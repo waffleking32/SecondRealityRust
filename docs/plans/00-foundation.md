@@ -1327,20 +1327,28 @@ The tick order in `Engine::tick`, which is the whole point of the module:
 
 ```
 timeline.reset(palette.clone())
-run_copper(0)                      // take slot 0, build a ctx, call, restore
+run_copper(0)                      // take slot 0, build a ctx, call, restore; OR out its exit flag
 for band in 0..bands:
-    status = {
+    (status, exit) = {
         let mut ctx = PartCtx::new(&mut surface, &mut view, &mut palette,
                                    &mut timeline, &mut copper, frame, band, bands);
-        part.frame(&mut ctx)
+        (part.frame(&mut ctx), ctx.exit_requested)
     }                              // ctx dropped here, so the borrows below are free
+    self.exit_requested |= exit    // a request from band 0 must survive bands 1..n
     (first, last) = band_range(out.height, bands, band)
     compose_band(out, &surface, &view, first, last)
     timeline.push(first, palette.clone())
 run_copper(1)
 run_copper(2)
 out.border = view.effective(out.height.saturating_sub(1)).border
+swap(out.palettes, timeline)       // the frame gets the timeline this tick built
 ```
+
+**Two things the sketch above exists to make unmissable.**
+
+*A `PartCtx` is rebuilt for every band and every copper call, so any flag a part sets on it dies with it.* `exit_requested` is the one that matters: it maps the original's `dis_exit()`, and reading it back into an `Engine` field — at the band loop, in `run_copper`, and after `init` — is what makes it more than a no-op. `Engine` clears the field in `start` alongside `frame_counter`.
+
+*The timeline the engine built has to reach the frame.* `IndexedFrame::palette_for` reads `frame.palettes`, so `Engine::tick` swaps its own timeline into `out.palettes` at the end. The swap is a `Vec`-header exchange, not a copy; `out.palettes`' previous contents land in the engine's field and are discarded by the next tick's `reset`. Every band stamps a change at its first scanline, so no displayed scanline ever falls back to the frame's `base`.
 
 **The ctx is rebuilt for every band, and that is not stylistic.** A `PartCtx` holds `&mut` to the timeline and the palette, so a ctx that stays alive across the loop body blocks the `timeline.push` and `compose_band` calls that must happen between bands. Building one per band, inside a block whose borrows end before the compose, is the shape that compiles. `PartCtx::new` must therefore take the individual field references rather than `&mut self` — disjoint field borrows are fine, a whole-`self` borrow is not.
 
