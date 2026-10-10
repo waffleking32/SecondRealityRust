@@ -613,12 +613,13 @@ mod tests {
     use rstest::*;
 
     /// One tick is 1e12 accumulator units at 70_086 units per nanosecond, so a
-    /// period is 14,268,225.27 ns and the first whole tick lands at 14,268,225.
+    /// period is 14,268,184.80 ns and the first whole tick lands at 14,268,185.
+    /// Note this is the *unclamped* boundary; 250 ms is 17 ticks.
     #[rstest]
     #[case(0, 0)]
-    #[case(14_268_224, 0)]
-    #[case(14_268_225, 1)]
-    #[case(1_000_000_000, 70)]
+    #[case(14_268_184, 0)]
+    #[case(14_268_185, 1)]
+    #[case(250_000_000, 17)]
     fn advance_emits_whole_ticks_only(#[case] elapsed_ns: u64, #[case] ticks: u32) {
         let mut t = Tick::new();
         assert_eq!(t.advance(Duration::from_nanos(elapsed_ns)), ticks);
@@ -627,7 +628,7 @@ mod tests {
     #[rstest]
     fn a_partial_tick_carries_into_the_next_call() {
         let mut t = Tick::new();
-        assert_eq!(t.advance(Duration::from_nanos(14_268_224)), 0);
+        assert_eq!(t.advance(Duration::from_nanos(14_268_184)), 0);
         assert_eq!(t.advance(Duration::from_nanos(1)), 1);
     }
 
@@ -635,17 +636,35 @@ mod tests {
     fn zero_elapsed_leaves_the_accumulator_intact() {
         let mut t = Tick::new();
         assert_eq!(t.advance(Duration::ZERO), 0);
-        assert_eq!(t.advance(Duration::from_secs(1)), 70);
-        assert_eq!(t.total(), 70);
+        assert_eq!(t.advance(Tick::MAX_ELAPSED), 17);
+        assert_eq!(t.total(), 17);
     }
 
+    /// Exactness is measured in unclamped slices, because `advance` discards
+    /// anything past `MAX_ELAPSED`. 4000 × 250 ms is exactly 1000 s.
     #[rstest]
     fn a_thousand_seconds_yields_exactly_70086_ticks() {
         let mut t = Tick::new();
         let mut ticks = 0u64;
-        for _ in 0..1000 { ticks += t.advance(Duration::from_secs(1)) as u64; }
+        for _ in 0..4000 { ticks += t.advance(Tick::MAX_ELAPSED) as u64; }
         assert_eq!(ticks, 70_086);
         assert_eq!(t.total(), 70_086);
+    }
+
+    /// The only test that states both halves of the clamp contract: 250 ms is
+    /// the whole budget, and anything beyond it is discarded, not accumulated.
+    /// A clamp anywhere in ~243..257 ms would satisfy the stall test below.
+    #[rstest]
+    fn elapsed_beyond_max_is_clamped_to_max() {
+        let mut a = Tick::new();
+        let mut b = Tick::new();
+        assert_eq!(a.advance(Tick::MAX_ELAPSED), 17);
+        assert_eq!(
+            b.advance(Tick::MAX_ELAPSED * 4),
+            17,
+            "excess time must be dropped, not caught up"
+        );
+        assert_eq!(a.total(), b.total());
     }
 
     #[rstest]
@@ -672,9 +691,16 @@ Accumulator arithmetic, exact and integer; no floats and no drift:
 /// One logic tick is this many accumulator units.
 const TICK_SCALE: u64 = 1_000_000_000_000;
 /// An accumulator unit is `HZ_MILLI`-th of a unit per nanosecond:
-/// ticks = elapsed_ns * 70_086 / 1e12.
+/// ticks = elapsed_ns * 70_086 / 1e12. One period is therefore
+/// 1e12 / 70_086 = 14,268,184.80 ns.
 const NS_TO_ACC: u64 = 70_086;
 ```
+
+`MAX_ELAPSED` is a real limit on what a single `advance` call can account for, not a safety
+nicety: at 250 ms a caller that feeds one-second slices silently loses 75% of the time. The
+normal caller feeds one display frame (≈16.7 ms at 60 Hz), so it never binds — but any
+measurement of the tick rate must use slices at or under `MAX_ELAPSED`, which is why the
+exactness test uses 4000 × 250 ms rather than 1000 × 1 s.
 
 `advance` clamps `elapsed` to `MAX_ELAPSED` **before** multiplying (which also keeps the product inside `u64`), adds `elapsed.as_nanos() as u64 * NS_TO_ACC` to `acc`, then drains whole ticks with a `while acc >= TICK_SCALE` loop, adding to `total`.
 
@@ -1215,7 +1241,10 @@ mod tests {
     #[test]
     fn runner_advance_runs_one_step_per_due_tick() {
         let mut r = Runner::new(8, 4, View::new(8, 4), Box::new(Flat)).unwrap();
-        assert_eq!(r.advance(Duration::from_secs(1)), 70);
+        // `advance` clamps at `Tick::MAX_ELAPSED`, so a one-second call is a
+        // 250 ms call: 17 ticks, not 70.
+        assert_eq!(r.advance(Duration::from_secs(1)), 17);
+        assert_eq!(r.part_frame(), 17);
     }
 
     #[test]
