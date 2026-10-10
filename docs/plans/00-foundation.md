@@ -430,8 +430,11 @@ impl View {
     pub fn new(width: u16, height: u16) -> View;
     /// Sets `x_offset` and zeroes `start_addr`.
     pub fn set_origin(&mut self, pixel: u16);
-    /// The view in force at displayed scanline `y`, walking the split chain.
-    /// A split at or beyond `height` is inert. `Box` makes cycles impossible.
+    /// The view in force at displayed scanline `y`, and the scanline number
+    /// **within that view**. Below a split the inner number restarts at 0 —
+    /// see the note below. A split at or beyond `height` is inert.
+    pub fn effective_at(&self, y: u16) -> (&View, u16);
+    /// Convenience: `self.effective_at(y).0`.
     pub fn effective(&self, y: u16) -> &View;
     /// Surface row sampled by displayed scanline `y`, after double-scan.
     pub fn surface_row(&self, y: u16) -> u16;
@@ -440,6 +443,24 @@ impl View {
     pub fn source_index(&self, surface_len: usize, x: u16, y: u16) -> usize;
 }
 ```
+
+**Why `effective_at` returns a scanline number, not just a view.** Line compare (CRTC 0x18
+plus 0x07 bit 4) resets the CRTC's address counter *and* its scanline counter when the
+vertical counter reaches it. So a scanline below the split is not at its absolute position
+in the source — it is `y - split.scanline` lines into the lower view, fetched from that
+view's own `start_addr`. Counting from the frame top instead would make line compare a
+no-op: with the same `start_addr` and no restart, the picture below the split would be
+identical to the picture with no split at all.
+
+The original confirms this. `PLZPART/ASM` exports `set_plzstart` (`PLZPART/ASMYT.ASM:99`),
+which writes only 0x18 and 0x07 bit 4 — never 0x0C/0x0D — while `PLZPART/COPPER.ASM:67`
+(`copper1`) writes the display start address once per frame and `pompota`
+(`PLZPART/COPPER.ASM:126`) alternates line compare between 60 and 61. The effect is entirely
+in the restart; without it, `set_plzstart` would do nothing observable.
+
+`Split::view` therefore describes the lower region **as its own display**, origin at its
+first scanline. A part wanting the lower half to look like the top of VRAM sets
+`view.set_origin(0)`, not a compensating offset.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -516,6 +537,20 @@ mod tests {
     }
 
     #[rstest]
+    fn a_split_restarts_the_scanline_count_where_it_starts(mut v320: View) {
+        let mut lower = View::new(320, 200);
+        lower.set_origin(0);
+        v320.split = Some(Box::new(Split { scanline: 120, view: lower }));
+        // Above the split the row is the frame row.
+        assert_eq!(v320.surface_row(119), 119);
+        // Below it the CRTC's counters restart, so the first post-split row
+        // is 0, not 120. Counting from the frame top makes line compare a
+        // no-op — see the note in the Interfaces block.
+        assert_eq!(v320.surface_row(120), 0);
+        assert_eq!(v320.surface_row(125), 5);
+    }
+
+    #[rstest]
     fn split_beyond_height_is_inert(mut v320: View) {
         let mut lower = View::new(320, 200);
         lower.set_origin(999);
@@ -547,7 +582,20 @@ Expected: compile error — `View` is not defined.
 
 - [ ] **Step 3: Implement `View` and `Split`**
 
-`effective` walks `while let Some(s) = &v.split { if y < s.scanline { break } v = &s.view }`. `surface_row` is `y >> v.double_scan as u16` on the effective view. `source_index` is `(start_addr + x_offset + surface_row(y) * y_line_offset + pan + x) % surface_len`.
+`effective_at` walks the split chain, subtracting each split's scanline as it descends, so the number it returns is the scanline *within* the innermost view:
+
+```rust
+let mut v = self;
+let mut ly = y;
+while let Some(s) = &v.split {
+    if ly < s.scanline { break; }
+    ly -= s.scanline;
+    v = &s.view;
+}
+(v, ly)
+```
+
+`effective` is `self.effective_at(y).0`. `surface_row` is `ly >> v.double_scan as u16`. `source_index` is `(start_addr + x_offset + surface_row(y) * y_line_offset + pan + x) % surface_len`, with every term read from the view `effective_at` returned.
 
 **Note on `start_addr` + `x_offset`:** in the original these are the CRTC display-start register and the planar byte offset respectively; the port keeps both so event logs can cite the raw register value. `set_origin` is the convenience path and zeroes `start_addr`.
 
@@ -861,9 +909,12 @@ mod tests {
         compose_band(&mut f, &s, &v, 0, 4);
         assert_eq!(f.row(0), &[1; 8]);
         assert_eq!(f.row(1), &[2; 8]);
-        // Rows 2 and 3 read from surface rows 3 and 0 (wrapped).
-        assert_eq!(f.row(2), &[4; 8]);
-        assert_eq!(f.row(3), &[1; 8]);
+        // Row 2 is the first post-split scanline, so it counts from 0 within the
+        // lower view: origin 8 lands on surface row 1. Row 3 counts from 1,
+        // landing on surface row 2. Counting from the frame top instead would
+        // give rows 3 and 0 — which is the bug this test exists to catch.
+        assert_eq!(f.row(2), &[2; 8]);
+        assert_eq!(f.row(3), &[3; 8]);
     }
 
     #[test]
