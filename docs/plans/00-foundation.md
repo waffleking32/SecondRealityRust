@@ -462,6 +462,16 @@ in the restart; without it, `set_plzstart` would do nothing observable.
 first scanline. A part wanting the lower half to look like the top of VRAM sets
 `view.set_origin(0)`, not a compensating offset.
 
+**`y_line_offset` is the surface stride, not the view width.** `View::new(w, h)` defaults it to
+`w`, which is correct only when the surface *is* `w` wide — true for every test in Tasks 3, 5
+and 6, all of which use 8-wide surfaces with 8-wide views. It is false for the test card and
+for every real part: `Surface::set(x, y, v)` strides by the surface width, so a 320-wide view
+on the 640-wide surface must set `y_line_offset = 640` or it reads a different layout than the
+part wrote. With the default, a view reads surface indices `320*y + x` while the part wrote
+`640*y + x`, and the picture comes out interleaved. An origin is likewise a pixel index into
+the surface, not a row number: `set_origin(64000)` is row 100 of a 640-wide surface, and
+`set_origin(32000)` is row 50 of it.
+
 - [ ] **Step 1: Write the failing tests**
 
 In `crates/sr-engine/src/view.rs`:
@@ -1081,8 +1091,9 @@ impl Engine {
     /// Call `part.init`. Copper slots are cleared first.
     pub fn start(&mut self, part: &mut dyn Part) -> Result<(), EngineError>;
     /// One logic tick, in the fixed order of spec §4.2:
-    ///   1. copper slot 0   2. part.frame() per band, composing after each
-    ///   3. copper slot 1   4. copper slot 2
+    ///   1. resize `out` to the view's displayed geometry
+    ///   2. copper slot 0   3. part.frame() per band, composing after each
+    ///   4. copper slot 1   5. copper slot 2   6. hand the timeline to `out`
     pub fn tick(&mut self, part: &mut dyn Part, out: &mut IndexedFrame) -> PartStatus;
     /// Test-only: register a copper function without going through a `PartCtx`,
     /// which the tests cannot build before `start` has run.
@@ -1326,6 +1337,7 @@ Expected: compile error — `Engine`, `Part`, `Runner` are not defined.
 The tick order in `Engine::tick`, which is the whole point of the module:
 
 ```
+out.resize(view.width, view.height)   // the frame IS the displayed area (plan decision 8)
 timeline.reset(palette.clone())
 run_copper(0)                      // take slot 0, build a ctx, call, restore; OR out its exit flag
 for band in 0..bands:
@@ -1344,7 +1356,15 @@ out.border = view.effective(out.height.saturating_sub(1)).border
 swap(out.palettes, timeline)       // the frame gets the timeline this tick built
 ```
 
-**Two things the sketch above exists to make unmissable.**
+**Three things the sketch above exists to make unmissable.**
+
+*The engine resizes the frame from the view, every tick.* `IndexedFrame` is exactly the
+displayed area (plan decision 8), and the view's geometry is a part's to change — the
+double-scan phases set `height = 400`. A frame sized once at construction shows only the top
+half of a doubled picture, and a part that cannot change the displayed line count cannot
+express double-scan at all. The resize belongs in `Engine::tick` rather than `Runner`, so a
+direct `tick` caller gets the same behaviour. Reallocation happens only when the size actually
+changes, and every pixel is recomposed anyway.
 
 *A `PartCtx` is rebuilt for every band and every copper call, so any flag a part sets on it dies with it.* `exit_requested` is the one that matters: it maps the original's `dis_exit()`, and reading it back into an `Engine` field — at the band loop, in `run_copper`, and after `init` — is what makes it more than a no-op. `Engine` clears the field in `start` alongside `frame_counter`.
 
@@ -1608,7 +1628,13 @@ mod tests {
     use rstest::*;
 
     fn runner() -> Runner {
-        Runner::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200), Box::new(TestCard::new())).unwrap()
+        // `y_line_offset` is the *surface* stride, not the view width, because
+        // the card draws with `Surface::set`. Leaving it at `View::new`'s
+        // default of 320 makes the view read a different layout than the card
+        // writes — see the rule in Task 3's Interfaces block.
+        let mut view = View::new(320, 200);
+        view.y_line_offset = MAX_WIDTH as u16;
+        Runner::new(MAX_WIDTH, MAX_HEIGHT, view, Box::new(TestCard::new())).unwrap()
     }
 
     /// Runs until the part's frame counter reads `phase * PHASE_TICKS + n`.
@@ -1712,9 +1738,9 @@ Expected: compile error — `TestCard` is not defined.
 
 - **0 bars**: fill the surface with 16 vertical bars (`x / 20`), and set palette entry 0 to `[band * 8, 0, 0]` — one distinct palette per band, which is what `phase_bars_leaves_every_band_a_distinct_palette` reads.
 - **1 scroll**: fill with a 1-in-8 vertical stripe pattern from a fixed seed, then `ctx.view.x_offset = (ctx.frame % 320) as u16` each tick.
-- **2 split**: draw bars (`x / 20`) into surface rows 0..100 and the inverse (`15 - x / 20`) into rows 100..200, then set `ctx.view.split = Some(Box::new(Split { scanline: 100, view: lower }))` where `lower.set_origin(320 * 100)`. The lower view's origin is advanced by one row each tick so the phase is not static, but the split scanline stays at 100 so the test above can name exact pixels.
+- **2 split**: draw bars (`x / 20`) into surface rows 0..100 and the inverse (`15 - x / 20`) into rows 100..200, then set `ctx.view.split = Some(Box::new(Split { scanline: 100, view: lower }))` where `lower.set_origin(MAX_WIDTH as u16 * 100)` — 64000, which is surface row 100 because the stride is 640. The lower view's origin is advanced by one row each tick so the phase is not static, but the split scanline stays at 100 so the test above can name exact pixels.
 - **3 double-scan**: draw a 320×200 pattern, set `ctx.view.double_scan = true`, and `ctx.view.height = 400`.
-- **4 beam compose**: draw a vertical ramp by band and set palette entry 0 to `[8 + band * 24, 0, 0]`, monotonic in `band`; set `ctx.view.border = Some(9)` and give entry 9 a visible colour.
+- **4 beam compose**: draw a vertical ramp by band and set palette entry 0 to `[8 + band * 7, 0, 0]` — 8, 15, 22, 29, 36, 43, 50, 57, genuinely monotonic and inside the 6-bit range. (`8 + band * 24` reaches 176 and masks to a sawtooth; the test's `bottom[0] > top[0]` happens to pass anyway, which is why the formula matters.) Set `ctx.view.border = Some(9)` and give entry 9 a visible colour.
 
 Then append the first entry to `docs/fidelity/APPROXIMATIONS.md`:
 
