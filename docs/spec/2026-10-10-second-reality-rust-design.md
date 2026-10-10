@@ -69,15 +69,20 @@ modules.
 
 ### 2.2 Part sequence
 
-From `MAIN/U2.ASM`:
+From `MAIN/U2.ASM`. **Transcribed and verified in Phase 0** (task 10) — the citations,
+the entry-point conditions and the block arguments are in
+`docs/fidelity/part-sequence.md`, which is the reference; this table is the summary.
+What changed in the correction is recorded as D13.
 
-`Order` numbers the show parts only; the menu and the hidden part sit outside that
-numbering.
+`Order` numbers the show parts only; the menu and the two helper programs sit outside
+that numbering, and the hidden part sits outside the run. Slot **17 is the hidden
+part's slot** — it is not executed in the main sequence.
 
 | Order | Binary | Directory | Effect |
 |---|---|---|---|
 | — | START.EXE | MAIN | setup menu (text mode), not a show part |
-| — | — | — | MUSIC0 starts at order 0 |
+| — | STARTMUS.EXE | MAIN | music loader/unloader helper, not a show part |
+| — | — | — | MUSIC0 starts at order 0 — only when block 1 runs; `SECOND 2`–`5` load MUSIC1 at order 0 instead |
 | 1 | ALKU.EXE | ALKU | intro text I + horizon pan |
 | 2 | U2A.EXE | VISU/C | intro text II / vector part 0 |
 | 3 | PAM.EXE | PAM | Praxis explosion (FLIC) |
@@ -87,7 +92,7 @@ numbering.
 | 6 | TUNNELI.EXE | TUNNELI | dot tunnel |
 | 7 | TECHNO.EXE | TECHNO | techno bars + EGA interference |
 | 8 | PANICEND.EXE | PANIC | panic fake-ending (screen shrinks to a dot) |
-| — | — | — | music-cue wait, then MUSIC1 restarts at order 42 |
+| — | — | — | music-cue wait; **on `SECOND 3` only**, MUSIC1 then restarts at order 42 — a full run restarts nothing here |
 | 9 | MNTSCRL.EXE | FOREST | mountain scroller |
 | 10 | LNS&ZOOM.EXE | LENS | lens + rotazoomer |
 | 11 | PLZPART.EXE | PLZPART | plasma + plasma cube |
@@ -97,21 +102,30 @@ numbering.
 | 15 | JPLOGO.EXE | JPLOGO | wobbling "jelly" logo |
 | — | — | — | MUSIC0 restarts at order 18 |
 | 16 | U2E.EXE | VISU/C | vector part II — space battle |
-| hidden | DDSTARS.EXE | DDSTARS | **hidden part**, MUSIC0 at order 70; not in the main sequence |
+| 17 (hidden) | DDSTARS.EXE | DDSTARS | **hidden part**, MUSIC0 at order 70; run only by `SECOND U`, alone |
+| — | — | — | MUSIC0 restarts at order 25 — **on `SECOND 5` only**; a full run restarts nothing here either |
 | 18 | ENDLOGO.EXE | END | end picture |
 | 19 | CRED.EXE | CREDITS | credits pictures |
 | 20 | ENDSCRL.EXE | ENDSCRL | greetings scroller (skipped in loop mode) |
 
-Loop mode restarts MUSIC0 at order 0 and jumps back to part 1.
+Loop mode restarts MUSIC0 at order 0 and jumps back to part 1. The jump target is the
+top of the runner (`@@partsagain`), and `whattorun` is reset to run everything first, so
+every pass after the first runs the whole sequence whatever the demo was started with.
 
-**Verify this table against `MAIN/U2.ASM` during Phase 0** — it is derived from a
-survey, not from a line-by-line transcription, and the exact ordering of the music
-restarts relative to part boundaries matters.
+The rows marked "on `SECOND 3` only" and "on `SECOND 5` only" are **entry-point**
+restarts: they exist so that starting mid-demo reproduces the music position a full run
+would have reached by that point, and each is skipped precisely when the blocks leading
+up to it did run. A full run therefore reaches the mountain scroller and the ending with
+the music already playing and no restart at either boundary.
 
 The hidden part is entered with `SECOND.EXE U` (`checkcmdline` maps `u`/`U` to
-`partsmask[8]`, giving `whattorun = 0x80`). The other block arguments are `1`–`5`.
-These arguments are how the reference capture harness starts the original at a
-chosen point, and the port must accept the same arguments for comparison.
+`partsmask[8]`, giving `whattorun = 0x80`). The other block arguments are `1`–`5`, and
+`1` behaves exactly like no argument. These arguments are how the reference capture
+harness starts the original at a chosen point, and the port must accept the same
+arguments for comparison. The shipped `reference/original/README.1ST:66-79` documents
+`1`–`5` and never mentions `U`; the code is the authority on behaviour, and both are
+recorded in `docs/fidelity/part-sequence.md` §4, along with the `/gravis` switch the
+shell passes through to `START.EXE`.
 
 ### 2.3 Display modes
 

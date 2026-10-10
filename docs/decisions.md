@@ -234,3 +234,55 @@ Engine work and part implementation do not block on it — only the frame-diff g
 phase's exit criteria do. Phase 0 must therefore be planned so that its engine and
 synthetic-test-card work can complete even if no oracle is available, with the
 reference-capture deliverable explicitly separable.
+
+## D13 — Spec §2.2 was wrong about the music restarts (2026-10-10)
+
+`MAIN/U2.ASM` at the pinned `071a82e` has been transcribed into
+`docs/fidelity/part-sequence.md`, with a line citation per row. The upstream tree is now
+vendored as the submodule `.gitmodules` pins, so these citations are checkable in-tree.
+
+**What held up.** The part order itself, every binary name, all 20 directory
+attributions, `partsmask[8] = 0x80` for `SECOND U`, and `MUSIC0`/`MUSIC1` at orders
+0/0/18/42/70 are all correct as §2.2 had them. The survey did well on the sequence.
+
+**What was wrong.** §2.2 presented the two mid-run restarts as part of the normal flow.
+They are not: both are **entry-point** restarts, guarded so that they fire *only* when
+the blocks leading up to them did not run.
+
+- **MUSIC1 at order 42** fires only for `SECOND 3` (`U2.ASM:856-863`, guarded
+  `whattorun & 4` and not `whattorun & 2`). A full run does not restart here — it waits
+  for a music cue at `U2.ASM:829-853` and then starts the mountain scroller with MUSIC1
+  where it already is.
+- **MUSIC0 at order 25** was missing from the table entirely. It exists (`U2.ASM:898-905`)
+  and fires only for `SECOND 5` (guarded `whattorun & 16` and not `whattorun & 8`). A full
+  run has no restart in the ending either.
+- **The startup line was unqualified.** `MUSIC0 starts at order 0` is true only when
+  block 1 runs. `U2.ASM:767-775` loads MUSIC1 and starts it at order 0 instead for
+  `SECOND 2`–`5`. Block 1 is what selects the module the whole run begins with.
+
+**Consequence for the port, and why it matters.** The demo is music-counted: a part that
+begins at the wrong music position drifts against every later part, and the drift is
+invisible until a frame diff at the end of the run. `sr-shell` must implement the
+restarts as *entry-point* positions — one restart table keyed by which blocks are going
+to run, not a single linear timeline — and the reference capture harness must record the
+argument it started the original with, because the same part is diffed against different
+music positions depending on where the run started.
+
+**Block arguments: the README and the code disagree, and the port follows the code.**
+`reference/original/README.1ST:66-79` documents `1`–`5` and their meanings, and all five
+agree with what the code selects. But the README never mentions `U`, which the code
+accepts (`checkcmdline`, `U2.ASM:613-616, 626-627`) to run the hidden part alone; and the
+original's own error message (`U2.ASM:557-559`) says "a number between 2 and 5", which
+contradicts both the README and the code. `/`-prefixed arguments are neither rejected nor
+interpreted by the shell — they are passed through to `START.EXE`, which understands only
+`/gravis` (forces Gravis, `looping = 2`, skips the menu). The port accepts `1`–`5` and
+`U`/`u` with those exact masks, treats `1` and no argument as identical, and accepts and
+ignores `/`-switches it does not implement, so that a capture command line lifted from
+the original keeps working.
+
+**Not resolved:** the musical event the inter-block wait keys on. `dis_muscode`'s `dx`
+comes from STMIK's `_np_zplus`/`_np_row` (`DIS/DISINT.ASM:252-271`), and `_np_zplus`'s
+semantics remain open — the same unknown D8 already tracks under `_np_zinfo`. Phase 3
+resolves it from live memory. The wait's *shape* is certain (wait for `dx` to go
+negative, then positive, aborting on any key, skipped if Ctrl is held); only what
+musical event `dx` encodes is not.
