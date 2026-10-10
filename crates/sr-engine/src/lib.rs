@@ -8,6 +8,7 @@ pub mod copper;
 pub mod engine;
 pub mod palette;
 pub mod part;
+pub mod present;
 pub mod surface;
 pub mod tick;
 pub mod view;
