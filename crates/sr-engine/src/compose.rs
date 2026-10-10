@@ -156,9 +156,12 @@ mod tests {
         compose_band(&mut f, &s, &v, 0, 4);
         assert_eq!(f.row(0), &[1; 8]);
         assert_eq!(f.row(1), &[2; 8]);
-        // Rows 2 and 3 read from surface rows 3 and 0 (wrapped).
-        assert_eq!(f.row(2), &[4; 8]);
-        assert_eq!(f.row(3), &[1; 8]);
+        // Row 2 is the first post-split scanline, so it counts from 0 within the
+        // lower view: origin 8 lands on surface row 1. Row 3 counts from 1,
+        // landing on surface row 2. Counting from the frame top instead would
+        // give rows 3 and 0 — which is the bug this test exists to catch.
+        assert_eq!(f.row(2), &[2; 8]);
+        assert_eq!(f.row(3), &[3; 8]);
     }
 
     #[test]
