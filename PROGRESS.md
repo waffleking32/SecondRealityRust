@@ -8,7 +8,7 @@ Phase status board. **Read this first if you are resuming work.**
 
 | # | Phase | State | Plan | Tag |
 |---|---|---|---|---|
-| 0 | Foundation & harness | not started | — | — |
+| 0 | Foundation & harness | not started | [00-foundation.md](docs/plans/00-foundation.md) | — |
 | 1 | Assets & references | not started | — | — |
 | 2 | Shell + easy tier | not started | — | — |
 | 3 | Music engine | not started | — | — |
@@ -24,9 +24,10 @@ Phase status board. **Read this first if you are resuming work.**
 Nothing implemented yet. The design spec is approved:
 `docs/spec/2026-10-10-second-reality-rust-design.md`.
 
-**Next action:** write the Phase 0 implementation plan (`docs/plans/00-foundation.md`)
-and execute it. Phase 0 delivers the engine skeleton, the SDL2 presenter, and the
-reference-capture and comparison tooling — no demo parts.
+**Next action:** execute `docs/plans/00-foundation.md` (14 tasks). Phase 0 delivers the
+engine skeleton, the SDL2 presenter, and the reference-capture and comparison tooling —
+no demo parts. Tasks 1–10 need no reference oracle; Tasks 11–13 do and are marked
+`[oracle]` in the plan.
 
 Phase 3 has no dependency on Phase 2 and may be run in parallel if the music is worth
 retiring first.
