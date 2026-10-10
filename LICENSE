@@ -29,4 +29,10 @@ source code and media assets, obtained from https://github.com/mtuomi/SecondReal
 were released into the public domain under the Unlicense. They are redistributed here
 under those terms, which impose no conditions.
 
+`reference/original/` holds the demo's 1993 retail distribution — `SECOND.EXE` and
+`REALITY.FC` — which is retained unmodified as the reference oracle that the port's
+output is compared against. The original release states: "This demo is freeware. It can
+be freely distributed without modifications. No money can be charged for it." It is
+redistributed here unmodified, at no charge, and is never executed as part of the port.
+
 The MIT licence above applies to the new Rust source code in this repository.

@@ -29,6 +29,11 @@ engine skeleton, the SDL2 presenter, and the reference-capture and comparison to
 no demo parts. Tasks 1–10 need no reference oracle; Tasks 11–13 do and are marked
 `[oracle]` in the plan.
 
+The reference oracle's input is `reference/original/` — the 1993 retail distribution
+(`SECOND.EXE` + `REALITY.FC`), committed unmodified. See `docs/decisions.md` D12 and
+`reference/original/PROVENANCE.md`. Do not modify those files: every frame diff in the
+project is measured against those exact bytes.
+
 Phase 3 has no dependency on Phase 2 and may be run in parallel if the music is worth
 retiring first.
 

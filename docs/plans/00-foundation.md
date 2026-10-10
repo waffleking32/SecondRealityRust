@@ -13,7 +13,9 @@
 ## Global Constraints
 
 - Rust **edition 2021**; `rust-version = "1.85"`. Every crate manifest sets `license = "MIT"` (spec §14).
-- `sr-engine` has **zero dependencies**. SDL2 must not appear in it (D3, §4.2).
+- `sr-engine` has **zero runtime dependencies**. SDL2 must not appear in it (D3, §4.2). `[dev-dependencies]` are exempt from this: they never enter a consumer's dependency graph.
+- **`rstest = "0.27"` is the test dependency of choice** — used for `#[case]` tables and `#[fixture]`s where they read better than a hand-rolled loop or helper. It is a dev-dependency only. Not every test becomes an rstest; a test that reads clearly as plain `#[test]` stays plain.
+- The reference of record is the 1993 retail release in `reference/original/` — never a build from the source tree (D12). Those files are read-only.
 - Palette is **6-bit per channel internally**, widened only for upload (CLAUDE.md, §4.2).
 - The logic tick is **exactly 70.086 Hz** and **never spin-waits** (§5.3, §6.1).
 - Surface is allocated at the largest geometry in use, **640×400** (§4.2).
@@ -48,6 +50,8 @@ These refine the spec rather than changing it. Each is recorded in `docs/decisio
 6. **The overscan border is a fixed pad in the presenter**, not a modelled overscan region. First entry in `APPROXIMATIONS.md`.
 7. **`xtask` is invoked as `cargo xtask`** via a `.cargo/config.toml` alias, not as a bare `xtask` binary.
 8. **The composed frame is the displayed area only** — no full-frame overscan synthesis. `IndexedFrame` is exactly `view.width × view.height`.
+9. **The reference of record is the 1993 retail release**, vendored at `reference/original/`, not a build from the source tree. Fidelity means "looks like the demo people ran". Recorded as **D12** in `docs/decisions.md`, which also records that `REALITY.FC` is byte-identical to the source tree's copy.
+10. **`rstest` is a dev-dependency.** `sr-engine`'s zero-*runtime*-dependency constraint is what keeps it usable without SDL2; a test-only crate does not violate it. Used for `#[case]` tables and `#[fixture]`s where they read better than a loop or helper.
 
 ## Out of scope for Phase 0
 
@@ -94,7 +98,8 @@ xtask/
   src/compare.rs                    `compare`
 docs/fidelity/part-sequence.md      verified part table (Task 10)
 docs/fidelity/APPROXIMATIONS.md     approximations register
-reference/                          captured keyframes + manifests
+reference/original/                 the 1993 retail release — the oracle's input (D12)
+reference/<name>/                   captured keyframes + manifests
 out/                                headless render output (gitignored)
 ```
 
@@ -161,9 +166,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+rstest = "0.27"
 ```
 
-The empty `[dependencies]` section is deliberate — it is the constraint made visible.
+The empty `[dependencies]` section is deliberate — it is the constraint made visible. `rstest` sits in `[dev-dependencies]`, so it is compiled for `cargo test` and never for a consumer of `sr-engine`.
 
 `.cargo/config.toml`:
 
@@ -303,6 +311,7 @@ In `crates/sr-engine/src/palette.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[test]
     fn from_vga_keeps_six_bit_precision() {
@@ -321,18 +330,17 @@ mod tests {
         assert_eq!(Palette::from_vga(&vga).entry(5), [63, 32, 1]);
     }
 
-    #[test]
-    fn dac_expand_covers_the_full_range() {
-        assert_eq!(dac_expand(0), 0);
-        assert_eq!(dac_expand(1), 4);
-        assert_eq!(dac_expand(16), 65);
-        assert_eq!(dac_expand(63), 255);
-    }
-
-    #[test]
-    fn dac_expand_masks_values_above_six_bits() {
-        assert_eq!(dac_expand(255), 255);
-        assert_eq!(dac_expand(64), 0);
+    #[rstest]
+    #[case(0, 0)]
+    #[case(1, 4)]
+    #[case(16, 65)]
+    #[case(32, 130)]
+    #[case(63, 255)]
+    // Above six bits the DAC had nowhere to put the extra bits, so they are masked.
+    #[case(64, 0)]
+    #[case(255, 255)]
+    fn dac_expand_replicates_the_top_bits(#[case] input: u8, #[case] expected: u8) {
+        assert_eq!(dac_expand(input), expected);
     }
 
     #[test]
@@ -441,81 +449,89 @@ In `crates/sr-engine/src/view.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
 
+    #[fixture]
     fn v320() -> View { View::new(320, 200) }
 
-    #[test]
-    fn new_defaults_to_a_contiguous_origin() {
-        let v = v320();
-        assert_eq!(v.start_addr, 0);
-        assert_eq!(v.x_offset, 0);
-        assert_eq!(v.y_line_offset, 320);
-        assert_eq!(v.pan, 0);
-        assert!(!v.double_scan);
-        assert!(v.split.is_none());
-        assert!(v.border.is_none());
+    #[rstest]
+    fn new_defaults_to_a_contiguous_origin(v320: View) {
+        assert_eq!(v320.start_addr, 0);
+        assert_eq!(v320.x_offset, 0);
+        assert_eq!(v320.y_line_offset, 320);
+        assert_eq!(v320.pan, 0);
+        assert!(!v320.double_scan);
+        assert!(v320.split.is_none());
+        assert!(v320.border.is_none());
     }
 
-    #[test]
-    fn source_index_follows_the_line_offset() {
-        let mut v = v320();
-        v.set_origin(10);
-        assert_eq!(v.source_index(64_000, 3, 2), 10 + 2 * 320 + 3);
+    #[rstest]
+    fn source_index_follows_the_line_offset(mut v320: View) {
+        v320.set_origin(10);
+        assert_eq!(v320.source_index(64_000, 3, 2), 10 + 2 * 320 + 3);
     }
 
-    #[test]
+    #[rstest]
     fn source_index_wraps_past_the_end() {
         let mut v = View::new(4, 1);
-        v.y_line_offset = 4;
         v.start_addr = 6;
         assert_eq!(v.source_index(8, 3, 0), 1);
     }
 
-    #[test]
-    fn pan_shifts_by_one_pixel_per_unit() {
-        let mut v = v320();
-        v.pan = 5;
-        assert_eq!(v.source_index(64_000, 0, 0), 5);
+    #[rstest]
+    fn pan_shifts_by_one_pixel_per_unit(mut v320: View) {
+        v320.pan = 5;
+        assert_eq!(v320.source_index(64_000, 0, 0), 5);
     }
 
-    #[test]
-    fn double_scan_maps_two_scanlines_to_one_surface_row() {
-        let mut v = v320();
+    #[rstest]
+    #[case(0, 0)]
+    #[case(1, 0)]
+    #[case(2, 1)]
+    #[case(399, 199)]
+    fn double_scan_maps_two_scanlines_to_one_surface_row(
+        #[case] screen_y: u16,
+        #[case] source_row: u16,
+    ) {
+        let mut v = View::new(320, 200);
         v.double_scan = true;
+        assert_eq!(v.surface_row(screen_y), source_row);
+    }
+
+    #[rstest]
+    fn single_scan_advances_one_row_per_scanline() {
+        let v = View::new(320, 200);
         assert_eq!(v.surface_row(0), 0);
-        assert_eq!(v.surface_row(1), 0);
-        assert_eq!(v.surface_row(2), 1);
-        assert_eq!(v.surface_row(399), 199);
+        assert_eq!(v.surface_row(1), 1);
+        assert_eq!(v.surface_row(199), 199);
     }
 
-    #[test]
-    fn split_switches_view_at_its_scanline() {
-        let mut v = v320();
-        let mut lower = v320();
+    #[rstest]
+    fn split_switches_view_at_its_scanline(mut v320: View) {
+        let mut lower = View::new(320, 200);
         lower.set_origin(320 * 100);
-        v.split = Some(Box::new(Split { scanline: 120, view: lower }));
-        assert_eq!(v.effective(119).x_offset, 0);
-        assert_eq!(v.effective(120).x_offset, 320 * 100);
+        v320.split = Some(Box::new(Split { scanline: 120, view: lower }));
+        assert_eq!(v320.effective(119).x_offset, 0);
+        assert_eq!(v320.effective(120).x_offset, 320 * 100);
     }
 
-    #[test]
-    fn split_beyond_height_is_inert() {
-        let mut v = v320();
-        let mut lower = v320();
+    #[rstest]
+    fn split_beyond_height_is_inert(mut v320: View) {
+        let mut lower = View::new(320, 200);
         lower.set_origin(999);
-        v.split = Some(Box::new(Split { scanline: 500, view: lower }));
-        assert_eq!(v.effective(199).x_offset, 0);
-        assert_eq!(v.source_index(64_000, 0, 199), 199 * 320);
+        v320.split = Some(Box::new(Split { scanline: 500, view: lower }));
+        assert_eq!(v320.effective(199).x_offset, 0);
+        assert_eq!(v320.source_index(64_000, 0, 199), 199 * 320);
     }
 
-    #[test]
+    #[rstest]
     fn nested_splits_resolve_to_the_deepest_match() {
-        let mut top = v320();
-        let mut mid = v320();
+        let mut mid = View::new(320, 200);
         mid.set_origin(1000);
-        let mut low = v320();
+        let mut low = View::new(320, 200);
         low.set_origin(2000);
         mid.split = Some(Box::new(Split { scanline: 150, view: low }));
+        let mut top = View::new(320, 200);
         top.split = Some(Box::new(Split { scanline: 50, view: mid }));
         assert_eq!(top.effective(49).x_offset, 0);
         assert_eq!(top.effective(50).x_offset, 1000);
@@ -594,29 +610,36 @@ In `crates/sr-engine/src/tick.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
 
-    #[test]
-    fn one_tick_period_yields_one_tick() {
+    /// One tick is 1e12 accumulator units at 70_086 units per nanosecond, so a
+    /// period is 14,268,225.27 ns and the first whole tick lands at 14,268,225.
+    #[rstest]
+    #[case(0, 0)]
+    #[case(14_268_224, 0)]
+    #[case(14_268_225, 1)]
+    #[case(1_000_000_000, 70)]
+    fn advance_emits_whole_ticks_only(#[case] elapsed_ns: u64, #[case] ticks: u32) {
         let mut t = Tick::new();
-        // 1e12 / 70086 = 14268225.27 ns per tick; the first whole tick lands here.
-        assert_eq!(t.advance(Duration::from_nanos(14_268_225)), 1);
+        assert_eq!(t.advance(Duration::from_nanos(elapsed_ns)), ticks);
     }
 
-    #[test]
-    fn just_under_a_tick_period_yields_nothing() {
+    #[rstest]
+    fn a_partial_tick_carries_into_the_next_call() {
         let mut t = Tick::new();
         assert_eq!(t.advance(Duration::from_nanos(14_268_224)), 0);
         assert_eq!(t.advance(Duration::from_nanos(1)), 1);
     }
 
-    #[test]
-    fn one_second_yields_seventy_ticks_and_a_remainder() {
+    #[rstest]
+    fn zero_elapsed_leaves_the_accumulator_intact() {
         let mut t = Tick::new();
+        assert_eq!(t.advance(Duration::ZERO), 0);
         assert_eq!(t.advance(Duration::from_secs(1)), 70);
         assert_eq!(t.total(), 70);
     }
 
-    #[test]
+    #[rstest]
     fn a_thousand_seconds_yields_exactly_70086_ticks() {
         let mut t = Tick::new();
         let mut ticks = 0u64;
@@ -625,20 +648,13 @@ mod tests {
         assert_eq!(t.total(), 70_086);
     }
 
-    #[test]
+    #[rstest]
     fn a_stall_is_clamped_and_does_not_produce_a_burst() {
         let mut t = Tick::new();
         // Simulates a laptop suspend or a debugger pause.
         let burst = t.advance(Duration::from_secs(600));
         assert!(burst <= 18, "a 600 s stall emitted {burst} ticks");
         assert!(burst >= 17, "a 250 ms window should still emit ~17 ticks");
-    }
-
-    #[test]
-    fn zero_elapsed_yields_no_ticks() {
-        let mut t = Tick::new();
-        assert_eq!(t.advance(Duration::ZERO), 0);
-        assert_eq!(t.advance(Duration::from_secs(1)), 70);
     }
 }
 ```
@@ -755,6 +771,7 @@ In `crates/sr-engine/src/compose.rs`:
 mod tests {
     use super::*;
     use crate::palette::Palette;
+    use rstest::*;
 
     fn striped_surface() -> Surface {
         // Each row is filled with its own index, so the source row is readable
@@ -780,10 +797,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn band_range_is_fine_grained_when_height_is_not_divisible() {
-        assert_eq!(band_range(200, 7, 0), (0, 28));
-        assert_eq!(band_range(200, 7, 6), (171, 200));
+    #[rstest]
+    #[case(200, 1, 0, (0, 200))]
+    #[case(200, 7, 0, (0, 28))]
+    #[case(200, 7, 6, (171, 200))]
+    #[case(200, 8, 3, (75, 100))]
+    #[case(400, 8, 7, (350, 400))]
+    fn band_range_splits_evenly_when_height_is_not_divisible(
+        #[case] height: u16,
+        #[case] bands: u16,
+        #[case] band: u16,
+        #[case] expected: (u16, u16),
+    ) {
+        assert_eq!(band_range(height, bands, band), expected);
     }
 
     #[test]
@@ -1318,6 +1344,7 @@ In `crates/sr-engine/src/present.rs`:
 mod tests {
     use super::*;
     use crate::palette::Palette;
+    use rstest::*;
 
     /// 2x2, row 0 = [1, 2], row 1 = [3, 1].
     /// Scanline 0 uses the base palette; scanline 1 uses one where entry 1 is blue.
@@ -1344,15 +1371,19 @@ mod tests {
         assert_eq!(output_size(&f, &opts), (640, 400));
     }
 
-    #[test]
-    fn four_three_output_is_exactly_four_by_three() {
-        for (w, h) in [(320u16, 200u16), (320, 400), (640, 400)] {
-            let f = IndexedFrame::new(w, h);
-            let opts = PresentOptions::default();
-            let (ow, oh) = output_size(&f, &opts);
-            assert_eq!(ow % 4, 0, "{w}x{h} -> {ow}x{oh}");
-            assert_eq!(ow * 3, oh * 4, "{w}x{h} -> {ow}x{oh}");
-        }
+    #[rstest]
+    #[case(320, 200)]
+    #[case(320, 400)]
+    #[case(640, 400)]
+    fn four_three_output_is_exactly_four_by_three(#[case] w: u16, #[case] h: u16) {
+        let f = IndexedFrame::new(w, h);
+        let opts = PresentOptions::default();
+        let (ow, oh) = output_size(&f, &opts);
+        // The 6/5 horizontal stretch must land on whole pixels. It does for
+        // every geometry the demo uses; a width that is not a multiple of 5
+        // would truncate, which is why the implementation asserts on it.
+        assert_eq!(ow, w as usize * 6 / 5, "{w} is not a multiple of 5");
+        assert_eq!(ow * 3, oh * 4, "{w}x{h} -> {ow}x{oh}");
     }
 
     #[test]
@@ -1483,26 +1514,33 @@ In `crates/sr-engine/src/testcard.rs`, driving a `Runner`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
 
     fn runner() -> Runner {
         Runner::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200), Box::new(TestCard::new())).unwrap()
     }
 
     /// Runs until the part's frame counter reads `phase * PHASE_TICKS + n`.
-    /// `step` is called before the counter advances, so this is one more step
-    /// than the tick number.
+    /// The counter is read at the *start* of a tick, so reaching tick `target`
+    /// takes `target + 1` steps, and `part_frame()` then reads `target + 1`.
     fn frames(phase: u32, n: u32) -> Runner {
         let mut r = runner();
-        for _ in 0..(phase * TestCard::PHASE_TICKS + n + 1) { r.step(); }
-        assert_eq!(r.part_frame(), phase * TestCard::PHASE_TICKS + n);
+        let target = phase * TestCard::PHASE_TICKS + n;
+        for _ in 0..=target { r.step(); }
+        assert_eq!(r.part_frame(), target + 1);
         r
     }
 
-    #[test]
-    fn the_test_card_is_deterministic() {
-        let a = frames(4, 9).frame().clone();
-        let b = frames(4, 9).frame().clone();
-        assert_eq!(a, b);
+    #[rstest]
+    #[case(0, 2)]
+    #[case(1, 16)]
+    #[case(2, 8)]
+    #[case(3, 1)]
+    #[case(4, 9)]
+    fn the_test_card_is_deterministic(#[case] phase: u32, #[case] n: u32) {
+        let a = frames(phase, n).frame().clone();
+        let b = frames(phase, n).frame().clone();
+        assert_eq!(a, b, "phase {phase} tick {n} is not reproducible");
     }
 
     #[test]
@@ -1783,16 +1821,32 @@ EOF
 
 ---
 
-### Task 10: Vendor the upstream source and verify the part sequence
+### Task 10: Vendor the upstream source and the reference binary, and verify the part sequence
 
 **Files:**
+- Verify: `reference/original/` (already committed — do not modify it)
 - Create: `.gitmodules` (via `git submodule add`), `upstream/SecondReality`
 - Create: `docs/fidelity/part-sequence.md`
 - Modify: `docs/spec/2026-10-10-second-reality-rust-design.md` §2.2 if the table is wrong
 
-**Interfaces:** none — this task produces documentation.
+**Interfaces:** none — this task produces documentation and vendored inputs.
 
-- [ ] **Step 1: Add the pinned submodule**
+- [ ] **Step 1: Verify the reference binary is intact**
+
+```bash
+sha256sum reference/original/SECOND.EXE reference/original/REALITY.FC
+```
+
+Expected, exactly:
+
+```
+a0b637b1c6729aeee8874cb7de701f608fe6ec3028fd72652a962a3a2bd25d8f  reference/original/SECOND.EXE
+cffb5839d0660f646c2474ff46452543997c3fc9469fa64401556c2d271aa63b  reference/original/REALITY.FC
+```
+
+If either differs, **stop**. Every frame diff in the project is measured against these bytes, and a silent substitution would invalidate all of them. See `reference/original/PROVENANCE.md` and `docs/decisions.md` D12.
+
+- [ ] **Step 2: Add the pinned submodule**
 
 ```bash
 git submodule add https://github.com/mtuomi/SecondReality.git upstream/SecondReality
@@ -1807,19 +1861,21 @@ git -C upstream/SecondReality remote set-url origin https://github.com/mtuomi/Se
 git -C upstream/SecondReality checkout 071a82e
 ```
 
-- [ ] **Step 2: Read `MAIN/U2.ASM` and transcribe the part sequence**
+- [ ] **Step 3: Read `MAIN/U2.ASM` and transcribe the part sequence**
 
 Read the part-runner table and the `checkcmdline` routine. For each entry record: order number, part binary name, directory, and the music position it starts at.
 
-- [ ] **Step 3: Write `docs/fidelity/part-sequence.md`**
+- [ ] **Step 4: Write `docs/fidelity/part-sequence.md`**
 
 A table with the columns of spec §2.2, plus a **Source** column citing `MAIN/U2.ASM:<line>`, plus sections for: the music restart points, the `SECOND 1..5` and `SECOND U` block arguments and the `partsmask` bit they map to, and the loop-mode entry point.
 
-- [ ] **Step 4: Reconcile against the spec**
+Cross-check the block arguments against `reference/original/README.1ST`, which documents them from the distributor's side: `1` = beginning, `2` = title screen, `3` = landscape scroller, `4` = vector part, `5` = end credits. If the assembly disagrees with the shipped readme, the readme describes what users saw and the assembly describes what the code does — record both and say which the port follows.
 
-Compare with spec §2.2. Every difference is a spec bug — edit §2.2 in place and note the correction in `docs/decisions.md` as D12.
+- [ ] **Step 5: Reconcile against the spec**
 
-- [ ] **Step 5: Commit**
+Compare with spec §2.2. Every difference is a spec bug — edit §2.2 in place and note the correction in `docs/decisions.md` as D13.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add .gitmodules upstream docs/fidelity/part-sequence.md docs/spec docs/decisions.md
@@ -1845,6 +1901,8 @@ EOF
 **Interfaces:** none — the output is a recorded set of facts that Task 12 implements against.
 
 This task is deliberately exploration, not code. Its deliverable is a `docs/decisions.md` entry describing the exact request and response shapes, so Task 12 can be written without guessing.
+
+**What to boot:** `reference/original/SECOND.EXE`, with `reference/original/` as the working directory so it finds `REALITY.FC` beside it. That is the reference of record (D12) — not `upstream/SecondReality/MAIN/U2.EXE`, which is a developer build. The source-tree shells are only interesting if the distributed release turns out not to run.
 
 - [ ] **Step 1: Start the emulator headless**
 
@@ -1873,6 +1931,7 @@ Answer, and write into `docs/decisions.md`:
 4. The units and accepted range of **`/api/v1/cpu/cycles`** — whether the value is cycles-per-millisecond, a percentage, or a core multiplier.
 5. The request shape of **`/api/v1/script/*`** and `/api/v1/input/sequence`, or whether scripted input is simpler as keyboard events.
 6. Whether the framebuffer can be read as **memory**, which would give indexed pixels and the DAC registers directly.
+7. **What happens between boot and the first demo frame.** `SECOND.EXE` starts into a text-mode SETUP screen for choosing a sound card and mixing rate. Determine whether passing a block argument (`SECOND 2`) skips it, and if not, what input sequence gets past it. Every capture depends on this, and it is the one thing about the oracle that cannot be worked out from the API document.
 
 Save the literal bytes of the responses you rely on as fixtures, because Task 12's tests parse recorded bytes rather than a live emulator:
 
@@ -1890,7 +1949,7 @@ Boot any original screen with a large flat colour (the setup menu's blue backgro
 
 - [ ] **Step 4: Record the findings and correct any earlier guess**
 
-Append to `docs/decisions.md` as **D13 — The reference oracle's API shape**, with the literal response snippets. If any of Task 12's or Task 13's interfaces in this plan are contradicted by what the API actually returns, say so explicitly in the entry and amend this plan file before continuing.
+Append to `docs/decisions.md` as **D14 — The reference oracle's API shape**, with the literal response snippets. If any of Task 12's or Task 13's interfaces in this plan are contradicted by what the API actually returns, say so explicitly in the entry and amend this plan file before continuing.
 
 - [ ] **Step 5: Commit**
 
@@ -1948,7 +2007,8 @@ pub struct CapturedFrame {
 /// documented alternative instead of blocking a phase (spec §8.1, D10).
 pub trait Oracle {
     fn describe(&self) -> Result<String, OracleError>;
-    fn boot(&mut self, exe: &Path, args: &[String]) -> Result<(), OracleError>;
+    /// `cwd` matters: SECOND.EXE loads REALITY.FC from the working directory.
+    fn boot(&mut self, exe: &Path, cwd: &Path, args: &[String]) -> Result<(), OracleError>;
     fn set_cycles(&mut self, cycles: u32) -> Result<(), OracleError>;
     fn step_frames(&mut self, frames: u32) -> Result<(), OracleError>;
     fn frame(&mut self) -> Result<CapturedFrame, OracleError>;
@@ -1960,9 +2020,14 @@ pub trait Oracle {
 CLI:
 
 ```
-cargo xtask reference capture --exe <PATH> --arg <A>... --cycles <N> --frames <I,J,K>
-                              --out <DIR> [--skip-boot-frames <N>]
+cargo xtask reference capture [--exe <PATH>] [--cwd <DIR>] [--arg <A>]... --cycles <N>
+                              --frames <I,J,K> --out <DIR> [--skip-boot-frames <N>]
+                              [--keys <SCRIPT>]
 ```
+
+`--exe` defaults to `reference/original/SECOND.EXE` and `--cwd` to `reference/original/`, so
+the common case is just `--cycles`, `--frames` and `--out`. `SECOND.EXE` reads `REALITY.FC`
+from the working directory, so the two cannot be separated.
 
 Manifest written to `<DIR>/manifest.json`:
 
@@ -2028,7 +2093,24 @@ In `xtask/src/reference.rs`:
 
 ```rust
 #[test]
-fn the_manifest_round_trips() { /* serialize, parse, compare frames and geometry */ }
+fn the_manifest_round_trips() {
+    let m = CaptureManifest {
+        version: 1,
+        oracle: "dosbox-automation 0.85.1 (6d100)".into(),
+        upstream_commit: "071a82e".into(),
+        exe: "SECOND.EXE".into(),
+        arguments: vec!["2".into()],
+        cycles: 3000,
+        geometry: (320, 200),
+        frames: vec![FrameRef {
+            index: 100,
+            idx: Some("frame_000100.idx".into()),
+            rgb: "frame_000100.rgb".into(),
+        }],
+    };
+    let json = serde_json::to_string(&m).unwrap();
+    assert_eq!(CaptureManifest::from_json(&json).unwrap(), m);
+}
 
 #[test]
 fn frame_file_names_are_zero_padded_to_six_digits() {
@@ -2037,12 +2119,16 @@ fn frame_file_names_are_zero_padded_to_six_digits() {
 }
 ```
 
+`CaptureManifest` and `FrameRef` derive `Serialize, Deserialize, Debug, Clone, PartialEq`. The round-trip test is what keeps the on-disk format and the in-memory type from drifting apart, since both `capture` and `compare` read the same file.
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p xtask`
 Expected: compile error — the package does not exist.
 
 - [ ] **Step 3: Implement the oracle client and `reference capture`**
+
+`xtask/Cargo.toml` depends on `clap` (derive), `serde` (derive), `serde_json`, `ureq` and `png`. `ureq` only ever talks to `http://127.0.0.1:8386`, so no TLS configuration is needed.
 
 `DosboxOracle::spawn` launches the emulator with `LD_LIBRARY_PATH` set from a `SR_DOSBOX` environment variable (defaulting to `/home/ew/workspace/reality/dosbox-automation`), `SDL_VIDEODRIVER=dummy`, and a token it generates itself with 64 hex characters — never scraped from the log, which masks it (D11). Pass `--noprimaryconf --set webserver_enabled=true`.
 
@@ -2056,19 +2142,23 @@ Expected: all tests pass.
 - [ ] **Step 5: Capture from the original and check determinism**
 
 ```bash
-cargo xtask reference capture --exe upstream/SecondReality/MAIN/SECOND.EXE \
-  --cycles <value from Task 11> --frames 10,60,120 --out reference/alku_a
-cargo xtask reference capture --exe upstream/SecondReality/MAIN/SECOND.EXE \
-  --cycles <value from Task 11> --frames 10,60,120 --out reference/alku_b
-diff -r reference/alku_a reference/alku_b && echo "deterministic"
+CYCLES=<value from Task 11>
+KEYS=<the input sequence from Task 11 question 7, if one is needed>
+cargo xtask reference capture --arg 2 --keys "$KEYS" \
+  --cycles $CYCLES --frames 10,60,120 --out reference/check_a
+cargo xtask reference capture --arg 2 --keys "$KEYS" \
+  --cycles $CYCLES --frames 10,60,120 --out reference/check_b
+diff -r reference/check_a reference/check_b && echo "deterministic"
 ```
 
-Expected: identical. If the two captures differ, determinism is not achievable at these frame indices and that finding goes in `docs/decisions.md` immediately — every later phase's verification depends on it. Delete `reference/alku_b` afterwards; it exists only for this check.
+Expected: identical. If the two captures differ, determinism is not achievable at these frame indices and that finding goes in `docs/decisions.md` immediately — every later phase's verification depends on it. Delete `reference/check_b` afterwards; it exists only for this check. Keep `reference/check_a` as the first real capture.
+
+These are frames 10, 60 and 120 from the title screen, not from a part the port renders yet. That is deliberate: Phase 0 verifies the *mechanism* — that the oracle runs, pins cycles, produces frames and repeats itself exactly. Whether those frames match the port is Phase 2's question.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml xtask reference/alku_a
+git add Cargo.toml xtask reference/check_a
 git commit -m "$(cat <<'EOF'
 Add xtask and reference capture
 
@@ -2219,16 +2309,20 @@ Expected: all tests pass.
 - [ ] **Step 5: Verify the mechanism end to end**
 
 ```bash
-cargo xtask compare --reference reference/alku_a --rendered reference/alku_a --out out/self
+cargo xtask compare --reference reference/check_a --rendered reference/check_a --out out/self
 ```
 
-Expected: `verdict: identical`, exit code 0. Then, to confirm the tool can actually fail:
+Expected: `verdict: identical`, exit code 0.
+
+Then confirm the tool can actually fail, by capturing a second time from a point that cannot match the first:
 
 ```bash
-cargo xtask compare --reference reference/alku_a --rendered <a capture with different frames> --out out/neg
+cargo xtask reference capture --arg 5 --cycles $CYCLES \
+  --frames 10,60,120 --out reference/check_neg
+cargo xtask compare --reference reference/check_a --rendered reference/check_neg --out out/neg
 ```
 
-Expected: `verdict: different`, exit code 1, and a diff PNG on disk. Record both results in `PROGRESS.md`.
+Expected: `verdict: different`, exit code 1, and a diff PNG on disk. **A compare tool that cannot report a difference is worthless**, so this negative check is part of the deliverable, not optional. Record both results in `PROGRESS.md` and delete `reference/check_neg`.
 
 - [ ] **Step 6: Commit**
 
@@ -2272,7 +2366,7 @@ Set "Where to pick up" to Phase 1, naming its first action.
 
 - [ ] **Step 3: Record the plan's decisions in `docs/decisions.md`**
 
-Append D14 covering the eight decisions listed under "Decisions this plan makes that the spec leaves open", with the reason for each.
+Append D15 covering the ten decisions listed under "Decisions this plan makes that the spec leaves open", with the reason for each. Renumber if an earlier task took a number that was expected to be free — D12 was claimed mid-planning by the reference-of-record decision, so the part-sequence correction is D13 and the oracle API shape is D14.
 
 - [ ] **Step 4: Update `CLAUDE.md`**
 

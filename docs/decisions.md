@@ -150,6 +150,40 @@ All four capabilities the design depends on are present:
 `debugger` is false, so there is no interactive debugger — consistent with the design
 never having depended on one.
 
+## D12 — The reference of record is the distributed 1993 release (2026-10-10)
+
+The upstream `mtuomi/SecondReality` tree contains **no runnable demo binary**. It has two
+different builds of the shell — `MAIN/U2.EXE` (31,612 bytes) and `U2.EXE` (31,548 bytes) —
+plus the unpacked part EXEs and data in `MAIN/DATA/`. Neither shell is the shipped demo.
+
+The original retail release has been supplied separately and now lives at
+`reference/original/`:
+
+| File | Size | SHA-256 |
+|---|---|---|
+| `SECOND.EXE` | 1,451,093 | `a0b637b1c6729aeee8874cb7de701f608fe6ec3028fd72652a962a3a2bd25d8f` |
+| `REALITY.FC` | 992,188 | `cffb5839d0660f646c2474ff46452543997c3fc9469fa64401556c2d271aa63b` |
+
+Its `README.1ST` confirms the distribution is exactly these two files unpacked into one
+directory, and documents the command line: `SECOND 1`..`5` start at the beginning, title
+screen, landscape scroller, vector part and end credits respectively.
+
+**Decision: the distributed release is the reference of record for every frame diff.**
+Fidelity means "looks like the demo people actually ran", and that is this binary, not a
+developer build from the source tree. The source tree remains the reference for *how*
+every effect works, which is what the port transcribes.
+
+**`REALITY.FC` is byte-identical in both places** (`cffb5839…`). So the music and art the
+source release ships *are* the shipped data, and Phase 1's asset decoding works on
+authentic input rather than something re-encoded. This retires a risk the spec did not
+name: there is no chance the media in the source tree is a later or earlier revision.
+
+**Open, to settle in Phase 2:** whether the part EXEs in `MAIN/DATA/` are byte-identical to
+those packed inside `SECOND.EXE`. If they differ, the port could match one reference and
+not the other. This is cheap to answer once BEGLOGO is diffable against real frames, and
+it does not block anything before then. If they *do* differ, the distributed release still
+wins and the difference gets recorded in `APPROXIMATIONS.md`.
+
 ## D9 — Licence: MIT (2026-10-10)
 
 The new Rust code is MIT licensed, in the same permissive spirit as the original, which
