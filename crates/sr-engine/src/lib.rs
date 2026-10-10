@@ -10,6 +10,7 @@ pub mod palette;
 pub mod part;
 pub mod present;
 pub mod surface;
+pub mod testcard;
 pub mod tick;
 pub mod view;
 

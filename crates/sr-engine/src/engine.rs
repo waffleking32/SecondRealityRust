@@ -130,7 +130,17 @@ impl Engine {
     /// One logic tick, in the fixed order of spec §4.2:
     ///   1. copper slot 0   2. part.frame() per band, composing after each
     ///   3. copper slot 1   4. copper slot 2
+    ///
+    /// The frame is the displayed area and nothing else, so it follows the
+    /// view: a part that changes the view's geometry gets a frame of the new
+    /// size from the next tick on. The geometry a part sets while a tick runs
+    /// therefore applies from that tick's band 0 — this tick still composes at
+    /// the old size, which is what keeps the band ranges it already used
+    /// consistent with the frame it wrote them into.
     pub fn tick(&mut self, part: &mut dyn Part, out: &mut IndexedFrame) -> PartStatus {
+        if out.width != self.view.width || out.height != self.view.height {
+            *out = IndexedFrame::new(self.view.width, self.view.height);
+        }
         let bands = part.band_count();
         // `ctx.frame` is the counter as it stands at the start of the tick.
         let frame = self.frame_counter;
@@ -247,7 +257,9 @@ pub struct Runner {
 
 impl Runner {
     /// Build the engine, start `part`, and size the output frame to the view's
-    /// displayed geometry — the surface may be a larger canvas.
+    /// displayed geometry — the surface may be a larger canvas. [`Engine::tick`]
+    /// re-checks that geometry every tick, so a part that changes it mid-run
+    /// gets a frame of the new size from the next tick.
     pub fn new(
         surface_width: usize,
         surface_height: usize,
@@ -364,6 +376,19 @@ mod tests {
         fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
         fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
             if ctx.frame >= self.0 { PartStatus::Finished } else { PartStatus::Continuing }
+        }
+    }
+
+    /// Raises the displayed height from its second tick — what a part switching
+    /// to a taller mode (400-line double-scan) does.
+    struct GrowsHeight;
+
+    impl Part for GrowsHeight {
+        fn name(&self) -> &'static str { "grows-height" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            if ctx.frame >= 1 { ctx.view.height = 8; }
+            PartStatus::Continuing
         }
     }
 
@@ -527,6 +552,20 @@ mod tests {
         r.step();
         assert_eq!(r.frame().width, 8);
         assert_eq!(r.part_frame(), 1);
+    }
+
+    #[test]
+    fn the_frame_follows_the_view_when_a_part_changes_its_geometry() {
+        let mut r = Runner::new(8, 4, View::new(8, 4), Box::new(GrowsHeight)).unwrap();
+        r.step();
+        assert_eq!((r.frame().width, r.frame().height), (8, 4), "the part has not asked yet");
+        // The part raises the height while this tick runs, and the band ranges
+        // this tick already used match the frame it is composing into, so the
+        // new size applies from the next tick.
+        r.step();
+        assert_eq!((r.frame().width, r.frame().height), (8, 4));
+        r.step();
+        assert_eq!((r.frame().width, r.frame().height), (8, 8), "the frame is the displayed area");
     }
 
     #[test]
