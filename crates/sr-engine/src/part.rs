@@ -136,7 +136,12 @@ impl PartCtx<'_> {
         self.copper.is_set(slot)
     }
 
-    /// Ask the shell to quit (`dis_exit()`).
+    /// Ask the engine to quit (`dis_exit()`).
+    ///
+    /// The request outlives this call: the engine reads it back out of the
+    /// context when the call returns, reports it through
+    /// [`Engine::exit_requested`](crate::engine::Engine::exit_requested), and
+    /// stops ticking this part.
     pub fn request_exit(&mut self) {
         self.exit_requested = true;
     }

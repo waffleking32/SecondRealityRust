@@ -5,9 +5,10 @@
 //! is stamped as that band is composed. See spec §4.2.
 //!
 //! Every `PartCtx` the engine builds reports `standalone = true`: the engine
-//! drives one part with no demo shell around it. `exit_requested` starts clear
-//! on each call — a request only lasts as long as the call that made it, until
-//! a shell grows somewhere to record it.
+//! drives one part with no demo shell around it. An `exit_requested` a part or
+//! copper callback sets is read back out of the context before it is dropped,
+//! so the request outlives the call that made it: [`Engine::exit_requested`]
+//! reports it until the next `start`, and [`Runner`] stops ticking.
 
 use std::fmt;
 use std::time::Duration;
@@ -51,6 +52,7 @@ pub struct Engine {
     timeline: PaletteTimeline,
     copper: CopperRegistry,
     frame_counter: u32,
+    exit_requested: bool,
 }
 
 impl Engine {
@@ -63,6 +65,7 @@ impl Engine {
             timeline: PaletteTimeline::new(Palette::new()),
             copper: CopperRegistry::new(),
             frame_counter: 0,
+            exit_requested: false,
         }
     }
 
@@ -86,6 +89,12 @@ impl Engine {
         &self.palette
     }
 
+    /// Whether a part or copper callback has asked to quit (`dis_exit()`), by
+    /// calling [`PartCtx::request_exit`]. Sticky until the next `start`.
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested
+    }
+
     /// Call `part.init`. Copper slots are cleared first.
     pub fn start(&mut self, part: &mut dyn Part) -> Result<(), EngineError> {
         let name = part.name();
@@ -94,6 +103,7 @@ impl Engine {
         }
         // The part's frame 0 is its own, whatever ran in this engine before.
         self.frame_counter = 0;
+        self.exit_requested = false;
         let bands = part.band_count();
         let mut ctx = PartCtx::new(
             &mut self.surface,
@@ -107,7 +117,11 @@ impl Engine {
             true,
             false,
         );
-        part.init(&mut ctx).map_err(|e| EngineError::Run {
+        let started = part.init(&mut ctx);
+        // `init`'s context is dropped here too, so its exit request is read
+        // back the same way a band's or a copper callback's is.
+        self.exit_requested |= ctx.exit_requested;
+        started.map_err(|e| EngineError::Run {
             part: name,
             message: e.message,
         })
@@ -132,7 +146,7 @@ impl Engine {
 
         let mut status = PartStatus::Continuing;
         for band in 0..bands {
-            let band_status = {
+            let (band_status, exit) = {
                 // A fresh context per band. Its borrows of the engine's fields
                 // end with this block, which is what frees the surface for the
                 // compose and the timeline for the push below.
@@ -148,8 +162,11 @@ impl Engine {
                     true,
                     false,
                 );
-                part.frame(&mut ctx)
+                (part.frame(&mut ctx), ctx.exit_requested)
             };
+            // The context is discarded at the end of every call, so an exit
+            // request has to be read back out of it here to outlive the band.
+            self.exit_requested |= exit;
             // `Finished` is sticky: the tick still runs its remaining bands —
             // the original drew them too — but reports the part as done, so
             // the engine can retire it when the tick ends.
@@ -190,7 +207,7 @@ impl Engine {
         let Some(mut f) = self.copper.take(slot) else {
             return;
         };
-        {
+        let exit = {
             let mut ctx = PartCtx::new(
                 &mut self.surface,
                 &mut self.view,
@@ -204,8 +221,10 @@ impl Engine {
                 false,
             );
             f(&mut ctx);
-        }
+            ctx.exit_requested
+        };
         self.copper.restore(slot, f);
+        self.exit_requested |= exit;
     }
 
     /// Test-only: register a copper function without going through a `PartCtx`,
@@ -248,10 +267,12 @@ impl Runner {
         })
     }
 
-    /// One logic tick.
+    /// One logic tick. A part that has finished, or asked to quit, is not
+    /// ticked again: the runner returns the last status the part itself
+    /// reported, which for an exit request is still `Continuing`.
     pub fn step(&mut self) -> PartStatus {
-        if self.status == PartStatus::Finished {
-            return PartStatus::Finished;
+        if self.stopped() {
+            return self.status;
         }
         self.status = self.engine.tick(&mut *self.part, &mut self.frame);
         self.part_frame += 1;
@@ -259,17 +280,26 @@ impl Runner {
     }
 
     /// Feed wall-clock time; steps once per due tick, dropping stale frames.
+    /// Returns how many steps it took, and none at all once the part has
+    /// finished or asked to quit.
     pub fn advance(&mut self, elapsed: Duration) -> u32 {
-        if self.status == PartStatus::Finished {
+        if self.stopped() {
             return 0;
         }
         let due = self.tick.advance(elapsed);
         let mut steps = 0;
-        while steps < due && self.status == PartStatus::Continuing {
+        while steps < due && !self.stopped() {
             self.step();
             steps += 1;
         }
         steps
+    }
+
+    /// Whether the part is done: it reported `Finished`, or it asked to quit.
+    /// Retiring on an exit request is the runner's job because the shell that
+    /// would act on it is a layer up.
+    fn stopped(&self) -> bool {
+        self.status == PartStatus::Finished || self.engine.exit_requested()
     }
 
     /// The last presented frame.
@@ -281,6 +311,11 @@ impl Runner {
         self.status
     }
 
+    /// Whether the part has asked to quit (see [`Engine::exit_requested`]).
+    pub fn exit_requested(&self) -> bool {
+        self.engine.exit_requested()
+    }
+
     /// Logic ticks run since the part started.
     pub fn part_frame(&self) -> u32 {
         self.part_frame
@@ -290,6 +325,7 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -329,6 +365,32 @@ mod tests {
         fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
             if ctx.frame >= self.0 { PartStatus::Finished } else { PartStatus::Continuing }
         }
+    }
+
+    /// Asks to quit from band 0, then keeps drawing; four bands, so the request
+    /// has to survive three more contexts.
+    struct Quitter;
+
+    impl Part for Quitter {
+        fn name(&self) -> &'static str { "quitter" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            ctx.request_exit();
+            PartStatus::Continuing
+        }
+        fn band_count(&self) -> u16 { 4 }
+    }
+
+    /// Asks to quit before it ever draws.
+    struct QuitsInInit;
+
+    impl Part for QuitsInInit {
+        fn name(&self) -> &'static str { "quits-in-init" }
+        fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+            ctx.request_exit();
+            Ok(())
+        }
+        fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus { PartStatus::Continuing }
     }
 
     impl Part for ProbePart {
@@ -484,6 +546,52 @@ mod tests {
         assert_eq!(r.step(), PartStatus::Finished);
         let frames_before = r.part_frame();
         assert_eq!(r.advance(Duration::from_secs(1)), 0, "a finished part must not keep ticking");
+        assert_eq!(r.part_frame(), frames_before);
+    }
+
+    #[rstest]
+    fn a_part_can_request_exit_and_the_engine_observes_it() {
+        let mut part = Quitter;
+        let (mut e, mut f) = engine_with(&mut part);
+        assert!(!e.exit_requested());
+        e.tick(&mut part, &mut f);
+        assert!(e.exit_requested(), "band 0's request must survive the other three bands");
+    }
+
+    #[test]
+    fn a_copper_callback_can_request_exit_and_the_engine_observes_it() {
+        let mut part = Noop;
+        let (mut e, mut f) = engine_with(&mut part);
+        e.set_copper_for_test(1, Box::new(|ctx: &mut PartCtx| ctx.request_exit()));
+        e.tick(&mut part, &mut f);
+        assert!(e.exit_requested(), "a copper callback's request must be observed too");
+    }
+
+    #[test]
+    fn a_part_can_request_exit_from_init() {
+        let mut part = QuitsInInit;
+        let (e, _f) = engine_with(&mut part);
+        assert!(e.exit_requested(), "an init-time request must not be dropped with its context");
+    }
+
+    #[test]
+    fn starting_a_part_clears_a_previous_exit_request() {
+        let mut part = Quitter;
+        let (mut e, mut f) = engine_with(&mut part);
+        e.tick(&mut part, &mut f);
+        assert!(e.exit_requested());
+        e.start(&mut Noop).unwrap();
+        assert!(!e.exit_requested(), "a new part starts with a clean slate");
+    }
+
+    #[test]
+    fn a_runner_stops_stepping_once_a_part_requests_exit() {
+        let mut r = Runner::new(8, 4, View::new(8, 4), Box::new(Quitter)).unwrap();
+        assert!(!r.exit_requested());
+        assert_eq!(r.step(), PartStatus::Continuing);
+        assert!(r.exit_requested());
+        let frames_before = r.part_frame();
+        assert_eq!(r.advance(Duration::from_secs(1)), 0, "an exit request must stop the ticking");
         assert_eq!(r.part_frame(), frames_before);
     }
 }
