@@ -44,7 +44,7 @@ These refine the spec rather than changing it. Each is recorded in `docs/decisio
 
 1. **Presentation lives in `bins/secondreality`, not `sr-engine`.** The spec's §4.2 puts "Presentation" under `sr-engine`; putting the SDL2 dependency there would make the engine untestable without SDL. No `sr-present` crate is introduced — the engine keeps the pure raster maths, the binary owns the window.
 2. **`View` gains a `width` field.** §4.2's struct sketch lists height but not width; 320 and 640 wide displays both exist (§2.3).
-3. **`View::split` is `Option<Box<Split>>`.** A `Split` containing a `View` containing a `Split` is an infinitely-sized type.
+3. **`View::split` is `Option<Box<Split>>`, and neither `View` nor `Split` is `Copy`.** A `Split` containing a `View` containing a `Split` is an infinitely-sized type, hence the `Box`. That `Box` is also why they are `Clone` only: `Box<T>` is never `Copy` — it owns its contents, and copying it would permit a double free — so `View` cannot be `Copy`, and `Split`, which contains a `View`, cannot be either. Nothing needs a copy: `effective` returns `&View`, `surface_row` and `source_index` take `&self`, and `Engine::new`/`Runner::new` take the view by value, which is a move.
 4. **`Part` gains `name()`;** `init` returns `Result<(), PartError>` rather than `Result<()>` so the runner can name the failing part.
 5. **Music is not in `PartCtx` in Phase 0.** It arrives in Phase 3 (spec §7). Adding fields to `PartCtx` is additive and breaks no part.
 6. **The overscan border is a fixed pad in the presenter**, not a modelled overscan region. First entry in `APPROXIMATIONS.md`.
@@ -406,7 +406,7 @@ EOF
 - Produces: `sr_engine::view::{View, Split}`
 
 ```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub width: u16,           // displayed width in pixels
     pub height: u16,          // displayed height in scanlines
@@ -419,7 +419,7 @@ pub struct View {
     pub border: Option<u8>,   // overscan colour (AC 0x11)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Split {
     pub scanline: u16,   // first displayed scanline using `view`
     pub view: View,
