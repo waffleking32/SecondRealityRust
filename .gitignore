@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+
+# Reference capture working space. Captured keyframes and manifests are committed;
+# raw video and scratch output are not.
+/reference/scratch/
+/reference/**/*.raw
+
+# xtask scratch
+/.xtask-cache/
