@@ -558,10 +558,22 @@ the affected parts against a substitute cue and record the difference in
 
 ### 8.1 The oracle
 
-`dosbox-automation` (a DOSBox fork exposing a REST API) is the reference. It provides
-`/api/v1/video/frame` for exact frame grabs, `/api/v1/cpu/cycles` to pin emulation
-speed for reproducibility, `/api/v1/input/sequence` for scripted input, and
-`/api/v1/memory/*` for live variable inspection.
+The reference is **an emulator that can run the original deterministically and yield
+its frames**. `dosbox-automation` (a DOSBox fork exposing a REST API) is the preferred
+implementation: it provides `/api/v1/video/frame` for exact frame grabs,
+`/api/v1/cpu/cycles` to pin emulation speed for reproducibility,
+`/api/v1/input/sequence` for scripted input, and `/api/v1/memory/*` for live variable
+inspection, which is also the primary tool for resolving `_np_zinfo` (§7.4).
+
+`xtask reference capture` therefore sits behind a small trait, not a hard dependency on
+one emulator, so that an unavailable or unusable oracle degrades to a documented
+alternative rather than blocking a phase. Candidate fallbacks, in order: a locally
+built `dosbox-automation`; stock DOSBox-X with its scripted-command and screenshot
+facilities; DOSBox-staging.
+
+**The oracle is only needed for verification, not for development.** Engine work —
+surface, view, palette, tick, the `Part` trait — is testable against synthetic
+expectations and does not block on it. See §12 for the risk entry.
 
 The original's own command line (`SECOND 2..5`, `U`) starts the demo at any block,
 which is how per-part references are captured.
@@ -664,6 +676,7 @@ The project is designed to be stopped and resumed at any phase boundary.
 | `dis_getmframe` real rate not reproducible | medium | medium | measured empirically in Phase 3; affects GLENZ/PLZPART/TECHNO |
 | FOREST, WATER and PANIC shipped binaries have only prototype sources | high | medium | shipped EXEs exist in `MAIN/DATA/`; disassemble against reference frames |
 | Emulator reference itself wrong for Mode X/CRTC tricks | low | medium | cross-check against `demoscene-recomp`'s modelled-VGA notes |
+| Reference emulator unavailable or unusable | medium | medium | oracle is behind a trait (§8.1) with documented fallbacks; engine work and part implementation do not block on it, only verification gates do |
 | Vector engine (Phase 6) larger than expected | medium | high | it is the largest single work item and is isolated in its own phase |
 | Scope creep from the vault | medium | low | vault is Phase 8, after the main sequence works |
 
@@ -671,7 +684,20 @@ The project is designed to be stopped and resumed at any phase boundary.
 
 ## 13. Open questions
 
-1. **Licence for the new code.** The original is Unlicense (public domain). Matching
-   it, or MIT-0, would be consistent. Needs a decision before the repo goes public.
-2. **`zspeedadjust` / `zspeedadjust2`.** Whether they affect audible timing or are
+1. **`zspeedadjust` / `zspeedadjust2`.** Whether they affect audible timing or are
    GUS-specific calibration. Resolve in Phase 3.
+
+---
+
+## 14. Licence
+
+The port is **MIT licensed**, in the same permissive spirit as the original, which was
+released into the public domain under the Unlicense. See `LICENSE`.
+
+This applies to the new source code. The original media assets in `assets/` and the
+vendored `upstream/SecondReality` submodule remain under their own Unlicense terms —
+both are public domain, so redistribution alongside MIT code is unencumbered. The
+`assets/README.md` provenance file records this per asset.
+
+Phase 0 sets `license = "MIT"` in the workspace `Cargo.toml` and in each crate's
+manifest.

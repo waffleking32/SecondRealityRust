@@ -103,3 +103,39 @@ source for the semantics of "plus flags"; (3) disassemble the STMIK segment.
 
 Escalation trigger: if route 1 fails within Phase 3, implement affected parts against a
 substitute cue and record the difference. Do not let it block the phase.
+
+## D9 — Licence: MIT (2026-10-10)
+
+The new Rust code is MIT licensed, in the same permissive spirit as the original, which
+is public domain under the Unlicense. Applies to new source only; the vendored
+`upstream/SecondReality` submodule and the media copied into `assets/` stay under
+Unlicense/public-domain terms, which impose no conditions on redistribution.
+
+Phase 0 sets `license = "MIT"` in the workspace and crate manifests.
+
+## D10 — The reference oracle is behind a trait, not a hard dependency (2026-10-10)
+
+The `dosbox-automation` binaries on this machine did not run. Diagnosed: the build at
+`dosbox-automation/build/release-linux/` succeeds and produces the executable, but it
+has no rpath to its own vcpkg-style dependencies, so `libSDL3.so.0`,
+`libSDL3_image.so.0`, `libmt32emu.so.2` and `libiir.so.1` are not found. All four *are*
+built, under `build/release-linux/_deps/*-build/`. Supplying
+
+```
+LD_LIBRARY_PATH=<repo>/build/release-linux/_deps/{sdl3,sdl3_image,mt32emu,fluidsynth,zlib-ng,iir1}-build
+```
+
+makes it run — confirmed, reports `dosbox-automation version 0.85.1 (6d100)`. A
+`cmake --install` or an rpath fix would make this permanent.
+
+**Design consequence, independent of whether that fix sticks:** `xtask reference
+capture` sits behind a small trait rather than depending on one emulator, so an
+unusable oracle degrades to a documented alternative instead of blocking a phase.
+Fallback order: locally built `dosbox-automation`; DOSBox-X with scripted commands and
+screenshots; DOSBox-staging.
+
+Important consequence for sequencing: **the oracle is only needed for verification.**
+Engine work and part implementation do not block on it — only the frame-diff gates in a
+phase's exit criteria do. Phase 0 must therefore be planned so that its engine and
+synthetic-test-card work can complete even if no oracle is available, with the
+reference-capture deliverable explicitly separable.

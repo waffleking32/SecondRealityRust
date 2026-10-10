@@ -43,10 +43,18 @@ development effects.
 - **Approximations need justification.** Each one goes in
   `docs/fidelity/APPROXIMATIONS.md` with the measured visual difference.
 
+## Licence
+
+MIT (see `LICENSE`). The vendored original source and the media in `assets/` are
+public domain under the Unlicense, which imposes no conditions. Set `license = "MIT"`
+in any new crate manifest.
+
 ## Verification
 
-`dosbox-automation` is the reference oracle. The original accepts `SECOND 2..5` and
-`SECOND U` to start at a chosen block.
+`dosbox-automation` is the preferred reference oracle, behind a trait — not a hard
+dependency. See `docs/decisions.md` D10 for the LD_LIBRARY_PATH workaround on this
+machine and the fallback order. The original accepts `SECOND 2..5` and `SECOND U` to
+start at a chosen block.
 
 - `xtask reference capture` — capture frames from the emulated original into
   `reference/` with a manifest (commit, CPU cycles, arguments, frame indices).
