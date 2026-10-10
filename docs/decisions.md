@@ -104,6 +104,52 @@ source for the semantics of "plus flags"; (3) disassemble the STMIK segment.
 Escalation trigger: if route 1 fails within Phase 3, implement affected parts against a
 substitute cue and record the difference. Do not let it block the phase.
 
+## D11 — The reference oracle is verified end-to-end (2026-10-10)
+
+Supersedes the "still unverified" caveat in D10. The emulator's REST API was exercised
+successfully. **Working invocation:**
+
+```
+LD_LIBRARY_PATH=<repo>/build/release-linux/_deps/{sdl3,sdl3_image,mt32emu,fluidsynth,zlib-ng,iir1}-build
+SDL_VIDEODRIVER=dummy
+DOSBOX_API_TOKEN=<64 hex chars>
+dosbox-automation --noprimaryconf --set webserver_enabled=true
+```
+
+Three gotchas, all found the hard way:
+
+1. **The API token must be exactly 64 hex characters.** `DOSBOX_API_TOKEN` with any
+   other length is rejected with `WARN: DOSBOX_API_TOKEN set but invalid (need 64 hex
+   chars)` and the emulator silently generates its own. Requests then fail with 401.
+2. **The log masks the token** (`API token: a4b00e48...`), so it cannot be scraped from
+   stdout for a full-length token. There is an alternative — `webserver_token_file` —
+   but supplying the token ourselves is better: deterministic, and no file to manage.
+   Our spawner generates 64 hex chars, passes them via the environment, and uses the
+   same value in the `Authorization: Bearer` header.
+3. **Port 8386, bound to 127.0.0.1** by default; remote binding requires
+   `webserver_allow_remote=true`.
+
+**Headless operation works.** `SDL_VIDEODRIVER=dummy` runs the emulator with no window,
+which is what automated capture needs — no GUI stealing focus during a test run.
+
+**Confirmed capabilities** from `GET /api/v1/dosbox/info`:
+
+```json
+"features": { "cpu_control": true, "cpu_registers": true, "debugger": false,
+              "freeze": true, "input": true, "memory": true, "port_io": true }
+```
+
+All four capabilities the design depends on are present:
+
+- `cpu_control` — pin cycles so captures are reproducible (§8.1)
+- `input` — scripted input sequences
+- `video/frame` — frame grabs (endpoint present in the OpenAPI document)
+- `memory` — **live variable inspection, which is the primary route for resolving
+  `_np_zinfo` (§7.4 route 1). This is now a confirmed capability, not an assumption.**
+
+`debugger` is false, so there is no interactive debugger — consistent with the design
+never having depended on one.
+
 ## D9 — Licence: MIT (2026-10-10)
 
 The new Rust code is MIT licensed, in the same permissive spirit as the original, which
