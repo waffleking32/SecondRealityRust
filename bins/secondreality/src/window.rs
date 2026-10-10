@@ -53,14 +53,19 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let mut buffer = FrameBuffer::new(0, 0);
     let mut events = sdl.event_pump()?;
 
+    let mut sampled = Instant::now();
     loop {
-        let frame_start = Instant::now();
         if quit_requested(&mut events) {
             break;
         }
-        // The engine decides how many ticks are due; a display that missed one
-        // gets the newest frame only, never a burst of stale ones.
-        runner.advance(frame_start.elapsed());
+        // The runner has no clock of its own: it is handed the wall-clock time
+        // since it was last asked, so a display that fell behind gets the
+        // newest frame only, never a burst of stale ones. The timestamp has to
+        // outlive the iteration — anchored inside the loop it would measure the
+        // event drain alone, and the demo would advance a tick a minute.
+        let now = Instant::now();
+        runner.advance(now - sampled);
+        sampled = now;
 
         // `Engine::tick` sizes the frame from the view every tick, so a part
         // that changes the picture's geometry — double-scan takes it to 400
@@ -78,7 +83,7 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         }
         // SDL's frame delay does the waiting — out the rest of the tick, and
         // never less than a millisecond, so the loop cannot spin.
-        let left = TICK_PERIOD.saturating_sub(frame_start.elapsed());
+        let left = TICK_PERIOD.saturating_sub(now.elapsed());
         timer.delay(left.as_millis().max(1) as u32);
     }
     Ok(())

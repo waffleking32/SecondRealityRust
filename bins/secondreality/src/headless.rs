@@ -2,8 +2,9 @@
 //!
 //! Nothing here touches SDL — `--headless` is dispatched before video is
 //! initialised, so this is the mode that runs on a machine with no display and
-//! the one `xtask compare` will call. Both modes drive the same `Runner` and
-//! the same tick, so the rate measured here is the rate the window runs at.
+//! the one `xtask compare` will call. Both modes hand the same `Runner` real
+//! elapsed wall-clock time, so the rate measured here is the rate the window
+//! ticks at.
 //!
 //! Dumped frames are native geometry, one output pixel per source pixel, no
 //! border: a dump is 1:1 with an emulator capture, which is the whole point of
