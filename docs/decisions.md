@@ -125,8 +125,23 @@ built, under `build/release-linux/_deps/*-build/`. Supplying
 LD_LIBRARY_PATH=<repo>/build/release-linux/_deps/{sdl3,sdl3_image,mt32emu,fluidsynth,zlib-ng,iir1}-build
 ```
 
-makes it run — confirmed, reports `dosbox-automation version 0.85.1 (6d100)`. A
-`cmake --install` or an rpath fix would make this permanent.
+makes it run — confirmed, reports `dosbox-automation version 0.85.1 (6d100)`.
+
+**Do not use `cmake --install` to make this permanent.** Verified: the fetched
+dependencies carry install rules (`sdl3` 12, `sdl3_image` 12, `mt32emu` 39, `iir1` 41,
+`fluidsynth` 17) and `CMAKE_INSTALL_PREFIX` is `/usr/local`, so a default install would
+place SDL3, mt32emu, iir1, fluidsynth and their headers system-wide. It also would not
+reliably fix the binary: `readelf -d` shows the executable has **no `RPATH`/`RUNPATH` at
+all**, so installing to `/usr/local/lib` still depends on the system linker being
+configured to search there.
+
+**Chosen approach: `xtask` sets `LD_LIBRARY_PATH` on the child process.** The emulator is
+spawned programmatically, so its environment can be set at spawn time. No wrapper
+script, no system modification, no `patchelf`. The workaround lives in our code where
+it is discoverable and reviewable, rather than in a shell script somebody must remember
+to use. If a standalone runnable binary is ever wanted, the contained options are
+`cmake --install --prefix <project-local-dir>` or rebuilding with
+`-DCMAKE_BUILD_RPATH=<_deps build dirs>`; neither touches `/usr/local`.
 
 **Design consequence, independent of whether that fix sticks:** `xtask reference
 capture` sits behind a small trait rather than depending on one emulator, so an
