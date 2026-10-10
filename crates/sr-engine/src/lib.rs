@@ -5,8 +5,10 @@
 
 pub mod palette;
 pub mod surface;
+pub mod tick;
 pub mod view;
 
 pub use palette::{dac_expand, Palette};
 pub use surface::{Surface, MAX_HEIGHT, MAX_WIDTH};
+pub use tick::Tick;
 pub use view::{Split, View};
