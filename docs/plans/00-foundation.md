@@ -255,7 +255,7 @@ Expected: `6 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml .cargo/config.toml .gitignore crates/sr-engine
+git add Cargo.lock Cargo.toml .cargo/config.toml .gitignore crates/sr-engine
 git commit -m "$(cat <<'EOF'
 Add workspace skeleton and the indexed Surface
 
@@ -1806,7 +1806,7 @@ Expected: the reported rate is within 0.2 Hz of 70.086. Record the measured numb
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml bins/secondreality
+git add Cargo.lock Cargo.toml bins/secondreality
 git commit -m "$(cat <<'EOF'
 Add the secondreality binary: SDL2 window and headless frame dump
 
@@ -2158,7 +2158,7 @@ These are frames 10, 60 and 120 from the title screen, not from a part the port 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml xtask reference/check_a
+git add Cargo.lock Cargo.toml xtask reference/check_a
 git commit -m "$(cat <<'EOF'
 Add xtask and reference capture
 
