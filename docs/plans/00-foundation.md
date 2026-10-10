@@ -421,7 +421,7 @@ pub struct View {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Split {
-    pub scanline: u16,   // first displayed scanline using `view`
+    pub scanline: u16,   // first scanline *within the enclosing view* using `view`
     pub view: View,
 }
 
@@ -570,7 +570,10 @@ mod tests {
         top.split = Some(Box::new(Split { scanline: 50, view: mid }));
         assert_eq!(top.effective(49).x_offset, 0);
         assert_eq!(top.effective(50).x_offset, 1000);
-        assert_eq!(top.effective(150).x_offset, 2000);
+        // There is one line-compare counter and it restarts on every hit, so
+        // mid's split at 150 is counted *within mid* — frame row 200, not 150.
+        assert_eq!(top.effective(199).x_offset, 1000);
+        assert_eq!(top.effective(200).x_offset, 2000);
     }
 }
 ```
