@@ -76,6 +76,59 @@ impl Palette {
     }
 }
 
+/// Per-frame record of which palette was in force from which scanline.
+/// `changes` is kept sorted by scanline and holds at most one entry per scanline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaletteTimeline {
+    base: Palette,
+    changes: Vec<(u16, Palette)>,
+}
+
+impl PaletteTimeline {
+    /// `base` in force from scanline 0, no changes yet.
+    pub fn new(base: Palette) -> PaletteTimeline {
+        PaletteTimeline {
+            base,
+            changes: Vec::new(),
+        }
+    }
+
+    /// The palette in force before the first change.
+    pub fn base(&self) -> &Palette {
+        &self.base
+    }
+
+    /// Record `pal` as the palette from `scanline` onward, replacing any
+    /// existing entry at that exact scanline.
+    pub fn push(&mut self, scanline: u16, pal: Palette) {
+        let at = self.changes.partition_point(|(s, _)| *s < scanline);
+        match self.changes.get_mut(at) {
+            Some((s, existing)) if *s == scanline => *existing = pal,
+            _ => self.changes.insert(at, (scanline, pal)),
+        }
+    }
+
+    /// The palette in force at `scanline`: the last change at or before it,
+    /// else the base.
+    pub fn palette_at(&self, scanline: u16) -> &Palette {
+        match self.changes.partition_point(|(s, _)| *s <= scanline) {
+            0 => &self.base,
+            n => &self.changes[n - 1].1,
+        }
+    }
+
+    /// How many scanlines carry a change.
+    pub fn change_count(&self) -> usize {
+        self.changes.len()
+    }
+
+    /// Reset to `base` and drop every change.
+    pub fn reset(&mut self, base: Palette) {
+        self.base = base;
+        self.changes.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
