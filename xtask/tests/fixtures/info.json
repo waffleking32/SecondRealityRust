@@ -1,0 +1,14 @@
+{
+  "appimage": null,
+  "binary": "/home/ew/workspace/reality/dosbox-automation/build/release-linux/dosbox-automation",
+  "features": {
+    "cpu_control": true,
+    "cpu_registers": true,
+    "debugger": false,
+    "freeze": true,
+    "input": true,
+    "memory": true,
+    "port_io": true
+  },
+  "version": "0.85.1 (6d100)"
+}

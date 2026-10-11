@@ -286,3 +286,271 @@ semantics remain open — the same unknown D8 already tracks under `_np_zinfo`. 
 resolves it from live memory. The wait's *shape* is certain (wait for `dx` to go
 negative, then positive, aborting on any key, skipped if Ctrl is held); only what
 musical event `dx` encodes is not.
+
+## D14 — The reference oracle's API shape (2026-10-10)
+
+Everything below was measured against `dosbox-automation 0.85.1 (6d100)` running
+`reference/original/SECOND.EXE`, with the emulator as the reference of record (D12).
+Response shapes are recorded literally; fixtures are committed in
+`xtask/tests/fixtures/`.
+
+**The API document is at `/openapi.json`, not `/api/v1/openapi.json`.** The command in
+the task brief 404s. The document is OpenAPI 3.1.0, 76,031 bytes, titled
+"dosbox-automation control API". 37 paths, 43 operations. Auth is
+`Authorization: Bearer <token>` everywhere.
+
+### Mounting the reference directory is blocked by the default invocation
+
+With `--noprimaryconf --set webserver_enabled=true` and no `-conf` file, the mount
+allow-list is empty and `MOUNT C -RO <reference/original>` is refused:
+
+```
+The mount policy: outside allowed directories.
+Put a dosbox-automation.conf next to the game and start with -conf,
+or add the path to mount_allowed_bases in the primary config.
+```
+
+`mount_allowed_bases` is read **only from the primary config file** — a `-conf` or a
+`--set` override is deliberately ignored (`src/webserver/webserver.cpp:666-675`). Working
+recipe, verified: point `XDG_CONFIG_HOME` at a scratch directory containing
+`dosbox-automation/dosbox-automation.conf` with
+
+```
+[webserver]
+webserver_enabled = true
+mount_allowed_bases = /path/to/reference/original
+```
+
+after which `MOUNT C -RO <dir>` succeeds and reports `Mounted read-only`. The read-only
+mount is not a limitation: the demo writes nothing, and the reference directory is
+untouched (hashes re-verified below). The source also documents a second route — a
+`-conf` file whose directory becomes the anchor root — which was **not tested here**.
+
+### `GET /api/v1/video/frame`
+
+`?format={jpeg|png|raw}` (default jpeg), `?mode={raw|rendered}` (default raw),
+`?quality=1..100` (jpeg only, default 98). `Accept` selects the format when `?format` is
+absent (`image/png`, `application/octet-stream`; anything else gets jpeg).
+
+| request | Content-Type | size on the probe screen |
+|---|---|---|
+| no params | `image/jpeg` | 9,367 |
+| `?format=png` | `image/png` | 1,393 |
+| `?format=raw` | `application/octet-stream` | 256,015 |
+| `?format=raw&mode=rendered` | `application/octet-stream` | 1,293,921 (758×569, pitch 2274, `pixel_format` 24 = BGR24) |
+
+**`raw` is a 15-byte header, not 16:**
+
+```
+u32 width, u32 height, i32 pitch, u8 pixel_format, u16 palette_count   (little-endian)
+```
+
+then `palette_count * 3` palette bytes when paletted, then `height * |pitch|` bytes of
+pixels. Getting the header length wrong by one byte shifts every pixel; it cost an hour
+during this task, so it is recorded here.
+
+Observed on every graphics mode sampled: `pixel_format = 32` (`BGRX32_ByteArray`),
+`pitch = 1280`, `palette_count = 0`, and each pixel is `[blue, green, red, 0]` — the
+fourth byte is unused and always zero. **`/video/frame` never returns indices**: the
+paletted (`Indexed8`, 8) branch of the schema was not reachable in any mode the demo
+uses, so `CapturedFrame::indexed` cannot come from here.
+
+Geometry follows the guest, it is not normalised. For the same 64000-byte source:
+
+- `INT 10h AX=0013h` → frame 320×200, `video_mode.is_double_scanned = true`.
+- the demo's own mode 13h/CRTC programming → frame **320×400**,
+  `is_double_scanned = false`, and the picture is a genuine 400-line image (353 distinct
+  row signatures out of 400; only 24 of 200 adjacent row pairs are equal), so a 320×200
+  port frame cannot be compared against it without doubling rows.
+
+Neither is stretched horizontally: the 4:3 correction only appears in `mode=rendered`
+(758×569 in this run). `mode=raw` is the emulator framebuffer at native resolution.
+
+### Indexed capture is available, through the memory API (task questions 2 and 6)
+
+`GET /api/v1/memory/{segment}/{offset}/{len}` returns `application/octet-stream` by
+default (`Content-Disposition: attachment; filename ="memory.bin"`), no `Accept` needed.
+The segment accepts `0xA000` or `40960`; `len` is decimal only (`0x10` → 400 "Invalid
+request parameter"). **The read honours the VGA graphics-controller Read Map Select
+register** (port `0x3CE` index 4, data `0x3CF`): reads of the same address with the
+register set to 0..3 return different bytes (57/54/57/55 distinct values in a live test),
+which is what makes the planar case solvable.
+
+Two layouts, both verified against `/video/frame` pixel by pixel:
+
+- **Chain-4 / linear** (sequencer memory mode bit 3 set — e.g. mode 13h as the BIOS sets
+  it, and the demo's 320×200 parts): `idx(x,y) = mem[y*320 + x]`. Verified on a
+  controlled screen: 0 mismatches over 64,000 pixels. Verified on a demo screen: 0
+  index↔RGB conflicts.
+- **Planar Mode X** (sequencer memory mode `0x06`, GC mode `0x40`, CRTC offset `0x28` —
+  the demo's 320×400 title screen): with the read map set to `p`, plane `p` occupies
+  `A000:0 .. +32000` at 80 bytes per row, and
+  `idx(x,y) = plane[x % 4][y*80 + x/4]`. Verified on the live title screen: **0 conflicts
+  over all 128,000 pixels**, 57 distinct indices, with the frame byte-identical either
+  side of the capture.
+
+  A cheap mode test before deciding which read to use: `PUT 0x3C4 = 4`, then
+  `GET 0x3C5`; bit 3 is chain-4.
+
+The DAC is readable the same way: write the entry number to `0x3C7`, then read `0x3C9`
+three times for R, G, B **as 6-bit values (0..63)**; the read index advances after every
+triple. Writing the write index (`0x3C8 = n`) also sets the read index to `n-1`.
+
+Caveat that applies to every register poke: a running demo rewrites the VGA registers
+many times per frame, so a plane selection or a DAC read is only meaningful while the
+guest is idle or the screen is static. That is also why a Mode X capture needs the four
+plane reads *and* the frame read to happen inside one still moment.
+
+### The widening rule the emulator actually uses (differs from Task 2's choice)
+
+DOSBox widens six bits to eight with **round-to-nearest**,
+`rgb6_to_8(c) = (c * 259 + 33) >> 6` — identical to `round(255c/63)`
+(`src/utils/rgb.h:31-36`, applied in `src/hardware/video/vga_dac.cpp:158-160`).
+
+Task 2 chose `dac_expand(v) = (v << 2) | (v >> 4)`. The two agree on 54 of the 64 values
+and differ on ten: **11–15** (Task 2 is one too low) and **48–52** (Task 2 is one too
+high).
+
+```
+v=11: (11<<2)|(11>>4) = 44|0 = 44        (11*259+33)>>6 = 2882>>6 = 45
+v=48: (48<<2)|(48>>4) = 192|3 = 195      (48*259+33)>>6 = 12465>>6 = 194
+v=42: both give 170                      (the standard blue, so it proves nothing)
+```
+
+Measured live, not inferred: a probe program set DAC entries to 11/48/63, 12/49/0,
+13/50/21, 14/51/42, 15/52/63, 16/46/47, 0/0/0 and 63/63/63 and painted one flat band per
+entry. Every pixel of `/video/frame` matched the round-to-nearest rule; the Task 2 rule
+mismatched 40,000 of 64,000 pixels (62.5%). The fixture triple `frame.bin` / `fb.bin` /
+`dac.bin` re-checks this offline: 0 mismatches for `(c*259+33)>>6`, 40,000 for
+`(c<<2)|(c>>4)`.
+
+`crates/sr-engine/src/palette.rs` was **not** changed — the brief reserved that ruling.
+
+### `GET`/`PUT /api/v1/cpu/cycles` (task question 4)
+
+The unit is **cycles per millisecond**, verbatim from the emulator's own setting help:
+"Emulate a fixed number of cycles per millisecond (roughly equivalent to MIPS). Valid
+range is from 50 to 2000000", with a ballpark table (386DX-33 = 6000, 486DX/2-66 =
+25000, Pentium 90 = 50000). The demo asks for a 33 MHz 486, so 25000 was used.
+
+`PUT {"cycles": N}` → `{"status":"ok","cycles":N}` and sets **both** real and protected
+mode. Out of range → 400 `{"error": "Field 'cycles' must be 50..2000000"}`; missing field
+→ 400 `{"error":"Field 'cycles' must be an integer"}`; 409 while input recording is
+active, or in legacy cycles mode.
+
+**The trap:** starting the emulator with `--set cycles=N` puts it in *legacy* mode
+(`"mode":"legacy"`, `real_mode`/`protected_mode` null) and the runtime PUT is then
+refused. Use `--set cpu_cycles=N` (modern, verified: `"mode":"modern"`, `real_mode`
+25000, PUT still works), or set cycles only through the API.
+
+### Input, scripting, and stepping frames (task question 5)
+
+- `POST /api/v1/input/type {"text": "...", "cps": 250}` — paced keystrokes. Only ASCII
+  that maps to a key is sent: `\n` is Enter, and **`\r` is silently dropped**
+  (`src/lua/text_input.cpp`). It returns `{"status":"ok","chars":N}` *before* the keys
+  have drained: the caller must wait about `N/cps` seconds.
+- `POST /api/v1/input/sequence {"events": [...]}` — keys with `t` (ms, absolute on the
+  sequence timeline) or `delay_ms` (relative), and mouse/timed forms. Key names are the
+  C++ `KBD_KEYS` enumerator names: `KBD_left`, `KBD_right`, `KBD_enter`, `KBD_space`,
+  `KBD_esc` — `KBD_escape` returns 400 `"Unknown key: KBD_escape"`.
+- One injection at a time: anything sent while a sequence is still draining fails with
+  `{"error":"Replay already in progress"}`. `input/type` and `input/sequence` share that
+  one queue, so a harness must pace its calls.
+- `POST /api/v1/script/load?name=X` with the Lua source as the raw request body
+  (`Content-Type: text/plain`) → `{"status":"loaded","name":"X"}`; then
+  `/api/v1/script/start`, `/api/v1/script/status` (`state` idle|loaded|running|yielded|
+  completed|error, plus `frame` and the script's `dosbox.output` table), `/script/stop`.
+  `/script/load` is rate-limited to one call per 2,000 ms (429 + `Retry-After`).
+- Lua exposes `dosbox.wait_frames(n)` and `dosbox.frame()`. Verified: `wait_frames(60)`
+  advanced the counter exactly 60 and took 0.92 s of wall clock, so the emulator runs at
+  the DOS rate in real time. **There is no pause or step-the-emulator endpoint** and no
+  debugger, so "frame N" means "after N rendered frames of wall-clock-paced emulation",
+  which is what `wait_frames` can pin exactly.
+
+Recommendation: scripted input is simpler as keyboard events (`input/type` +
+`input/sequence`); use Lua only when frame-exact timing or screen-text synchronisation is
+needed.
+
+### What happens between boot and the first demo frame (task question 7)
+
+**`SECOND 2` does not skip the setup screen**, and neither does a bare `SECOND`. The
+block argument chooses the demo's entry point; the soundcard menu runs first either way.
+
+- Launching `SECOND 2` draws the setup screen (text mode 03h, 720×400 frame) fully
+  **0.31 s** after the command.
+- Its three fields default to `Soundcard: Gravis Ultrasound, 512K of memory (stereo)`,
+  `Sound quality: High`, `Demo looping: Disabled`. Pressing Enter with the Gravis default
+  fails: `Failed to initialize the selected soundcard. Try selecting another soundcard or
+  no sound.` and the program returns to the DOS prompt. This emulator provides an SB16
+  (`BLASTER=A220 I7 D1 H5 T6`, from the startup log) and no GUS (no ROM files), so the
+  menu has to be answered.
+- The soundcard entries, in order: `No sound`, `SoundBlaster (mono)`,
+  `SoundBlaster Pro (stereo)`, `Gravis Ultrasound, 512K of memory (stereo)`. One
+  `KBD_left` from the default lands on `SoundBlaster Pro (stereo)`.
+- **Recipe, verified end to end:** type `SECOND 2\n`, wait for the setup screen, send
+  `KBD_left`, send `KBD_enter`. First graphics frame 0.26 s after Enter; about 1.0 s from
+  launch to the first demo frame. The demo then runs from the read-only mount without
+  complaint.
+
+Not tested: the `No sound` option (the demo is music-counted, so it is not obviously
+safe), `SECOND /gravis` (D13 says `/gravis` skips the menu, but it forces the GUS this
+emulator cannot provide), and driving the menu with the DOSBox shell's own `AUTOTYPE`
+command from an `[autoexec]` section, which exists with `-w`/`-p` and key names such as
+`left enter` and would remove the input round-trips entirely.
+
+### Fixtures
+
+`xtask/tests/fixtures/`, recorded from the live emulator, never hand-written:
+
+| file | bytes | what it is |
+|---|---|---|
+| `info.json` | 326 | `GET /api/v1/dosbox/info` |
+| `frame_info.json` | 411 | `GET /video/frame/info` on the probe screen |
+| `frame.bin` | 256,015 | `GET /video/frame?format=raw` on the probe screen |
+| `fb.bin` | 64,000 | `GET /memory/0xA000/0/64000` for that same screen |
+| `dac.bin` | 768 | 256 RGB triples, 6-bit, read through `0x3C7`/`0x3C9` |
+| `modex_title_frame.bin` | 512,015 | the demo's 320×400 Mode X title screen |
+| `modex_title_planes.bin` | 128,000 | its four 32,000-byte planes, in plane order |
+| `modex_title_frame_info.json` | 413 | that screen's `video/frame/info` |
+
+The first five are a self-checking set: for every pixel,
+`frame.bin` must read `(blue, green, red, 0)` where each channel is
+`(dac.bin[3i + ch] * 259 + 33) >> 6` and `i` is `fb.bin[y*320 + x]`. Verified 0
+mismatches. `modex_title_frame.bin` and `modex_title_planes.bin` are the same check for
+the planar case (`idx(x,y) = planes[x%4][y*80 + x/4]`, 0 conflicts) and are the only
+recorded bytes of the screen Phase 0 actually captures.
+
+### What this contradicts in Tasks 12 and 13
+
+1. **Mounting is blocked by the brief's spawn invocation.** `--noprimaryconf --set
+   webserver_enabled=true` has an empty mount allow-list, and `--set` cannot fill it.
+   Task 12's `spawn` must also provide a primary config (`XDG_CONFIG_HOME` scratch dir)
+   naming the reference directory in `mount_allowed_bases`.
+2. **There is no BMP.** `decode_frame(..., "image/bmp", ...)` has nothing to match:
+   the content types are `image/jpeg` (default), `image/png` and
+   `application/octet-stream`. The default is lossy JPEG at quality 98, so a capture must
+   ask for `raw` (or `png`) explicitly.
+3. **The raw header is 15 bytes and the pixels are BGRX.** `palette_count` is 0 for every
+   mode sampled, so `/video/frame` never carries indices: `CapturedFrame::indexed` has to
+   be filled from `/memory/...` (with the read-map-select dance in Mode X) and
+   `CapturedFrame::palette` from the port API, not from the frame endpoint.
+4. **`geometry: [320, 200]` is not universal.** The title screen that Phase 0 captures at
+   frames 10/60/120 is 320×400, and not a doubled 200-line image. Geometry has to be
+   recorded per capture rather than assumed.
+5. **`arguments: ["2"]` alone does not reach the demo.** The soundcard menu must be
+   answered with `KBD_left`, `KBD_enter` (the default choice fails on this emulator), so
+   the manifest's arguments plus the key script are both part of the capture recipe.
+6. **`set_cycles` must use the PUT**, and the emulator must not be started with a
+   `cycles=` command-line value, which switches it to legacy mode where the PUT fails
+   with 409. `cpu_cycles=` is the modern key.
+
+### Left open
+
+- Whether the `-conf`-anchor mount route works (documented, untested).
+- Whether `No sound` lets the reference run (would cut the soundcard dependency).
+- Whether `AUTOTYPE` can drive the setup menu from `[autoexec]`.
+- Capture determinism at fixed frame indices — Task 12's own step 5, not answered here.
+- The palette payload of a paletted raw frame was never observed.
+- Other endpoints exist and were not exercised: `/api/v1/mixer`, `/capture/*`,
+  `/memory/search`, `/memory/freeze`, `/dos/internals`, `/drive/swap`, `/mount/lock`.
+  Nothing in Phase 0 needs them.

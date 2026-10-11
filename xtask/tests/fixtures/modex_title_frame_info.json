@@ -1,0 +1,19 @@
+{
+  "double_height": false,
+  "double_width": false,
+  "height": 400,
+  "is_paletted": false,
+  "pitch": 1280,
+  "pixel_format": "BGRX32_ByteArray",
+  "rendered_double_scan": false,
+  "video_mode": {
+    "bios_mode_number": 19,
+    "color_depth": "256-colour",
+    "graphics_standard": "VGA",
+    "height": 400,
+    "is_double_scanned": false,
+    "is_graphics_mode": true,
+    "width": 320
+  },
+  "width": 320
+}
