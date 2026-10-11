@@ -77,12 +77,11 @@ pub fn compose_band(
 ) {
     let width = frame.width as usize;
     let source = surface.pixels();
-    let surface_len = source.len();
     for y in first..last {
         let start = y as usize * width;
         let row = &mut frame.pixels[start..start + width];
         for (x, pixel) in row.iter_mut().enumerate() {
-            *pixel = source[view.source_index(surface_len, x as u16, y)];
+            *pixel = source[view.source_index(surface, x as u16, y)];
         }
     }
 }
@@ -146,6 +145,27 @@ mod tests {
     }
 
     #[test]
+    fn compose_band_reads_the_rows_the_part_wrote() {
+        // A part draws with `Surface::set` or `row_mut`, which lay rows out at
+        // the surface's own stride. A view that has not asked for anything else
+        // must read them back at that same stride.
+        //
+        // The bug this pins was live: `View::new` defaulted the stride to the
+        // *view's* width, so a 320-wide picture on the 640-wide surface read
+        // each row's other half — a sheared picture, with no error anywhere.
+        let mut s = Surface::new(640, 400);
+        for y in 0..4 {
+            s.row_mut(y)[..320].fill((y + 1) as u8);
+        }
+        let v = View::new(320, 4);
+        let mut f = IndexedFrame::new(320, 4);
+        compose_band(&mut f, &s, &v, 0, 4);
+        for y in 0..4 {
+            assert_eq!(f.row(y as u16), &[(y + 1) as u8; 320][..], "row {y}");
+        }
+    }
+
+    #[test]
     fn compose_band_uses_the_split_view_for_lower_scanlines() {
         let s = striped_surface();
         let mut v = View::new(8, 4);
@@ -162,6 +182,32 @@ mod tests {
         // give rows 3 and 0 — which is the bug this test exists to catch.
         assert_eq!(f.row(2), &[2; 8]);
         assert_eq!(f.row(3), &[3; 8]);
+    }
+
+    #[test]
+    fn a_lower_view_resolves_its_own_line_stride() {
+        // The stride is resolved per effective view, not once for the enclosing
+        // one. A split's lower view is built by the part and is usually a fresh
+        // `View::new`, so resolving only the outer view would read the lower
+        // half at the upper half's stride.
+        let mut s = Surface::new(640, 400);
+        for y in 0..2 {
+            s.row_mut(y).fill(1);
+        }
+        for y in 2..4 {
+            s.row_mut(y)[..320].fill(2);
+        }
+        let mut v = View::new(320, 4);
+        let mut lower = View::new(320, 4);
+        lower.set_origin(640 * 2); // surface row 2
+        v.split = Some(Box::new(Split { scanline: 2, view: lower }));
+
+        let mut f = IndexedFrame::new(320, 4);
+        compose_band(&mut f, &s, &v, 0, 4);
+        assert_eq!(f.row(0), &[1; 320][..]);
+        assert_eq!(f.row(1), &[1; 320][..]);
+        assert_eq!(f.row(2), &[2; 320][..]);
+        assert_eq!(f.row(3), &[2; 320][..], "the lower view's second row");
     }
 
     #[test]

@@ -3,17 +3,28 @@
 //! Display start, line offset, fine pan, double-scan, the line-compare split
 //! and the overscan colour, in one register set.
 
+use crate::surface::Surface;
+
 /// One CRTC register set: where the beam starts in the surface, how far it
 /// steps per scanline, and how wide the displayed picture is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
-    pub width: u16,         // displayed width in pixels
-    pub height: u16,        // displayed height in scanlines
-    pub start_addr: u16,    // CRTC display start (0x0C/0x0D), in pixels
-    pub x_offset: u16,      // planar byte-to-pixel offset; added to start_addr
-    pub y_line_offset: u16, // pixel stride between displayed scanlines (CRTC 0x13)
-    pub pan: u8,            // fine horizontal shift, 0..=7 (AC 0x13)
-    pub double_scan: bool,  // CRTC reg 9 bit 7
+    pub width: u16,      // displayed width in pixels
+    pub height: u16,     // displayed height in scanlines
+    pub start_addr: u16, // CRTC display start (0x0C/0x0D), in pixels
+    pub x_offset: u16,   // planar byte-to-pixel offset; added to start_addr
+    /// Pixel stride between displayed scanlines (CRTC 0x13), or `None` — the
+    /// default — for the surface's own row stride.
+    ///
+    /// `None` is what a part wants unless it has deliberately packed its rows
+    /// more tightly than the surface's: a picture drawn through [`Surface`] is
+    /// laid out at the surface's stride, and reading it back at any other
+    /// stride shears it, without an error anywhere. The stride is resolved
+    /// where the surface is in hand, in [`View::source_index`], so a view built
+    /// before the surface existed cannot get it wrong.
+    pub y_line_offset: Option<u16>,
+    pub pan: u8,           // fine horizontal shift, 0..=7 (AC 0x13)
+    pub double_scan: bool, // CRTC reg 9 bit 7
     pub split: Option<Box<Split>>,
     pub border: Option<u8>, // overscan colour (AC 0x11)
 }
@@ -26,19 +37,26 @@ pub struct Split {
 }
 
 impl View {
-    /// Origin at 0, `y_line_offset = width`, no split, no border.
+    /// Origin at 0, line stride unset (the surface's own row stride), no split,
+    /// no border.
     pub fn new(width: u16, height: u16) -> View {
         View {
             width,
             height,
             start_addr: 0,
             x_offset: 0,
-            y_line_offset: width,
+            y_line_offset: None,
             pan: 0,
             double_scan: false,
             split: None,
             border: None,
         }
+    }
+
+    /// The stride the beam reads with, against a surface whose own rows are
+    /// `surface_stride` pixels apart.
+    pub fn stride(&self, surface_stride: u16) -> u16 {
+        self.y_line_offset.unwrap_or(surface_stride)
     }
 
     /// Sets `x_offset` and zeroes `start_addr`.
@@ -77,16 +95,22 @@ impl View {
         ly >> v.double_scan as u16
     }
 
-    /// Index into a surface of `surface_len` pixels for displayed pixel (x, y).
-    /// Wraps, like the CRTC address counter.
-    pub fn source_index(&self, surface_len: usize, x: u16, y: u16) -> usize {
+    /// Index into `surface` for displayed pixel (x, y). Wraps, like the CRTC
+    /// address counter.
+    ///
+    /// The stride is resolved here, per view — including the lower view of a
+    /// split — because this is where the surface is in hand. Resolving it once
+    /// for the enclosing view would leave a split's lower view reading at the
+    /// wrong stride.
+    pub fn source_index(&self, surface: &Surface, x: u16, y: u16) -> usize {
         let (v, ly) = self.effective_at(y);
+        let stride = v.stride(surface.width() as u16);
         (v.start_addr as usize
             + v.x_offset as usize
-            + (ly >> v.double_scan as u16) as usize * v.y_line_offset as usize
+            + (ly >> v.double_scan as u16) as usize * stride as usize
             + v.pan as usize
             + x as usize)
-            % surface_len
+            % surface.pixels().len()
     }
 }
 
@@ -104,30 +128,53 @@ mod tests {
     fn new_defaults_to_a_contiguous_origin(v320: View) {
         assert_eq!(v320.start_addr, 0);
         assert_eq!(v320.x_offset, 0);
-        assert_eq!(v320.y_line_offset, 320);
+        assert_eq!(v320.y_line_offset, None);
         assert_eq!(v320.pan, 0);
         assert!(!v320.double_scan);
         assert!(v320.split.is_none());
         assert!(v320.border.is_none());
     }
 
+    /// A view that has not asked for a stride reads the surface's own rows.
+    /// Getting this wrong shears the picture and reports nothing.
+    #[rstest]
+    fn the_line_stride_defaults_to_the_surface_row_stride() {
+        let mut s = Surface::new(640, 400);
+        s.set(3, 2, 7);
+        let v = View::new(320, 200);
+        assert_eq!(v.stride(640), 640);
+        assert_eq!(v.source_index(&s, 3, 2), 2 * 640 + 3);
+        assert_eq!(s.pixels()[v.source_index(&s, 3, 2)], 7);
+    }
+
+    /// CRTC 0x13 is independent of the view's width: a part may pack its rows
+    /// more tightly than the surface's.
+    #[rstest]
+    fn an_explicit_line_stride_overrides_the_surface_row_stride() {
+        let mut v = View::new(320, 200);
+        v.y_line_offset = Some(320);
+        let s = Surface::new(640, 400);
+        assert_eq!(v.stride(640), 320);
+        assert_eq!(v.source_index(&s, 3, 2), 2 * 320 + 3);
+    }
+
     #[rstest]
     fn source_index_follows_the_line_offset(mut v320: View) {
         v320.set_origin(10);
-        assert_eq!(v320.source_index(64_000, 3, 2), 10 + 2 * 320 + 3);
+        assert_eq!(v320.source_index(&Surface::new(320, 200), 3, 2), 10 + 2 * 320 + 3);
     }
 
     #[rstest]
     fn source_index_wraps_past_the_end() {
         let mut v = View::new(4, 1);
         v.start_addr = 6;
-        assert_eq!(v.source_index(8, 3, 0), 1);
+        assert_eq!(v.source_index(&Surface::new(4, 2), 3, 0), 1);
     }
 
     #[rstest]
     fn pan_shifts_by_one_pixel_per_unit(mut v320: View) {
         v320.pan = 5;
-        assert_eq!(v320.source_index(64_000, 0, 0), 5);
+        assert_eq!(v320.source_index(&Surface::new(320, 200), 0, 0), 5);
     }
 
     #[rstest]
@@ -187,7 +234,7 @@ mod tests {
             view: lower,
         }));
         assert_eq!(v320.effective(199).x_offset, 0);
-        assert_eq!(v320.source_index(64_000, 0, 199), 199 * 320);
+        assert_eq!(v320.source_index(&Surface::new(320, 200), 0, 199), 199 * 320);
     }
 
     #[rstest]

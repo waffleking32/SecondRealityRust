@@ -58,6 +58,10 @@ fn main() -> ExitCode {
 
 /// The runner both modes drive: the demo's surface, the picture's starting
 /// geometry, and the part the command line named.
+///
+/// The view leaves its line stride unset, so the beam reads the surface's own
+/// rows whatever `VIEW_WIDTH` is: a part that draws through `Surface` and never
+/// touches the stride still gets its picture back un-sheared.
 fn new_runner(part_name: &str) -> Result<Runner, Box<dyn Error>> {
     let part =
         parts::new_part(part_name).ok_or_else(|| format!("unknown part {part_name:?}"))?;

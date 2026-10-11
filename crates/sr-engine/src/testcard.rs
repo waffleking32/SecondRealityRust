@@ -101,13 +101,12 @@ impl Part for TestCard {
     /// A 320×200 picture with the 16-colour bar palette loaded.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // The phases change how the picture is scanned out, never how big it
-        // is, so the view starts from a plain 320×200 again.
+        // is, so the view starts from a plain 320×200 again. The line stride is
+        // deliberately left unset: the card draws through `Surface`, which lays
+        // rows out at `MAX_WIDTH`, so that is the stride the beam must read —
+        // and leaving it unset is what makes the card a live test of the
+        // default rather than of an explicit value.
         *ctx.view = View::new(WIDTH, HEIGHT);
-        // The beam's line stride is the surface's row stride: `Surface::set`
-        // writes `width * y + x`, so a picture drawn with it must be read back
-        // that way. `View::new`'s `y_line_offset = width` is only right when
-        // the surface is that wide, and this one is allocated `MAX_WIDTH` wide.
-        ctx.view.y_line_offset = MAX_WIDTH as u16;
         for (entry, rgb) in BAR_PALETTE.iter().enumerate() {
             ctx.set_palette_entry(entry as u8, *rgb);
         }
@@ -186,7 +185,6 @@ impl TestCard {
         // 100 and the tests can name exact pixels.
         let row = SPLIT_ROW + (ctx.frame % SPLIT_WALK_ROWS as u32) as u16;
         let mut lower = View::new(WIDTH, HEIGHT);
-        lower.y_line_offset = MAX_WIDTH as u16;
         lower.set_origin(MAX_WIDTH as u16 * row);
         ctx.view.split = Some(Box::new(Split {
             scanline: SPLIT_ROW,
@@ -288,11 +286,15 @@ mod tests {
     use rstest::*;
 
     fn runner() -> Runner {
-        // The view's line stride is the surface's row stride, as it is in the
-        // card's own `init`: a 320-wide picture in a `MAX_WIDTH`-wide surface.
-        let mut view = View::new(320, 200);
-        view.y_line_offset = MAX_WIDTH as u16;
-        Runner::new(MAX_WIDTH, MAX_HEIGHT, view, Box::new(TestCard::new())).unwrap()
+        // The view leaves its line stride unset, exactly as the card's own
+        // `init` does: a 320-wide picture in a `MAX_WIDTH`-wide surface.
+        Runner::new(
+            MAX_WIDTH,
+            MAX_HEIGHT,
+            View::new(320, 200),
+            Box::new(TestCard::new()),
+        )
+        .unwrap()
     }
 
     /// Runs until the part's frame counter reads `phase * PHASE_TICKS + n`.
@@ -386,10 +388,11 @@ mod tests {
     ///
     /// None of the tests above pin that: every other phase's pattern is
     /// constant down a column, and phase 3's row pairs come from one source row
-    /// whatever the stride, so a `y_line_offset` of 320 (the view's own width
-    /// rather than the surface's) passes them all. This one does not: with the
-    /// wrong stride, two picture rows share a surface row, one as its left half
-    /// and one as its right half, and land on the same values.
+    /// whatever the stride, so a view that set `y_line_offset = Some(320)` —
+    /// the view's own width rather than the surface's — passes them all. This
+    /// one does not: with the wrong stride, two picture rows share a surface
+    /// row, one as its left half and one as its right half, and land on the
+    /// same values.
     #[test]
     fn every_source_row_reaches_its_own_pair_of_frame_rows() {
         let f = frames(3, 1).frame().clone();
