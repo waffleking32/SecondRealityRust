@@ -4,11 +4,16 @@
 //! [`dac_expand`]. Widening early would lose the precision the original's
 //! fades and copper effects depend on.
 
-/// Widen a 6-bit DAC value to 8 bits by replicating the top bits.
+/// Widen a 6-bit DAC value to 8 bits by rounding to nearest.
+///
+/// `(v * 259 + 33) >> 6` is `round(v * 255 / 63)` — the mapping the reference
+/// oracle's DAC applies, measured against it in `docs/decisions.md` D14. Bit
+/// replication, `(v << 2) | (v >> 4)`, is the cruder "wire the top bits up"
+/// approximation and differs from it on ten of the sixty-four values.
 /// Input above 63 is masked; the DAC had no eighth bit to receive it.
 pub const fn dac_expand(v: u8) -> u8 {
-    let v = v & 0x3F;
-    (v << 2) | (v >> 4)
+    let v = (v & 0x3F) as u16;
+    ((v * 259 + 33) >> 6) as u8
 }
 
 /// A 256-entry RGB palette, six bits per channel.
@@ -157,11 +162,26 @@ mod tests {
     #[case(16, 65)]
     #[case(32, 130)]
     #[case(63, 255)]
+    // 15, 48 and 52 are three of the ten values where rounding and bit
+    // replication disagree; replication gives 60, 195 and 211.
+    #[case(15, 61)]
+    #[case(48, 194)]
+    #[case(52, 210)]
     // Above six bits the DAC had nowhere to put the extra bits, so they are masked.
     #[case(64, 0)]
     #[case(255, 255)]
-    fn dac_expand_replicates_the_top_bits(#[case] input: u8, #[case] expected: u8) {
+    fn dac_expand_rounds_to_nearest(#[case] input: u8, #[case] expected: u8) {
         assert_eq!(dac_expand(input), expected);
+    }
+
+    /// The rule is `round(v * 255 / 63)` over the whole six-bit range, which is
+    /// what the emulated DAC does — D14.
+    #[test]
+    fn dac_expand_is_the_ideal_even_mapping() {
+        for v in 0u8..=63 {
+            let ideal = ((v as u32 * 255 + 31) / 63) as u8;
+            assert_eq!(dac_expand(v), ideal, "at {v}");
+        }
     }
 
     #[test]
@@ -178,7 +198,7 @@ mod tests {
         p.set_entry(255, [0, 63, 0]);
         let mut out = [0u8; 1024];
         p.write_rgba(&mut out);
-        // dac_expand(32) = (32 << 2) | (32 >> 4) = 128 | 2 = 130.
+        // dac_expand(32) = (32 * 259 + 33) >> 6 = 8321 >> 6 = 130.
         assert_eq!(&out[0..4], &[255, 0, 130, 255]);
         assert_eq!(&out[1020..1024], &[0, 255, 0, 255]);
     }

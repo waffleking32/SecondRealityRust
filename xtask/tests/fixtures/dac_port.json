@@ -1,0 +1,133 @@
+{
+  "note": "literal dosbox-automation 0.85.1 (6d100) port-API responses, captured live 2026-10-10 while PROBE.COM held DAC entries 1..8 = (11,48,63) (12,49,0) (13,50,21) (14,51,42) (15,52,63) (16,46,47) (0,0,0) (63,63,63)",
+  "protocol": "PUT 0x3C7 = N selects DAC entry N for reading; each GET 0x3C9 returns one channel and advances; PUT 0x3C8 = N selects the write index and also sets the read index to N-1",
+  "calls": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=968"
+      },
+      "response": {
+        "port": 968,
+        "value": 9,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "PUT",
+        "path": "/io/port",
+        "port": 967,
+        "value": 1
+      },
+      "response": {
+        "port": 967,
+        "status": "ok",
+        "value": 1,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 11,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 48,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 63,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "PUT",
+        "path": "/io/port",
+        "port": 968,
+        "value": 6
+      },
+      "response": {
+        "port": 968,
+        "status": "ok",
+        "value": 6,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 15,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 52,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=969"
+      },
+      "response": {
+        "port": 969,
+        "value": 63,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=967"
+      },
+      "response": {
+        "port": 967,
+        "value": 0,
+        "width": 1
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/io/port?port=968"
+      },
+      "response": {
+        "port": 968,
+        "value": 6,
+        "width": 1
+      }
+    }
+  ]
+}

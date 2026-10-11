@@ -373,6 +373,13 @@ Expected: compile error — `Palette` and `dac_expand` are not defined.
 
 `dac_expand` is `((v & 0x3F) << 2) | ((v & 0x3F) >> 4)` — masking first keeps it a total function on `u8`. `from_vga` reads three bytes per entry and shifts each right by 2. `write_rgba` writes `[dac_expand(r), dac_expand(g), dac_expand(b), 255]`. `BLACK` is `[[0, 0, 0]; 256]` as a `const`.
 
+> **Superseded (Task 11, D14).** The rule above is what Task 2 shipped, and Task 11's probe
+> found the reference widens by rounding instead: `dac_expand(v) = ((v & 0x3F) * 259 + 33) >> 6`.
+> The two differ on ten of the sixty-four values, so the plan's snippet, the
+> `dac_expand_replicates_the_top_bits` case list and the commit message below are history;
+> `crates/sr-engine/src/palette.rs` now carries the rounding rule and cases pinning
+> `15 -> 61`, `48 -> 194`, `52 -> 210`.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p sr-engine`
@@ -2114,9 +2121,15 @@ Full evidence in `docs/decisions.md` D14; every fixture below is recorded in
    reached only after answering it: send `KBD_left`, then `KBD_enter` (the default
    soundcard is a Gravis Ultrasound this emulator cannot provide, and Enter alone exits
    with "Failed to initialize the selected soundcard"). Launch to first demo frame is
-   about a second, so frames 10/60/120 land on the 320×400 title screen — **not**
-   `geometry: [320, 200]`, which is the geometry only for the demo's later 320×200 parts.
-   Record the geometry that was captured rather than asserting one.
+   about a second. **A frame index counts from the emulator's first rendered frame at
+   process start** (`dosbox.frame()`, also `GET /script/status`'s `frame`), so frames
+   10/60/120 counted from boot are DOS-shell frames — the title screen is around frame
+   1700 on an API-driven run, and the exact number depends on how long the harness spends
+   mounting and typing. Name the origin, count `--skip-boot-frames` and every captured
+   index from it, and record it in the manifest, as the brief already intends. The title
+   screen itself is 320×400 (not `geometry: [320, 200]`, which holds only for the demo's
+   later 320×200 parts, and not a doubled 200-line image), so record the geometry that was
+   captured rather than asserting one.
 4. **Cycles are cycles per millisecond, 50..2,000,000** (the emulator's own scale puts a
    486DX/2-66 at 25000). `PUT /api/v1/cpu/cycles {"cycles":N}` sets both real and
    protected mode. Do not start the emulator with the deprecated `cycles=` setting: it

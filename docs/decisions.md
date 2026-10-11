@@ -396,6 +396,23 @@ The DAC is readable the same way: write the entry number to `0x3C7`, then read `
 three times for R, G, B **as 6-bit values (0..63)**; the read index advances after every
 triple. Writing the write index (`0x3C8 = n`) also sets the read index to `n-1`.
 
+The REST shape of that, verbatim from a live capture (recorded in
+`xtask/tests/fixtures/dac_port.json`, which also carries the protocol note):
+
+```
+PUT /api/v1/io/port   {"port": 967, "value": 1}
+  -> {"port": 967, "status": "ok", "value": 1, "width": 1}
+GET /api/v1/io/port?port=969
+  -> {"port": 969, "value": 11, "width": 1}          # entry 1's red, 6-bit
+```
+
+`PUT` takes `port` and `value` as JSON **integers** (the query form's `0x`-prefixed hex is
+not accepted in a body: `{"port":"0x3C7",...}` → `{"error":"Malformed request body"}`), and
+`width` defaults to 1. `GET` takes `?port=` plus an optional `width=1|2` and answers with
+`port`, `width` and a single `value`; there is no bulk read, so a 256-entry DAC costs 768
+requests, and each read advances the DAC's internal read index — which is why the entry
+has to be selected with a `0x3C7` write before each triple, not just once.
+
 Caveat that applies to every register poke: a running demo rewrites the VGA registers
 many times per frame, so a plane selection or a DAC read is only meaningful while the
 guest is idle or the screen is static. That is also why a Mode X capture needs the four
@@ -424,7 +441,18 @@ mismatched 40,000 of 64,000 pixels (62.5%). The fixture triple `frame.bin` / `fb
 `dac.bin` re-checks this offline: 0 mismatches for `(c*259+33)>>6`, 40,000 for
 `(c<<2)|(c>>4)`.
 
-`crates/sr-engine/src/palette.rs` was **not** changed — the brief reserved that ruling.
+**Ruled: the port follows the emulator.** `dac_expand` in `crates/sr-engine/src/palette.rs`
+is now `((v & 0x3F) as u16 * 259 + 33) >> 6`, with `15 -> 61`, `48 -> 194` and `52 -> 210`
+pinned as test cases because bit replication gives 60, 195 and 211 for those. The
+emulator's formula is also the better model of the hardware: it is `round(v * 255 / 63)`,
+the even mapping of 64 levels onto 256, whereas replicating the top bits is a wiring
+shortcut that diverges from it on exactly those ten values.
+
+**The rule cannot affect a fidelity measurement, which is why adopting it is free.**
+Task 13 compares indices whenever both sides expose them, and indices are what the capture
+path actually records (`fb.bin`, `planes`), so widening only ever enters the RGB path —
+the PNG/JPEG output, the diff images, and human inspection. That is also the main reason
+to keep the indexed path first-class.
 
 ### `GET`/`PUT /api/v1/cpu/cycles` (task question 4)
 
@@ -456,8 +484,10 @@ refused. Use `--set cpu_cycles=N` (modern, verified: `"mode":"modern"`, `real_mo
 - One injection at a time: anything sent while a sequence is still draining fails with
   `{"error":"Replay already in progress"}`. `input/type` and `input/sequence` share that
   one queue, so a harness must pace its calls.
-- `POST /api/v1/script/load?name=X` with the Lua source as the raw request body
-  (`Content-Type: text/plain`) → `{"status":"loaded","name":"X"}`; then
+- `POST /api/v1/script/load?name=X` with the Lua source as the raw request body and
+  **`Content-Type: text/plain` or `application/lua`** — anything else, `application/json`
+  included, is refused with 415 `"unsupported Content-Type: …"`, and a missing header with
+  415 `"missing Content-Type header"` → `{"status":"loaded","name":"X"}`; then
   `/api/v1/script/start`, `/api/v1/script/status` (`state` idle|loaded|running|yielded|
   completed|error, plus `frame` and the script's `dosbox.output` table), `/script/stop`.
   `/script/load` is rate-limited to one call per 2,000 ms (429 + `Retry-After`).
@@ -498,6 +528,34 @@ emulator cannot provide), and driving the menu with the DOSBox shell's own `AUTO
 command from an `[autoexec]` section, which exists with `-w`/`-p` and key names such as
 `left enter` and would remove the input round-trips entirely.
 
+### What a frame index counts from
+
+**Frame 0 is the emulator's first rendered frame after it starts** — a boot-relative
+counter running at the DOS rate, exposed as `dosbox.frame()` in Lua and as the `frame`
+field of `GET /api/v1/script/status` (a resident script is the only way to read it; there
+is no frame-number field on `/video/frame` or `/status`).
+
+Measured on one API-driven run at 25000 cycles/ms, typing at 250 cps:
+
+```
+counter just before the SECOND 2 command       1657
+setup screen visible                            1677   (+20 frames, 0.29 s)
+first demo (graphics) frame                     1718   (+41 frames after the setup,
+                                                        0.26 s after Enter)
+```
+
+So the counter advances at about 70 Hz from process start and **frames 10, 60 and 120 do
+not reach the title screen**: from boot they are text-mode DOS-shell frames several
+hundred milliseconds in, before `SECOND.EXE` has even been typed. The title screen sits
+around frame 1700 on this path, and how many exactly depends on how long the harness
+spends mounting and typing — the number is a property of the run, not of the demo.
+
+Consequence for the capture tool: define the origin explicitly, count
+`--skip-boot-frames` and every captured index from the emulator's start, and record both
+in the manifest, so a frame index means the same thing in two runs. Nothing in the
+committed fixtures contradicts this: they are single frames identified by the screen they
+show, and `frame_info.json` records geometry, not an index.
+
 ### Fixtures
 
 `xtask/tests/fixtures/`, recorded from the live emulator, never hand-written:
@@ -509,6 +567,7 @@ command from an `[autoexec]` section, which exists with `-w`/`-p` and key names 
 | `frame.bin` | 256,015 | `GET /video/frame?format=raw` on the probe screen |
 | `fb.bin` | 64,000 | `GET /memory/0xA000/0/64000` for that same screen |
 | `dac.bin` | 768 | 256 RGB triples, 6-bit, read through `0x3C7`/`0x3C9` |
+| `dac_port.json` | 2,638 | the literal `PUT`/`GET /io/port` request and response pairs behind that read |
 | `modex_title_frame.bin` | 512,015 | the demo's 320×400 Mode X title screen |
 | `modex_title_planes.bin` | 128,000 | its four 32,000-byte planes, in plane order |
 | `modex_title_frame_info.json` | 413 | that screen's `video/frame/info` |
@@ -534,9 +593,11 @@ recorded bytes of the screen Phase 0 actually captures.
    mode sampled, so `/video/frame` never carries indices: `CapturedFrame::indexed` has to
    be filled from `/memory/...` (with the read-map-select dance in Mode X) and
    `CapturedFrame::palette` from the port API, not from the frame endpoint.
-4. **`geometry: [320, 200]` is not universal.** The title screen that Phase 0 captures at
-   frames 10/60/120 is 320×400, and not a doubled 200-line image. Geometry has to be
-   recorded per capture rather than assumed.
+4. **`geometry: [320, 200]` is not universal, and a frame index needs an origin.** The
+   title screen is 320×400 and is not a doubled 200-line image, so geometry has to be
+   recorded per capture. And because the emulator's frame counter starts at process start
+   (see "What a frame index counts from"), frames 10/60/120 counted from boot are DOS-shell
+   frames: the capture has to name a boot-relative origin and skip to the demo.
 5. **`arguments: ["2"]` alone does not reach the demo.** The soundcard menu must be
    answered with `KBD_left`, `KBD_enter` (the default choice fails on this emulator), so
    the manifest's arguments plus the key script are both part of the capture recipe.
