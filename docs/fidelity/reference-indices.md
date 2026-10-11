@@ -174,10 +174,17 @@ black. `indexed_matches_rgb` compares colours, so a collapsed palette leaves it 
 own arithmetic: a 256-colour screen draws a line every `scan_len * 8` bytes of the emulator's address
 space (`vga_draw.cpp:1785-1792`), and a guest plane byte at offset `o` sits at four-byte group `o`
 in that space (`vga_memory.cpp:129-135`), so one *plane* row is `scan_len * 2` bytes — 80 for mode
-13h's offset 40, 176 for ALKU's 88. When `stride × height` is more than one plane holds, the guest's
-display wraps and the read cannot say what it shows; that is ALKU (176 × 400 = 70,400 > 65,536), and
-its frames now come back RGB-only with a message that names the stride. **A missing `.idx` is honest;
-a sheared one is not.**
+13h's offset 40, 176 for ALKU's 88. The **mode** is what says which units apply, and it comes from
+the emulator's own name for the screen's colour depth (`webserver/video.cpp`'s
+`video_mode.color_depth`) rather than from the chain-4 bit alone: only 256-colour screens are one
+index a byte, so a 16-colour screen — whose pixels are packed as *bits* — is refused rather than
+assembled at a plausible-looking wrong stride.
+
+When `stride × height` is more than one plane holds, the guest's display wraps and the read cannot
+say what it shows; that is ALKU (176 × 400 = 70,400 > 65,536). Its frames come back RGB-only with a
+message that names the stride, and the message says **which** kind of thing happened — the refusal
+is its own error, not a decode failure, so a capture log distinguishes a deliberate permanent
+refusal from a broken read. **A missing `.idx` is honest; a sheared one is not.**
 
 **And the tables above already agree:** `check_a`'s four frames, BEGLOGO's 430 and 900, U2A's 7300
 and 7640 and PAM's 7900 were each re-read locally, and *the only row stride that reproduces their

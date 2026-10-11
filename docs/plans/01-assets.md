@@ -1423,11 +1423,20 @@ in `reference-indices.md` §1.6 and §§4–6, and all of which later blocks wil
   now reads the row stride from the CRTC** (`xtask/src/oracle/dosbox.rs`'s `row_stride_bytes`:
   `scan_len * 2` planar, `scan_len * 8` chain-4, from the emulator's own `vga_draw.cpp:1785-1792` and
   `vga_memory.cpp:129-135`) and **refuses to emit `.idx` for a screen whose rows need more than one
-  plane holds** — ALKU's 176 × 400 = 70,400 > 65,536, so its frames are RGB-only with a message
-  naming the stride. A stride the plane *can* hold is assembled at that stride, and the coherence
-  check verifies it whenever the palette does not collapse. What B4/B5 should take from this: trust
-  the tool's own stride arithmetic, and be suspicious of any `.idx` whose frame is a flat colour —
-  that is exactly the case the check cannot see.
+  plane holds, or whose pixels are not one index a byte** — ALKU's 176 × 400 = 70,400 > 65,536, so
+  its frames are RGB-only with a message naming the stride. A stride the plane *can* hold is
+  assembled at that stride, and the coherence check verifies it whenever the palette does not
+  collapse. What B4/B5 should take from this: trust the tool's own stride arithmetic, and be
+  suspicious of any `.idx` whose frame is a flat colour — that is exactly the case the check cannot
+  see.
+  **Two parts still to come are already known to have non-default strides**, and their rows should
+  expect a stride the packed layout would have got wrong:
+  - **PLZPART** writes CRTC 0x13 = `0x50` (`PLZPART/TWEAK.ASM:34`, `mov ax, 5013h`) — 80 units, a
+    **160-byte** row, where `width/4` is 80. B4 captures it; the same file's `0x3013h` at `:65` is a
+    third mode again.
+  - **GLENZ** writes `0x2e` (`GLENZ/VIDINIT.ASM:306`, `dw 02e13h ; offset 92` — the source's own
+    comment names the byte offset) — a **92-byte** row, where `width/4` is 80 and the old read gave
+    ≈80: a slow shear rather than an obvious one. GLENZ is in block 2.
 - **A moving screen's session-to-session difference can be an exact whole-pixel pan, which no ±1
   support frame can bridge.** ALKU's picture advances its window one pixel per 9-frame step, and two
   re-captures at the same index differed from the reference by 10.9750 % and 15.2797 % at offset 0

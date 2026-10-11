@@ -40,6 +40,11 @@ pub enum OracleError {
     /// taken of it, so the capture would not be of the frame that was asked
     /// for. The capture is refused rather than mislabelled.
     FrameMissed { index: u64, observed: u64 },
+    /// The screen is real and the frame was captured fine; the *indexed* part
+    /// of the read does not describe it, so the frame keeps its RGB and no
+    /// indices are written. Deliberate and permanent, and kept apart from
+    /// `Decode` so a log says which happened (fix round 2).
+    ScreenUnreadable(ScreenRefusal),
 }
 
 impl fmt::Display for OracleError {
@@ -66,6 +71,11 @@ impl fmt::Display for OracleError {
                 f,
                 "the emulator reached frame {observed} before frame {index} could be captured; \
                  the capture would not be of the requested frame"
+            ),
+            OracleError::ScreenUnreadable(refusal) => write!(
+                f,
+                "the screen is not one the indexed read can describe, so this frame keeps its \
+                 RGB: {refusal}"
             ),
         }
     }
@@ -112,6 +122,169 @@ impl CapturedFrame {
 /// see `docs/decisions.md` D14 and `crates/sr-engine/src/palette.rs`.
 pub fn widen(component: [u8; 3]) -> [u8; 3] {
     component.map(|c| ((((c & 0x3F) as u16) * 259 + 33) >> 6) as u8)
+}
+
+/// What kind of screen the indexed read is looking at.
+///
+/// The read's arithmetic only describes screens that put **one palette index a
+/// byte**: 256-colour planar (four planes, a byte of a plane per four pixels)
+/// and 256-colour chained (one byte a pixel, which is what mode 13h and its
+/// unchained "Mode X" tweak both mean). A 16-colour or 2-colour planar screen
+/// packs *bits*, not bytes, and nothing in the tree has needed it; naming the
+/// layout rather than asking "is chain-4 on?" is what keeps that from being
+/// assembled at a guessed stride (fix round 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenLayout {
+    /// 256 colours, four planes, one byte of a plane per four pixels.
+    Planar256,
+    /// 256 colours, one layout-wide image, one byte a pixel.
+    Chained256,
+    /// A screen this read does not model.
+    Unsupported,
+}
+
+impl ScreenLayout {
+    /// From the two things the emulator says about the mode: the colour depth
+    /// it names (`webserver/video.cpp`'s `video_mode.color_depth`, whose
+    /// strings are `misc/video.cpp:27-41`), and whether the sequencer has
+    /// chain-4 on. Anything that is not "256-colour" is unmodelled, and so is
+    /// a depth the API did not name at all.
+    pub fn of(color_depth: &str, chain4: bool) -> ScreenLayout {
+        if color_depth != "256-colour" {
+            return ScreenLayout::Unsupported;
+        }
+        if chain4 {
+            ScreenLayout::Chained256
+        } else {
+            ScreenLayout::Planar256
+        }
+    }
+}
+
+/// What the indexed read will do with a screen, worked out before any of it
+/// happens so that the decision can be tested without an emulator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadPlan {
+    /// Bytes one scanline advances the address counter, and the row length in
+    /// the plane the read walks.
+    pub stride: usize,
+    /// Bytes one row of *pixels* needs: one a pixel chained, one per four
+    /// pixels a plane.
+    pub row_bytes: usize,
+    /// Bytes to read from the start of each plane.
+    pub plane_bytes: usize,
+}
+
+/// Why a screen cannot be read as indices.
+///
+/// This is a deliberate, permanent refusal about a screen the read does not
+/// describe — not a decode failure — and it is its own type so a capture log
+/// can say so (fix round 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenRefusal {
+    /// The mode is not one this read models: not 256-colour, or a depth the
+    /// API did not name.
+    UnmodelledMode,
+    /// The screen's own offset register implies rows shorter than the pixels
+    /// it shows.
+    RowTooShort { stride: usize, row_bytes: usize },
+    /// The rows need more bytes than one VGA plane holds; the guest's display
+    /// wraps and this read cannot say what it shows.
+    PlaneTooSmall {
+        stride: usize,
+        height: u16,
+        plane_bytes: usize,
+    },
+}
+
+impl fmt::Display for ScreenRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScreenRefusal::UnmodelledMode => write!(
+                f,
+                "this screen is not one palette index a byte (not 256-colour, or a depth the \
+                 emulator did not name), and the indexed read describes only those"
+            ),
+            ScreenRefusal::RowTooShort { stride, row_bytes } => write!(
+                f,
+                "this screen's rows are {stride} bytes, shorter than the {row_bytes} bytes its \
+                 pixels need"
+            ),
+            ScreenRefusal::PlaneTooSmall {
+                stride,
+                height,
+                plane_bytes,
+            } => write!(
+                f,
+                "this screen's rows are {stride} bytes and it is {height} rows tall, so it needs \
+                 {plane_bytes} bytes a plane; one plane holds {PLANE_BYTES}, and the display wraps"
+            ),
+        }
+    }
+}
+
+/// One VGA plane's addressable bytes. A screen whose rows need more than this
+/// wraps under the guest and cannot be read as one plane.
+pub const PLANE_BYTES: usize = 64 * 1024;
+
+/// Bytes one scanline advances the address counter, from the CRTC's offset
+/// register (3d4h index 13h), or `None` when the read does not model the
+/// screen at all.
+///
+/// The register is a byte offset divided by a factor the mode sets, and the
+/// emulator's own arithmetic is the source: a 256-colour screen draws a line
+/// every `scan_len * 8` bytes of its address space (`vga_draw.cpp:1785-1792`,
+/// the `M_VGA` case, which is where DOSBox puts mode 13h *and* every
+/// unchained "Mode X" tweak of it), and one guest plane byte at offset `o`
+/// sits at four-byte group `o` in that space (`vga_memory.cpp:129-135`: an
+/// unchained read is `((uint32_t *)linear)[o]` selected by the read map). So
+/// one *plane* row is `scan_len * 2` bytes and one chained row is
+/// `scan_len * 8`. Only the low byte of the port is the offset.
+///
+/// Measured against the tree before it was written: 40 × 2 = 80 is what every
+/// part whose `.idx` files reproduce their RGB uses, and 88 × 2 = 176 is
+/// ALKU's (`ALKU/TWEAK.ASM:46`, `ALKU/MAIN.C:26`).
+pub fn row_stride_bytes(offset_register: u16, layout: ScreenLayout) -> Option<usize> {
+    let scan_len = (offset_register & 0xFF) as usize;
+    match layout {
+        ScreenLayout::Planar256 => Some(scan_len * 2),
+        ScreenLayout::Chained256 => Some(scan_len * 8),
+        ScreenLayout::Unsupported => None,
+    }
+}
+
+/// Work out what to read for a screen, or why it cannot be read — the whole
+/// decision, with no emulator in it (fix round 2's reason for splitting it out
+/// of the oracle: a test that calls the real thing is the only kind that
+/// notices the arithmetic changing).
+pub fn plan_indexed_read(
+    width: u16,
+    height: u16,
+    offset_register: u16,
+    layout: ScreenLayout,
+) -> Result<ReadPlan, ScreenRefusal> {
+    let stride = row_stride_bytes(offset_register, layout).ok_or(ScreenRefusal::UnmodelledMode)?;
+    let row_bytes = match layout {
+        ScreenLayout::Planar256 => width as usize / 4,
+        ScreenLayout::Chained256 => width as usize,
+        ScreenLayout::Unsupported => return Err(ScreenRefusal::UnmodelledMode),
+    };
+    if stride < row_bytes {
+        return Err(ScreenRefusal::RowTooShort { stride, row_bytes });
+    }
+    let plane_bytes = stride * height as usize;
+    if plane_bytes > PLANE_BYTES {
+        return Err(ScreenRefusal::PlaneTooSmall {
+            stride,
+            height,
+            plane_bytes,
+        });
+    }
+    Ok(ReadPlan {
+        stride,
+        row_bytes,
+        plane_bytes,
+    })
 }
 
 /// The planar (Mode X) layout: `idx(x, y) = planes[x % 4][y * stride + x / 4]`,
@@ -413,17 +586,140 @@ mod tests {
         ));
     }
 
-    /// The stride is the emulator's own arithmetic: index 13h divided by the
-    /// mode's address unit. Checked against the two screens the tree
-    /// measures — the packed one every part but ALKU uses, and ALKU's.
+    /// The stride is the emulator's own arithmetic: index 13h in the mode's
+    /// units. This calls the production function — the point of fix round 2
+    /// was that a test restating the formula cannot notice it changing.
     #[test]
     fn the_row_stride_is_the_crtc_offset_in_the_modes_units() {
-        // `row_stride_bytes` is port I/O, so the arithmetic is checked here
-        // as the expression it is, with the two measured offsets.
-        let planar = |scan_len: usize| scan_len * 2;
-        let chain4 = |scan_len: usize| scan_len * 8;
-        assert_eq!(planar(0x28), 320 / 4, "mode 13h's offset is a packed row");
-        assert_eq!(planar(0x58), 176, "ALKU's offset is a 176-byte row");
-        assert_eq!(chain4(0x28), 320, "chain-4 draws a byte a pixel");
+        use ScreenLayout::{Chained256, Planar256, Unsupported};
+
+        // The packed row every part but ALKU and PLZPART uses: mode 13h
+        // leaves index 13h at 0x28, 40 × 2 = 80 = width / 4 for a 320-wide
+        // screen.
+        assert_eq!(row_stride_bytes(0x28, Planar256), Some(320 / 4));
+        // The two screens this phase has measured in a part's own source.
+        assert_eq!(row_stride_bytes(0x58, Planar256), Some(176), "ALKU");
+        assert_eq!(row_stride_bytes(0x50, Planar256), Some(160), "PLZPART");
+        assert_eq!(row_stride_bytes(0x2E, Planar256), Some(92), "GLENZ");
+        // Chain-4 draws a byte a pixel, so its row is eight bytes an offset.
+        assert_eq!(row_stride_bytes(0x28, Chained256), Some(320));
+        assert_eq!(row_stride_bytes(0x00, Chained256), Some(0));
+        // Only the low byte of the port is the offset: the high byte of a
+        // 16-bit port read is not part of the register.
+        assert_eq!(row_stride_bytes(0xFF58, Planar256), Some(176));
+        assert_eq!(row_stride_bytes(0x0158, Planar256), Some(176));
+        assert_eq!(row_stride_bytes(0xFF00, Chained256), Some(0));
+        // A screen the read does not model has no stride at all.
+        assert_eq!(row_stride_bytes(0x28, Unsupported), None);
+    }
+
+    /// Which screen is which comes from the emulator's colour depth, not from
+    /// chain-4 alone: 16-colour planar is the case that would otherwise be
+    /// assembled at a plausible-looking wrong stride.
+    #[test]
+    fn the_layout_follows_the_modes_colour_depth() {
+        assert_eq!(
+            ScreenLayout::of("256-colour", false),
+            ScreenLayout::Planar256
+        );
+        assert_eq!(
+            ScreenLayout::of("256-colour", true),
+            ScreenLayout::Chained256
+        );
+        for depth in [
+            "16-colour",
+            "4-colour",
+            "2-colour",
+            "monochrome",
+            "composite",
+            "15-bit high colour",
+            "16-bit high colour",
+            "24-bit true colour",
+            "",
+        ] {
+            assert_eq!(
+                ScreenLayout::of(depth, false),
+                ScreenLayout::Unsupported,
+                "{depth} is not a screen this read can index"
+            );
+            assert_eq!(ScreenLayout::of(depth, true), ScreenLayout::Unsupported);
+        }
+    }
+
+    /// Every reason the read can refuse a screen, and the three screens the
+    /// tree has: the one it reads, ALKU's, and a screen that is not indexed
+    /// content at all.
+    #[test]
+    fn a_screen_the_read_cannot_describe_is_refused_with_its_reason() {
+        // The packed 320×400 screen every `.idx` in the tree came from.
+        assert_eq!(
+            plan_indexed_read(320, 400, 0x28, ScreenLayout::Planar256),
+            Ok(ReadPlan {
+                stride: 80,
+                row_bytes: 80,
+                plane_bytes: 32_000,
+            })
+        );
+        // ALKU's: the stride is right and the plane cannot hold the screen.
+        assert_eq!(
+            plan_indexed_read(320, 400, 0x58, ScreenLayout::Planar256),
+            Err(ScreenRefusal::PlaneTooSmall {
+                stride: 176,
+                height: 400,
+                plane_bytes: 70_400,
+            })
+        );
+        // GLENZ's 320×200 at 92 bytes a row fits a plane, and is why block 2
+        // is the first place this path runs for real.
+        assert_eq!(
+            plan_indexed_read(320, 200, 0x2E, ScreenLayout::Planar256),
+            Ok(ReadPlan {
+                stride: 92,
+                row_bytes: 80,
+                plane_bytes: 18_400,
+            })
+        );
+        // A row narrower than the pixels it would have to show.
+        assert_eq!(
+            plan_indexed_read(320, 400, 0x10, ScreenLayout::Planar256),
+            Err(ScreenRefusal::RowTooShort {
+                stride: 32,
+                row_bytes: 80,
+            })
+        );
+        // A 16-colour screen is refused before any stride is considered.
+        assert_eq!(
+            plan_indexed_read(320, 400, 0x28, ScreenLayout::Unsupported),
+            Err(ScreenRefusal::UnmodelledMode)
+        );
+        // A chained screen wider than its own rows is refused too, where the
+        // old read would have gather past the end of its buffer.
+        assert_eq!(
+            plan_indexed_read(320, 200, 0x20, ScreenLayout::Chained256),
+            Err(ScreenRefusal::RowTooShort {
+                stride: 256,
+                row_bytes: 320,
+            })
+        );
+        // A chained screen with rows wider than the screen is read as a
+        // gather — when it still fits one image. A 320×200 screen cannot: any
+        // row wider than 320 bytes overflows the 64 KiB a chain-4 image has,
+        // so the read refuses rather than gathering.
+        assert_eq!(
+            plan_indexed_read(320, 200, 0x2E, ScreenLayout::Chained256),
+            Err(ScreenRefusal::PlaneTooSmall {
+                stride: 368,
+                height: 200,
+                plane_bytes: 73_600,
+            })
+        );
+        assert_eq!(
+            plan_indexed_read(320, 150, 0x2E, ScreenLayout::Chained256),
+            Ok(ReadPlan {
+                stride: 368,
+                row_bytes: 320,
+                plane_bytes: 55_200,
+            })
+        );
     }
 }
