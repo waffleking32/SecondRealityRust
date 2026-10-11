@@ -422,7 +422,7 @@ plane reads *and* the frame read to happen inside one still moment.
 
 DOSBox widens six bits to eight with **round-to-nearest**,
 `rgb6_to_8(c) = (c * 259 + 33) >> 6` — identical to `round(255c/63)`
-(`src/utils/rgb.h:31-36`, applied in `src/hardware/video/vga_dac.cpp:158-160`).
+(`src/utils/rgb.h:22-28`, applied in `src/hardware/video/vga_dac.cpp:158-160`).
 
 Task 2 chose `dac_expand(v) = (v << 2) | (v >> 4)`. The two agree on 54 of the 64 values
 and differ on ten: **11–15** (Task 2 is one too low) and **48–52** (Task 2 is one too
