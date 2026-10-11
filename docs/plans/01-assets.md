@@ -1261,8 +1261,21 @@ recipe with their own `--arg` and indices.
 
 ```bash
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames <i,j,k> --out reference/parts/beglogo --sheet out/beglogo.png
+    --frames <i-1,i,j,k,k+1> --out reference/parts/beglogo --sheet out/beglogo.png
 ```
+
+**A capture holds one support frame beyond each end of its keyframe range**, and that is not
+optional — B1b established it. The oracle's alignment is ±1 frame between sessions, `compare` searches
+for it, and a search needs a neighbour to find: a capture holding only its keyframes has exactly one
+candidate per index, so the alignment shows up as a real 9–15% difference instead of being absorbed.
+One frame at each end is enough and they are **support, not keyframes**: they go in the manifest and
+not in the index table.
+
+Two of B1b's other numbers decide how much this costs. A run of requested indices closer together than
+25 frames is now grabbed *before* any of them is read, so the neighbours are capturable at all — the
+DAC read costs ~300 ms (1024 requests, 99% of a chain-4 frame) and used to sit between grabs, which is
+why consecutive indices were previously refused. And the read itself is untouched: same bytes, same
+coherence rule.
 
 - [ ] **Step 4: Re-capture and prove the reference is reproducible**
 
@@ -1271,10 +1284,24 @@ Run the same command into a second directory and `cargo xtask compare` the two. 
 reproduced cannot be a reference. Record the exit code and the percentage in the index table.
 
 This is an **across-session** comparison — two captures are two boots — so it is exactly where B1's
-measured ±1 frame alignment bites. With B1b's search, exit 0 means every frame matched within one
-frame, and the report says which offset each needed. Record that offset in the row: on a held screen
-it should be 0, and a *constant* non-zero offset across a moving capture is a finding about the
-oracle rather than a pass (D18).
+measured ±1 frame alignment bites, and the support frames above are what let the search find it.
+Record the exit code, the offset and the percentage in the row.
+
+**What to expect, measured (B1b/D19), because "exit 0" alone is not the whole story on a moving
+screen:**
+
+- **A held screen re-captures byte-identical, exit 0, offset 0.** That is the strong claim and it is
+  the one §8.2's keyframes were always going to make. Prefer held keyframes wherever a part has them.
+- **A moving screen lands in one of two alignment groups, and which one is a coin flip between
+  boots.** Two captures in the *same* group are byte-identical (one B1b re-capture differed in 47 px
+  of 64,000, in a session's first frame). Two in *different* groups align at offset ±1 and still carry
+  a **residue of 137–383 px (0.2–0.6%)** — the one-frame shift is not perfectly uniform across the
+  picture, so alignment recovers most of the difference but not all of it. `compare` exits 1 on that,
+  correctly, because the pixels really do differ.
+- So: **a moving row that exits 1 gets re-run once.** Same group and it is byte-identical; different
+  group again and the row records the offset and the residue, which is a statement about the oracle
+  rather than a failure of the reference. **No pixel tolerance is added to `compare` for any of this**
+  — tolerance is what the ±1 ruling was chosen *instead of*, and the port comparison stays exact.
 
 - [ ] **Step 5: Write the index table** with BEGLOGO's row filled in and the method section above it.
 
@@ -1406,4 +1433,4 @@ Exit criteria from spec §10, with the evidence each task leaves:
 | Every needed asset decodes | `cargo xtask assets verify --decode` exit 0 |
 | …and matches the source art | cross-format tests (A2/A3) plus the contact sheets and the recorded look (A8) |
 | Provenance file complete | `cargo xtask assets verify --tree` exit 0 against `assets/PROVENANCE.md` |
-| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each with a re-capture comparison at exit 0 **within B1b's ±1 frame alignment** (a held screen at offset 0; a moving one at whatever offset the oracle's ambiguity requires, recorded per row) |
+| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each holding one support frame beyond each end of its keyframe range and carrying a re-capture comparison. **A held screen shows exit 0, offset 0, byte-identical; a moving one shows the measured offset and residue** (B1b/D19: same alignment group → identical, different group → offset ±1 with 0.2–0.6 % residue). This criterion is stated per screen kind because the oracle's own reproducibility is per screen kind, and restating it is what B1b measured rather than assumed |
