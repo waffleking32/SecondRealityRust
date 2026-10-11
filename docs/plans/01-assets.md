@@ -1210,6 +1210,16 @@ D15 says a capture refuses a frame list that changes geometry. Before relying on
 `xtask/tests/` with a mixed-geometry frame list and the expected refusal. It is load-bearing for
 every capture in this part and for Phase 2's BEGLOGO comparison.
 
+**B2 found it pinned, and no test was added.** `xtask/src/reference.rs:1339`,
+`reference::tests::a_screen_that_changes_geometry_mid_capture_is_refused`: a two-index list whose
+second frame is the recorded 320×400 Mode X fixture against a 320×200 first, asserting
+`GeometryChanged { index: 5200, expected: (320, 200), found: (320, 400) }`. It runs in `cargo test
+-p xtask`. It lives in the module's unit tests rather than `xtask/tests/` because the refusal is
+reached inside `capture()` after an oracle exists — an integration test would need a running
+emulator, and the fake oracle is what makes the case reachable without one. The refusal was also
+observed against the real emulator in this task — the sweep's refusal at frame 1170, below — so
+both the code path and the case that matters are covered.
+
 - [ ] **Step 2: Find BEGLOGO's frames by sweeping, not by guessing**
 
 Capture a coarse sweep — a dozen or so indices spanning a few seconds from a `SECOND 2` boot — with
@@ -1230,6 +1240,15 @@ pins the mixed-geometry refusal, and a sweep from BEGLOGO into GLENZ crosses 320
 obstacle to sweep around; it is how the boundary is found: the change lies between the last index the
 sweep captured and the one it refused. Sweep ascending, read the refusal, then narrow. Reference
 captures are then one geometry each into `reference/parts/` — which is exactly what step 3 does.
+
+**Narrow it with sparse single-index probes, and expect the window's middle to refuse for a second
+reason.** The changeover stalls the renderer, so an index in the last few frames before it is
+refused as a *miss* rather than as a geometry change: B2 measured `the emulator reached frame 1156
+before frame 1155 could be captured`, and 1158 twice, "reaching 1159". A dense run spends its takes
+in that window, and one miss refuses the whole capture, so a dense list buys nothing and costs a
+run — probe one index at a time from each side. A refused capture also writes **no manifest**: the
+frames taken before the refusal are on disk, but nothing in that directory is a capture, so the
+indices come from the refusal's message and from the narrower runs.
 
 - [ ] **Step 2b: Measure whether the pinned cycles change what an index shows**
 
@@ -1253,6 +1272,15 @@ number goes in the table, because every later phase depends on the answer.
 
 Three to four per part, per §8.2, at structurally significant moments — for BEGLOGO: early fade,
 mid fade, held logo. One geometry per capture directory (D15).
+
+**What BEGLOGO turned out to be, from the sheet: white, fade, hold.** The part opens on a flat
+white screen (404 onwards), fades a held picture in over ~129 frames (the first changing frame is
+in 441–449 and the last in 571–579, ~129 steps at one per frame), holds it from 580 to ~1110, and
+then leaves through a collapsing transition into GLENZ's mode change at ~1155–1160. B2's four
+keyframes are the white screen (430), the early fade (470), the fade near its end (560) and the
+held logo (900) — §3.1 of `reference-indices.md` has the measurements. The fade occupies 128
+frames, which is less than two supported keyframes need (§1.3 of that file), so the fade gets one
+keyframe in its first quarter and one near its end rather than two in its middle.
 
 **`--boot autoexec` is required from here on**, and so is the silent emulator the oracle now sets
 itself; D17 records why both halves are needed and what happens without them. The flag is the
@@ -1287,6 +1315,24 @@ cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter
 Support frames are support: they go in the manifest and not in the index table, and the directory
 holding them is scratch (`out/`), not `reference/`.
 
+**Corrected by B2's measurement: the supports go around every keyframe, and not only around the two
+ends.** The rule above is sound only when the keyframes are contiguous, which is the case B1b
+measured it on. A session's animation phase is uniform across a whole capture (D17 measured it
+across five indices spread 200 apart, and nothing since has mixed one), so a partner one step out of
+phase has to answer *every* moving keyframe from its neighbour: an interior keyframe answered from
+its own index pairs at offset 0 and reports the one-step difference rather than aligning. The
+partner's list is therefore `K-1, K, K+1` around each keyframe that changes from frame to frame.
+Two consequences, both measured in B2:
+
+- **A keyframe whose ±1 neighbours are the same picture needs no support at all**, and is better off
+  without one: a held screen's candidates are the same bytes, so the search finds offset 0 whatever
+  the partner's phase is. BEGLOGO's white (429/430/431 byte-identical) and held-logo (580–1110
+  byte-identical) keyframes carry none; only the two fade keyframes do. Check it per keyframe —
+  hash the sweep's neighbours — rather than assuming a screen is held.
+- **Consecutive keyframes must then be far enough apart for the batch's own reads**: three reads
+  cost 57 frames (measured), so two supported keyframes closer together than ~60 frames cannot both
+  be captured at all. BEGLOGO's are 90 apart, which is where the margin stops being thin.
+
 **Leave room after a support run.** B1b's other numbers decide the rest. A run of requested indices
 closer together than 25 frames is grabbed *before* any of them is read, because the DAC read costs
 ~300 ms (1024 requests, 99% of a chain-4 frame) and used to sit between grabs — which is why
@@ -1295,6 +1341,14 @@ consecutive indices were previously refused. The price is that the run's reads a
 immediately before a distant keyframe is refused (`--frames 2448..2452,2540` fails; 2540 arrives during
 the batch's reads). Keyframes hundreds of frames apart are naturally fine — a trio defers ~69 frames —
 but do not build a list where a distant index follows a batched run by less than ~25·*k* frames.
+
+**B2 measured the deferral itself, and the ceiling is the safe end of it.** Three reads cost 57
+rendered frames (`--frames 429,430,431,479,…` captures the three and refuses the fourth: "the emulator
+reached frame 488 before frame 479 could be captured") — ~19 frames per read, not 23. So `~20·*k*` is
+the number to leave, and a supported keyframe needs that much clear space behind the keyframe before
+it. The same batch is also why a frame's *palette* is the palette at read time rather than at grab
+time: a batch spanning a palette change hands D15's coherence check a palette from the end of the
+batch and the frames come back RGB-only.
 
 - [ ] **Step 4: Re-capture and prove the reference is reproducible**
 
