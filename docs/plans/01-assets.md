@@ -1416,15 +1416,18 @@ git commit -m "Capture references for <parts>"
 **Three things block 1 (ALKU, U2A, PAM) measured that this task's steps did not anticipate, all now
 in `reference-indices.md` §1.6 and §§4–6, and all of which later blocks will meet:**
 
-- **A screen with a wider row stride than the packed Mode X one comes back RGB-only, however still
-  it is.** The indexed read assembles planes at `width/4` bytes a row; ALKU's screen is 176 bytes a
-  row (`ALKU/TWEAK.ASM:40-46`, `ALKU/MAIN.C:26`), so every frame of ALKU with a picture on it fails
-  the coherence check and is written RGB-only, while its black opening frames keep their indices
-  because every DAC entry they use is black. This is not motion and must not be recorded as motion.
-  **PAM was expected to behave the same and does not** — its copy of `tw_opengraph` never writes CRTC
-  0x13, so its rows stay 80 bytes and its held frame keeps its indices. Read what a part's own mode
-  set writes to 0x13 before deciding; PLZPART and the other panning parts in B4 are the likely
-  candidates for the wide-stride case.
+- **A screen's rows are not always `width/4` bytes, and the read used to assume they were.**
+  ALKU's screen is 176 bytes a row (`ALKU/TWEAK.ASM:46` writes CRTC 0x13 = `0x5813`,
+  `ALKU/MAIN.C:26`) and the first pass assembled it at 80 — a sheared `.idx` in the reference tree
+  that passed the coherence check only because every index in that frame widens to black. **The tool
+  now reads the row stride from the CRTC** (`xtask/src/oracle/dosbox.rs`'s `row_stride_bytes`:
+  `scan_len * 2` planar, `scan_len * 8` chain-4, from the emulator's own `vga_draw.cpp:1785-1792` and
+  `vga_memory.cpp:129-135`) and **refuses to emit `.idx` for a screen whose rows need more than one
+  plane holds** — ALKU's 176 × 400 = 70,400 > 65,536, so its frames are RGB-only with a message
+  naming the stride. A stride the plane *can* hold is assembled at that stride, and the coherence
+  check verifies it whenever the palette does not collapse. What B4/B5 should take from this: trust
+  the tool's own stride arithmetic, and be suspicious of any `.idx` whose frame is a flat colour —
+  that is exactly the case the check cannot see.
 - **A moving screen's session-to-session difference can be an exact whole-pixel pan, which no ±1
   support frame can bridge.** ALKU's picture advances its window one pixel per 9-frame step, and two
   re-captures at the same index differed from the reference by 10.9750 % and 15.2797 % at offset 0

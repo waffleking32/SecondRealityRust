@@ -158,30 +158,35 @@ the cycles. `reference/check_a` (30000) can therefore be compared against any Pa
 
 ### 1.6 Three things blocks 1 and 3 of B3 measured that the rules above do not cover
 
-**A frame can come back RGB-only because of how the oracle reads a screen, not because the screen
-moved.** The coherence check is a comparison of the grabbed RGB against the RGB re-derived from the
-planes and the palette read a moment later (D15), and it fails whenever the two disagree — which the
-rules above read as "the screen moved". There is a second way to disagree, and ALKU takes it: the
-read assembles the planes at **`width/4` bytes a row** (`xtask/src/oracle/dosbox.rs:620-629`), which
-is the packed Mode X layout `reference/parts/beglogo`'s screens use, but ALKU's screen is 176 bytes
-a row — `ALKU/TWEAK.ASM:40-46` sets CRTC 0x17 = `0xe3` (word units) and 0x13 = `0x58` (88 units,
-176 bytes), and `ALKU/MAIN.C:26` strides its own rows by 176 (`char (* far vvmem)[176]`, used at
-`MAIN.C:165-166`, `:367-368`). With the wrong stride the assembled indices are not the screen's, so
-**every ALKU frame with a picture on it comes back RGB-only** — in each of the ten captures that
-took one, whatever the batch shape — while the frames whose pixels are all a black DAC entry pass.
-That the cause is the read and not a moved screen is measured: the same index is RGB-only in every
-session, and its RGB bytes are identical to the reference's (1719 and 2719 below). The consequence
-worth carrying is that `compare` runs this part's rows through the **RGB path**, where the 6→8-bit
-widening `(c*259+33)>>6` is load-bearing (`docs/decisions.md:422-423`).
+**A screen's rows are not always `width/4` bytes long, and the first pass of this phase shipped a
+sheared plane because it assumed they were.** The read used to assemble the planes at `width/4` rows
+unconditionally. That is right for the packed Mode X screen `reference/parts/beglogo`'s parts use and
+wrong for ALKU, whose rows are 176 bytes: `ALKU/TWEAK.ASM:46` writes CRTC 0x13 = `0x5813` (88 units)
+and `ALKU/MAIN.C:26` strides its own rows by 176 (`char (* far vvmem)[176]`, used at `:165-166`,
+`:367-368`). `reference/parts/alku/frame_000900.idx` was the result — a plane whose picture began at
+row 110 where `ALKU/MAIN.C:165-166` blits it at row 50, 34.8 % of covered pixels wrong — and it
+**passed the coherence check**, because that frame's every pixel uses a palette entry that widens to
+black. `indexed_matches_rgb` compares colours, so a collapsed palette leaves it nothing to see:
+**that check cannot catch a stride error on a screen whose indices all map to one colour.**
 
-**And the first pass of this note predicted PAM would do the same, which the measurement refuted.**
-PAM's `tw_opengraph` (`PAM/TWEAK.ASM:18-41`) is the same routine as ALKU's, but it stops before the
-CRTC writes that make ALKU's screen wide: it sets mode 13h, chain-4 off, 0x14 = 0 and 0x17 = `0xe3`,
-and **never writes 0x13** — where `ALKU/TWEAK.ASM:46` writes `0x5813`. So PAM's rows stay 80 bytes,
-which is exactly `width/4`, and its screen *does* come back with indices: `reference/parts/pam/
-frame_007900.idx` exists (§6.4). The wide-stride case is ALKU's alone among these three parts, and
-the way to tell which a part is before trusting a capture's `.idx` files is to read what its own
-mode set writes to CRTC 0x13 — not to assume that two copies of `tw_opengraph` behave alike.
+**The tool now reads the stride, and refuses a screen it cannot describe** (fix round 1,
+`xtask/src/oracle/dosbox.rs`'s `row_stride_bytes` and `capture_indexed`). The stride is the CRTC's
+own arithmetic: a 256-colour screen draws a line every `scan_len * 8` bytes of the emulator's address
+space (`vga_draw.cpp:1785-1792`), and a guest plane byte at offset `o` sits at four-byte group `o`
+in that space (`vga_memory.cpp:129-135`), so one *plane* row is `scan_len * 2` bytes — 80 for mode
+13h's offset 40, 176 for ALKU's 88. When `stride × height` is more than one plane holds, the guest's
+display wraps and the read cannot say what it shows; that is ALKU (176 × 400 = 70,400 > 65,536), and
+its frames now come back RGB-only with a message that names the stride. **A missing `.idx` is honest;
+a sheared one is not.**
+
+**And the tables above already agree:** `check_a`'s four frames, BEGLOGO's 430 and 900, U2A's 7300
+and 7640 and PAM's 7900 were each re-read locally, and *the only row stride that reproduces their
+RGB* is 80 in the planar model (and 320 in the linear one — the same screen). ALKU's 900 fits at
+several because its palette collapses, which is the check's blind spot and not a reading. PAM's
+`tw_opengraph` (`PAM/TWEAK.ASM:18-41`) is the same routine as ALKU's but stops before the CRTC
+writes: it sets mode 13h, chain-4 off, 0x14 = 0 and 0x17 = `0xe3`, and never writes 0x13, so its
+rows stay 80 and its held frame keeps its indices (§6.4). Reading a part's own mode set is still the
+cheap way to know which it is — the difference is that the tool no longer needs to be told.
 
 **A moving screen's session-to-session difference can be an exact integer pan, which no ±1 frame
 support can bridge.** D17's moving case is a screen that is redrawn continuously: a session phase
@@ -201,6 +206,12 @@ expect them wherever a part pans:
 
 Held screens are untouched by either: 900, 1719 and 2719 below are byte-identical in every session
 that took them.
+
+**Consequence for the rows: a part whose `.idx` the tool refuses is compared in `mode: rgb`.** ALKU
+is one — all four of its keyframes go through the RGB path, where the 6→8-bit widening
+`(c*259+33)>>6` is load-bearing (`docs/decisions.md:422-423`) — and PAM's three animated frames are
+RGB-only for D15's ordinary reason. `compare`'s report says which mode it used; nothing else needs
+to be inferred from the file names.
 
 **A part boundary is not always a geometry change, and §1.2 finds only mode changes.** U2A and PAM
 are both 320×200 (the second part inherits the first's screen and its own `tw_opengraph` leaves it
@@ -226,7 +237,7 @@ table.
 | part | boot | geometry | keyframes | re-capture | re-capture result |
 |---|---|---|---|---|---|
 | BEGLOGO | `SECOND 2` | 320×400 Mode X | 430, 470, 560, 900 | `out/beglogo-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` |
-| ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1 — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
+| ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride; RGB only | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1, `mode: rgb` — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
 | U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
 
@@ -495,7 +506,7 @@ one batch, so every frame in it is the frame that was asked for:
 
 | index | 1500–1540 | 1560 | 1580 | 1600 | 1620–1900 | 1920 | 1940 | 1960 | 1980–2000 |
 |---|---|---|---|---|---|---|---|---|---|
-| mean sample value | 0 | 1.18 | 2.56 | 3.97 | 4.30 | 3.39 | 2.01 | 0.61 | 0 |
+| whole-frame mean byte | 0 | 0.68 | 1.48 | 2.30 | 2.49 | 1.96 | 1.16 | 0.35 | 0 |
 | `sha256` | `fec9afb5…` ×3 | `ea09bd61…` | `5ca8d435…` | `e56da741…` | `6a27ec50…` ×15 | `55bc5ebe…` | `0bb265c7…` | `3d577743…` | `fec9afb5…` ×2 |
 
 That is the source's shape exactly: black until the first fade step lands in (1540, 1560], 64 steps
@@ -510,18 +521,26 @@ took 2419/2420/2421 and 2719/2720/2721 and got one `sha256` per triple, `6a2de86
 and the black screen is one `sha256` (`fec9afb5…`) at 420, 620, 820, 1020, 1220, 1420 and 2020
 (sweep 1), 1500, 1520, 1540, 1980 and 2000 (the card run), 3020 (sweep 2), 412 and 416
 (`out/b3-alku-start`) and 899–901 (the probe) — **eighteen indices in five captures**, plus 900 in
-the reference and both partners. The frame is black without being one index: the reference's 900
-uses sixteen distinct indices (0–11, 19, 20, 21 and 47) whose palette entries are all `(0,0,0)`,
-which is also why the coherence check keeps its indices (§1.6).
+the reference and both partners. The screen is flat black in the RGB — one colour, `(0,0,0)`, on
+every pixel — and what the plane holds underneath that black is not something this oracle can read
+(§1.6): the sheared index plane the first pass committed carried sixteen distinct indices under it,
+all of whose palette entries widen to black, and that is how it passed a check it should not have.
 
 ### 4.3 The keyframes, and why these
 
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
-| 900 | the **black screen** — every pixel is `(0,0,0)`, from sixteen distinct indices whose DAC entries are all black. The part opens on it (the first graphics frame is 404, D17; the earliest index this boot can grab is 412, and 404–410 are refused as misses) and holds it until the first card's fade starts in (1540, 1560]. About 16 seconds of the part. | `.rgb` + `.idx` (16 palette entries) | rgb `fec9afb5…`, idx `1b2bb3e3…` |
+| 900 | the **black screen** — every pixel is `(0,0,0)`. The part opens on it (the first graphics frame is 404, D17) and holds it until the first card's fade starts in (1540, 1560]. About 16 seconds of the part. | `.rgb` only | rgb `fec9afb5…` |
 | 1719 | **card 1** — `A`, `Future Crew`, `Production` in the FONA font, mid-hold (fade in ended ~1615, fade out starts ~1905). | `.rgb` only | rgb `6a27ec50…` |
 | 2719 | **card 3** — `in` over the Dolby Surround logo glyphs, mid-hold (`prtc`, `MAIN.C:74-76`). | `.rgb` only | rgb `5e3c3884…` |
 | 5859 | the **scrolled picture**, bare of text, mid-step: it is the same bytes at 5859, 5860 and 5861 (measured, `out/b3-alku-probe`), so its ±1 neighbours are the same picture *in this session*. | `.rgb` only | rgb `be6f6c32…` |
+
+**Nothing is keyframed in the first frames after the demo's first graphics frame**, and that is a
+race rather than a line: `out/b3-alku-start`'s `--frames 404,405,406,410` was refused as a *miss*
+(`the emulator reached frame 411 before frame 404 could be captured`), while the same run's
+`--frames 412,416` captured both — and a later session's `411,412,416` took all three. The grab loop
+is trying to land on indices within a frame or two of a mode change, so which of 404–412 it can catch
+varies; 420 is the first index this task took *and* relied on (§4.2), and it is the black screen.
 
 The three held keyframes are the part's three distinct held screens (black, a text card, the logo
 card); card 2 at 2419 is deliberately *not* a keyframe — it is the same code path and the same kind
@@ -540,20 +559,25 @@ saving: 899/900/901, 1719/1720/1721 and 2719/2720/2721 are each byte-identical w
 only ever answer at offset 0 (§1.3). 5859's support window was captured anyway, because its ±1
 identity is a property of where the step boundary happens to fall, not of the screen.
 
-Full hashes of the four files in `reference/parts/alku/`:
+Full hashes of the five files in `reference/parts/alku/` — all `.rgb`, no `.idx`, because the fix
+round 1 tool refuses this screen's stride (§1.6):
 
 | index | file | `sha256` |
 |---|---|---|
 | 900 | `frame_000900.rgb` | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` |
-| 900 | `frame_000900.idx` | `1b2bb3e331529400a02a4e60b5b74dfd2857634285364fbf520c89bfc622ad0f` |
 | 1719 | `frame_001719.rgb` | `6a27ec502abe606d39c25af842594335fb71d30e14a1f245e9492f3b4148cebe` |
 | 2719 | `frame_002719.rgb` | `5e3c38846788c1cc4d8d23c65dfdb620779d9691b598e97ee2d79a3f4f0f0bd3` |
 | 5859 | `frame_005859.rgb` | `be6f6c32e8a328a04a93c5e54129830f58c187c5deb4dbb399e1819f261240d2` |
 
+The four RGBs above are byte-identical to the ones the first pass captured — the re-capture changed
+nothing but the `.idx` that should never have been there, and this session landed in the reference
+session's alignment group (§4.4).
+
 ### 4.4 The re-capture: three held frames identical, the picture a whole pan away
 
 ```bash
-# the reference: keyframes only
+# the reference: keyframes only (re-captured once, after the stride fix of §1.6 removed a sheared
+# index plane; all four RGBs came back byte-identical)
 cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 900,1719,2719,5859 --out reference/parts/alku --sheet out/alku.png
 
@@ -573,7 +597,7 @@ frame 900:  0.0000% differing (0/128000 px), max delta 0
 frame 1719: 0.0000% differing (0/128000 px), max delta 0
 frame 2719: 0.0000% differing (0/128000 px), max delta 0
 frame 5859: 10.9750% differing (14048/128000 px), max delta 255
-verdict: different, mode: mixed, offsets {"0": 4}
+verdict: different, mode: rgb, offsets {"0": 4}
 exit: 1
 ```
 
@@ -584,9 +608,13 @@ frame 900:  0.0000% differing (0/128000 px), max delta 0
 frame 1719: 0.0000% differing (0/128000 px), max delta 0
 frame 2719: 0.0000% differing (0/128000 px), max delta 0
 frame 5859: 15.2797% differing (19558/128000 px), max delta 255
-verdict: different, mode: mixed, offsets {"0": 4}
+verdict: different, mode: rgb, offsets {"0": 4}
 exit: 1
 ```
+
+Both are `mode: rgb`: neither side of an ALKU comparison holds a `.idx` any more (§1.6), so all four
+frames are judged on their pixels. `compare` pairs by index first (§1.3) and searches ±1 frame,
+which is why the offsets read `{0: 4}` even though the picture differs.
 
 **What the picture difference is, measured.** The three `sha256`s that share an index are not three
 unrelated pictures: they are one picture at different pan positions. Comparing the reference's 5859
@@ -614,14 +642,14 @@ picture; here nothing is left over at all once a *whole* number of pixels is rem
 part's motion is a discrete step. `compare` exits 1 and is right to: the bytes at the reference
 index really do differ between sessions. No tolerance was added.
 
-The columns this puts Phase 2 in: alku is compared in `mode: mixed` — 900 by indices (its palette
-holds still), 1719, 2719 and 5859 by RGB, where the DAC's widening rule is load-bearing. And a port
-of ALKU has an unambiguous target for 900, 1719 and 2719 (reproduce the bytes) but not for 5859
-(reproduce the reference's pan position, which the oracle's own sessions do not agree on).
+The columns this puts Phase 2 in: alku is compared in `mode: rgb` — all four frames, because the
+reference holds no `.idx` at all any more (§1.6) — where the DAC's widening rule is load-bearing. And
+a port of ALKU has an unambiguous target for 900, 1719 and 2719 (reproduce the bytes) but not for
+5859 (reproduce the reference's pan position, which the oracle's own sessions do not agree on).
 
 ### 4.5 Where the part ends, and the transition
 
-`out/b3-alku-sweep3` (5420…8120 step 300) was refused at its fourth index:
+`out/b3-alku-sweep3` (5420…8120 step 300) was refused at its third index:
 
 ```
 error: the display changed geometry between frames: frame 6020 is 320x200 where the capture
@@ -633,7 +661,7 @@ Narrowed with sparse single-index probes from both sides — `out/b3-alku-bounda
 (5800, 5860, 5920, 5980) captured three and was refused at **5980**; `out/b3-alku-boundary2`
 (5940, 5950, 5960, 5970) captured two and was refused at **5960** — so the change lies in
 **(5950, 5960]**. No index in this window refused as a *miss*; the misses here are at the other end
-of the part (404–410, above).
+of the part, in the first frames after the demo's first graphics frame (404–410, §4.3).
 
 The last frames of the 320×400 screen are a transition, not the picture: 5800, 5860, 5920 and 5940
 all have the same row structure — rows 50–349 picture, black above and below — while **5950** has
@@ -748,9 +776,14 @@ So 6500 and 7640 need no support frames, and 7300 needs its pair — and the sup
 for all three anyway (plus a triple around 7760, which is PAM's, §6.1), which is what turns this
 table from an assumption into a measurement.
 
-**Which frames carry `.idx` is not a property of held-or-moving here.** In the same run, 7639,
-7640, 7641 and 7300 kept their indices and 6499–6501 did not; across the scan the plain-landscape
-frames at 7010 and 7560–7660 kept them and every sample of the pad (6010–6960) did not. Reading the
+**Which frames carry `.idx` is not a property of held-or-moving, and not a property of one run
+either — it is the session's.** The reference run kept indices at 7300 and 7640; the partner run kept
+them at 7639, 7640 and 7641 and **not** at 7299–7301 — while 7300's RGB is byte-identical in both
+(`0a7c2216…`, the re-capture above is 0.0000%). So the same frame on the same screen carries indices
+in one session and not in another, and a support frame one index away can carry them where its
+keyframe does not. (A later session of the reviewer's had 7300's indices again.) Across the scan the
+plain-landscape frames at 7010 and 7560–7660 kept them and every sample of the pad (6010–6960) did
+not. Reading the
 planes from offset 0 (`xtask/src/oracle/dosbox.rs:618-629`) only matches the screen when the
 *displayed* buffer is the one at offset 0, and this part rotates four animation buffers through its
 display start (`VISU/C/U2A.C:105-130`, `vid_setswitch(-1,clr)` inside `copper2`); the measurements
@@ -875,10 +908,11 @@ takes beyond its four-frame wait.
 | 7900 | **the washed closing hold** — the same flat `(251,251,251)` as 7710, and the same bytes at 7880, 7890, 7910 and 7920. | `.rgb` + `.idx` | rgb `1fef46de…`, idx `4333e44e…` |
 
 7710 and 7900 are the same bytes, and that is the part's shape rather than a coincidence: `wfade`
-returns to 63 at both ends of the animation. 7710 is the part's *first* frame and a one-frame event
-(7700 is still U2A's landscape and 7720 is the next animation frame), while 7900 is inside a hold of
-at least 40 frames — so the two are the same picture with very different reproducibility, which is
-worth having in one row.
+returns to 63 at both ends of the animation. They are the same picture with very different
+reproducibility: 7900 is inside a hold of at least 40 frames (7880–7920, one `sha256`), while 7710's
+wash lasts only about one loop step — 7709 and 7711 are the same bytes as 7710, and 7720 is already
+the next animation frame — so an index one frame away from 7710 is still this picture but an index
+ten frames away is not. Both are worth having in one row.
 
 Full hashes of the five files in `reference/parts/pam/`:
 
@@ -906,7 +940,7 @@ The partner's frames, hashed:
 
 | keyframe | `K-1` | `K` | `K+1` | reading |
 |---|---|---|---|---|
-| 7710 | (7700 `0a68ffb9…`, from the scan) | `1fef46de…` | (7720 `10bb3b95…`, from the scan) | **a one-frame event** — both neighbours differ |
+| 7710 | (7700 `0a68ffb9…`, U2A's, from the scan) | `1fef46de…` | (7720 `10bb3b95…`, from the scan) | **moving, but only just**: the wash holds for about one loop step, not one frame — 7709 and 7711 are byte-identical to 7710 (leftovers in the refused first attempt's directory, `out/pam-recapture/frame_00770{9,1}.rgb`), and the next animation frame is at 7720 |
 | 7760 | `23fa5096…` | `5d558081…` | `5d558081…` | **moving** — changes between 7759 and 7760 |
 | 7830 | `e1967ed2…` | `e1967ed2…` | `e1967ed2…` | **held** — one `sha256` across the triple |
 | 7900 | (7890, 7910 `1fef46de…`, from the scan) | `1fef46de…` | (identical) | **held** — one `sha256` across the scan's samples |

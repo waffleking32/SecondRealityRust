@@ -114,17 +114,32 @@ pub fn widen(component: [u8; 3]) -> [u8; 3] {
     component.map(|c| ((((c & 0x3F) as u16) * 259 + 33) >> 6) as u8)
 }
 
-/// The planar (Mode X) layout the demo's 320×400 title screen uses:
-/// `idx(x, y) = planes[x % 4][y * (width / 4) + x / 4]`, verified against the
-/// recorded planes and frame with zero conflicts (`docs/decisions.md` D14).
+/// The planar (Mode X) layout: `idx(x, y) = planes[x % 4][y * stride + x / 4]`,
+/// with `stride` the screen's own row length in plane bytes rather than an
+/// assumed `width / 4`.
+///
+/// The packed layout the demo's 320×400 title screen uses is `stride =
+/// width / 4` and was verified against the recorded planes and frame with zero
+/// conflicts (`docs/decisions.md` D14). Taking the stride as an argument is
+/// what B3 block 1 added: ALKU's screen is 176 bytes a row where `width / 4`
+/// is 80 (`ALKU/TWEAK.ASM:46` writes CRTC 0x13 = `0x5813`), and assembling it
+/// at the packed stride put a sheared plane in the reference tree —
+/// `reference/parts/alku/frame_000900.idx` in the first pass, whose picture
+/// started at row 110 instead of the row 50 `ALKU/MAIN.C:165-166` blits to.
 pub fn assemble_planes(
     planes: &[Vec<u8>],
     width: u16,
     height: u16,
+    stride: usize,
 ) -> Result<Vec<u8>, OracleError> {
     if width == 0 || width % 4 != 0 || height == 0 {
         return Err(OracleError::Decode(format!(
             "planar capture needs a width divisible by four, got {width}x{height}"
+        )));
+    }
+    if stride * 4 < width as usize {
+        return Err(OracleError::Decode(format!(
+            "a {stride}-byte row is narrower than the {width} pixels this screen shows"
         )));
     }
     if planes.len() != 4 {
@@ -133,7 +148,6 @@ pub fn assemble_planes(
             planes.len()
         )));
     }
-    let stride = width as usize / 4;
     if planes.iter().any(|p| p.len() < stride * height as usize) {
         return Err(OracleError::Decode(format!(
             "a plane holds less than the {stride}×{height} bytes {width}x{height} needs"
@@ -312,7 +326,7 @@ mod tests {
                 MODEX_PLANES[start..start + 32_000].to_vec()
             })
             .collect();
-        let indexed = assemble_planes(&planes, 320, 400).unwrap();
+        let indexed = assemble_planes(&planes, 320, 400, 320 / 4).unwrap();
         assert_eq!(indexed.len(), 320 * 400);
 
         // The title screen's own palette was not recorded, so the check D14
@@ -343,12 +357,73 @@ mod tests {
     fn planes_that_are_too_short_are_refused_not_indexed_out_of_bounds() {
         let short = vec![vec![0u8; 100]; 4];
         assert!(matches!(
-            assemble_planes(&short, 320, 400),
+            assemble_planes(&short, 320, 400, 320 / 4),
             Err(OracleError::Decode(_))
         ));
         assert!(matches!(
-            assemble_planes(&[], 320, 400),
+            assemble_planes(&[], 320, 400, 320 / 4),
             Err(OracleError::Decode(_))
         ));
+    }
+
+    /// The stride is the screen's, not `width / 4`: the same plane bytes
+    /// assembled at 80 and at 176 are different planes, and only the one the
+    /// screen used puts a byte where the picture has it.
+    #[test]
+    fn assembly_follows_the_planes_own_row_stride() {
+        // Four planes of 176-byte rows, each row stamped with its own number,
+        // so a wrong stride reads the wrong row rather than by luck another
+        // pixel of the same one.
+        let stride = 176usize;
+        let planes: Vec<Vec<u8>> = (0..4u8)
+            .map(|plane| {
+                let mut p = vec![0u8; stride * 400];
+                for y in 0..400usize {
+                    for c in 0..stride {
+                        p[y * stride + c] = (y as u8).wrapping_add(plane);
+                    }
+                }
+                p
+            })
+            .collect();
+
+        let indexed = assemble_planes(&planes, 320, 400, stride).unwrap();
+        for y in 0..400usize {
+            for x in 0..320usize {
+                assert_eq!(
+                    indexed[y * 320 + x],
+                    (y as u8).wrapping_add((x % 4) as u8),
+                    "pixel ({x},{y}) does not come from row {y}"
+                );
+            }
+        }
+
+        // The packed stride is a different plane, and it shears: the plane's
+        // row 50 — where ALKU's picture begins — comes out at screen row 110
+        // when the same bytes are read at 80, which is the 110 the first
+        // pass's `frame_000900.idx` started its picture at.
+        let packed = assemble_planes(&planes, 320, 400, 80).unwrap();
+        assert_eq!(packed[110 * 320], indexed[50 * 320]);
+        assert_ne!(packed, indexed);
+
+        // A row narrower than the screen's pixels cannot be assembled at all.
+        assert!(matches!(
+            assemble_planes(&planes, 320, 400, 40),
+            Err(OracleError::Decode(_))
+        ));
+    }
+
+    /// The stride is the emulator's own arithmetic: index 13h divided by the
+    /// mode's address unit. Checked against the two screens the tree
+    /// measures — the packed one every part but ALKU uses, and ALKU's.
+    #[test]
+    fn the_row_stride_is_the_crtc_offset_in_the_modes_units() {
+        // `row_stride_bytes` is port I/O, so the arithmetic is checked here
+        // as the expression it is, with the two measured offsets.
+        let planar = |scan_len: usize| scan_len * 2;
+        let chain4 = |scan_len: usize| scan_len * 8;
+        assert_eq!(planar(0x28), 320 / 4, "mode 13h's offset is a packed row");
+        assert_eq!(planar(0x58), 176, "ALKU's offset is a 176-byte row");
+        assert_eq!(chain4(0x28), 320, "chain-4 draws a byte a pixel");
     }
 }

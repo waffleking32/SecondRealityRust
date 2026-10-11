@@ -53,8 +53,16 @@ const PORT_GC_INDEX: u16 = 0x3CE;
 const PORT_GC_DATA: u16 = 0x3CF;
 const PORT_DAC_READ_INDEX: u16 = 0x3C7;
 const PORT_DAC_DATA: u16 = 0x3C9;
+const PORT_CRTC_INDEX: u16 = 0x3D4;
+const PORT_CRTC_DATA: u16 = 0x3D5;
 /// Graphics controller register 4, read map select (D14).
 const GC_READ_MAP_SELECT: u16 = 4;
+/// The CRTC's offset register: the number of bytes in a scanline divided by
+/// the mode's address unit (see `row_stride_bytes`).
+const CRTC_OFFSET: u16 = 0x13;
+/// One VGA plane's addressable bytes. A screen whose rows need more than this
+/// wraps under the guest and cannot be read as one plane.
+const PLANE_BYTES: usize = 64 * 1024;
 /// Sequencer register 4, memory mode: bit 3 set means chain-4, i.e. the
 /// framebuffer is one linear image rather than four planes (D14).
 const SEQUENCER_MEMORY_MODE: u16 = 4;
@@ -607,26 +615,78 @@ impl DosboxOracle {
         Ok(palette)
     }
 
-    /// Indices for the frame on screen now: `mem[y*width + x]` when the
-    /// sequencer is in chain-4, otherwise one memory read per plane with the
-    /// graphics controller's read map select set (D14).
+    /// The number of bytes one scanline advances the address counter, from
+    /// the CRTC's offset register (3d4h index 13h).
+    ///
+    /// The register is a byte offset divided by a factor the mode sets, and
+    /// the emulator's own arithmetic is the source: a 256-colour screen draws
+    /// a line every `scan_len * 8` bytes of *its* address space
+    /// (`vga_draw.cpp:1785-1792`, the `M_VGA` case, which is where DOSBox
+    /// puts mode 13h *and* every unchained "Mode X" tweak of it), and one
+    /// guest plane byte at offset `o` sits at four-byte group `o` in that
+    /// space (`vga_memory.cpp:129-135`: an unchained read is
+    /// `((uint32_t *)linear)[o]` selected by the read map). So one plane row
+    /// is `scan_len * 2` bytes, and `scan_len * 8` is the row of a chain-4
+    /// screen, where one byte is one pixel.
+    ///
+    /// Measured against the tree before it was written: 40 × 2 = 80 is what
+    /// every part whose `.idx` files reproduce their RGB uses, and 88 × 2 =
+    /// 176 is ALKU's (`ALKU/TWEAK.ASM:46`, `ALKU/MAIN.C:26`).
+    fn row_stride_bytes(&self, chain4: bool) -> Result<usize, OracleError> {
+        self.port_write(PORT_CRTC_INDEX, CRTC_OFFSET as u8)?;
+        let scan_len = self.port_read(PORT_CRTC_DATA)? as usize & 0xFF;
+        Ok(if chain4 { scan_len * 8 } else { scan_len * 2 })
+    }
+
+    /// Indices for the frame on screen now: a linear read when the sequencer
+    /// is in chain-4, otherwise one memory read per plane with the graphics
+    /// controller's read map select set (D14), assembled at the screen's own
+    /// row stride.
+    ///
+    /// **A stride the plane cannot describe is refused rather than guessed
+    /// at.** The read starts at offset 0 of each plane because that is where
+    /// the demo's screens begin; when `stride * height` runs past what one
+    /// plane holds, the guest's own display wraps and this read cannot say
+    /// what it shows — ALKU is that case (176 × 400 = 70,400 > 65,536), and
+    /// its frames come back RGB-only. A missing `.idx` is honest; a sheared
+    /// one is a wrong artefact in the reference tree.
     fn capture_indexed(
         &self,
         width: u16,
         height: u16,
     ) -> Result<(Vec<u8>, [[u8; 3]; 256]), OracleError> {
-        let indexed = if self.chain4_enabled()? {
-            self.read_memory(VGA_SEGMENT, 0, width as usize * height as usize)?
+        let chain4 = self.chain4_enabled()?;
+        let stride = self.row_stride_bytes(chain4)?;
+        let needed = stride * height as usize;
+        if needed > PLANE_BYTES {
+            return Err(OracleError::Decode(format!(
+                "this screen's rows are {stride} bytes and it is {height} rows tall, so it needs \
+                 {needed} bytes a plane; one plane holds {PLANE_BYTES}, and the display wraps.  \
+                 Its indices cannot be read as a single {width}x{height} plane"
+            )));
+        }
+        let indexed = if chain4 {
+            let mut memory = self.read_memory(VGA_SEGMENT, 0, needed)?;
+            if stride != width as usize {
+                // The rows are not packed at the screen's width: gather them.
+                let mut gathered = vec![0u8; width as usize * height as usize];
+                for y in 0..height as usize {
+                    let from = y * stride;
+                    let to = y * width as usize;
+                    gathered[to..to + width as usize]
+                        .copy_from_slice(&memory[from..from + width as usize]);
+                }
+                memory = gathered;
+            }
+            memory
         } else {
-            let stride = width as usize / 4;
-            let plane_len = stride * height as usize;
             let mut planes = Vec::with_capacity(4);
             for plane in 0..4u8 {
                 self.port_write(PORT_GC_INDEX, GC_READ_MAP_SELECT as u8)?;
                 self.port_write(PORT_GC_DATA, plane)?;
-                planes.push(self.read_memory(VGA_SEGMENT, 0, plane_len)?);
+                planes.push(self.read_memory(VGA_SEGMENT, 0, needed)?);
             }
-            super::assemble_planes(&planes, width, height)?
+            super::assemble_planes(&planes, width, height, stride)?
         };
         if indexed.len() != width as usize * height as usize {
             return Err(OracleError::Decode(format!(
