@@ -23,6 +23,23 @@ use crate::cli::Cli;
 /// The window's title.
 const TITLE: &str = "Second Reality";
 
+/// The texture format the presented frames are uploaded in.
+///
+/// `RGBA32`, not `RGBA8888` — the two are reverses of each other, and the name
+/// that reads "RGBA" is the wrong one. SDL names packed 32-bit formats by *bit
+/// significance*, most significant component first; on a little-endian host
+/// that puts the first-named component in the *last* byte. `present` writes a
+/// byte array, red first, so the format it needs is the one SDL defines as
+/// "RGBA byte arrays of color data" (`SDL_pixels.h:273`), which SDL calls
+/// `SDL_PIXELFORMAT_RGBA32` and resolves to `ABGR8888` on little-endian and
+/// `RGBA8888` on big-endian (`SDL_pixels.h:274-284`). The crate's `RGBA32` is
+/// that same alias, so this line is correct on either endianness.
+///
+/// Declaring `RGBA8888` here read the red byte as alpha — every pixel at full
+/// red, green and blue swapped — and nothing failed: the engine was right, the
+/// presenter was right, and only the screen was wrong.
+const TEXTURE_FORMAT: PixelFormatEnum = PixelFormatEnum::RGBA32;
+
 /// One logic tick's period, from the engine's own rate: the window is paced to
 /// the tick, never to the display's refresh, so a 60 Hz panel shows some
 /// frames twice rather than re-timing the demo.
@@ -123,8 +140,31 @@ fn streaming_texture(
     raster: (usize, usize),
 ) -> Result<Texture<'_>, Box<dyn Error>> {
     Ok(creator.create_texture_streaming(
-        PixelFormatEnum::RGBA8888,
+        TEXTURE_FORMAT,
         raster.0 as u32,
         raster.1 as u32,
     )?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The declared format must decode the bytes `present` wrote, in the order
+    /// it wrote them. Getting this wrong does not fail loudly: the picture comes
+    /// up in wrong colours and every test above still passes, because none of
+    /// them touches a texture.
+    #[test]
+    fn the_texture_format_reads_the_presenters_bytes_in_order() {
+        let masks = TEXTURE_FORMAT.into_masks().expect("SDL knows its own formats");
+        // One pixel as `Palette::write_rgba` lays it out in memory: red 10,
+        // green 20, blue 30, opaque. `from_ne_bytes` is the bytes as they are,
+        // which is what the texture is handed.
+        let packed = u32::from_ne_bytes([10, 20, 30, 255]);
+        let channel = |mask: u32| ((packed & mask) >> mask.trailing_zeros()) as u8;
+        assert_eq!(channel(masks.rmask), 10, "red");
+        assert_eq!(channel(masks.gmask), 20, "green");
+        assert_eq!(channel(masks.bmask), 30, "blue");
+        assert_eq!(channel(masks.amask), 255, "alpha");
+    }
 }
