@@ -694,6 +694,46 @@ counters and counting from the frame top would make the register a no-op) and th
 (**`(c*259+33)>>6`**, adopted from the emulator because it is also the ideal even mapping). Both were
 corrections of Phase 0's own plan, not refinements of the spec.
 
+### The split's two conventions, and the stride's default (settled after the phase review)
+
+Phase 0's closing fidelity review found the split model and the DAC rule right, and two of the split's
+conventions unwritten. Both are now on `Split`'s doc comment with their source lines, and repeated
+here because they are exactly what a later phase gets wrong.
+
+**The line-compare register is not the scanline.** `Split::scanline` is the first displayed scanline
+the lower view draws, counted within the enclosing view. The hardware's register names the last line
+*above* the split: the emulator applies it at `(line_compare + 1) / lines_scaled - vblank_skip`
+(`vga_draw.cpp:1586-1593`) and resets the beam at the start of that scanline (`vga_draw.cpp:1276`). A
+value copied from the assembly — `PLZPART/COPPER.ASM:126` alternates `60`/`61` — is therefore **one
+less** than the number to write here, and taking it literally puts the split one line high.
+
+Two caveats are recorded but **not** settled: `lines_scaled` divides the sum for a mode forced to
+single scan (`vga_draw.cpp:3594`), and `vblank_skip` — a vertical-blanking trick the emulator logs a
+warning about (`vga_draw.cpp:2245-2293`) — subtracts from it. Neither has been met yet, so the first
+part that splits must confirm the mapping against a capture rather than trust the `+ 1`.
+
+**The lower view's origin is forced to 0.** `VGA_ProcessSplit` (`vga_draw.cpp:1139-1158`) sets the
+address counter to 0, clears panning, and resets the sub-row phase: the lower region of a hardware
+split reads from the top of video memory, which is the whole trick. The port's `View` is a superset —
+it lets the lower view name any origin — while `View::new` already produces the hardware's answer, so
+a faithful port leaves the lower view's origin and pan alone. A faithful-*looking* translation of
+`set_plzstart` that gave the lower view the scrolled origin instead would show a whole region wrong in
+a way that looks like an arithmetic bug. The test card sets a walking origin deliberately, to prove the
+switch lands on named scanlines; that is a picture the hardware cannot produce, and the reason the
+field was not simply hard-wired to 0.
+
+A lower view carries only its origin, stride, pan, split and border: `width` and `height` on a lower
+view are never read, because the frame's geometry is the top-level view's. `border` *is* read from the
+effective view, which is what lets a part change the overscan colour partway down the frame.
+
+**The line stride's default was a trap, and is defused.** `View::new` defaulted `y_line_offset` to the
+view's own width. It is now `Option<u16>`, and `None` — the default — resolves to the **surface's** row
+stride inside `View::source_index`, which is handed the surface. Resolution is per effective view, so a
+split's lower view resolves its own rather than inheriting the enclosing view's. The trap had already
+sprung in `bins/secondreality/src/main.rs`, which worked only because `TestCard::init` overwrote the
+view; no part had been ported, so nothing downstream was wrong. `TestCard` no longer sets a stride at
+all, which makes the card a live test of the default.
+
 ### Open item — `View`'s origin is `u16` and the surface is not
 
 **Unresolved. Phase 2 must settle it when ENDSCRL lands.**

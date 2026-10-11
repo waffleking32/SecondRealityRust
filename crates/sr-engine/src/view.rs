@@ -30,6 +30,27 @@ pub struct View {
 }
 
 /// A line-compare split: from `scanline` down, the beam reads `view` instead.
+///
+/// # The two conventions a part author has to know
+///
+/// **`scanline` is the first displayed scanline the lower view draws**, counted
+/// within the enclosing view. The hardware's line-compare register names the
+/// last line *above* the split: the emulator applies the register at
+/// `(line_compare + 1) / lines_scaled - vblank_skip` (`vga_draw.cpp:1586-1593`)
+/// and resets the beam at the start of that scanline (`vga_draw.cpp:1276`). A
+/// value copied straight out of the original's assembly is therefore **one
+/// less** than the `scanline` to write here. `lines_scaled` and `vblank_skip`
+/// are special cases — a mode forced to single scan, and a vertical-blanking
+/// trick — that Phase 0 has not met; the first part that splits settles the
+/// mapping by measurement against a capture rather than by trusting the +1.
+///
+/// **The lower view's origin is 0.** At the split the hardware sets the address
+/// counter to 0, clears panning and resets the sub-row phase
+/// (`VGA_ProcessSplit`, `vga_draw.cpp:1139-1158`), so the lower region reads
+/// from the top of video memory. [`View::new`] gives exactly that, which means
+/// a part modelling the hardware leaves `start_addr`, `x_offset` and `pan`
+/// alone. They are settable because the test card uses them to prove the view
+/// switch lands on named scanlines — a picture the hardware cannot produce.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Split {
     pub scanline: u16, // first scanline using `view`, counted within the enclosing view

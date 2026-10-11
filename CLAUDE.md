@@ -100,10 +100,16 @@ A part is done when its frames match. Record the evidence in `PROGRESS.md`.
 
 ### Geometry caveats worth knowing before they bite
 
-- **A view's `y_line_offset` is the surface stride, not the view width.** `View::new(w, h)`
-  defaults it to `w`, which is correct only when the surface *is* `w` wide. A 320-wide view
-  on the 640-wide surface must set it to 640, or it reads a different layout than the part
-  wrote.
+- **A view's line stride is unset by default, and resolves to the surface's row stride.**
+  `y_line_offset` is `Option<u16>`; `None` reads the surface's own rows, which is what a
+  part that draws through `Surface` wants. Set it only to pack rows more tightly than the
+  surface's (that is what CRTC 0x13 is for). Setting it to the view's own width on a wider
+  surface shears the picture with no error anywhere — that trap was live once.
+- **A split's lower view reads from origin 0 in the original.** The hardware sets the
+  address counter to 0 and clears panning at the split, so a faithful port leaves the lower
+  view's origin and pan alone. And `Split::scanline` is the first line *below* the split,
+  while the assembly's line-compare register names the last line above it: add one. See
+  `Split`'s doc comment and D16.
 - **`View`'s origin is `u16` and the surface is 256,000 pixels** — see the open item in
   `docs/decisions.md` D16. It will need settling when ENDSCRL lands.
 - **Below a split, the scanline count restarts.** Line compare resets the CRTC's counters,
