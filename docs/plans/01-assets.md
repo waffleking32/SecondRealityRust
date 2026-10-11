@@ -759,18 +759,29 @@ The measurement A1 already made says **nothing needs recovering**. Turn that fro
 checked result, and record it as the task's evidence:
 
 1. **Prove completeness.** For every blob in the inventory's §D that has a standalone twin, assert
-   in a test that `extract_ledata(blob) == std::fs::read(twin)`. **Twenty-five of the twenty-nine
-   data blobs** reconstruct a standalone file byte-exactly; the other four are the blob-only
-   payloads step 2 answers. That is the phase's evidence for "provenance file complete" from the
-   EXE side: nothing the parts link exists only in a build artifact.
-2. **Answer the three blob-only payloads by name.** The set was four until the review found that
-   `TECHNO/_CIRCLE.OBK`'s payload is byte-identical to `DDSTARS/PIC.EGA`, which is now curated — so
-   `_CIRCLE.OBK` has a twin and belongs in step 1's list, not here. What remains:
-   `TECHNO/_CIRCLE2.OBK` (8,000, linked by `TECHNO/MAKEFILE:6`, no image header, not a picture
-   size); `TECHNO/_PIC1.OBK` (50,000, holds an Origin RLE picture at 320×400, **not linked** —
-   `TECHNO/MAKEFILE:7`'s `_pic1.obk _pic2.obk` line is commented out); and `_PIC2.OBK` (20,859,
-   no magic, also not linked). Say what each is and whether the port needs it. Nothing is recovered
-   speculatively.
+   in a test that `extract_ledata(blob) == std::fs::read(twin)`. **Twenty-six of the twenty-nine
+   data blobs** reconstruct a standalone file byte-exactly — 22 whole-file rows plus the 4 `COMAN`
+   `W*DTA` slices — and the other three are the blob-only payloads step 2 answers. (The plan
+   previously said "twenty-five of twenty-nine", which matches no reading of §D; the measurement is
+   22 + 4 + 3 = 29.) That is the phase's evidence for "provenance file complete" from the EXE side:
+   nothing the parts link exists only in a build artifact.
+2. **Answer the three blob-only payloads by name, and recover the ones that are assets.** The set
+   was four until the review found `TECHNO/_CIRCLE.OBK`'s payload byte-identical to `DDSTARS/PIC.EGA`,
+   which is curated — so `_CIRCLE.OBK` belongs in step 1's list, not here. But the remaining three
+   were **not** all residue, and the plan's "nothing needs recovering" was a prediction rather than a
+   result:
+   - **`TECHNO/_CIRCLE2.OBK` (8,000) is a live asset and was recovered** as
+     `assets/TECHNO/CIRCLE2.EGA`. It is a 320×200 1-bpp mask, byte-identical to `DDSTARS/DOIT2.C`'s
+     output, linked by `TECHNO/MAKEFILE:6,23`, sized in the shipped image (`TECHNO/KOE.MAP:11`) and
+     read by `TECHNO/KOEA.ASM:665`. No file in the tree holds its bytes — `DDSTARS/PIC2.EGA` differs
+     in 7,162 of 8,000. This is exactly §9's clause, and **`PROVENANCE.md`'s recovered table exists
+     for it**. Without the recovery, "no asset is EXE-only" would be false.
+   - **`TECHNO/_PIC1.OBK` (50,000) is a truncated Origin RLE stream** — 281 of its header's 400 rows,
+     ending 119 bytes into row 282. It **cannot** decode, so the test pins `sniff`, the header and the
+     `Truncated` refusal instead. It is also not linked: `TECHNO/MAKEFILE:7`'s
+     `_pic1.obk _pic2.obk` line is commented out, so it is unlinked build residue.
+   - **`TECHNO/_PIC2.OBK` (20,859)** has no magic and is also not linked.
+   Nothing is recovered speculatively — but "nothing to recover" is not assumed either.
 3. **Confirm against the shipped EXE.** `MAIN/PACKFINA.INC`'s 79 entries are what `SECOND.EXE`
    actually carries. Check that every entry is either a part executable or a file already in
    `assets/`, so "no asset is EXE-only" is a checked statement rather than an inference from the
