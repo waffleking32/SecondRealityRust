@@ -44,3 +44,59 @@ corrupted would be worse than either.
 between 3 and 121 pixels each — 16,191 pixels of the decoded stream, 6.32 % of the
 file's 256,000 — all of them beyond column 639. Measured by decoding
 `assets/START/HZPIC.P` row by row.
+
+## A3 — Three malformed-input paths in PAM's FLI decoder take defined behaviour where the tree's player has none
+
+**Part:** PAM (`PAM/PRAX4.FLI`), Phase 4. PAM's `.ANI` (`PAM/OUT.ANI`) does not need
+this entry: it has one malformed-input path, a record run past its 64,000-pixel
+canvas, and `PAM/ANIM.C`'s encoder cannot emit one (`cnt+a<64000` bounds every run),
+so the refusal there is an internal consistency check rather than a substitution.
+
+**Original:** three constructs in `PAM/VFLI.C` have no defined behaviour, and no file
+in either tree reaches any of them:
+
+1. **A run that writes past the canvas.** The pixel offset is a 16-bit `unsigned int`
+   (`VFLI.C:177`, `:208`, `:251`) and the only guard is `u<64000` *before* a packet
+   (`:184`, `:219`, `:256`), never inside one. A run that has already started
+   therefore writes into the 1,536 bytes of the VGA window past 64,000, and a wrap
+   through 65,536 lands the remainder in the top-left corner of the screen (the pixel
+   buffer is `0xa0000000`, `VFLI.C:6`).
+2. **A chunk body longer than the frame that holds it.** `VFLI.C:87` calls `doblock`
+   with the file positioned at the body and no bound at all, and only re-seeks to the
+   chunk's end afterwards (`:88`) — so a body whose declared size outruns its frame
+   reads the next frame's bytes as its own.
+3. **A frame record with no chunks.** `blocksleft` reaches zero only inside the chunk
+   branch (`VFLI.C:89-90`) — a frame header sets it (`:81`) and a chunk decrements
+   it, but a header with an empty chunk list decrements nothing, so the next record's
+   header resets it and the frame is never dumped at `:102-113`. The frame is dropped
+   rather than shown, and the frame the player counts disagrees with the record chain.
+
+**Port:** the first two are refused — `Unsupported` for a packet that would write
+outside the canvas, `Truncated` for a chunk whose body outruns its frame, both with
+the byte named — and the third completes with the canvas unchanged, which is what a
+frame with no chunks means in the format. `sr_assets::anim`'s module docs carry the
+same three, with the refusals listed beside the rest.
+
+**Why:** each original behaviour is a write outside the picture's own bytes or a read
+outside the frame's own bytes, and the crate's standing promise is that no input
+panics and none is decoded past its input. What the first would corrupt is visible
+(it paints real pixels of the top rows) and what the second would read is not the
+chunk's data at all, so reproducing either would be inventing output; the third is
+not a corruption at all but a dropped frame, and the port prefers the record chain it
+walks.
+
+**Measured difference:** **zero on the curated tree — no shipped file fires any of
+the three.** Measured over `PRAX4.FLI`'s 42 frame records: every packet of every
+`0x000C`/`0x000F` chunk stays inside its own 320-pixel line and inside the canvas
+(0 packets cross either bound); every chunk's size fits its frame and every frame's
+chunks end exactly on its frame's end, with the record walk landing on the file's
+last byte (0 overshoots, 0 bytes left over); and every record carries 1 or 2 chunks
+(frame 0 has 2, frames 1-41 have 1), so none is empty. The paths exist for files the
+demo never shipped, and a later frame-diff comparison cannot encounter them.
+
+Not an approximation, recorded here for scope: the `0x0004` and `0x0007` chunk
+decodes are ported from `VFLI.C:161-172` and `:203-246` as written, including
+`0x0007`'s treatment of a word's two bytes as two consecutive pixels (`:226-230`)
+rather than the format's line pairing. No file in either tree carries either chunk
+type (`PRAX4.FLI`'s histogram is `0x0B:1 0x0C:41 0x0F:1`), so those two paths are
+cited from the authority and unmeasured, which `sr_assets::anim`'s module docs say.
