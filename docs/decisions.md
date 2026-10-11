@@ -1011,16 +1011,15 @@ and it is why every offset is recorded rather than absorbed: offset 0 everywhere
 `docs/fidelity/reference-indices.md` is where the offsets and that settling are recorded (B2
 writes the first row).
 
-**What the search cannot do.** It aligns frames the rendered side actually holds. Two
-*captures* at the same index list hold, between them, only the frames at those indices: if
-one session's picture at index 2400 is the other's 2401, neither capture holds the 2401
-needed to see that. So B2 step 4's re-capture check still passes on held screens and cannot
-pass, at any offset, on a moving one, unless the re-capture (or the reference) also captures
-the neighbouring indices. That is a limit of the oracle, not of this search, and it is B2's
-to work around; measured here on the real captures (`out/b1-ws-s1` against `out/b1-ws-s2`,
-the same five indices 2400–2600 of the moving part screen): every frame paired at offset 0 —
-the only candidate the rendered side held — and 9.1453–14.6172% of *pixels* differing (D17's
-5.45–12.73% was measured in bytes, over index files, not over pixels).
+**What the search cannot do by itself.** It aligns frames the rendered side actually holds.
+Two *captures* at the same index list hold, between them, only the frames at those indices:
+if one session's picture at index 2400 is the other's 2401, neither capture holds the 2401
+needed to see that — measured on the real captures (`out/b1-ws-s1` against `out/b1-ws-s2`,
+the same five indices 2400–2600 of the moving part screen): every frame paired at offset 0,
+the only candidate the rendered side held, and 9.1453–14.6172% of *pixels* differing (D17's
+5.45–12.73% was measured in bytes, over index files, not over pixels). The two captures must
+therefore also hold the neighbours — one frame beyond each end of the keyframe range — and
+`reference capture` was changed so that a run can hold adjacent indices at all: D19.
 
 **Measured on the real captures.** `reference/check_a` compared with itself: `verdict:
 identical`, every offset 0, exit 0. `reference/check_a` against the older `out/check_neg`:
@@ -1047,9 +1046,8 @@ ruled: alignment searched, pixels exact, nothing waved through.
 
 A triple in one session was attempted first and **could not be captured**: after writing
 frame 2449, the capture loop is ~18 frames late for 2450 and refuses ("the emulator reached
-frame 2468 before frame 2450 could be captured"). Adjacent indices cannot be captured in one
-run — the write between grabs costs more than the gap — which is another reason B2 step 4's
-re-capture cannot be rescued by re-capturing a neighbour, and B2's business to work around.
+frame 2468 before frame 2450 could be captured"). That turned out to be fixable, and it had
+to be: see D19.
 
 The tests are `cargo test -p xtask`. Thirteen of them were run against the pre-B1b pairing
 first — the old code with only the new signatures shimmed so they could compile — and all
@@ -1062,3 +1060,72 @@ reference frame is measured against the rendered frame at its own index (100% di
 exit 1) and against a rendered side holding its picture one index later (0.0000%,
 `rendered_index: 901`, `offset: 1`, `offset_frames: 1`, exit 0), so the pair is a real pair
 of different pictures and the transition is the search's doing, not the fixture's.
+
+---
+
+## D19 — What a grab costs, and a capture that carries its own neighbours (2026-10-11)
+
+B1b's report said a capture could not hold two adjacent indices, so a reference could not
+carry the neighbouring frames the ±1 search needs (D18) — and B2 step 4's re-capture check
+was therefore unreachable on a moving screen. The measurement that decided it was asked for
+rather than assumed: break a grab into its parts and see whether the cost is the indexed
+read, and whether the neighbours being RGB-only is enough. It is the read, and RGB-only
+neighbours are *not* enough — the fix is that a run's read must not sit between two grabs.
+
+**What a grab costs, measured** (`dosbox-automation 0.85.1` (6d100), `SECOND 2`, 30000
+cycles, the silent D17 recipe, timings taken with temporary instrumentation around each
+phase of the capture loop):
+
+| phase | 320×200 chain-4 | 320×400 Mode X | requests |
+|---|---|---|---|
+| identified RGB grab (counter, raw frame, counter) | 0.7–2.2 ms | 0.7–2.2 ms | 3 |
+| `video/frame/info` | 0.3–0.4 ms | 0.2–0.3 ms | 1 |
+| framebuffer read | 1.0 ms | 10 ms | 1 (chain-4) / 4 planes + 8 port writes |
+| **DAC palette: 768 port reads + 256 index writes** | **273.0–323.5 ms** | **260.2–285.0 ms** | 1024 |
+| `indexed_matches_rgb` | 0.0 ms | 0.0 ms | 0 |
+| `write_frame` (rgb + idx + palette) | 0.1 ms (192 + 64 KB) | 19.8–21.8 ms (384 + 128 KB) | 0 |
+| one frame, grab to disk | 325.7 ms ≈ 22.8 frames | 317.8–344.1 ms ≈ 22.3–24.1 frames | |
+
+So the grab itself is ~1 ms — a tenth of one frame — and **the indexed read is 82% of the
+cost of a Mode X frame and 99% of a chain-4 one**, the palette dominating it either way (the
+title screen's 128 KB index file costs 20 ms to write, which chain-4's 64 KB does not). The capture loop's problem was never
+the grab: it was that the read sat *between* two grabs, so any requested index within ~25
+frames of the one before was already gone by the time the loop looked for it.
+
+**A capture can carry its own neighbours.** `reference capture` now takes every frame in a
+run of indices closer than `INDEXED_READ_FRAMES` (25, the measured read rounded up) before
+reading any of them, and the oracle's kept-frame slot became a queue so more than one take
+can be held. Two properties matter: the indexed capture itself is untouched — same read, same
+`indexed_matches_rgb` coherence rule, same bytes, and only its *start* moves, by at most one
+index within a run — and a capture whose frames are far apart behaves exactly as before,
+because the rule only fires within a read's reach. Measured after the change:
+
+- `--frames 2449,2450,2451` captures, exit 0, where it was refused before (each frame's read
+  is still attempted and still fails coherence on that moving screen, so all three are RGB
+  only, as D15 requires).
+- A held screen is unchanged: `--frames 700,900` (320×400 Mode X, indices kept) compares
+  byte for byte with a capture of the same two frames taken before the change —
+  `verdict: identical`, `mode: indexed`, 0.0000%, exit 0.
+- Two sessions that disagree about the animation phase now align: `out/b1b-tri-b` (a session
+  one frame ahead) against `out/b1b-span-c` paired all three of its frames at **offset −1**
+  (0.2141%, 0.5984%, 0.2766% of pixels) with no refusal, where the same pair against a
+  capture holding only the same three indices was **refused, exit 2**.
+
+**The convention that follows, and B2's to apply:** a capture compared against another
+capture must hold **one frame beyond each end** of its keyframe range — `--frames N₁-1 … N_k+1`
+— because a reference frame can only pair with a rendered frame that exists. Measured: two
+captures of the same three indices in different phases (`out/b1b-tri-a` vs `out/b1b-tri-b`)
+refuse, exit 2, "reference frame 2451 has no rendered frame within ±1 … the nearest rendered
+index is 2449", while `tri-b` against the five-index span (2448–2452) aligns completely. The
+support frames are support: they are captured, recorded in the manifest like any other frame,
+and are not keyframes in `reference-indices.md`.
+
+**Two residues, recorded and not thresholded.** A same-phase re-capture of the five-index
+span (`out/b1b-span-a` vs `out/b1b-span-b` and vs `out/b1b-span-c`) was byte-identical on
+every frame but one: `span-a`'s first captured frame, 2448, differs from both later captures
+by the same **47 pixels** of 64,000 (max delta 121) — `span-b` and `span-c` agree with each
+other exactly, so that residue is that one session's, the class D17 measured one session in
+twelve carrying. The aligned pair above carried 137–383 pixels. So a moving part's re-capture
+can be aligned and *still* report `verdict: different`; the number is recorded in the part's
+row, and no tolerance is introduced — a pixel tolerance is exactly what the user's ruling
+avoided (fix round 1, ruling 3).

@@ -6,6 +6,7 @@
 //! are encoded below: the raw frame header is **15 bytes, not 16**, and the
 //! pixels are `[blue, green, red, 0]`.
 
+use std::collections::VecDeque;
 use std::env;
 use std::fs::File;
 use std::io::Read;
@@ -373,8 +374,13 @@ pub struct DosboxOracle {
     /// (`BootRecipe::Autoexec`), so `boot` waits for the setup screen instead
     /// of typing one (D17).
     autoexec: bool,
-    /// The frame `wait_for_frame` pinned, for the `frame` call that follows.
-    pending: Option<CapturedFrame>,
+    /// The frames [`Oracle::wait_for_frame`] has taken and not yet handed
+    /// over, oldest first.
+    ///
+    /// A queue rather than a slot: a capture with neighbours to take waits for
+    /// them before it reads the indices of the frame before, and a single slot
+    /// would drop the earlier frame on the floor.
+    pending: VecDeque<CapturedFrame>,
 }
 
 impl DosboxOracle {
@@ -450,7 +456,7 @@ impl DosboxOracle {
             }),
             scratch,
             autoexec: !autoexec.is_empty(),
-            pending: None,
+            pending: VecDeque::new(),
         };
         match oracle.wait_for_api(&log_path) {
             Ok(()) => {}
@@ -820,7 +826,8 @@ impl Oracle for DosboxOracle {
             }
             sleep_frames(index - now, GRAB_WINDOW_FRAMES);
         }
-        self.pending = Some(self.grab_at(index)?);
+        let frame = self.grab_at(index)?;
+        self.pending.push_back(frame);
         Ok(())
     }
 
@@ -834,7 +841,7 @@ impl Oracle for DosboxOracle {
         // palette — takes long enough that the emulator is many frames further
         // on by the time it is done, so a staleness check after it would
         // measure nothing.
-        let mut frame = match self.pending.take() {
+        let mut frame = match self.pending.pop_front() {
             Some(frame) => frame,
             None => self.grab_any()?,
         };
@@ -1315,7 +1322,7 @@ mod tests {
             api: Box::new(script),
             scratch: std::env::temp_dir().join("xtask-scripted-oracle"),
             autoexec: false,
-            pending: None,
+            pending: VecDeque::new(),
         }
     }
 

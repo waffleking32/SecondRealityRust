@@ -53,6 +53,19 @@ pub const SETUP_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
 const MANIFEST_VERSION: u32 = 1;
 
+/// How long one frame's indexed read costs, in rendered frames — the distance
+/// within which two requested indices are taken before either of them is read.
+///
+/// Measured (B1b fix round 1, `dosbox-automation 0.85.1`, 30000 cycles): one
+/// read is 270–326 ms, of which the 768 DAC port reads plus 256 DAC index
+/// writes are 260–325 ms, the framebuffer read 1.0 ms in chain-4 and 10 ms in
+/// Mode X, and the identified RGB grab around 1 ms. At 70.086 Hz that is
+/// 19–23 frames, so a read between two grabs loses every index within that
+/// distance of the one it was read for. This is the measured cost rounded up,
+/// not a budget: an index further away than this is waited for first, exactly
+/// as it always was, so a capture whose frames are far apart is unchanged.
+const INDEXED_READ_FRAMES: u64 = 25;
+
 #[derive(Debug)]
 pub enum CaptureError {
     /// The options cannot produce a reproducible capture. Nothing was started.
@@ -578,27 +591,47 @@ pub fn capture(
 
     let mut geometry: Option<(u16, u16)> = None;
     let mut frames = Vec::with_capacity(options.frames.len());
-    for &index in &options.frames {
+    // Indices taken but not yet read. Requested frames closer together than one
+    // frame's indexed read are all taken before any of them is read: the read
+    // costs INDEXED_READ_FRAMES rendered frames, so reading one frame's indices
+    // before taking the next loses the next index — which is what made
+    // `--frames 2449,2450,2451` uncapturable and what kept a reference from
+    // carrying the neighbouring frames the ±1 alignment search needs (D18).
+    let mut taken: Vec<u64> = Vec::new();
+    for (position, &index) in options.frames.iter().enumerate() {
         // Wait for this frame. The oracle refuses a capture the emulator has
         // clearly run past (see `Oracle::wait_for_frame` for how close it can
         // come, and D15), because a frame taken later would be written under
         // this one's name.
         oracle.wait_for_frame(index)?;
-        let frame = oracle.frame()?;
+        taken.push(index);
 
-        let found = (frame.width, frame.height);
-        match geometry {
-            None => geometry = Some(found),
-            Some(expected) if expected != found => {
-                return Err(CaptureError::GeometryChanged {
-                    index,
-                    expected,
-                    found,
-                })
-            }
-            Some(_) => {}
+        let next_in_reach = options
+            .frames
+            .get(position + 1)
+            .is_some_and(|next| next.saturating_sub(index) < INDEXED_READ_FRAMES);
+        if next_in_reach {
+            continue;
         }
-        frames.push(write_frame(&options.out, index, &frame)?);
+
+        // Every frame in this run has been taken; read and write them now, in
+        // the order they were asked for.
+        for index in taken.drain(..) {
+            let frame = oracle.frame()?;
+            let found = (frame.width, frame.height);
+            match geometry {
+                None => geometry = Some(found),
+                Some(expected) if expected != found => {
+                    return Err(CaptureError::GeometryChanged {
+                        index,
+                        expected,
+                        found,
+                    })
+                }
+                Some(_) => {}
+            }
+            frames.push(write_frame(&options.out, index, &frame)?);
+        }
     }
 
     let (width, height) = geometry.expect("validate_options refuses an empty frame list");
@@ -1171,6 +1204,46 @@ mod tests {
     }
 
     #[test]
+    fn indices_within_a_read_of_each_other_are_all_taken_before_any_is_read() {
+        // A frame's indexed read costs about twenty-five rendered frames (D15
+        // and the constant above), so reading the frames in turn loses every
+        // index within a read of the one before — which is what made a capture
+        // carrying a keyframe's neighbours impossible, and what left the ±1
+        // alignment search (D18) without a neighbouring frame to find.
+        let out = scratch_dir("adjacent-indices");
+        let opts = options(vec![5100, 5101, 5102], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame(), indexed_frame()]);
+        let manifest = capture(&mut oracle, &opts).unwrap();
+
+        assert_eq!(
+            oracle.events,
+            vec!["take 5100", "take 5101", "take 5102", "read", "read", "read"]
+        );
+        assert_eq!(
+            manifest.frames.iter().map(|f| f.index).collect::<Vec<_>>(),
+            vec![5100, 5101, 5102]
+        );
+    }
+
+    #[test]
+    fn indices_further_apart_than_a_read_are_still_taken_and_read_in_turn() {
+        // Far-apart keyframes are what every capture in the tree holds today,
+        // and their behaviour does not change: taking the next one before
+        // reading this one would delay the read by the whole gap, and on a
+        // screen that changes slowly the indices would be stale by then.
+        let out = scratch_dir("sparse-indices");
+        let opts = options(vec![5100, 5200], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame()]);
+        let manifest = capture(&mut oracle, &opts).unwrap();
+
+        assert_eq!(oracle.events, vec!["take 5100", "read", "take 5200", "read"]);
+        assert_eq!(
+            manifest.frames.iter().map(|f| f.index).collect::<Vec<_>>(),
+            vec![5100, 5200]
+        );
+    }
+
+    #[test]
     fn a_capture_is_written_as_one_sheet_a_person_can_look_at() {
         // The point of the flag: after a capture, one PNG holding what was
         // taken, in the order it was taken — B2–B5 find a part's frames by
@@ -1286,6 +1359,9 @@ mod tests {
         frames: VecDeque<CapturedFrame>,
         counter: u64,
         stepped_frames: Vec<u64>,
+        /// Every take and every read, in the order the capture made them: what
+        /// a test needs to see that a read did not sit between two takes.
+        events: Vec<String>,
         keys: Option<String>,
         waited_for_text: Vec<String>,
         waited_for_graphics: Vec<String>,
@@ -1301,6 +1377,7 @@ mod tests {
                 frames: frames.into(),
                 counter: 0,
                 stepped_frames: Vec::new(),
+                events: Vec::new(),
                 keys: None,
                 waited_for_text: Vec::new(),
                 waited_for_graphics: Vec::new(),
@@ -1329,6 +1406,7 @@ mod tests {
             Ok(())
         }
         fn frame(&mut self) -> Result<CapturedFrame, OracleError> {
+            self.events.push("read".to_owned());
             self.frames
                 .pop_front()
                 .ok_or_else(|| OracleError::Decode("no frame scripted".into()))
@@ -1365,6 +1443,7 @@ mod tests {
                     observed: self.counter,
                 });
             }
+            self.events.push(format!("take {index}"));
             self.stepped_frames.push(index);
             self.counter = index;
             Ok(())

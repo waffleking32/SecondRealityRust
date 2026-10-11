@@ -181,9 +181,12 @@ pub trait Oracle {
     fn set_cycles(&mut self, cycles: u32) -> Result<(), OracleError>;
     /// Run forward `frames` rendered frames.
     fn step_frames(&mut self, frames: u32) -> Result<(), OracleError>;
-    /// The frame [`Oracle::wait_for_frame`] settled on, when it kept one, and
-    /// otherwise the frame the oracle can identify as the one it is showing.
-    /// Either way it is a frame the oracle can name, never a guess at one.
+    /// The earliest frame [`Oracle::wait_for_frame`] settled on, when it kept
+    /// any, and otherwise the frame the oracle can identify as the one it is
+    /// showing. Either way it is a frame the oracle can name, never a guess at
+    /// one. A capture that takes the neighbours of a keyframe before reading
+    /// any of them holds more than one; they come back in the order they were
+    /// waited for.
     fn frame(&mut self) -> Result<CapturedFrame, OracleError>;
     /// Send a whitespace-separated list of `KBD_*` key names, in order.
     fn send_keys(&mut self, script: &str) -> Result<(), OracleError>;
@@ -206,10 +209,13 @@ pub trait Oracle {
     /// than let a capture be mislabelled — when it cannot be taken exactly.
     ///
     /// Pinning a frame is the oracle's business, but the promise is the
-    /// strict one: the frame kept for the following [`Oracle::frame`] is the
-    /// frame the oracle's own counter names `index`, and a frame that arrives
-    /// late is refused. A capture is never written under an index whose
-    /// picture it does not hold (D17).
+    /// strict one: the frame kept for the following [`Oracle::frame`] call is
+    /// the frame the oracle's own counter names `index`, and a frame that
+    /// arrives late is refused. A capture is never written under an index
+    /// whose picture it does not hold (D17). Waiting for several frames before
+    /// reading any of them is allowed — each wait pins the frame its own index
+    /// names, and the frames are handed over in the order they were waited
+    /// for.
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError>;
 }
 

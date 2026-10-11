@@ -88,6 +88,13 @@ Five things the command needs, each of which cost time to discover:
    part follows around 1160; the typed recipe reaches the same screens about 324 frames
    earlier but with the boot's host-timing jitter.
 
+**A capture can hold adjacent indices** — `--frames 2449,2450,2451` — because a run of
+indices closer together than one frame's indexed read (~25 rendered frames) is all taken
+before any of it is read; the read itself is unchanged (D19). A capture that will be
+compared against another capture should hold **one frame beyond each end** of its keyframe
+range (`--frames N₁-1 … N_k+1`), because the ±1 alignment search (D18) can only pair a
+reference frame with a rendered frame that exists.
+
 ### Comparing
 
 `cargo xtask compare` diffs a rendered frame set against a capture and reports
