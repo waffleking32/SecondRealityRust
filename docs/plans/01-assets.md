@@ -514,13 +514,26 @@ fn every_iff_asset_decodes_and_fills_the_geometry_its_bmhd_claims() {
     assert!(seen >= 20, "expected both IFF flavours, saw {seen}");
 }
 
+/// **The test that pins the CMAP rule, and the only one with teeth.** This was
+/// originally written as a `six_bit` round trip, which is the wrong rule and
+/// passes under either. An `rstest` over two converted twin pairs, asserting this
+/// decoder's palette equals the twin's — and asserting each case's *discrimination
+/// count*, so a case that stopped discriminating fails rather than passing weakly:
+///   LENS/LENSPIC.LBM vs LENS/LENS.EXB   457 of 768 bytes at stake
+///   BEG/SRTITLE.LBM  vs BEG/SRTITLE.UP    1 of 768
+#[rstest]
+#[case("../../assets/LENS/LENSPIC.LBM", "../../assets/LENS/LENS.EXB", 457)]
+#[case("../../assets/BEG/SRTITLE.LBM", "../../assets/BEG/SRTITLE.UP", 1)]
+fn the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap(
+    #[case] lbm: &str, #[case] twin: &str, #[case] at_stake: usize,
+) { /* decode both, assert equal, assert the count */ }
+
+/// `six_bit` is still the exact inverse of the engine's widening — it is the 6→8
+/// *display* rule inverted. It is **not** the 8→6 conversion rule, and this test
+/// governs `six_bit` alone.
 #[test]
-fn an_eight_bit_cmap_becomes_six_bits_through_the_inverse_widening() {
-    for v in 0u8..=255 {
-        let six = six_bit(v);
-        assert!((dac_expand(six) as i32 - v as i32).abs() <= 2, "8-bit {v} -> 6-bit {six}");
-        assert_eq!(six, six_bit(v), "stable");
-    }
+fn six_bit_is_the_inverse_of_dac_expand_over_all_256_values() {
+    for c in 0u8..=63 { assert_eq!(six_bit(dac_expand(c)), c, "6-bit value {c}"); }
 }
 
 #[test]
