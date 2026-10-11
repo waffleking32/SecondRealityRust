@@ -530,6 +530,23 @@ Each of these is something a later task must know before it writes a loader or a
     either. So these are the only pictures in the shipment whose container bytes exist nowhere
     but in the blobs — a fact for Phase 7 (CREDITS), which is the part that would need them;
     A5 records it and recovers nothing.
+21. **PAM's animation is 42 frames in both of its containers, and the FLI's header word says 41.**
+    `PAM/PRAX4.FLI` carries 41 at offset 6 (`29 00`) and the record chain after its 128-byte
+    header holds **42** `0xF1FA` frame records — one `0x000F` byte-run key frame plus 41 `0x000C`
+    line-compressed deltas — whose last is the first again, pixel for pixel. `PAM/VFLI.C:66`
+    reads that word into a global nothing else touches and walks records until `feof`
+    (`:71-77`), which is why 42 is the count the tree plays. Its only colour chunk is one
+    `0x000B` in frame 0, and the 768 bytes of its payload are **`PAM/PAL.PAL` exactly** — so
+    PAM's palette is one palette written twice, and the chunk's count and first-entry words are
+    the format's only big-endian fields (`VFLI.C:152-156` reads `getc()*256+getc()`; the file's
+    `01 00` is 256 entries, and 4 + 256×3 is the chunk's 778 bytes less its six-byte header
+    exactly). `PAM/OUT.ANI`, the same animation re-packed by `PAM/ANIM.C` from what `VFLI.C`
+    dumped, holds 42 frames on 16-byte boundaries (`ANIM.C:42`, 303 padding bytes in all) and
+    decodes to the FLI's 42 frames byte for byte; each of its frames is a delta from the frame
+    **two** back and never from the one before, because `PAM/OUTTAA.C:51-60` double-buffers two
+    screen pages (`ulosta_frame(0x0a000)`/`tw_setstart(0)` alternating with `0x0a400`/`16384`).
+    Task A6's decoders assert all 42 pairs; this finding is the record so Phase 4 does not have
+    to re-derive it.
 
 ---
 

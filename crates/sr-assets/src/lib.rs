@@ -2,10 +2,11 @@
 //!
 //! One module per family. Task A2 lands the Origin PIC container ([`origin`]),
 //! A3 the IFF images ([`iff`]) and A4 the RIX3 screens ([`rix`], behind `.CLX`
-//! and `.SCI`) and the headerless VGA palettes ([`pal`]); the two animation
-//! formats (A6) follow and plug into [`load`] and [`sniff`]. [`omf`] (A5) is the
-//! odd one out: it reads the `.OBK`/`.OBJ` container the original's linker put
-//! assets in, never an image, and exists to prove the tree complete.
+//! and `.SCI`) and the headerless VGA palettes ([`pal`]); A6 the two animation
+//! formats ([`anim`]) — the FLI `sniff` reads and the `.ANI` it cannot, which
+//! `load_frames` is the door for. [`omf`] (A5) is the odd one out:
+//! it reads the `.OBK`/`.OBJ` container the original's linker put assets in,
+//! never an image, and exists to prove the tree complete.
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
 //! a pixel somewhere before:
@@ -28,6 +29,7 @@
 //! - **A decoder never reads past its input.** Malformed and truncated input is
 //!   an [`AssetError`], never a panic and never a short read.
 
+pub mod anim;
 pub mod iff;
 pub mod omf;
 pub mod origin;
@@ -79,7 +81,11 @@ impl std::fmt::Debug for Image {
 /// because it cannot know the geometry — [`raw_surface`] is its door.
 /// [`Format::Pal`] is the same shape of absence — 768 bytes with no header — and
 /// is refused by `load` for a different reason: it has no pixels to put in an
-/// [`Image`]. [`pal::decode`] is its door. [`Format::Omf`] is not an image format
+/// [`Image`]. [`pal::decode`] is its door. [`Format::Fli`] is the tree's one
+/// animation container with a magic (a `u32` size then `11 AF`, `PAM/PRAX4.FLI`)
+/// and [`Format::Ani`] the one without (a record stream that starts with a run
+/// length), and neither has a single picture to return: [`load_frames`] is their
+/// door. [`Format::Omf`] is not an image format
 /// at all: it is the build container [`omf::extract_ledata`] reads, never
 /// returned by [`sniff`] (an OMF file opens with a record type, not a magic) and
 /// refused by [`load`].
@@ -202,7 +208,9 @@ pub fn sniff(bytes: &[u8]) -> Option<Format> {
 /// has no geometry to read, and [`Format::Pal`] has no pixels to return. Both
 /// name their own door in the error — [`raw_surface`] and [`pal::decode`].
 ///
-/// FLI and ANI are [`AssetError::Unsupported`] until their decoders land with A6;
+/// The two animations are refused for a reason of their own: they are 42
+/// pictures, not one, and returning the first would be a silent guess about what
+/// the caller wanted. Both say so and name [`load_frames`].
 /// [`Format::Omf`] is refused for good, because a blob's payload is not a picture
 /// — [`omf::extract_ledata`] is its door.
 pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
@@ -222,7 +230,7 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
         }),
         Format::Fli | Format::Ani => Err(AssetError::Unsupported {
             format,
-            what: "no decoder for this format yet".to_string(),
+            what: "an animation, not a picture: load_frames(bytes, format) is its door".to_string(),
         }),
         Format::Omf => Err(AssetError::Unsupported {
             format,
@@ -243,15 +251,19 @@ pub fn load_path(path: &Path) -> Result<Image, AssetError> {
 }
 
 /// Every frame in `bytes`. A still container is one frame — the Origin family,
-/// IFF and RIX3; only FLI and the `.ANI` scheme carry more than one, and those
-/// land with task A6.
+/// IFF and RIX3 — and the two animations are decoded to all of theirs: the FLI's
+/// record chain ([`anim::decode_fli`], 42 frames in the tree's file) and the
+/// `.ANI`'s record stream ([`anim::decode_ani`], the same 42). A trailing
+/// partial frame is [`AssetError::Truncated`], never a short list.
 pub fn load_frames(bytes: &[u8], format: Format) -> Result<Vec<Image>, AssetError> {
     match format {
         Format::Origin | Format::Iff | Format::Rix3 => Ok(vec![load(bytes, format)?]),
+        Format::Fli => anim::decode_fli(bytes),
+        Format::Ani => anim::decode_ani(bytes),
         _ => Err(AssetError::Unsupported {
             format,
-            what: "not implemented; only the Origin family, IFF and RIX3 are containers this \
-                   decoder reads yet"
+            what: "not a container of frames: pal::decode, raw_surface and omf::extract_ledata \
+                   are the doors for a palette, a bare dump and a build container"
                 .to_string(),
         }),
     }
