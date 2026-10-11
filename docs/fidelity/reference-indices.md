@@ -208,6 +208,7 @@ table.
 |---|---|---|---|---|---|
 | BEGLOGO | `SECOND 2` | 320×400 Mode X | 430, 470, 560, 900 | `out/beglogo-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` |
 | ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1 — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
+| U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640, 7760 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — including the two moving keyframes, which landed in the same alignment group (§5.4) |
 
 ### Adding a row
 
@@ -620,3 +621,154 @@ rows 0–24 black, 25–174 picture, 175–184 black, 185–349 picture, 350–3
 split and shifted as the next part takes the screen. No keyframe is taken in it, and 5950 is the
 last 320×400 index sampled. The next part (U2A) starts at 5960 or 5961 and is 320×200 — §5 is its
 row.
+
+---
+
+## 5. U2A
+
+`SECOND 1`'s second part: a held "landing pad" scene, then a flying saucer over the same
+landscape, then the landscape alone, then a second view of it. 320×200, one geometry, from 5960 or
+5961 to a mode change in **(7810, 7950]** — about 27 seconds. It is the first part in the phase
+whose screen the oracle reads as *indices* for some of its frames and as RGB for others (§5.3), and
+the first whose keyframes include moving ones that still re-capture byte-identically.
+
+The source is `VISU/C/U2A.C`: it loads its scene data (`U2A.0xx`) and a background picture, waits
+for the music to reach one position (`VISU/C/U2A.C:227-239`, a `for(;;)` around `int 0fch` with
+`a>10 && b>46`), sets the screen up (`vid_init(3) ////// oversample x 4` at `:242`,
+`vid_window(0L,319L,25L,174L,512L,…)` at `:247`), and then runs a four-buffer animation loop
+(`cl[0..3]`, `copper2` at `:105-130`, the loop at `:259-…`) that ends when the music reaches a
+second position (`a>11 && b>54`, `:276`) — `xit` then unwinds it.
+
+### 5.1 The sweeps, and what the sheets showed
+
+```
+out/b3-u2a-sweep1   5960,6300,6600,6900,7200,7500,7800,8100,8400,8700   exit 2, refused at 6300
+out/b3-u2a-sweep2   6300,7000,7700,8400,9100,9800                       exit 2, refused at 8400
+out/b3-u2a-sweep3   5960,6200,6450,6700,6950,7200,7450,7700,7950,8100,8200   exit 2, refused at 7950
+out/b3-u2a-scan     5960…7810 step 50 (38 indices)                      exit 0
+```
+
+The refusals are the boundary story (§5.4). The frames they left on disk, and the scan, give the
+part's shape. Tiles, in the order each run laid them out:
+
+- **sweep3's 6300** — the landscape with a **yellow wireframe grid** across its lower half: the
+  "pad". **7000** and **7700** — the same landscape with no grid at all. (Sweep 2, another session,
+  had 6300 as the pad and 7000 and 7700 plain, so the pad arrives and leaves at about the same
+  place in both.)
+- **the scan**, the part in one session, every 50th frame: 5960 plain landscape; **6010–6960 the
+  pad, one `sha256` for all twenty samples** — a hold of at least 950 frames; 7010 plain; **7060,
+  7110, 7160, 7210, 7260 a grey saucer that fills the frame and recedes**; 7310, 7360, 7410 a small
+  blue-white craft shrinking against the sky; 7460, 7510 the plain landscape; 7560, 7610, 7660 the
+  plain landscape again, one `sha256`; **7710 a flat `(251,251,251)` frame**, one colour, the only
+  flush-white frame the phase has captured; 7760, 7810 the landscape with a glowing orange object
+  on the horizon, and a picture band one row lower (rows 25–175 rather than 25–174).
+
+So the sheet says: pad hold → saucer → plain hold → flash → second view. The pad hold and the plain
+hold are where this part's keyframes belong, and only the saucer moves.
+
+### 5.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 6500 | the **pad** — the landscape with the yellow wireframe grid, 950 frames into a hold that the scan shows running from 6010 to 6960. | `.rgb` only | rgb `11a66eb0…` |
+| 7300 | the **saucer receding** — a small blue-white craft against the sky, mid-animation. | `.rgb` + `.idx` | rgb `0a7c2216…`, idx `b50f52f4…` |
+| 7640 | the **plain landscape**, inside a hold the scan shows running from 7560 to 7660. | `.rgb` + `.idx` | rgb `0a68ffb9…`, idx `c51ba997…` |
+| 7760 | the **second view** — the landscape with a glowing orange object on the horizon, and the band one row lower. | `.rgb` only | rgb `5d558081…` |
+
+Two of the four are held screens and two move, which is the split this part actually has. 6500 is
+chosen deep inside the pad's 950-frame hold rather than at its edge (6010), because the hold's first
+frames are within a few tens of frames of U2A's own mode change — an index that close to it is not
+safe to put in a reference (§5.5). 7760 is at the far end for the same reason in reverse: it is the
+last thing sampled before the boundary and it is the part's second view.
+
+Full hashes of the six files in `reference/parts/u2a/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 6500 | `frame_006500.rgb` | `11a66eb08a14b3cf65528ff982c272791393af06d9afacd3a2e85eb1dc81cf7e` |
+| 7300 | `frame_007300.idx` | `b50f52f4e5b2389f281cddce87031ec9da2fd90e50a30edd6df2d5115703bd24` |
+| 7300 | `frame_007300.rgb` | `0a7c2216cb3a7964d0221af01cfa07e8aab5372f39d9ef4f097e270decf3d590` |
+| 7640 | `frame_007640.idx` | `c51ba997410ec820a3695e18bfe0622a856e65c0163b60dc83b9addff5753f1c` |
+| 7640 | `frame_007640.rgb` | `0a68ffb92f0e208a3eb34ace29fa1ea91a51bebfea3ec2733ca30cd5d8b5bbd6` |
+| 7760 | `frame_007760.rgb` | `5d558081c851f3f1b8a01ef777834f83757308a01207a23290d890ccdee77378` |
+
+### 5.3 Held or moving, measured — and which frames carry indices
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 6500,7300,7640,7760 --out reference/parts/u2a --sheet out/u2a.png
+
+# the partner: a support frame each side of every keyframe, so the held/moving question is measured
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 6499,6500,6501,7299,7300,7301,7639,7640,7641,7759,7760,7761 --out out/u2a-recapture
+```
+
+The partner's triples, hashed:
+
+| keyframe | `K-1` | `K` | `K+1` | reading |
+|---|---|---|---|---|
+| 6500 | `11a66eb0…` | `11a66eb0…` | `11a66eb0…` | **held** — one `sha256` across the triple |
+| 7300 | `9f5fe99c…` | `0a7c2216…` | `0a7c2216…` | **moving** — the frame changes between 7299 and 7300 |
+| 7640 | `0a68ffb9…` | `0a68ffb9…` | `0a68ffb9…` | **held** — one `sha256` |
+| 7760 | `23fa5096…` | `5d558081…` | `5d558081…` | **moving** — changes between 7759 and 7760 |
+
+So 6500 and 7640 need no support frames, and 7300 and 7760 need theirs — and all twelve frames were
+captured anyway, which is what turns this table from an assumption into a measurement.
+
+**Which frames carry `.idx` is not a property of held-or-moving here.** In the same run, 7639,
+7640, 7641 and 7300 kept their indices and 6499–6501 and 7759–7761 did not; across the scan the
+plain-landscape frames at 7010 and 7560–7660 kept them and every sample of the pad (6010–6960) and
+of the second view (7760, 7810) did not. Reading the planes from offset 0 (`xtask/src/oracle/
+dosbox.rs:618-629`) only matches the screen when the *displayed* buffer is the one at offset 0, and
+this part rotates four animation buffers through its display start (`VISU/C/U2A.C:105-130`,
+`vid_setswitch(-1,clr)` inside `copper2`); the measurements above are consistent with that and are
+not evidence of motion.
+Either way the RGB is the frame that was asked for: it is the same bytes in every session.
+
+### 5.4 The re-capture: exit 0, identical, moving frames included
+
+```
+$ cargo xtask compare --reference reference/parts/u2a --rendered out/u2a-recapture \
+      --out out/u2a-recapture-diff
+frame 6500: 0.0000% differing (0/64000 px), max delta 0
+frame 7300: 0.0000% differing (0/64000 px), max delta 0
+frame 7640: 0.0000% differing (0/64000 px), max delta 0
+frame 7760: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 4}
+exit: 0
+```
+
+All four frames are byte-identical between the two directories, including the two that move. **That
+is the same-alignment-group case, and it should be read as one**: D17 measured that two sessions
+land in the same group about half the time, and this pair did. It is the first time in the phase
+that a moving screen has re-captured this way, and it is a stronger claim than ALKU's picture could
+make (§4.4) — but it is not a claim that this part's animation is session-independent, and nothing
+here tested the other group. The held pair (6500, 7640) is what carries the reproducibility;
+the moving pair is what shows the same group exists for this part too.
+
+**And the animation is coarse enough that the alignment has something to bite on**: 7300's picture
+changed from the frame before it and held for the frame after, so a session one frame out of phase
+would find its answer at offset ±1 — exactly the case the support frames exist for. The other
+group was not observed, so this is a statement about the frames' spacing, not about a result.
+
+### 5.5 Where the part ends
+
+```
+out/b3-u2a-sweep3 (5940…, 320×200)     refused at 7950: "frame 7950 is 320x400 where the capture
+                                       started at 320x200; capture one screen at a time"   exit 2
+out/b3-u2a-sweep2 (6300…, 320×200)     refused at 8400: same refusal                         exit 2
+out/b3-u2a-scan    (5960…7810, 320×200) exit 0 — 7810 is 320×200
+```
+
+So the change to the next part lies in **(7810, 7950]**, and 7810 is inside U2A. The window is
+wider than ALKU's because the two bracketting indices come from two sessions, and the *frame* of a
+mode change is not perfectly stable across sessions — measured at ALKU's end, where 5960 was
+320×400 in `out/b3-alku-sweep1` and 320×200 in `out/b3-u2a-scan` (§4.5). Nothing between 7810 and
+7950 was captured; the part's last sampled frame is 7810.
+
+**U2A's own start is the same kind of fuzziness**, and it is worth stating because it constrains
+where U2A's keyframes can go: 5960 is 320×200 plain landscape in `out/b3-u2a-scan` and still
+320×400 ALKU in `out/b3-alku-sweep1`. An index in the first few tens of frames of a part can belong
+to either side of a mode change depending on the session, so no reference keyframe should sit
+there — which is why U2A's earliest keyframe is 6500, 490 frames clear of it.
