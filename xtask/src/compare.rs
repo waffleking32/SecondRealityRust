@@ -30,6 +30,13 @@
 //! frame is resized from the view every tick, so a run can legitimately hold
 //! frames of more than one size, and comparing the overlapping corner of two
 //! different geometries would report a number that means nothing.
+//!
+//! `--out` defaults to `out/compare` (gitignored, and it cannot collide with a
+//! `--dump-dir`, which the caller names). The reference directory is
+//! **input-only**: an `--out` that resolves inside it is refused, resolved
+//! paths and all, because a report written among the captures would dirty the
+//! bytes every later diff is measured against — the same principle that makes
+//! `reference/original/` read-only.
 
 use std::fmt;
 use std::fs;
@@ -607,6 +614,57 @@ fn capture_out(out: &Path, name: &str) -> PathBuf {
     }
 }
 
+/// Where the reports go when `--out` is not given. Gitignored, and it cannot
+/// collide with a `--dump-dir`, which the caller names explicitly.
+const DEFAULT_OUT: &str = "out/compare";
+
+/// The report directory for a run: `--out` if it was given, the default
+/// otherwise.
+fn output_root(out: Option<&Path>) -> PathBuf {
+    out.map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT))
+}
+
+/// `path` with symlinks, `.` and `..` resolved as far as it exists: the
+/// deepest ancestor that exists is canonicalised and the rest appended. The
+/// path does not have to exist yet, but it still has to be comparable with a
+/// path that does.
+fn resolve(path: &Path) -> Result<PathBuf, CompareError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| CompareError::Io(format!("cannot read the working directory: {e}")))?
+            .join(path)
+    };
+    for ancestor in absolute.ancestors() {
+        if let Ok(resolved) = fs::canonicalize(ancestor) {
+            let rest = absolute.strip_prefix(ancestor).unwrap_or(Path::new(""));
+            return Ok(resolved.join(rest));
+        }
+    }
+    Ok(absolute)
+}
+
+/// Refuse a report directory inside the reference: the captures are inputs,
+/// not outputs, and a report written among them would dirty the bytes every
+/// later diff is measured against. Both paths are resolved first, so a
+/// relative path, a trailing slash or a `..` cannot slip past.
+fn refuse_out_inside_reference(out: &Path, reference: &Path) -> Result<(), CompareError> {
+    let out = resolve(out)?;
+    let reference = resolve(reference)?;
+    if out.starts_with(&reference) {
+        return Err(CompareError::Io(format!(
+            "--out {} is inside --reference {}: the reference captures are inputs, not outputs, and \
+             a report written among them would dirty the frames every later diff is measured \
+             against. Pass --out somewhere else; the default is {DEFAULT_OUT}",
+            out.display(),
+            reference.display()
+        )));
+    }
+    Ok(())
+}
+
 /// `cargo xtask compare`: optionally run a command to produce the rendered
 /// frames, diff them against the reference, print and write the report.
 ///
@@ -627,6 +685,10 @@ pub fn command(
                 .into(),
         ));
     }
+    let out = output_root(out);
+    // Before anything is run or written: the harness must not write into its
+    // own inputs.
+    refuse_out_inside_reference(&out, reference)?;
     if let Some(command) = run {
         // Through `sh -c`, so it can be a whole command line rather than a
         // single path.
@@ -643,13 +705,12 @@ pub fn command(
     }
 
     let rendered = rendered.unwrap_or(reference);
-    let out = out.unwrap_or(reference);
     let reference_captures = resolve_captures(reference)?;
     let rendered_captures = resolve_captures(rendered)?;
 
     let mut identical = true;
     for (reference_capture, rendered_capture) in pair_captures(&reference_captures, &rendered_captures)? {
-        let capture_out = capture_out(out, &reference_capture.name);
+        let capture_out = capture_out(&out, &reference_capture.name);
         let outcome = compare_capture(reference_capture, rendered_capture, &capture_out)?;
         for frame in &outcome.report.frames {
             let prefix = if reference_capture.name.is_empty() {
@@ -1137,6 +1198,72 @@ mod tests {
         let out = scratch("default-rendered-out");
 
         assert_eq!(command(&dir, None, None, Some(&out)).unwrap(), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn the_default_report_directory_is_out_compare() {
+        // Not the reference directory: nothing this tool writes may land among
+        // the captures, and `out/` is already ignored by git.
+        assert_eq!(output_root(None), PathBuf::from("out/compare"));
+        assert_eq!(
+            output_root(Some(Path::new("somewhere/else"))),
+            PathBuf::from("somewhere/else")
+        );
+    }
+
+    #[test]
+    fn an_out_directory_inside_the_reference_is_refused() {
+        // reference/ is input-only: a report written among the captures would
+        // dirty the bytes every later diff is measured against.
+        let reference = scratch("guard-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+        let inside = reference.join("reports");
+
+        let error = command(&reference, Some(&reference), None, Some(&inside)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("--out"), "{message}");
+        assert!(message.contains(&inside.display().to_string()), "{message}");
+        assert!(message.contains(&reference.display().to_string()), "{message}");
+        assert!(!inside.exists(), "the refused directory must not be created");
+    }
+
+    #[test]
+    fn the_reference_itself_is_refused_as_an_out_directory() {
+        let reference = scratch("guard-self-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+
+        assert!(command(&reference, Some(&reference), None, Some(&reference)).is_err());
+        assert!(!reference.join("report.json").exists());
+    }
+
+    #[test]
+    fn a_dotted_or_unmade_path_cannot_slip_past_the_out_guard() {
+        let reference = scratch("guard-slip-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+
+        // A trailing `/.` names the reference itself.
+        assert!(command(&reference, Some(&reference), None, Some(&reference.join("."))).is_err());
+        // A path under the reference whose first component does not exist yet.
+        assert!(command(
+            &reference,
+            Some(&reference),
+            None,
+            Some(&reference.join("deep/../deeper"))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_report_directory_beside_the_reference_is_allowed() {
+        let reference = scratch("guard-ok-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+        let out = scratch("guard-ok-out");
+
+        assert_eq!(
+            command(&reference, Some(&reference), None, Some(&out)).unwrap(),
+            ExitCode::SUCCESS
+        );
+        assert!(out.join("report.json").is_file());
     }
 
     #[test]

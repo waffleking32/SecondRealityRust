@@ -37,10 +37,13 @@ enum Command {
         command: ReferenceCommand,
     },
     /// Diff frames against a reference capture and report how far apart they
-    /// are. Exit code 0 when every frame is identical, 1 when any differs.
+    /// are. Exit code 0 when every frame is identical, 1 when any differs, 2
+    /// when the comparison could not run at all (a geometry or frame-count
+    /// mismatch, a missing or malformed manifest or frame file).
     Compare {
         /// The capture to measure against: a directory holding `manifest.json`,
         /// or one holding capture subdirectories (as `reference/check_a` does).
+        /// A capture is input-only: nothing this tool writes may land inside it.
         #[arg(long)]
         reference: PathBuf,
         /// Where the frames to measure came from, in the same shape. Defaults
@@ -52,7 +55,8 @@ enum Command {
         #[arg(long = "run")]
         run: Option<String>,
         /// Where `report.json` and the diff images go. Defaults to
-        /// `--reference`; a tree writes one report per capture, by name.
+        /// `out/compare`; a tree writes one report per capture, by name. An
+        /// `--out` inside `--reference` is refused.
         #[arg(long)]
         out: Option<PathBuf>,
     },
