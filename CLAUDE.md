@@ -98,7 +98,7 @@ differing-pixel percentage, max channel delta, and a diff image per frame.
 
 A part is done when its frames match. Record the evidence in `PROGRESS.md`.
 
-### Geometry caveats worth knowing before they bite
+### Caveats worth knowing before they bite
 
 - **A view's line stride is unset by default, and resolves to the surface's row stride.**
   `y_line_offset` is `Option<u16>`; `None` reads the surface's own rows, which is what a
@@ -114,6 +114,13 @@ A part is done when its frames match. Record the evidence in `PROGRESS.md`.
   `docs/decisions.md` D16. It will need settling when ENDSCRL lands.
 - **Below a split, the scanline count restarts.** Line compare resets the CRTC's counters,
   so `View::effective_at` returns the scanline *within* the view.
+- **SDL names packed pixel formats by bit significance, not memory order.** For a byte
+  array with red first — which is what `present` writes — the correct enum is
+  `PixelFormatEnum::RGBA32`, not `RGBA8888`. They are reverses of each other on a
+  little-endian host, and the wrong one reads red as alpha: the screen goes red and every
+  test still passes, because nothing else in the project looks at a texture. Anything that
+  displays or exports pixels needs a test through SDL's format tables, like
+  `window::tests::the_texture_format_reads_the_presenters_bytes_in_order`.
 
 ## Fidelity notes
 

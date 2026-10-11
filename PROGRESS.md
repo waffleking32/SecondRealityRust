@@ -73,9 +73,9 @@ can tell "the frames differ" from "the tool could not tell".
 
 ### Phase 0 — Foundation & harness (done, tag `phase-0`)
 
-Fourteen tasks on branch `phase-0-foundation`. **All tests pass: 159 across the workspace, zero
-warnings** — 98 in `sr-engine`, 55 in `xtask`, 5 unit + 1 integration in `bins/secondreality`. (155
-at close-out; the four the post-review fixes added are below.)
+Fourteen tasks on branch `phase-0-foundation`. **All tests pass: 160 across the workspace, zero
+warnings** — 98 in `sr-engine`, 55 in `xtask`, 6 unit + 1 integration in `bins/secondreality`. (155
+at close-out; the five added since are below.)
 
 **What was built.** `sr-engine`, a dependency-free software VGA model: an indexed `Surface`, a
 6-bit `Palette` with a per-scanline `PaletteTimeline`, `View` (the CRTC — display start, line
@@ -89,7 +89,7 @@ test card cycling the five visually-significant hardware behaviours of spec §2.
 
 | Criterion (spec §10) | Evidence |
 |---|---|
-| `cargo test` green | 159 passed, 0 failed, no warnings |
+| `cargo test` green | 160 passed, 0 failed, no warnings |
 | Test card at correct speed, exercising all five behaviours | **703 ticks in 10.040 s = 70.019 Hz** (`--run-seconds 10`); three further runs matched `floor(70.086 × elapsed)` exactly. One property test per behaviour in `testcard.rs` |
 | `xtask reference capture` captures from the original | `reference/check_a/{title,part}/`. **Four independent captures agree byte-for-byte** — two runs, each capturing the 320×400 title screen and the 320×200 part |
 | `xtask compare` produces a diff report | Identical → `verdict: identical`, exit 0. Differing → `verdict: different`, exit 1, diff PNGs. Hard errors → exit 2 |
@@ -131,8 +131,9 @@ test card cycling the five visually-significant hardware behaviours of spec §2.
 **Post-review fixes.** The closing fidelity review found all three of the phase's contested decisions
 sound — the split model, the DAC widening rule and the independent line stride — and left three
 findings, all now fixed. **`phase-0` was moved forward to include them**; `9cecc1b` is the close-out
-as reviewed, and the four commits after it are these fixes. A phase that ships a known trap is not
-done, and the tag is what a resuming session checks out.
+as reviewed, and every commit after it is Phase 0 work — these three fixes, the window's colour bug,
+and the records of both. A phase that ships a known trap is not done, and the tag is what a resuming
+session checks out.
 
 The three findings:
 
@@ -153,6 +154,20 @@ The three findings:
   `00e3181`.
 - **A citation slip in D14**: `src/utils/rgb.h:31-36` is `rgb5_to_8`; `rgb6_to_8` is 22-28.
   `334f82b`.
+
+**And the window was finally watched — which found a bug no test could have.** Task 9's step 5 was to
+verify the windowed run by hand, and it was the one thing no agent could do; the phase recorded that
+gap rather than hiding it. The user looked, and reported the colours as *mostly reddish*. The engine
+was right — a headless dump is a correct sixteen-colour spectrum — and so were the captures from the
+original. The window declared `SDL_PIXELFORMAT_RGBA8888` for a buffer holding a byte array with red
+first, and SDL names packed formats by bit significance rather than memory order, so on little-endian
+it read `present`'s **red byte as alpha**: every pixel at full red, green and blue swapped. Fixed in
+`03a3b11` by declaring SDL's own "RGBA byte array" format, `RGBA32` (which resolves to `ABGR8888` on
+little-endian), with a test that decodes a known pixel through SDL's format tables — it failed against
+the old value for exactly the reported reason. Reproduced from a dumped frame first: the misread puts
+R at 255 on 64,000 of 64,000 pixels against 16,000 of 64,000 for the frame the engine drew.
+**Re-run after the fix, the colours are correct** — which closes the phase's only unverified visual
+claim, and it was worth closing: the first look found a bug that no test in the repository could see.
 
 **Working note.** The phase's ledger — every ruling, every deferred minor, every plan correction —
 is at `.superpowers/sdd/00-foundation/progress.md`. It is git-ignored scratch and will be deleted
