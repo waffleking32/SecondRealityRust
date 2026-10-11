@@ -90,10 +90,18 @@ Five things the command needs, each of which cost time to discover:
 
 **A capture can hold adjacent indices** — `--frames 2449,2450,2451` — because a run of
 indices closer together than one frame's indexed read (~25 rendered frames) is all taken
-before any of it is read; the read itself is unchanged (D19). A capture that will be
-compared against another capture should hold **one frame beyond each end** of its keyframe
-range (`--frames N₁-1 … N_k+1`), because the ±1 alignment search (D18) can only pair a
-reference frame with a rendered frame that exists.
+before any of it is read; the read itself is unchanged (D19). Two things follow.
+
+The **reference holds keyframes only**; the capture that will be compared *against* it holds
+**one support frame beyond each end** of the keyframe range (`--frames N₁-1 … N_k+1`). That
+asymmetry is measured, not stylistic: `compare` pairs *every* frame of the reference, so a
+support frame in the reference is itself a reference index whose counterpart lies one further
+out — two captures both holding `N₁-1 … N_k+1` refuse at the outermost index (D19). The two
+captures are two different commands.
+
+And a batched run is **read after it is taken**, so a run of *k* indices spends ~23·*k*
+rendered frames reading afterwards: do not list a distant index less than ~25·*k* frames
+behind a support run, or it is refused (D19).
 
 ### Comparing
 

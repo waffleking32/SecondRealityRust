@@ -1111,14 +1111,28 @@ because the rule only fires within a read's reach. Measured after the change:
   (0.2141%, 0.5984%, 0.2766% of pixels) with no refusal, where the same pair against a
   capture holding only the same three indices was **refused, exit 2**.
 
-**The convention that follows, and B2's to apply:** a capture compared against another
-capture must hold **one frame beyond each end** of its keyframe range — `--frames N₁-1 … N_k+1`
-— because a reference frame can only pair with a rendered frame that exists. Measured: two
-captures of the same three indices in different phases (`out/b1b-tri-a` vs `out/b1b-tri-b`)
-refuse, exit 2, "reference frame 2451 has no rendered frame within ±1 … the nearest rendered
-index is 2449", while `tri-b` against the five-index span (2448–2452) aligns completely. The
-support frames are support: they are captured, recorded in the manifest like any other frame,
-and are not keyframes in `reference-indices.md`.
+**The convention that follows is asymmetric: the reference holds keyframes only; the
+capture that will be compared *against* it holds one support frame beyond each end of the
+keyframe range** (`--frames N₁-1 … N_k+1`). Not a style choice — the symmetric version was
+measured failing. `compare` pairs *every* frame of the reference, so a support frame sitting
+in the reference is itself a reference index, and its own counterpart lies one further out
+still: two captures both holding `N₁-1 … N_k+1` still refuse at the outermost index (exit 2,
+"reference frame 2451 has no rendered frame within ±1 of it … the nearest rendered index is
+2449" — `out/b1b-tri-a` against `out/b1b-tri-b`, 2449–2451 each, phases one frame apart),
+while the reference's 2449–2451 against the five-index span 2448–2452 aligns completely (all
+three at offset −1). So the two captures are **two different commands**: the reference's
+comes from keyframes alone, the partner's adds the support frames. Support frames are
+support — they go in the manifest like any other frame, in the scratch directory
+(`out/…-recapture`), never in `reference/parts/`, and not in `reference-indices.md`'s table.
+
+**Leave room after a support run.** A batched run is read *after* it is taken, so a batch of
+*k* frames spends ~23·*k* rendered frames reading, and a distant index listed too soon behind
+it is refused. Measured: `--frames 2448,2449,2450,2451,2452,2540` captures the five and then
+refuses the sixth — "the emulator reached frame 2552 before frame 2540 could be captured",
+100 frames of deferral for five frames of support. That is a loud refusal and not a
+regression (the same list was refused before the batching too), but a capture list must not
+put a distant index less than ~25·*k* frames after a run of *k*. Keyframes hundreds of
+frames apart are naturally clear of it.
 
 **Two residues, recorded and not thresholded.** A same-phase re-capture of the five-index
 span (`out/b1b-span-a` vs `out/b1b-span-b` and vs `out/b1b-span-c`) was byte-identical on

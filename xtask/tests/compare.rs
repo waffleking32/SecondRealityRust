@@ -122,7 +122,9 @@ fn frames_that_cannot_be_paired_exit_2_and_leave_no_report() {
     // refusal is pinned to the window and not to the frame values.
     let reference = scratch("unpairable-reference");
     let rendered = scratch("unpairable-rendered");
-    let out = scratch("unpairable-out");
+    // A path nothing has made yet, so the assertion below can tell a directory
+    // the comparison left from one that was there to begin with.
+    let out = scratch("unpairable-out").join("reports");
     write_capture(&reference, &[(700, 1), (900, 1)]);
     write_capture(&rendered, &[(400, 1), (600, 1)]);
 
@@ -143,16 +145,24 @@ fn frames_that_cannot_be_paired_exit_2_and_leave_no_report() {
     assert!(output.contains("700"), "{output}");
     assert!(output.contains("±1"), "{output}");
     assert!(output.contains("means nothing"), "{output}");
+    // Nothing at all: not a report, not a diff image, and not even the empty
+    // output directory. A script that found a directory would have to open it
+    // to learn that the comparison never ran; the exit code is the answer.
     assert!(
         reports(&out).is_empty(),
         "a refused comparison must not leave a report behind"
+    );
+    assert!(
+        !out.exists(),
+        "a refused comparison must not leave so much as an empty directory behind"
     );
 }
 
 #[test]
 fn frames_that_are_identical_exit_0() {
     let capture = scratch("identical");
-    let out = scratch("identical-out");
+    // A path nothing has made yet: a comparison that writes something makes it.
+    let out = scratch("identical-out").join("reports");
     write_capture(&capture, &[(700, 1), (900, 2)]);
 
     let run = xtask(&[
@@ -174,7 +184,7 @@ fn frames_that_are_identical_exit_0() {
 fn frames_that_differ_at_matching_indices_exit_1() {
     let reference = scratch("differing-reference");
     let rendered = scratch("differing-rendered");
-    let out = scratch("differing-out");
+    let out = scratch("differing-out").join("reports");
     write_capture(&reference, &[(700, 1), (900, 1)]);
     write_capture(&rendered, &[(700, 2), (900, 1)]);
 

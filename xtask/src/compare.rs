@@ -699,6 +699,18 @@ fn offsets_used(offsets: &BTreeMap<i32, usize>) -> String {
         .join(", ")
 }
 
+/// Make `out` just before something goes in it.
+///
+/// A comparison that refuses must leave nothing behind — not even an empty
+/// directory, which a script would have to open to find out that the comparison
+/// never ran and the exit code, not the tree, is the answer it needs.
+fn prepare_out(out: &Path) -> Result<(), CompareError> {
+    if out.is_dir() {
+        return Ok(());
+    }
+    fs::create_dir_all(out).map_err(|e| CompareError::Io(format!("{}: {e}", out.display())))
+}
+
 /// Compare every frame of one capture pair, write its report and one diff
 /// image per frame, and hand back what was written.
 fn compare_capture(
@@ -706,8 +718,6 @@ fn compare_capture(
     rendered: &Capture,
     out: &Path,
 ) -> Result<CaptureOutcome, CompareError> {
-    fs::create_dir_all(out).map_err(|e| CompareError::Io(format!("{}: {e}", out.display())))?;
-
     let mut frames = Vec::new();
     let mut modes = Vec::new();
     for (reference_frame, rendered_frame) in paired_frames(reference, rendered)? {
@@ -772,6 +782,7 @@ fn compare_capture(
         };
 
         let diff_image = format!("diff_{:06}.png", reference_frame.index);
+        prepare_out(out)?;
         write_diff_image(&out.join(&diff_image), &reference_rgb, &mask, width, height)?;
 
         frames.push(FrameReport {
@@ -801,6 +812,7 @@ fn compare_capture(
         frames,
         summary,
     };
+    prepare_out(out)?;
     let path = out.join(REPORT_FILE);
     let mut json = serde_json::to_string_pretty(&report)
         .map_err(|e| CompareError::Io(format!("cannot serialise {}: {e}", path.display())))?;
@@ -1618,7 +1630,8 @@ mod tests {
         let rendered = scratch("count-rendered");
         write_reference_capture(&reference, (4, 2), &[flat(100, 1, 8), flat(200, 1, 8)]);
         write_rendered_capture(&rendered, "testcard", &[(flat(100, 1, 8), (4, 2))]);
-        let out = scratch("count-out");
+        // A path nothing has made yet: the refusal must not make it either.
+        let out = scratch("count-out").join("reports");
 
         let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
         match error {
@@ -1627,6 +1640,9 @@ mod tests {
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
+        // A refusal leaves nothing to read: no report, and no output directory
+        // for a script to open and wonder about.
+        assert!(!out.exists(), "{} was left behind", out.display());
     }
 
     #[test]
