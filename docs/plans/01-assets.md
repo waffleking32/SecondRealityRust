@@ -704,9 +704,10 @@ The measurement A1 already made says **nothing needs recovering**. Turn that fro
 checked result, and record it as the task's evidence:
 
 1. **Prove completeness.** For every blob in the inventory's §D that has a standalone twin, assert
-   in a test that `extract_ledata(blob) == std::fs::read(twin)`. Eighteen of them, all byte-exact.
-   That is the phase's evidence for "provenance file complete" from the EXE side: nothing the parts
-   link exists only in a build artifact.
+   in a test that `extract_ledata(blob) == std::fs::read(twin)`. **Twenty-five of the twenty-nine
+   data blobs** reconstruct a standalone file byte-exactly; the other four are the blob-only
+   payloads step 2 answers. That is the phase's evidence for "provenance file complete" from the
+   EXE side: nothing the parts link exists only in a build artifact.
 2. **Answer the four blob-only payloads by name.** `TECHNO/_CIRCLE.OBK` (24,000) and
    `_CIRCLE2.OBK` (8,000) are linked but carry no image header and are not picture sizes;
    `_PIC1.OBK` and `_PIC2.OBK` hold pictures but are **not linked** — `TECHNO/MAKEFILE:7`'s
