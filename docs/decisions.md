@@ -781,7 +781,9 @@ that a later phase is most likely to trip over:
 B1 asked whether the boot can be made to repeat. It can, and it took two changes rather
 than one: the guest has to run its own boot recipe (route 1), and the emulator has to be
 run silent. With both, the same boot index is the same screen in every run, and captures
-of a screen that moves repeat byte for byte. Measured on
+of a screen that moves repeat byte for byte *within an alignment group* — a session's
+captures are internally consistent, and a re-run lands on the same pictures about half the
+time, which the last section here measures. Measured on
 `dosbox-automation 0.85.1 (6d100)`, `SECOND 2`, 30000 cycles/ms, on a 320×200 part screen
 whose picture changes ~3–7% of its pixels per frame (the vector object turning over its
 checkered floor) — a screen where a one-frame difference is visible.
@@ -805,10 +807,27 @@ primary config gains an `[autoexec]` section — `MOUNT C -RO <abs cwd>`, `C:`,
 `AUTOTYPE` comes before the program line because the program does not return: it schedules
 its press/release pairs through `MAPPER_AutoType` → `PIC_AddEvent` (`gui/mapper.cpp:1220-1244`)
 on the emulated clock, then exits. Nothing in the boot waits on the host, so nothing in it
-jitters with the host. `--keys "KBD_left KBD_enter"` is unchanged as the flag's surface;
-under this recipe the names lose only their `KBD_` prefix, because that is the only
-difference between the `KBD_KEYS` enumerators and the mapper's button names
-(`KBD_left` → `left`, `left` → `left`).
+jitters with the host.
+
+**The two key vocabularies are not one spelling with a prefix**, and getting that wrong
+answered the setup screen with nothing and wrote a capture of the menu at exit 0. `--keys`
+takes `input/sequence`'s `KBD_KEYS` names; `AUTOTYPE` wants the mapper's button names; 27
+of the 105 keys differ beyond the prefix — `KBD_backspace` is `bspace`, `KBD_leftshift` is
+`lshift`, `KBD_leftctrl` is `lctrl`, `KBD_leftbracket` is `lbracket`, and every keypad key
+(`KBD_kp8` is `kp_8`, `KBD_kpenter` is `kp_enter`). `AUTOTYPE` does not report an unknown
+name: `type_button` only reaches `LOG_ERR` (`gui/mapper.cpp:209-222`) and presses nothing,
+and that log is the scratch file the capture deletes. Both halves were measured, not read:
+a run with `AUTOTYPE -w 2 kp8 backspace leftshift left` logs six "Couldn't find a button"
+lines and a run with `AUTOTYPE -w 2 kp_8 bspace lshift left` logs none, while the API
+answers `{"key": "KBD_kp8"}` with 200 and `{"key": "KBD_kp_8"}` with 400 "Unknown key".
+`KEY_NAMES` in `xtask/src/reference.rs` is therefore the real pairing, taken from the
+mapper's button layout and `KeyBlock` tables (`gui/mapper.cpp`) and the API's list
+(`webserver/input.cpp`, `key_name_map`); every name is validated against it before anything
+starts (exit 2, naming the key, in **both** recipes), and a capture whose keys do not clear
+the setup screen — the menu's default soundcard fails and drops the demo back to the DOS
+prompt — is refused by waiting for the demo's first **graphics** frame, because key names
+alone cannot judge a recipe (`KBD_kp8` is a real key and a real button, and it answers
+nothing there).
 
 **Silent is part of the recipe, and it is not the boot's doing.** With a real audio device
 the mixer follows the host's audio clock and the demo's music and animation drift against
@@ -824,8 +843,9 @@ is deterministic per frame. `spawn` now sets both (`SDL_AUDIODRIVER=dummy` and t
 captures at indices 2125/2250/2400 were byte-identical in all three pairwise comparisons
 (0.0000%, `verdict: identical`, exit 0), as were three at 1800/2000 after the `nosound`
 fix. The frames are not a still screen: within one run those three indices differ from
-each other by 20–40% of pixels, and one frame of the animation is worth ~2.6–4.2% of
-bytes, so the identical pairs could have differed. For contrast, the typed recipe at the
+each other by 20–40% of pixels, and one frame of the animation is worth 5.5–12.7% of bytes
+at those indices (2.6–4.2% at frame 2125, where the object turns more slowly), so the
+identical pairs could have differed. For contrast, the typed recipe at the
 same indices with the same silent emulator differed by 12.66–15.79% — the boot anchor's
 cost, now that it is the only difference left.
 
@@ -843,8 +863,12 @@ tool itself was measured doing it (four captures of index 3000 landed on 3000, 3
 and 3003, differing by 14–22% on that screen). The grab is now identified instead: the
 counter is read on both sides of it, and the emulator publishes a frame's pixels and
 counts it immediately afterwards, in that order and on one thread (`render.cpp:446`, then
-`sdl_gui.cpp:1205`), so a reading that did not move across the grab can only have seen
-that reading's frame. A grab that straddles a frame boundary is thrown away; a frame that
+`sdl_gui.cpp:1205`), so a reading that did not move across the grab names the frame that
+was published — with one narrow exception, a video-mode stop or reset calls
+`GFX_EndUpdate` without publishing (`GFX_Stop`, `sdl_gui.cpp:396-402`; `halt_render`,
+`render.cpp:349-353`), so a single counter value per stop can still see the old picture.
+Where such a stop changes geometry the capture's `GeometryChanged` refusal catches it, and
+the same counter reading also identifies the mode-change frames after it. A grab that straddles a frame boundary is thrown away; a frame that
 arrives late is refused, not relabelled; and the loop waits for exactly the index asked
 for, first sleeping off all but the last 25 frames (in one-second steps — a single long
 sleep was itself worth three frames, which is where the old lateness came from). Decoding

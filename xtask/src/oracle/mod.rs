@@ -194,6 +194,12 @@ pub trait Oracle {
     /// recorded boot recipe waits for the shell prompt and the setup screen
     /// rather than sleeping for guessed times (D14).
     fn wait_for_text(&mut self, needle: &str, timeout: Duration) -> Result<(), OracleError>;
+    /// Wait until the screen is in a graphics mode, or fail. This is how a
+    /// capture judges the keys it sent: the setup screen is text, every screen
+    /// the demo draws is graphics, and a key sequence that only reaches the
+    /// menu's default leaves the guest in text — either at the menu or back at
+    /// the DOS prompt after the soundcard it picked fails to start (D17).
+    fn wait_for_graphics(&mut self, timeout: Duration) -> Result<(), OracleError>;
     /// The frame counter, counted from the emulator's first rendered frame.
     fn frame_counter(&mut self) -> Result<u64, OracleError>;
     /// Wait for `index` to be the current frame, take it, and refuse — rather

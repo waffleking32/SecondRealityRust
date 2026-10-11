@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use std::time::Duration;
+
 use crate::oracle::{CapturedFrame, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIGIN};
 
 /// The pinned commit of `upstream/SecondReality` the port follows
@@ -41,6 +43,13 @@ pub const SETUP_SCREEN_TEXT: &str = "Soundcard";
 /// five seconds leaves about 4.8 s of margin and is what D17's captures were
 /// taken with.
 pub const AUTOTYPE_WAIT_SECONDS: f64 = 5.0;
+
+/// How long the setup screen has to disappear after the capture's keys were
+/// sent or run. It is answered within a second of the keys landing (the demo's
+/// first graphics frame follows 0.26 s after Enter, D14), and the keys
+/// themselves are placed `AUTOTYPE_WAIT_SECONDS` into the boot, so this only
+/// has to outlast the boot plus a little — it is the failure case that waits.
+pub const SETUP_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
 const MANIFEST_VERSION: u32 = 1;
 
@@ -191,7 +200,13 @@ pub fn autoexec_lines(
     })?;
     let mut lines = vec![format!("MOUNT C -RO {}", cwd.display()), "C:".to_owned()];
     if !keys.is_empty() {
-        let buttons: Vec<&str> = keys.iter().map(|key| autotype_name(key)).collect();
+        // Validation has already refused anything without a button; this is
+        // the lookup that has to be right, because AUTOTYPE presses nothing
+        // and says nothing for a name it does not know.
+        let buttons: Vec<&str> = keys
+            .iter()
+            .map(|key| autotype_button(key).ok_or_else(|| unknown_key(key, true)))
+            .collect::<Result<_, _>>()?;
         lines.push(format!(
             "AUTOTYPE -w {AUTOTYPE_WAIT_SECONDS} {}",
             buttons.join(" ")
@@ -201,12 +216,160 @@ pub fn autoexec_lines(
     Ok(lines)
 }
 
-/// `AUTOTYPE` names buttons the way the mapper does: `left`, `enter`, `kp_8`
-/// (`gui/mapper.cpp`), where `input/sequence` names the same keys by their
-/// `KBD_KEYS` enumerators. The capture's surface stays the `KBD_*` spelling
-/// `reference/check_a`'s manifest records, so the prefix is all that differs.
-fn autotype_name(key: &str) -> &str {
-    key.strip_prefix("KBD_").unwrap_or(key)
+/// The refusal a key gets when it is not one the capture can press. The
+/// offending name is always named, because the whole failure this guards
+/// against is a silently unpressed key.
+fn unknown_key(key: &str, autotype: bool) -> CaptureError {
+    let known = if autotype {
+        "a key the emulator's mapper has a button for"
+    } else {
+        "a key name the emulator's input API knows"
+    };
+    CaptureError::Options(format!(
+        "--keys: {key:?} is not {known}; names look like \"KBD_left KBD_enter\" \
+         (KBD_backspace is bspace to AUTOTYPE, KBD_kp8 is kp_8, and so on)"
+    ))
+}
+
+/// The two key namespaces, paired.
+///
+/// `input/sequence` names a key by its `KBD_KEYS` enumerator, `AUTOTYPE` by the
+/// mapper's button name, and **they are not the same word with a prefix on
+/// one side**: `KBD_backspace` is `bspace`, every keypad key differs
+/// (`KBD_kp8` is `kp_8`, `KBD_kpenter` is `kp_enter`), and so do the
+/// modifiers and brackets (`KBD_leftshift` is `lshift`, `KBD_leftctrl` is
+/// `lctrl`, `KBD_leftbracket` is `lbracket`). `AUTOTYPE` does not validate a
+/// name either — an unknown one only reaches `LOG_ERR` in the emulator's log
+/// (`gui/mapper.cpp:209-222`), which the capture deletes — so a derivation
+/// that is merely plausible would answer the setup screen with nothing and
+/// write a capture of the wrong screen, at exit 0.
+///
+/// This table is the pairing, taken from the emulator's own tables rather than
+/// derived from either spelling: the mapper's button layout and its `KeyBlock`
+/// tables (`gui/mapper.cpp`, `CreateLayout`) and the API's key list
+/// (`webserver/input.cpp`, `key_name_map`), at `dosbox-automation 0.85.1`.
+/// `KBD_NONE` is not in it: the API accepts it as a key that presses nothing,
+/// and there is no button to press, so a capture cannot use it.
+pub const KEY_NAMES: &[(&str, &str)] = &[
+    ("KBD_0", "0"),
+    ("KBD_1", "1"),
+    ("KBD_2", "2"),
+    ("KBD_3", "3"),
+    ("KBD_4", "4"),
+    ("KBD_5", "5"),
+    ("KBD_6", "6"),
+    ("KBD_7", "7"),
+    ("KBD_8", "8"),
+    ("KBD_9", "9"),
+    ("KBD_a", "a"),
+    ("KBD_abnt1", "abnt1"),
+    ("KBD_b", "b"),
+    ("KBD_backslash", "backslash"),
+    ("KBD_backspace", "bspace"),
+    ("KBD_c", "c"),
+    ("KBD_capslock", "capslock"),
+    ("KBD_comma", "comma"),
+    ("KBD_d", "d"),
+    ("KBD_delete", "delete"),
+    ("KBD_down", "down"),
+    ("KBD_e", "e"),
+    ("KBD_end", "end"),
+    ("KBD_enter", "enter"),
+    ("KBD_equals", "equals"),
+    ("KBD_esc", "esc"),
+    ("KBD_f", "f"),
+    ("KBD_f1", "f1"),
+    ("KBD_f10", "f10"),
+    ("KBD_f11", "f11"),
+    ("KBD_f12", "f12"),
+    ("KBD_f2", "f2"),
+    ("KBD_f3", "f3"),
+    ("KBD_f4", "f4"),
+    ("KBD_f5", "f5"),
+    ("KBD_f6", "f6"),
+    ("KBD_f7", "f7"),
+    ("KBD_f8", "f8"),
+    ("KBD_f9", "f9"),
+    ("KBD_g", "g"),
+    ("KBD_grave", "grave"),
+    ("KBD_h", "h"),
+    ("KBD_home", "home"),
+    ("KBD_i", "i"),
+    ("KBD_insert", "insert"),
+    ("KBD_j", "j"),
+    ("KBD_k", "k"),
+    ("KBD_kp0", "kp_0"),
+    ("KBD_kp1", "kp_1"),
+    ("KBD_kp2", "kp_2"),
+    ("KBD_kp3", "kp_3"),
+    ("KBD_kp4", "kp_4"),
+    ("KBD_kp5", "kp_5"),
+    ("KBD_kp6", "kp_6"),
+    ("KBD_kp7", "kp_7"),
+    ("KBD_kp8", "kp_8"),
+    ("KBD_kp9", "kp_9"),
+    ("KBD_kpdivide", "kp_divide"),
+    ("KBD_kpenter", "kp_enter"),
+    ("KBD_kpminus", "kp_minus"),
+    ("KBD_kpmultiply", "kp_multiply"),
+    ("KBD_kpperiod", "kp_period"),
+    ("KBD_kpplus", "kp_plus"),
+    ("KBD_l", "l"),
+    ("KBD_left", "left"),
+    ("KBD_leftalt", "lalt"),
+    ("KBD_leftbracket", "lbracket"),
+    ("KBD_leftctrl", "lctrl"),
+    ("KBD_leftgui", "lgui"),
+    ("KBD_leftshift", "lshift"),
+    ("KBD_m", "m"),
+    ("KBD_minus", "minus"),
+    ("KBD_n", "n"),
+    ("KBD_numlock", "numlock"),
+    ("KBD_o", "o"),
+    ("KBD_oem102", "oem102"),
+    ("KBD_p", "p"),
+    ("KBD_pagedown", "pagedown"),
+    ("KBD_pageup", "pageup"),
+    ("KBD_pause", "pause"),
+    ("KBD_period", "period"),
+    ("KBD_printscreen", "printscreen"),
+    ("KBD_q", "q"),
+    ("KBD_quote", "quote"),
+    ("KBD_r", "r"),
+    ("KBD_right", "right"),
+    ("KBD_rightalt", "ralt"),
+    ("KBD_rightbracket", "rbracket"),
+    ("KBD_rightctrl", "rctrl"),
+    ("KBD_rightgui", "rgui"),
+    ("KBD_rightshift", "rshift"),
+    ("KBD_s", "s"),
+    ("KBD_scrolllock", "scrolllock"),
+    ("KBD_semicolon", "semicolon"),
+    ("KBD_slash", "slash"),
+    ("KBD_space", "space"),
+    ("KBD_t", "t"),
+    ("KBD_tab", "tab"),
+    ("KBD_u", "u"),
+    ("KBD_up", "up"),
+    ("KBD_v", "v"),
+    ("KBD_w", "w"),
+    ("KBD_x", "x"),
+    ("KBD_y", "y"),
+    ("KBD_z", "z"),
+];
+
+/// Whether `input/sequence` would accept `key`, as far as the table knows.
+pub fn is_sequence_key(key: &str) -> bool {
+    KEY_NAMES.iter().any(|(api, _)| *api == key)
+}
+
+/// The `AUTOTYPE` button for a `KBD_*` name, or `None` when the emulator's
+/// mapper has no button for it (or the name is not one at all).
+pub fn autotype_button(key: &str) -> Option<&'static str> {
+    KEY_NAMES
+        .iter()
+        .find(|(api, _)| *api == key)
+        .map(|(_, button)| *button)
 }
 
 /// `frame_000100` — six digits, so a directory listing sorts by frame.
@@ -287,6 +450,18 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             )));
         }
     }
+    // Every key is checked here, before anything starts, in both recipes: a
+    // name AUTOTYPE does not know is not an error it reports — it logs and
+    // presses nothing — so a capture would answer the setup screen with
+    // nothing and write the wrong screen at exit 0 (D17).
+    for key in &options.keys {
+        if !is_sequence_key(key) {
+            return Err(unknown_key(key, false));
+        }
+        if options.boot == BootRecipe::Autoexec && autotype_button(key).is_none() {
+            return Err(unknown_key(key, true));
+        }
+    }
     if let Some(&first) = options.frames.first() {
         if first < options.skip_boot_frames {
             return Err(CaptureError::Options(format!(
@@ -365,12 +540,30 @@ pub fn capture(
     oracle.set_cycles(options.cycles)?;
 
     oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
-    if options.boot == BootRecipe::Typed && !options.keys.is_empty() {
+    let answering = !options.keys.is_empty();
+    if options.boot == BootRecipe::Typed && answering {
         // The setup screen has to be answered before the demo draws anything.
         // Under the `Autoexec` recipe the guest answers it itself, from the
         // `[autoexec]` section this run was started with (D17).
         oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
         oracle.send_keys(&options.keys.join(" "))?;
+    }
+    if answering {
+        // Keys that leave the setup screen up have not answered it: the
+        // capture would be of the menu while the manifest said the demo. The
+        // guest is the judge, not the key names — `KBD_kp8` is a real key and
+        // a real button, and it answers nothing on this screen — so a run
+        // whose keys do not clear it is refused, naming them (D17).
+        if let Err(error) = oracle.wait_for_graphics(SETUP_ANSWER_TIMEOUT) {
+            let detail = match error {
+                OracleError::Timeout(message) => message,
+                other => other.to_string(),
+            };
+            return Err(CaptureError::Oracle(OracleError::Timeout(format!(
+                "the keys {:?} did not start the demo: {detail}",
+                options.keys.join(" ")
+            ))));
+        }
     }
 
     let now = oracle.frame_counter()?;
@@ -716,12 +909,78 @@ mod tests {
     }
 
     #[test]
-    fn autotype_names_are_the_kbd_names_without_the_prefix() {
-        assert_eq!(autotype_name("KBD_left"), "left");
-        assert_eq!(autotype_name("KBD_kp_8"), "kp_8");
-        // A name the mapper already spells is passed through rather than
-        // mangled: the two namespaces only differ by the prefix.
-        assert_eq!(autotype_name("left"), "left");
+    fn autotype_buttons_are_the_mappers_names_not_the_kbd_names_less_a_prefix() {
+        // The pairs where the two namespaces differ are the point: a capture
+        // that pressed `p_8` or `backspace` would answer the setup screen with
+        // nothing, silently (D17).
+        assert_eq!(autotype_button("KBD_left"), Some("left"));
+        assert_eq!(autotype_button("KBD_enter"), Some("enter"));
+        assert_eq!(autotype_button("KBD_backspace"), Some("bspace"));
+        assert_eq!(autotype_button("KBD_kp8"), Some("kp_8"));
+        assert_eq!(autotype_button("KBD_kpenter"), Some("kp_enter"));
+        assert_eq!(autotype_button("KBD_leftshift"), Some("lshift"));
+        assert_eq!(autotype_button("KBD_leftctrl"), Some("lctrl"));
+        assert_eq!(autotype_button("KBD_leftalt"), Some("lalt"));
+        assert_eq!(autotype_button("KBD_leftgui"), Some("lgui"));
+        assert_eq!(autotype_button("KBD_leftbracket"), Some("lbracket"));
+        assert_eq!(autotype_button("KBD_rightbracket"), Some("rbracket"));
+
+        // Names that are not the API's at all have no button, including the
+        // two spellings the old prefix rule invented.
+        assert_eq!(autotype_button("KBD_kp_8"), None);
+        assert_eq!(autotype_button("left"), None);
+        assert_eq!(autotype_button("KBD_nope"), None);
+        assert_eq!(autotype_button("KBD_NONE"), None);
+        assert!(!is_sequence_key("KBD_kp_8"));
+        assert!(!is_sequence_key("KBD_NONE"));
+        assert!(is_sequence_key("KBD_left"));
+    }
+
+    #[test]
+    fn a_key_the_emulator_does_not_know_is_refused_before_the_capture_starts() {
+        // The reviewer's reproduction: `--keys "KBD_kp8 KBD_enter"` used to
+        // answer the setup screen with nothing (AUTOTYPE has no `kp8`) and
+        // write the 720x400 text screen at exit 0. Now the name alone is
+        // enough to refuse, in both recipes, before an emulator is spawned.
+        for key in ["KBD_kp_8", "KBD_nope", "left", "KBD_NONE"] {
+            let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+            opts.keys = vec![key.to_owned()];
+            for boot in [BootRecipe::Typed, BootRecipe::Autoexec] {
+                opts.boot = boot;
+                match validate_options(&opts) {
+                    Err(CaptureError::Options(message)) => {
+                        assert!(
+                            message.contains(key),
+                            "the refusal must name {key}: {message}"
+                        );
+                    }
+                    other => panic!("{key} under {boot:?}: expected a refusal, got {other:?}"),
+                }
+            }
+        }
+
+        // The keys the reference manifests record still pass, and so does the
+        // whole table.
+        for boot in [BootRecipe::Typed, BootRecipe::Autoexec] {
+            let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+            opts.boot = boot;
+            assert!(validate_options(&opts).is_ok());
+        }
+        for (api, _) in KEY_NAMES {
+            let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+            opts.boot = BootRecipe::Autoexec;
+            opts.keys = vec![(*api).to_owned()];
+            assert!(validate_options(&opts).is_ok(), "{api} must be usable");
+        }
+    }
+
+    #[test]
+    fn the_key_table_is_sorted_and_unique() {
+        // It is read by eye against the emulator's own tables; a duplicate or
+        // a stray blank line is how a missing key hides.
+        for pair in KEY_NAMES.windows(2) {
+            assert!(pair[0].0 < pair[1].0, "{} then {}", pair[0].0, pair[1].0);
+        }
     }
 
     #[test]
@@ -764,6 +1023,44 @@ mod tests {
         assert_eq!(oracle.waited_for_text, vec![SETUP_SCREEN_TEXT.to_owned()]);
         assert_eq!(oracle.keys.as_deref(), Some("KBD_left KBD_enter"));
         std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn keys_that_do_not_answer_the_setup_screen_refuse_the_capture() {
+        // The reviewer's reproduction, at the oracle boundary: the keys are
+        // sent, the setup screen stays up, and the run must not quietly write
+        // the menu as if it were the demo. `KBD_kp8` is a real key and a real
+        // button — it simply answers nothing on that screen — so no key-name
+        // check can catch this; the guest has to.
+        let out = scratch_dir("keys-that-answer-nothing");
+        let opts = options(vec![5100], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        oracle.setup_screen_clears = false;
+
+        let error = capture(&mut oracle, &opts).unwrap_err();
+        match error {
+            CaptureError::Oracle(OracleError::Timeout(message)) => {
+                assert!(
+                    message.contains("KBD_left") && message.contains("did not start the demo"),
+                    "the refusal must name the keys and what did not happen: {message}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // Nothing was written: the frames would have been of the menu.
+        assert!(!out.join("manifest.json").exists());
+
+        // And when the screen does clear, the capture goes through and waits
+        // for exactly that.
+        let out = scratch_dir("keys-that-answer");
+        let opts = options(vec![5100], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        capture(&mut oracle, &opts).unwrap();
+        assert_eq!(
+            oracle.waited_for_graphics,
+            vec!["the demo's first graphics frame".to_owned()]
+        );
+        assert!(out.join("manifest.json").is_file());
     }
 
     #[test]
@@ -991,6 +1288,10 @@ mod tests {
         stepped_frames: Vec<u64>,
         keys: Option<String>,
         waited_for_text: Vec<String>,
+        waited_for_graphics: Vec<String>,
+        /// Whether the setup screen goes away when the keys are sent, as the
+        /// real one does when they answer it.
+        setup_screen_clears: bool,
         cycles: Option<u32>,
     }
 
@@ -1002,6 +1303,8 @@ mod tests {
                 stepped_frames: Vec::new(),
                 keys: None,
                 waited_for_text: Vec::new(),
+                waited_for_graphics: Vec::new(),
+                setup_screen_clears: true,
                 cycles: None,
             }
         }
@@ -1040,6 +1343,17 @@ mod tests {
         fn wait_for_text(&mut self, needle: &str, _timeout: Duration) -> Result<(), OracleError> {
             self.waited_for_text.push(needle.to_owned());
             Ok(())
+        }
+        fn wait_for_graphics(&mut self, _timeout: Duration) -> Result<(), OracleError> {
+            self.waited_for_graphics
+                .push("the demo's first graphics frame".to_owned());
+            if self.setup_screen_clears {
+                Ok(())
+            } else {
+                Err(OracleError::Timeout(
+                    "the screen is still text after 15s".to_owned(),
+                ))
+            }
         }
         fn frame_counter(&mut self) -> Result<u64, OracleError> {
             Ok(self.counter)

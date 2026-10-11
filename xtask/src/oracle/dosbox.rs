@@ -258,11 +258,116 @@ pub fn port_read_path(port: u16) -> String {
     format!("/api/v1/io/port?port={port}")
 }
 
-pub struct DosboxOracle {
-    child: Option<Child>,
+/// What the oracle asks the emulator for. The capture's calls go to the
+/// emulator over HTTP; the tests answer them from a script, so the identity
+/// logic runs on the code that ships (D17).
+trait EmulatorApi {
+    fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError>;
+    fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError>;
+    fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError>;
+    fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError>;
+    /// `POST` a `text/plain` body, which is all `/script/load` accepts.
+    fn post_text(&self, path: &str, body: &str) -> Result<Vec<u8>, OracleError>;
+    /// Whether the API has answered at all: any status counts as up (the 401
+    /// an unauthenticated probe gets means the API is listening), and only a
+    /// transport error means it is not.
+    fn probe(&self) -> Result<(), OracleError>;
+}
+
+/// The emulator's HTTP API, with the token it was given.
+struct HttpApi {
     agent: ureq::Agent,
     token: String,
     base_url: String,
+}
+
+impl HttpApi {
+    /// The emulator API, with the token the emulator was given.
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
+    fn transport_error(&self, path: &str, error: ureq::Error) -> OracleError {
+        match error {
+            ureq::Error::Status(status, response) => {
+                map_http_error(status, &response.into_string().unwrap_or_default())
+            }
+            ureq::Error::Transport(transport) => OracleError::Transport(format!(
+                "cannot reach the emulator at {} for {path}: {transport}",
+                self.base_url
+            )),
+        }
+    }
+}
+
+impl EmulatorApi for HttpApi {
+    fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError> {
+        let response = self
+            .agent
+            .get(&self.url(path))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .call()
+            .map_err(|e| self.transport_error(path, e))?;
+        read_body(response)
+    }
+
+    fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError> {
+        let body = self.get_bytes(path)?;
+        let text = String::from_utf8(body)
+            .map_err(|e| OracleError::Decode(format!("{path} did not answer UTF-8: {e}")))?;
+        serde_json::from_str(&text)
+            .map_err(|e| OracleError::Decode(format!("{path} is not the documented shape: {e}")))
+    }
+
+    fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
+        let response = self
+            .agent
+            .post(&self.url(path))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .send_json(body.clone())
+            .map_err(|e| self.transport_error(path, e))?;
+        read_body(response)
+    }
+
+    fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
+        let response = self
+            .agent
+            .put(&self.url(path))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .send_json(body.clone())
+            .map_err(|e| self.transport_error(path, e))?;
+        read_body(response)
+    }
+
+    fn post_text(&self, path: &str, body: &str) -> Result<Vec<u8>, OracleError> {
+        let response = self
+            .agent
+            .post(&self.url(path))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Content-Type", "text/plain")
+            .send_string(body)
+            .map_err(|e| self.transport_error(path, e))?;
+        read_body(response)
+    }
+
+    fn probe(&self) -> Result<(), OracleError> {
+        match self.agent.get(&self.url("/api/v1/dosbox/info")).call() {
+            Ok(_) | Err(ureq::Error::Status(_, _)) => Ok(()),
+            Err(ureq::Error::Transport(transport)) => Err(OracleError::Transport(format!(
+                "cannot reach the emulator at {}: {transport}",
+                self.base_url
+            ))),
+        }
+    }
+}
+
+pub struct DosboxOracle {
+    child: Option<Child>,
+    /// Where the HTTP calls go: the emulator in a capture, a script in the
+    /// tests. Everything the oracle asks for goes through it, so a test drives
+    /// the same `wait_for_frame`/`frame` path a capture does rather than a
+    /// stand-in for it (D17).
+    api: Box<dyn EmulatorApi + Send>,
     scratch: PathBuf,
     /// The guest ran its own boot recipe out of `[autoexec]`
     /// (`BootRecipe::Autoexec`), so `boot` waits for the setup screen instead
@@ -336,11 +441,13 @@ impl DosboxOracle {
 
         let mut oracle = DosboxOracle {
             child: Some(child),
-            agent: ureq::AgentBuilder::new()
-                .timeout(Duration::from_secs(15))
-                .build(),
-            token,
-            base_url,
+            api: Box::new(HttpApi {
+                agent: ureq::AgentBuilder::new()
+                    .timeout(Duration::from_secs(15))
+                    .build(),
+                token,
+                base_url,
+            }),
             scratch,
             autoexec: !autoexec.is_empty(),
             pending: None,
@@ -361,11 +468,6 @@ impl DosboxOracle {
         }
     }
 
-    /// The emulator API, with the token the emulator was given.
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
     /// Fail with a legible 401 rather than a puzzle if the emulator did not
     /// take the token this process generated for it.
     fn check_token(&self) -> Result<(), OracleError> {
@@ -373,53 +475,19 @@ impl DosboxOracle {
     }
 
     fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError> {
-        let body = self.get_bytes(path)?;
-        let text = String::from_utf8(body)
-            .map_err(|e| OracleError::Decode(format!("{path} did not answer UTF-8: {e}")))?;
-        serde_json::from_str(&text)
-            .map_err(|e| OracleError::Decode(format!("{path} is not the documented shape: {e}")))
+        self.api.get_json(path)
     }
 
     fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError> {
-        let response = self
-            .agent
-            .get(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|e| self.transport_error(path, e))?;
-        read_body(response)
+        self.api.get_bytes(path)
     }
 
     fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
-        let response = self
-            .agent
-            .post(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .send_json(body.clone())
-            .map_err(|e| self.transport_error(path, e))?;
-        read_body(response)
+        self.api.post_json(path, body)
     }
 
     fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
-        let response = self
-            .agent
-            .put(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .send_json(body.clone())
-            .map_err(|e| self.transport_error(path, e))?;
-        read_body(response)
-    }
-
-    fn transport_error(&self, path: &str, error: ureq::Error) -> OracleError {
-        match error {
-            ureq::Error::Status(status, response) => {
-                map_http_error(status, &response.into_string().unwrap_or_default())
-            }
-            ureq::Error::Transport(transport) => OracleError::Transport(format!(
-                "cannot reach the emulator at {} for {path}: {transport}",
-                self.base_url
-            )),
-        }
+        self.api.put_json(path, body)
     }
 
     fn wait_for_api(&mut self, log_path: &Path) -> Result<(), OracleError> {
@@ -435,17 +503,15 @@ impl DosboxOracle {
                     )));
                 }
             }
-            match self.agent.get(&self.url("/api/v1/dosbox/info")).call() {
-                // Any answer with a status — 200, or the 401 an
-                // unauthenticated probe gets — means the API is up. A
-                // transport error means it is not listening yet.
-                Ok(_) | Err(ureq::Error::Status(_, _)) => return Ok(()),
-                Err(ureq::Error::Transport(_)) => {}
+            // Any answer with a status — 200, or the 401 an unauthenticated
+            // probe gets — means the API is up. A transport error means it is
+            // not listening yet.
+            if self.api.probe().is_ok() {
+                return Ok(());
             }
             if std::time::Instant::now() >= deadline {
                 return Err(OracleError::Transport(format!(
-                    "the emulator did not answer on {} within {}s.\n{}",
-                    self.base_url,
+                    "the emulator did not answer on {DEFAULT_BASE_URL} within {}s.\n{}",
                     API_STARTUP_TIMEOUT.as_secs(),
                     log_tail(log_path)
                 )));
@@ -460,14 +526,9 @@ impl DosboxOracle {
         const WATCHER: &str = "while true do\n  dosbox.wait_frames(60)\nend\n";
         // /script/load only accepts text/plain or application/lua, and is
         // rate limited to one call per two seconds (D14).
-        let response = self
-            .agent
-            .post(&self.url("/api/v1/script/load?name=xtask-frame-watch"))
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Content-Type", "text/plain")
-            .send_string(WATCHER)
-            .map_err(|e| self.transport_error("/api/v1/script/load", e))?;
-        let status = read_body(response)?;
+        let status = self
+            .api
+            .post_text("/api/v1/script/load?name=xtask-frame-watch", WATCHER)?;
         if !String::from_utf8_lossy(&status).contains("loaded") {
             return Err(OracleError::Decode(format!(
                 "the emulator did not load the frame-watching script: {}",
@@ -578,7 +639,12 @@ impl DosboxOracle {
     /// afterwards, in that order and on one thread (`gui/render/render.cpp:446`
     /// then `gui/sdl_gui.cpp:1205`), so a counter reading that is the same on
     /// both sides of the grab can only have seen the frame that reading names:
-    /// no frame was published in between, or the reading would have moved.
+    /// no frame was published in between, or the reading would have moved. The
+    /// exception is narrow and loud: a video-mode stop or reset advances the
+    /// counter without publishing (`GFX_Stop`, `gui/sdl_gui.cpp:396-402`;
+    /// `halt_render`, `gui/render/render.cpp:349-353`), so one counter value
+    /// per stop can see the old picture — and a stop that changes geometry is
+    /// refused by the capture's `GeometryChanged` check rather than written.
     /// When it did move, a frame boundary fell inside the grab and the picture
     /// belongs to one side or the other — `None` says so instead of guessing
     /// (D17).
@@ -819,11 +885,10 @@ impl Oracle for DosboxOracle {
 
     fn shutdown(&mut self) -> Result<(), OracleError> {
         if let Some(mut child) = self.child.take() {
-            let _ = self
-                .agent
-                .post(&self.url("/api/v1/dosbox/shutdown"))
-                .set("Authorization", &format!("Bearer {}", self.token))
-                .call();
+            let _ = self.api.post_json(
+                "/api/v1/dosbox/shutdown",
+                &serde_json::json!({}),
+            );
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             while std::time::Instant::now() < deadline {
                 match child.try_wait() {
@@ -861,6 +926,31 @@ impl Oracle for DosboxOracle {
                 let shown = lines[lines.len().saturating_sub(4)..].join(" / ");
                 return Err(OracleError::Timeout(format!(
                     "waited {}s for {needle:?}; the bottom of the screen says: {shown}",
+                    timeout.as_secs()
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn wait_for_graphics(&mut self, timeout: Duration) -> Result<(), OracleError> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let info = self.get_json("/api/v1/video/frame/info")?;
+            if info["video_mode"]["is_graphics_mode"].as_bool() == Some(true) {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                let screen = self.get_json("/api/v1/video/text")?;
+                let lines: Vec<&str> = screen["text"]
+                    .as_str()
+                    .unwrap_or("<not a text screen>")
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .collect();
+                let shown = lines[lines.len().saturating_sub(4)..].join(" / ");
+                return Err(OracleError::Timeout(format!(
+                    "the screen is still text after {}s; the bottom of it says: {shown}",
                     timeout.as_secs()
                 )));
             }
@@ -1020,6 +1110,8 @@ fn log_tail(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
 
     const INFO_JSON: &str = include_str!("../../tests/fixtures/info.json");
     const FRAME_BIN: &[u8] = include_bytes!("../../tests/fixtures/frame.bin");
@@ -1126,6 +1218,150 @@ mod tests {
         assert_eq!(
             command.get_current_dir().map(Path::to_path_buf),
             Some(PathBuf::from("/scratch/run"))
+        );
+    }
+
+    /// A scripted emulator, driven through the oracle's own calls.
+    ///
+    /// The counters and the pictures are separate queues on purpose: the
+    /// emulator publishes a picture and *then* counts it, so a grab that
+    /// straddles a frame boundary sees a counter from one side and a picture
+    /// from the other, and that ordering is what the identity rule rests on
+    /// (D17).
+    struct ScriptedEmulator {
+        counters: RefCell<VecDeque<u64>>,
+        pictures: RefCell<VecDeque<u64>>,
+    }
+
+    impl ScriptedEmulator {
+        fn new(counters: Vec<u64>, pictures: Vec<u64>) -> ScriptedEmulator {
+            ScriptedEmulator {
+                counters: RefCell::new(counters.into()),
+                pictures: RefCell::new(pictures.into()),
+            }
+        }
+
+        /// The picture numbered `picture`, as a raw frame whose first pixel
+        /// carries the number in its red byte — the frame comes back as
+        /// `[red, green, blue]`, so `frame.rgb[0]` reads it back.
+        fn raw_frame(picture: u64) -> Vec<u8> {
+            let mut raw = Vec::with_capacity(RAW_HEADER_LEN + 200 * 1280);
+            raw.extend_from_slice(&320u32.to_le_bytes());
+            raw.extend_from_slice(&200u32.to_le_bytes());
+            raw.extend_from_slice(&1280i32.to_le_bytes());
+            raw.push(PIXEL_FORMAT_BGRX32);
+            raw.extend_from_slice(&0u16.to_le_bytes());
+            raw.extend_from_slice(&[0, 0, picture as u8]); // BGRX: red last
+            raw.resize(RAW_HEADER_LEN + 200 * 1280, 0);
+            raw
+        }
+    }
+
+    impl EmulatorApi for ScriptedEmulator {
+        fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError> {
+            if path.starts_with("/api/v1/video/frame") {
+                let picture = self
+                    .pictures
+                    .borrow_mut()
+                    .pop_front()
+                    .ok_or_else(|| OracleError::Decode("the script ran out of pictures".into()))?;
+                return Ok(Self::raw_frame(picture));
+            }
+            Err(OracleError::Transport(format!("the script does not answer {path}")))
+        }
+
+        fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError> {
+            match path {
+                "/api/v1/script/status" => {
+                    let frame = self
+                        .counters
+                        .borrow_mut()
+                        .pop_front()
+                        .ok_or_else(|| OracleError::Decode("the script ran out of counters".into()))?;
+                    Ok(json!({ "frame": frame, "state": "yielded" }))
+                }
+                // A text screen: `frame()` keeps the frame it was given and
+                // skips the indexed path, which is not what these tests are
+                // about.
+                "/api/v1/video/frame/info" => {
+                    Ok(json!({ "video_mode": { "is_graphics_mode": false } }))
+                }
+                "/api/v1/video/text" => Ok(json!({ "text": "" })),
+                _ => Err(OracleError::Transport(format!("the script does not answer {path}"))),
+            }
+        }
+
+        fn post_json(&self, path: &str, _body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
+            Err(OracleError::Transport(format!("the script does not answer {path}")))
+        }
+
+        fn put_json(&self, path: &str, _body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
+            Err(OracleError::Transport(format!("the script does not answer {path}")))
+        }
+
+        fn post_text(&self, path: &str, _body: &str) -> Result<Vec<u8>, OracleError> {
+            Err(OracleError::Transport(format!("the script does not answer {path}")))
+        }
+
+        fn probe(&self) -> Result<(), OracleError> {
+            Ok(())
+        }
+    }
+
+    /// An oracle talking to a scripted emulator, with no process behind it.
+    fn scripted_oracle(script: ScriptedEmulator) -> DosboxOracle {
+        DosboxOracle {
+            child: None,
+            api: Box::new(script),
+            scratch: std::env::temp_dir().join("xtask-scripted-oracle"),
+            autoexec: false,
+            pending: None,
+        }
+    }
+
+    #[test]
+    fn a_grab_that_straddles_a_frame_boundary_is_refused_not_written() {
+        // The counter reads 9 twice (a clean grab of picture 9), then 10 while
+        // the picture has already moved to 11: that grab straddled a boundary,
+        // and picture 11 would be filed under index 10 by a grab that read the
+        // counter only once. The wait must end in a refusal that names both
+        // frames — never in a frame written under the wrong index.
+        let script = ScriptedEmulator::new(vec![9, 9, 9, 10, 11, 11, 11], vec![9, 11, 11]);
+        let mut oracle = scripted_oracle(script);
+        let error = oracle.wait_for_frame(10).unwrap_err();
+        assert!(matches!(
+            error,
+            OracleError::FrameMissed {
+                index: 10,
+                observed: 11
+            }
+        ));
+    }
+
+    #[test]
+    fn the_frame_written_under_an_index_is_the_one_the_wait_pinned() {
+        // Two clean grabs, 9 then 10: the wait keeps picture 10 and the
+        // following `frame` hands it over. A `frame` that grabbed for itself
+        // would return picture 11, which is the next thing the script has.
+        let script = ScriptedEmulator::new(vec![9, 9, 9, 10, 10, 11], vec![9, 10, 11]);
+        let mut oracle = scripted_oracle(script);
+        oracle.wait_for_frame(10).unwrap();
+        let frame = oracle.frame().unwrap();
+        assert_eq!(frame.rgb[0], 10, "the frame for index ten, not a later grab");
+    }
+
+    #[test]
+    fn a_sleep_never_runs_longer_than_a_second() {
+        // An hour of frames must not sleep for an hour: one call is capped at
+        // a second and the caller re-reads the counter in between. The
+        // uncapped version overshot by three frames over a minute-long skip,
+        // and that overshoot was the old capture's 0-3 frame lateness (D17).
+        let start = std::time::Instant::now();
+        sleep_frames(60 * 60 * 70, 0);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the sleep was not capped: {:?}",
+            start.elapsed()
         );
     }
 

@@ -72,15 +72,21 @@ Five things the command needs, each of which cost time to discover:
    `--noprimaryconf` alone cannot mount the reference directory — the mount policy is
    honoured only in the primary config file. `xtask` writes one into a temp directory.
 3. **The setup screen.** `SECOND 2` does *not* skip it. The default Gravis soundcard fails
-   on this emulator, so the capture sends `KBD_left` then `KBD_enter` to select an SB16
-   before the demo starts.
+   on this emulator, so `--keys "KBD_left KBD_enter"` selects an SB16 before the demo
+   starts. Under `--boot autoexec` (D17) the *guest* presses those keys — the tool sends
+   nothing over the API — via `AUTOTYPE left enter` in the config's `[autoexec]` section,
+   and the capture then waits for the demo's first graphics frame: keys that leave the
+   setup screen up are refused, not captured.
 4. **Cycles through the config, never the REST PUT.** Setting `cycles=` at startup forces
    legacy mode and the PUT then returns 409. A capture without pinned cycles is **refused**
    rather than produced: an unpinned capture is not reproducible and must never be mistaken
    for a reference.
 5. **Frame indices are boot-relative, and the demo does not start at frame 0.** Frame 0 is
-   the emulator's first rendered frame; `SECOND.EXE` is not reached until around counter
-   1657. The title screen is near frame 1700, and frames below that are DOS shell.
+   the emulator's first rendered frame, and `SECOND.EXE` is reached in the first few dozen.
+   Under `--boot autoexec` the setup screen is up at frame 16, the title screen's first
+   graphics frame is 404 (measured on the emulator's own clock, D17) and the first 320×200
+   part follows around 1160; the typed recipe reaches the same screens about 324 frames
+   earlier but with the boot's host-timing jitter.
 
 ### Comparing
 

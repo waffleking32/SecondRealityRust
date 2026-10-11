@@ -79,8 +79,9 @@ tool's own exit code as the verdict:
   reference/check_a --rendered out/check_neg --out out/neg` → title 99.5609% differing
   (indexed), part 40.7172% differing (RGB: that capture's screen moved during the
   indexed read, so it wrote no indices and the comparison fell back to RGB),
-  `verdict: different`, **exit code 1**, diff PNGs at `out/neg/title/diff_000400.png`
-  and `out/neg/part/diff_001100.png`.
+  `verdict: different`, **exit code 1**, diff PNGs under `out/neg/` (`diff_000400.png`
+  and `diff_001100.png` for that run; the re-run below writes them under `out/neg2/`
+  as `diff_000700.png` and `diff_001350.png`, with the same percentages).
 
 A comparison that cannot run at all (a geometry or frame-count mismatch, a missing
 manifest or frame file) is refused with a legible message and exit code 2, so a script
