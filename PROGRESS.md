@@ -73,8 +73,9 @@ can tell "the frames differ" from "the tool could not tell".
 
 ### Phase 0 — Foundation & harness (done, tag `phase-0`)
 
-Fourteen tasks on branch `phase-0-foundation`. **All tests pass: 155 across the workspace, zero
-warnings** — 94 in `sr-engine`, 55 in `xtask`, 5 unit + 1 integration in `bins/secondreality`.
+Fourteen tasks on branch `phase-0-foundation`. **All tests pass: 159 across the workspace, zero
+warnings** — 98 in `sr-engine`, 55 in `xtask`, 5 unit + 1 integration in `bins/secondreality`. (155
+at close-out; the four the post-review fixes added are below.)
 
 **What was built.** `sr-engine`, a dependency-free software VGA model: an indexed `Surface`, a
 6-bit `Palette` with a per-scanline `PaletteTimeline`, `View` (the CRTC — display start, line
@@ -88,7 +89,7 @@ test card cycling the five visually-significant hardware behaviours of spec §2.
 
 | Criterion (spec §10) | Evidence |
 |---|---|
-| `cargo test` green | 155 passed, 0 failed, no warnings |
+| `cargo test` green | 159 passed, 0 failed, no warnings |
 | Test card at correct speed, exercising all five behaviours | **703 ticks in 10.040 s = 70.019 Hz** (`--run-seconds 10`); three further runs matched `floor(70.086 × elapsed)` exactly. One property test per behaviour in `testcard.rs` |
 | `xtask reference capture` captures from the original | `reference/check_a/{title,part}/`. **Four independent captures agree byte-for-byte** — two runs, each capturing the 320×400 title screen and the 320×200 part |
 | `xtask compare` produces a diff report | Identical → `verdict: identical`, exit 0. Differing → `verdict: different`, exit 1, diff PNGs. Hard errors → exit 2 |
@@ -126,6 +127,32 @@ test card cycling the five visually-significant hardware behaviours of spec §2.
 - **Open item for Phase 2: `View`'s origin is `u16` while the surface is 256,000 pixels.** Recorded
   in `docs/decisions.md` D16. ENDSCRL's 401-line circular buffer needs ~256,000; Phase 0 left the
   fields as the spec declares them.
+
+**Post-review fixes.** The closing fidelity review found all three of the phase's contested decisions
+sound — the split model, the DAC widening rule and the independent line stride — and left three
+findings, all now fixed. **`phase-0` was moved forward to include them**; `9cecc1b` is the close-out
+as reviewed, and the four commits after it are these fixes. A phase that ships a known trap is not
+done, and the tag is what a resuming session checks out.
+
+The three findings:
+
+- **The line stride's default was a trap, and it had already sprung.** `View::new` defaulted
+  `y_line_offset` to the view's own width, so a 320-wide picture drawn through `Surface` on the
+  640-wide surface was read back sheared; `bins/secondreality/src/main.rs` worked only because
+  `TestCard::init` overwrote the view. `y_line_offset` is now `Option<u16>`, and `None` resolves to
+  the surface's row stride inside `View::source_index` — per effective view, so a split's lower view
+  resolves its own. `TestCard` no longer sets a stride at all, which makes the card a live test of
+  the default. `cc28a4e`.
+- **The split's two conventions were unwritten** — the review's judgement was that this was the
+  model's single biggest risk. The hardware forces the post-split origin to **0** and clears panning
+  (`VGA_ProcessSplit`, `vga_draw.cpp:1139-1158`), so a faithful translation of `set_plzstart` leaves
+  the lower view's origin alone; and the emulator applies the line-compare register on
+  **register + 1** (`vga_draw.cpp:1586-1593`, `:1276`), so a value copied from the assembly is one
+  less than `Split::scanline`. Both are now on `Split`'s doc comment and in D16, with the two
+  unsettled caveats (`lines_scaled`, `vblank_skip`) that the first splitting part must measure.
+  `00e3181`.
+- **A citation slip in D14**: `src/utils/rgb.h:31-36` is `rgb5_to_8`; `rgb6_to_8` is 22-28.
+  `334f82b`.
 
 **Working note.** The phase's ledger — every ruling, every deferred minor, every plan correction —
 is at `.superpowers/sdd/00-foundation/progress.md`. It is git-ignored scratch and will be deleted
