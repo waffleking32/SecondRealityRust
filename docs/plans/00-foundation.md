@@ -2313,15 +2313,23 @@ Expected: all tests pass.
 CYCLES=<value from Task 11>
 KEYS=<the input sequence from Task 11 question 7, if one is needed>
 cargo xtask reference capture --arg 2 --keys "$KEYS" \
-  --cycles $CYCLES --frames 10,60,120 --out reference/check_a
+  --cycles $CYCLES --frames 1720,1800,1900 --out reference/check_a
 cargo xtask reference capture --arg 2 --keys "$KEYS" \
-  --cycles $CYCLES --frames 10,60,120 --out reference/check_b
+  --cycles $CYCLES --frames 1720,1800,1900 --out reference/check_b
 diff -r reference/check_a reference/check_b && echo "deterministic"
 ```
 
 Expected: identical. If the two captures differ, determinism is not achievable at these frame indices and that finding goes in `docs/decisions.md` immediately — every later phase's verification depends on it. Delete `reference/check_b` afterwards; it exists only for this check. Keep `reference/check_a` as the first real capture.
 
-These are frames 10, 60 and 120 from the title screen, not from a part the port renders yet. That is deliberate: Phase 0 verifies the *mechanism* — that the oracle runs, pins cycles, produces frames and repeats itself exactly. Whether those frames match the port is Phase 2's question.
+**These indices are boot-relative, and the title screen is around frame 1700** — see the frame-origin
+note in the corrections block above. Frames 10, 60 and 120 are therefore DOS-shell frames, which is
+fine for what Phase 0 is testing: the *mechanism* — that the oracle runs, pins cycles, produces frames
+and repeats itself exactly. Whether those frames match the port is Phase 2's question.
+
+Pick the indices deliberately rather than copying them. Any three boot-relative indices that produce
+stable, non-identical frames prove determinism; if the shell frames turn out to be identical (a static
+DOS prompt is), choose indices inside the demo instead — roughly 1720, 1800 and 1900 — so that
+"identical across two captures" is a claim about pixels rather than about a blank screen.
 
 - [ ] **Step 6: Commit**
 
@@ -2349,7 +2357,7 @@ turned out to be available, so `compare_indexed` is the primary path rather than
 fallback — but two things need handling:
 
 1. **Geometry is per capture, not fixed at 320×200.** The demo's 320×400 title screen
-   (where frames 10/60/120 land) is a genuine 400-line image, not a row-doubled 320×200
+   (around frame 1700 boot-relative) is a genuine 400-line image, not a row-doubled 320×200
    one, so a 320×200 port frame cannot be compared with it unless the comparison knows to
    double rows. `CompareError::GeometryMismatch` should report which side is which rather
    than assume the reference is 320×200.
@@ -2501,7 +2509,7 @@ Then confirm the tool can actually fail, by capturing a second time from a point
 
 ```bash
 cargo xtask reference capture --arg 5 --cycles $CYCLES \
-  --frames 10,60,120 --out reference/check_neg
+  --frames 1720,1800,1900 --out reference/check_neg
 cargo xtask compare --reference reference/check_a --rendered reference/check_neg --out out/neg
 ```
 
