@@ -240,10 +240,14 @@ Task A5 walked every `.OBK`/`.OBJ` in the original with `sr_assets::omf::extract
 found **one** asset whose bytes existed only inside a build artifact: `TECHNO/CIRCLE2.EGA`,
 the one-bit mask the shipped TECHNO.EXE reads as its `_circle2` data. It was written out with
 the same reader — `cargo test -p sr-assets --test omf -- --ignored write_the_recovered_asset`
-regenerates it — and `tests/omf.rs` pins it against its blob. Every other blob's payload
-reproduces a standalone file byte for byte, mostly already in the table above
-(`docs/fidelity/asset-inventory.md` §D); the two payloads with no twin and no consumer
-(`TECHNO/_PIC1.OBK`, `TECHNO/_PIC2.OBK`) are unlinked build residue and are not recovered.
+regenerates it — and `tests/omf.rs` pins it against its blob. Every other payload either
+reproduces a standalone file byte for byte (35 of them, most already in the table above;
+`docs/fidelity/asset-inventory.md` §D) or is named there as one of the tree's three exceptions
+— `ALKU/INCLUDE.OBJ` (§E.18), whose picture bytes differ from `ALKU/HOI.U` in three palette
+entries, `WATER/MIEK.OBJ` (§E.19), an unlinked intermediate one byte from `MIEKKA.SCI`, and
+the two `CREDITS` picture blobs (§E.20), which hold 21 pictures no file in the tree holds. The
+two payloads with no twin and no consumer (`TECHNO/_PIC1.OBK`, `TECHNO/_PIC2.OBK`) are
+unlinked build residue and are not recovered.
 
 Columns: `path` is the path under `assets/`; `blob` is the `.OBK` the bytes were recovered
 from; `record` names the OMF records the bytes came from; `range` is the half-open span of
@@ -258,9 +262,9 @@ those records in the blob, `start..end`; `sha256` is the digest of the recovered
 - `TECHNO/CIRCLE2.EGA` — 8,000 bytes, no header: a 320×200 **one bit per pixel** mask, high
   bit leftmost (8,000 = 320×200/8). It is the part's `_circle2` data, not a picture a viewer
   ever sees on its own: `TECHNO/MAKEFILE:6` links `_circle2.obk`, `:23` links that into
-  `koe.exe`, `TECHNO/KOE.MAP:11` sizes the segment at 0x1F40 and `TECHNO/KOEA.ASM:653-680`
-  (`init_interference`) blits it into the EGA planes. The same part's `_circle` data is
-  `DDSTARS/PIC.EGA`, already in the table above under `parts: TECHNO`.
+  `koe.exe`, `TECHNO/KOE.MAP:11` sizes the segment at 0x1F40 and `TECHNO/KOEA.ASM:646-745`
+  (`init_interference`; the load is at `:665`) blits it into the EGA planes. The same part's
+  `_circle` data is `DDSTARS/PIC.EGA`, already in the table above under `parts: TECHNO`.
 - **Not `DDSTARS/PIC2.EGA`.** That file has the same size and the same nominal name (both are
   what a `DDSTARS/DOIT*.C` tool writes), but it differs from the shipped mask in **7,162 of
   8,000 bytes**. The recovered bytes are byte-identical to what the generator at

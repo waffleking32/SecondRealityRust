@@ -12,12 +12,14 @@
 //!
 //! An OMF object is a flat sequence of records: a type byte, a `u16` little-endian length,
 //! then that many bytes of body — no alignment and no padding, so records are found only
-//! by walking them. `LEDATA` is type **`0xA0`**, and it is the only record type that
+//! by walking them. `LEDATA` is type **`0xA0`** here, and it is the only record type that
 //! carries segment data. Measured over every `.OBK`/`.OBJ` in the tree (151 files):
-//! **3,975 `LEDATA` records, and not one of type `0xA1`.** `0xA1` is a distinct record in
-//! the dialect these tools wrote, with a different body, so [`extract_ledata`] refuses it
-//! rather than silently mis-framing a payload — a walk that mapped both types to one name
-//! could not tell them apart, which is why the distinction is pinned here.
+//! **3,975 `LEDATA` records, and not one of type `0xA1`.**
+//!
+//! The distinction is pinned because a walk that mapped the two types to one name could not
+//! tell them apart: in the standard Intel OMF, `0xA1` is also `LEDATA`, with a 32-bit offset
+//! and so a different body. No file in this tree uses that spelling, and [`extract_ledata`]
+//! refuses it rather than guess at a framing that never occurs here.
 //!
 //! A `LEDATA` body is
 //!
@@ -53,9 +55,10 @@ use crate::{AssetError, Format};
 /// The concatenated data of every `LEDATA` record in `bytes`, in record order — the
 /// segment as the original's linker received it.
 ///
-/// A `.OBK`/`.OBJ` is a build container, not an asset format: the returned bytes are the
-/// standalone file the blob shipped inside, and callers compare them with a file in the
-/// tree (the tests do) or write them out once, as `assets/TECHNO/CIRCLE2.EGA` was written.
+/// A `.OBK`/`.OBJ` is a build container, not an asset format: for 35 of the tree's blobs the
+/// returned bytes are exactly the standalone file the blob shipped inside (the inventory's
+/// §D), and callers compare them with a file in the tree (the tests do) or write them out
+/// once, as `assets/TECHNO/CIRCLE2.EGA` was written.
 ///
 /// # Errors
 ///

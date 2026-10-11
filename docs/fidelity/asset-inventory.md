@@ -36,7 +36,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | ALKU | `ALKU/FONA.UH` | 45784 | FC FC | Origin raw PIC: 1500x30, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ALKU/INCLUDE.ASM:17 INCLUDE 'fona.inc' |
 | ALKU | `ALKU/FONA.LBM` | 15360 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ALKU/FONA.UH (floor list) |
 | ALKU | `ALKU/FONA2.LBM` | 15268 | FORM | IFF PBM  (FORM .... PBM ) | standalone | second font strip (floor list) |
-| ALKU | `ALKU/HOI.U` | 128784 | FC FC | Origin raw PIC: 640x200, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ALKU/INCLUDE.ASM:9,12 INCLUDE 'hoi.in0' + 'hoi.in1' |
+| ALKU | `ALKU/HOI.U` | 128784 | FC FC | Origin raw PIC: 640x200, colours=256, pixels at paragraph 0x31 (784) | standalone | not the file that is linked: `ALKU/INCLUDE.ASM:7-12` assembles `INCLUDE 'hoi.in0'` + `'hoi.in1'` as the `PUBLIC` symbol `hzpic`, and those bytes differ from this file in three palette entries (§E.18) |
 | ALKU | `ALKU/HOI.LBM` | 33328 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ALKU/HOI.U |
 | U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2A.C:170) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
 | U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes = two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2A.C:208-219) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
@@ -183,7 +183,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 30-pixel font strip (floor list) |
 | GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
 
-### A.2 Assets whose bytes exist only inside a build blob
+### A.2 Assets whose bytes exist only inside a build blob: one recovered, two answered
 
 Task A5 walked these three with its OMF `LEDATA` reader; **one of them is now recovered**, so this
 section is A5's result as much as A1's list. `bytes` is the size of the blob's `LEDATA` payload
@@ -196,12 +196,15 @@ section is A5's result as much as A1's list. `bytes` is the size of the blob's `
 | TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic; A5 measured it as `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859) | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
 
 Every other blob in the tree whose payload is an asset has a standalone twin, and §A carries
-that twin's row; §D names the pairing. `TECHNO/_CIRCLE.OBK` sat in this table until a
-reconstruction showed its payload **is** `DDSTARS/PIC.EGA` byte for byte (`c42cf0062e81fa19…`,
-24,000 bytes each on both sides), so its twin's row is in §A like every other.
+that twin's row; §D names the pairing. The exception is `ALKU/INCLUDE.OBJ`, whose payload
+differs from `ALKU/HOI.U` in three palette bytes (§E.18) — so this row's file is the curated
+copy and the linked bytes are the `.IN` text, not the other way round. `TECHNO/_CIRCLE.OBK`
+sat in this table until a reconstruction showed its payload **is** `DDSTARS/PIC.EGA` byte for
+byte (`c42cf0062e81fa19…`, 24,000 bytes each on both sides), so its twin's row is in §A like
+every other.
 
-A5's walk covers **all 151 `.OBK`/`.OBJ` files**, not only the rows above, and found the relation
-to hold everywhere it applies: 35 blobs reconstruct a standalone file byte-for-byte (§D). The one
+A5's walk covers **all 151 `.OBK`/`.OBJ` files**, not only the rows above; the pairs it found
+are §D's, and the three payloads that are not a standalone file are §D's table there. The one
 recovered file is the only entry in `assets/` with no upstream path (§G).
 
 ---
@@ -325,15 +328,27 @@ payload is exactly what the `DOIT2.C` in the tree generates, and `DDSTARS/PIC2.E
 
 **A5's verification of this section.** `tests/omf.rs` reconstructs every row of the first table
 above and asserts byte equality with the named file, plus the four `COMAN` half-blobs against
-the slices `COMAN/DOOBJS.BAT:1-2,7-8` cuts; all hold, and a byte-inexact reconstruction appears
-nowhere in the tree. The same walk over **all 151 `.OBK`/`.OBJ` files** (not only the rows
-above) found the relation holds wherever a payload is an asset — 35 blobs reconstruct a
-standalone file — and found thirteen pairs beyond this table, the same relation on files §A
-lists as standalone: `FOREST/HILLBACK.OBJ`→`HILLBACK.CLX`, `FOREST/POS1–3.OBJ`→`POS1–3.DAT`,
-`MAIN/PROT/RUN1.OBJ`→`RUN1.BIN`, `TUNNELI/SINIT.OBJ`→`SINIT.DAT`,
-`TUNNELI/TUNNELI.OBJ`→`TUNNEL.DAT`, `WATER/BKG.OBJ`→`BKG.CLX`,
-`WATER/MIEKKA.OBJ`→`MIEKKA.SCI` and `WATER/WAT1–4.OBJ`→`WAT1–4.DAT`. Nothing any part linked
-exists only in a build artifact except the one file A5 recovered, and §A.2 carries it.
+the slices `COMAN/DOOBJS.BAT:1-2,7-8` cuts; all hold. The same walk over **all 151 `.OBK`/`.OBJ`
+files** (not only the rows above) found thirteen pairs beyond this table, the same relation on
+files §A lists as standalone: `FOREST/HILLBACK.OBJ`→`HILLBACK.CLX`,
+`FOREST/POS1–3.OBJ`→`POS1–3.DAT`, `MAIN/PROT/RUN1.OBJ`→`RUN1.BIN`,
+`TUNNELI/SINIT.OBJ`→`SINIT.DAT`, `TUNNELI/TUNNELI.OBJ`→`TUNNEL.DAT`,
+`WATER/BKG.OBJ`→`BKG.CLX`, `WATER/MIEKKA.OBJ`→`MIEKKA.SCI` and `WATER/WAT1–4.OBJ`→`WAT1–4.DAT`
+— **35 blobs reconstruct a standalone file byte-for-byte in all.**
+
+The walk also found that **not every blob payload is a standalone file**, and A5 records each
+case rather than smoothing it over — three of them, four blobs:
+
+| payload | what it is | where |
+|---|---|---|
+| `ALKU/INCLUDE.OBJ` | `decode(HOI.IN0)`+`decode(HOI.IN1)`+`decode(FONA.INC)` byte for byte; the picture part differs from `assets/ALKU/HOI.U` in exactly 9 bytes at offsets 19–27 — three palette entries | §E.18 |
+| `WATER/MIEK.OBJ` | `WATER/MIEKKA.SCI` with 1 byte changed (offset 2,563); nothing links it — `WATER/MIEK.PAS:2` links `miekka.obj`, which is byte-exact | §E.19 |
+| `CREDITS/INCLUDE.OBJ`, `CREDITS/INCLUD2.OBJ` | 12 and 9 raw `FC FC` 160×100 pictures at a 16,784-byte stride (plus the credits font in the first); no file in the tree holds those pictures' bytes | §E.20 |
+
+Of the blobs the shipped parts link, four payloads are asset data that is not a standalone
+file: the three in the table above, plus `TECHNO/_CIRCLE2.OBK`, which A5 recovered (§A.2).
+Everything else a part links reproduces a standalone file byte for byte. (`TECHNO/_PIC1.OBK`
+and `_PIC2.OBK` are not linked at all.)
 
 ---
 
@@ -463,12 +478,58 @@ Each of these is something a later task must know before it writes a loader or a
     It is a 320×200 **one-bit mask** — 8,000 bytes with no header, 8,000 = 320×200/8, high bit
     leftmost — and it is the shipped part's `_circle2`: `TECHNO/MAKEFILE:6` links the blob,
     `:23` links it into `koe.exe`, `TECHNO/KOE.MAP:11` sizes the segment (`DATA__circle2`,
-    0x1F40 = 8,000) and `TECHNO/KOEA.ASM:653-680` (`init_interference`) blits it into the EGA
-    planes. Its bytes are exactly what the generator at `DDSTARS/DOIT2.C:21-52` writes — which
+    0x1F40 = 8,000) and `TECHNO/KOEA.ASM:646-745` (`init_interference`; the load is at `:665`)
+    blits it into the EGA planes. Its bytes are exactly what the generator at
+    `DDSTARS/DOIT2.C:21-52` writes — which
     is why the recovered file is named after the linker symbol, not after `DDSTARS/PIC2.EGA`,
     the stale file of that name that differs from it in 7,162 of 8,000 bytes. A later TECHNO
     task therefore needs a 1-bpp mask path, not the 8-bpp `raw_surface`; `assets/PROVENANCE.md`
     carries the file's origin as a blob and its records.
+18. **`ALKU`'s shipped palette is not the curated `HOI.U`'s: the linked hzpic's entries 1–3 are
+    three brightened greys — two of which occur at no index of `HOI.LBM`'s `CMAP` at all.**
+    This is the tree's only *linked* payload whose bytes differ by content from the curated
+    copy of the same art (the other divergence §D names, `WATER/MIEK.OBJ`, is unlinked), and
+    it is A5's, found by comparing the reconstruction with the `.IN` text. `ALKU/INCLUDE.OBJ`'s
+    payload (173,786 bytes) is `decode(HOI.IN0)` (65,535) + `decode(HOI.IN1)` (63,250) +
+    `decode(FONA.INC)` (45,001) byte for byte; `ALKU/INCLUDE.ASM:7-12` assembles those
+    fragments as the `PUBLIC` symbol `hzpic`. (`decode(HOI.IN0)+decode(HOI.IN1)` is one byte
+    longer than `HOI.U`: its last byte is the `-1` that ends `HOI.IN1`, an INCBIN-text artifact of the same kind as PAM's
+    fragments.) The picture bytes that follow are `assets/ALKU/HOI.U`'s with **exactly nine
+    bytes changed, at offsets 19–27** — palette entries 1, 2 and 3:
+
+    | entry | the linked bytes (shipped) | `assets/ALKU/HOI.U` | `HOI.LBM` `CMAP ÷ 4`, same index |
+    |---|---|---|---|
+    | 1 | `(10, 10, 10)` | `(2, 2, 3)` | `(2, 2, 3)` |
+    | 2 | `(30, 30, 30)` | `(5, 5, 7)` | `(5, 5, 7)` |
+    | 3 | `(63, 63, 63)` | `(6, 6, 9)` | `(6, 6, 9)` |
+
+    `HOI.U`'s three entries are the LBM's `CMAP` divided by four at the same indices, so `HOI.U`
+    is the ordinary conversion. **The shipped `(10, 10, 10)` and `(30, 30, 30)` occur at no
+    index of that `CMAP ÷ 4` at all**, and the shipped `(63, 63, 63)` occurs only as the ramp's
+    saturated white (indices 64–254), not at index 3 — so the shipped palette cannot be
+    reproduced by re-quantising `HOI.LBM`, only by reading the `.IN` text (or the 9 bytes
+    above). Which of the two an ALKU port should draw is a Phase 2 decision that needs
+    `ALKU`'s own loader read; **A5 does not curate `HOI.IN0`/`HOI.IN1`**, and this table is the
+    record so the values do not have to be re-derived.
+19. **`WATER/MIEK.OBJ` is `MIEKKA.SCI` with one byte changed, and it is not the linked file.**
+    Its payload is 14,778 bytes, identical to `WATER/MIEKKA.SCI` except at offset 2,563
+    (`0x54` against `MIEKKA.SCI`'s `0x00`, i.e. one pixel byte in row 4 of the RIX3 payload).
+    `WATER/MIEK.PAS:2` links `miekka.obj`, and `MIEKKA.OBJ` **is** byte-exact (§D); `MIEK.OBJ`
+    is an intermediate nothing links, so the one differing byte cannot reach the shipped part.
+20. **`CREDITS/INCLUDE.OBJ` and `CREDITS/INCLUD2.OBJ` hold the credits pictures raw, and no
+    standalone file in the tree holds them.** Each payload is a run of `FC FC` 160×100
+    256-colour pictures at a 16,784-byte stride (16 + 768 palette + 16,000 pixels, pixels at
+    paragraph `0x31` = 784): 12 pictures in `INCLUDE.OBJ` (`CREDITS/INCLUDE.ASM:3-73`, PIC01,
+    02, 03, 04, 05, 05B, 06, 07, 08, 09, 10, 10B) plus the credits font —
+    `decode(CREDITS/FONA.INC)`, 60,000 bytes, the 1,500×40 raster §E.8 names — and 9 in
+    `INCLUD2.OBJ` (`CREDITS/INCLUD2.ASM`, PIC11, 12, 13, 14, 14B, 15, 16, 17, 18). Each
+    picture's raster is byte-identical to the decoded pixels of the matching
+    `CREDITS/PICS/PICNN.LBM` (measured for all 21), but **no file in the tree holds any of the
+    21 pictures' bytes**: the `.UH` files `CREDITS/UNPACK.BAT:1-22` names do not exist in the
+    tree (only the `.LBM` source art does), and the `picNN.inc` intermediates are not built
+    either. So these are the only pictures in the shipment whose container bytes exist nowhere
+    but in the blobs — a fact for Phase 7 (CREDITS), which is the part that would need them;
+    A5 records it and recovers nothing.
 
 ---
 

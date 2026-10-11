@@ -11,8 +11,11 @@
 //!    would pass a size test.
 //! 2. **The tree is complete from the EXE side.** Every blob's payload is compared with
 //!    the standalone file it reproduces: the inventory's §D pairs, the four `COMAN`
-//!    slices, and thirteen more pairs that the same walk finds elsewhere in the tree.
-//!    Nothing a part linked exists only in a build artifact.
+//!    slices, and thirteen more pairs that the same walk finds elsewhere in the tree — 35
+//!    blobs in all. The walk's three exceptions are named in §D: `ALKU/INCLUDE.OBJ` (§E.18,
+//!    three palette bytes from `ALKU/HOI.U`), `WATER/MIEK.OBJ` (§E.19, one byte from
+//!    `MIEKKA.SCI`, unlinked) and the two `CREDITS` picture blobs (§E.20, 21 pictures no
+//!    file in the tree holds).
 //! 3. **The payloads with no twin are answered.** `TECHNO/_CIRCLE2.OBK` is a 320x200
 //!    one-bit mask, the exact output of `DDSTARS/DOIT2.C`, linked into the shipped
 //!    TECHNO.EXE (`TECHNO/MAKEFILE:6,23`, `TECHNO/KOE.MAP:10-11`) and consumed at runtime
@@ -125,9 +128,11 @@ fn a_record_that_runs_past_the_end_of_the_blob_is_refused() {
     assert!(matches!(extract_ledata(&[0xA0, 0x00]), Err(AssetError::Truncated { .. })));
 }
 
-/// `LEDATA` is type `0xA0` and this tree never spells it any other way: 3,975 records
-/// across the 151 `.OBK`/`.OBJ` files, not one of type `0xA1`. A reader that treated
-/// `0xA1` as the same record could not tell the two apart, so it refuses it instead.
+/// `LEDATA` is type `0xA0` in this tree and no file spells it any other way: 3,975 records
+/// across the 151 `.OBK`/`.OBJ` files, not one of type `0xA1`. (In the standard Intel OMF
+/// `0xA1` is `LEDATA` too, with a 32-bit offset and a longer body — a reader that treated
+/// the two as the same record could not tell them apart, which is why this one refuses the
+/// spelling the tree never uses.)
 #[test]
 fn a_record_type_this_tree_never_uses_is_refused() {
     // 0xA1, body length 4, segment 1, offset 0, checksum.
@@ -148,7 +153,7 @@ fn a_ledata_body_too_short_to_hold_its_header_is_refused() {
 }
 
 // -------------------------------------------------------------------------------------
-// Completeness: every blob reproduces a standalone file
+// Completeness: the 35 blobs whose payload is a standalone file
 // -------------------------------------------------------------------------------------
 
 /// Every blob whose payload is a standalone file, as `(blob, file)`. The first 22 rows are
@@ -198,9 +203,11 @@ const TWINS: &[(&str, &str)] = &[
     ("WATER/WAT4.OBJ", "WATER/WAT4.DAT"),
 ];
 
-/// The phase's evidence from the EXE side: no asset exists only in a build artifact. This
-/// is the measurement turned into a check — the walk covers every blob in `TWINS`, and the
-/// comparison is byte equality, because a length check cannot see the one-byte drift.
+/// The phase's evidence from the EXE side: every one of these 35 blobs reproduces a
+/// standalone file byte for byte, and `TWINS` is every blob in the tree that does (the
+/// exceptions the walk found are not twins and are named in §D and §E.18–E.20). This is
+/// the measurement turned into a check — the comparison is byte equality, because a length
+/// check cannot see the one-byte drift.
 #[test]
 fn every_blob_with_a_twin_reproduces_it_byte_for_byte() {
     // A guard, like the loops in the sibling test files: a table that emptied itself must
@@ -257,7 +264,7 @@ fn the_dta_halves_reproduce_the_slices_the_build_script_cuts(
 /// one file this phase recovers. It is 8,000 bytes = 320x200 bits — a one-bit-per-pixel
 /// mask with no header — and it is pulled into the shipped image by `TECHNO/MAKEFILE:6,23`
 /// (`data=_circle2.obk`, linked into `koe.exe`) and read at runtime by
-/// `init_interference` (`TECHNO/KOEA.ASM:653-680`).
+/// `init_interference` (`TECHNO/KOEA.ASM:646-745`; the load at `:665`).
 #[test]
 fn the_recovered_mask_is_the_shipped_blob_payload() {
     let payload = payload("TECHNO/_CIRCLE2.OBK");
@@ -339,9 +346,10 @@ const DISTRIBUTOR_TEXT: [&str; 2] = ["FCINFO10.TXT", "README.1ST"];
 
 /// `MAIN/PACKFINA.INC:1-81` is the 79-entry table of what `SECOND.EXE` carries, six `dw`
 /// fields each. Every entry is either a part executable (22 of them) or a file whose bytes
-/// are already in `assets/` (55) — so "no asset is EXE-only" is a checked statement from
-/// the shipped side, not an inference from the blobs. The two exceptions are the
-/// distributor's text files, named above.
+/// are already in `assets/` (55) — so everything the pack hands out beside the part
+/// executables is accounted for in the curated tree — except the distributor's two text
+/// files, named above. What lives *inside* a part executable is §D's subject, and one of
+/// those assets was recovered (§A.2).
 #[test]
 fn the_shipped_pack_carries_part_executables_and_assets() {
     let manifest = format!("{UPSTREAM}/MAIN/PACKFINA.INC");
