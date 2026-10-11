@@ -34,8 +34,14 @@ impl Palette {
         Palette::BLACK
     }
 
-    /// 768 bytes of 8-bit RGB, as stored by `.PAL`, LBM and the S3M modules.
-    /// Each component is shifted down by 2 — the DAC's 6 bits are the top 6.
+    /// 768 bytes of 8-bit RGB — an IFF `CMAP`, a module's palette. Each
+    /// component is shifted down by 2, which is the original's own conversion
+    /// (`GRAB/LBM2U.C:170` writes `getc(f1)/4`); the DAC's 6 bits are the top 6.
+    ///
+    /// **Not a `.PAL`.** The tree's `.PAL` files hold the *output* of that same
+    /// conversion, so they are six-bit DAC values already and shifting them down
+    /// again darkens every colour by four. `sr_assets::pal::decode` reads them as
+    /// they are; `sr_assets::pal`'s docs carry the measurements that settle it.
     pub fn from_vga(bytes: &[u8]) -> Palette {
         let mut p = Palette::new();
         for (entry, rgb) in p.entries.iter_mut().zip(bytes.chunks_exact(3)) {

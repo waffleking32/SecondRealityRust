@@ -1,7 +1,8 @@
 //! Asset decoding for the port: the original's formats, read as they are.
 //!
-//! One module per family. Task A2 lands the Origin PIC container ([`origin`])
-//! and A3 the IFF images ([`iff`]); RIX3 and `.PAL` (A4) and the two animation
+//! One module per family. Task A2 lands the Origin PIC container ([`origin`]),
+//! A3 the IFF images ([`iff`]) and A4 the RIX3 screens ([`rix`], behind `.CLX`
+//! and `.SCI`) and the headerless VGA palettes ([`pal`]); the two animation
 //! formats (A6) follow and plug into [`load`] and [`sniff`].
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
@@ -9,19 +10,26 @@
 //!
 //! - **The extension never decides the format.** `.UH` holds four different
 //!   containers in this tree, and `.U` holds both a headered one and a bare dump;
-//!   [`sniff`] answers from the magic bytes alone.
+//!   [`sniff`] answers from the magic bytes alone — and for the two formats with
+//!   no magic at all ([`Format::OriginBare`] and [`Format::Pal`]) it answers
+//!   `None`, because a name or a size is not evidence. Those two are loaded by
+//!   construction, through [`raw_surface`] and [`pal::decode`].
 //! - **Palettes stay six bits.** A palette is read as the original stored it.
-//!   The Origin family stores six-bit values already and they are copied
-//!   verbatim; the IFF `CMAP` stores eight and the original's own converters
-//!   truncate them with `/4` (`GRAB/LBM2U.C:170` and four more copies of the
-//!   same line). [`six_bit`] is neither of those rules: it is the inverse of the
-//!   engine's 6→8 display widening, kept for the widening's round trip, and
-//!   running it over an already-six-bit palette would darken every colour.
+//!   The Origin family and RIX3 store six-bit values already and they are copied
+//!   verbatim; `.PAL` is the same six-bit palette with no header, so
+//!   [`pal::decode`] copies it verbatim too; the IFF `CMAP` stores eight and the
+//!   original's own converters truncate them with `/4` (`GRAB/LBM2U.C:170` and
+//!   four more copies of the same line). [`six_bit`] is neither of those rules:
+//!   it is the inverse of the engine's 6→8 display widening, kept for the
+//!   widening's round trip, and running it over an already-six-bit palette would
+//!   darken every colour.
 //! - **A decoder never reads past its input.** Malformed and truncated input is
 //!   an [`AssetError`], never a panic and never a short read.
 
 pub mod iff;
 pub mod origin;
+pub mod pal;
+pub mod rix;
 
 use std::path::{Path, PathBuf};
 
@@ -66,6 +74,9 @@ impl std::fmt::Debug for Image {
 /// has to tell raw from RLE from bit-planes. [`Format::OriginBare`] has no header
 /// and therefore no magic: `sniff` never returns it and `load` refuses it,
 /// because it cannot know the geometry — [`raw_surface`] is its door.
+/// [`Format::Pal`] is the same shape of absence — 768 bytes with no header — and
+/// is refused by `load` for a different reason: it has no pixels to put in an
+/// [`Image`]. [`pal::decode`] is its door.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Origin,
@@ -167,26 +178,39 @@ pub fn sniff(bytes: &[u8]) -> Option<Format> {
         return Some(Format::Fli);
     }
     // `.PAL` (768 raw bytes) and `.ANI` (frames back to back) have no magic at
-    // all: they are loaded by construction, never sniffed.
+    // all: they are loaded by construction, never sniffed. A `.PAL` is *exactly*
+    // 768 bytes, every one of the five in the tree — a "768 bytes, so it is a
+    // palette" branch would claim any file of that length, which is why there is
+    // none.
     None
 }
 
 /// Decode `bytes` as `format`. [`Format::Origin`] reads its own magic to choose
 /// between the family's five variants; [`Format::Iff`] reads its `FORM` type the
-/// same way, between `ILBM` and `PBM `.
+/// same way, between `ILBM` and `PBM `; [`Format::Rix3`] reads its 10-byte header
+/// and the two type bytes in it.
 ///
-/// Every other format is [`AssetError::Unsupported`] until its decoder lands:
-/// RIX3 and `.PAL` with A4, FLI and ANI with A6.
+/// The two formats with no magic cannot be reached here: [`Format::OriginBare`]
+/// has no geometry to read, and [`Format::Pal`] has no pixels to return. Both
+/// name their own door in the error — [`raw_surface`] and [`pal::decode`].
+///
+/// FLI and ANI are [`AssetError::Unsupported`] until their decoders land with A6.
 pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
     match format {
         Format::Origin => origin::decode(bytes),
         Format::Iff => iff::decode(bytes),
+        Format::Rix3 => rix::decode(bytes),
+        Format::Pal => Err(AssetError::Unsupported {
+            format,
+            what: "palette: pal::decode(bytes) returns it; an Image has pixels and a .PAL has none"
+                .to_string(),
+        }),
         Format::OriginBare => Err(AssetError::Unsupported {
             format,
             what: "no header, so no geometry: raw_surface(bytes, width, height) is its door"
                 .to_string(),
         }),
-        Format::Rix3 | Format::Pal | Format::Fli | Format::Ani => Err(AssetError::Unsupported {
+        Format::Fli | Format::Ani => Err(AssetError::Unsupported {
             format,
             what: "no decoder for this format yet".to_string(),
         }),
@@ -203,15 +227,16 @@ pub fn load_path(path: &Path) -> Result<Image, AssetError> {
     load(&bytes, format)
 }
 
-/// Every frame in `bytes`. A still container is one frame; only FLI and the
-/// `.ANI` scheme carry more than one, and those land with task A6.
+/// Every frame in `bytes`. A still container is one frame — the Origin family,
+/// IFF and RIX3; only FLI and the `.ANI` scheme carry more than one, and those
+/// land with task A6.
 pub fn load_frames(bytes: &[u8], format: Format) -> Result<Vec<Image>, AssetError> {
     match format {
-        Format::Origin | Format::Iff => Ok(vec![load(bytes, format)?]),
+        Format::Origin | Format::Iff | Format::Rix3 => Ok(vec![load(bytes, format)?]),
         _ => Err(AssetError::Unsupported {
             format,
-            what: "not implemented; only the Origin family and IFF are containers this decoder \
-                   reads yet"
+            what: "not implemented; only the Origin family, IFF and RIX3 are containers this \
+                   decoder reads yet"
                 .to_string(),
         }),
     }
@@ -256,8 +281,8 @@ pub fn raw_surface(bytes: &[u8], width: u16, height: u16) -> Result<Image, Asset
 /// `.UP`, `.16` and `.EXB` palettes that a `/4` produced.
 ///
 /// Nor is it the identity over six-bit input — `six_bit(32)` is 8 — so it must
-/// not be run over a palette that is six bits already, which every Origin
-/// family file's is and every `.PAL` (task A4) will be.
+/// not be run over a palette that is six bits already, which is what every
+/// Origin family file's, every RIX3 file's and every `.PAL`'s is.
 pub const fn six_bit(v: u8) -> u8 {
     ((v as u32 * 63 + 127) / 255) as u8
 }
