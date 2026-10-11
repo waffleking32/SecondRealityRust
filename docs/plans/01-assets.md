@@ -313,7 +313,8 @@ fn every_origin_asset_decodes_and_fills_the_geometry_its_header_claims() {
     // asserted separately below. The guard is what stops a loop that matches
     // nothing from passing — the plan's original `>= 20` came from the
     // whole-upstream tally of 26 and was never reachable against the curated tree.
-    assert_eq!(seen, 14, "expected every decodable Origin asset, saw {seen}");
+    assert!(seen >= 14, "expected every decodable Origin asset, saw {seen}");
+    assert_eq!(refused, 1, "only the truncated asset should be refused");
 }
 
 #[test]
