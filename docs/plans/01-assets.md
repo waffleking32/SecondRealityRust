@@ -867,12 +867,29 @@ so and drop it rather than inventing a cell grid for it.
 - Produces:
 
 ```rust
-pub struct Font { /* cells over a decoded Image */ }
+> **Corrected after measurement.** This block originally described a `cell: (u16, u16)` grid that
+> the strip is cut into. **The strips are proportional, not grids.** `ENDSCRL/MAIN.C:103-122` finds
+> each glyph by scanning for a run of inked columns — 74 runs, widths 3..25, start-to-start 4..26,
+> one per character of `fonaorder` (`:13`), in order — and the only cell the routine states by hand
+> is its blank (`fonap[32]=1500-20; fonaw[32]=16;`, `:123-124`), which is where the (20, 30) in the
+> brief came from. **Cutting at that pitch is the failure the plan warned against**: 41 of the 74
+> cells straddle a 20-column boundary — cell 2 (`C`) starts at 37, inside `B`'s cell — so
+> `glyph('B')` would carry a sliver of `C`.
+>
+> So `cell` survives only as a **validated input**, not as the glyph pitch: `from_image` checks it
+> (both dimensions must divide the strip, and the height must be the strip's) and refuses with
+> `Unsupported` if it does not hold, then takes glyphs from the scan. Glyphs are variable-width.
+> `glyph(ch)` addresses cells by index (`ch - first`), because the parts' orders are not
+> ASCII-contiguous past `X` and a `Font` cannot know them — **the character order belongs to the
+> part**, not to this type. Phase 2's consumers must supply it.
+
+```rust
+pub struct Font { /* proportional glyphs scanned from a decoded Image */ }
 impl Font {
-    /// `cell` is (width, height) in pixels; `first` is the character the first
-    /// cell holds. Both come from the part's own text routine, cited in the commit.
+    /// `cell` is a **claim to validate**, not the glyph pitch — see the note above.
+    /// `first` is the character the first cell holds.
     pub fn from_image(image: Image, cell: (u16, u16), first: char) -> Result<Font, AssetError>;
-    pub fn glyph(&self, ch: char) -> Option<&[u8]>;   // cell-sized, row-major
+    pub fn glyph(&self, ch: char) -> Option<&[u8]>;   // width x height, row-major
     pub fn cell(&self) -> (u16, u16);
 }
 ```
