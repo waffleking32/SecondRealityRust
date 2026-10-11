@@ -38,14 +38,14 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | ALKU | `ALKU/FONA2.LBM` | 15268 | FORM | IFF PBM  (FORM .... PBM ) | standalone | second font strip (floor list) |
 | ALKU | `ALKU/HOI.U` | 128784 | FC FC | Origin raw PIC: 640x200, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ALKU/INCLUDE.ASM:9,12 INCLUDE 'hoi.in0' + 'hoi.in1' |
 | ALKU | `ALKU/HOI.LBM` | 33328 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ALKU/HOI.U |
-| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2A.C:170) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes = two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2A.C:208-219) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
 | U2A | `VISU/C/SCENE/U2A.0AB` | 16081 | 20 EA D8 23 | 16081 bytes of binary data, no magic | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
 | U2A | `VISU/C/SCENE/U2A.001` | 8928 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
 | U2A | `VISU/C/SCENE/U2A.002` | 7684 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
 | U2A | `VISU/C/SCENE/U2A.003` | 2032 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2E.C:214) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | 8 bytes = two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2E.C:252-263) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
 | U2E | `VISU/C/SCENE/U2E.0AB` | 77069 | 20 EB FD 78 | 77069 bytes of binary data, no magic | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
 | U2E | `VISU/C/SCENE/U2E.001` | 832 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
 | U2E | `VISU/C/SCENE/U2E.002` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
@@ -424,7 +424,7 @@ whether a file was missed.
 
 | what | why it is not in `assets/` |
 |---|---|
-| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the four blob-only rows in §D |
+| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the three blob-only rows in §D |
 | `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
 | `ALKU/HOI.IN0`, `HOI.IN1` | the `INCBIN` text of `ALKU/HOI.U`, which is in `assets/`; the binary is what the port reads. **`PAM/OUT.IN0`–`OUT.IN4` are the exception and are copied** — task A6's plan names them, and they are PAM's shipped data rather than a redundant text form (§A) |
 | `ALKU/HOIKKA.LBM`, `ALKU/PIC001.LBM`, `ALKU/RYPPIS.LBM`, `ALKU/U2-MOVIE.LBM` | working pictures in ALKU's directory that no ALKU source, makefile or project file names |
@@ -462,4 +462,5 @@ echo "checked $(find assets -type f ! -name PROVENANCE.md | wc -l) files"
 ```
 
 Every file in `assets/` has a path that exists upstream, which is what makes the loop
-one line. At A1's commit the loop printed no `DIFFERS` lines and `checked 148 files`.
+one line. As of the review-fix commit the loop printed no `DIFFERS` lines and
+`checked 149 files`.
