@@ -21,14 +21,18 @@
 //! gets wrong, each one measured over the tree:
 //!
 //! - **A chunk size can include the pad byte.** Eight of the curated `ILBM`
-//!   files carry a `CMAP` of 333 bytes — an odd number of triples' worth — and
+//!   files carry a `CMAP` one byte longer than its entries need — 334 bytes for
+//!   111 triples, the extra byte being the pad that makes the chunk even — and
 //!   thirteen carry a `BODY` whose row stream ends one byte before the chunk
 //!   does. Both writers made the chunk even by counting the pad byte in the
 //!   size. So the palette is `size / 3` entries and a leftover byte is padding,
-//!   and the row stream may leave a byte unread: a decoder that demanded the
-//!   stream fill the `BODY` exactly would refuse eight of the tree's files. The
-//!   `FORM` size, by contrast, is exact — `size + 8` equals the file length for
-//!   all 37 curated files, byte for byte — and bounds every walk below.
+//!   and the row stream may leave a byte unread: a decoder that refused a
+//!   `CMAP` whose length is not a multiple of three would refuse eight of the
+//!   tree's files, and one that demanded the stream fill the `BODY` exactly
+//!   would refuse thirteen. The `FORM` size, by contrast, is exact — `size + 8`
+//!   equals the file length for all 37 curated files, byte for byte — and bounds
+//!   every read below, and the chunks have to fill it end to end: the walk
+//!   refuses a `FORM` whose bytes are not all accounted for by chunks.
 //! - **A row ends when it is full, not when its opcodes run out.** The
 //!   original's loop is `while(lp < xsz)` (`LOADLBM.C:161-179` for chunky,
 //!   `197-232` for planar), checked between opcodes; a run that overshoots is
@@ -42,10 +46,13 @@
 //!   `VPL.C:97` all read `a = getc(f1)/4` — the 8->6 conversion the original
 //!   actually used, which is why the `.UH`/`.UP`/`.16`/`.EXB` files it wrote
 //!   hold those values. [`crate::six_bit`] is the *display* rule's inverse
-//!   ([`dac_expand`](sr_engine::dac_expand) widens 6->8) and differs from `/4`
-//!   on one 6-bit step wherever the byte is 3 mod 4; the tree's own converted
-//!   twins agree with `/4` byte for byte, and `tests/iff.rs` pins the palette
-//!   against them, 768 bytes at a time.
+//!   ([`dac_expand`](sr_engine::dac_expand) widens 6->8) and a different
+//!   function: it disagrees with `/4` on 42 of the 256 values — every `4k+3` up
+//!   to 83, where it rounds up by one, and every fourth value from 172 to 252,
+//!   where it rounds down by one — so it would move the tree's converted
+//!   palettes by one 6-bit step on those bytes. The twins agree with `/4` byte
+//!   for byte, and `tests/iff.rs` pins the palette against them, 768 bytes at a
+//!   time.
 //! - **A truncated stream is an error, not a hang.** The original's `getc`
 //!   returns `EOF`, which `if(a > 127)` reads as a literal of length 0 and
 //!   loops on forever; every read here is bounded by the `BODY`'s end and
@@ -175,12 +182,15 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, AssetError> {
         // way the next chunk starts after it.
         at = stop + (size as usize & 1);
     }
-    // The FORM's bytes have to be chunks; bytes left over mean the size field
-    // and the content disagree, and guessing at the rest would invent a picture.
-    if at < end {
+    // The `FORM`'s bytes have to be chunks, end to end. `at` lands past `end`
+    // when the last chunk is odd-sized and the file carries no final pad byte
+    // for it, and short of `end` when bytes follow the last chunk; it lands
+    // exactly on `end` for every file in either tree (measured). Anything else
+    // means the size field and the content disagree, and guessing at the rest
+    // would invent a picture.
+    if at != end {
         return Err(unsupported(format!(
-            "{} bytes after the last chunk are not a chunk header",
-            end - at
+            "the chunk walk ends at byte {at} of a FORM that ends at {end}"
         )));
     }
 
@@ -384,7 +394,8 @@ fn row_stream(bytes: &[u8], mut at: usize, end: usize, out: &mut [u8]) -> Result
         at += 1;
         if op > 0x7F {
             // `0x80` is `257 - 128` = 129 and `0xFF` is 2 (`LOADLBM.C:164-170`),
-            // so a run is never zero and never more than a row can hold.
+            // so a run is never zero. It can be longer than the row has left —
+            // the clamp below is exactly for that.
             let run = 257 - op as usize;
             debug_assert!((2..=129).contains(&run));
             if at >= end {

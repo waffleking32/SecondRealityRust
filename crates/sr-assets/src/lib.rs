@@ -10,9 +10,13 @@
 //! - **The extension never decides the format.** `.UH` holds four different
 //!   containers in this tree, and `.U` holds both a headered one and a bare dump;
 //!   [`sniff`] answers from the magic bytes alone.
-//! - **Palettes stay six bits.** A palette is read as the original stored it —
-//!   the Origin family already stores six-bit values, which must **not** be run
-//!   through [`six_bit`], whose job is the other direction (8-bit IFF `CMAP`).
+//! - **Palettes stay six bits.** A palette is read as the original stored it.
+//!   The Origin family stores six-bit values already and they are copied
+//!   verbatim; the IFF `CMAP` stores eight and the original's own converters
+//!   truncate them with `/4` (`GRAB/LBM2U.C:170` and four more copies of the
+//!   same line). [`six_bit`] is neither of those rules: it is the inverse of the
+//!   engine's 6→8 display widening, kept for the widening's round trip, and
+//!   running it over an already-six-bit palette would darken every colour.
 //! - **A decoder never reads past its input.** Malformed and truncated input is
 //!   an [`AssetError`], never a panic and never a short read.
 
@@ -91,9 +95,16 @@ impl std::fmt::Display for Format {
 pub enum AssetError {
     /// Nothing in the first bytes matched a known magic.
     UnknownFormat,
-    /// The bytes stop short of what the container promises. `had` is
-    /// sometimes *more* than `needed`: the same variant reports a buffer that is
-    /// not the length the geometry requires, in either direction.
+    /// The bytes stop short of what the container promises.
+    ///
+    /// Both fields are file offsets into the input: `needed` is the byte the
+    /// decoder wanted and `had` the last byte it had to work with. `had` is
+    /// sometimes *more* than `needed` — the same variant reports a buffer that
+    /// is not the length the geometry requires, in either direction — and it is
+    /// the length of the input only when the payload runs to the end of it. An
+    /// IFF picture is the case where it does not: its rows come from the `BODY`
+    /// chunk, so a short row stream reports that chunk's end, which can be
+    /// several bytes inside the file (`sr_assets::iff`'s module docs).
     Truncated { format: Format, needed: usize, had: usize },
     /// A construct no shipped file uses, where guessing would invent behaviour.
     Unsupported { format: Format, what: String },
@@ -235,11 +246,18 @@ pub fn raw_surface(bytes: &[u8], width: u16, height: u16) -> Result<Image, Asset
 /// The inverse of [`sr_engine::dac_expand`]'s rounding: `round(v * 63 / 255)`,
 /// where `dac_expand` is `round(v * 255 / 63)`.
 ///
-/// For loaders that read **8-bit** palette data — the IFF `CMAP` (task A3) and
-/// nothing else. The Origin family stores six-bit values already and must be
-/// copied verbatim: this is not the identity over six-bit input (`six_bit(32)`
-/// is 8, and running it over an Origin palette would darken every picture by
-/// roughly a factor of four).
+/// **This is the display rule's inverse, not the 8→6 conversion rule.** The
+/// engine widens six bits to eight for output, and this is the value that comes
+/// back; a loader handed eight-bit palette data converts it the way the
+/// original's own tools did, which for the IFF `CMAP` is the integer `/4` of
+/// `GRAB/LBM2U.C:170` — not this. The two are different functions: they disagree
+/// on 42 of the 256 values here (every `4k+3` up to 83, and every fourth value
+/// from 172 to 252), which is one 6-bit step on each of the tree's `.UH`,
+/// `.UP`, `.16` and `.EXB` palettes that a `/4` produced.
+///
+/// Nor is it the identity over six-bit input — `six_bit(32)` is 8 — so it must
+/// not be run over a palette that is six bits already, which every Origin
+/// family file's is and every `.PAL` (task A4) will be.
 pub const fn six_bit(v: u8) -> u8 {
     ((v as u32 * 63 + 127) / 255) as u8
 }

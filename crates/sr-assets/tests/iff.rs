@@ -391,21 +391,26 @@ fn every_iff_asset_decodes_and_fills_the_geometry_its_bmhd_claims() {
     assert_eq!((planar, chunky), (24, 13), "the curated tree's own tally");
 }
 
-/// `six_bit` is the exact inverse of the engine's DAC widening over all 256
-/// 8-bit values, which is what `lib.rs` documents it for and what A2's
-/// `six_bit_is_the_exact_inverse_of_the_engines_widening` pins over 0..=63.
+/// `six_bit` is the exact inverse of the engine's DAC widening — the 6→8
+/// *display* rule inverted — in both directions: an eight-bit value widened from
+/// the six-bit answer comes back within the rounding (at most 2), and every
+/// six-bit value survives the round trip exactly.
 ///
-/// It is **not** the IFF `CMAP` rule — the original's converters truncate by
-/// four (`LBM2U.C:170`) and
-/// `the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap` pins the
-/// decoder against their output. The tolerance is the rounding: widening the
-/// six-bit answer back can miss the 8-bit input by at most 2.
+/// It is **not** the IFF `CMAP` rule. The original's converters truncate by four
+/// (`LBM2U.C:170`), and
+/// `the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap` pins this
+/// decoder against their output; A2's
+/// `six_bit_is_the_exact_inverse_of_the_engines_widening` pins the 0..=63 half
+/// from the palette side.
 #[test]
 fn six_bit_is_the_inverse_of_dac_expand_over_all_256_values() {
     for v in 0u8..=255 {
         let six = six_bit(v);
         assert!((dac_expand(six) as i32 - v as i32).abs() <= 2, "8-bit {v} -> 6-bit {six}");
         assert_eq!(six, six_bit(v), "stable");
+    }
+    for c in 0u8..=63 {
+        assert_eq!(six_bit(dac_expand(c)), c, "6-bit value {c}");
     }
 }
 
@@ -761,6 +766,41 @@ fn a_cmap_that_counts_its_pad_byte_in_the_size_reads_its_entries() {
     assert_eq!(img.palette.entry(3), [0, 0, 0], "the pad must not become an entry");
 }
 
+/// The other end of the same rule, and the reason the walk's check is
+/// `at != end` rather than `at < end`: a `FORM` whose size stops one byte short
+/// of its last, odd-sized chunk — the pad byte the tree's writers count *in* the
+/// chunk is not counted in the `FORM` — is refused rather than read past. No
+/// file in either tree is shaped like this (measured over all 37 curated and all
+/// 86 upstream IFF files: every walk lands exactly on the `FORM`'s end), and the
+/// padded form of the same file decodes, which is what makes the refusal a
+/// decision about the contract rather than a limitation.
+#[test]
+fn a_form_that_stops_before_its_last_chunks_pad_byte_is_refused() {
+    // A one-row file whose BODY is three bytes: odd, so the writers would have
+    // written a fourth (the pad) and counted it in the chunk's size.
+    let bmhd_chunk = chunk(b"BMHD", &bmhd(2, 1, 8, 0, 1));
+    let body_id = 12 + bmhd_chunk.len();
+    let mut unpadded = form(b"PBM ", &[bmhd_chunk]);
+    unpadded.extend_from_slice(b"BODY");
+    unpadded.extend_from_slice(&3u32.to_be_bytes());
+    unpadded.extend_from_slice(&[0xFF, 0x11, 0x01]); // a run of two and a literal
+    let form_size = (unpadded.len() - 8) as u32;
+    unpadded[4..8].copy_from_slice(&form_size.to_be_bytes());
+    assert!(
+        matches!(load(&unpadded, Format::Iff), Err(AssetError::Unsupported { .. })),
+        "a FORM that ends before its last chunk's pad byte does not describe its own bytes"
+    );
+
+    // The same file as the writers make it: a four-byte chunk, the pad counted
+    // in the size, and the FORM's size even.
+    let mut padded = unpadded.clone();
+    padded.push(0);
+    padded[body_id + 4..body_id + 8].copy_from_slice(&4u32.to_be_bytes());
+    let form_size = (padded.len() - 8) as u32;
+    padded[4..8].copy_from_slice(&form_size.to_be_bytes());
+    assert_eq!(load(&padded, Format::Iff).unwrap().pixels(), &[0x11, 0x11]);
+}
+
 /// The `FORM` size has to describe chunks. These writers make it exactly the
 /// file length less eight (measured, all 37), so bytes left over after the last
 /// chunk mean the size and the content disagree — and a decoder that shrugged
@@ -781,6 +821,31 @@ fn a_form_size_that_promises_bytes_that_are_not_a_chunk_is_refused() {
         load(&extended, Format::Iff),
         Err(AssetError::Unsupported { .. })
     ));
+}
+
+/// The other half of the walk's contract: a chunk whose declared size runs past
+/// the `FORM`'s end. The `FORM` check above cannot catch this one — the size
+/// field still describes the file exactly — so it is the chunk that is lying,
+/// and its payload is that much shorter than it says.
+#[test]
+fn a_chunk_that_claims_more_than_the_form_holds_is_refused() {
+    let raw = std::fs::read("../../assets/GLENZ/FC.LBM").unwrap();
+    assert!(load(&raw, Format::Iff).is_ok());
+
+    // The BMHD (first chunk, 20 bytes at 12) is told it is as long as the whole
+    // file: its payload then ends past the FORM, and there is no reading of the
+    // container that makes both numbers true.
+    let mut inflated = raw.clone();
+    let claimed = inflated.len() as u32;
+    inflated[16..20].copy_from_slice(&claimed.to_be_bytes());
+    assert!(
+        matches!(
+            load(&inflated, Format::Iff),
+            Err(AssetError::Truncated { format: Format::Iff, needed, had })
+                if needed == 20 + raw.len() && had == raw.len()
+        ),
+        "expected a Truncated naming the chunk's claimed end and the file's length"
+    );
 }
 
 #[test]
@@ -849,8 +914,10 @@ fn no_prefix_of_an_iff_asset_panics_or_decodes_silently() {
     }
     assert_eq!(assets, 37, "every curated IFF asset is swept");
     assert!(cuts > 500, "expected a lot of cuts, made {cuts}");
-    // The `FORM`-size cuts are all refused, and so are the great majority of the
-    // `BODY` cuts: only a cut that lands exactly on a row boundary decodes.
+    // The `FORM`-size cuts are all refused, and so are nearly all the `BODY`
+    // cuts: for one to decode, it has to land exactly on a row boundary — and
+    // then the container has to still walk, which an odd length with no pad byte
+    // does not.
     assert!(refused * 10 > cuts * 9, "only {refused} of {cuts} cuts refused");
 }
 
