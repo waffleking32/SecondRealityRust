@@ -1429,6 +1429,15 @@ git commit -m "Capture references for <parts>"
   but **0 pixels of 95,700** after a 1- and a 2-pixel shift. A row like that is still worth having —
   the reference is one exact picture a port can be held to — but the supports are not what will make
   it compare, and the row should say what the sessions can differ by instead of implying they cannot.
+- **A part boundary is not always a geometry change, and step 1's "the refusal is the discovery"
+  finds only mode changes.** U2A and PAM are both 320×200, so nothing about the geometry marks where
+  one ends and the other begins, and the refusals that look like PAM's end (7950, 8400) are the part
+  *after* PAM taking a 320×400 screen. Where two consecutive parts share a geometry, sweep the
+  suspected change densely, look at the tiles, and identify the boundary by content — a hash already
+  known to belong to the next part is the cheapest evidence there is. Also worth checking a part's
+  own mode set before trusting which of its frames carry `.idx`: ALKU's `tw_opengraph` writes CRTC
+  0x13 = `0x5813` (a 176-byte row) and every frame with a picture on it comes back RGB-only, while
+  PAM's copy of the same routine never writes 0x13, keeps 80-byte rows, and keeps its indices.
 
 ---
 

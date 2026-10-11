@@ -156,7 +156,7 @@ cycles change how long a capture takes in wall time and nothing about what it co
 counter counts emulator-rendered frames, and one frame is one emulated vertical refresh whatever
 the cycles. `reference/check_a` (30000) can therefore be compared against any Part B capture.
 
-### 1.6 Two things ALKU measured that the rules above do not cover
+### 1.6 Three things blocks 1 and 3 of B3 measured that the rules above do not cover
 
 **A frame can come back RGB-only because of how the oracle reads a screen, not because the screen
 moved.** The coherence check is a comparison of the grabbed RGB against the RGB re-derived from the
@@ -170,10 +170,18 @@ a row — `ALKU/TWEAK.ASM:40-46` sets CRTC 0x17 = `0xe3` (word units) and 0x13 =
 **every ALKU frame with a picture on it comes back RGB-only** — in each of the ten captures that
 took one, whatever the batch shape — while the frames whose pixels are all a black DAC entry pass.
 That the cause is the read and not a moved screen is measured: the same index is RGB-only in every
-session, and its RGB bytes are identical to the reference's (1719 and 2719 below). Consequences worth
-carrying: `compare` runs this part's rows through the **RGB path**, where the 6→8-bit widening
-`(c*259+33)>>6` is load-bearing (`docs/decisions.md:422-423`); and PAM, whose `PAM/TWEAK.ASM:18-41`
-is the same `tw_opengraph` with the same 176-byte rows, is expected to behave the same way (§5).
+session, and its RGB bytes are identical to the reference's (1719 and 2719 below). The consequence
+worth carrying is that `compare` runs this part's rows through the **RGB path**, where the 6→8-bit
+widening `(c*259+33)>>6` is load-bearing (`docs/decisions.md:422-423`).
+
+**And the first pass of this note predicted PAM would do the same, which the measurement refuted.**
+PAM's `tw_opengraph` (`PAM/TWEAK.ASM:18-41`) is the same routine as ALKU's, but it stops before the
+CRTC writes that make ALKU's screen wide: it sets mode 13h, chain-4 off, 0x14 = 0 and 0x17 = `0xe3`,
+and **never writes 0x13** — where `ALKU/TWEAK.ASM:46` writes `0x5813`. So PAM's rows stay 80 bytes,
+which is exactly `width/4`, and its screen *does* come back with indices: `reference/parts/pam/
+frame_007900.idx` exists (§6.4). The wide-stride case is ALKU's alone among these three parts, and
+the way to tell which a part is before trusting a capture's `.idx` files is to read what its own
+mode set writes to CRTC 0x13 — not to assume that two copies of `tw_opengraph` behave alike.
 
 **A moving screen's session-to-session difference can be an exact integer pan, which no ±1 frame
 support can bridge.** D17's moving case is a screen that is redrawn continuously: a session phase
@@ -194,6 +202,17 @@ expect them wherever a part pans:
 Held screens are untouched by either: 900, 1719 and 2719 below are byte-identical in every session
 that took them.
 
+**A part boundary is not always a geometry change, and §1.2 finds only mode changes.** U2A and PAM
+are both 320×200 (the second part inherits the first's screen and its own `tw_opengraph` leaves it
+in the same size), so *no* refusal marks where one ends and the other begins — the change is in the
+content, and the sweeps' last refusals (7950, 8400) belong to the part after PAM, not to either
+(§5.5, §6.5). B2's rule that "the refusal is the discovery" holds where consecutive parts differ in
+geometry, which is the case B2 had; where they do not, the sheet is the discovery instead, and the
+boundary is where the picture stops being the part's. What settled this one was a dense scan across
+the suspected change plus a hash already known to belong to the next part: §6.1 found PAM's first
+frame by matching a flat white frame against `wfade`'s own law, and §6.5 found where PAM ends by
+matching a held logo against B2's BEGLOGO hash.
+
 ---
 
 ## 2. The index table
@@ -208,7 +227,8 @@ table.
 |---|---|---|---|---|---|
 | BEGLOGO | `SECOND 2` | 320×400 Mode X | 430, 470, 560, 900 | `out/beglogo-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` |
 | ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1 — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
-| U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640, 7760 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — including the two moving keyframes, which landed in the same alignment group (§5.4) |
+| U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
+| PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
 
 ### Adding a row
 
@@ -626,11 +646,20 @@ row.
 
 ## 5. U2A
 
-`SECOND 1`'s second part: a held "landing pad" scene, then a flying saucer over the same
-landscape, then the landscape alone, then a second view of it. 320×200, one geometry, from 5960 or
-5961 to a mode change in **(7810, 7950]** — about 27 seconds. It is the first part in the phase
-whose screen the oracle reads as *indices* for some of its frames and as RGB for others (§5.3), and
-the first whose keyframes include moving ones that still re-capture byte-identically.
+`SECOND 1`'s second part: a held "landing pad" scene, then a flying saucer over the same landscape,
+then the landscape alone. 320×200, one geometry, from 5960 or 5961 to the end of its own drawing
+between 7510 and 7560, its cleared background staying up until PAM's first frame at 7710 — about
+22 seconds of drawing and 2.5 more of held screen. It is the first part in the phase whose screen the oracle reads
+as *indices* for some of its frames and as RGB for others (§5.3), and the first whose keyframes
+include moving ones that still re-capture byte-identically.
+
+**This section was corrected by what §6 measured, and the correction is the interesting part.** The
+first pass ended U2A at the mode change the sweeps hit at 7950 — but that refusal is **PAM's end,
+not this part's**: PAM is 320×200 too (§6), so nothing in the *geometry* marks the U2A→PAM boundary
+at all. U2A's own last frame is at ~7700 and PAM's first drawn frame at 7710, and the only reason it
+is known is that the content changes there (§5.5). A fourth keyframe at 7760 was captured in the
+first pass and is **not U2A's**: it is PAM's second animated frame, and it moved to §6's row. The
+reference now holds three keyframes.
 
 The source is `VISU/C/U2A.C`: it loads its scene data (`U2A.0xx`) and a background picture, waits
 for the music to reach one position (`VISU/C/U2A.C:227-239`, a `for(;;)` around `int 0fch` with
@@ -659,12 +688,12 @@ part's shape. Tiles, in the order each run laid them out:
   pad, one `sha256` for all twenty samples** — a hold of at least 950 frames; 7010 plain; **7060,
   7110, 7160, 7210, 7260 a grey saucer that fills the frame and recedes**; 7310, 7360, 7410 a small
   blue-white craft shrinking against the sky; 7460, 7510 the plain landscape; 7560, 7610, 7660 the
-  plain landscape again, one `sha256`; **7710 a flat `(251,251,251)` frame**, one colour, the only
-  flush-white frame the phase has captured; 7760, 7810 the landscape with a glowing orange object
-  on the horizon, and a picture band one row lower (rows 25–175 rather than 25–174).
+  plain landscape again, one `sha256`; 7710 onwards the next part's animation (§6).
 
-So the sheet says: pad hold → saucer → plain hold → flash → second view. The pad hold and the plain
-hold are where this part's keyframes belong, and only the saucer moves.
+So the sheet says: pad hold → saucer → plain hold. The pad hold and the plain hold are where this
+part's keyframes belong, and only the saucer moves. The last three of the scan's tiles were read as
+a "second view" of U2A at the time; §6 shows they are PAM's, and the flat white frame among them is
+PAM's first, not a U2A flash.
 
 ### 5.2 The keyframes, and why these
 
@@ -672,16 +701,14 @@ hold are where this part's keyframes belong, and only the saucer moves.
 |---|---|---|---|
 | 6500 | the **pad** — the landscape with the yellow wireframe grid, 950 frames into a hold that the scan shows running from 6010 to 6960. | `.rgb` only | rgb `11a66eb0…` |
 | 7300 | the **saucer receding** — a small blue-white craft against the sky, mid-animation. | `.rgb` + `.idx` | rgb `0a7c2216…`, idx `b50f52f4…` |
-| 7640 | the **plain landscape**, inside a hold the scan shows running from 7560 to 7660. | `.rgb` + `.idx` | rgb `0a68ffb9…`, idx `c51ba997…` |
-| 7760 | the **second view** — the landscape with a glowing orange object on the horizon, and the band one row lower. | `.rgb` only | rgb `5d558081…` |
+| 7640 | the **plain landscape**, inside a hold that the scan shows from 7560 to 7660 and the dense scan of §6.1 from 7660 to 7700. | `.rgb` + `.idx` | rgb `0a68ffb9…`, idx `c51ba997…` |
 
-Two of the four are held screens and two move, which is the split this part actually has. 6500 is
-chosen deep inside the pad's 950-frame hold rather than at its edge (6010), because the hold's first
-frames are within a few tens of frames of U2A's own mode change — an index that close to it is not
-safe to put in a reference (§5.5). 7760 is at the far end for the same reason in reverse: it is the
-last thing sampled before the boundary and it is the part's second view.
+One keyframe per screen the part has — the pad, the saucer, the cleared background — and two of the
+three are held. 6500 is chosen deep inside the pad's 950-frame hold rather than at its edge (6010),
+because the hold's first frames are within a few tens of frames of U2A's own mode change: an index
+that close to it is not safe to put in a reference (§5.5).
 
-Full hashes of the six files in `reference/parts/u2a/`:
+Full hashes of the five files in `reference/parts/u2a/`:
 
 | index | file | `sha256` |
 |---|---|---|
@@ -690,14 +717,13 @@ Full hashes of the six files in `reference/parts/u2a/`:
 | 7300 | `frame_007300.rgb` | `0a7c2216cb3a7964d0221af01cfa07e8aab5372f39d9ef4f097e270decf3d590` |
 | 7640 | `frame_007640.idx` | `c51ba997410ec820a3695e18bfe0622a856e65c0163b60dc83b9addff5753f1c` |
 | 7640 | `frame_007640.rgb` | `0a68ffb92f0e208a3eb34ace29fa1ea91a51bebfea3ec2733ca30cd5d8b5bbd6` |
-| 7760 | `frame_007760.rgb` | `5d558081c851f3f1b8a01ef777834f83757308a01207a23290d890ccdee77378` |
 
 ### 5.3 Held or moving, measured — and which frames carry indices
 
 ```bash
-# the reference: keyframes only
+# the reference: keyframes only (re-captured after §6 re-attributed 7760 to PAM)
 cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 6500,7300,7640,7760 --out reference/parts/u2a --sheet out/u2a.png
+    --frames 6500,7300,7640 --out reference/parts/u2a --sheet out/u2a.png
 
 # the partner: a support frame each side of every keyframe, so the held/moving question is measured
 cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
@@ -711,20 +737,19 @@ The partner's triples, hashed:
 | 6500 | `11a66eb0…` | `11a66eb0…` | `11a66eb0…` | **held** — one `sha256` across the triple |
 | 7300 | `9f5fe99c…` | `0a7c2216…` | `0a7c2216…` | **moving** — the frame changes between 7299 and 7300 |
 | 7640 | `0a68ffb9…` | `0a68ffb9…` | `0a68ffb9…` | **held** — one `sha256` |
-| 7760 | `23fa5096…` | `5d558081…` | `5d558081…` | **moving** — changes between 7759 and 7760 |
 
-So 6500 and 7640 need no support frames, and 7300 and 7760 need theirs — and all twelve frames were
-captured anyway, which is what turns this table from an assumption into a measurement.
+So 6500 and 7640 need no support frames, and 7300 needs its pair — and the supports were captured
+for all three anyway (plus a triple around 7760, which is PAM's, §6.1), which is what turns this
+table from an assumption into a measurement.
 
 **Which frames carry `.idx` is not a property of held-or-moving here.** In the same run, 7639,
-7640, 7641 and 7300 kept their indices and 6499–6501 and 7759–7761 did not; across the scan the
-plain-landscape frames at 7010 and 7560–7660 kept them and every sample of the pad (6010–6960) and
-of the second view (7760, 7810) did not. Reading the planes from offset 0 (`xtask/src/oracle/
-dosbox.rs:618-629`) only matches the screen when the *displayed* buffer is the one at offset 0, and
-this part rotates four animation buffers through its display start (`VISU/C/U2A.C:105-130`,
-`vid_setswitch(-1,clr)` inside `copper2`); the measurements above are consistent with that and are
-not evidence of motion.
-Either way the RGB is the frame that was asked for: it is the same bytes in every session.
+7640, 7641 and 7300 kept their indices and 6499–6501 did not; across the scan the plain-landscape
+frames at 7010 and 7560–7660 kept them and every sample of the pad (6010–6960) did not. Reading the
+planes from offset 0 (`xtask/src/oracle/dosbox.rs:618-629`) only matches the screen when the
+*displayed* buffer is the one at offset 0, and this part rotates four animation buffers through its
+display start (`VISU/C/U2A.C:105-130`, `vid_setswitch(-1,clr)` inside `copper2`); the measurements
+above are consistent with that and are not evidence of motion. Either way the RGB is the frame that
+was asked for: it is the same bytes in every session.
 
 ### 5.4 The re-capture: exit 0, identical, moving frames included
 
@@ -734,41 +759,199 @@ $ cargo xtask compare --reference reference/parts/u2a --rendered out/u2a-recaptu
 frame 6500: 0.0000% differing (0/64000 px), max delta 0
 frame 7300: 0.0000% differing (0/64000 px), max delta 0
 frame 7640: 0.0000% differing (0/64000 px), max delta 0
-frame 7760: 0.0000% differing (0/64000 px), max delta 0
-verdict: identical, mode: mixed, offsets {"0": 4}
+verdict: identical, mode: mixed, offsets {"0": 3}
 exit: 0
 ```
 
-All four frames are byte-identical between the two directories, including the two that move. **That
+All three frames are byte-identical between the two directories, including the one that moves. **That
 is the same-alignment-group case, and it should be read as one**: D17 measured that two sessions
 land in the same group about half the time, and this pair did. It is the first time in the phase
 that a moving screen has re-captured this way, and it is a stronger claim than ALKU's picture could
 make (§4.4) — but it is not a claim that this part's animation is session-independent, and nothing
 here tested the other group. The held pair (6500, 7640) is what carries the reproducibility;
-the moving pair is what shows the same group exists for this part too.
+the moving frame is what shows the same group exists for this part too.
 
 **And the animation is coarse enough that the alignment has something to bite on**: 7300's picture
 changed from the frame before it and held for the frame after, so a session one frame out of phase
 would find its answer at offset ±1 — exactly the case the support frames exist for. The other
 group was not observed, so this is a statement about the frames' spacing, not about a result.
 
-### 5.5 Where the part ends
+### 5.5 Where the part ends — and how, when nothing changes geometry
 
 ```
-out/b3-u2a-sweep3 (5940…, 320×200)     refused at 7950: "frame 7950 is 320x400 where the capture
-                                       started at 320x200; capture one screen at a time"   exit 2
-out/b3-u2a-sweep2 (6300…, 320×200)     refused at 8400: same refusal                         exit 2
-out/b3-u2a-scan    (5960…7810, 320×200) exit 0 — 7810 is 320×200
+out/b3-u2a-sweep3   (5940…, 320×200)      refused at 7950: "frame 7950 is 320x400 where the capture
+                                          started at 320x200; capture one screen at a time"   exit 2
+out/b3-u2a-sweep2   (6300…, 320×200)      refused at 8400: same refusal                         exit 2
+out/b3-u2a-scan     (5960…7810, 320×200)  exit 0 — 7810 is 320×200
+out/b3-pam-scan     (7660…7930, 320×200)  refused at 7930: the same 320x400 refusal              exit 2
+out/b3-pam-probe2   (7950…8130, 320x400)  exit 0 — 7950 is 320×400
 ```
 
-So the change to the next part lies in **(7810, 7950]**, and 7810 is inside U2A. The window is
-wider than ALKU's because the two bracketting indices come from two sessions, and the *frame* of a
-mode change is not perfectly stable across sessions — measured at ALKU's end, where 5960 was
-320×400 in `out/b3-alku-sweep1` and 320×200 in `out/b3-u2a-scan` (§4.5). Nothing between 7810 and
-7950 was captured; the part's last sampled frame is 7810.
+**Both refusals belong to PAM's end, not U2A's.** PAM is 320×200 as well (§6), so the U2A→PAM
+boundary is invisible to the geometry check: the 320×400 change at (7920, 7930] is the *next* part
+after PAM — BEGLOGO — taking the screen. U2A's own last drawn frames are the saucer sequence,
+ending in the plain-landscape hold that the dense scan of §6.1 shows running from 7560 (at the
+latest) to 7700, and PAM's first drawn frame is 7710. That boundary was found by **content**, not by
+a refusal: the plain landscape stops and a flat white frame — PAM's, matching `wfade[0] = 63`'s
+wash exactly (§6.1) — starts. §1.2's rule finds *mode changes*; where two consecutive parts share a
+geometry it says nothing, and the sheet and the hashes are what say where the part changed.
+
+Two things this section was wrong about in its first pass, now fixed: the 7950 refusal is not
+U2A's end (§6 explains it), and 7760 — captured as U2A's fourth keyframe then — is PAM's second
+animated frame, now in §6.1 with the rest of PAM's.
 
 **U2A's own start is the same kind of fuzziness**, and it is worth stating because it constrains
 where U2A's keyframes can go: 5960 is 320×200 plain landscape in `out/b3-u2a-scan` and still
 320×400 ALKU in `out/b3-alku-sweep1`. An index in the first few tens of frames of a part can belong
 to either side of a mode change depending on the session, so no reference keyframe should sit
 there — which is why U2A's earliest keyframe is 6500, 490 frames clear of it.
+
+---
+
+## 6. PAM
+
+`SECOND 1`'s third part: the animated intro picture that leads into BEGLOGO. **320×200 — the same
+geometry as U2A** — from its first drawn frame in (7700, 7710] to the end of its animation at about
+7920, when the screen changes to BEGLOGO's 320×400 logo in (7920, 7930]. About 3 seconds, the
+shortest part in the phase so far. It is the part that produced the phase's first *same-geometry*
+boundary (§5.5) and the phase's first frame set in which the RGB-only status of a moving frame is
+D15's moving case and nothing else (§6.3).
+
+The source is `PAM/OUTTAA.C`: it builds 63 washed variants of its palette
+(`for(a=1;a<64;a++) … pal[a*768+b]=(63*a+(64-a)*pal[b])/64`, `PAM/OUTTAA.C:36-37`), waits for the
+music to reach sync 10 (`while(dis_sync()<10&&!dis_exit())`, `:39`), sets the screen
+(`tw_setpalette(&pal[768*63])` then `tw_opengraph()`, `:41-42`), and then plays a **45-step**
+animation loop at four frames a step (`while(!dis_exit() && f++<45)` at `:46` with
+`while(frame_count<4); frame_count=0;` at `:48`), each step unpacking one frame of the animation
+into one of two buffers and flipping the display start between them (`ulosta_frame(0x0a400)` /
+`tw_setstart(16384)` against `ulosta_frame(0x0a000)` / `tw_setstart(0)`, `:53-59`) and pointing the
+copper at a palette from its fade table (`cop_pal=&pal[768*wfade[f]]; do_pal=1;`, `:62-63`).
+`wfade[100] = {63,32,16,8,4,2,1,0,…0,1,2,4,6,9,14,20,28,37,46,56,63,63,…63}` (`:22-32`) — the
+picture starts washed out to white, comes to full contrast in about 28 frames, and washes back out
+to white at the end.
+
+### 6.1 The dense scan, and what it measured
+
+```
+out/b3-pam-scan  7660,7670,…,7930 (28 indices, 320×200)   exit 2, refused at 7930
+```
+
+Every 10th frame from the end of U2A's hold to the mode change, hashed in the order it was taken:
+
+| index | 7660–7700 | 7710 | 7720…7860 (15 samples) | 7870 | 7880–7920 |
+|---|---|---|---|---|---|
+| `sha256` | `0a68ffb9…` ×5 | `1fef46de…` | a different one at **every** sample | `644acaf3…` | `1fef46de…` ×5 |
+| distinct colours | 40 | 1 | 63 → 163 → 76 | 24 | 1 |
+
+Three things fall out of it, and all three are what the part's row rests on:
+
+- **U2A's hold ends at 7700 and PAM's animation starts at 7710**, in the *same* geometry — the
+  boundary is a content change, not a refusal (§5.5).
+- **The flat `(251,251,251)` frame is PAM's, and it is exactly what `wfade` predicts.** Its colour is
+  `251 = widen(62)` and six-bit `62` is what `(63*63 + pal)/64` gives for `wfade[f] = 63` — the wash
+  the animation opens and closes on. It appears at **7710** in three separate sessions (§6.4), and
+  as a hold of at least 40 frames at the end (7880–7920).
+- **The animation changes every frame it was sampled at** — fifteen samples, fifteen hashes — which
+  is why every keyframe in the middle of it is a moving one and why the RGB-only warning on those
+  frames is D15's moving case, not §1.6's read-layout case.
+
+The source's own count agrees with the measurement: 45 steps at four frames each is 180 frames, and
+the animation spans (7705, 7920] — 215 frames, the difference being the time each `ulosta_frame`
+takes beyond its four-frame wait.
+
+### 6.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 7710 | **the washed opening frame** — a flat `(251,251,251)`, one colour: `wfade[f]=63` applied over the first animation frame. | `.rgb` only | rgb `1fef46de…` |
+| 7760 | an **animation frame**, the landscape with a group of glowing objects above the horizon. | `.rgb` only | rgb `5d558081…` |
+| 7830 | an **animation frame from the second half**, the same landscape with a wide band across it. | `.rgb` only | rgb `e1967ed2…` |
+| 7900 | **the washed closing hold** — the same flat `(251,251,251)` as 7710, and the same bytes at 7880, 7890, 7910 and 7920. | `.rgb` + `.idx` | rgb `1fef46de…`, idx `4333e44e…` |
+
+7710 and 7900 are the same bytes, and that is the part's shape rather than a coincidence: `wfade`
+returns to 63 at both ends of the animation. 7710 is the part's *first* frame and a one-frame event
+(7700 is still U2A's landscape and 7720 is the next animation frame), while 7900 is inside a hold of
+at least 40 frames — so the two are the same picture with very different reproducibility, which is
+worth having in one row.
+
+Full hashes of the five files in `reference/parts/pam/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 7710 | `frame_007710.rgb` | `1fef46de229b96373d36639c7250856afa2d5b39c1401a2f4d55511cd597aee0` |
+| 7760 | `frame_007760.rgb` | `5d558081c851f3f1b8a01ef777834f83757308a01207a23290d890ccdee77378` |
+| 7830 | `frame_007830.rgb` | `e1967ed23c3709d84462489083c43fa9ac64e85bfbae3e1fae61a5e001f54f93` |
+| 7900 | `frame_007900.idx` | `4333e44e17fb9ecad2fd1a623897ef6d12a59431e4f20ca6a993d10d07b056ef` |
+| 7900 | `frame_007900.rgb` | `1fef46de229b96373d36639c7250856afa2d5b39c1401a2f4d55511cd597aee0` |
+
+### 6.3 Held or moving, measured — and the spacing rule, twice
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 7710,7760,7830,7900 --out reference/parts/pam --sheet out/pam.png
+
+# the partner: a support frame each side of the two moving keyframes
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 7710,7759,7760,7761,7829,7830,7831,7900 --out out/pam-recapture
+```
+
+The partner's frames, hashed:
+
+| keyframe | `K-1` | `K` | `K+1` | reading |
+|---|---|---|---|---|
+| 7710 | (7700 `0a68ffb9…`, from the scan) | `1fef46de…` | (7720 `10bb3b95…`, from the scan) | **a one-frame event** — both neighbours differ |
+| 7760 | `23fa5096…` | `5d558081…` | `5d558081…` | **moving** — changes between 7759 and 7760 |
+| 7830 | `e1967ed2…` | `e1967ed2…` | `e1967ed2…` | **held** — one `sha256` across the triple |
+| 7900 | (7890, 7910 `1fef46de…`, from the scan) | `1fef46de…` | (identical) | **held** — one `sha256` across the scan's samples |
+
+**The first attempt at this partner was refused, and the refusal is §1.3's rule landing on a part
+it was written for:**
+
+```
+error: the emulator reached frame 7773 before frame 7759 could be captured; the capture would not
+       be of the requested frame
+exit: 2
+```
+
+The list was `7709,7710,7711,7759,7760,7761,…`: a three-index batch at 7709–7711 whose reads cost
+~57 rendered frames, with the next index only 48 frames behind it. The batch's reads ran past 7759
+and the capture refused rather than take a later frame under an earlier name. The partner above is
+the same list with the gap widened past the batch cost — and it is a useful reminder that the rule
+binds *between* batches, not only before a distant single index.
+
+### 6.4 The re-capture: exit 0, identical
+
+```
+$ cargo xtask compare --reference reference/parts/pam --rendered out/pam-recapture \
+      --out out/pam-recapture-diff
+frame 7710: 0.0000% differing (0/64000 px), max delta 0
+frame 7760: 0.0000% differing (0/64000 px), max delta 0
+frame 7830: 0.0000% differing (0/64000 px), max delta 0
+frame 7900: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 4}
+exit: 0
+```
+
+All four are byte-identical, and the same indices are identical in three sessions — the dense scan,
+the reference and the partner — with 7710 and 7760 also agreeing with the earlier
+`out/b3-u2a-scan` session. So this part's animation, unlike ALKU's pan, **is** session-stable at a
+fixed index: the frames above are the same bytes in every session that took them (four sessions for
+7710 and 7760, three for 7830 and 7900). That is worth saying explicitly because it is the opposite
+of what a 45-step animation with an adaptive step *could* have done, and it is the reason PAM can
+have moving keyframes at all.
+
+**Only 7900 carries `.idx`.** The frame it holds is the washed white one, and the palette holds
+still while the indices are read, so D15 keeps both; every animated frame of this part is RGB-only
+because the screen really does move during the ~20-frame read — D15's moving case, not §1.6's
+read-layout case. Those eight frames judge Phase 2 through the RGB path, where the DAC's widening
+rule is load-bearing (`docs/decisions.md:422-423`).
+
+### 6.5 Where the part ends, and what follows it
+
+The screen becomes 320×400 in **(7920, 7930]** — `out/b3-pam-scan` captured 7920 as 320×200 and was
+refused at 7930 — and what comes up is **BEGLOGO**: `out/b3-pam-probe2` (starting at 7950, 320×400,
+exit 0) shows the logo fading in at 7950, 7980, 8010 and 8040 and then holding at 8070, 8100 and
+8130, all three of those the **same `sha256`, `cbdc67eb…`, as B2's held BEGLOGO logo under
+`SECOND 2`**. So the mode change is the next part's, and PAM's own screen is the 320×200 one it
+inherits and keeps — which is exactly why §5.5's boundary is not in the geometry.
