@@ -866,7 +866,6 @@ so and drop it rather than inventing a cell grid for it.
 - Consumes: `Image` from A2/A3.
 - Produces:
 
-```rust
 > **Corrected after measurement.** This block originally described a `cell: (u16, u16)` grid that
 > the strip is cut into. **The strips are proportional, not grids.** `ENDSCRL/MAIN.C:103-122` finds
 > each glyph by scanning for a run of inked columns — 74 runs, widths 3..25, start-to-start 4..26,
