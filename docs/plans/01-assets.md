@@ -28,8 +28,19 @@ for contact sheets. Hashing is `sha256sum` in the shell steps — no hashing cra
   A file that needs repair is a finding, not a fix.
 - **`reference/` and `upstream/` are input-only.** Nothing any task writes may land inside them;
   `compare`'s existing guard is the precedent for how that is enforced.
-- **6-bit palette internally.** Every palette a loader produces goes through
-  `sr_engine::dac_expand`'s inverse, and a test proves the round trip over all 64 values.
+- **6-bit palette internally.** But *how* a loader gets there depends on what the source stores, and
+  the two cases are not the same rule:
+  - **Origin palettes are already 6-bit** and are copied verbatim. Running them through
+    `dac_expand`'s inverse is not the identity — `six_bit(32) == 8` — and would darken every Origin
+    picture. A byte above 63 is refused.
+  - **An IFF `CMAP` is 8-bit and converts by integer `/4`**, which is what every original converter
+    and viewer does (`LBM2U.C:170`, `LBM2P.C:195`, `LBM16.C:194`, `VIEWLBM.C:157`, `VPL.C:97`) and
+    what the shipped art holds. **Not** `six_bit`: measured against the converted twins, `/4`
+    disagrees on 0 of 768 bytes while `six_bit` disagrees on 457 of 768 (`LENS/LENSPIC.LBM` vs
+    `LENS/LENS.EXB`) and 1 of 768 (`BEG/SRTITLE.LBM` vs `BEG/SRTITLE.UP`). `/4` is also what makes
+    an image and its converted twin show the same screen, which is the property the port needs.
+  - `six_bit` remains the exact inverse of `dac_expand`, with a test proving the round trip over all
+    64 values — it is the 6→8 *display* rule inverted, and is not the 8→6 conversion rule.
 - **`sr-assets` manifests set `license = "MIT"`**; workspace inheritance for the rest.
 - **Every claim about the original cites `file:line`** in the commit message, as Phase 0 did. The
   upstream commit is `071a82e` (`mtuomi/SecondReality`).
@@ -49,8 +60,11 @@ The five input classes most likely to bite, each with the task that pins it:
    A per-dimension rule would be wrong: `ALKU/FONA.UH` is **1500 wide** and is a required asset,
    so refusing anything wider than 640 would reject a font strip the demo ships. A 1024×400 header
    (409,600 px) must still be refused with a legible message, not clipped or wrapped. Pinned in A2.
-4. **An 8-bit palette from an IFF CMAP.** Converting 8→6 bits through anything but the exact inverse
-   of `dac_expand` silently shifts every colour in the demo. Pinned in A3 over all 256 values.
+4. **An 8-bit palette from an IFF CMAP.** The conversion is the original's own — integer `/4` — and
+   the tempting alternative is worse than it looks: `dac_expand`'s inverse is the mathematically
+   tidier 8→6 mapping and is **wrong here**, disagreeing with the shipped twins on 457 of 768 bytes.
+   A round-trip test over 256 values passes either way; only comparison against a converted twin
+   catches it. Pinned in A3 against `LENSPIC.LBM`/`LENS.EXB`.
 5. **A part whose geometry changes during the frames being captured.** `video/frame` follows the
    guest; one manifest carries one geometry (D15). Pinned in B2.
 
