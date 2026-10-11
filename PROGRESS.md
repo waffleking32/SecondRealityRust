@@ -9,7 +9,7 @@ Phase status board. **Read this first if you are resuming work.**
 | # | Phase | State | Plan | Tag |
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
-| 1 | Assets & references | not started | — | — |
+| 1 | Assets & references | **in progress** | [01-assets.md](docs/plans/01-assets.md) | — |
 | 2 | Shell + easy tier | not started | — | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
@@ -24,10 +24,25 @@ Phase status board. **Read this first if you are resuming work.**
 **Phase 0 is complete** (tag `phase-0`). The engine, the binary and the verification harness all
 work; no demo part has been ported yet.
 
-**Next action: write `docs/plans/01-assets.md` and execute it.** Phase 1 is *Assets & references*:
-its exit criterion is that every needed asset decodes and matches the source art, with a complete
-provenance file. Its first concrete step is to inventory which of the original's asset formats the
-ported parts will actually need — spec §4.4's format table is the starting list, not a survey.
+**Phase 1 is in progress.** Its plan is `docs/plans/01-assets.md`; its ledger (the recovery map, git-ignored
+scratch) is `.superpowers/sdd/01-assets/progress.md`.
+
+**Part A (assets) is complete** — A1 through A8. `sr-assets` decodes Origin PIC (five variants plus a
+headerless case), IFF (ILBM and PBM), RIX3, `.PAL`, OMF `LEDATA`, FLI and `.ANI`, plus a proportional
+font-strip view. **361 workspace tests**; `assets/` holds **150 assets plus `PROVENANCE.md`** (149 curated
+plus one recovered from an EXE); `cargo xtask assets verify --tree --decode` exits **0** with `verdict: ok`
+and writes 21 contact sheets. Four approximation entries; 17 plan corrections, each from a measurement
+rather than from reasoning. The phase's human-look evidence is the user's own reading of the sheets
+("images look fine") — the noise-like tiles are non-picture data (3D scene files, TASM listings, S3M
+music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
+magic.
+
+**Part B (references) is the remaining work** — B1 through B6, and B1 is a spike whose outcome gates the
+rest. Phase 1's exit criterion is not met until every part has a reference that re-captures identically.
+
+Phase 2 is *Shell + easy tier*, whose exit criterion is **BEGLOGO frame-diff-identical** — that is the
+project's central technical risk, and it is answered there, not in Phase 9. Phase 3 (music) has no
+dependency on Phase 2 and may run in parallel if the music is worth retiring first.
 
 Two things Phase 1 inherits and should not have to rediscover:
 
