@@ -856,23 +856,43 @@ with the final code (three at the title screen, eight at moving indices) plus se
 while the decode's placement was still being settled wrote the frame they were asked for
 with no refusal at all.
 
-**What still does not repeat is the emulator's published picture, not the boot and not the
-grab.** Repeated captures of a *moving* screen come out in two (sometimes three)
-alignment groups: 12 captures of index 2500 gave six byte-identical runs, five that match
-each other exactly but are one frame of animation away from the six (6.62% of bytes), and
-one differing by 0.057% (145 bytes); 1800/2000 and 3000 split 2 to 1 the same way (4.33%
-and 14.74%, 11.22%). The guest's own timeline is *not* what flips: a Lua script watching
-the BIOS video-mode byte saw 3@2, 19@404 and 13@4796 in four consecutive sessions, frame
-for frame. So the frame the counter names holds a picture that is itself ±1 frame
-unstable between sessions — a rendering-publishing difference inside DOSBox (its main
-loop is paced by host ticks, one millisecond at a time), not something the REST API can
-pin. The alternatives were probed rather than assumed: `mode=rendered` *is* frame-locked —
-one request blocks for exactly one vblank, measured at 14.243 ms per request — but it
-returns the post-shader 758×569 image, which is not a reference frame; the video recorder
-writes every frame but needs a decoder this machine does not have; and Lua runs frame-exact
-but cannot reach the pixels. Held screens are unaffected (the same captures repeat
-byte-for-byte), which is why Phase 0's still-screen evidence never met this. Whether B2–B5
-capture moving screens under a stricter policy is the user's call, not this task's.
+**What still does not repeat is a per-session alignment of the counter, not the boot and not
+the grab.** A frame counter names one picture within a session and a picture one frame away
+in the next session half the time. Measured directly: four sessions, each capturing the
+same five moving indices in one run (`--frames 2400,2450,2500,2550,2600`, so five indices
+per emulator process), all five indices of a session in the *same* alignment — session 2
+and session 3 were one frame of animation off session 1 at every index (5.45–12.73% of
+bytes), session 4 matched session 1 at every index (0.003–0.070%), and no session mixed
+alignments across its five indices. Across sessions it splits roughly evenly: in that
+batch 2 of 4 sessions were off (2 of 6 session pairs agreed at every index); in an earlier
+sample of 12 sessions at a single index, 6 runs were byte-identical, 5 matched each other
+but sat one frame of animation away from the six (6.62% of bytes), and 1 differed by 0.057%
+(145 bytes).
+
+**The flip is in the emulator's own accounting, and it reaches the guest, not just the
+picture.** The guest's framebuffer memory, read at counter-identified moments, differs the
+same way: two sessions' 64,000 index bytes at counter 2450 were byte-identical while their
+counter-2500 reads differed by 2.02%, and a third session differed from both by 26–30% at
+both indices (one animation frame). Yet the demo's *discrete* events stay put: a Lua script
+watching the BIOS video-mode byte saw 3@2, 19@404 and 13@4796 frame-for-frame in four
+sessions. So the counter-to-guest-event map is fixed while the *continuous* drawing at a
+counter can be a frame older or newer. The best candidate in the source is DOSBox's
+host-measured clock adjustment: `adjust_ticks_after_present_frame`
+(`gui/sdl_gui.cpp:2555-2570`) subtracts the *measured host time* spent presenting from the
+emulator's tick budget, so the emulated clock itself carries a host-timing term. Nothing in
+the REST API or the settings reaches it.
+
+**The frame-locked alternatives were probed and do not rescue it.**
+`GET /video/frame?mode=rendered` really is synchronised — one request blocks for exactly
+one vblank, measured at 14.243 ms per request against 0.405 ms for `mode=raw` — but it
+returns a rendered image, not the framebuffer: 758×569 (BGR24) by default, and still
+640×480 with `render_aspect=square-pixels`, `render_shader=none` and `window_size=640x400`
+(the window's minimum height is 480), with no pixel-exact mapping back to the raw frame
+(its pixels pass through the render pipeline's adjustments). The video recorder writes every
+frame but needs a decoder this machine does not have; Lua runs frame-exact but has no pixel
+access. Held screens are unaffected — the same captures repeat byte-for-byte — which is why
+Phase 0's still-screen evidence never met any of this. Whether B2–B5 may capture moving
+screens at all, and under what policy, is the user's call and not this task's.
 
 **The cost of a boot.** ~5.9 s wall from process start to the first graphics frame (frame
 404), the 5 s `AUTOTYPE` wait included; the typed recipe booted in ~1.2 s but at host
