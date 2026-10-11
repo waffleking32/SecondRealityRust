@@ -123,10 +123,34 @@ git commit -m "Inventory the assets each part needs, and copy the subset into as
 
 ### Task A2: `sr-assets` skeleton and the Origin PIC container
 
-The container behind `.UH`, `.U`, `.UP`, `.P` and `.16` — five extensions, one format: magic
-`0xFCFC` (raw) or `0xFCFD` (RLE), a 16-byte header, a 768-byte palette, chunky pixels. `.X` is the
-same family's palette-less variant with the ASCII magic `UH\x01\x00`. This one task therefore
-retires five of §4.4's rows plus `.X`.
+> **Corrected after pre-flight research.** This section originally claimed *one* format — magic
+> `0xFCFC`/`0xFCFD`, 16-byte header, always-768-byte palette — and pointed at `GRAB/SP.C` as the
+> authority. That was wrong: `SP.C` is the *animation* viewer and its `0xFCFC` is a mouse-interrupt
+> argument, not a magic. The authority is the **writers** (`GRAB/LBM2U.C`, `LBM16.C`, `LBM2P.C`,
+> and `GRAB/GLVP.C`'s `saveunp`/`saveunpheader`/`saveunpheaderpal`) plus the runtime reader
+> `ENDPIC/READP.C`. Measurements, decoder pseudocode and file-by-file verification are in
+> `.superpowers/sdd/01-assets/a2-format-research-report.md`; the implementer must read it.
+>
+> Three consequences worth stating up front, because each one silently corrupts colour if missed:
+> **the palette is `colors*3` bytes, not 768**; **it is already 6-bit and must not be re-quantised**
+> (see the Global Constraints amendment below); and **the extension does not identify the format** —
+> `ENDPIC/PIC.UH` is RLE, `COMAN/COMBG.UH` is `UH`, `GLENZ/FC.UH` is `Uh`.
+
+The container behind `.UH`, `.U`, `.UP`, `.P`, `.16` and `.X` is **one family of five variants plus
+a headerless case**, all sharing a 16-byte little-endian header:
+
+| variant | bytes 0-1 | palette | pixels |
+|---|---|---|---|
+| `FCFC` raw (`LBM2U.C`) | `FC FC` | `colors*3` at 16, 6-bit | raw 8-bit at `para*16` |
+| `FCFC` bit-planes (`LBM16.C`) | `FC FC` | 48 bytes at 16 | `bpls` planes at `para*16` |
+| `FCFD` RLE (`LBM2P.C`) | `FD FC` | `colors*3` at 16, 6-bit | row-prefixed RLE at `para*16` |
+| `UH` (`GLVP.C` `saveunpheader`) | `55 48` | none | raw 8-bit at **16** |
+| `Uh` (`GLVP.C` `saveunpheaderpal`) | `55 68` | 768 at 16, 6-bit | raw 8-bit at **784** |
+| bare (`GLVP.C` `saveunp`) | — | none | raw 8-bit at 0, geometry from the caller |
+
+Only the first three carry a `para` field, and only there is the offset computed —
+`(16 + colors*3 + 15) / 16 * 16`. The `UH` and `Uh` writers hardcode 16 and 49 paragraphs. A bare
+file has no header at all, so `sniff` returns `None` for it and it is loaded by construction.
 
 **Files:**
 - Create: `crates/sr-assets/Cargo.toml`, `crates/sr-assets/src/lib.rs`, `crates/sr-assets/src/origin.rs`
@@ -144,8 +168,12 @@ retires five of §4.4's rows plus `.X`.
 pub struct Image { pub surface: Surface, pub palette: Palette }
 impl Image { pub fn width(&self) -> u16; pub fn height(&self) -> u16; pub fn pixels(&self) -> &[u8]; }
 
+/// `Origin` covers all five magic-carrying variants; `load` dispatches on the magic
+/// internally, so callers never need to tell raw from RLE from bit-planes.
+/// `OriginBare` has no header and therefore no magic: `sniff` never returns it and
+/// `load` refuses it, because it cannot know the geometry. `raw_surface` is its door.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Format { Origin, OriginX, Iff, Rix3, Pal, Fli, Ani }
+pub enum Format { Origin, OriginBare, Iff, Rix3, Pal, Fli, Ani }
 
 #[derive(Debug)]
 pub enum AssetError {
@@ -164,61 +192,130 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError>;
 pub fn load_path(path: &std::path::Path) -> Result<Image, AssetError>;   // sniffs, errors if None
 pub fn load_frames(bytes: &[u8], format: Format) -> Result<Vec<Image>, AssetError>;
 
-/// The exact inverse of `sr_engine::dac_expand` over 0..=63.
+/// A headerless pixel dump — `PANIC/MONSTER.U`, `LENS/LENS.U`, `GRAB/BLOWFNT.1BM` —
+/// whose geometry only the caller knows. Requires `bytes.len() == width * height`.
+pub fn raw_surface(bytes: &[u8], width: u16, height: u16) -> Result<Image, AssetError>;
+
+/// The exact inverse of `sr_engine::dac_expand` over 0..=63. For loaders that read
+/// **8-bit** palette data — that is the IFF `CMAP` (A3) and nothing else. The Origin
+/// family stores 6-bit values already and must be copied verbatim.
 pub fn six_bit(v: u8) -> u8;
 ```
 
+**Palette precision is not uniform, and the Global Constraints' rule needs one amendment.**
+"Every palette a loader produces goes through `dac_expand`'s inverse" is true of 8-bit sources and
+**false of the Origin family**, which stores 6-bit values directly (`LBM2U.C:170` writes
+`getc(f1)/4`, already 6-bit). Running `six_bit` over an already-6-bit value is not the identity —
+`six_bit(32) == 8` — so applying it there would darken every Origin picture. Origin palettes are
+copied verbatim and a byte above 63 is refused as out of contract; the round-trip test stays, and
+pins `six_bit` against `dac_expand` rather than against a file.
+
 - [ ] **Step 1: Write the failing tests** in `crates/sr-assets/tests/origin.rs`
 
-Real-file agreement is the phase's own test of "matches the source art", and the tree hands us free
-pairs — the same picture in two formats:
+Real-file agreement is the phase's own test of "matches the source art": the tree hands us files
+whose headers were read off the bytes and confirmed against the writers, so these tests pin the
+decoder rather than anyone's transcription. (The cross-format equality test — `SRTITLE.UP` against
+`SRTITLE.LBM` — now lives in A3, because it needs A3's IFF decoder to run.)
 
 ```rust
 #[test]
-fn the_packed_title_and_the_iff_title_are_the_same_picture() {
-    let up = load_path(Path::new("../../assets/BEG/SRTITLE.UP")).unwrap();
-    let lbm = load_path(Path::new("../../assets/BEG/SRTITLE.LBM")).unwrap();
-    assert_eq!((up.width(), up.height()), (lbm.width(), lbm.height()));
-    assert_eq!(up.pixels(), lbm.pixels());
-}
-
-#[test]
 fn a_thirty_pixel_tall_font_strip_reads_as_one() {
-    // The header of ALKU/FONA.UH, read off the file: 0xFCFC, 1500 x 30, 768
-    // palette bytes, pixels at paragraph 0x31 (= 784).
+    // ALKU/FONA.UH, read off the file: magic FC FC, 1500 x 30, colours 256,
+    // para 0x31 (= 784), so 16 + 768 palette bytes then 45,000 raw pixels.
     let img = load_path(Path::new("../../assets/ALKU/FONA.UH")).unwrap();
     assert_eq!((img.width(), img.height()), (1500, 30));
+    assert_eq!(img.pixels().len(), 45_000);
 }
 
-/// Every Origin file in the curated tree decodes, and the geometry its header
-/// claims matches the payload it actually carries. This is the property that
-/// catches a misread header field across all five extensions at once, so it
-/// does not depend on anyone having transcribed dimensions correctly.
+/// The point of this family, in one test: the extension says nothing. `END/PIC.UH`
+/// is RLE, `ENDPIC/PIC.UH` and `GLENZ/FC.UH` are `Uh` with a palette, and
+/// `COMAN/COMBG.UH` is `UH` without one. All four are `.UH`.
 #[test]
-fn every_origin_asset_agrees_with_its_own_header() {
+fn the_extension_never_decides_the_format() {
+    let rle = load_path(Path::new("../../assets/END/PIC.UH")).unwrap();
+    assert_eq!((rle.width(), rle.height()), (320, 400));
+
+    let uh_pal = load_path(Path::new("../../assets/ENDPIC/PIC.UH")).unwrap();
+    assert_eq!((uh_pal.width(), uh_pal.height()), (320, 200));
+
+    let uh = load_path(Path::new("../../assets/COMAN/COMBG.X")).unwrap();
+    assert_eq!((uh.width(), uh.height()), (320, 200));
+
+    assert_eq!(sniff(&std::fs::read("../../assets/BEG/SRTITLE.LBM").unwrap()), Some(Format::Iff));
+}
+
+/// The `Uh` variant's palette is the one place a 768-byte palette is guaranteed,
+/// and it is already 6-bit — so this also pins that no re-quantising happens.
+#[test]
+fn a_uh_file_carries_its_own_six_bit_palette() {
+    let img = load_path(Path::new("../../assets/ENDPIC/PIC.UH")).unwrap();
+    for i in 0..=255u8 {
+        assert!(img.palette.entry(i).iter().all(|&c| c <= 63), "entry {i} is not 6-bit");
+    }
+    assert_ne!(img.palette.entry(0), img.palette.entry(255), "palette was not read");
+}
+
+/// `LBM16.C` writes a fixed 16-colour palette and bit-planes, and `TEXTS.16` was
+/// made with it at two planes (`DOTEXTS.BAT:1`).
+#[test]
+fn a_bit_plane_file_decodes_to_the_geometry_in_its_header() {
+    let img = load_path(Path::new("../../assets/DDSTARS/TEXTS.16")).unwrap();
+    assert_eq!((img.width(), img.height()), (320, 200));
+    assert_eq!(img.pixels().len(), 64_000);
+}
+
+/// A bare dump has no header, so `sniff` cannot see it and the geometry is the
+/// caller's to supply. `PANIC/MONSTER.U` is exactly 320 x 200 bytes of pixels.
+#[test]
+fn a_headerless_dump_needs_its_geometry_from_the_caller() {
+    let raw = std::fs::read("../../assets/PANIC/MONSTER.U").unwrap();
+    assert_eq!(sniff(&raw), None, "a bare dump has no magic to sniff");
+    let img = raw_surface(&raw, 320, 200).unwrap();
+    assert_eq!((img.width(), img.height()), (320, 200));
+    assert!(matches!(raw_surface(&raw, 320, 199), Err(AssetError::Truncated { .. })));
+}
+
+/// Every Origin file in the curated tree decodes, and what it decodes to fills the
+/// geometry its header claimed. The decoder refuses any payload that is neither
+/// `w*h` nor a whole number of bit-planes, so a misread header field cannot pass.
+/// `seen` guards the other failure mode: a loop that matches nothing also passes.
+#[test]
+fn every_origin_asset_decodes_and_fills_the_geometry_its_header_claims() {
+    let mut seen = 0;
     for path in origin_assets_in("../../assets") {
         let raw = std::fs::read(&path).unwrap();
-        let img = load(&raw, Format::Origin).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let header_pixels = img.width() as usize * img.height() as usize;
-        let payload = raw.len() - origin_pixel_offset(&raw);
-        if raw[1] == 0xFC {
-            assert_eq!(payload, header_pixels, "{}: raw payload", path.display());
-        } else {
-            assert!(payload <= header_pixels, "{}: RLE payload cannot exceed", path.display());
+        if sniff(&raw) != Some(Format::Origin) {
+            continue; // bare dumps are the caller's geometry, tested above
         }
+        let img = load(&raw, Format::Origin)
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(
+            img.pixels().len(),
+            img.width() as usize * img.height() as usize,
+            "{}: decoded pixels vs header geometry",
+            path.display()
+        );
+        seen += 1;
     }
+    assert!(seen >= 20, "expected the whole Origin family, saw {seen}");
 }
-
-#[test]
-fn a_palette_less_x_file_decodes_and_keeps_the_callers_palette() { /* COMAN/COMBG.X */ }
-
-#[test]
-fn a_raw_and_an_rle_file_of_the_same_picture_agree() { /* COMAN/COMBG.X vs COMBG.UH */ }
 
 #[test]
 fn a_truncated_pixel_run_is_refused_not_panicked_on() {
+    // Half of an RLE file: the row length word at the cut promises more bytes than
+    // remain, which is a truncation the decoder must detect, not a panic.
     let mut bytes = std::fs::read("../../assets/BEG/SRTITLE.UP").unwrap();
     bytes.truncate(bytes.len() / 2);
+    assert!(matches!(load(&bytes, Format::Origin), Err(AssetError::Truncated { .. })));
+}
+
+/// A file that is genuinely short in the tree. `COMAN/COMBG.UH` is the first
+/// 32,768 bytes of `COMAN/COMBG.X`; its `UH` header claims 320 x 200 and its
+/// payload is 32,752 of the 64,000 pixels. It is a corrupt asset, and the decoder
+/// refusing it is the correct outcome — see the finding in `asset-inventory.md`.
+#[test]
+fn the_truncated_asset_in_the_tree_is_refused() {
+    let bytes = std::fs::read("../../assets/COMAN/COMBG.UH").unwrap();
     assert!(matches!(load(&bytes, Format::Origin), Err(AssetError::Truncated { .. })));
 }
 
@@ -229,10 +326,16 @@ fn an_oversized_header_is_refused_rather_than_clipped() {
     assert!(matches!(load(&bytes, Format::Origin), Err(AssetError::TooLarge { .. })));
 }
 
+/// `START/HZPIC.P` has 153 of its 400 rows decoding wider than the 640 its header
+/// claims, up to 761 pixels, and a shipped file relying on it means this is not a
+/// malformed file. The original writes every pixel into a 640-byte row buffer and
+/// overflows it; the port takes the first `w` and drops the rest, which is what the
+/// visible output shows. That substitution is recorded in APPROXIMATIONS.md.
 #[test]
-fn the_extension_never_overrides_the_magic() {
-    // An IFF file named .UH is an IFF: `sniff` looks at bytes only.
-    assert_eq!(sniff(&std::fs::read("../../assets/BEG/SRTITLE.LBM").unwrap()), Some(Format::Iff));
+fn a_run_row_wider_than_the_header_is_clipped_not_refused() {
+    let img = load_path(Path::new("../../assets/START/HZPIC.P")).unwrap();
+    assert_eq!((img.width(), img.height()), (640, 400));
+    assert_eq!(img.pixels().len(), 640 * 400);
 }
 
 #[test]
@@ -250,51 +353,81 @@ Expected: FAIL — `error[E0433]: failed to resolve: use of undeclared crate or 
 
 Cargo manifest: `sr-engine = { path = "../sr-engine" }`, `rstest` as a dev-dependency, `license = "MIT"`.
 
-Then implement `crates/sr-assets/src/origin.rs`. **Read `GRAB/SP.C` first** — it is the format's
-authority and the ASCII art in this task is only what the files showed:
+Then implement `crates/sr-assets/src/origin.rs`. **Read
+`.superpowers/sdd/01-assets/a2-format-research-report.md` §7 first** — it is the decoder, written
+out precisely enough to implement without re-reading the C, and it is the authority for this task.
+Its §1 variant table, §5 palette encoding and §8 file-by-file tally are all load-bearing.
+
+The essentials, so the shape is clear before you open the report:
 
 ```
-0x00 u16 magic        0xFCFC raw, 0xFCFD RLE (`.X`: ASCII "UH\x01\x00")
-0x02 u16 width
-0x04 u16 height
-0x06 u16 colours      (SP.C defines it; several files hold 1 here and still carry 768 palette bytes)
-0x08 u16 pixel offset in 16-byte paragraphs  (0x31 in every file inspected, i.e. 784 = 16 + 768)
-0x0A 6 bytes          zero in every file inspected
-0x10 768 bytes        palette, 3 bytes per entry, each byte a 6-bit value (0..=63)
-para*16              pixel data, one byte per pixel, row-major
+dispatch on B[0..2], little-endian, and on nothing else:
+  FD FC  RLE        (0xFCFD as stored — the discriminator is B[0], not B[1])
+  FC FC  raw or bit-planes
+  55 48  "UH"       raw, no palette, pixels at 16
+  55 68  "Uh"       raw, 768-byte palette at 16, pixels at 784
+  other  bare       no header at all
+
+header, 16 bytes: magic, then seven u16 words w1..w7
+  FCFC/FCFD:  w=w1, h=w2, colours=w3, para=w4; palette at 16, colours*3 bytes;
+              pixels at para*16, which the writer computes as ((16+colours*3+15)/16)*16
+  UH:         w=w2, h=w3; pixels at 16; w1 is 1 in every file
+  Uh:         w=w2, h=w3; palette 768 bytes at 16; pixels at w1*16 (w1 is 49)
 ```
 
-The RLE opcode scheme for `0xFCFD` is SP.C's — do not infer it from the file sizes. `.X` carries no
-palette, so `load` returns `Image` with `Palette::BLACK` and `load_path` documents that the caller
-supplies the palette (the part that uses `COMBG.X` loads `COMBG.UH`'s palette).
+Three things the original art does that a naive decoder gets wrong, all of them load-bearing:
+
+- **The palette is 6-bit already.** Do not run it through `six_bit`. A byte above 63 is out of
+  contract and is refused rather than clamped.
+- **The RLE rows may decode wider than `w`.** `START/HZPIC.P` does this on 153 of 400 rows. Take
+  the first `w` pixels; do not reject the file. Record the substitution in
+  `docs/fidelity/APPROXIMATIONS.md` in this task's commit.
+- **A run opcode of `0x80` means a run of zero**, and the two readers in the tree disagree about it
+  (`READP.C`'s assembly copies 256 pixels, its C copy copies 0). The writer never emits it. Refuse
+  it rather than picking a reading the original does not have.
+
+`.X` is not a format: it is `GLVP.C`'s `saveunpheader` output, which is the `UH` variant, and
+`COMAN/COMBG.X` is the tree's only one. `.U` likewise holds both bare dumps and `FCFC` files.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p sr-assets`
-Expected: PASS, including the cross-format equality.
+Expected: PASS — all thirteen, including the two real-file truncation refusals and the
+`HZPIC.P` clip.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Cargo.toml crates/sr-assets
-git commit -m "Add sr-assets and decode the Origin PIC container (.UH/.U/.UP/.P/.16/.X)"
+git add Cargo.toml crates/sr-assets docs/fidelity/APPROXIMATIONS.md
+git commit -m "Add sr-assets and decode the Origin PIC container's five variants"
 ```
+
+The commit message cites `GRAB/LBM2U.C:57-67` (the `colors*3` palette and the offset formula),
+`GRAB/GLVP.C`'s `saveunpheader`/`saveunpheaderpal` (the `UH`/`Uh` magics) and `ENDPIC/READP.C`
+(the runtime RLE reader), as the Global Constraints require.
 
 ---
 
 ### Task A3: IFF — ILBM and PBM
 
-The tree carries **both** IFF flavours and the tally is not obvious from any one file: 38 files are
-`FORM .... ILBM` (planar, `nPlanes` bitplanes) and 46 are `FORM .... PBM ` (one byte per pixel).
-§4.4's "stencil/EHB, multiple bitplane counts" applies to the ILBM half only; check whether either
-feature is actually used before supporting it, and record the answer.
+The tree carries **both** IFF flavours and the tally is not obvious from any one file. Measured
+over all 81 `.lbm`/`.1bm` files: **38 are `FORM .... ILBM`** (planar, `nPlanes` bitplanes) and
+**42 are `FORM .... PBM `** (one byte per pixel). The plan originally said 46 `PBM `; the corrected
+count is a direct measurement. §4.4's "stencil/EHB, multiple bitplane counts" applies to the ILBM
+half only; check whether either feature is actually used before supporting it, and record the
+answer.
+
+The 81st file is not IFF at all: `GRAB/BLOWFNT.1BM` is 64,000 bytes of bare 320×200 pixels with a
+twelve-byte all-zero head. It does not belong to this decoder — A2's `raw_surface` is its door, and
+A7 decides whether it is a font strip.
 
 **Files:**
 - Create: `crates/sr-assets/src/iff.rs`, `crates/sr-assets/tests/iff.rs`
 - Read: `upstream/SecondReality/GRAB/LOADLBM.C`, `GRAB/VIEWLBM.C`, `GRAB/DEFLBM.INC`
 
 **Interfaces:**
-- Consumes: `AssetError`, `Image`, `Format::Iff`, `six_bit` (A2).
+- Consumes: `AssetError`, `Image`, `Format::Iff`, `six_bit`, `load`, `load_path` (A2). Also A2's
+  Origin decoder, for the cross-format equality test moved here from A2.
 - Produces: `sr_assets::iff::decode(bytes: &[u8]) -> Result<Image, AssetError>`, reached through
   `load(bytes, Format::Iff)`. The chunk walker and ByteRun1 are private to the module.
 
@@ -317,8 +450,38 @@ fn a_pbm_decodes_to_the_dimensions_in_its_header() {
     // Any chunky file from assets/; A1's inventory names them.
 }
 
+/// **Moved here from A2**, because it needs both decoders: it was A2's strongest
+/// evidence that the Origin decoder matches the source art, and it cannot run until
+/// this task lands. Verified during pre-flight: 0 differing pixels of 128,000, and
+/// the `UP` palette is byte-equal to the LBM's `CMAP` divided by 4.
 #[test]
-fn every_iff_asset_agrees_with_its_own_bmhd() { /* as in A2: payload vs header */ }
+fn the_packed_title_and_the_iff_title_are_the_same_picture() {
+    let up = load_path(Path::new("../../assets/BEG/SRTITLE.UP")).unwrap();
+    let lbm = load_path(Path::new("../../assets/BEG/SRTITLE.LBM")).unwrap();
+    assert_eq!((up.width(), up.height()), (lbm.width(), lbm.height()));
+    assert_eq!(up.pixels(), lbm.pixels());
+}
+
+/// A2's tree-wide property does not transfer to a compressed container: an IFF
+/// `BODY` is ByteRun1, so there is no payload-equality to assert. What does hold,
+/// and catches the same class of misread header field, is that every IFF file
+/// decodes and that what it decodes to fills its own `BMHD`'s `w`/`h`.
+#[test]
+fn every_iff_asset_decodes_and_fills_the_geometry_its_bmhd_claims() {
+    let mut seen = 0;
+    for path in iff_assets_in("../../assets") {
+        let raw = std::fs::read(&path).unwrap();
+        let img = load(&raw, Format::Iff).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(
+            img.pixels().len(),
+            img.width() as usize * img.height() as usize,
+            "{}: decoded pixels vs BMHD geometry",
+            path.display()
+        );
+        seen += 1;
+    }
+    assert!(seen >= 20, "expected both IFF flavours, saw {seen}");
+}
 
 #[test]
 fn an_eight_bit_cmap_becomes_six_bits_through_the_inverse_widening() {
@@ -551,10 +714,16 @@ git commit -m "Decode PAM's FLI animation and its ANI record scheme"
 
 ### Task A7: Font strips
 
-`ALKU/FONA.LBM`, `ALKU/FONA2.LBM`, `ENDSCRL/FONA.UH` (1500×30), `GRAB/BLOWFNT.1BM`: pictures that a
-part slices into glyph cells. The loader work is therefore the `Font` view over a decoded `Image`,
-plus the cell geometry — which is **not** to be guessed: read the part's own text routine
-(`ENDSCRL/`, `ALKU/`, `CREDITS/`) for the cell size and the character order, and pin both.
+`ALKU/FONA.UH`, `ENDSCRL/FONA.UH` (both 1500×30 by header, and **not** the same strip — same size,
+different pixels and a different palette), `ALKU/FONA.LBM`, `ALKU/FONA2.LBM`: pictures that a part
+slices into glyph cells. The loader work is therefore the `Font` view over a decoded `Image`, plus
+the cell geometry — which is **not** to be guessed: read the part's own text routine (`ENDSCRL/`,
+`ALKU/`, `CREDITS/`) for the cell size and the character order, and pin both.
+
+`GRAB/BLOWFNT.1BM` is on this list but is **not an LBM**: it is 64,000 bytes of bare 320×200 pixels
+with a twelve-byte all-zero head, so it is A2's `raw_surface` and not A3's IFF loader. Whether it is
+a font strip at all is for this task to establish from the part that uses it, and if it is not, say
+so and drop it rather than inventing a cell grid for it.
 
 **Files:**
 - Create: `crates/sr-assets/src/font.rs`, `crates/sr-assets/tests/font.rs`
