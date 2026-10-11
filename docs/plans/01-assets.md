@@ -826,10 +826,16 @@ A7 because the two share nothing but their lateness.
 
 - [ ] **Step 2: Run to verify they fail.** `cargo test -p sr-assets anim`
 
-- [ ] **Step 3: Implement `anim.rs`.** FLI: 128-byte header (`0xAF12` magic), then per-frame chunk
-  records (`0xF1FA` frame type, `0x0004`/`0x000C` colour chunks, `0x0007`/`0x000B`/`0x000C` delta
-  types) applied to a 320×200 chunky canvas. Follow VFLI.C's decode for the delta forms it actually
-  uses; refuse the ones it does not.
+- [ ] **Step 3: Implement `anim.rs`.** FLI: 128-byte header — **`0xAF11` in this tree's file**, and
+  `0xAF12` is the other FLI variant, so accept both but measure which one `PRAX4.FLI` carries — then
+  per-frame chunk records (`0xF1FA` frame type; colour chunks `0x0004` and `0x000B`; delta types
+  `0x0007`, `0x000C` and `0x000F`) applied to a 320×200 chunky canvas. **The plan originally listed
+  `0x000C` as both a colour chunk and a delta type, which is a contradiction in its own text** — the
+  measured histogram for `PRAX4.FLI` is `0x0B:1, 0x0C:41, 0x0F:1`, so `0x000C` is a delta and
+  `0x000B` is the colour chunk. Follow VFLI.C's decode for every form it implements; the ones no
+  file in this tree exercises are ported and cited but are **not** measured — say so in the module
+  docs rather than implying coverage, and **do not refuse them**: they are standard FLI forms, so
+  refusing them would make the decoder unable to read a valid FLI.
 
 - [ ] **Step 4: Run the tests to verify they pass, then commit**
 
