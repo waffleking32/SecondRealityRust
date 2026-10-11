@@ -2582,10 +2582,10 @@ git tag phase-0
 
 From spec §10, checked off at Task 14:
 
-- [ ] `cargo test` green across the workspace.
-- [ ] The synthetic test card runs at the correct speed (70.086 Hz measured in Task 9 Step 5) and exercises per-scanline palette, split, scroll, double-scan and beam compose — one property test per behaviour in Task 8.
-- [ ] `cargo xtask reference capture` captures frames from the original **[oracle]**.
-- [ ] `cargo xtask compare` produces a diff report **[oracle]**.
-- [ ] The part sequence in spec §2.2 is verified against `MAIN/U2.ASM` and corrected where it was wrong (Task 10).
+- [x] `cargo test` green across the workspace. — **155 passed, 0 failed, no warnings** (94 `sr-engine`, 55 `xtask`, 5 + 1 binary).
+- [x] The synthetic test card runs at the correct speed and exercises per-scanline palette, split, scroll, double-scan and beam compose — one property test per behaviour in Task 8. — **703 ticks in 10.040 s = 70.019 Hz**; three further runs matched `floor(70.086 × elapsed)` exactly. One caveat recorded rather than hidden: phase 2's split *walk* is clamped to 3 rows by the `u16` origin limit (D16) and is invisible frame-to-frame, so the split is proven by the view switch and lower origin being pinned at exact pixels, not by the walk.
+- [x] `cargo xtask reference capture` captures frames from the original **[oracle]**. — `reference/check_a/{title,part}/`. **Four independent captures agree byte-for-byte** (two runs, each capturing the 320×400 title screen and the 320×200 part), confirmed by `diff -r` printing nothing between the two pairs.
+- [x] `cargo xtask compare` produces a diff report **[oracle]**. — Identical → `verdict: identical`, exit 0. Differing → `verdict: different`, exit 1, diff PNGs written. Hard errors → exit 2.
+- [x] The part sequence in spec §2.2 is verified against `MAIN/U2.ASM` and corrected where it was wrong (Task 10). — `docs/fidelity/part-sequence.md`, with line citations. §2.2 was right about the part order and **wrong about the music**; see `docs/decisions.md` D13.
 
 Tasks 1–10 have no oracle dependency. If it becomes unavailable, Tasks 11–13 and the last two exit criteria move to Phase 1 and Phase 0 closes as `done (engine only)` with that stated in `PROGRESS.md`.

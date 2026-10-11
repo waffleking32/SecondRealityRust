@@ -652,3 +652,86 @@ normal and does not shift the demo-relative mapping. And the indexed read costs 
 requests (four planes, or one for chain-4, plus 768 for the DAC), so it takes roughly a
 third of a second: it is only meaningful where the screen holds, and the capture checks the
 indices against the RGB frame before writing them.
+
+## D16 — Phase 0's interface decisions, and the open question it did not close (2026-10-10)
+
+Ten decisions the plan made where the spec was silent, each because the alternative was worse.
+Recorded here so a later phase inherits the reasoning rather than re-deriving it.
+
+1. **Presentation lives in `bins/secondreality`, not `sr-engine`.** Spec §4.2 puts "Presentation"
+   under `sr-engine`; putting the SDL2 dependency there would make the engine untestable without
+   SDL. No `sr-present` crate was introduced — the engine keeps the pure raster maths, the binary
+   owns the window. The engine's `[dependencies]` is still empty, and a test asserts nothing has
+   crept in.
+2. **`View` gained a `width` field.** §4.2's sketch lists height but not width, and 320- and
+   640-wide displays both exist (§2.3).
+3. **`View::split` is `Option<Box<Split>>`, and neither `View` nor `Split` is `Copy`.** A `Split`
+   containing a `View` containing a `Split` is an infinitely-sized type, hence the `Box`. That
+   `Box` is also why they are `Clone` only: `Box<T>` is never `Copy`, and the bound is recursively
+   unsatisfiable. The plan originally declared `Copy` on both and would not have compiled.
+4. **`Part` gained `name()`**, and `init` returns `Result<(), PartError>` rather than `Result<()>`,
+   so the runner can name the part that failed to start.
+5. **Music is not in `PartCtx` in Phase 0.** It arrives in Phase 3 (spec §7). Adding fields to
+   `PartCtx` is additive and breaks no part.
+6. **The overscan border is a fixed pad in the presenter**, not a modelled overscan region — 8
+   source pixels per side, scaled with the picture. It is the first entry in
+   `docs/fidelity/APPROXIMATIONS.md`, and Phase 5 must re-measure it when PANIC lands.
+7. **`xtask` is invoked as `cargo xtask`** through a `.cargo/config.toml` alias.
+8. **The composed frame is the displayed area only** — no full-frame overscan synthesis.
+   `IndexedFrame` is exactly `view.width × view.height`, and `Engine::tick` resizes it from the
+   view every tick, because a part that cannot change the displayed line count cannot express
+   double-scan at all.
+9. **The reference of record is the 1993 retail release**, vendored at `reference/original/`, not a
+   build from the source tree — see D12. The source tree contains no runnable demo binary, only two
+   developer builds of the shell.
+10. **`rstest` is a dev-dependency.** The zero-*runtime*-dependency constraint is what keeps
+    `sr-engine` usable without SDL2; a test-only crate does not violate it. Used for `#[case]`
+    tables and `#[fixture]`s where they read better than a hand-rolled loop.
+
+Two further decisions were made mid-phase and are recorded where they belong rather than here: the
+split model (**post-split scanlines count from the split**, because line compare resets the CRTC's
+counters and counting from the frame top would make the register a no-op) and the DAC widening rule
+(**`(c*259+33)>>6`**, adopted from the emulator because it is also the ideal even mapping). Both were
+corrections of Phase 0's own plan, not refinements of the spec.
+
+### Open item — `View`'s origin is `u16` and the surface is not
+
+**Unresolved. Phase 2 must settle it when ENDSCRL lands.**
+
+`start_addr` and `x_offset` are `u16` (spec §4.2), so an origin sums to at most 131,070. The
+mandated surface is 640 × 400 = **256,000** pixels.
+
+Every Phase 0 use stays well inside that — the test card's largest origin is 64,000 — so nothing in
+Phase 0 is wrong. But ENDSCRL's **401-line circular buffer** at 640 pixels wide needs display
+origins up to ~256,000:
+
+- On real hardware this is fine, because the CRTC address counter counts *bytes*, and a 16-colour
+  planar scanline is 80 bytes. 401 × 80 = 32,080, comfortably inside 16 bits.
+- In the port's chunky-pixel model the same buffer is 256,640 *pixels*, which needs 18 bits.
+
+Phase 0 deliberately did **not** widen the fields: the spec declares `u16`, and widening mid-phase
+would be a unilateral deviation from an approved document. Phase 2 either widens the fields or
+models the CRTC's byte countering, and either way amends §4.2 and records the choice here.
+
+Independently corroborated: Task 8's implementer hit the same ceiling and had to clamp the test
+card's split walk to 3 rows, with `SPLIT_WALK_ROWS` derived from `u16::MAX` so it follows if the
+fields widen.
+
+### Deferred minor findings
+
+Phase 0's task reviews left a list of Minor findings that were deliberately not fixed — they do not
+block anything and several are documentation polish. The full list with the reasoning is in the
+phase ledger (`.superpowers/sdd/00-foundation/progress.md`), which is git-ignored scratch. The two
+that a later phase is most likely to trip over:
+
+- **`compare`'s guard has a demonstrated bypass.** `--out <nonexistent>/../<reference>/x` is not
+  refused: `canonicalize` fails for every ancestor up to the first that exists, so the `..` survives
+  in the appended tail and is compared literally, and the write lands inside the reference. A
+  reviewer compiled the guard standalone and reproduced the write. The doc comment claiming a `..`
+  cannot slip past is therefore not unconditionally true. It needs a contrived path, not the
+  accidental one the guard was added for, which is why it was deferred — but the fix is one line:
+  lexically collapse `.`/`..` in the tail after canonicalising the deepest existing ancestor.
+- **`phase_beam_compose_staircases_the_palette_down_the_frame` cannot tell a monotonic ramp from a
+  sawtooth.** It passes against both. The property is currently guaranteed by the constant
+  (`8 + band * 7`) rather than by a test; a strict-increase walk over all eight band boundaries
+  would pin it.

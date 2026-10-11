@@ -52,17 +52,62 @@ in any new crate manifest.
 ## Verification
 
 `dosbox-automation` is the preferred reference oracle, behind a trait — not a hard
-dependency. See `docs/decisions.md` D10 for the LD_LIBRARY_PATH workaround on this
-machine and the fallback order. The original accepts `SECOND 2..5` and `SECOND U` to
-start at a chosen block.
+dependency. See `docs/decisions.md` D10 for the fallback order and D14 for the API as it
+actually behaves. The original accepts `SECOND 2..5` and `SECOND U` to start at a chosen
+block.
 
-- `xtask reference capture` — capture frames from the emulated original into
-  `reference/` with a manifest (commit, CPU cycles, arguments, frame indices).
-  Capture is only meaningful with CPU cycles pinned.
-- `xtask compare` — run the port headless, render the same frames, report
-  differing-pixel percentage, max channel delta, and a diff image.
+### Capturing reference frames
+
+`cargo xtask reference capture` drives the emulated original and writes frames plus a
+manifest under `reference/`. Two files must sit together in the working directory —
+`SECOND.EXE` loads `REALITY.FC` from the current directory — which is why the defaults
+are both `reference/original/`.
+
+Five things the command needs, each of which cost time to discover:
+
+1. **`LD_LIBRARY_PATH`** must include the emulator's own build dependencies, because the
+   binary has no RPATH: `$SR_DOSBOX/build/release-linux/_deps/{sdl3,sdl3_image,mt32emu,fluidsynth,zlib-ng,iir1}-build`,
+   with `SR_DOSBOX` pointing at the `dosbox-automation` checkout.
+2. **A scratch `XDG_CONFIG_HOME`** whose *primary* config carries `mount_allowed_bases`.
+   `--noprimaryconf` alone cannot mount the reference directory — the mount policy is
+   honoured only in the primary config file. `xtask` writes one into a temp directory.
+3. **The setup screen.** `SECOND 2` does *not* skip it. The default Gravis soundcard fails
+   on this emulator, so the capture sends `KBD_left` then `KBD_enter` to select an SB16
+   before the demo starts.
+4. **Cycles through the config, never the REST PUT.** Setting `cycles=` at startup forces
+   legacy mode and the PUT then returns 409. A capture without pinned cycles is **refused**
+   rather than produced: an unpinned capture is not reproducible and must never be mistaken
+   for a reference.
+5. **Frame indices are boot-relative, and the demo does not start at frame 0.** Frame 0 is
+   the emulator's first rendered frame; `SECOND.EXE` is not reached until around counter
+   1657. The title screen is near frame 1700, and frames below that are DOS shell.
+
+### Comparing
+
+`cargo xtask compare` diffs a rendered frame set against a capture and reports
+differing-pixel percentage, max channel delta, and a diff image per frame.
+
+- **Exit codes matter**: `0` every frame identical, `1` frames differ, `2` the tool could
+  not compare (geometry or frame-count mismatch, malformed manifest, missing file). Scripts
+  rely on the difference between "they differ" and "it could not tell".
+- **Indexed comparison is preferred** and used whenever both sides have `.idx`. It is
+  stricter than RGB and makes the DAC widening rule irrelevant. The fallback is RGB.
+- Frames are paired by their manifest **index**, not by position.
+- **`reference/` is input-only.** Output defaults to `out/compare` and an explicit `--out`
+  inside a reference tree is refused. Do not write into a capture directory.
 
 A part is done when its frames match. Record the evidence in `PROGRESS.md`.
+
+### Geometry caveats worth knowing before they bite
+
+- **A view's `y_line_offset` is the surface stride, not the view width.** `View::new(w, h)`
+  defaults it to `w`, which is correct only when the surface *is* `w` wide. A 320-wide view
+  on the 640-wide surface must set it to 640, or it reads a different layout than the part
+  wrote.
+- **`View`'s origin is `u16` and the surface is 256,000 pixels** — see the open item in
+  `docs/decisions.md` D16. It will need settling when ENDSCRL lands.
+- **Below a split, the scanline count restarts.** Line compare resets the CRTC's counters,
+  so `View::effective_at` returns the scanline *within* the view.
 
 ## Fidelity notes
 
