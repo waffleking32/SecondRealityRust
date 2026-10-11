@@ -392,8 +392,8 @@ Three things the original art does that a naive decoder gets wrong, all of them 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p sr-assets`
-Expected: PASS — all thirteen, including the two real-file truncation refusals and the
-`HZPIC.P` clip.
+Expected: PASS — all eleven, including the two real-file truncation refusals and the `HZPIC.P`
+clip.
 
 - [ ] **Step 5: Commit**
 
@@ -555,10 +555,19 @@ palette, no header.
 - [ ] **Step 1: Establish the header from the parts' own reads**
 
 Before writing a test, find the code that consumes a `.SCI`/`.CLX` in the part that ships it, and
-write down its offsets. The observed header is `"RIX3"` + `u16 width` + `u16 height` + `u16 0x00AF` +
-`u16 0x0000`, then 768 palette bytes at offset 10 — but `0x00AF` is unexplained by the files alone
-and the part's read is what decides. Same for `.PAL`: exactly 768 bytes, 6-bit, in `PANIC/MONSTER.PAL`,
-`PAM/PAL.PAL`, `START/HZPIC.PAL`.
+write down its offsets. The header is **10 bytes** — `"RIX3"`, `u16 width`, `u16 height`,
+`u16 0x00AF` — then **768 palette bytes at offset 10**, then pixels at 778. Verified by file
+arithmetic rather than assumed: `WATER/BKG.CLX` is 64,778 = 10 + 768 + 64,000 and `FOREST/O2.SCI`
+is 21,258 = 10 + 768 + 20,480, and both land exactly.
+
+The plan originally described a `u16 0x0000` field between `0x00AF` and the palette, which cannot
+be right — those fields sum to 12, not 10 — and the bytes at offset 10 are the first palette entry
+(`00 00 00`). `0x00AF` itself is still unexplained by the files alone, and the part's own read is
+what decides it; record what you find either way. Same for `.PAL`: exactly 768 bytes, 6-bit, in
+`PANIC/MONSTER.PAL`, `PAM/PAL.PAL`, `START/HZPIC.PAL`.
+
+Note that `FOREST/O2.SCI` is a verified duplicate of `MAIN/DATA/O2.SCI`, and A1's curated tree keeps
+only the `FOREST/` copy — which is the path the tests here name.
 
 - [ ] **Step 2: Write the failing tests**
 
