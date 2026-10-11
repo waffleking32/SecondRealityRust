@@ -16,12 +16,15 @@
 //! `ILBM` file a multiple of 16 wide, which is why the row-padding question in
 //! `decode_planar`'s doc comment cannot be answered by any shipped file.
 //!
-//! The one measured fact that is *also* a decision: these files store 8-bit
-//! palettes and `LOADLBM.C:101` converts them with `/4`, while the engine's
-//! `dac_expand` inverse is `six_bit`. The two differ on 2,067 of the 22,760
-//! `CMAP` bytes in the curated tree (most and least on `LENS/LENSPIC.LBM`, 457
-//! of 768, and `BEG/SRTITLE.LBM`, 1 of 768) — `six_bit_is_measured_against_the_
-//! originals_own_truncation` records both numbers.
+//! The palette rule, which the twins settle: an IFF `CMAP` holds 8-bit values
+//! and the original truncates them with `/4` (`LBM2U.C:170`, and the same line
+//! at `LBM2P.C:195`, `LBM16.C:194`, `VIEWLBM.C:157`, `VPL.C:97`). Every
+//! converted twin in the tree holds those `/4` values byte for byte —
+//! `the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap` checks
+//! 768 bytes of `LENS/LENS.EXB` and of `BEG/SRTITLE.UP` against this decoder's
+//! own palette. It matters: `six_bit`, the *display* rule's inverse, would
+//! differ on 457 of the 768 bytes for the first pair and 1 for the second, and
+//! over the curated tree the two disagree on 2,067 of 22,760 `CMAP` bytes.
 
 use std::path::{Path, PathBuf};
 
@@ -76,6 +79,21 @@ fn bmhd_of(file: &[u8]) -> (u16, u16, u8) {
         at += 8 + size as usize + (size as usize & 1);
     }
     panic!("no BMHD chunk in this file");
+}
+
+/// The payload of a file's `CMAP` chunk, walked the same way the decoder walks
+/// it, so a test can compare a palette with the bytes it came from.
+fn cmap_of(file: &[u8]) -> &[u8] {
+    let mut at = 12;
+    while at + 8 <= file.len() {
+        let size = u32::from_be_bytes([file[at + 4], file[at + 5], file[at + 6], file[at + 7]])
+            as usize;
+        if &file[at..at + 4] == b"CMAP" {
+            return &file[at + 8..at + 8 + size];
+        }
+        at += 8 + size + (size & 1);
+    }
+    panic!("no CMAP chunk in this file");
 }
 
 /// The payload offset and declared length of a file's `BODY` chunk.
@@ -199,10 +217,11 @@ fn with_short_body(file: &[u8], keep: usize) -> Vec<u8> {
 /// `0011_0000` = 0x30. Row 1 is 3, 2, 1, 0: bit 0 = 1,0,1,0 = 0xA0, bit 1 =
 /// 1,1,0,0 = 0xC0.
 ///
-/// The palette's third entry, `[83, 3, 7]`, is the one value that separates
-/// `six_bit` from the `/4` an 8-bit `CMAP` tempts you into: `six_bit(83)` is 21
-/// and `83 / 4` is 20, and likewise 3 and 7 against 0 and 1. The fourth is the
-/// brief's `[255, 0, 0]`, which both conversions turn into 63.
+/// The palette's third entry, `[83, 3, 7]`, is there for the conversion rule:
+/// `83 / 4` is 20, and `six_bit(83)` would be 21 — the display rule's inverse,
+/// which is not what the original's converters do (`LBM2U.C:170` is `a =
+/// getc(f1)/4`). The fourth is the brief's `[255, 0, 0]`, which gives 63 either
+/// way.
 #[test]
 fn a_hand_built_planar_ilbm_decodes_to_its_known_pixels() {
     let palette = [[0, 0, 0], [255, 255, 255], [83, 3, 7], [255, 0, 0]];
@@ -228,8 +247,8 @@ fn a_hand_built_planar_ilbm_decodes_to_its_known_pixels() {
     assert_eq!(img.palette.entry(1), [63, 63, 63]);
     assert_eq!(
         img.palette.entry(2),
-        [21, 1, 2],
-        "eight bits go through six_bit, not through the original's /4"
+        [20, 0, 1],
+        "eight bits are truncated by four, as every converter in the tree does"
     );
 }
 
@@ -293,6 +312,12 @@ fn the_planar_scene_bitmap_and_its_origin_twin_are_the_same_picture() {
     assert_eq!((lbm.width(), lbm.height()), (320, 200));
     assert_eq!((lbm.width(), lbm.height()), (uh.width(), uh.height()));
     assert_eq!(lbm.pixels(), uh.pixels());
+    // Palette too, across the two decoders: the `.UH` was written from this
+    // `.LBM` by `LBM2U.C`, which truncates its `CMAP` with `/4` — so the Origin
+    // door (verbatim 6-bit) and the IFF door (`/4`) have to land on the same 256
+    // entries. This assertion is the one a `six_bit` conversion of the `CMAP`
+    // fails, on 56 of this file's 768 bytes.
+    assert_eq!(lbm.palette, uh.palette);
 
     // Thirteen file pairs like this exist in the curated tree — `COMAN/COMBG.LBM`
     // has two twins, and `LENS/LENSPIC.LBM`'s is `LENS/LENS.EXB`, named after
@@ -366,8 +391,17 @@ fn every_iff_asset_decodes_and_fills_the_geometry_its_bmhd_claims() {
     assert_eq!((planar, chunky), (24, 13), "the curated tree's own tally");
 }
 
+/// `six_bit` is the exact inverse of the engine's DAC widening over all 256
+/// 8-bit values, which is what `lib.rs` documents it for and what A2's
+/// `six_bit_is_the_exact_inverse_of_the_engines_widening` pins over 0..=63.
+///
+/// It is **not** the IFF `CMAP` rule — the original's converters truncate by
+/// four (`LBM2U.C:170`) and
+/// `the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap` pins the
+/// decoder against their output. The tolerance is the rounding: widening the
+/// six-bit answer back can miss the 8-bit input by at most 2.
 #[test]
-fn an_eight_bit_cmap_becomes_six_bits_through_the_inverse_widening() {
+fn six_bit_is_the_inverse_of_dac_expand_over_all_256_values() {
     for v in 0u8..=255 {
         let six = six_bit(v);
         assert!((dac_expand(six) as i32 - v as i32).abs() <= 2, "8-bit {v} -> 6-bit {six}");
@@ -510,64 +544,47 @@ fn unknown_chunks_are_skipped_not_fatal() {
 // measurements turned up.
 // ---------------------------------------------------------------------------
 
-/// The decision the ruling made, with the measurement that makes it a decision:
-/// an IFF `CMAP` holds 8-bit values, the original's own converter truncated them
-/// with `/4` (`LBM2U.C:170` — `a = getc(f1)/4`, and the same line stands in
-/// `LBM2P.C:195`, `LBM16.C:194`, `VIEWLBM.C:157` and `VPL.C:97`), and `six_bit`
-/// rounds. On the title's palette the two agree on 767 of 768 bytes and differ
-/// on one, `83`, where `six_bit` gives 21 and the `/4` the tree's `.UP` twin
-/// holds gives 20.
+/// The palette rule, pinned against the original's own converted twins rather
+/// than against a transcription of it.
 ///
-/// Recorded rather than resolved: every `.UH`/`.UP`/`.16`/`.EXB` twin in the
-/// curated tree holds `/4` values, byte for byte, because that is what the
-/// converters wrote. A part that loads an `.LBM` where the original loaded its
-/// converted twin therefore differs from the original by one 6-bit step on the
-/// channels where the two disagree — 1 of 768 for `BEG/SRTITLE.LBM`, and 457 of
-/// 768 for `LENS/LENSPIC.LBM`, whose `LENS/LENS.EXB` twin holds the `/4` on
-/// every one of them (measured over the tree: 2,067 of 22,760 `CMAP` bytes).
-/// The ruling is that the IFF door converts properly; this test exists so the
-/// price of that ruling is a number in the suite rather than a surprise in a
-/// frame diff.
-#[test]
-fn six_bit_is_measured_against_the_originals_own_truncation() {
-    let lbm = std::fs::read("../../assets/BEG/SRTITLE.LBM").unwrap();
-    let (at, size) = {
-        let mut at = 12;
-        loop {
-            let size = u32::from_be_bytes([lbm[at + 4], lbm[at + 5], lbm[at + 6], lbm[at + 7]])
-                as usize;
-            if &lbm[at..at + 4] == b"CMAP" {
-                break (at + 8, size);
-            }
-            at += 8 + size + (size & 1);
-        }
-    };
-    let cmap = &lbm[at..at + size];
-    assert_eq!(cmap.len(), 768, "the title's palette is 256 entries");
+/// The two doors lead to the same picture — one loads the `.LBM`, the other the
+/// `.UH`/`.EXB` the `GRAB/` toolchain made from it — so their palettes have to
+/// be the same 768 bytes, and each assertion below fails for a `six_bit`
+/// implementation of the `CMAP`. The first case is the one with teeth: on
+/// `LENS/LENSPIC.LBM` the two rules differ on **457 of the 768 bytes**, against
+/// 1 on the title. Both twins put their palette at offset 16 (`Uh`, `GRAB/
+/// GLVP.C:988-1014`, and `FCFD`, `LBM2P.C`), and the third assertion keeps the
+/// discrimination honest by counting what is at stake in each pair — a case that
+/// stopped discriminating would still pass the first two.
+#[rstest]
+#[case("../../assets/LENS/LENSPIC.LBM", "../../assets/LENS/LENS.EXB", 457)]
+#[case("../../assets/BEG/SRTITLE.LBM", "../../assets/BEG/SRTITLE.UP", 1)]
+fn the_palette_is_the_originals_own_truncation_of_the_eight_bit_cmap(
+    #[case] lbm_path: &str,
+    #[case] twin_path: &str,
+    #[case] at_stake: usize,
+) {
+    let lbm = load_path(Path::new(lbm_path)).unwrap();
+    let twin = load_path(Path::new(twin_path)).unwrap();
+    assert_eq!(lbm.palette, twin.palette, "the IFF door and the Origin door must agree");
 
-    let diverging: Vec<usize> = (0..cmap.len()).filter(|&i| six_bit(cmap[i]) != cmap[i] / 4).collect();
-    assert_eq!(diverging, vec![93], "measured: one byte, of 768");
-    assert_eq!((cmap[93], six_bit(cmap[93]), cmap[93] / 4), (83, 21, 20));
-
-    // Byte 93 is entry 31's red — the CMAP is three bytes an entry, entry 0
-    // first — and this decoder gives the rounded 21.
-    let img = load_path(Path::new("../../assets/BEG/SRTITLE.LBM")).unwrap();
-    assert_eq!(
-        img.palette.entry(31),
-        [six_bit(cmap[93]), six_bit(cmap[94]), six_bit(cmap[95])]
-    );
-    assert_eq!(img.palette.entry(31)[0], 21);
-
-    // The `.UP` the demo loads holds the truncated 20 instead — its whole
-    // palette is the `CMAP` divided by four, byte for byte, which is what makes
-    // this the one entry of the 256 where the two doors to the same picture
-    // disagree (`FCFD`, the 768-byte palette at 16, `LBM2P.C`).
-    let up = std::fs::read("../../assets/BEG/SRTITLE.UP").unwrap();
+    // And the same thing in raw bytes, so a shared mistake in both decoders
+    // cannot pass: the twin's stored palette is the `CMAP` divided by four, byte
+    // for byte (`LBM2U.C:170`, `LBM2P.C:195`).
+    let raw = std::fs::read(lbm_path).unwrap();
+    let cmap = cmap_of(&raw);
+    assert_eq!(cmap.len(), 768, "256 entries, as every `PBM ` file in the tree");
+    let twin_raw = std::fs::read(twin_path).unwrap();
     for i in 0..768 {
-        assert_eq!(up[16 + i], cmap[i] / 4, "byte {i} of the twin's palette");
+        assert_eq!(twin_raw[16 + i], cmap[i] / 4, "byte {i} of the twin's palette");
     }
-    assert_eq!(up[16 + 93], 20);
-    assert_ne!(img.palette.entry(31)[0], up[16 + 93], "the one byte the two differ on");
+
+    // What `six_bit` would have cost, which is why this is not the rule: the
+    // bytes where the display widening's inverse disagrees with the conversion
+    // the original ran.
+    let divergent = (0..768).filter(|&i| six_bit(cmap[i]) != cmap[i] / 4).count();
+    assert_eq!(divergent, at_stake, "{lbm_path} against {twin_path}");
+    assert!(at_stake > 0, "a pair where the two rules agree proves nothing");
 }
 
 /// `masking` is a *mask plane*: nonzero means one is stored in each row after
@@ -737,8 +754,8 @@ fn a_cmap_that_counts_its_pad_byte_in_the_size_reads_its_entries() {
     );
     let img = load(&file, Format::Iff).unwrap();
     assert_eq!(img.pixels(), &[0x01, 0x00]);
-    assert_eq!(img.palette.entry(0), [six_bit(10), six_bit(20), six_bit(30)]);
-    assert_eq!(img.palette.entry(2), [six_bit(70), six_bit(80), six_bit(90)]);
+    assert_eq!(img.palette.entry(0), [2, 5, 7], "10/4, 20/4, 30/4");
+    assert_eq!(img.palette.entry(2), [17, 20, 22], "70/4, 80/4, 90/4");
     // 334 / 3 = 111 entries for `PIC01.LBM`; here it is 3, and the pad bought no
     // fourth.
     assert_eq!(img.palette.entry(3), [0, 0, 0], "the pad must not become an entry");

@@ -37,12 +37,15 @@
 //!   port consumes the opcode and drops the excess, which is what that copy
 //!   leaves visible. (No curated file overshoots: all 37 rows' streams land on
 //!   their row bounds.)
-//! - **The palette is 8-bit and is converted through [`six_bit`].** The
-//!   original's own converter truncated with `/4` instead (`LBM2U.C:170` —
-//!   `a = getc(f1)/4`), which is why the `.UH`/`.UP`/`.16` twins in the tree
-//!   hold those values; `six_bit` is the rounding conversion the engine's
-//!   [`dac_expand`](sr_engine::dac_expand) is the exact inverse of, and the
-//!   divergence between the two is measured and pinned in `tests/iff.rs`.
+//! - **The palette is 8-bit and is truncated with `/4`.** Same line in five
+//!   tools: `LBM2U.C:170`, `LBM2P.C:195`, `LBM16.C:194`, `VIEWLBM.C:157` and
+//!   `VPL.C:97` all read `a = getc(f1)/4` — the 8->6 conversion the original
+//!   actually used, which is why the `.UH`/`.UP`/`.16`/`.EXB` files it wrote
+//!   hold those values. [`crate::six_bit`] is the *display* rule's inverse
+//!   ([`dac_expand`](sr_engine::dac_expand) widens 6->8) and differs from `/4`
+//!   on one 6-bit step wherever the byte is 3 mod 4; the tree's own converted
+//!   twins agree with `/4` byte for byte, and `tests/iff.rs` pins the palette
+//!   against them, 768 bytes at a time.
 //! - **A truncated stream is an error, not a hang.** The original's `getc`
 //!   returns `EOF`, which `if(a > 127)` reads as a literal of length 0 and
 //!   loops on forever; every read here is bounded by the `BODY`'s end and
@@ -67,7 +70,7 @@
 
 use sr_engine::{Palette, Surface};
 
-use crate::{check_geometry, six_bit, AssetError, Format, Image};
+use crate::{check_geometry, AssetError, Format, Image};
 
 /// `FORM`, the size that follows it, and the four-byte type.
 const HEAD: usize = 12;
@@ -274,21 +277,22 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, AssetError> {
 /// `CREDITS/PICS/PIC18.LBM`, 111 and 110 for `PIC01.LBM`, 240 and 239 for the
 /// eight like `PIC05.LBM` (measured over all 37).
 ///
-/// The conversion is [`six_bit`], the inverse of the engine's DAC widening.
-/// The stored values are 8-bit (`LBM2U.C:170` divides them by four *because*
-/// they are), and [`Palette`] holds six; copying them verbatim would mask every
-/// value above 63 down to its low six bits. See the module docs and
-/// `tests/iff.rs` for what the original's own `/4` would have given instead.
+/// The conversion is `/4`, the original's own: `LBM2U.C:170`, `LBM2P.C:195`,
+/// `LBM16.C:194`, `VIEWLBM.C:157` and `VPL.C:97` are five independent copies of
+/// `a = getc(f1)/4`, which is how the `.UH`, `.UP`, `.16` and `.EXB` files this
+/// tree ships got their six-bit palettes. The tree's converted twins are the
+/// evidence and the test: their 768 palette bytes equal the `CMAP` divided by
+/// four exactly, for `LENS/LENSPIC.LBM`/`LENS/LENS.EXB` and `BEG/SRTITLE.LBM`/
+/// `BEG/SRTITLE.UP` alike, where [`crate::six_bit`] would differ on 457 and 1 of the
+/// bytes respectively. (The engine widens the other way at upload through
+/// `dac_expand`, which rounds; that is the display rule and not this one.)
 fn read_palette(cmap: Option<&[u8]>) -> Palette {
     let mut palette = Palette::new();
     let Some(cmap) = cmap else {
         return palette;
     };
     for (i, rgb) in cmap.chunks_exact(3).take(256).enumerate() {
-        palette.set_entry(
-            i as u8,
-            [six_bit(rgb[0]), six_bit(rgb[1]), six_bit(rgb[2])],
-        );
+        palette.set_entry(i as u8, [rgb[0] / 4, rgb[1] / 4, rgb[2] / 4]);
     }
     palette
 }
