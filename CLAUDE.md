@@ -94,11 +94,17 @@ Five things the command needs, each of which cost time to discover:
 differing-pixel percentage, max channel delta, and a diff image per frame.
 
 - **Exit codes matter**: `0` every frame identical, `1` frames differ, `2` the tool could
-  not compare (geometry or frame-count mismatch, malformed manifest, missing file). Scripts
-  rely on the difference between "they differ" and "it could not tell".
+  not compare (a geometry mismatch, a reference index with no rendered frame within one
+  frame of it, malformed manifest, missing file). Scripts rely on the difference between
+  "they differ" and "it could not tell".
 - **Indexed comparison is preferred** and used whenever both sides have `.idx`. It is
   stricter than RGB and makes the DAC widening rule irrelevant. The fallback is RGB.
-- Frames are paired by their manifest **index**, not by position.
+- Frames are paired by their manifest **index**, not by position, and a rendered frame may
+  sit **one frame either side** of the reference index it answers for: the oracle's
+  animation phase at one boot index is not reproducible across sessions (D17), so the
+  alignment is searched rather than assumed. Which offset each frame was paired at is in
+  the report and on the console; a reference index that can only be paired further away is
+  refused (exit 2) rather than paired. See D18 for what that could hide.
 - **`reference/` is input-only.** Output defaults to `out/compare` and an explicit `--out`
   inside a reference tree is refused. Do not write into a capture directory.
 

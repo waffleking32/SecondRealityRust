@@ -83,14 +83,30 @@ tool's own exit code as the verdict:
   and `diff_001100.png` for that run; the re-run below writes them under `out/neg2/`
   as `diff_000700.png` and `diff_001350.png`, with the same percentages).
 
-A comparison that cannot run at all (a geometry or frame-count mismatch, a missing
-manifest or frame file) is refused with a legible message and exit code 2, so a script
-can tell "the frames differ" from "the tool could not tell".
+A comparison that cannot run at all (a geometry mismatch, a reference index with no
+rendered frame within one frame of it, a missing manifest or frame file) is refused with a
+legible message and exit code 2, so a script can tell "the frames differ" from "the tool
+could not tell".
 
 Both checks above were re-run after B1 re-captured `reference/check_a` (D17; the same two
 screens at new indices, frames byte-identical to the ones they replace), and the numbers
 are the same: self-comparison `verdict: identical` exit 0, the `SECOND 5` negative
 `verdict: different` exit 1 with title 99.5609% and part 40.7172%.
+
+**The negative check above was measured before B1b, and B1b changes its outcome.** The two
+captures are 300 frames apart by index (`check_a` at 700/900/1350/1450, `check_neg` at
+400/600/1100/1150), and the old pairing — which compared by position in the list, not by
+index — zipped them and printed those percentages. Pairing is now by index within ±1 frame
+(D18), so the same command is **refused, exit code 2**, naming reference frame 1350 and the
+nearest rendered index 1150. The identical-input check is unaffected: `check_a` against
+itself is still `verdict: identical`, every offset 0, exit 0.
+
+What a negative check now needs is two captures *at the same indices* that show different
+screens, and there is one in `out/` (scratch, not in the tree): `out/a8-capture` (title
+screen, `SECOND 2`, frames 400/600, indexed) against `out/check_neg/title` (`SECOND 5`'s end
+logo, same frames) → both frames 99.5609% differing, every offset 0, `verdict: different`,
+exit 1. D18's table carries the same point on the moving part screen (14.8531% and 0.0063%,
+exit 1).
 
 ## Phase log
 

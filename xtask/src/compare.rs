@@ -19,9 +19,14 @@
 //!   indices still differ, and an index is what the part actually wrote. RGB
 //!   is the fallback, used only when one side lacks the indices (a capture
 //!   whose coherence check failed, D15).
-//! - **Frames pair by manifest index, not by position in the list.** A capture
-//!   that holds a different number of frames is refused rather than compared
-//!   off the end: a skipped frame must not silently shift the rest.
+//! - **Frames pair by manifest index, not by position in the list, and the
+//!   rendered side may sit one frame either side of the index it answers for.**
+//!   The oracle's animation phase at one boot index is not reproducible across
+//!   emulator sessions (B1/D17), so the alignment is *searched* and the offset
+//!   each frame was paired at is reported. A reference index with no rendered
+//!   frame within that window is refused rather than paired with something
+//!   further away: this widens the alignment, never the pixel comparison, and
+//!   what it could hide is recorded in D18.
 //! - **Exit code 0 when every frame is identical, 1 when any differs** (and 2
 //!   for "could not compare at all", which is not a fidelity measurement), so
 //!   a phase's exit criteria can be checked by a script.
@@ -38,6 +43,7 @@
 //! bytes every later diff is measured against — the same principle that makes
 //! `reference/original/` read-only.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::BufWriter;
@@ -57,7 +63,30 @@ const REPORT_FILE: &str = "report.json";
 
 /// The report format's own version, independent of the manifests' (`MANIFEST_VERSION`
 /// is what both sides must say; this is what this tool writes).
-const REPORT_VERSION: u32 = 1;
+///
+/// Version 2 is the alignment search (D18): each frame records the offset it
+/// was paired at and the summary counts them, so a reader that knows version 1
+/// — where a frame's counterpart was always the frame at its own index — must
+/// not read a version-2 report as if that were still true.
+const REPORT_VERSION: u32 = 2;
+
+/// How far either side of its reference index a rendered frame may sit.
+///
+/// One frame, because that is what the oracle's ambiguity was measured to be
+/// (B1/D17: a session's animation phase is one frame away from another's, a
+/// coin flip across sessions and constant within one). It is a constant and not
+/// an option on purpose: this is a *search over alignment*, not a tolerance on
+/// the pixels, and a knob that widens it would be the tolerance mistake wearing
+/// a different name (D18).
+const ALIGNMENT_WINDOW: u32 = 1;
+
+/// The score of a candidate that cannot be compared at all — a rendered frame
+/// whose geometry is not the reference's. It ranks below every candidate that
+/// can be compared, so a comparable one always wins; if it is the only
+/// candidate it is still chosen, and the geometry check refuses it out loud
+/// with both pixel counts named rather than the report showing a number nobody
+/// can interpret.
+const INCOMPARABLE: u64 = u64::MAX;
 
 /// Why a comparison could not produce a number.
 #[derive(Debug)]
@@ -65,8 +94,22 @@ pub enum CompareError {
     /// The two frames hold different numbers of pixels. Reported in pixels,
     /// the reference side first, so the message names which side is which.
     GeometryMismatch { reference: usize, rendered: usize },
-    /// The two captures do not hold the same number of frames.
-    FrameCountMismatch { reference: usize, rendered: usize },
+    /// A reference frame has no rendered frame it could honestly be paired
+    /// with: nothing unused within the alignment window. The comparison is
+    /// refused rather than pairing a frame from further away, which would
+    /// report a number that means nothing.
+    NoFrameWithinWindow {
+        /// The reference frame's manifest index.
+        index: u32,
+        /// How far either side of `index` a candidate may sit.
+        window: u32,
+        /// The rendered index nearest to `index`, if the rendered side holds
+        /// any frames at all. The distance is in the message.
+        nearest: Option<u32>,
+        /// How many frames the rendered side holds, so a manifest that is
+        /// empty or wildly the wrong shape is visible in the message.
+        rendered_frames: usize,
+    },
     /// A manifest, a frame file, or the layout of the two sides could not be
     /// read or matched. The message names what and where.
     Io(String),
@@ -81,11 +124,27 @@ impl fmt::Display for CompareError {
                  frame holds {rendered}; comparing the overlap would report a number that means \
                  nothing"
             ),
-            CompareError::FrameCountMismatch { reference, rendered } => write!(
-                f,
-                "frame counts differ: the reference holds {reference} frames where the rendered \
-                 side holds {rendered}; pairing them by index is impossible"
-            ),
+            CompareError::NoFrameWithinWindow {
+                index,
+                window,
+                nearest,
+                rendered_frames,
+            } => {
+                let nearest = match nearest {
+                    Some(nearest) => format!(
+                        "the nearest rendered index is {nearest}, {} frames away, and ",
+                        nearest.abs_diff(*index)
+                    ),
+                    None => String::new(),
+                };
+                write!(
+                    f,
+                    "reference frame {index} has no rendered frame within ±{window} of it that no \
+                     earlier reference frame has taken: {nearest}the rendered side holds \
+                     {rendered_frames} frames. Refusing to pair a frame from further away, which \
+                     would report a number that means nothing"
+                )
+            }
             CompareError::Io(message) => write!(f, "{message}"),
         }
     }
@@ -185,26 +244,95 @@ fn percent(differing: u64, total: u64) -> f32 {
     }
 }
 
-/// Frame numbers are paired by their manifest index, not by position in the
-/// list, so a capture that skipped a frame cannot silently shift the rest.
+/// Pair each reference frame with the rendered frame that answers for it.
 ///
-/// Both sides must name the same number of frames; a side that holds fewer is
-/// refused (`FrameCountMismatch`) rather than compared off the end. The pairs
-/// are returned in index order, so the report and the diff images line up —
-/// and each pair records both indices, so two sides that name *different*
-/// frames are visible in the report rather than hidden by the pairing.
-pub fn pair_indices(reference: &[u32], rendered: &[u32]) -> Result<Vec<(u32, u32)>, CompareError> {
-    if reference.len() != rendered.len() {
-        return Err(CompareError::FrameCountMismatch {
-            reference: reference.len(),
-            rendered: rendered.len(),
-        });
-    }
+/// Frames pair by the index each one carries, never by position in the list,
+/// and a rendered frame may sit up to `ALIGNMENT_WINDOW` frames either side of
+/// the reference index it answers for — the oracle's animation phase at one
+/// boot index is not reproducible across sessions (B1/D17), so the alignment is
+/// searched rather than assumed (D18).
+///
+/// For each reference index, in ascending order, the candidates are the unused
+/// rendered frames actually present at that index, one below and one above.
+/// `difference` scores a candidate — the differing-pixel count between the two
+/// pictures — and the lowest score wins, so the pairing follows the picture and
+/// a report that has to fail shows the closest thing rather than an arbitrary
+/// neighbour. Equal scores go to the smaller offset and then to the lower
+/// index, which is what makes an exact index win whenever it is as good a match
+/// as its neighbours: on a still screen several candidates match, and the
+/// report must say offset 0 rather than flip a coin.
+///
+/// A rendered frame answers one reference frame only: the pairs are resolved
+/// greedily in reference-index order, which is what makes a capture holding two
+/// adjacent indices unambiguous. A reference index with no candidate at all is
+/// refused — the window widens the alignment, not the comparison. The rendered
+/// side may hold frames the reference does not (the port's dump holds every
+/// tick where a capture holds a handful of keyframes); it is the reference's
+/// indices that must all be answered.
+pub fn pair_indices<F>(
+    reference: &[u32],
+    rendered: &[u32],
+    difference: F,
+) -> Result<Vec<(u32, u32)>, CompareError>
+where
+    F: Fn(u32, u32) -> Result<u64, CompareError>,
+{
     let mut reference: Vec<u32> = reference.to_vec();
     let mut rendered: Vec<u32> = rendered.to_vec();
     reference.sort_unstable();
     rendered.sort_unstable();
-    Ok(reference.into_iter().zip(rendered).collect())
+
+    let mut taken = vec![false; rendered.len()];
+    let mut pairs = Vec::with_capacity(reference.len());
+    for index in reference {
+        // (score, index distance, position in the sorted list): the distance
+        // prefers offset 0 over a neighbour, and the position breaks a tie
+        // between −1 and +1 by taking the lower index.
+        let mut best: Option<(u64, u32, usize)> = None;
+        for (position, candidate) in rendered.iter().enumerate() {
+            if taken[position] {
+                continue;
+            }
+            let distance = candidate.abs_diff(index);
+            if distance > ALIGNMENT_WINDOW {
+                continue;
+            }
+            let rank = (difference(index, *candidate)?, distance, position);
+            if best.is_none_or(|best| rank < best) {
+                best = Some(rank);
+            }
+        }
+        let Some((_, _, position)) = best else {
+            let nearest = rendered
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| !taken[*position])
+                .map(|(_, candidate)| *candidate)
+                .min_by_key(|candidate| candidate.abs_diff(index));
+            return Err(CompareError::NoFrameWithinWindow {
+                index,
+                window: ALIGNMENT_WINDOW,
+                nearest,
+                rendered_frames: rendered.len(),
+            });
+        };
+        taken[position] = true;
+        pairs.push((index, rendered[position]));
+    }
+    Ok(pairs)
+}
+
+/// `rendered_index - reference_index`: signed, so the direction is in the
+/// report and not only the distance. Every pair this tool makes is 0 or ±1 (the
+/// window), but it is computed as a difference rather than a pair of casts, so
+/// an index too large for `i32` cannot wrap into a plausible-looking offset.
+fn frame_offset(reference_index: u32, rendered_index: u32) -> i32 {
+    let distance = i32::try_from(reference_index.abs_diff(rendered_index)).unwrap_or(i32::MAX);
+    if rendered_index < reference_index {
+        -distance
+    } else {
+        distance
+    }
 }
 
 /// `identical` only when every frame matched; one differing frame is enough.
@@ -382,22 +510,110 @@ fn names(captures: &[Capture]) -> String {
 
 // --- comparing whole captures ---------------------------------------------
 
-/// The frames of both sides, paired by sorted manifest index.
+/// The frames of both sides, paired by manifest index within the alignment
+/// window, the picture deciding between a reference frame's candidates.
+///
+/// The pairing needs the pixels — the candidate that matches is the one the
+/// report should be about — so this reads the frames it is deciding between.
+/// The chosen pair is then compared again by `compare_capture`, which is where
+/// the numbers in the report come from; neither the score nor the choice is
+/// carried over, so the report and the pairing cannot disagree about what was
+/// compared.
 fn paired_frames<'a>(
     reference: &'a Capture,
     rendered: &'a Capture,
 ) -> Result<Vec<(&'a FrameRef, &'a FrameRef)>, CompareError> {
-    let reference_indices: Vec<u32> = reference.manifest.frames.iter().map(|f| f.index).collect();
-    let rendered_indices: Vec<u32> = rendered.manifest.frames.iter().map(|f| f.index).collect();
-    // The count and pairing contract; the zip below is the same pairing,
-    // because both lists are then sorted the same way.
-    pair_indices(&reference_indices, &rendered_indices)?;
-
     let mut reference_frames: Vec<&FrameRef> = reference.manifest.frames.iter().collect();
     let mut rendered_frames: Vec<&FrameRef> = rendered.manifest.frames.iter().collect();
     reference_frames.sort_by_key(|f| f.index);
     rendered_frames.sort_by_key(|f| f.index);
-    Ok(reference_frames.into_iter().zip(rendered_frames).collect())
+    let reference_indices: Vec<u32> = reference_frames.iter().map(|f| f.index).collect();
+    let rendered_indices: Vec<u32> = rendered_frames.iter().map(|f| f.index).collect();
+
+    let pairs = pair_indices(
+        &reference_indices,
+        &rendered_indices,
+        |reference_index, rendered_index| {
+            let reference_frame = frame_with(&reference_frames, reference_index)?;
+            let rendered_frame = frame_with(&rendered_frames, rendered_index)?;
+            // A frame of another geometry cannot stand in for this one, so it
+            // ranks below every candidate that can. If it is the only one it
+            // is chosen, and the geometry check refuses it with both sizes
+            // named instead of the report carrying a meaningless number.
+            if reference_frame.geometry(&reference.manifest)
+                != rendered_frame.geometry(&rendered.manifest)
+            {
+                return Ok(INCOMPARABLE);
+            }
+            candidate_difference(reference, reference_frame, rendered, rendered_frame)
+        },
+    )?;
+
+    // Back to the frames themselves: each pair names a reference index and the
+    // rendered index it was matched with, and each rendered frame is named
+    // once, so a side that lists the same index twice is consumed in order.
+    let mut reference_taken = vec![false; reference_frames.len()];
+    let mut rendered_taken = vec![false; rendered_frames.len()];
+    let mut paired = Vec::with_capacity(pairs.len());
+    for (reference_index, rendered_index) in pairs {
+        paired.push((
+            take_frame(&reference_frames, &mut reference_taken, reference_index)?,
+            take_frame(&rendered_frames, &mut rendered_taken, rendered_index)?,
+        ));
+    }
+    Ok(paired)
+}
+
+/// The first frame carrying `index` that no earlier pair has taken.
+fn take_frame<'a>(
+    frames: &[&'a FrameRef],
+    taken: &mut [bool],
+    index: u32,
+) -> Result<&'a FrameRef, CompareError> {
+    for (position, frame) in frames.iter().enumerate() {
+        if frame.index == index && !taken[position] {
+            taken[position] = true;
+            return Ok(frame);
+        }
+    }
+    Err(CompareError::Io(format!(
+        "the pairing named a frame at index {index} that the manifest does not hold"
+    )))
+}
+
+/// The frame carrying `index`, for scoring a candidate. A manifest that names
+/// one index twice is not distinguished here; the pairing takes them in order.
+fn frame_with<'a>(frames: &[&'a FrameRef], index: u32) -> Result<&'a FrameRef, CompareError> {
+    frames
+        .iter()
+        .find(|frame| frame.index == index)
+        .copied()
+        .ok_or_else(|| {
+            CompareError::Io(format!(
+                "the pairing named a frame at index {index} that the manifest does not hold"
+            ))
+        })
+}
+
+/// How far apart two frames are, by the rule the report will use for them:
+/// indices when both sides have them, RGB otherwise (D15's fallback).
+fn candidate_difference(
+    reference: &Capture,
+    reference_frame: &FrameRef,
+    rendered: &Capture,
+    rendered_frame: &FrameRef,
+) -> Result<u64, CompareError> {
+    let difference = match (&reference_frame.idx, &rendered_frame.idx) {
+        (Some(reference_idx), Some(rendered_idx)) => compare_indexed(
+            &read_frame(&reference.dir, reference_idx)?,
+            &read_frame(&rendered.dir, rendered_idx)?,
+        )?,
+        _ => compare_rgb(
+            &read_frame(&reference.dir, &reference_frame.rgb)?,
+            &read_frame(&rendered.dir, &rendered_frame.rgb)?,
+        )?,
+    };
+    Ok(difference.differing_pixels)
 }
 
 /// One capture's report, already written to disk.
@@ -418,10 +634,16 @@ struct Report {
 
 #[derive(Debug, Serialize)]
 struct FrameReport {
-    /// The reference frame's manifest index; `rendered_index` is the frame it
-    /// was paired with — the same number unless a side's list is sparse.
+    /// The reference frame's manifest index.
     index: u32,
+    /// The rendered frame it was paired with. The searches pair by the picture,
+    /// so this is the index that answered for the reference frame, not
+    /// necessarily the reference frame's own.
     rendered_index: u32,
+    /// `rendered_index - index`, spelled out rather than left for a reader to
+    /// notice by subtraction: 0 for an exact pairing, ±1 when the oracle's
+    /// animation phase put the counterpart a frame either side (D18).
+    offset: i32,
     differing_pixels: u64,
     total_pixels: u64,
     differing_percent: f32,
@@ -436,20 +658,45 @@ struct Summary {
     worst_percent: f32,
     mean_percent: f32,
     verdict: &'static str,
+    /// How many frames were paired at a non-zero offset.
+    offset_frames: usize,
+    /// Every offset used and how many frames used it: `{"-1": 1, "0": 2}`.
+    /// Scattered non-zero offsets are the oracle's ambiguity; one constant
+    /// non-zero offset is a finding about the port (D18), and the distribution
+    /// is what tells them apart.
+    offsets: BTreeMap<i32, usize>,
 }
 
-fn summarise(percents: &[f32]) -> Summary {
+fn summarise(frames: &[FrameReport]) -> Summary {
+    let percents: Vec<f32> = frames.iter().map(|frame| frame.differing_percent).collect();
     let worst_percent = percents.iter().copied().fold(0.0f32, f32::max);
     let mean_percent = if percents.is_empty() {
         0.0
     } else {
         percents.iter().sum::<f32>() / percents.len() as f32
     };
+    let mut offsets: BTreeMap<i32, usize> = BTreeMap::new();
+    for frame in frames {
+        *offsets.entry(frame.offset).or_default() += 1;
+    }
     Summary {
         worst_percent,
         mean_percent,
-        verdict: verdict(percents),
+        verdict: verdict(&percents),
+        offset_frames: frames.iter().filter(|frame| frame.offset != 0).count(),
+        offsets,
     }
+}
+
+/// `+1 x2, -1 x1` for the console line: the frames paired at a non-zero offset,
+/// by offset. Empty when every frame was exact.
+fn offsets_used(offsets: &BTreeMap<i32, usize>) -> String {
+    offsets
+        .iter()
+        .filter(|(offset, _)| **offset != 0)
+        .map(|(offset, frames)| format!("{offset:+} x{frames}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Compare every frame of one capture pair, write its report and one diff
@@ -462,7 +709,6 @@ fn compare_capture(
     fs::create_dir_all(out).map_err(|e| CompareError::Io(format!("{}: {e}", out.display())))?;
 
     let mut frames = Vec::new();
-    let mut percents = Vec::new();
     let mut modes = Vec::new();
     for (reference_frame, rendered_frame) in paired_frames(reference, rendered)? {
         let reference_geometry = reference_frame.geometry(&reference.manifest);
@@ -528,10 +774,10 @@ fn compare_capture(
         let diff_image = format!("diff_{:06}.png", reference_frame.index);
         write_diff_image(&out.join(&diff_image), &reference_rgb, &mask, width, height)?;
 
-        percents.push(diff.differing_percent);
         frames.push(FrameReport {
             index: reference_frame.index,
             rendered_index: rendered_frame.index,
+            offset: frame_offset(reference_frame.index, rendered_frame.index),
             differing_pixels: diff.differing_pixels,
             total_pixels: diff.total_pixels,
             differing_percent: diff.differing_percent,
@@ -548,11 +794,12 @@ fn compare_capture(
         (false, true) => "mixed",
         (false, false) => "rgb",
     };
+    let summary = summarise(&frames);
     let report = Report {
         version: REPORT_VERSION,
         mode,
         frames,
-        summary: summarise(&percents),
+        summary,
     };
     let path = out.join(REPORT_FILE);
     let mut json = serde_json::to_string_pretty(&report)
@@ -603,6 +850,17 @@ fn write_diff_image(
         .finish()
         .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
     Ok(())
+}
+
+/// The name a capture's lines are prefixed with: its own — `title`, `part` —
+/// or nothing for a directory that is one capture, whose frame lines start
+/// with `frame`.
+fn capture_prefix(name: &str) -> String {
+    if name.is_empty() {
+        String::new()
+    } else {
+        format!("{name} ")
+    }
 }
 
 /// Where one capture's report and diff images go.
@@ -738,18 +996,34 @@ pub fn command(
         let capture_out = capture_out(&out, &reference_capture.name);
         let outcome = compare_capture(reference_capture, rendered_capture, &capture_out)?;
         for frame in &outcome.report.frames {
-            let prefix = if reference_capture.name.is_empty() {
-                "frame".to_string()
+            let prefix = format!("{}frame", capture_prefix(&reference_capture.name));
+            // A frame paired at a non-zero offset says so on its own line: an
+            // offset is the oracle's ambiguity being absorbed, and it must be
+            // visible where the number is, not worked out from two indices.
+            let alignment = if frame.offset == 0 {
+                String::new()
             } else {
-                format!("{} frame", reference_capture.name)
+                format!(
+                    ", rendered index {} (offset {:+})",
+                    frame.rendered_index, frame.offset
+                )
             };
             println!(
-                "{prefix} {}: {:.4}% differing ({}/{} px), max delta {}",
+                "{prefix} {}: {:.4}% differing ({}/{} px), max delta {}{alignment}",
                 frame.index,
                 frame.differing_percent,
                 frame.differing_pixels,
                 frame.total_pixels,
                 frame.max_channel_delta
+            );
+        }
+        if outcome.report.summary.offset_frames > 0 {
+            println!(
+                "{}alignment: {} of {} frames paired at a non-zero offset ({})",
+                capture_prefix(&reference_capture.name),
+                outcome.report.summary.offset_frames,
+                outcome.report.frames.len(),
+                offsets_used(&outcome.report.summary.offsets)
             );
         }
         println!("report: {}", outcome.path.display());
@@ -853,16 +1127,40 @@ mod tests {
 
     // --- pairing ----------------------------------------------------------
 
+    /// A scorer for a capture whose pictures are named by their index: two
+    /// frames are the same picture only at the same index. The pairing tests
+    /// below that are about structure use it; the ones about the search use
+    /// real frames through `command`.
+    fn same_picture_at_the_same_index(
+        reference_index: u32,
+        rendered_index: u32,
+    ) -> Result<u64, CompareError> {
+        Ok(u64::from(reference_index != rendered_index) * 8)
+    }
+
     #[test]
     fn frames_are_paired_by_manifest_index_not_by_position() {
+        // The indices are the pairing: two lists of the same size that name
+        // *different* frames are refused, not zipped positionally. This is the
+        // real shape the name is about — `reference/check_a` at 700/900/1350/
+        // 1450 against an older capture at 400/600/1100/1150, which the
+        // positional pairing compared frame for frame and printed a percentage
+        // for.
+        let error =
+            pair_indices(&[700, 900], &[400, 600], same_picture_at_the_same_index).unwrap_err();
+        match error {
+            CompareError::NoFrameWithinWindow { index, window, .. } => {
+                assert_eq!((index, window), (700, 1));
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+
+        // Two lists that do name the same frames pair by index, whatever order
+        // each manifest happens to list them in.
         assert_eq!(
-            pair_indices(&[10, 20], &[10, 20]).unwrap(),
-            vec![(10, 10), (20, 20)]
+            pair_indices(&[900, 700], &[700, 900], same_picture_at_the_same_index).unwrap(),
+            vec![(700, 700), (900, 900)]
         );
-        assert!(matches!(
-            pair_indices(&[10], &[10, 20]),
-            Err(CompareError::FrameCountMismatch { .. })
-        ));
     }
 
     #[test]
@@ -870,33 +1168,93 @@ mod tests {
         // A manifest may list its frames in any order; the pairing is by the
         // index each frame carries, so the report and the diff images line up.
         assert_eq!(
-            pair_indices(&[600, 400], &[400, 600]).unwrap(),
+            pair_indices(&[600, 400], &[400, 600], same_picture_at_the_same_index).unwrap(),
             vec![(400, 400), (600, 600)]
         );
         assert_eq!(
-            pair_indices(&[20, 10], &[10, 20]).unwrap(),
+            pair_indices(&[20, 10], &[10, 20], same_picture_at_the_same_index).unwrap(),
             vec![(10, 10), (20, 20)]
         );
     }
 
     #[test]
     fn a_side_that_skipped_frames_is_refused_not_shifted() {
-        // The whole point of counting: one side holding fewer frames must not
-        // let the rest of the capture slide one place over.
-        assert!(matches!(
-            pair_indices(&[100, 200, 300], &[100, 300]),
-            Err(CompareError::FrameCountMismatch {
-                reference: 3,
-                rendered: 2
+        // A rendered side that cannot supply a reference index must not let the
+        // rest of the capture slide over: reference frame 200 has nothing
+        // within ±1, and the refusal names it.
+        let error = pair_indices(
+            &[100, 200, 300],
+            &[100, 300],
+            same_picture_at_the_same_index,
+        )
+        .unwrap_err();
+        match error {
+            CompareError::NoFrameWithinWindow { index, .. } => assert_eq!(index, 200),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(pair_indices(&[100, 700], &[100, 300], same_picture_at_the_same_index).is_err());
+    }
+
+    #[test]
+    fn a_rendered_frame_is_taken_by_one_reference_frame_only() {
+        // Greedy in reference-index order: two adjacent reference frames pair
+        // with the two frames that answer them, and a rendered frame that has
+        // already answered one is not offered to the next.
+        assert_eq!(
+            pair_indices(&[900, 901], &[899, 900, 901], |_, _| Ok(0)).unwrap(),
+            vec![(900, 900), (901, 901)]
+        );
+        // One rendered frame cannot answer two reference frames, however well
+        // it matches both: the second is refused rather than handed the same
+        // frame again.
+        let error = pair_indices(&[900, 901], &[901], |_, _| Ok(0)).unwrap_err();
+        match error {
+            CompareError::NoFrameWithinWindow { index, .. } => assert_eq!(index, 901),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_pairing_follows_the_picture_and_the_exact_index_breaks_a_tie() {
+        // Candidates are scored by how far apart their pictures are; an
+        // exact-index candidate wins only when it is as close a match as its
+        // neighbours, so a still screen — where several candidates are equally
+        // exact — reports offset 0 rather than a coin flip (D18).
+        let nearest_picture = |reference_index: u32, rendered_index: u32| {
+            Ok(match (reference_index, rendered_index) {
+                (900, 899) => 3,
+                (900, 900) => 2, // the exact index, but a worse match
+                (900, 901) => 0, // the picture the reference actually holds
+                _ => 100,
             })
-        ));
-        assert!(matches!(
-            pair_indices(&[100, 300], &[100, 200, 300]),
-            Err(CompareError::FrameCountMismatch {
-                reference: 2,
-                rendered: 3
-            })
-        ));
+        };
+        assert_eq!(
+            pair_indices(&[900], &[899, 900, 901], nearest_picture).unwrap(),
+            vec![(900, 901)]
+        );
+        // All three hold the same picture: offset 0 wins the tie.
+        assert_eq!(
+            pair_indices(&[900], &[899, 900, 901], |_, _| Ok(0)).unwrap(),
+            vec![(900, 900)]
+        );
+        // Two neighbours match equally and offset 0 is absent: the lower index
+        // wins, deterministically.
+        assert_eq!(
+            pair_indices(&[900], &[899, 901], |_, _| Ok(0)).unwrap(),
+            vec![(900, 899)]
+        );
+    }
+
+    #[test]
+    fn the_offset_distribution_lists_the_offsets_that_were_used() {
+        // The console line's evidence: which offsets the frames were paired
+        // at, with offset 0 left out because it is the case that needs no
+        // explanation (D18).
+        assert_eq!(offsets_used(&BTreeMap::from([(0, 3)])), "");
+        assert_eq!(
+            offsets_used(&BTreeMap::from([(-1, 1), (0, 2), (1, 2)])),
+            "-1 x1, +1 x2"
+        );
     }
 
     #[test]
@@ -919,20 +1277,201 @@ mod tests {
 
         assert_eq!(code, ExitCode::SUCCESS);
         let report = read_json(&out.join("report.json"));
-        assert_eq!(report["version"], 1);
+        // The report's shape changed with the alignment search (D18), so its
+        // version moved with it: a reader that knows version 1 must not read a
+        // version-2 report as if frames still paired positionally.
+        assert_eq!(report["version"], 2);
         assert_eq!(report["mode"], "indexed");
         assert_eq!(report["summary"]["verdict"], "identical");
         assert_eq!(report["summary"]["worst_percent"], 0.0);
         assert_eq!(report["summary"]["mean_percent"], 0.0);
+        assert_eq!(report["summary"]["offset_frames"], 0);
+        assert_eq!(report["summary"]["offsets"], serde_json::json!({ "0": 2 }));
         assert_eq!(report["frames"].as_array().unwrap().len(), 2);
         for frame in report["frames"].as_array().unwrap() {
             assert_eq!(frame["differing_pixels"], 0);
             assert_eq!(frame["total_pixels"], 8);
             assert_eq!(frame["max_channel_delta"], 0);
             assert_eq!(frame["differing_percent"], 0.0);
+            assert_eq!(frame["offset"], 0);
             let image = out.join(frame["diff_image"].as_str().unwrap());
             assert!(image.is_file(), "{} was not written", image.display());
         }
+    }
+
+    /// The requirement the whole search exists for: a frame pair that would be
+    /// measured as different is measured as identical because the offset was
+    /// searched, and the offset is in the report. The two halves of the test
+    /// are the two outcomes: the reference frame against the rendered frame at
+    /// its own index (the different pictures), then against a rendered side
+    /// that holds its picture one frame later.
+    #[test]
+    fn a_frame_one_index_later_is_found_and_its_offset_is_reported() {
+        // A dense rendered side — the port dumps every tick — where index 900
+        // holds a different picture and 901 holds the reference's byte for
+        // byte. This is what the oracle's phase does between sessions (B1/D17).
+        let reference = scratch("offset-reference");
+        let at_its_own_index = scratch("offset-own-index");
+        let one_later = scratch("offset-one-later");
+        write_reference_capture(&reference, (4, 2), &[flat(900, 3, 8)]);
+        write_rendered_capture(&at_its_own_index, "testcard", &[(flat(900, 7, 8), (4, 2))]);
+        write_rendered_capture(
+            &one_later,
+            "testcard",
+            &[
+                (flat(899, 1, 8), (4, 2)),
+                (flat(900, 7, 8), (4, 2)),
+                (flat(901, 3, 8), (4, 2)),
+            ],
+        );
+
+        // The pictures really are different: paired at index 900 this is a
+        // 100% difference, so the pair the search finds is not an accident of
+        // the fixture.
+        let out = scratch("offset-own-index-out");
+        assert_eq!(
+            command(&reference, Some(&at_its_own_index), None, Some(&out)).unwrap(),
+            ExitCode::from(1)
+        );
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["frames"][0]["differing_percent"], 100.0);
+
+        let out = scratch("offset-one-later-out");
+        assert_eq!(
+            command(&reference, Some(&one_later), None, Some(&out)).unwrap(),
+            ExitCode::SUCCESS
+        );
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["summary"]["verdict"], "identical");
+        let frame = &report["frames"][0];
+        assert_eq!(frame["index"], 900);
+        assert_eq!(frame["rendered_index"], 901);
+        assert_eq!(frame["offset"], 1);
+        assert_eq!(frame["differing_pixels"], 0);
+        assert_eq!(frame["differing_percent"], 0.0);
+        assert_eq!(report["summary"]["offset_frames"], 1);
+        assert_eq!(report["summary"]["offsets"], serde_json::json!({ "1": 1 }));
+    }
+
+    #[test]
+    fn a_frame_one_index_earlier_is_found_and_its_offset_is_reported() {
+        let reference = scratch("offset-back-reference");
+        let one_earlier = scratch("offset-one-earlier");
+        write_reference_capture(&reference, (4, 2), &[flat(900, 3, 8)]);
+        write_rendered_capture(
+            &one_earlier,
+            "testcard",
+            &[
+                (flat(899, 3, 8), (4, 2)),
+                (flat(900, 7, 8), (4, 2)),
+                (flat(901, 1, 8), (4, 2)),
+            ],
+        );
+        let out = scratch("offset-one-earlier-out");
+
+        assert_eq!(
+            command(&reference, Some(&one_earlier), None, Some(&out)).unwrap(),
+            ExitCode::SUCCESS
+        );
+        let report = read_json(&out.join("report.json"));
+        let frame = &report["frames"][0];
+        assert_eq!(frame["rendered_index"], 899);
+        assert_eq!(frame["offset"], -1);
+        assert_eq!(frame["differing_percent"], 0.0);
+        assert_eq!(report["summary"]["offsets"], serde_json::json!({ "-1": 1 }));
+    }
+
+    #[test]
+    fn an_exact_index_is_preferred_when_it_matches_as_well_as_its_neighbour() {
+        // A still screen: all three rendered frames hold the reference's
+        // picture, so the choice is a tie and offset 0 must win it. Anything
+        // else would report the oracle's ambiguity where there is none.
+        let reference = scratch("offset-tie-reference");
+        let rendered = scratch("offset-tie-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(900, 3, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[
+                (flat(899, 3, 8), (4, 2)),
+                (flat(900, 3, 8), (4, 2)),
+                (flat(901, 3, 8), (4, 2)),
+            ],
+        );
+        let out = scratch("offset-tie-out");
+
+        assert_eq!(
+            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            ExitCode::SUCCESS
+        );
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["frames"][0]["rendered_index"], 900);
+        assert_eq!(report["frames"][0]["offset"], 0);
+        assert_eq!(report["summary"]["offset_frames"], 0);
+        assert_eq!(report["summary"]["offsets"], serde_json::json!({ "0": 1 }));
+    }
+
+    #[test]
+    fn the_closest_rendered_frame_is_kept_when_none_matches() {
+        // A failing report has to show the nearest picture, not an arbitrary
+        // neighbour: 900 differs in two pixels of eight, 901 in five.
+        let reference = scratch("closest-reference");
+        let rendered = scratch("closest-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(900, 3, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[
+                (flat_but(900, 3, 2, 8), (4, 2)),
+                (flat_but(901, 3, 5, 8), (4, 2)),
+            ],
+        );
+        let out = scratch("closest-out");
+
+        assert_eq!(
+            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            ExitCode::from(1)
+        );
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["summary"]["verdict"], "different");
+        let frame = &report["frames"][0];
+        assert_eq!(frame["rendered_index"], 900);
+        assert_eq!(frame["offset"], 0);
+        assert_eq!(frame["differing_pixels"], 2);
+        assert_eq!(frame["differing_percent"], 25.0);
+    }
+
+    #[test]
+    fn a_rendered_frame_answers_one_reference_frame_only() {
+        // Two reference frames holding the same picture and one rendered frame
+        // holding it: the second reference frame must not take it again, so it
+        // is measured against what is left — a difference, said out loud,
+        // rather than a second identical result off the same frame.
+        let reference = scratch("consume-reference");
+        let rendered = scratch("consume-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(900, 3, 8), flat(901, 3, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[(flat(900, 7, 8), (4, 2)), (flat(901, 3, 8), (4, 2))],
+        );
+        let out = scratch("consume-out");
+
+        assert_eq!(
+            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            ExitCode::from(1)
+        );
+        let report = read_json(&out.join("report.json"));
+        let frames = report["frames"].as_array().unwrap();
+        let paired = |frame: &serde_json::Value| {
+            (frame["index"].as_u64(), frame["rendered_index"].as_u64())
+        };
+        assert_eq!(paired(&frames[0]), (Some(900), Some(901)));
+        assert_eq!(frames[0]["differing_percent"], 0.0);
+        assert_eq!(paired(&frames[1]), (Some(901), Some(900)));
+        assert_eq!(frames[1]["offset"], -1);
+        assert_eq!(frames[1]["differing_percent"], 100.0);
+        assert_eq!(report["summary"]["offsets"], serde_json::json!({ "1": 1, "-1": 1 }));
     }
 
     #[test]
@@ -1071,20 +1610,53 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_count_mismatch_between_the_sides_is_a_hard_error() {
+    fn a_rendered_side_that_cannot_supply_a_reference_index_is_a_hard_error() {
+        // The rendered side holding fewer frames than the reference is caught
+        // per reference index, by the alignment window, rather than by a count:
+        // reference frame 200 has no rendered frame within ±1 of it.
         let reference = scratch("count-reference");
         let rendered = scratch("count-rendered");
         write_reference_capture(&reference, (4, 2), &[flat(100, 1, 8), flat(200, 1, 8)]);
         write_rendered_capture(&rendered, "testcard", &[(flat(100, 1, 8), (4, 2))]);
         let out = scratch("count-out");
 
-        assert!(matches!(
-            command(&reference, Some(&rendered), None, Some(&out)),
-            Err(CompareError::FrameCountMismatch {
-                reference: 2,
-                rendered: 1
-            })
-        ));
+        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        match error {
+            CompareError::NoFrameWithinWindow { index, window, .. } => {
+                assert_eq!((index, window), (200, 1));
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rendered_side_may_hold_frames_the_reference_does_not() {
+        // The port's dump holds every tick and a capture holds a handful of
+        // keyframes, so the rendered side is allowed to be the denser one. The
+        // reference's indices are the ones that must all be answered.
+        let reference = scratch("dense-reference");
+        let rendered = scratch("dense-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(100, 5, 8), flat(200, 6, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[
+                (flat(99, 1, 8), (4, 2)),
+                (flat(100, 5, 8), (4, 2)),
+                (flat(101, 2, 8), (4, 2)),
+                (flat(199, 3, 8), (4, 2)),
+                (flat(200, 6, 8), (4, 2)),
+            ],
+        );
+        let out = scratch("dense-out");
+
+        assert_eq!(
+            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            ExitCode::SUCCESS
+        );
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["frames"].as_array().unwrap().len(), 2);
+        assert_eq!(report["summary"]["offset_frames"], 0);
     }
 
     #[test]
@@ -1315,6 +1887,25 @@ mod tests {
         assert_eq!(part.manifest.frames[0].index, 1350);
     }
 
+    #[test]
+    fn the_real_check_a_capture_compares_identical_with_no_offset() {
+        // The real capture through the real path: four frames of two
+        // geometries, every index exactly where the alignment search finds it.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/check_a");
+        let out = scratch("real-check-a-out");
+
+        assert_eq!(command(&root, Some(&root), None, Some(&out)).unwrap(), ExitCode::SUCCESS);
+        for capture in ["part", "title"] {
+            let report = read_json(&out.join(capture).join("report.json"));
+            assert_eq!(report["summary"]["verdict"], "identical");
+            assert_eq!(report["summary"]["offset_frames"], 0);
+            for frame in report["frames"].as_array().unwrap() {
+                assert_eq!(frame["offset"], 0);
+                assert_eq!(frame["differing_percent"], 0.0);
+            }
+        }
+    }
+
     // --- helpers ----------------------------------------------------------
 
     /// A frame as the tests write it: indices optional, RGB always present.
@@ -1329,6 +1920,20 @@ mod tests {
         FrameData {
             index,
             idx: Some(vec![value; pixels]),
+            rgb: vec![value; pixels * 3],
+        }
+    }
+
+    /// A frame that differs from `flat(index, value, pixels)` in exactly
+    /// `differing` of its pixels, so a test can say how close a picture is.
+    fn flat_but(index: u32, value: u8, differing: usize, pixels: usize) -> FrameData {
+        let mut idx = vec![value; pixels];
+        for pixel in idx.iter_mut().take(differing) {
+            *pixel = value.wrapping_add(1);
+        }
+        FrameData {
+            index,
+            idx: Some(idx),
             rgb: vec![value; pixels * 3],
         }
     }

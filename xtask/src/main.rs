@@ -45,8 +45,10 @@ enum Command {
     },
     /// Diff frames against a reference capture and report how far apart they
     /// are. Exit code 0 when every frame is identical, 1 when any differs, 2
-    /// when the comparison could not run at all (a geometry or frame-count
-    /// mismatch, a missing or malformed manifest or frame file).
+    /// when the comparison could not run at all (a geometry mismatch, a
+    /// reference index with no rendered frame within one frame of it, a missing
+    /// or malformed manifest or frame file). A frame may be paired one index
+    /// either side of its reference index, and the offset is reported (D18).
     Compare {
         /// The capture to measure against: a directory holding `manifest.json`,
         /// or one holding capture subdirectories (as `reference/check_a` does).

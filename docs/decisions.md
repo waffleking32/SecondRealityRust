@@ -936,3 +936,129 @@ checks were re-run against the new tree: self-comparison `verdict: identical` ex
 convention: the autoexec boot's. A part's frames can be found by sweeping as before, but
 they no longer move between runs, and a capture taken on a busy host can still land a few
 frames late — re-run it if a pair that should be identical is not.
+
+---
+
+## D18 — `compare` searches a frame either side, and says which offset matched (2026-10-11)
+
+B1/D17 left one thing the phase's exit criterion could not survive: even with an exact grab,
+a *moving* screen captured at the same boot index lands one frame of animation apart between
+emulator sessions about half the time, and the flip is in the emulated clock — nothing the
+API or `--set` reaches. The user ruled: **`compare` searches ±1 frame and reports which
+offset matched.**
+
+**It is a widening of the alignment, never a tolerance on the pixels.** The comparison is
+still exact — a paired frame is 0.0000% or it is a difference, and the DAC widening,
+index-vs-RGB and strictness rules are untouched. What moved is only *which* rendered frame
+answers for a reference one, and every pair says how far apart the two indices were. The
+window is the constant `ALIGNMENT_WINDOW = 1`, not a flag: a knob that widened it would be
+the pixel-tolerance mistake wearing another name, and the width is a measurement (D17), not
+a setting.
+
+**The rule.** For each reference index in ascending order, the candidates are the rendered
+frames actually present at that index, one below and one above, that no earlier reference
+frame has taken. The candidate with the fewest differing pixels wins — so the pairing
+follows the *picture* — and equal scores go to the smaller offset, then to the lower index.
+A still screen therefore reports offset 0 (several candidates match exactly) instead of a
+coin flip, and a report that must fail shows the closest picture rather than an arbitrary
+neighbour. A rendered frame answers one reference frame only. A reference index with no
+candidate is **refused with exit 2** and a message naming the index and the nearest rendered
+frame; nothing is ever paired from further away. Exit codes keep their meanings: 0 only when
+every reference frame matched at some offset inside the window.
+
+**The pairing engine it replaces was index-blind, and the phase already had the evidence.**
+`pair_indices` checked only that the two sides held the same *number* of frames and then
+zipped them positionally. `reference/check_a` (now 700/900/1350/1450) against the older
+`out/check_neg` (400/600/1100/1150) therefore compared frames 300 apart and printed
+`title 99.5609% differing`, exit 1 (PROGRESS.md's Task 13 section). With the window in place
+the same command refuses:
+
+```
+error: reference frame 1350 has no rendered frame within ±1 of it that no earlier reference
+frame has taken: the nearest rendered index is 1150, 200 frames away, and the rendered side
+holds 2 frames. Refusing to pair a frame from further away, which would report a number that
+means nothing
+exit: 2
+```
+
+That count check had to go rather than be kept alongside the window: the port's dump holds
+*every* tick (`--frames N` writes one frame per tick) while a capture holds a handful of
+keyframes, so a count comparison would refuse the very workflow the search exists for. It is
+the reference's indices that must all be answered; a rendered side that holds frames the
+reference does not is normal, and one that cannot answer a reference index is refused by the
+window, per index, with a message that says which index.
+
+**The report says it out loud.** The report is version 2: each frame carries `offset`
+(`rendered_index - index`, signed, so the direction is not left to subtraction) and the
+summary carries `offset_frames` and the distribution `offsets` (`{-1: 1, 0: 3}`). The
+console repeats it, on the frame's own line and once for the capture — as measured below,
+`frame 2450: 0.0063% differing (4/64000 px), max delta 121, rendered index 2451 (offset +1)`
+and `alignment: 1 of 1 frames paired at a non-zero offset (+1 x1)`. The version moved
+because the *meaning* of a paired frame moved: a reader that knows version 1 must not read a
+version-2 report as if a frame's counterpart were always the frame at its own index.
+
+**What this could hide, and the evidence that separates it.** A port whose animation is
+systematically one frame out would match at a *constant* non-zero offset and pass. **Scattered
+non-zero offsets are the oracle's ambiguity; a constant one is a finding about the port** —
+with D17's caveat attached, which makes the reading sharper rather than softer: a session's
+phase is constant too, so a constant non-zero offset across a capture is a *suspicion*, not a
+conviction, and one comparison cannot tell a port bug from the oracle's phase. What settles
+it is a second capture — re-capturing the reference in a new session, or comparing the port
+against two sessions — because the oracle's ambiguity *moves the offset between sessions*
+and a port bug does not. The offset distribution is what makes both readings visible at all,
+and it is why every offset is recorded rather than absorbed: offset 0 everywhere, scattered
+±1, and one constant non-zero offset are three different findings. Each part's row in
+`docs/fidelity/reference-indices.md` is where the offsets and that settling are recorded (B2
+writes the first row).
+
+**What the search cannot do.** It aligns frames the rendered side actually holds. Two
+*captures* at the same index list hold, between them, only the frames at those indices: if
+one session's picture at index 2400 is the other's 2401, neither capture holds the 2401
+needed to see that. So B2 step 4's re-capture check still passes on held screens and cannot
+pass, at any offset, on a moving one, unless the re-capture (or the reference) also captures
+the neighbouring indices. That is a limit of the oracle, not of this search, and it is B2's
+to work around; measured here on the real captures (`out/b1-ws-s1` against `out/b1-ws-s2`,
+the same five indices 2400–2600 of the moving part screen): every frame paired at offset 0 —
+the only candidate the rendered side held — and 9.1453–14.6172% of *pixels* differing (D17's
+5.45–12.73% was measured in bytes, over index files, not over pixels).
+
+**Measured on the real captures.** `reference/check_a` compared with itself: `verdict:
+identical`, every offset 0, exit 0. `reference/check_a` against the older `out/check_neg`:
+refused, exit 2, message above — the same command the old code answered with
+`title 99.5609%` (frames 700 against 400 and 900 against 600) and `part 40.7172%` (1350
+against 1100), exit 1, which is the mispairing this replaces.
+
+The offset search was then measured against the oracle, on the moving 320×200 part screen:
+the reference frame at index 2450, taken from `out/b1-ws-s1` (session 1 of D17's
+alignment-batch measurement), and two single frames captured in later sessions, at 2449 and
+2451 (`out/b1b-2449`, `out/b1b-2451`, D17 recipe, 30000 cycles, both RGB-only because the
+screen moved during the indexed read — D15's coherence check doing its job).
+
+| reference 2450 vs | paired with | offset | differing | verdict |
+|---|---|---|---|---|
+| a later session's 2449 | 2449 | −1 | 14.8531% (9506 px, max delta 162) | different, exit 1 |
+| a later session's 2451 | 2451 | +1 | **0.0063% (4 px, max delta 121)** | different, exit 1 |
+
+The 2451 session was in the *other* alignment: its frame at 2451 is the reference's frame at
+2450, to within **four pixels of 64,000** — the small residue D17 measured one session in
+five carrying (145 bytes at index 2500). The search found it and reported the offset; the
+pixel comparison then reported those four pixels and exited 1. That is the policy working as
+ruled: alignment searched, pixels exact, nothing waved through.
+
+A triple in one session was attempted first and **could not be captured**: after writing
+frame 2449, the capture loop is ~18 frames late for 2450 and refuses ("the emulator reached
+frame 2468 before frame 2450 could be captured"). Adjacent indices cannot be captured in one
+run — the write between grabs costs more than the gap — which is another reason B2 step 4's
+re-capture cannot be rescued by re-capturing a neighbour, and B2's business to work around.
+
+The tests are `cargo test -p xtask`. Thirteen of them were run against the pre-B1b pairing
+first — the old code with only the new signatures shimmed so they could compile — and all
+thirteen failed: the four the plan names, plus the report version, the missing `offset`
+fields, the old count-mismatch refusals (`reference: 1, rendered: 3`), and one that shows the
+old engine outright lying (`pair_indices(&[700, 900], &[400, 600])` returned
+`Ok([(700, 400), (900, 600)])`). The one that carries the ruling is
+`compare::tests::a_frame_one_index_later_is_found_and_its_offset_is_reported`: the same
+reference frame is measured against the rendered frame at its own index (100% differing,
+exit 1) and against a rendered side holding its picture one index later (0.0000%,
+`rendered_index: 901`, `offset: 1`, `offset_frames: 1`, exit 0), so the pair is a real pair
+of different pictures and the transition is the search's doing, not the fixture's.
