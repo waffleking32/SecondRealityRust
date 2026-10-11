@@ -44,9 +44,11 @@ The five input classes most likely to bite, each with the task that pins it:
    read past its input. Pinned in A2 (Origin), A3 (IFF), A4 (RIX3) with deliberately cut buffers.
 2. **An asset whose magic contradicts its extension.** `sniff` decides; the extension is a hint at
    most. A `.UH` that is really an IFF must decode as an IFF. Pinned in A2.
-3. **An image larger than the surface the engine can allocate.** `MAX_WIDTH`/`MAX_HEIGHT` are
-   640×400; a 1024-wide asset must be refused with a legible message, not clipped or wrapped.
-   Pinned in A2.
+3. **An image too large for the surface the engine can allocate.** The rule is an **area** one —
+   `w * h > MAX_WIDTH * MAX_HEIGHT`, i.e. more than 256,000 pixels — not a per-dimension one.
+   A per-dimension rule would be wrong: `ALKU/FONA.UH` is **1500 wide** and is a required asset,
+   so refusing anything wider than 640 would reject a font strip the demo ships. A 1024×400 header
+   (409,600 px) must still be refused with a legible message, not clipped or wrapped. Pinned in A2.
 4. **An 8-bit palette from an IFF CMAP.** Converting 8→6 bits through anything but the exact inverse
    of `dac_expand` silently shifts every colour in the demo. Pinned in A3 over all 256 values.
 5. **A part whose geometry changes during the frames being captured.** `video/frame` follows the
@@ -180,8 +182,13 @@ pub enum AssetError {
     UnknownFormat,
     Truncated { format: Format, needed: usize, had: usize },
     Unsupported { format: Format, what: String },
+    /// An **area** rule: `width * height > MAX_WIDTH * MAX_HEIGHT`. Not a
+    /// per-dimension one — `ALKU/FONA.UH` is 1500 wide and must load.
     TooLarge { width: u32, height: u32 },
     Palette { what: String },
+    /// The file could not be read at all. `load_path` reports this rather than
+    /// inventing a `Truncated` for a file it never opened.
+    Io { path: std::path::PathBuf, what: String },
 }
 impl std::fmt::Display for AssetError { /* one line per variant */ }
 impl std::error::Error for AssetError {}
@@ -228,14 +235,18 @@ fn a_thirty_pixel_tall_font_strip_reads_as_one() {
 }
 
 /// The point of this family, in one test: the extension says nothing. `END/PIC.UH`
-/// is RLE, `ENDPIC/PIC.UH` and `GLENZ/FC.UH` are `Uh` with a palette, and
-/// `COMAN/COMBG.UH` is `UH` without one. All four are `.UH`.
+/// is RLE, `GLENZ/FC.UH` is `Uh` with a palette, and `COMAN/COMBG.X` is `UH`
+/// without one. All three are `.UH`/`.X` and all three are different formats.
+///
+/// The plan originally named `ENDPIC/PIC.UH` as the `Uh` example. It is not in
+/// the curated tree and has no consumer in the original, so `GLENZ/FC.UH` — the
+/// same variant at the same 320x200 — stands in.
 #[test]
 fn the_extension_never_decides_the_format() {
     let rle = load_path(Path::new("../../assets/END/PIC.UH")).unwrap();
     assert_eq!((rle.width(), rle.height()), (320, 400));
 
-    let uh_pal = load_path(Path::new("../../assets/ENDPIC/PIC.UH")).unwrap();
+    let uh_pal = load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap();
     assert_eq!((uh_pal.width(), uh_pal.height()), (320, 200));
 
     let uh = load_path(Path::new("../../assets/COMAN/COMBG.X")).unwrap();
@@ -248,7 +259,7 @@ fn the_extension_never_decides_the_format() {
 /// and it is already 6-bit — so this also pins that no re-quantising happens.
 #[test]
 fn a_uh_file_carries_its_own_six_bit_palette() {
-    let img = load_path(Path::new("../../assets/ENDPIC/PIC.UH")).unwrap();
+    let img = load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap();
     for i in 0..=255u8 {
         assert!(img.palette.entry(i).iter().all(|&c| c <= 63), "entry {i} is not 6-bit");
     }
@@ -297,7 +308,12 @@ fn every_origin_asset_decodes_and_fills_the_geometry_its_header_claims() {
         );
         seen += 1;
     }
-    assert!(seen >= 20, "expected the whole Origin family, saw {seen}");
+    // The curated tree holds 16 Origin-family files: 15 carry a magic and one is
+    // bare. Fourteen decode; the fifteenth is the truncated `COMAN/COMBG.UH`,
+    // asserted separately below. The guard is what stops a loop that matches
+    // nothing from passing — the plan's original `>= 20` came from the
+    // whole-upstream tally of 26 and was never reachable against the curated tree.
+    assert_eq!(seen, 14, "expected every decodable Origin asset, saw {seen}");
 }
 
 #[test]
