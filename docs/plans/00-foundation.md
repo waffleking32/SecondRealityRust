@@ -2087,6 +2087,44 @@ EOF
 
 ### Task 12: `xtask` and reference capture **[oracle]**
 
+**Corrections from Task 11's probe — the API does not match the guesses below.**
+Full evidence in `docs/decisions.md` D14; every fixture below is recorded in
+`xtask/tests/fixtures/`.
+
+1. **Mounting needs more than the spawn flags written here.** With
+   `--noprimaryconf --set webserver_enabled=true` the mount allow-list is empty and
+   `MOUNT C -RO <reference/original>` is refused ("outside allowed directories").
+   `mount_allowed_bases` is honoured only in the *primary* config file, so `--set` cannot
+   fix it. The spawn must also point `XDG_CONFIG_HOME` at a scratch directory holding
+   `dosbox-automation/dosbox-automation.conf` with `webserver_enabled = true` and
+   `mount_allowed_bases = <reference dir>`. A `-conf` file inside the game directory is
+   the documented alternative, untested.
+2. **There is no BMP and no indexed frame from `/video/frame`.**
+   `decode_frame(&raw, "image/bmp", 320, 200)` has nothing to match: the content types
+   are `image/jpeg` (the default, lossy at quality 98), `image/png`, and
+   `application/octet-stream` for `?format=raw`. The raw header is **15 bytes**
+   (`u32 width, u32 height, i32 pitch, u8 pixel_format, u16 palette_count`, little-endian)
+   followed by `palette_count * 3` palette bytes and `height * |pitch|` pixel bytes, and
+   the pixels are `[blue, green, red, 0]` with the fourth byte always zero.
+   `palette_count` was 0 in every mode sampled, so indices and the palette come from
+   elsewhere: `GET /api/v1/memory/0xA000/0/<len>` for indices (in Mode X, one read per
+   plane with the graphics-controller read-map-select register set to 0..3, then
+   `idx(x,y) = plane[x%4][y*80 + x/4]`), and `0x3C7`/`0x3C9` for the DAC (6-bit values).
+3. **`SECOND 2` does not skip the setup screen** and the list of frame indices below is
+   reached only after answering it: send `KBD_left`, then `KBD_enter` (the default
+   soundcard is a Gravis Ultrasound this emulator cannot provide, and Enter alone exits
+   with "Failed to initialize the selected soundcard"). Launch to first demo frame is
+   about a second, so frames 10/60/120 land on the 320×400 title screen — **not**
+   `geometry: [320, 200]`, which is the geometry only for the demo's later 320×200 parts.
+   Record the geometry that was captured rather than asserting one.
+4. **Cycles are cycles per millisecond, 50..2,000,000** (the emulator's own scale puts a
+   486DX/2-66 at 25000). `PUT /api/v1/cpu/cycles {"cycles":N}` sets both real and
+   protected mode. Do not start the emulator with the deprecated `cycles=` setting: it
+   switches to legacy mode, where the PUT is refused with 409. Use `cpu_cycles=`.
+5. The task brief's `export LD_LIBRARY_PATH=$SR_DOSBOX/.../{sdl3,…}-build` line does not
+   work in bash as written — brace expansion yields six assignment words and only the
+   last survives, so the binary fails to start. Build one colon-joined string.
+
 **Files:**
 - Create: `xtask/Cargo.toml`, `xtask/src/main.rs`, `xtask/src/oracle/mod.rs`, `xtask/src/oracle/dosbox.rs`, `xtask/src/reference.rs`
 - Modify: `Cargo.toml` (workspace members)
@@ -2292,6 +2330,21 @@ EOF
 ---
 
 ### Task 13: `xtask compare` **[oracle]**
+
+**Correction from Task 11's probe** (detail in `docs/decisions.md` D14). Indexed capture
+turned out to be available, so `compare_indexed` is the primary path rather than a
+fallback — but two things need handling:
+
+1. **Geometry is per capture, not fixed at 320×200.** The demo's 320×400 title screen
+   (where frames 10/60/120 land) is a genuine 400-line image, not a row-doubled 320×200
+   one, so a 320×200 port frame cannot be compared with it unless the comparison knows to
+   double rows. `CompareError::GeometryMismatch` should report which side is which rather
+   than assume the reference is 320×200.
+2. **The DAC widening rule the emulator applies differs from Task 2's** (`(c*259+33)>>6`,
+   i.e. round-to-nearest, versus `(c<<2)|(c>>4)`; they differ on ten of sixty-four values).
+   Indexed comparison is unaffected, which is another reason to prefer it; the RGB path
+   and `max_channel_delta` must not treat a one-step channel difference as significant
+   without knowing which rule produced the reference.
 
 **Files:**
 - Create: `xtask/src/compare.rs`
