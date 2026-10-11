@@ -103,6 +103,7 @@ setup menu); a later task's `recovered assets` table uses paths under the same t
 | `TUNNELI/SINIT.DAT` | `upstream/SecondReality/TUNNELI/SINIT.DAT` | `071a82e` | 12292 | `282ac11e5943b4d0a775f95e67830a244f5872ae92b859278ddd2ed9cd4e31a3` | Unlicense / public domain | TUNNELI |
 | `TECHNO/TROLL.UP` | `upstream/SecondReality/TECHNO/TROLL.UP` | `071a82e` | 70718 | `6a9fe2c5ec513b9dd33912ad7fd7ec6606be0ffce0a0c97332731074bc07032e` | Unlicense / public domain | TECHNO |
 | `TECHNO/PANICPIC.LBM` | `upstream/SecondReality/TECHNO/PANICPIC.LBM` | `071a82e` | 82456 | `9d9e4d73bc9afe7584aa276d01b1cc877aa502aa05e92cde7923120aa443babe` | Unlicense / public domain | TECHNO |
+| `DDSTARS/PIC.EGA` | `upstream/SecondReality/DDSTARS/PIC.EGA` | `071a82e` | 24000 | `c42cf0062e81fa195c516b80b195334cbb9a3c4cda63ae0f3e4c6730dfebe2b0` | Unlicense / public domain | TECHNO |
 | `PANIC/MONSTER.U` | `upstream/SecondReality/PANIC/MONSTER.U` | `071a82e` | 64000 | `47ea1ec93a1e78fc0b36aae1ea6180cdcbd2564cb37f685ff1898bcf0c3304d6` | Unlicense / public domain | PANICEND |
 | `PANIC/MONSTER.PAL` | `upstream/SecondReality/PANIC/MONSTER.PAL` | `071a82e` | 768 | `78ee356861fc8f97c3aff43cbd96286e5c3dcc12d18dd024fb9a1b8c0edb3fac` | Unlicense / public domain | PANICEND |
 | `FOREST/O2.SCI` | `upstream/SecondReality/FOREST/O2.SCI` | `071a82e` | 21258 | `81693b533a77bca4ededc840042486693920b108e1d032d46cab6f81df40386e` | Unlicense / public domain | MNTSCRL |
@@ -182,14 +183,15 @@ are keyed by `path`; the table's columns are fixed and are not extended for them
   `COMAN/MAIN.C:163,170,174` reads (the loops at `:166-176` stop at row 89).
   `docs/fidelity/asset-inventory.md` §E.2 has the numbers.
 - `PAM/OUT.IN0`–`OUT.IN4` — ASCII `INCBIN` fragments, not binaries: they are the text form of
-  `PAM/OUT.ANI` (verified: parsing the `db` values reproduces that file's bytes). The binary
-  is in the tree beside them and is the file the port loads.
+  `PAM/OUT.ANI`. Verified: parsing their `db` values gives 324,626 bytes whose first 324,625
+  equal `PAM/OUT.ANI` exactly, followed by one trailing `0xFF`. The binary is in the tree
+  beside them and is the file the port loads.
 - `MAIN/MUSIC0.S3M`, `MAIN/MUSIC1.S3M` — the S3M magic is `SCRM` at offset 44, not at offset
   0; their first bytes are the module title (`UnreaL ][ …`). Their packed pattern data is
   XOR-scrambled (decision D5).
 - `ENDSCRL/ENDSCROL.TXT` (1,007 bytes) and `MAIN/DATA/ENDSCROL.TXT` (6,141 bytes) are
   **different files**: the first is the build directory's test text, the second is the text
-  the shipped pack carries (`MAIN/PACKFINA.INC:50`) and the one the port must scroll. Both are
+  the shipped pack carries (`MAIN/PACKFINA.INC:51`) and the one the port must scroll. Both are
   copied because both are cited; §E.9.
 - `ENDPIC/` — the alternate build of part 4 is not copied as a set. The files it shares with
   other directories are in the table above under the path that a shipped build names; §E.10.

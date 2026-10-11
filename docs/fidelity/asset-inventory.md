@@ -8,7 +8,7 @@ build blob.
 **Source of record** — `upstream/SecondReality` at `071a82e`. Two things name an asset, per
 the plan: the link inputs in a part's `MAKEFILE` (and the `.BAT`/`.LNK`/`.PRJ` equivalents
 where a part has no makefile) and the filenames its own `.C`/`.ASM`/`.PAS` mention. Every row
-below cites the line that names it. `MAIN/PACKFINA.INC:2-80` is the third source: it is what
+below cites the line that names it. `MAIN/PACKFINA.INC:3-81` is the third source: it is what
 the shipped `SECOND.EXE` carries, and §C cross-checks the three against each other.
 
 **Format is decided by magic bytes, not by extension.** Where a file's leading bytes do not
@@ -38,64 +38,64 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | ALKU | `ALKU/FONA2.LBM` | 15268 | FORM | IFF PBM  (FORM .... PBM ) | standalone | second font strip (floor list) |
 | ALKU | `ALKU/HOI.U` | 128784 | FC FC | Origin raw PIC: 640x200, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ALKU/INCLUDE.ASM:9,12 INCLUDE 'hoi.in0' + 'hoi.in1' |
 | ALKU | `ALKU/HOI.LBM` | 33328 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ALKU/HOI.U |
-| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.0AB` | 16081 | 20 EA D8 23 | 16081 bytes of binary data, no magic | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.001` | 8928 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.002` | 7684 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.003` | 2032 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2A.C:208 readfile("U2A.00M") and the name builders at U2A.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.0AB` | 77069 | 20 EB FD 78 | 77069 bytes of binary data, no magic | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.001` | 832 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.002` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.003` | 836 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.004` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.005` | 916 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.006` | 1292 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.007` | 1024 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.008` | 1260 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.009` | 4044 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.010` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.011` | 532 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.012` | 1404 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.013` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.014` | 564 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.015` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.016` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.017` | 1600 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.018` | 1432 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.019` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.020` | 756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.021` | 1760 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.022` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.023` | 12672 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.024` | 3704 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.025` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.026` | 1252 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.027` | 2212 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.028` | 8968 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.029` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.030` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.031` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.032` | 1572 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.033` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.034` | 4092 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.035` | 1048 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.036` | 3696 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.037` | 2716 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.038` | 3356 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.039` | 1900 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.040` | 1116 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.041` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2E | `VISU/C/SCENE/U2E.042` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: VISU/C/U2E.C:208 readfile("U2E.00M") and the name builders at U2E.C:222,250,257 |
-| U2A | `VISU/C/SCENE/U2A.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: VISU/C/MAIN.C:225-239 loads .MAT and .PAL beside it |
+| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.0AB` | 16081 | 20 EA D8 23 | 16081 bytes of binary data, no magic | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.001` | 8928 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.002` | 7684 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2A | `VISU/C/SCENE/U2A.003` | 2032 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
+| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (VISU/C/U2A.C:153) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | 8 bytes: the scene script's leading record (VISU/C/U2A.C:250) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.0AB` | 77069 | 20 EB FD 78 | 77069 bytes of binary data, no magic | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.001` | 832 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.002` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.003` | 836 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.004` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.005` | 916 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.006` | 1292 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.007` | 1024 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.008` | 1260 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.009` | 4044 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.010` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.011` | 532 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.012` | 1404 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.013` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.014` | 564 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.015` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.016` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.017` | 1600 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.018` | 1432 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.019` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.020` | 756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.021` | 1760 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.022` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.023` | 12672 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.024` | 3704 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.025` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.026` | 1252 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.027` | 2212 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.028` | 8968 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.029` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.030` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.031` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.032` | 1572 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.033` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.034` | 4092 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.035` | 1048 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.036` | 3696 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.037` | 2716 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.038` | 3356 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.039` | 1900 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.040` | 1116 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.041` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2E | `VISU/C/SCENE/U2E.042` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2A | `VISU/C/SCENE/U2A.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: the material palette is copied out of the .00M at offset 16 (U2A.C:243), and the viewer reads .MAT/.PAL beside it (VISU/C/MAIN.C:225-239) |
 | U2A | `VISU/C/SCENE/U2A.MAT` | 304 | 3B 66 6F 72 | ASCII text | standalone | scene material list |
 | U2A | `VISU/C/SCENE/U2A.INF` | 19 | 66 6F 76 20 | ASCII text | standalone | scene info text |
-| U2E | `VISU/C/SCENE/U2E.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: VISU/C/MAIN.C:225-239 loads .MAT and .PAL beside it |
+| U2E | `VISU/C/SCENE/U2E.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: the material palette is copied out of the .00M at offset 16 (U2E.C:337), and the viewer reads .MAT/.PAL beside it (VISU/C/MAIN.C:225-239) |
 | U2E | `VISU/C/SCENE/U2E.MAT` | 480 | 3B 66 6F 72 | ASCII text | standalone | scene material list |
 | U2E | `VISU/C/SCENE/U2E.INF` | 19 | 66 6F 76 20 | ASCII text | standalone | scene info text |
-| U2A | `VISU/C/U2ABG.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: VISU/C/MAKEFILE:39 u2a.obj+_bg.obk |
+| U2A | `VISU/C/U2ABG.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: VISU/C/MAKEFILE:40 u2a.obj+_bg.obk |
 | U2A | `VISU/C/U2ABG.LBM` | 19906 | FORM | IFF ILBM (FORM .... ILBM) | standalone | source art of VISU/C/U2ABG.UH |
 | U2A | `VISU/C/U2A.PAL` | 768 | 00 00 00 01 | 768 bytes, no magic: a VGA palette | standalone | the city scene palette |
 | U2E | `VISU/C/SCENE/U2E.PAL` | 768 | 00 00 00 0F | 768 bytes, no magic: a VGA palette | standalone | the U2E scene palette |
@@ -105,7 +105,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | PAM | `PAM/OUT.IN3` | 189960 | 0A 09 64 62 | ASCII INCBIN fragment (\tdb ... lines), not the binary; it parses to the bytes of the file it replaces | standalone | linked: PAM/INCLUDE.ASM:22 INCLUDE 'out.in3' |
 | PAM | `PAM/OUT.IN4` | 179997 | 0A 09 64 62 | ASCII INCBIN fragment (\tdb ... lines), not the binary; it parses to the bytes of the file it replaces | standalone | linked: PAM/INCLUDE.ASM:26 INCLUDE 'out.in4' |
 | PAM | `PAM/OUT.ANI` | 324625 | 88 88 88 88 | the ANI delta stream PAM/ANIM.C's packframe() writes: no magic, frames back to back | standalone | the animation the OUT.IN* fragments carry |
-| PAM | `PAM/PAL.PAL` | 768 | 00 00 00 02 | 768 bytes, no magic: a VGA palette | standalone | runtime palette: PAM/ANIM.C:17 fopen("pal.pal"); PAM/PAL.INC is its INCBIN text |
+| PAM | `PAM/PAL.PAL` | 768 | 00 00 00 02 | 768 bytes, no magic: a VGA palette | standalone | runtime palette: PAM/ANIM.C:19 fopen("pal.pal"); PAM/PAL.INC is its INCBIN text |
 | PAM | `PAM/PRAX4.FLI` | 335476 | 74 1E 05 00 | Autodesk FLI animation: magic AF 11 at offset 4, 320x200; the first u32 is the file size | standalone | the FLI the animation was built from (task A6 reads it) |
 | BEGLOGO | `BEG/SRTITLE.UP` | 44575 | FD FC | Origin RLE PIC: 320x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: BEG/MAKEFILE:21 link ...+_pic.obk |
 | BEGLOGO | `BEG/SRTITLE.LBM` | 53254 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of BEG/SRTITLE.UP |
@@ -115,6 +115,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | TUNNELI | `TUNNELI/SINIT.DAT` | 12292 | 00 00 00 00 | 12292 bytes of binary data, no magic, leading zeros | standalone | linked: TUNNELI/TUN10.PAS:33 {$L sinit.obj} |
 | TECHNO | `TECHNO/TROLL.UP` | 70718 | FD FC | Origin RLE PIC: 320x400, colours=256, pixels at paragraph 0x31 (784) | standalone | runtime: TECHNO/KOE.C:605 open("troll.up") |
 | TECHNO | `TECHNO/PANICPIC.LBM` | 82456 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: TECHNO/DOPIC.BAT:1 lbm2p panicpic.lbm troll.up |
+| TECHNO | `DDSTARS/PIC.EGA` | 24000 | AD 29 6B 4B | 24000 bytes of binary data, no magic | standalone | the standalone form of TECHNO/_CIRCLE.OBK's payload (byte-identical, 24,000 bytes): written by DDSTARS/DOIT1.C:30 and linked into TECHNO by TECHNO/MAKEFILE:6 (data=_circle.obk _circle2.obk) |
 | PANICEND | `PANIC/MONSTER.U` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | the part's picture (floor list) |
 | PANICEND | `PANIC/MONSTER.PAL` | 768 | 00 00 00 3F | 768 bytes, no magic: a VGA palette | standalone | the part's palette (floor list) |
 | MNTSCRL | `FOREST/O2.SCI` | 21258 | RIX3 | RIX3 screen: 640x32, palette at offset 10 | standalone | runtime: FOREST/READ2.PAS:110 assign(f,'o2.sci') |
@@ -172,7 +173,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | ENDSCRL | `ENDSCRL/FONA.UH` | 45784 | FC FC | Origin raw PIC: 1500x30, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ENDSCRL/ASMYT.ASM:73 INCLUDE 'fona.inc' |
 | ENDSCRL | `ENDSCRL/FONA.LBM` | 9730 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ENDSCRL/FONA.UH (floor list) |
 | ENDSCRL | `ENDSCRL/ENDSCROL.TXT` | 1007 | 4C 65 72 74 | ASCII text | standalone | the scroller text as it sat in the build directory: ENDSCRL/MAIN.C:101 open("endscrol.txt") |
-| ENDSCRL | `MAIN/DATA/ENDSCROL.TXT` | 6141 | 53 65 63 6F | ASCII text | standalone | the shipped scroller text: MAIN/PACKFINA.INC:50 gives ENDSCROL.TXT as 0x17FD bytes, which is this file (6141), not ENDSCRL/ENDSCROL.TXT (1007) |
+| ENDSCRL | `MAIN/DATA/ENDSCROL.TXT` | 6141 | 53 65 63 6F | ASCII text | standalone | the shipped scroller text: MAIN/PACKFINA.INC:51 gives ENDSCROL.TXT as 0x17FD bytes, which is this file (6141), not ENDSCRL/ENDSCROL.TXT (1007) |
 | MAIN | `MAIN/MUSIC0.S3M` | 391312 | SCRM @44 | Scream Tracker 3 module: SCRM at offset 44 the S3M magic (patterns XOR-scrambled, decision D5) | standalone | the first music module (decision D5) |
 | MAIN | `MAIN/MUSIC1.S3M` | 600860 | SCRM @44 | Scream Tracker 3 module: SCRM at offset 44 the S3M magic (patterns XOR-scrambled, decision D5) | standalone | the second music module (decision D5) |
 | MAIN | `MAIN/DATA/U2END.BIN` | 4000 | DA 08 C4 08 | 4000 bytes, no magic: 80 x 25 text-mode cells of (character, attribute), the shell's end screen (MAIN/U2.ASM:506) | standalone | the shell's end screen: named at MAIN/U2.ASM:506, packed at MAIN/PACKFINA.INC:49, copied to the text page by printend (MAIN/U2.ASM:511-535, called at :974) |
@@ -184,19 +185,20 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 
 ### A.2 Assets whose bytes exist only inside a build blob
 
-These four have no standalone file anywhere in the tree: the only copy of their bytes is inside
+These three have no standalone file anywhere in the tree: the only copy of their bytes is inside
 the `.OBK` the linker was handed. They are the input to task A5, which recovers them; `bytes` is
 the size of the blob's `LEDATA` payload (measured, §D), not of the blob.
 
 | part | blob | payload bytes | magic | header / description | form | citation |
 |---|---|---|---|---|---|---|
-| TECHNO | `TECHNO/_CIRCLE.OBK` | 24000 | `AD 29 6B 4B` | no header, 24,000 bytes of data | blob-only | linked: `TECHNO/MAKEFILE:6` `data=_circle.obk _circle2.obk` |
 | TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | no header, a bit pattern | blob-only | linked: `TECHNO/MAKEFILE:6` |
 | TECHNO | `TECHNO/_PIC1.OBK` | 50000 | `FD FC` | Origin RLE picture, 320×400 by its header | blob-only | **not linked**: `TECHNO/MAKEFILE:7` comments `_pic1.obk _pic2.obk` out |
 | TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
 
 Every other blob in the tree whose payload is an asset has a standalone twin, and §A carries
-that twin's row; §D names the pairing.
+that twin's row; §D names the pairing. `TECHNO/_CIRCLE.OBK` sat in this table until a
+reconstruction showed its payload **is** `DDSTARS/PIC.EGA` byte for byte (`c42cf0062e81fa19…`,
+24,000 bytes each on both sides), so its twin's row is in §A like every other.
 
 ---
 
@@ -215,16 +217,19 @@ into §E as a finding.
 | B.6 | `O2.SCI` ×2 | **holds** | `FOREST/O2.SCI` = `MAIN/DATA/O2.SCI`, 21,258 bytes, `81693b53…4731f0`. |
 | B.7 | `SIN1024.INC` ×9 | **does not hold** | nine files exist; **eight** are identical (`COMAN`, `DDSTARS`, `DOTS`, `GLENZ`, `HARD`, `LENS`, `TECHNO`, `TWIST`, 4,468 bytes, `fa6d0a6a…7ff8f959`) and the ninth, `JPLOGO/SIN1024.INC`, differs (4,468 bytes, `76ee2420…3b1261`). The count is right and the grouping is wrong. |
 
-Two more duplicate sets turned up while checking these, neither claimed by §9 and neither
-needed by any shipped build: `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH` (64,784 bytes,
-`89e821e6…f6ba7844`) with their source art `ENDPIC/PIC.LBM` ≡ `JPLOGO/PIC.LBM`, and
-`GLENZ/EYE4.UH` ≡ `GRID/EYE4.UH` (64,784 bytes, `a4972606…76b65f4c`). §E has the detail.
+Three more duplicate sets turned up while checking these, none of them claimed by §9:
+`ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH` (64,784 bytes, `89e821e6…f6ba7844`) with their source art
+`ENDPIC/PIC.LBM` ≡ `JPLOGO/PIC.LBM`; `GLENZ/EYE4.UH` ≡ `GRID/EYE4.UH` (64,784 bytes,
+`a4972606…76b65f4c`); and a blob-vs-file pair, `TECHNO/_CIRCLE.OBK`'s payload ≡
+`DDSTARS/PIC.EGA` (24,000 bytes, `c42cf0062e81fa19…`) — the same stream reached two different
+parts by two different routes (`DDSTARS/DOIT1.C:30` writes it, `TECHNO/MAKEFILE:6` links it).
+§E has the detail.
 
 ---
 
 ## C. Cross-check against the pack manifest
 
-`MAIN/PACKFINA.INC:2-80` is the 79-entry table of what `SECOND.EXE` carries (line 1 is
+`MAIN/PACKFINA.INC:3-81` is the 79-entry table of what `SECOND.EXE` carries (line 1 is
 `dw 79`; the 79 rows that follow each end in a `;NAME` comment, six `dw` fields each). Checked
 mechanically rather than by eye: **79 rows, 79 names, no duplicate names, and every name
 resolves to a file in `MAIN/DATA`.** 75 of the 79 size fields equal the staged file's size
@@ -238,7 +243,7 @@ exactly; the four that do not are all part EXEs, whose packed size the table rec
 | `START.EXE` | 11,329 | 11,458 |
 
 That is the staging difference part-sequence §1 already records (`U2A.EXE`/`U2E.EXE` are staged
-uncompressed while the table holds their packed size), and `MAIN/PACK.C:166-172` patches the
+uncompressed while the table holds their packed size), and `MAIN/PACK.C:199-204` patches the
 first two bytes of every entry whose name contains `EXE`, so the table is a name list first and
 a size list second.
 
@@ -258,7 +263,7 @@ Two consequences worth stating:
   packed: every picture a part shows is already compiled into its part EXE (as an `.OBK`
   blob's payload or an `INCBIN` fragment), and the only assets `SECOND.EXE` hands to a part
   at runtime are the four named above.
-- `ENDSCROL.TXT` in the pack is 0x17FD = 6,141 bytes (`MAIN/PACKFINA.INC:50`), which is
+- `ENDSCROL.TXT` in the pack is 0x17FD = 6,141 bytes (`MAIN/PACKFINA.INC:51`), which is
   `MAIN/DATA/ENDSCROL.TXT`, **not** the 1,007-byte `ENDSCRL/ENDSCROL.TXT` that sits in the
   build directory. The two are different files; §E.9.
 
@@ -287,6 +292,7 @@ file **byte for byte** (`cmp`-identical):
 | `JPLOGO/_PIC.OBK` | 58,566 | `ICEKNGDM.UP` | `JPLOGO/ICEKNGDM.UP` |
 | `VISU/C/_BG.OBK` | 64,784 | `U2ABG.UH` | `VISU/C/U2ABG.UH` |
 | `COMAN/_COMBG.OBK` | 32,768 | `COMBG.UH` | `COMAN/COMBG.UH` |
+| `TECHNO/_CIRCLE.OBK` | 24,000 | `PIC.EGA` | `DDSTARS/PIC.EGA` (sha256 `c42cf0062e81fa19…` on both sides) |
 | `DDSTARS/_TEXTPIC.OBK` | 16,064 | `TEXTS.16` | `DDSTARS/TEXTS.16` |
 | `START/_HZPIC.OBJ` | 60,706 | `HZPIC.P` | `START/HZPIC.P` |
 | `LENS/_LENSEXB.OBK` | 64,784 | `LENS.EXB` | `LENS/LENS.EXB` |
@@ -296,18 +302,20 @@ file **byte for byte** (`cmp`-identical):
 | `COMAN/_W1DTA.OBJ`, `_W2DTA.OBJ` | 65,536 | `W1DTA.BIN`, `W2DTA.BIN` | `COMAN/W1DTA.BIN`, `W2DTA.BIN` |
 | `COMAN/_W1DTA1/2.OBJ`, `_W2DTA1/2.OBJ` | 32,768 each | the two halves of the file | as `COMAN/DOOBJS.BAT:1-2,5-6` says (`getslice … 0 32768`, `32768 32768`) |
 
-**Blobs that hold bytes with no standalone twin** — `blob-only` rows in §A, the input to A5:
+**Blobs that hold bytes with no standalone twin** — three of them, the `blob-only` rows in §A
+and the input to A5:
 
 | blob | payload | first bytes | what it is |
 |---|---|---|---|
-| `TECHNO/_CIRCLE.OBK` | 24,000 | `AD 29 6B 4B` | linked by `TECHNO/MAKEFILE:6` (`data=_circle.obk _circle2.obk`); no header, and 24,000 bytes is not a picture size |
-| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by the same line; a bit pattern, not a picture |
+| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by `TECHNO/MAKEFILE:6`; a bit pattern, not a picture. Its near-twin `DDSTARS/PIC2.EGA` is the same size but differs in 7,162 of 8,000 bytes |
 | `TECHNO/_PIC1.OBK` | 50,000 | `FD FC 40 01 90 01` | an Origin RLE picture, 320×400 by its header; **not** linked (the `#_pic1.obk _pic2.obk` line in `TECHNO/MAKEFILE:7` is commented out) |
 | `TECHNO/_PIC2.OBK` | 20,859 | `83 2E 2B 27` | no magic; also not linked |
 
-`DDSTARS/PIC.EGA` (24,000) and `DDSTARS/PIC2.EGA` (8,000) are the same sizes as the two
-`_CIRCLE` payloads but are different byte streams, and both are outputs of the `DDSTARS/DOIT*.C`
-tools rather than inputs to the shipped part.
+`DDSTARS/PIC.EGA` and `DDSTARS/PIC2.EGA` are both outputs of the `DDSTARS/DOIT*.C` tools, and
+both are 24,000 and 8,000 bytes — the sizes of the two `_CIRCLE` payloads. The first **is**
+`_CIRCLE.OBK`'s stream byte for byte, so it is in `assets/` as that asset's standalone form
+(§A, `parts: TECHNO`); the second only looks as if it should be, and differs from
+`_CIRCLE2.OBK` in 7,162 of its 8,000 bytes. Size is not evidence: hash both sides.
 
 ---
 
@@ -366,12 +374,13 @@ Each of these is something a later task must know before it writes a loader or a
 8. **The three `FONA` fonts are three different fonts**: `ALKU/FONA.UH` (45,784 bytes,
    1,500×30), `ENDSCRL/FONA.UH` (45,784 bytes, the same geometry, a different picture) and
    `CREDITS/FONA.INC`, whose `db` values parse to 60,000 bytes of raster — a 1,500×40 font,
-   one row taller than the other two. `ENDSCRL/FONA.INC` parses to exactly `ENDSCRL/FONA.UH[784:]`, so that fragment is
-   the pixel payload without its header and palette; `ALKU/FONA.INC` is the same relation for
-   `ALKU/FONA.UH`.
+   one row taller than the other two. `ENDSCRL/FONA.INC` parses to 45,000 values equal to `ENDSCRL/FONA.UH[784:]` — the pixel payload
+   without its header and palette. `ALKU/FONA.INC` parses to 45,001 values equal to
+   `ALKU/FONA.UH[783:]`, the same relation one byte earlier, so the two fragments are not
+   interchangeable.
 9. **`ENDSCRL/ENDSCROL.TXT` is not the text the demo scrolls.** It is 1,007 bytes of the
    developer's `Lerto has coded this hilariously fantastic…` test text; the pack entry is
-   6,141 bytes (`MAIN/PACKFINA.INC:50`) and is `MAIN/DATA/ENDSCROL.TXT`, the real credits
+   6,141 bytes (`MAIN/PACKFINA.INC:51`) and is `MAIN/DATA/ENDSCROL.TXT`, the real credits
    text. Both are in `assets/`, both are cited, and the port must use the second.
 10. **Two builds of part 4 exist, and `assets/` holds neither `ENDPIC/`'s set nor a guess.**
     `ENDPIC/MAKEFILE:22` stages `beg.exe` as `beglogo.exe`, the same target name as
@@ -416,7 +425,8 @@ whether a file was missed.
 | what | why it is not in `assets/` |
 |---|---|
 | `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the four blob-only rows in §D |
-| `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.IN0`–`.IN4`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`.IN0`–`.IN4`, `FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
+| `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
+| `ALKU/HOI.IN0`, `HOI.IN1` | the `INCBIN` text of `ALKU/HOI.U`, which is in `assets/`; the binary is what the port reads. **`PAM/OUT.IN0`–`OUT.IN4` are the exception and are copied** — task A6's plan names them, and they are PAM's shipped data rather than a redundant text form (§A) |
 | `ALKU/HOIKKA.LBM`, `ALKU/PIC001.LBM`, `ALKU/RYPPIS.LBM`, `ALKU/U2-MOVIE.LBM` | working pictures in ALKU's directory that no ALKU source, makefile or project file names |
 | `GLENZ/PIC001.LBM`, `GLENZ/PIC002.LBM`, `GLENZ/FCX.LBM`, `GLENZ/FC.BBK`, `GLENZ/EDGE.*`, `GLENZ/NEW.*`, `GLENZ/VEC.*` | GLENZ's working files and the EDGE tool's sources; none is linked or loaded |
 | `GLENZ/_BGPIC.OBK` | an unused blob whose payload is `GLENZ/EYE4.UH`, the file next to it in `assets/` — nothing is lost by not copying the blob |
@@ -428,7 +438,7 @@ whether a file was missed.
 | `DOTS/*` | none: `DOTS/ASM.ASM:243` includes `face.inc`, which `DOTS/MAKEFILE:5-7` regenerates from `FACE.C` at build time, and `SIN1024.INC` is a source fragment |
 | `CREDITS/TEST.LBM`, `CREDITS/TEST.INC` | a test picture and its fragment; neither is included by `CREDITS/INCLUDE.ASM` or `INCLUD2.ASM` |
 | `CREDITS/PICS/PIC19.*` (absent), `CREDITS/UNPACK.BAT:22` | the batch file names `PICS\PIC19.UH`, which does not exist in the tree, and no `INCLUDE` uses `pic19.inc`. A dead line in a build script, not a missing asset |
-| `DDSTARS/PIC.EGA`, `DDSTARS/PIC2.EGA`, `DDSTARS/*.C` (the `DOIT` tools), `DDSTARS/TEST/` | outputs of the `DOIT*.C` tools, not inputs to the shipped part (`DDSTARS/MAKEFILE:2` links only `_textpic.obk` and `koe.obj`) |
+| `DDSTARS/PIC2.EGA`, `DDSTARS/*.C` (the `DOIT` tools), `DDSTARS/TEST/` | outputs of the `DOIT*.C` tools, not inputs to the shipped part (`DDSTARS/MAKEFILE:2` links only `_textpic.obk` and `koe.obj`). `DDSTARS/PIC.EGA` is copied after all: it is `TECHNO/_CIRCLE.OBK`'s payload byte for byte, so the port needs it as TECHNO's data (§D) |
 | `ENDPIC/*` | the alternate build of part 4 — §E.10 |
 | `MAIN/DATA/*.EXE`, `MAIN/DISTR/*`, `MAIN/PROT/*`, `MAIN/TT.*`, `MAIN/U2*.BBK` | the pack's staged part binaries, the distributor's text files (`FCINFO10.TXT`, `README.1ST`, both cited in §C) and the protection tool's data |
 | `MAIN/DATA/REALITY.FC` | the shipped music container: an 8-word header (patched by `MAIN/PACK.C:56-63`) followed by `MUSIC0.S3M` and `MUSIC1.S3M` verbatim. Both modules are in `assets/`; the container itself is not, because the port plays the modules (decision D5, `reference/original/PROVENANCE.md`) |
