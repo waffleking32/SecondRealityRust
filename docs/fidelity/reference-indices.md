@@ -156,6 +156,44 @@ cycles change how long a capture takes in wall time and nothing about what it co
 counter counts emulator-rendered frames, and one frame is one emulated vertical refresh whatever
 the cycles. `reference/check_a` (30000) can therefore be compared against any Part B capture.
 
+### 1.6 Two things ALKU measured that the rules above do not cover
+
+**A frame can come back RGB-only because of how the oracle reads a screen, not because the screen
+moved.** The coherence check is a comparison of the grabbed RGB against the RGB re-derived from the
+planes and the palette read a moment later (D15), and it fails whenever the two disagree — which the
+rules above read as "the screen moved". There is a second way to disagree, and ALKU takes it: the
+read assembles the planes at **`width/4` bytes a row** (`xtask/src/oracle/dosbox.rs:620-629`), which
+is the packed Mode X layout `reference/parts/beglogo`'s screens use, but ALKU's screen is 176 bytes
+a row — `ALKU/TWEAK.ASM:40-46` sets CRTC 0x17 = `0xe3` (word units) and 0x13 = `0x58` (88 units,
+176 bytes), and `ALKU/MAIN.C:26` strides its own rows by 176 (`char (* far vvmem)[176]`, used at
+`MAIN.C:165-166`, `:367-368`). With the wrong stride the assembled indices are not the screen's, so
+**every ALKU frame with a picture on it comes back RGB-only** — in each of the ten captures that
+took one, whatever the batch shape — while the frames whose pixels are all a black DAC entry pass.
+That the cause is the read and not a moved screen is measured: the same index is RGB-only in every
+session, and its RGB bytes are identical to the reference's (1719 and 2719 below). Consequences worth
+carrying: `compare` runs this part's rows through the **RGB path**, where the 6→8-bit widening
+`(c*259+33)>>6` is load-bearing (`docs/decisions.md:422-423`); and PAM, whose `PAM/TWEAK.ASM:18-41`
+is the same `tw_opengraph` with the same 176-byte rows, is expected to behave the same way (§5).
+
+**A moving screen's session-to-session difference can be an exact integer pan, which no ±1 frame
+support can bridge.** D17's moving case is a screen that is redrawn continuously: a session phase
+difference of one frame leaves a **0.2–0.6 % residue**, because the one-frame shift is not uniform
+across the picture. ALKU's scrolled picture is a different kind of moving screen — it advances its
+window by one pixel per step and holds the same bytes in between (`ALKU/MAIN.C:7` `#define SCRLF 9`,
+`MAIN.C:87` `for(f=60;a<320;...)` around `do_scroll(1)`), so the whole picture is identical between
+sessions **after a whole number of pixels**: measured, the reference's 5859 against one session's is
+**0 pixels differing of 95,700** after a 1-pixel shift and against another's after a 2-pixel shift,
+while at offset 0 they differ by 10.975 % and 15.2797 % (§4.4). Two things follow, and B4/B5 should
+expect them wherever a part pans:
+- **The ±1 support rule buys nothing here.** The support window is ±1 *frame*, and the difference is
+  a whole number of 9-frame scroll steps, so no choice of neighbouring index recovers the
+  reference's picture.
+- **A row is still worth having.** The reference frame is one exact picture; a port can be required
+  to produce *that* picture, and the row says what the sessions can differ by instead of hiding it.
+
+Held screens are untouched by either: 900, 1719 and 2719 below are byte-identical in every session
+that took them.
+
 ---
 
 ## 2. The index table
@@ -169,6 +207,7 @@ table.
 | part | boot | geometry | keyframes | re-capture | re-capture result |
 |---|---|---|---|---|---|
 | BEGLOGO | `SECOND 2` | 320×400 Mode X | 430, 470, 560, 900 | `out/beglogo-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` |
+| ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1 — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
 
 ### Adding a row
 
@@ -385,3 +424,199 @@ BEGLOGO build shipped: the other source in the tree would itself wait on a music
 exiting (`ENDPIC/BEG.C:45-48`, capped at 300 frames), and 300 frames is less than the ~530-frame
 hold, so GLENZ's wait is in the hold either way. What it does not change: 900 is still the right
 picture and the right bytes, and no keyframe sits in the collapse.
+
+---
+
+## 4. ALKU
+
+`SECOND 1`'s first part: three title cards over black, then a scrolled horizon picture, one
+geometry (320×400) throughout. It is the longest part captured so far — from the demo's first
+graphics frame to a mode change in (5950, 5960], about 79 seconds — and it is the phase's first
+part with text, with a palette-driven card, and with a *moving* picture. The part is
+`ALKU/MAIN.C`: each card is gated on the music (`while(dis_sync()<1..4)`, `MAIN.C:59,66,72,79`),
+drawn once (`prtc`, `MAIN.C:61-63`) and then faded in, held and faded out
+(`dofade(fade1,fade2); wait(300); dofade(fade2,fade1)`, `MAIN.C:64` — 64 steps in, 300 frames held,
+64 out, one step a frame per `dofade`'s own loop, `MAIN.C:301-311`); after the fourth sync the picture
+fades in over 128 frames (`cop_dofade=128`, `MAIN.C:83`) and `for(f=60;a<320;...)` scrolls it a step
+at a time while five text batches are laid over it (`MAIN.C:87-135`).
+
+### 4.1 The sweeps, and what the sheets showed
+
+```
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 420,620,820,1020,1220,1420,1620,1820,2020,2220 --out out/b3-alku-sweep1 \
+    --sheet out/b3-alku-sweep1.png
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 2420,2720,3020,3320,3620,3920,4220,4520,4820,5120 --out out/b3-alku-sweep2 \
+    --sheet out/b3-alku-sweep2.png
+```
+
+Both at 320×400, both exit 0. `b3-alku-sweep1.png`'s tiles, in the order the capture printed them:
+**r0c0–r1c1** (420, 620, 820, 1020, 1220, 1420) are plain black; **r1c2, r1c3** (1620, 1820) are the
+card `A / Future Crew / Production`; **r2c0** (2020) is black again; **r2c1** (2220) is
+`First Presented / at Assembly 93`. `b3-alku-sweep2.png`: **r0c0** (2420) the same
+`First Presented` card, **r0c1** (2720) `in` over the **Dolby Surround logo**, **r0c2** (3020)
+black, **r0c3** (3320) the landscape picture, faded in but already scrolling; **r1c0–r2c1**
+(3620, 3920, 4220, 4520, 4820, 5120) the same picture alternately bare and with a text batch —
+`Graphics / Marvel / Pixel` at 3920, `Music / Purple Motion / Skaven` at 4520,
+`Code / Psi / Trug / Wildfire` at 5120.
+
+So the sheet alone says: black → card → black → card → black → card → picture with texts. The
+minimum over each card's position is what the sweep cannot give, and §4.2 measures it for the first
+one. A third sweep (`out/b3-alku-sweep3`, 5420…8120 step 300) was **refused**, which is how the
+part's end was found (§4.5); the two frames it took before the refusal (5420, 5720) show the picture
+bare at 5420 and with the last text batch `Additional Design / Abyss / Gore` at 5720.
+
+### 4.2 The card, measured frame by frame
+
+`out/b3-alku-card1` took every 20th frame from 1500 to 2000 in one run (26 indices, exit 0, 35 s) —
+one batch, so every frame in it is the frame that was asked for:
+
+| index | 1500–1540 | 1560 | 1580 | 1600 | 1620–1900 | 1920 | 1940 | 1960 | 1980–2000 |
+|---|---|---|---|---|---|---|---|---|---|
+| mean sample value | 0 | 1.18 | 2.56 | 3.97 | 4.30 | 3.39 | 2.01 | 0.61 | 0 |
+| `sha256` | `fec9afb5…` ×3 | `ea09bd61…` | `5ca8d435…` | `e56da741…` | `6a27ec50…` ×15 | `55bc5ebe…` | `0bb265c7…` | `3d577743…` | `fec9afb5…` ×2 |
+
+That is the source's shape exactly: black until the first fade step lands in (1540, 1560], 64 steps
+of fade-in, a hold the sampling shows as one `sha256` at all fifteen samples from 1620 to 1900
+(280 frames sampled, no change), 64 steps out, black by 1980. The card's `6a27ec50…` is the same
+bytes in five other captures (1620 and 1820 of the sweep, 1719–1721 of `out/b3-alku-probe`, the
+reference and both partners), so the hold is a held screen in the sense §1.4 means it, measured
+across six sessions rather than assumed from the source.
+
+The same three-sample pattern holds for cards 2 and 3 where they were sampled (`out/b3-alku-probe`
+took 2419/2420/2421 and 2719/2720/2721 and got one `sha256` per triple, `6a2de862…` and `5e3c3884…`),
+and the black screen is one `sha256` (`fec9afb5…`) at 420, 620, 820, 1020, 1220, 1420 and 2020
+(sweep 1), 1500, 1520, 1540, 1980 and 2000 (the card run), 3020 (sweep 2), 412 and 416
+(`out/b3-alku-start`) and 899–901 (the probe) — **eighteen indices in five captures**, plus 900 in
+the reference and both partners. The frame is black without being one index: the reference's 900
+uses sixteen distinct indices (0–11, 19, 20, 21 and 47) whose palette entries are all `(0,0,0)`,
+which is also why the coherence check keeps its indices (§1.6).
+
+### 4.3 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 900 | the **black screen** — every pixel is `(0,0,0)`, from sixteen distinct indices whose DAC entries are all black. The part opens on it (the first graphics frame is 404, D17; the earliest index this boot can grab is 412, and 404–410 are refused as misses) and holds it until the first card's fade starts in (1540, 1560]. About 16 seconds of the part. | `.rgb` + `.idx` (16 palette entries) | rgb `fec9afb5…`, idx `1b2bb3e3…` |
+| 1719 | **card 1** — `A`, `Future Crew`, `Production` in the FONA font, mid-hold (fade in ended ~1615, fade out starts ~1905). | `.rgb` only | rgb `6a27ec50…` |
+| 2719 | **card 3** — `in` over the Dolby Surround logo glyphs, mid-hold (`prtc`, `MAIN.C:74-76`). | `.rgb` only | rgb `5e3c3884…` |
+| 5859 | the **scrolled picture**, bare of text, mid-step: it is the same bytes at 5859, 5860 and 5861 (measured, `out/b3-alku-probe`), so its ±1 neighbours are the same picture *in this session*. | `.rgb` only | rgb `be6f6c32…` |
+
+The three held keyframes are the part's three distinct held screens (black, a text card, the logo
+card); card 2 at 2419 is deliberately *not* a keyframe — it is the same code path and the same kind
+of screen as 1719 with different strings (`MAIN.C:68-69` against `:61-63`), so a fourth held card
+would buy nothing a fourth slot should buy. The fourth slot goes to the picture, which is the only
+screen this part has that moves.
+
+**Why 5859 is mid-step and not at a step boundary**: 5859, 5860 and 5861 are one `sha256`, so the
+step boundary is at 5862 or later. It is worth saying what that does and does not buy: it makes the
+*supports* cheap, but it is not what makes the frame reproducible — across sessions this frame is
+not (§4.4).
+
+Each of 900, 1719 and 2719 carries **no support frames**, and that is a measurement rather than a
+saving: 899/900/901, 1719/1720/1721 and 2719/2720/2721 are each byte-identical within their triple
+(`out/b3-alku-probe`, one `sha256` each), so a support frame there is the same picture and could
+only ever answer at offset 0 (§1.3). 5859's support window was captured anyway, because its ±1
+identity is a property of where the step boundary happens to fall, not of the screen.
+
+Full hashes of the four files in `reference/parts/alku/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 900 | `frame_000900.rgb` | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` |
+| 900 | `frame_000900.idx` | `1b2bb3e331529400a02a4e60b5b74dfd2857634285364fbf520c89bfc622ad0f` |
+| 1719 | `frame_001719.rgb` | `6a27ec502abe606d39c25af842594335fb71d30e14a1f245e9492f3b4148cebe` |
+| 2719 | `frame_002719.rgb` | `5e3c38846788c1cc4d8d23c65dfdb620779d9691b598e97ee2d79a3f4f0f0bd3` |
+| 5859 | `frame_005859.rgb` | `be6f6c32e8a328a04a93c5e54129830f58c187c5deb4dbb399e1819f261240d2` |
+
+### 4.4 The re-capture: three held frames identical, the picture a whole pan away
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 900,1719,2719,5859 --out reference/parts/alku --sheet out/alku.png
+
+# the partner: the same keyframes plus a support frame each side of the picture keyframe
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 900,1719,2719,5858,5859,5860 --out out/alku-recapture
+
+# the re-run (§2's rule for a moving row that exits 1), with one extra frame a scroll step earlier
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 900,1719,2719,5850,5858,5859,5860 --out out/alku-recapture2
+```
+
+First comparison (`out/alku-recapture`, exit 0 as a capture):
+
+```
+frame 900:  0.0000% differing (0/128000 px), max delta 0
+frame 1719: 0.0000% differing (0/128000 px), max delta 0
+frame 2719: 0.0000% differing (0/128000 px), max delta 0
+frame 5859: 10.9750% differing (14048/128000 px), max delta 255
+verdict: different, mode: mixed, offsets {"0": 4}
+exit: 1
+```
+
+Re-run (`out/alku-recapture2`, exit 0 as a capture):
+
+```
+frame 900:  0.0000% differing (0/128000 px), max delta 0
+frame 1719: 0.0000% differing (0/128000 px), max delta 0
+frame 2719: 0.0000% differing (0/128000 px), max delta 0
+frame 5859: 15.2797% differing (19558/128000 px), max delta 255
+verdict: different, mode: mixed, offsets {"0": 4}
+exit: 1
+```
+
+**What the picture difference is, measured.** The three `sha256`s that share an index are not three
+unrelated pictures: they are one picture at different pan positions. Comparing the reference's 5859
+against each partner over the picture band (rows 50–349, where the part's window sits; rows 0–49 and
+350–399 are black in all three frames):
+
+| partner | differing at offset 0 | best shift | differing after the shift |
+|---|---|---|---|
+| `out/alku-recapture` 5858, 5859, 5860 (one `sha256`, `a77b4991…`) | 14,048 px | 1 px horizontally | **0 px of 95,700** |
+| `out/alku-recapture2` 5858, 5859, 5860 (one `sha256`, `069964a4…`) | 19,558 px | 2 px horizontally | **0 px of 95,700** |
+
+So the sessions differ by a whole number of pixels of the part's own horizontal pan, and by nothing
+else: the four sessions that took an index in this window produced three distinct pictures — the
+reference's (5859 in the reference and the probe, 5860 in `out/b3-alku-boundary1`), one 1 pixel
+along, and one 2 pixels along. The part advances that
+pan one pixel per scroll step (`MAIN.C:7`, `:87`), nine frames apart, which is why the difference is
+*pixel-exact* and why the ±1 support window cannot reach it: the reference's picture is a whole
+number of steps away in time, not one frame. `out/alku-recapture2`'s extra frame says the same thing
+from the other side — its 5850 is `a77b4991…`, the *other* partner's picture, and 5858 is
+`069964a4…`, one pixel along: within one session the pan moved once in those eight frames.
+
+**This is the phase's first moving-row evidence, and it is a different animal from D17's.** D17's
+moving case leaves a 0.2–0.6 % residue because its one-frame shift is not uniform across the
+picture; here nothing is left over at all once a *whole* number of pixels is removed, because the
+part's motion is a discrete step. `compare` exits 1 and is right to: the bytes at the reference
+index really do differ between sessions. No tolerance was added.
+
+The columns this puts Phase 2 in: alku is compared in `mode: mixed` — 900 by indices (its palette
+holds still), 1719, 2719 and 5859 by RGB, where the DAC's widening rule is load-bearing. And a port
+of ALKU has an unambiguous target for 900, 1719 and 2719 (reproduce the bytes) but not for 5859
+(reproduce the reference's pan position, which the oracle's own sessions do not agree on).
+
+### 4.5 Where the part ends, and the transition
+
+`out/b3-alku-sweep3` (5420…8120 step 300) was refused at its fourth index:
+
+```
+error: the display changed geometry between frames: frame 6020 is 320x200 where the capture
+started at 320x400; capture one screen at a time
+exit: 2
+```
+
+Narrowed with sparse single-index probes from both sides — `out/b3-alku-boundary1`
+(5800, 5860, 5920, 5980) captured three and was refused at **5980**; `out/b3-alku-boundary2`
+(5940, 5950, 5960, 5970) captured two and was refused at **5960** — so the change lies in
+**(5950, 5960]**. No index in this window refused as a *miss*; the misses here are at the other end
+of the part (404–410, above).
+
+The last frames of the 320×400 screen are a transition, not the picture: 5800, 5860, 5920 and 5940
+all have the same row structure — rows 50–349 picture, black above and below — while **5950** has
+rows 0–24 black, 25–174 picture, 175–184 black, 185–349 picture, 350–399 black: the window is being
+split and shifted as the next part takes the screen. No keyframe is taken in it, and 5950 is the
+last 320×400 index sampled. The next part (U2A) starts at 5960 or 5961 and is 320×200 — §5 is its
+row.

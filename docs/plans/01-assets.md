@@ -1413,6 +1413,23 @@ git add docs/fidelity/reference-indices.md reference/parts
 git commit -m "Capture references for <parts>"
 ```
 
+**Two things block 1 (ALKU) measured that this task's steps did not anticipate, both now in
+`reference-indices.md` §1.6 and §4, and both of which later blocks will meet:**
+
+- **A screen with a wider row stride than the packed Mode X one comes back RGB-only, however still
+  it is.** The indexed read assembles planes at `width/4` bytes a row; ALKU's screen is 176 bytes a
+  row (`ALKU/TWEAK.ASM:40-46`, `ALKU/MAIN.C:26`), so every frame of ALKU with a picture on it fails
+  the coherence check and is written RGB-only, while its black opening frames keep their indices
+  because every DAC entry they use is black. This is not motion and must not be recorded as motion.
+  PAM uses the same `tw_opengraph` and is expected to behave the same; PLZPART and other panning
+  parts in B4 should be checked for it before their rows are written.
+- **A moving screen's session-to-session difference can be an exact whole-pixel pan, which no ±1
+  support frame can bridge.** ALKU's picture advances its window one pixel per 9-frame step, and two
+  re-captures at the same index differed from the reference by 10.9750 % and 15.2797 % at offset 0
+  but **0 pixels of 95,700** after a 1- and a 2-pixel shift. A row like that is still worth having —
+  the reference is one exact picture a port can be held to — but the supports are not what will make
+  it compare, and the row should say what the sessions can differ by instead of implying they cannot.
+
 ---
 
 ### Task B4: Blocks 3 and 4 — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, 3DSINFLD, JPLOGO, U2E
