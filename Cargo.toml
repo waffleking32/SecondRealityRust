@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bins/secondreality", "crates/sr-engine"]
+members = ["bins/secondreality", "crates/sr-engine", "xtask"]
 
 [workspace.package]
 version = "0.1.0"

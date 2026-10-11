@@ -615,3 +615,40 @@ recorded bytes of the screen Phase 0 actually captures.
 - Other endpoints exist and were not exercised: `/api/v1/mixer`, `/capture/*`,
   `/memory/search`, `/memory/freeze`, `/dos/internals`, `/drive/swap`, `/mount/lock`.
   Nothing in Phase 0 needs them.
+
+## D15 — Capture is deterministic, and what that costs (2026-10-10)
+
+Task 12's step-5 check is answered: **two captures of the same boot-relative frame indices
+are byte-identical**, frames and manifest both. Three things had to be understood first,
+and each is a rule a later phase has to keep.
+
+**The demo is deterministic in demo-relative time, not in boot time.** Two runs with the
+same commands produced the same screens at indices 43–45 frames apart — the whole demo was
+shifted by exactly the jitter of the boot (how long the host took to answer the setup
+screen), with identical pixels per screen. So a fixed boot index lands at a demo position
+only as precisely as the boot repeats, and a *still* section is what makes the comparison
+safe: `xtask reference capture` therefore records the origin (`"frame_origin": "boot"`) and
+the skipped boot (`skip_boot_frames`) in the manifest, and Phase 2+ should capture where the
+screen holds still unless it re-anchors on a guest-visible event.
+
+**Captures are one geometry each.** The title screen is 320×400 Mode X and the demo's next
+part is 320×200 chain-4, and `video/frame` follows the guest rather than normalising. One
+manifest carries one `width`/`height` (the controller's ruling for Task 13's reading of it),
+so the capture refuses a frame list that changes geometry mid-way rather than writing a
+manifest that misdescribes some of its frames.
+
+**The DAC cannot be recorded whole.** A running demo rewrites palette entries between
+frames — including entries the current screen does not use — so a snapshot of all 256
+registers does not repeat between runs: the two determinism runs differed in every *unused*
+entry while every frame byte was identical. The capture records the entries the frame's
+indices actually use (which the coherence check has verified widen back to the RGB frame),
+and that is deterministic.
+
+**Small print, all measured.** The frame counter is read through a command the emulator
+services once per rendered frame, so a capture lands within a frame or two of the requested
+index — the capture refuses (rather than mislabelling) only when the emulator has run more
+than three frames past it. The emulator stalls for ~20 frames when the demo loads, which is
+normal and does not shift the demo-relative mapping. And the indexed read costs ~770
+requests (four planes, or one for chain-4, plus 768 for the DAC), so it takes roughly a
+third of a second: it is only meaningful where the screen holds, and the capture checks the
+indices against the RGB frame before writing them.

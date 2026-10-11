@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Only ever speaks http to 127.0.0.1:8386, so no TLS: dropping the default
+# features keeps rustls and ring out of the tree entirely.
+ureq = { version = "2", default-features = false, features = ["json"] }
