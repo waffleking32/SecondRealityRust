@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{sleep_until_close, CapturedFrame, Oracle, OracleError, DEFAULT_WAIT};
+use super::{sleep_frames, sleep_until_close, CapturedFrame, Oracle, OracleError, DEFAULT_WAIT};
 
 /// Where the emulator is mounted by default on this machine (D10).
 const DEFAULT_SR_DOSBOX: &str = "/home/ew/workspace/reality/dosbox-automation";
@@ -30,10 +30,21 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Keys within one sequence are placed this far apart, in rendered frames
 /// (200 ms at the dos rate): long enough for the guest to read each one.
 const KEY_SPACING_FRAMES: u64 = 14;
-/// How far past the requested index a capture may land before it is refused:
-/// the frame counter is serviced once per rendered frame, so a read can lag by
-/// a frame or two (measured: one to three).
-const FRAME_READ_SLOP: u64 = 3;
+/// How many frames before the requested one the exact-grab loop starts.
+///
+/// That loop identifies every frame it takes with a counter reading on both
+/// sides of the grab, so it begins early rather than at the requested frame.
+/// The window has to outlast a host stall: a grab costs a millisecond or two
+/// when the host is keeping up, but one scheduled-out round trip of tens of
+/// milliseconds can jump several frames, and a window narrower than that
+/// refuses captures that would otherwise have landed exactly. Twenty-five
+/// frames is what the measurement in D17 used, and it costs a few hundred
+/// grabs — all small, and cheap next to the indexed reads a capture makes.
+const GRAB_WINDOW_FRAMES: u64 = 25;
+/// How long the exact-grab loop keeps trying before it gives up. A frame that
+/// cannot be identified must end as a refusal, never as a guess at which one
+/// it was.
+const GRAB_DEADLINE: Duration = Duration::from_secs(10);
 
 const PORT_SEQUENCER_INDEX: u16 = 0x3C4;
 const PORT_SEQUENCER_DATA: u16 = 0x3C5;
@@ -257,6 +268,8 @@ pub struct DosboxOracle {
     /// (`BootRecipe::Autoexec`), so `boot` waits for the setup screen instead
     /// of typing one (D17).
     autoexec: bool,
+    /// The frame `wait_for_frame` pinned, for the `frame` call that follows.
+    pending: Option<CapturedFrame>,
 }
 
 impl DosboxOracle {
@@ -330,6 +343,7 @@ impl DosboxOracle {
             base_url,
             scratch,
             autoexec: !autoexec.is_empty(),
+            pending: None,
         };
         match oracle.wait_for_api(&log_path) {
             Ok(()) => {}
@@ -557,12 +571,105 @@ impl DosboxOracle {
         Ok((indexed, palette))
     }
 
+    /// The guest's screen as raw bytes, with the counter reading that
+    /// identifies it — or `None` when it cannot be identified.
+    ///
+    /// The emulator publishes a frame's pixels and counts it immediately
+    /// afterwards, in that order and on one thread (`gui/render/render.cpp:446`
+    /// then `gui/sdl_gui.cpp:1205`), so a counter reading that is the same on
+    /// both sides of the grab can only have seen the frame that reading names:
+    /// no frame was published in between, or the reading would have moved.
+    /// When it did move, a frame boundary fell inside the grab and the picture
+    /// belongs to one side or the other — `None` says so instead of guessing
+    /// (D17).
+    ///
+    /// The bytes are returned undecoded on purpose. Decoding costs several
+    /// milliseconds in a debug build, and anywhere inside or between the grab
+    /// loop's iterations it would drop the loop's sampling rate to one grab
+    /// per two or three frames — which is how the frame asked for used to slip
+    /// between two grabs and get refused.
+    fn grab_identified(&mut self) -> Result<Option<(u64, Vec<u8>)>, OracleError> {
+        let before = self.frame_counter()?;
+        let raw = self.get_bytes("/api/v1/video/frame?format=raw")?;
+        let after = self.frame_counter()?;
+        Ok((before == after).then_some((before, raw)))
+    }
+
+    /// Take the frame the counter names `index`, or refuse.
+    fn grab_at(&mut self, index: u64) -> Result<CapturedFrame, OracleError> {
+        let deadline = std::time::Instant::now() + GRAB_DEADLINE;
+        let raw = grab_exactly(index, deadline, || self.grab_identified())?;
+        decode_frame(&raw)
+    }
+
+    /// Take the next frame that can be identified, whatever the counter calls
+    /// it.
+    fn grab_any(&mut self) -> Result<CapturedFrame, OracleError> {
+        let deadline = std::time::Instant::now() + GRAB_DEADLINE;
+        loop {
+            if let Some((_, raw)) = self.grab_identified()? {
+                return decode_frame(&raw);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(grab_timeout(None));
+            }
+        }
+    }
+
     fn kill(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
     }
+}
+
+/// Wait for the frame the counter names exactly, over an abstract grab.
+///
+/// `grab` returns the counter reading that identifies the frame it took and
+/// the frame itself, or `None` for a grab that straddled a frame boundary.
+/// The counter only moves forward one frame at a time, so the loop ends on the
+/// frame that was asked for, on a frame that arrived too late (a refusal, not
+/// a relabelling), or on the deadline.
+///
+/// Split out from the HTTP path so the three endings can be tested without an
+/// emulator; the REST side around it is a thin shell (D17).
+fn grab_exactly<T>(
+    index: u64,
+    deadline: std::time::Instant,
+    mut grab: impl FnMut() -> Result<Option<(u64, T)>, OracleError>,
+) -> Result<T, OracleError> {
+    loop {
+        if let Some((at, frame)) = grab()? {
+            match at.cmp(&index) {
+                std::cmp::Ordering::Equal => return Ok(frame),
+                std::cmp::Ordering::Greater => {
+                    return Err(OracleError::FrameMissed {
+                        index,
+                        observed: at,
+                    })
+                }
+                std::cmp::Ordering::Less => {}
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(grab_timeout(Some(index)));
+        }
+    }
+}
+
+/// What the grab loop says when it runs out of time: a host slow enough to
+/// miss every frame's window is a failure to report, not a frame to invent.
+fn grab_timeout(index: Option<u64>) -> OracleError {
+    let what = match index {
+        Some(index) => format!("frame {index}"),
+        None => "a frame".to_owned(),
+    };
+    OracleError::Transport(format!(
+        "the emulator never held {what} still enough to be taken exactly (no frame the counter \
+         named on both sides of the grab within {}s); the host is not keeping up with it",
+        GRAB_DEADLINE.as_secs()
+    ))
 }
 
 impl Oracle for DosboxOracle {
@@ -638,34 +745,33 @@ impl Oracle for DosboxOracle {
     }
 
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError> {
+        // Sleep off everything but the last few frames: the grab loop below
+        // polls, and it must not do that for the length of a skip.
         loop {
             let now = self.frame_counter()?;
-            if now >= index {
+            if now + GRAB_WINDOW_FRAMES >= index {
                 break;
             }
-            sleep_until_close(index - now);
+            sleep_frames(index - now, GRAB_WINDOW_FRAMES);
         }
-        // The counter is read through a command the emulator services once per
-        // rendered frame, so it can lag the guest by a frame or two and a
-        // capture lands that close to the index. What must not happen is a
-        // capture written under an index the emulator has clearly left behind
-        // (a host stall during a sleep, say), so that is refused.
-        let observed = self.frame_counter()?;
-        if observed > index + FRAME_READ_SLOP {
-            return Err(OracleError::FrameMissed {
-                index,
-                observed,
-            });
-        }
+        self.pending = Some(self.grab_at(index)?);
         Ok(())
     }
 
     fn frame(&mut self) -> Result<CapturedFrame, OracleError> {
-        // The grab comes first and fast: everything below it — the frame info,
-        // and in Mode X some eight hundred requests for planes and palette —
-        // takes long enough that the emulator is many frames further on by the
-        // time it is done, so a check made after it would measure nothing.
-        let mut frame = decode_frame(&self.get_bytes("/api/v1/video/frame?format=raw")?)?;
+        // The frame the wait pinned, when there is one: writing any other
+        // frame under the index that was asked for is the failure this whole
+        // dance exists to prevent (D17).
+        //
+        // The grab inside comes first and fast: everything below it — the
+        // frame info, and in Mode X some eight hundred requests for planes and
+        // palette — takes long enough that the emulator is many frames further
+        // on by the time it is done, so a staleness check after it would
+        // measure nothing.
+        let mut frame = match self.pending.take() {
+            Some(frame) => frame,
+            None => self.grab_any()?,
+        };
         let info = self.get_json("/api/v1/video/frame/info")?;
         if info["video_mode"]["is_graphics_mode"].as_bool() != Some(true) {
             // A text screen has no palette indices, only glyph codes.
@@ -1020,6 +1126,53 @@ mod tests {
         assert_eq!(
             command.get_current_dir().map(Path::to_path_buf),
             Some(PathBuf::from("/scratch/run"))
+        );
+    }
+
+    #[test]
+    fn a_frame_is_taken_only_when_the_counter_names_it() {
+        // Grabs that straddled a frame boundary (None) are thrown away, an
+        // early frame is passed over, and the frame the counter names is the
+        // one that comes back. This loop is what stands between the capture
+        // and a frame written under an index it does not hold (D17).
+        let script = vec![
+            None,
+            Some((6, "six")),
+            None,
+            Some((7, "seven")),
+            Some((8, "eight")),
+        ];
+        let mut script = script.into_iter();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let frame = grab_exactly(8, deadline, || Ok(script.next().unwrap_or(None))).unwrap();
+        assert_eq!(frame, "eight");
+    }
+
+    #[test]
+    fn a_frame_that_arrives_late_is_refused_rather_than_relabelled() {
+        // The old wait accepted anything up to three frames past the index and
+        // wrote it under the index anyway; that is the lie this refuses.
+        let mut script = vec![Some((7, "seven")), Some((9, "nine"))].into_iter();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let error = grab_exactly(8, deadline, || Ok(script.next().unwrap_or(None))).unwrap_err();
+        assert!(matches!(
+            error,
+            OracleError::FrameMissed {
+                index: 8,
+                observed: 9
+            }
+        ));
+    }
+
+    #[test]
+    fn a_grab_that_never_identifies_its_frame_gives_up_loudly() {
+        // A stalled host must end as an error naming the frame, never as a
+        // guess at which frame the picture belonged to.
+        let deadline = std::time::Instant::now();
+        let error = grab_exactly(8, deadline, || Ok(None::<(u64, &str)>)).unwrap_err();
+        assert!(
+            matches!(error, OracleError::Transport(ref message) if message.contains("frame 8")),
+            "unexpected error: {error}"
         );
     }
 

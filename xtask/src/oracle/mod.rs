@@ -181,7 +181,9 @@ pub trait Oracle {
     fn set_cycles(&mut self, cycles: u32) -> Result<(), OracleError>;
     /// Run forward `frames` rendered frames.
     fn step_frames(&mut self, frames: u32) -> Result<(), OracleError>;
-    /// Capture the frame the oracle is showing now.
+    /// The frame [`Oracle::wait_for_frame`] settled on, when it kept one, and
+    /// otherwise the frame the oracle can identify as the one it is showing.
+    /// Either way it is a frame the oracle can name, never a guess at one.
     fn frame(&mut self) -> Result<CapturedFrame, OracleError>;
     /// Send a whitespace-separated list of `KBD_*` key names, in order.
     fn send_keys(&mut self, script: &str) -> Result<(), OracleError>;
@@ -194,13 +196,14 @@ pub trait Oracle {
     fn wait_for_text(&mut self, needle: &str, timeout: Duration) -> Result<(), OracleError>;
     /// The frame counter, counted from the emulator's first rendered frame.
     fn frame_counter(&mut self) -> Result<u64, OracleError>;
-    /// Wait for `index` to be the current frame, and refuse (rather than let a
-    /// capture be mislabelled) if the emulator has run past it.
+    /// Wait for `index` to be the current frame, take it, and refuse — rather
+    /// than let a capture be mislabelled — when it cannot be taken exactly.
     ///
-    /// How exactly a frame can be pinned is the oracle's business: its frame
-    /// counter is serviced once per rendered frame, so an implementation can
-    /// promise the frame that follows within a frame or two of `index`, and
-    /// must refuse the capture when it cannot even do that (D15).
+    /// Pinning a frame is the oracle's business, but the promise is the
+    /// strict one: the frame kept for the following [`Oracle::frame`] is the
+    /// frame the oracle's own counter names `index`, and a frame that arrives
+    /// late is refused. A capture is never written under an index whose
+    /// picture it does not hold (D17).
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError>;
 }
 
@@ -208,8 +211,23 @@ pub trait Oracle {
 /// advances at the dos rate, so all but the last few frames can be slept off.
 fn sleep_until_close(remaining: u64) {
     const TIGHT_POLL_FRAMES: u64 = 30;
-    if remaining > TIGHT_POLL_FRAMES {
-        let ms = ((remaining - TIGHT_POLL_FRAMES) as f64 * 1000.0 / FRAME_RATE_HZ) as u64;
+    sleep_frames(remaining, TIGHT_POLL_FRAMES);
+}
+
+/// Sleep off all but the last `tail` of `remaining` frames, which the caller
+/// polls itself. A wait that has to look at each of the last few frames — to
+/// pin one exactly — leaves exactly those frames to its own loop.
+///
+/// One call sleeps at most a second, so a caller that re-reads the counter
+/// between calls lands on its target rather than a frame or two past it: the
+/// sleep is computed from the nominal frame rate, and a minute-long sleep
+/// overshoots by more than a frame (measured: three, which is where the old
+/// capture's one-to-three-frame lateness came from — D17).
+pub(crate) fn sleep_frames(remaining: u64, tail: u64) {
+    const LONGEST_SLEEP_FRAMES: u64 = 70;
+    if remaining > tail {
+        let frames = (remaining - tail).min(LONGEST_SLEEP_FRAMES);
+        let ms = (frames as f64 * 1000.0 / FRAME_RATE_HZ) as u64;
         std::thread::sleep(Duration::from_millis(ms.max(1)));
     }
 }
