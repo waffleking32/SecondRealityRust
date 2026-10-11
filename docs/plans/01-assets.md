@@ -763,11 +763,14 @@ checked result, and record it as the task's evidence:
    data blobs** reconstruct a standalone file byte-exactly; the other four are the blob-only
    payloads step 2 answers. That is the phase's evidence for "provenance file complete" from the
    EXE side: nothing the parts link exists only in a build artifact.
-2. **Answer the four blob-only payloads by name.** `TECHNO/_CIRCLE.OBK` (24,000) and
-   `_CIRCLE2.OBK` (8,000) are linked but carry no image header and are not picture sizes;
-   `_PIC1.OBK` and `_PIC2.OBK` hold pictures but are **not linked** — `TECHNO/MAKEFILE:7`'s
-   `_pic1.obk _pic2.obk` line is commented out. Say what each is and whether the port needs it.
-   Nothing is recovered speculatively.
+2. **Answer the three blob-only payloads by name.** The set was four until the review found that
+   `TECHNO/_CIRCLE.OBK`'s payload is byte-identical to `DDSTARS/PIC.EGA`, which is now curated — so
+   `_CIRCLE.OBK` has a twin and belongs in step 1's list, not here. What remains:
+   `TECHNO/_CIRCLE2.OBK` (8,000, linked by `TECHNO/MAKEFILE:6`, no image header, not a picture
+   size); `TECHNO/_PIC1.OBK` (50,000, holds an Origin RLE picture at 320×400, **not linked** —
+   `TECHNO/MAKEFILE:7`'s `_pic1.obk _pic2.obk` line is commented out); and `_PIC2.OBK` (20,859,
+   no magic, also not linked). Say what each is and whether the port needs it. Nothing is recovered
+   speculatively.
 3. **Confirm against the shipped EXE.** `MAIN/PACKFINA.INC`'s 79 entries are what `SECOND.EXE`
    actually carries. Check that every entry is either a part executable or a file already in
    `assets/`, so "no asset is EXE-only" is a checked statement rather than an inference from the
