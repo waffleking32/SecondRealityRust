@@ -25,7 +25,7 @@
 //! - **An RLE row may decode wider than the header's width.** `START/HZPIC.P`
 //!   does it on 153 of 400 rows, up to 761 pixels for a 640-pixel row. The
 //!   original writes every pixel into the caller's `char rowbuf[640]`
-//!   (`START/MAIN.C:16`) and overflows it; the port takes the first `w` and drops
+//!   (`START/MAIN.C:13`) and overflows it; the port takes the first `w` and drops
 //!   the rest, which is what the visible output shows. Recorded in
 //!   `docs/fidelity/APPROXIMATIONS.md`.
 //! - **A run opcode of `0x80` means a run of zero.** The tree's two readers
@@ -100,13 +100,24 @@ fn decode_fcfc(bytes: &[u8]) -> Result<Image, AssetError> {
     if HEADER + palette_len > bytes.len() {
         return Err(truncated(HEADER + palette_len, bytes.len()));
     }
+    // The pixels cannot start inside the palette. Every writer's `para` clears
+    // the palette (`LBM2U.C:57` is the formula that guarantees it), so a header
+    // that does not is misread or corrupted, and following it would read palette
+    // bytes as pixels.
+    let pixels_at = para * 16;
+    if pixels_at < HEADER + palette_len {
+        return Err(unsupported(format!(
+            "the header puts the pixels at {pixels_at}, inside the {palette_len}-byte palette \
+             that starts at {HEADER}"
+        )));
+    }
     let palette = read_palette(&bytes[HEADER..HEADER + palette_len])?;
 
     // `para` is authoritative for where the pixels are; the writer's own
     // `(16+colors*3+15)/16` is how it chose the value, and `LBM2U.C:67` pads to
-    // it with 'X'. A `para` that is wrong shows up as a payload that is not the
-    // geometry's length, which the checks below report rather than hide.
-    let pixels_at = para * 16;
+    // it with 'X'. A `para` that is wrong in the other direction — past the end
+    // of the file — shows up as a payload that is not the geometry's length,
+    // which `render` reports rather than hides.
     render(bytes, width, height, pixels_at, palette, rle)
 }
 

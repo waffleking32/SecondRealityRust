@@ -76,6 +76,34 @@ fn fc_fc_raw(width: u16, height: u16, palette: &[[u8; 3]], pixels: &[u8]) -> Vec
     out
 }
 
+/// One row of an RLE file, expanded from the file's own opcode stream — the
+/// writer's rule (`LBM2P.C:74-94`), applied to one row so a test can say what that
+/// row's pixels are without guessing at them. The palette, the header arithmetic
+/// and every other row stay out of it.
+fn expand_row(file: &[u8], pixels_at: usize, row: usize) -> Vec<u8> {
+    let mut p = pixels_at;
+    for _ in 0..row {
+        let len = u16::from_le_bytes([file[p], file[p + 1]]) as usize;
+        p += 2 + len;
+    }
+    let len = u16::from_le_bytes([file[p], file[p + 1]]) as usize;
+    let ops = &file[p + 2..p + 2 + len];
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < ops.len() {
+        let op = ops[i];
+        i += 1;
+        if op < 0x80 {
+            out.push(op);
+        } else {
+            let run = (op & 0x7f) as usize;
+            out.resize(out.len() + run, ops[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// A hand-built `FCFD` RLE file with one row, whose length prefix is the count of
 /// opcode-stream bytes that follow (`LBM2P.C:72-94`).
 fn fc_fd_rle(width: u16, height: u16, colors: u16, row_ops: &[u8]) -> Vec<u8> {
@@ -127,6 +155,14 @@ fn each_variant_in_the_family_decodes(
     let img = load_path(Path::new(path)).unwrap_or_else(|e| panic!("{what}: {e}"));
     assert_eq!((img.width(), img.height()), (w, h), "{what}");
     assert_eq!(img.pixels().len(), w as usize * h as usize, "{what}");
+    // More than geometry: a variant that decoded to one flat value — an empty
+    // palette lookup, a row walker that never wrote, a header field misread into
+    // a stride — satisfies every assertion above. Measured: these five decode to
+    // 4, 4, 57, 32 and 11 distinct values.
+    let mut values = img.pixels().to_vec();
+    values.sort_unstable();
+    values.dedup();
+    assert!(values.len() > 1, "{what}: decoded to a single value");
 }
 
 /// The point of this family, in one test: the extension says nothing. `END/PIC.UH`
@@ -151,12 +187,27 @@ fn the_extension_never_decides_the_format() {
 }
 
 /// The `Uh` variant's palette is the one place a 768-byte palette is guaranteed,
-/// and it is already 6-bit — so this also pins that no re-quantising happens.
+/// and it is already 6-bit — so this pins that no re-quantising happens.
+///
+/// Being 6-bit is not the assertion that matters: every entry would still be
+/// `<= 63` after a needless `six_bit`, which is why the second half compares the
+/// palette with the file's own 768 bytes at offset 16 (`GLVP.C:1003`). 255 of the
+/// 256 entries change under that mistake and only entry 0 survives it, so the
+/// equality is the assertion with teeth.
 #[test]
 fn a_uh_file_carries_its_own_six_bit_palette() {
-    let img = load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap();
+    let bytes = std::fs::read("../../assets/GLENZ/FC.UH").unwrap();
+    let img = load(&bytes, Format::Origin).unwrap();
     for i in 0..=255u8 {
         assert!(img.palette.entry(i).iter().all(|&c| c <= 63), "entry {i} is not 6-bit");
+    }
+    for i in 0..256usize {
+        let stored = [
+            bytes[16 + i * 3],
+            bytes[16 + i * 3 + 1],
+            bytes[16 + i * 3 + 2],
+        ];
+        assert_eq!(img.palette.entry(i as u8), stored, "entry {i} is not the file's own value");
     }
     assert_ne!(img.palette.entry(0), img.palette.entry(255), "palette was not read");
 }
@@ -165,9 +216,36 @@ fn a_uh_file_carries_its_own_six_bit_palette() {
 /// made with it at two planes (`DOTEXTS.BAT:1`).
 #[test]
 fn a_bit_plane_file_decodes_to_the_geometry_in_its_header() {
-    let img = load_path(Path::new("../../assets/DDSTARS/TEXTS.16")).unwrap();
+    let bytes = std::fs::read("../../assets/DDSTARS/TEXTS.16").unwrap();
+    let img = load(&bytes, Format::Origin).unwrap();
     assert_eq!((img.width(), img.height()), (320, 200));
     assert_eq!(img.pixels().len(), 64_000);
+
+    // Two planes, so no pixel can carry a bit above 3: a plane count read as 4
+    // would put values up to 15 in the same 16,000-byte payload.
+    assert!(
+        img.pixels().iter().all(|&p| p < 4),
+        "a plane count above 2 would show here"
+    );
+
+    // And the pixels themselves, from the file's own plane bytes: row 11 is the
+    // first row of the strip that is not one flat value. Plane 0 (the low colour
+    // bit) is the first `w/8` bytes of the row, plane 1 the next, and within a
+    // byte the most significant bit is the leftmost pixel (`LBM16.C:76-92`).
+    let pixels_at = 4 * 16; // `para` = 4, as `LBM16.C:61-67` computes it for colors=16
+    let planes = &bytes[pixels_at..];
+    let plane_row = 320 / 8;
+    for x in 0..40usize {
+        let byte = x / 8;
+        let bit = 7 - (x % 8);
+        let low = (planes[11 * 2 * plane_row + byte] >> bit) & 1;
+        let high = (planes[11 * 2 * plane_row + plane_row + byte] >> bit) & 1;
+        assert_eq!(
+            img.surface.get(x, 11),
+            Some(low | (high << 1)),
+            "row 11, x = {x}"
+        );
+    }
 }
 
 /// A bare dump has no header, so `sniff` cannot see it and the geometry is the
@@ -270,9 +348,22 @@ fn an_oversized_header_is_refused_rather_than_clipped() {
 /// visible output shows. That substitution is recorded in APPROXIMATIONS.md.
 #[test]
 fn a_run_row_wider_than_the_header_is_clipped_not_refused() {
-    let img = load_path(Path::new("../../assets/START/HZPIC.P")).unwrap();
+    let bytes = std::fs::read("../../assets/START/HZPIC.P").unwrap();
+    let img = load(&bytes, Format::Origin).unwrap();
     assert_eq!((img.width(), img.height()), (640, 400));
     assert_eq!(img.pixels().len(), 640 * 400);
+
+    // Which 640 pixels the clip keeps, which geometry alone cannot say. Row 302 is
+    // one of the 153 over-wide rows (757 pixels) and its head differs from its
+    // tail, so these four assertions separate "the first 640" from "the last 640",
+    // from a zero-filled row, and from a row that was refused. The expectation is
+    // the file's own row, read by `expand_row`.
+    let full = expand_row(&bytes, 0x31 * 16, 302);
+    assert!(full.len() > 640, "row 302 must be over-wide for this test to mean anything");
+    let row = img.surface.row(302);
+    assert_eq!(row, &full[..640], "the clip keeps the head of the row");
+    assert_ne!(row, &full[full.len() - 640..], "…and not its tail");
+    assert!(row.iter().any(|&p| p != 0), "nor is the row zero-filled");
 }
 
 #[test]
@@ -344,6 +435,31 @@ fn a_headerless_dump_is_not_sniffed_from_its_size() {
     ));
 }
 
+/// The FLI magic is a little-endian `u16` at offset 4, after the file size, so the
+/// bytes read `11 AF` — `assets/PAM/PRAX4.FLI` begins `74 1e 05 00 11 af`
+/// (`asset-inventory.md` finding 5). A test that only ever sniffed an IFF would not
+/// notice the two bytes being the wrong way round, and `load_path` would report
+/// `UnknownFormat` for the demo's only FLI file.
+#[test]
+fn the_fli_magic_is_read_in_the_byte_order_it_is_stored_in() {
+    let bytes = std::fs::read("../../assets/PAM/PRAX4.FLI").unwrap();
+    assert_eq!(&bytes[4..6], &[0x11, 0xAF], "the file's own bytes");
+    assert_eq!(sniff(&bytes), Some(Format::Fli));
+}
+
+/// `para` always points past the palette: every writer computes it as
+/// `(16 + colors*3 + 15)/16` (`LBM2U.C:57`), so no shipped file puts its pixels
+/// inside its own palette — the rule cannot reject a real file.
+#[test]
+fn a_pixel_offset_inside_the_palette_is_refused() {
+    let mut bytes = fc_fc_raw(2, 1, &[[0, 0, 0], [1, 2, 3]], &[0, 1]);
+    bytes[8..10].copy_from_slice(&1u16.to_le_bytes()); // para 1 -> offset 16
+    assert!(matches!(
+        load(&bytes, Format::Origin),
+        Err(AssetError::Unsupported { .. })
+    ));
+}
+
 #[test]
 fn load_path_refuses_a_file_it_cannot_identify() {
     assert!(matches!(
@@ -370,8 +486,9 @@ fn no_prefix_of_an_origin_asset_panics_or_decodes_silently() {
         if sniff(&raw) != Some(Format::Origin) {
             continue;
         }
-        // Every header boundary is in the sweep by construction (the step is a
-        // few hundred bytes at most) and the rest of it lands mid-row.
+        // ~200 cuts a file, spread evenly through it: most land in the payload,
+        // where the row walker indexes without the compiler's help, and the first
+        // is the only one inside the 16-byte header.
         let step = (raw.len() / 200).max(1);
         for cut in (0..raw.len()).step_by(step) {
             match load(&raw[..cut], Format::Origin) {

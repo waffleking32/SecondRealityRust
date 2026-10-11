@@ -18,7 +18,7 @@
 
 pub mod origin;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sr_engine::surface::{MAX_HEIGHT, MAX_WIDTH};
 use sr_engine::{Palette, Surface};
@@ -102,8 +102,10 @@ pub enum AssetError {
     /// A palette outside its contract: out of range, or the wrong length.
     Palette { what: String },
     /// The file could not be read at all — [`load_path`] only. Every other
-    /// variant describes bytes that *were* read.
-    Io { path: String, what: String },
+    /// variant describes bytes that *were* read. The path is kept whole, not
+    /// stringified, so a caller can re-open it (and so a path that is not valid
+    /// UTF-8 survives the round trip).
+    Io { path: PathBuf, what: String },
 }
 
 impl std::fmt::Display for AssetError {
@@ -119,7 +121,7 @@ impl std::fmt::Display for AssetError {
                 "{width}x{height} is larger than the engine's largest surface, {MAX_WIDTH}x{MAX_HEIGHT}"
             ),
             AssetError::Palette { what } => write!(f, "palette: {what}"),
-            AssetError::Io { path, what } => write!(f, "cannot read {path}: {what}"),
+            AssetError::Io { path, what } => write!(f, "cannot read {}: {what}", path.display()),
         }
     }
 }
@@ -146,9 +148,10 @@ pub fn sniff(bytes: &[u8]) -> Option<Format> {
     if bytes.len() >= 4 && &bytes[0..4] == b"RIX3" {
         return Some(Format::Rix3);
     }
-    // Autodesk FLI: a u32 file size, then the magic — 0xAF11 in this tree
-    // (`PAM/PRAX4.FLI`), 0xAF12 in the later revision.
-    if bytes.len() >= 6 && bytes[4] == 0xAF && matches!(bytes[5], 0x11 | 0x12) {
+    // Autodesk FLI: a u32 file size, then the magic as a little-endian u16 —
+    // bytes `11 AF` for 0xAF11 in this tree (`PAM/PRAX4.FLI` begins
+    // `74 1e 05 00 11 af`), `12 AF` for the later 0xAF12 revision.
+    if bytes.len() >= 6 && matches!(bytes[4], 0x11 | 0x12) && bytes[5] == 0xAF {
         return Some(Format::Fli);
     }
     // `.PAL` (768 raw bytes) and `.ANI` (frames back to back) have no magic at
@@ -181,7 +184,7 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
 /// Read a file and load it as whatever its magic says it is.
 pub fn load_path(path: &Path) -> Result<Image, AssetError> {
     let bytes = std::fs::read(path).map_err(|e| AssetError::Io {
-        path: path.display().to_string(),
+        path: path.to_path_buf(),
         what: e.to_string(),
     })?;
     let format = sniff(&bytes).ok_or(AssetError::UnknownFormat)?;

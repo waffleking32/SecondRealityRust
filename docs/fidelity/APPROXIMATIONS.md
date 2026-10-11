@@ -23,7 +23,7 @@ against the original when PANIC is ported (Phase 5).
 
 **Original:** `readp()` (`ENDPIC/READP.C:10-41`, `START/READP.C:10-42`) decodes a whole
 row into the caller's buffer with no bound on it, and `START/MAIN.C:105-113` hands it
-`char rowbuf[640]` (`START/MAIN.C:16`). The 153 of `HZPIC.P`'s 400 rows whose opcode
+`char rowbuf[640]` (`START/MAIN.C:13`). The 153 of `HZPIC.P`'s 400 rows whose opcode
 streams yield more than 640 pixels — 756 for most of them, 761 at the widest, 121 pixels
 over — therefore write past the end of that buffer. The overflow lands in whatever the
 linker placed after `rowbuf`; it is not part of the picture, and the row the CRTC scans
