@@ -180,7 +180,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | START | `START/HZPIC.PAL` | 768 | 03 00 02 00 | 768 bytes, no magic: a VGA palette | standalone | the setup menu's palette (floor list) |
 | START | `START/HZPIC.LBM` | 59352 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: START/DOHZ.BAT:1 lbm2p hzpic.lbm |
 | GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 30-pixel font strip (floor list) |
-| GRID | `GRID/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: GRID/_EYE.OBK; the GRID part is Phase 8 (vault).  The identical GLENZ/EYE4.UH and the blob GLENZ/_BGPIC.OBK are unused copies of it |
+| GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
 
 ### A.2 Assets whose bytes exist only inside a build blob
 
@@ -282,8 +282,8 @@ file **byte for byte** (`cmp`-identical):
 | `END/_PIC.OBK` | 45,884 | `PIC.UH` | `END/PIC.UH` |
 | `ENDPIC/_PIC.OBK` | 6,936 | `SRTITLE.U` | `ENDPIC/SRTITLE.U` |
 | `GLENZ/_FC.OBK` | 64,784 | `FC.UH` | `GLENZ/FC.UH` |
-| `GLENZ/_BGPIC.OBK` | 64,784 | `EYE4.UH` | `GLENZ/EYE4.UH` (unlinked; same file as `GRID/EYE4.UH`) |
-| `GRID/_EYE.OBK` | 64,784 | `EYE4.UH` | `GRID/EYE4.UH` |
+| `GLENZ/_BGPIC.OBK` | 64,784 | `EYE4.UH` | `GLENZ/EYE4.UH` (unlinked blob; the file is in `assets/` beside it) |
+| `GRID/_EYE.OBK` | 64,784 | `EYE4.UH` | `GLENZ/EYE4.UH` (identical bytes; the curated copy lives there) |
 | `JPLOGO/_PIC.OBK` | 58,566 | `ICEKNGDM.UP` | `JPLOGO/ICEKNGDM.UP` |
 | `VISU/C/_BG.OBK` | 64,784 | `U2ABG.UH` | `VISU/C/U2ABG.UH` |
 | `COMAN/_COMBG.OBK` | 32,768 | `COMBG.UH` | `COMAN/COMBG.UH` |
@@ -346,7 +346,7 @@ Each of these is something a later task must know before it writes a loader or a
 
    The independent research report reaches the same conclusion at its §"outlier 2"; these
    numbers were measured separately, from the files.
-3. **`VISU/C/SCENE/U2ABG.UH`, `GLENZ/FC.UH`, `LENS/LENS.EXB`, `GRID/EYE4.UH` and
+3. **`VISU/C/SCENE/U2ABG.UH`, `GLENZ/FC.UH`, `LENS/LENS.EXB`, `GLENZ/EYE4.UH` and
    `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH` start `55 68 31 00` (`Uh1\0`)** — a different magic from
    `COMBG.*`'s `55 48 01 00` (`UH\1\0`) — and are 64,784 bytes for 64,000 pixels: 784 bytes of
    header and palette then the pixels.
@@ -419,7 +419,7 @@ whether a file was missed.
 | `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.IN0`–`.IN4`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`.IN0`–`.IN4`, `FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
 | `ALKU/HOIKKA.LBM`, `ALKU/PIC001.LBM`, `ALKU/RYPPIS.LBM`, `ALKU/U2-MOVIE.LBM` | working pictures in ALKU's directory that no ALKU source, makefile or project file names |
 | `GLENZ/PIC001.LBM`, `GLENZ/PIC002.LBM`, `GLENZ/FCX.LBM`, `GLENZ/FC.BBK`, `GLENZ/EDGE.*`, `GLENZ/NEW.*`, `GLENZ/VEC.*` | GLENZ's working files and the EDGE tool's sources; none is linked or loaded |
-| `GLENZ/EYE4.UH`, `GLENZ/_BGPIC.OBK` | the eye picture, which GLENZ's link line does not name; the canonical copy is `assets/GRID/EYE4.UH` (see §B) |
+| `GLENZ/_BGPIC.OBK` | an unused blob whose payload is `GLENZ/EYE4.UH`, the file next to it in `assets/` — nothing is lost by not copying the blob |
 | `FOREST/*.LBM`, `FOREST/FONA*.LBM`, `FOREST/GREEN.CLX`, `FOREST/O.SCI`, `*.GIF`, `*.TPU` | MNTSCRL's working art and its `read`/`koe` tools' inputs: `READ2.PAS:110` opens `o2.sci` and its units link `hillback.obj`/`posN.obj`; nothing else in the directory is named by the part |
 | `WATER/SWORD.SCI`, `WATER/RAY.SCI`, `WATER/GREEN.CLX`, `WATER/TAUSTA.LBM`, `WATER/FINAL*.LBM`, `WATER/*.LBM`, `WATER/DATA.*`, `WATER/MASK.MTV`, `WATER/WAT4.DAT`, `WATER/*.PAS`, `*.TPU` | the shipped part links `bkg.obj` (`BKR.PAS:2`), `miekka.obj` (`MIEK.PAS:2`) and `wat1..3.obj` (`T1/T2/T3.PAS:2`). `WAT4.DAT` is linked only by `T4.PAS`, which the shipped `DEMO.PAS:1` does not `uses` |
 | `TUNNELI/COLORS.CLX`, `TUNNELI/TUNNELI.OBJ`, `TUNNELI/*.PAS` (the generators) | `COLORS.CLX` is a 320×200 RIX3 screen that no TUNNELI source names (checked across every `.PAS`, `.ASM` and the project files); `TUNNEL.DAT` and `SINIT.DAT` are the linked data |
@@ -433,7 +433,7 @@ whether a file was missed.
 | `MAIN/DATA/*.EXE`, `MAIN/DISTR/*`, `MAIN/PROT/*`, `MAIN/TT.*`, `MAIN/U2*.BBK` | the pack's staged part binaries, the distributor's text files (`FCINFO10.TXT`, `README.1ST`, both cited in §C) and the protection tool's data |
 | `MAIN/DATA/REALITY.FC` | the shipped music container: an 8-word header (patched by `MAIN/PACK.C:56-63`) followed by `MUSIC0.S3M` and `MUSIC1.S3M` verbatim. Both modules are in `assets/`; the container itself is not, because the port plays the modules (decision D5, `reference/original/PROVENANCE.md`) |
 | `MAIN/PACKING.INC`, `MAIN/PACKING.INB`, `MAIN/PACKFINA.INC` | the pack manifest, cited in §C but not media |
-| `GRID/*`, `HARD/*`, `TWIST/*` (except `GRID/EYE4.UH`) | the three unreleased development effects, which are Phase 8's (task B5's note, `docs/plans/01-assets.md`) and are not in `SECOND.EXE`'s manifest |
+| `GRID/*`, `HARD/*`, `TWIST/*` | the three unreleased development effects, which are Phase 8's (task B5's note, `docs/plans/01-assets.md`) and are not in `SECOND.EXE`'s manifest. `GRID/_EYE.OBK` embeds the identical bytes to `assets/GLENZ/EYE4.UH`, which is that pair's canonical copy (§B) |
 | `3DS/*`, `PICS/*`, `UTIL/*`, `FCP/*`, `CODE/*`, `SCRIPT/*`, `DESIGN/*`, `IDEAS/*` | the party's tool, design and source directories: inputs to the original's own toolchain, not to the demo |
 
 ---

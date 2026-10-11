@@ -168,7 +168,7 @@ setup menu); a later task's `recovered assets` table uses paths under the same t
 | `START/HZPIC.PAL` | `upstream/SecondReality/START/HZPIC.PAL` | `071a82e` | 768 | `9654e10d4d024f944b8146b3ebe907140dc418f251c833882d5202d200c200d9` | Unlicense / public domain | START |
 | `START/HZPIC.LBM` | `upstream/SecondReality/START/HZPIC.LBM` | `071a82e` | 59352 | `ec3d65b55103fea4570561d7bac04291f2888098c226047db2122e7dc0e38ffb` | Unlicense / public domain | START |
 | `GRAB/BLOWFNT.1BM` | `upstream/SecondReality/GRAB/BLOWFNT.1BM` | `071a82e` | 64000 | `a822ac2c9ebaaa3afbc1fc82750313b59718c8a9c729827e8f735b8f5c4bea50` | Unlicense / public domain | GRAB |
-| `GRID/EYE4.UH` | `upstream/SecondReality/GRID/EYE4.UH` | `071a82e` | 64784 | `a49726062aa91c4bb4cc45ca641727797d2acb07e98a4d310f370fc576b65f4c` | Unlicense / public domain | GRID |
+| `GLENZ/EYE4.UH` | `upstream/SecondReality/GLENZ/EYE4.UH` | `071a82e` | 64784 | `a49726062aa91c4bb4cc45ca641727797d2acb07e98a4d310f370fc576b65f4c` | Unlicense / public domain | GLENZ |
 
 ### Notes on individual files
 
@@ -210,7 +210,7 @@ that carries the same bytes. Verified with `sha256sum`; the digests here are als
 | `END/NUTS.LBM` | `assets/END/PIC.LBM` | `fb5172fccff7f02f4b7396be10a47cde02d1d8a6daec16be1299285bc9fa0e67` | the two names are one file; `END/DOPIC.BAT:1` names `pic.lbm` |
 | `VISU/C/CITY.PAL` | `assets/VISU/C/U2A.PAL` | `09ac30cadf94de7476ec450d9993e1ff530883e63501acc9d8cab625223d9e28` | the city tool's copy of the scene palette |
 | `VISU/C/SCENE/U2A.PAL` | `assets/VISU/C/U2A.PAL` | `09ac30cadf94de7476ec450d9993e1ff530883e63501acc9d8cab625223d9e28` | a second copy of the same palette inside the scene directory |
-| `GLENZ/EYE4.UH` | `assets/GRID/EYE4.UH` | `a49726062aa91c4bb4cc45ca641727797d2acb07e98a4d310f370fc576b65f4c` | `GLENZ/_BGPIC.OBK`'s payload is this file, but GLENZ's link line (`GLENZ/MAKEFILE:3`) does not name it; `GRID/_EYE.OBK` does, and GRID is the part that shows the eye |
+| `GRID/EYE4.UH` | `assets/GLENZ/EYE4.UH` | `a49726062aa91c4bb4cc45ca641727797d2acb07e98a4d310f370fc576b65f4c` | the canonical path belongs to a part in this phase's scope: GRID is a vault part (`GRID/DOLINE.EXE`), reachable through neither `SECOND.EXE`'s manifest nor this phase. `GRID/_EYE.OBK` and `GLENZ/_BGPIC.OBK` each embed the same bytes |
 
 ### Identical files that are not copied at all
 
