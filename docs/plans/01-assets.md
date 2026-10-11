@@ -607,11 +607,16 @@ git commit -m "Decode RIX3 screens and 768-byte VGA palettes"
 
 ### Task A5: Recover the EXE-only assets from OMF `LEDATA` records
 
-Eleven `.OBK` blobs in the tree have **no standalone file of the same size** — `GRID/_EYE.OBK`,
-`LENS/_LENSEX0.OBK`, `LENS/_LENSEXB.OBK`, `JPLOGO/_PIC.OBK`, `GLENZ/_FC.OBK`, `GLENZ/_BGPIC.OBK`,
-`VISU/C/_BG.OBK`, `TECHNO/_PIC1.OBK`, `TECHNO/_PIC2.OBK`, `TECHNO/_CIRCLE.OBK`,
-`TECHNO/_CIRCLE2.OBK`. (A1's inventory decides which of these actually *are* assets; some may be
-code.) The other ten blobs duplicate a standalone file and are already covered.
+> **Corrected after A1's inventory.** This task was planned around a claim — "eleven blobs have no
+> standalone file of the same size" — that turned out to rest on a bad signal. A blob is *larger*
+> than its payload because of OMF record overhead, so comparing file sizes said nothing. A1 walked
+> every blob and reconstructed its payload: **eighteen of them reproduce a standalone file byte for
+> byte** (`cmp`-identical), so those assets were never EXE-only and there is nothing to recover.
+> A1's `docs/fidelity/asset-inventory.md` §D is the measurement and the authority for this task.
+>
+> The task still earns its place, with a different job: **prove the tree is complete** rather than
+> filling gaps. `extract_ledata` is how that proof is made, and the four blobs that genuinely have
+> no twin are the ones worth a recorded answer.
 
 **Files:**
 - Create: `crates/sr-assets/src/omf.rs`, `crates/sr-assets/tests/omf.rs`
@@ -633,14 +638,29 @@ other; nothing in `sr-parts` or the binary ever sees an `.OBK`.
 - [ ] **Step 1: Write the failing test**
 
 ```rust
+/// The framing test, and the one that matters. A blob whose payload has a
+/// standalone twin must reproduce it **byte for byte** — equality, not a size
+/// check, because treating the offset pair as a u16 gives the right length and
+/// the wrong bytes. Every one of the eighteen twins in the inventory's §D is a
+/// candidate; `GLENZ/_FC.OBK` was measured at 64,784 bytes.
 #[test]
-fn a_blob_that_holds_a_picture_yields_one_that_decodes() {
+fn a_blob_reproduces_its_standalone_twin_byte_for_byte() {
+    let blob = std::fs::read("../../upstream/SecondReality/GLENZ/_FC.OBK").unwrap();
+    let twin = std::fs::read("../../upstream/SecondReality/GLENZ/FC.UH").unwrap();
+    assert_eq!(extract_ledata(&blob).unwrap(), twin);
+}
+
+/// A blob-only payload still yields something decodable: `TECHNO/_PIC1.OBK` holds
+/// an Origin RLE picture, 320x400 by its header. (It is also *not linked* — the
+/// `_pic1.obk` line in `TECHNO/MAKEFILE:7` is commented out — so it is build
+/// residue rather than an asset the shipped EXE carries. Recovering it proves the
+/// extractor works; recording that it is unlinked is the honest part.)
+#[test]
+fn a_blob_only_that_holds_a_picture_yields_one_that_decodes() {
     let bytes = std::fs::read("../../upstream/SecondReality/TECHNO/_PIC1.OBK").unwrap();
     let payload = extract_ledata(&bytes).unwrap();
-    let at = payload.windows(2).position(|w| w == [0xFC, 0xFC] || w == [0xFD, 0xFC])
-        .expect("an Origin PIC magic inside the object");
-    let img = load(&payload[at..], Format::Origin).unwrap();
-    assert!(img.width() > 0 && img.height() > 0);
+    let img = load(&payload, Format::Origin).unwrap();
+    assert_eq!((img.width(), img.height()), (320, 400));
 }
 
 #[test]
@@ -650,7 +670,7 @@ fn a_blob_with_no_ledata_is_refused() { … }
 fn a_record_that_runs_past_the_end_of_the_blob_is_refused() {
     // The first byte is the record type, the next two the length: a length that
     // overruns must be an error, not a panic.
-    assert!(matches!(extract_ledata(&[0xA1, 0xFF, 0xFF, 0x00]), Err(AssetError::Truncated { .. })));
+    assert!(matches!(extract_ledata(&[0xA0, 0xFF, 0xFF, 0x00]), Err(AssetError::Truncated { .. })));
 }
 ```
 
@@ -658,15 +678,40 @@ fn a_record_that_runs_past_the_end_of_the_blob_is_refused() {
 
 - [ ] **Step 3: Implement `omf.rs`**
 
-OMF records are a type byte followed by a `u16` little-endian length; `LEDATA` is `0xA1` and its
-payload is `u16 segment index` then data. Concatenate payloads in record order.
+OMF records are a type byte followed by a `u16` little-endian length. **`LEDATA` is `0xA0`**, not
+`0xA1` — both are legal OMF spellings and only `0xA0` occurs in this tree. Its payload is
+`u16 segment index`, then **one leading offset byte**, then up to 1,024 bytes of data, then **the
+same offset byte again**. Strip both offset bytes and concatenate the data in record order.
+
+That framing is not a guess and the distinction is not cosmetic: **the trailing byte is what makes
+the reconstruction byte-exact.** Keeping it drifts the output by one byte per record — `GLENZ/_FC.OBK`
+comes out 64,912 bytes instead of 64,784 — and treating the pair as a `u16` offset instead yields
+the right *length* with the wrong *bytes*, which is the failure that would survive a size check.
+Both were measured; see the inventory's §D.
 
 - [ ] **Step 4: Recover the assets and extend the provenance**
 
-For each blob A1's inventory marked as holding an asset, recover it, name it for what the part calls
-it, and add it under `assets/<PART>/`. `PROVENANCE.md` gains a second table — "recovered assets" —
-with the blob path, the record kind, the byte range inside the payload, and the sha256 of the
-recovered file. Nothing is recovered speculatively: a blob that only holds code is recorded as such.
+The measurement A1 already made says **nothing needs recovering**. Turn that from a claim into a
+checked result, and record it as the task's evidence:
+
+1. **Prove completeness.** For every blob in the inventory's §D that has a standalone twin, assert
+   in a test that `extract_ledata(blob) == std::fs::read(twin)`. Eighteen of them, all byte-exact.
+   That is the phase's evidence for "provenance file complete" from the EXE side: nothing the parts
+   link exists only in a build artifact.
+2. **Answer the four blob-only payloads by name.** `TECHNO/_CIRCLE.OBK` (24,000) and
+   `_CIRCLE2.OBK` (8,000) are linked but carry no image header and are not picture sizes;
+   `_PIC1.OBK` and `_PIC2.OBK` hold pictures but are **not linked** — `TECHNO/MAKEFILE:7`'s
+   `_pic1.obk _pic2.obk` line is commented out. Say what each is and whether the port needs it.
+   Nothing is recovered speculatively.
+3. **Confirm against the shipped EXE.** `MAIN/PACKFINA.INC`'s 79 entries are what `SECOND.EXE`
+   actually carries. Check that every entry is either a part executable or a file already in
+   `assets/`, so "no asset is EXE-only" is a checked statement rather than an inference from the
+   blobs.
+
+`PROVENANCE.md` gains its second table only if step 1–3 finds something to recover. If they do not,
+the tables stay as they are and the finding is recorded in `asset-inventory.md` and in this task's
+commit message — **a task that finds nothing missing has succeeded, not failed,** and saying so
+plainly is the point.
 
 - [ ] **Step 5: Run the tests to verify they pass, then commit**
 
