@@ -1159,7 +1159,11 @@ captures are then one geometry each into `reference/parts/` — which is exactly
 `reference/check_a/` was captured at `--cycles 25000`; this task captures at `30000`. Before two
 cycle conventions share the tree, settle whether they mean the same screen at the same boot index:
 capture one held index (BEGLOGO's logo-held frame is ideal — it holds still) at `25000` and at
-`30000` and `cargo xtask compare` the two. Write the result in the index table's method section.
+`30000` — same `--boot autoexec`, only the cycles differing — and `cargo xtask compare` the two.
+Write the result in the index table's method section.
+
+`reference/check_a` was itself re-captured at `30000` under the B1 recipe (D17), so this is now a
+clean single-variable comparison rather than the cross-recipe one it would have been.
 
 Expected: **identical** — the counter counts emulator-rendered frames, and one frame is one emulated
 vertical refresh whatever the cycles, so the cycles should change how long a capture takes in wall
@@ -1173,8 +1177,13 @@ number goes in the table, because every later phase depends on the answer.
 Three to four per part, per §8.2, at structurally significant moments — for BEGLOGO: early fade,
 mid fade, held logo. One geometry per capture directory (D15).
 
+**`--boot autoexec` is required from here on**, and so is the silent emulator the oracle now sets
+itself; D17 records why both halves are needed and what happens without them. The flag is the
+manifest's `boot` field, so a capture says which recipe produced it. B3, B4 and B5 use the same
+recipe with their own `--arg` and indices.
+
 ```bash
-cargo xtask reference capture --arg 2 --keys "KBD_left KBD_enter" --cycles 30000 \
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames <i,j,k> --out reference/parts/beglogo --sheet out/beglogo.png
 ```
 
