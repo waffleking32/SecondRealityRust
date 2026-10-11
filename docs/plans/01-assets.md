@@ -624,8 +624,19 @@ fn rix3_decodes_a_screen(#[case] path: &str, #[case] w: u16, #[case] h: u16) {
     assert_eq!((img.width(), img.height()), (w, h));
 }
 
-/// The same property A2 and A3 use: the geometry a header claims must match the
-/// payload the file carries, over every RIX3 file in the tree.
+/// The same property A2 and A3 use, with one measured exception. `WATER/MIEKKA.SCI`
+/// declares 400x250 and carries 14,000 payload bytes — 35 whole rows, not 250 — and
+/// it is a deliberate crop, not a corrupt file: its payload is the first 14,000
+/// bytes of `WATER/SWORD.SCI` with that file's palette, `WATER/MAKEOB.BAT:2` links
+/// it, and `MIEKKA.OBJ`'s LEDATA payload is this file byte for byte. The original's
+/// own read is bounded the same way (`WATER/DEMO.PAS:109` reads only 400*34 of it).
+/// So the decoder yields `width x rows-the-payload-carries` and neither pads nor
+/// refuses: padding would invent pixels the demo never shows, and refusing would
+/// reject a shipped asset the part links.
+///
+/// The test therefore asserts the property for the three files that hold it and
+/// pins the exception by name, so a fifth file that quietly stops filling its
+/// header cannot hide inside the exception.
 #[test]
 fn every_rix3_asset_agrees_with_its_own_header() { … }
 
