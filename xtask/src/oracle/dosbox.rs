@@ -657,6 +657,21 @@ impl DosboxOracle {
     ) -> Result<(Vec<u8>, [[u8; 3]; 256]), OracleError> {
         let chain4 = self.chain4_enabled()?;
         let stride = self.row_stride_bytes(chain4)?;
+        // A row has to be at least as long as the pixels it shows, in the
+        // units that mode packs them: one byte a pixel in chain-4, one byte
+        // per four pixels a plane otherwise. A screen whose own register says
+        // otherwise is not one this read can walk.
+        let row_bytes = if chain4 {
+            width as usize
+        } else {
+            width as usize / 4
+        };
+        if stride < row_bytes {
+            return Err(OracleError::Decode(format!(
+                "this {width}x{height} screen's rows are {stride} bytes, shorter than the \
+                 {row_bytes} bytes its pixels need; its indices cannot be read this way"
+            )));
+        }
         let needed = stride * height as usize;
         if needed > PLANE_BYTES {
             return Err(OracleError::Decode(format!(
