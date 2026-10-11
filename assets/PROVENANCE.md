@@ -3,11 +3,14 @@
 Every file in `assets/` is a byte-for-byte copy of a file in the vendored original,
 `upstream/SecondReality` (`mtuomi/SecondReality`, pinned at commit `071a82e`). Nothing here
 is re-encoded, repaired or "cleaned": an asset the port cannot read as it ships is a finding
-in `docs/fidelity/asset-inventory.md`, not something this tree fixes.
+in `docs/fidelity/asset-inventory.md`, not something this tree fixes. **One file is the
+exception** — `TECHNO/CIRCLE2.EGA`, recovered by task A5 from the `.OBK` a part linked, and
+therefore with a record rather than a path as its origin; its row is in `Recovered assets`
+below.
 
 `assets/` mirrors the upstream layout exactly, so a copy's origin is its own path with
 `assets/` replaced by `upstream/SecondReality/`. That is what makes the check in
-`docs/fidelity/asset-inventory.md` §G a one-liner.
+`docs/fidelity/asset-inventory.md` §G a one-liner, with that one recovered file guarded out.
 
 Licence: the original demo and its media are public domain under the Unlicense
 (`upstream/SecondReality/UNLICENSE`); the port's own code is MIT (`LICENSE`).
@@ -233,11 +236,36 @@ copied as a set).
 
 ## Recovered assets
 
-A later task (A5) recovers assets that exist only inside the shipped binaries, and appends
-its own table here:
+Task A5 walked every `.OBK`/`.OBJ` in the original with `sr_assets::omf::extract_ledata` and
+found **one** asset whose bytes existed only inside a build artifact: `TECHNO/CIRCLE2.EGA`,
+the one-bit mask the shipped TECHNO.EXE reads as its `_circle2` data. It was written out with
+the same reader — `cargo test -p sr-assets --test omf -- --ignored write_the_recovered_asset`
+regenerates it — and `tests/omf.rs` pins it against its blob. Every other blob's payload
+reproduces a standalone file byte for byte, mostly already in the table above
+(`docs/fidelity/asset-inventory.md` §D); the two payloads with no twin and no consumer
+(`TECHNO/_PIC1.OBK`, `TECHNO/_PIC2.OBK`) are unlinked build residue and are not recovered.
 
-```
+Columns: `path` is the path under `assets/`; `blob` is the `.OBK` the bytes were recovered
+from; `record` names the OMF records the bytes came from; `range` is the half-open span of
+those records in the blob, `start..end`; `sha256` is the digest of the recovered file.
+
 | path | blob | record | range | sha256 |
-```
+|---|---|---|---|---|
+| `TECHNO/CIRCLE2.EGA` | `upstream/SecondReality/TECHNO/_CIRCLE2.OBK` | `LEDATA` (`0xA0`) × 8 | 65..8121 | `3920a4fe8556b550d8e353078ceb097af9c734b4e921df1abe276fc1a33a94d7` |
 
-Its rows are files written into `assets/` by that task; the table above is not edited.
+### Notes on the recovered file
+
+- `TECHNO/CIRCLE2.EGA` — 8,000 bytes, no header: a 320×200 **one bit per pixel** mask, high
+  bit leftmost (8,000 = 320×200/8). It is the part's `_circle2` data, not a picture a viewer
+  ever sees on its own: `TECHNO/MAKEFILE:6` links `_circle2.obk`, `:23` links that into
+  `koe.exe`, `TECHNO/KOE.MAP:11` sizes the segment at 0x1F40 and `TECHNO/KOEA.ASM:653-680`
+  (`init_interference`) blits it into the EGA planes. The same part's `_circle` data is
+  `DDSTARS/PIC.EGA`, already in the table above under `parts: TECHNO`.
+- **Not `DDSTARS/PIC2.EGA`.** That file has the same size and the same nominal name (both are
+  what a `DDSTARS/DOIT*.C` tool writes), but it differs from the shipped mask in **7,162 of
+  8,000 bytes**. The recovered bytes are byte-identical to what the generator at
+  `DDSTARS/DOIT2.C:21-52` produces, which is what identifies them; §D of the inventory and
+  `tests/omf.rs` carry the measurement.
+- The upstream blob itself is **not** copied. `.OBK` is a build container, not an asset format:
+  nothing in `sr-parts` or the binary ever sees one (spec §4.4), and §9's recovery clause is
+  what turned its payload into the standalone file above.

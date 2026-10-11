@@ -3,7 +3,9 @@
 //! One module per family. Task A2 lands the Origin PIC container ([`origin`]),
 //! A3 the IFF images ([`iff`]) and A4 the RIX3 screens ([`rix`], behind `.CLX`
 //! and `.SCI`) and the headerless VGA palettes ([`pal`]); the two animation
-//! formats (A6) follow and plug into [`load`] and [`sniff`].
+//! formats (A6) follow and plug into [`load`] and [`sniff`]. [`omf`] (A5) is the
+//! odd one out: it reads the `.OBK`/`.OBJ` container the original's linker put
+//! assets in, never an image, and exists to prove the tree complete.
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
 //! a pixel somewhere before:
@@ -27,6 +29,7 @@
 //!   an [`AssetError`], never a panic and never a short read.
 
 pub mod iff;
+pub mod omf;
 pub mod origin;
 pub mod pal;
 pub mod rix;
@@ -76,7 +79,10 @@ impl std::fmt::Debug for Image {
 /// because it cannot know the geometry — [`raw_surface`] is its door.
 /// [`Format::Pal`] is the same shape of absence — 768 bytes with no header — and
 /// is refused by `load` for a different reason: it has no pixels to put in an
-/// [`Image`]. [`pal::decode`] is its door.
+/// [`Image`]. [`pal::decode`] is its door. [`Format::Omf`] is not an image format
+/// at all: it is the build container [`omf::extract_ledata`] reads, never
+/// returned by [`sniff`] (an OMF file opens with a record type, not a magic) and
+/// refused by [`load`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Origin,
@@ -86,6 +92,7 @@ pub enum Format {
     Pal,
     Fli,
     Ani,
+    Omf,
 }
 
 impl std::fmt::Display for Format {
@@ -98,6 +105,7 @@ impl std::fmt::Display for Format {
             Format::Pal => "VGA palette",
             Format::Fli => "FLI",
             Format::Ani => "ANI",
+            Format::Omf => "OMF object",
         })
     }
 }
@@ -194,7 +202,9 @@ pub fn sniff(bytes: &[u8]) -> Option<Format> {
 /// has no geometry to read, and [`Format::Pal`] has no pixels to return. Both
 /// name their own door in the error — [`raw_surface`] and [`pal::decode`].
 ///
-/// FLI and ANI are [`AssetError::Unsupported`] until their decoders land with A6.
+/// FLI and ANI are [`AssetError::Unsupported`] until their decoders land with A6;
+/// [`Format::Omf`] is refused for good, because a blob's payload is not a picture
+/// — [`omf::extract_ledata`] is its door.
 pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
     match format {
         Format::Origin => origin::decode(bytes),
@@ -213,6 +223,11 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
         Format::Fli | Format::Ani => Err(AssetError::Unsupported {
             format,
             what: "no decoder for this format yet".to_string(),
+        }),
+        Format::Omf => Err(AssetError::Unsupported {
+            format,
+            what: "a build container, not a picture: omf::extract_ledata(bytes) is its door"
+                .to_string(),
         }),
     }
 }

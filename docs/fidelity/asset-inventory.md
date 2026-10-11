@@ -142,7 +142,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | 3DSINFLD | `COMAN/COMBG.X` | 64016 | UH 01 00 | Origin UH PIC: header says 320x200 = 64000 pixels, file is 64016 bytes | standalone | the palette-less variant of COMBG (floor list) |
 | 3DSINFLD | `COMAN/COMBG.LBM` | 1796 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: COMAN/DOPIC.BAT:1 lbm2u combg.lbm combg.uh |
 | 3DSINFLD | `COMAN/W1DTA.BIN` | 65536 | 00 00 00 00 | 65536 bytes of binary data, no magic, leading zeros | standalone | linked: COMAN/MAKEFILE:4 dobjs; halves at COMAN/DOOBJS.BAT:1-2 |
-| 3DSINFLD | `COMAN/W2DTA.BIN` | 65536 | 00 00 00 00 | 65536 bytes of binary data, no magic, leading zeros | standalone | linked: COMAN/MAKEFILE:4 dobjs; halves at COMAN/DOOBJS.BAT:5-6 |
+| 3DSINFLD | `COMAN/W2DTA.BIN` | 65536 | 00 00 00 00 | 65536 bytes of binary data, no magic, leading zeros | standalone | linked: COMAN/MAKEFILE:4 dobjs; halves at COMAN/DOOBJS.BAT:7-8 |
 | JPLOGO | `JPLOGO/ICEKNGDM.UP` | 58566 | FD FC | Origin RLE PIC: 320x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: JPLOGO/MAKEFILE:23 +_pic.obk; the blob's payload is this file |
 | JPLOGO | `JPLOGO/ICEKNGDM.LBM` | 66862 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of JPLOGO/ICEKNGDM.UP |
 | DDSTARS | `DDSTARS/TEXTS.16` | 16064 | FC FC | Origin raw PIC: 320x200, colours=16, pixels at paragraph 0x4 (64) | standalone | linked: DDSTARS/MAKEFILE:2 +_textpic.obk (DDSTARS/DOTEXTS.BAT:2) |
@@ -185,20 +185,24 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 
 ### A.2 Assets whose bytes exist only inside a build blob
 
-These three have no standalone file anywhere in the tree: the only copy of their bytes is inside
-the `.OBK` the linker was handed. They are the input to task A5, which recovers them; `bytes` is
-the size of the blob's `LEDATA` payload (measured, §D), not of the blob.
+Task A5 walked these three with its OMF `LEDATA` reader; **one of them is now recovered**, so this
+section is A5's result as much as A1's list. `bytes` is the size of the blob's `LEDATA` payload
+(measured, §D), not of the blob.
 
 | part | blob | payload bytes | magic | header / description | form | citation |
 |---|---|---|---|---|---|---|
-| TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | no header, a bit pattern | blob-only | linked: `TECHNO/MAKEFILE:6` |
-| TECHNO | `TECHNO/_PIC1.OBK` | 50000 | `FD FC` | Origin RLE picture, 320×400 by its header | blob-only | **not linked**: `TECHNO/MAKEFILE:7` comments `_pic1.obk _pic2.obk` out |
-| TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
+| TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | **recovered by A5** as `assets/TECHNO/CIRCLE2.EGA`: a 320×200 one-bit mask (8,000 = 320×200/8), byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes | recovered | linked: `TECHNO/MAKEFILE:6` and `:23` link it into `koe.exe`; it sits in the shipped image (`TECHNO/KOE.MAP:11`, `DATA__circle2` = 0x1F40 bytes) and `TECHNO/KOEA.ASM:665` reads it |
+| TECHNO | `TECHNO/_PIC1.OBK` | 50000 | `FD FC` | Origin RLE container, 320×400 by its header, but the stream stops 119 bytes into row 282 — **281 of the 400 rows** (§E.13); the loader refuses it as truncation | blob-only | **not linked**: `TECHNO/MAKEFILE:7` comments `_pic1.obk _pic2.obk` out |
+| TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic; A5 measured it as `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859) | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
 
 Every other blob in the tree whose payload is an asset has a standalone twin, and §A carries
 that twin's row; §D names the pairing. `TECHNO/_CIRCLE.OBK` sat in this table until a
 reconstruction showed its payload **is** `DDSTARS/PIC.EGA` byte for byte (`c42cf0062e81fa19…`,
 24,000 bytes each on both sides), so its twin's row is in §A like every other.
+
+A5's walk covers **all 151 `.OBK`/`.OBJ` files**, not only the rows above, and found the relation
+to hold everywhere it applies: 35 blobs reconstruct a standalone file byte-for-byte (§D). The one
+recovered file is the only entry in `assets/` with no upstream path (§G).
 
 ---
 
@@ -300,22 +304,36 @@ file **byte for byte** (`cmp`-identical):
 | `LENS/_LENSEX0`–`4.OBK` | 215 / 19,588 / 6,860 / 1,538 / 6,252 | `LENS.EX0`–`EX4` | `LENS/LENS.EX0`–`EX4` |
 | `LENS/_FILLER.OBK` | 4,224 | `FILLER` | `LENS/FILLER` |
 | `COMAN/_W1DTA.OBJ`, `_W2DTA.OBJ` | 65,536 | `W1DTA.BIN`, `W2DTA.BIN` | `COMAN/W1DTA.BIN`, `W2DTA.BIN` |
-| `COMAN/_W1DTA1/2.OBJ`, `_W2DTA1/2.OBJ` | 32,768 each | the two halves of the file | as `COMAN/DOOBJS.BAT:1-2,5-6` says (`getslice … 0 32768`, `32768 32768`) |
+| `COMAN/_W1DTA1/2.OBJ`, `_W2DTA1/2.OBJ` | 32,768 each | the two halves of the file | as `COMAN/DOOBJS.BAT:1-2,7-8` says (`getslice … 0 32768`, `32768 32768`) |
 
-**Blobs that hold bytes with no standalone twin** — three of them, the `blob-only` rows in §A
-and the input to A5:
+**Blobs that hold bytes with no standalone twin** — three of them, the input to A5. The
+reconstruction is A1's; the descriptions are A5's, taken from the reconstructed payloads:
 
 | blob | payload | first bytes | what it is |
 |---|---|---|---|
-| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by `TECHNO/MAKEFILE:6`; a bit pattern, not a picture. Its near-twin `DDSTARS/PIC2.EGA` is the same size but differs in 7,162 of 8,000 bytes |
-| `TECHNO/_PIC1.OBK` | 50,000 | `FD FC 40 01 90 01` | an Origin RLE picture, 320×400 by its header; **not** linked (the `#_pic1.obk _pic2.obk` line in `TECHNO/MAKEFILE:7` is commented out) |
-| `TECHNO/_PIC2.OBK` | 20,859 | `83 2E 2B 27` | no magic; also not linked |
+| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by `TECHNO/MAKEFILE:6`; a **320×200 one-bit mask** (8,000 = 320×200/8), not a picture: A5 measured it as byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes, and recovered it as `assets/TECHNO/CIRCLE2.EGA` |
+| `TECHNO/_PIC1.OBK` | 50,000 | `FD FC 40 01 90 01` | an Origin RLE container, 320×400 by its header, that **does not hold a complete picture**: 281 of the 400 rows decode and the stream ends 119 bytes into row 282 (§E.13); **not** linked (the `#_pic1.obk _pic2.obk` line in `TECHNO/MAKEFILE:7` is commented out) |
+| `TECHNO/_PIC2.OBK` | 20,859 | `83 2E 2B 27` | no magic; A5 measured it as the last 20,859 bytes of `TECHNO/TROLL.UP`, byte for byte, so it carries a slice of an asset already curated; also not linked |
 
 `DDSTARS/PIC.EGA` and `DDSTARS/PIC2.EGA` are both outputs of the `DDSTARS/DOIT*.C` tools, and
 both are 24,000 and 8,000 bytes — the sizes of the two `_CIRCLE` payloads. The first **is**
 `_CIRCLE.OBK`'s stream byte for byte, so it is in `assets/` as that asset's standalone form
 (§A, `parts: TECHNO`); the second only looks as if it should be, and differs from
-`_CIRCLE2.OBK` in 7,162 of its 8,000 bytes. Size is not evidence: hash both sides.
+`_CIRCLE2.OBK` in 7,162 of its 8,000 bytes (A5 confirmed both counts). Size is not evidence:
+hash both sides. A5 also settled which side of that pair is the stale one: `_CIRCLE2.OBK`'s
+payload is exactly what the `DOIT2.C` in the tree generates, and `DDSTARS/PIC2.EGA` is not.
+
+**A5's verification of this section.** `tests/omf.rs` reconstructs every row of the first table
+above and asserts byte equality with the named file, plus the four `COMAN` half-blobs against
+the slices `COMAN/DOOBJS.BAT:1-2,7-8` cuts; all hold, and a byte-inexact reconstruction appears
+nowhere in the tree. The same walk over **all 151 `.OBK`/`.OBJ` files** (not only the rows
+above) found the relation holds wherever a payload is an asset — 35 blobs reconstruct a
+standalone file — and found thirteen pairs beyond this table, the same relation on files §A
+lists as standalone: `FOREST/HILLBACK.OBJ`→`HILLBACK.CLX`, `FOREST/POS1–3.OBJ`→`POS1–3.DAT`,
+`MAIN/PROT/RUN1.OBJ`→`RUN1.BIN`, `TUNNELI/SINIT.OBJ`→`SINIT.DAT`,
+`TUNNELI/TUNNELI.OBJ`→`TUNNEL.DAT`, `WATER/BKG.OBJ`→`BKG.CLX`,
+`WATER/MIEKKA.OBJ`→`MIEKKA.SCI` and `WATER/WAT1–4.OBJ`→`WAT1–4.DAT`. Nothing any part linked
+exists only in a build artifact except the one file A5 recovered, and §A.2 carries it.
 
 ---
 
@@ -402,10 +420,16 @@ Each of these is something a later task must know before it writes a loader or a
     copy-to-disk step whose `fwrite` passes the already-closed `f1`, so even that write does
     nothing. They are the distributor's text files; the port has its own, so they are not in
     `assets/`.
-13. **`TECHNO/_PIC1.OBK` holds a 50,000-byte Origin RLE picture that no shipped build links.**
-    It is tempting as "the techno picture" — the linked one is `TROLL.UP`, loaded at runtime
-    from the pack (`TECHNO/KOE.C:605`). A5's plan lists `_PIC1.OBK` among the blobs to
-    recover; recovering it is fine, but nothing in the shipped part will load the result.
+13. **The two unlinked TECHNO blobs are build residue, and A5 measured why.** `_PIC1.OBK`
+    holds an Origin RLE *container* — 320×400, 256 colours by its header — that is not a
+    complete picture: the stream holds **281 of the 400 rows** and ends 119 bytes into row
+    282 (its payload is exactly 50,000 bytes, so the cut is slice-shaped, not a full write).
+    `sr_assets::load` therefore refuses it as `Truncated` rather than clipping it, the same
+    rule `COMAN/COMBG.UH` is refused under (§E.2). `_PIC2.OBK`'s 20,859 bytes are
+    `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859). Both
+    are tempting as "the techno picture" — the linked one is `TROLL.UP`, loaded at runtime
+    from the pack (`TECHNO/KOE.C:605`) — and neither is needed: `TECHNO/MAKEFILE:7`
+    comments `_pic1.obk _pic2.obk` out of the link.
 14. **`GRAB/BLOWFNT.1BM` has no magic and no header** (64,000 bytes) yet the `.1BM` extension
     is an Amiga-style one. It is a font strip, one byte per pixel, 320×200 by its size; the
     port's font-strip task (A7) reads it with geometry supplied by the caller, exactly as it
@@ -435,6 +459,16 @@ Each of these is something a later task must know before it writes a loader or a
     python3 -I -c "import sys; d=open(sys.argv[1],'rb').read(); print('file', len(d), 'payload', len(d)-778, 'rows', (len(d)-778)//400, 'remainder', (len(d)-778)%400)" assets/WATER/MIEKKA.SCI
     # file 14778 payload 14000 rows 35 remainder 0
     ```
+17. **The one asset recovered from a build blob: `TECHNO/_CIRCLE2.OBK` → `assets/TECHNO/CIRCLE2.EGA`.**
+    It is a 320×200 **one-bit mask** — 8,000 bytes with no header, 8,000 = 320×200/8, high bit
+    leftmost — and it is the shipped part's `_circle2`: `TECHNO/MAKEFILE:6` links the blob,
+    `:23` links it into `koe.exe`, `TECHNO/KOE.MAP:11` sizes the segment (`DATA__circle2`,
+    0x1F40 = 8,000) and `TECHNO/KOEA.ASM:653-680` (`init_interference`) blits it into the EGA
+    planes. Its bytes are exactly what the generator at `DDSTARS/DOIT2.C:21-52` writes — which
+    is why the recovered file is named after the linker symbol, not after `DDSTARS/PIC2.EGA`,
+    the stale file of that name that differs from it in 7,162 of 8,000 bytes. A later TECHNO
+    task therefore needs a 1-bpp mask path, not the 8-bpp `raw_surface`; `assets/PROVENANCE.md`
+    carries the file's origin as a blob and its records.
 
 ---
 
@@ -445,7 +479,7 @@ whether a file was missed.
 
 | what | why it is not in `assets/` |
 |---|---|
-| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the three blob-only rows in §D |
+| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the three rows in §D with no standalone twin — A5 recovered one of those as a standalone file (`assets/TECHNO/CIRCLE2.EGA`) and the other two are unlinked residue |
 | `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
 | `ALKU/HOI.IN0`, `HOI.IN1` | the `INCBIN` text of `ALKU/HOI.U`, which is in `assets/`; the binary is what the port reads. **`PAM/OUT.IN0`–`OUT.IN4` are the exception and are copied** — task A6's plan names them, and they are PAM's shipped data rather than a redundant text form (§A) |
 | `ALKU/HOIKKA.LBM`, `ALKU/PIC001.LBM`, `ALKU/RYPPIS.LBM`, `ALKU/U2-MOVIE.LBM` | working pictures in ALKU's directory that no ALKU source, makefile or project file names |
@@ -477,11 +511,15 @@ whether a file was missed.
 cd /home/ew/workspace/reality/SecondRealityRust
 for f in $(find assets -type f ! -name PROVENANCE.md); do
   up="upstream/SecondReality/${f#assets/}"
+  # The one recovered file (A5) has no upstream path; PROVENANCE.md carries its origin.
+  [ -f "$up" ] || { echo "RECOVERED: $f"; continue; }
   cmp -s "$f" "$up" || echo "DIFFERS: $f vs $up"
 done
 echo "checked $(find assets -type f ! -name PROVENANCE.md | wc -l) files"
 ```
 
-Every file in `assets/` has a path that exists upstream, which is what makes the loop
-one line. As of the review-fix commit the loop printed no `DIFFERS` lines and
-`checked 149 files`.
+Every file in `assets/` has a path that exists upstream — **except the one task A5 recovered
+from a blob**, whose origin is a record, not a path — which is what makes the loop one line
+plus that guard. As of the review-fix commit the loop printed no `DIFFERS` lines and
+`checked 149 files`; as of A5 it prints one `RECOVERED: assets/TECHNO/CIRCLE2.EGA`, still no
+`DIFFERS` lines, and `checked 150 files`.
