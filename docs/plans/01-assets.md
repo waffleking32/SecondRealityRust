@@ -1109,6 +1109,83 @@ git commit -m "Make the boot repeat so boot-relative indices mean one screen"
 several runs and compare on structural similarity — and that decision changes B2–B5, so it is the
 user's to make, not the implementer's.
 
+**B1's measured outcome, and the task it added.** Route 1 won, but only alongside a second change the
+plan did not anticipate: with a real audio device the mixer follows the **host's** audio clock, so the
+demo's animation drifted against the frame counter continuously and differently per run. The recipe is
+`[autoexec]` + `AUTOTYPE` **and** a silent emulator; D17 has the numbers.
+
+What B1 also found is a limit that B2 step 4 depends on and cannot meet as written. Even with an exact
+grab, a *moving* screen captured at the same boot index lands **one frame of animation apart** between
+emulator sessions about half the time. Within a session the alignment is stable (20/20 across four
+sessions, every session holding one alignment across five indices); across sessions it is a coin flip
+(2 of 4 in one batch, 6/5/1 in a twelve-session one). The guest's own framebuffer, read at
+counter-identified moments, differs the same way, while the demo's discrete events stay frame-exact —
+so this is the emulated clock, not the publishing, and not anything the API or `--set` reaches.
+
+**The user ruled on this: `compare` searches ±1 frame.** That is Task B1b, below, and B2 cannot run
+until it lands.
+
+---
+
+### Task B1b: `compare` searches ±1 frame, and says when it did
+
+The oracle's animation phase at a given boot index is not reproducible across emulator sessions
+(B1/D17, measured), so a reference frame may sit one frame either side of the port's frame. Rather
+than weaken the pixel comparison, widen the *frame alignment* search and **report the offset**, so the
+evidence stays exact and auditable.
+
+**Files:**
+- Modify: `xtask/src/compare.rs`, `xtask/src/main.rs` (the flag, if one is added), `docs/decisions.md`
+  (D18 — the policy, and why it is a widening of alignment rather than a pixel tolerance)
+- Test: `xtask/tests/` (compare's integration tests) and `compare.rs`'s unit tests
+
+**Interfaces:**
+- Consumes: `pair_indices`, `FrameReport` (which already carries both `index` and `rendered_index`),
+  `Summary`.
+- Produces: paired frames that may differ by at most one in index, with the offset surfaced in the
+  report and in the console line, and an exit code that still means what it means.
+
+- [ ] **Step 1: Write the failing tests**
+
+At least these four, and each must be one that **fails against today's code**:
+
+1. A reference frame at index N whose rendered counterpart is at N+1, with otherwise identical pixels,
+   compares `0.0000 %` and reports `rendered_index` N+1.
+2. The same with the counterpart at N−1.
+3. A rendered set lacking any frame within ±1 of a reference index is **refused** (a clear error, exit
+   2) rather than paired with something further away.
+4. An exact-index match is still preferred when both N and N+1 are present and both match.
+
+- [ ] **Step 2: Run them and watch them fail**
+
+- [ ] **Step 3: Implement the search in `pair_indices`**
+
+For each reference frame in ascending index order, consider the rendered frames at N−1, N and N+1 that
+are actually present, and take: the exact match if one exists, otherwise the candidate with the fewest
+differing pixels (so a failing report shows the closest thing, not an arbitrary neighbour). A rendered
+frame is **never used for two reference frames** — resolve greedily in reference-index order, which is
+what makes a capture holding two adjacent indices unambiguous.
+
+- [ ] **Step 4: Surface the offset**
+
+The report already records `rendered_index` per frame — make sure a non-zero offset is visible rather
+than left for a reader to notice by subtraction, and add a summary count of how many frames needed
+one. `verdict` and the exit codes keep their meanings: `identical` and 0 only when every reference
+frame matched at *some* offset in the window.
+
+- [ ] **Step 5: Record the policy in D18**, including the thing this change could hide: a port whose
+  animation is **systematically** one frame out would match at a constant non-zero offset and pass.
+  Say that the offset distribution is the evidence that distinguishes the two — scattered non-zero
+  offsets are the oracle's ambiguity, a constant one is a finding about the port — and that a part's
+  row in `reference-indices.md` is where that is recorded.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add xtask docs/decisions.md
+git commit -m "Let compare search a frame either side, and say when it does"
+```
+
 ---
 
 ### Task B2: Capture BEGLOGO, and start the index table
@@ -1192,6 +1269,12 @@ cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter
 Run the same command into a second directory and `cargo xtask compare` the two. Expected: exit 0,
 `verdict: identical`. **This is the actual deliverable of Part B** — a reference that cannot be
 reproduced cannot be a reference. Record the exit code and the percentage in the index table.
+
+This is an **across-session** comparison — two captures are two boots — so it is exactly where B1's
+measured ±1 frame alignment bites. With B1b's search, exit 0 means every frame matched within one
+frame, and the report says which offset each needed. Record that offset in the row: on a held screen
+it should be 0, and a *constant* non-zero offset across a moving capture is a finding about the
+oracle rather than a pass (D18).
 
 - [ ] **Step 5: Write the index table** with BEGLOGO's row filled in and the method section above it.
 
@@ -1282,9 +1365,12 @@ table that nothing measured. Do it if the phase genuinely spans; otherwise the r
 names why, which is the same standard the rest of the phase is held to. A part that fails when it
 *is* run gets the §8.4 treatment.
 
-- [ ] **Step 2: Write the policy down** in `reference-indices.md`: what a capture index means, that
-  it is only valid under the B1 recipe with the pinned cycles, and that a part which cannot be
-  reproduced gets captured across runs and compared structurally rather than pixel-exactly.
+- [ ] **Step 2: Write the policy down** in `reference-indices.md`: what a capture index means, that it
+  is only valid under the B1 recipe with the pinned cycles and the silent emulator, and that a moving
+  screen's alignment is not reproducible across emulator sessions — so comparison searches ±1 frame
+  and reports the offset (B1b, D18) rather than falling back to §8.4's structural similarity. Say why
+  the two are different: ±1 keeps the comparison pixel-exact and merely searches the alignment, while
+  structural similarity would give up exactness. Record that the §8.4 fallback was **not needed**.
 
 - [ ] **Step 3: State the phase's evidence on the board.** `PROGRESS.md` gets the asset count, the
   verify exit code, the part count captured and the reproducibility result per part. Anything that
@@ -1320,4 +1406,4 @@ Exit criteria from spec §10, with the evidence each task leaves:
 | Every needed asset decodes | `cargo xtask assets verify --decode` exit 0 |
 | …and matches the source art | cross-format tests (A2/A3) plus the contact sheets and the recorded look (A8) |
 | Provenance file complete | `cargo xtask assets verify --tree` exit 0 against `assets/PROVENANCE.md` |
-| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each with a re-capture comparison at exit 0 |
+| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each with a re-capture comparison at exit 0 **within B1b's ±1 frame alignment** (a held screen at offset 0; a moving one at whatever offset the oracle's ambiguity requires, recorded per row) |
