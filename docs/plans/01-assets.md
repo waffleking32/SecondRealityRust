@@ -752,7 +752,8 @@ same offset byte again**. Strip both offset bytes and concatenate the data in re
 
 That framing is not a guess and the distinction is not cosmetic: **the trailing byte is what makes
 the reconstruction byte-exact.** Keeping it drifts the output by one byte per record — `GLENZ/_FC.OBK`
-comes out 64,912 bytes instead of 64,784 — and treating the pair as a `u16` offset instead yields
+comes out 64,848 bytes instead of 64,784 (64 records, one extra byte each; 64,912 is what
+keeping *both* offset bytes yields) — and treating the pair as a `u16` offset instead yields
 the right *length* with the wrong *bytes*, which is the failure that would survive a size check.
 Both were measured; see the inventory's §D.
 
