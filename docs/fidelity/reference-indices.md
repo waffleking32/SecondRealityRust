@@ -120,13 +120,15 @@ is the case B1b measured it on. Two corrections, both from this task:
 2. **A keyframe whose neighbours are the same picture needs no support at all.** A held screen's
    ±1 candidates are the same bytes, so the search finds offset 0 whatever the partner's phase is.
    That is measured, not assumed, per keyframe: 429, 430 and 431 are byte-identical (and equal to
-   410), and so is every sampled index of the held picture from 580 to 1110 — so BEGLOGO's white
-   and held keyframes carry no supports and only the two fade keyframes do.
+   410), and so is every sampled index of the hold from 580 to 1100 — the one shared index that
+   did differ, 1110, is the collapse's edge and is not a keyframe (§3.3) — so BEGLOGO's white and
+   held keyframes carry no supports and only the two fade keyframes do.
 
 Both corrections cost something the plan's form does not: because a keyframe's three supports are
-one batch, **consecutive keyframes have to be ~70 frames apart or more in the partner's list**
-(a 3-index batch defers ~57 frames, measured above). Two keyframes 50 apart cannot both be
-supported; BEGLOGO's are 90 and 340 apart, and 90 is where the margin starts to bite.
+one batch, **consecutive keyframes have to be ~60 frames apart in the partner's list** — that is
+the measured cost of a 3-index batch (57 frames, above), and the keyframes are laid out to it with
+whatever margin the part allows. Two keyframes 50 apart cannot both be supported; BEGLOGO's are 90
+and 340 apart.
 
 ### 1.4 What "held" means, and why keyframes are chosen there
 
@@ -191,8 +193,11 @@ anywhere**: the alignment is searched, the pixels stay exact.
 ## 3. BEGLOGO
 
 `SECOND 2`'s first part: the Future Crew logo, white, fading in over a held picture. 320×400
-Mode X. The part runs from the demo's first graphics frame, 404, to the mode change at ~1155–1160
-(§3.4), which is roughly 750 frames — about 10.7 seconds.
+Mode X. What *this part* draws spans the demo's first graphics frame, 404, to the end of its fade
+in 571–579 (§3.3) — about 2.5 seconds. The screen then stands still until GLENZ closes it down at
+~1115 and changes mode in (1154, 1160] (§3.4, §3.5), so the 320×400 screen lasts roughly 750
+frames — about 10.7 seconds — of which the first ~176 are this part's drawing. That distinction is
+§3.5's, and it matters to Phase 2.
 
 ### 3.1 The keyframes, and why these
 
@@ -206,6 +211,15 @@ Mode X. The part runs from the demo's first graphics frame, 404, to the mode cha
 430 and 900 are carried with indices because their palettes hold still across the indexed read;
 470 and 560 are RGB-only because the fade moves the palette while the read runs, which is D15's
 coherence rule refusing to record indices that do not widen back to the frame taken.
+
+**What that means for the comparison is worth stating, because it is not the usual case.** With two
+of the four frames RGB-only, this row's `compare` run reports `mode: mixed` and **two of the four
+frames that judge Phase 2's exit criterion go through the RGB path** — where the DAC's 6→8-bit
+widening, `(c*259+33)>>6`, is load-bearing rather than bypassed (`docs/decisions.md:422-423`; an
+indexed comparison never depends on it, which is `compare.rs`'s reason for preferring indices). So
+a port whose palette widening differed would show up on 470 and 560 and not on 430 and 900, and
+Phase 2 should expect exactly that pair of readings rather than treating the row as four
+indexed comparisons.
 
 Full hashes and the commands:
 
@@ -331,14 +345,43 @@ Two things sit in that window and neither is a keyframe:
 - **The GLENZ side of the boundary is B3's row**, and its sweep starts inside GLENZ (1160, say)
   for the reason in §1.2.
 
-**Open, and recorded rather than resolved:** *what draws the collapse, and whether the port has to
-reproduce it.* Both BEGLOGO makefiles copy their build to `..\main\data\beglogo.exe`
-(`BEG/MAKEFILE:22`, `ENDPIC/MAKEFILE:22`) so `MAIN/DATA/BEGLOGO.EXE` is one of the two — and the
-two sources disagree: `BEG/BEG.C` ends at the last `setpalarea` with no collapse, while
-`ENDPIC/BEG.C` is a different build (Mode 13h, `inittwk()`, an exit wait on `dis_muscode(0xf0)`).
-Which one shipped is the open question `docs/fidelity/part-sequence.md` already carries. The
-loader's own calls around a part (`MAIN/U2.ASM:205-220`, `MAIN/U2A.ASM:493-516`) contain no such
-effect. Nothing here depends on the answer: no keyframe is taken in the transition, so the port's
-BEGLOGO comparison is unaffected either way. It matters to Phase 2 only if it decides the part's
-own frames end at 1115 rather than at the mode change, and to B3 in that GLENZ's first capturable
-index is 1160.
+### 3.5 What the collapse is: GLENZ's opening, not BEGLOGO's ending
+
+This was left open in this task's first pass, with two `BEGLOGO.EXE` builds as the candidates, and
+that was a dead end because the collapse is not BEGLOGO's at all. Fix round 1's review attributed
+it, and the attribution is checkable in the sources and against these frames: **it is the first
+thing the next part draws**, GLENZ's `zoomer2()` — a vertical close run before GLENZ's own mode
+set, in the outgoing 320×400 geometry. `GLENZ/MAIN.C:288-303` is `dis_partstart()`, a wait on the
+music (`while(!dis_exit() && dis_musplus()<-19);`), then `zoomer2()`, and only after it `mov ax,13h`
+/ `int 10h`. Three things in the frames match the source line for line:
+
+- **The band law is `zoomer2`'s.** It advances a quadratic — `zya++` then `zy += zya/4`
+  (`GLENZ/ZOOMER.C:41-44`), so `zy(n) = n(n+1)/8` — and fills a top band through `zy` and a bottom
+  band tracking `zy2 = 125*zy/260` (`ZOOMER.C:45-58`). Both edges follow it: the top of the
+  non-black region is row 11 at 1120, 46 at 1130, 106 at 1140 and 191 at 1150, whose second
+  difference is **exactly 1/4 row per frame²** — which is `n(n+1)/8`'s second difference, and the
+  law the counter in `zy += zya/4` gives — and the bottom black edge at 1130, 1140 and 1150 is
+  `399 - 125*zy/260` for the `zy` the top edge implies, within a row each time (378, 349, 308). The
+  review that attributed this probed the band two frames apart and measured the top edge advancing
+  14, 15, 16, …, 21 rows per two frames, which is the `(n+1)/2` that `zy += zya/4` gives.
+- **The grey it converges to is `zoomer2`'s target.** The picture entries fade to a flat grey —
+  `c` is `frame` capped at 32, `b = 32-c`, `pal2[a] = (pal1[a]*b + 30*c) >> 5`, applied with
+  `setpalarea(pal2,0,128)` (`ZOOMER.C:59-68`) — so the target is six-bit **30**, which widens to
+  **121**. The band measured at 1150 is exactly `(121,121,121)`.
+- **Why the bands stay black while the picture greys.** `zoomer2` writes palette index **255**
+  into both bands (`memset(v,255,80)`, `ZOOMER.C:48` and `:56`) and fades only entries 0–127, and
+  `BEG/BEG.C:25-34` is what leaves entry 255 at `(0,0,0)` — white into 0–254, black into 255. The
+  polarity is that combination and not a coincidence: a fade that touched 255 would take the bands
+  grey with the picture.
+
+**And a knock-on Phase 2 should be told rather than left to discover:** BEGLOGO's own drawing ends
+with its fade. `BEG/BEG.C:86` is the last `setpalarea` and `BEG.C:87` closes `main()` — there is no
+loop after it — so the 580–1110 hold is not BEGLOGO holding anything: it is the loader and GLENZ's
+music wait leaving BEGLOGO's last screen up for ~530 frames, and the collapse then plays on top of
+it. The leading reading is that **"reproduce index 900" means reproducing a hold that belongs to
+the next part's music wait or to the loader, not to a BEGLOGO drawing loop**, and it is a reading
+rather than a settled fact because nothing here measured the port. It is also robust to which
+BEGLOGO build shipped: the other source in the tree would itself wait on a music code before
+exiting (`ENDPIC/BEG.C:45-48`, capped at 300 frames), and 300 frames is less than the ~530-frame
+hold, so GLENZ's wait is in the hold either way. What it does not change: 900 is still the right
+picture and the right bytes, and no keyframe sits in the collapse.

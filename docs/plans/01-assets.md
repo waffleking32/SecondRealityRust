@@ -1276,9 +1276,10 @@ mid fade, held logo. One geometry per capture directory (D15).
 **What BEGLOGO turned out to be, from the sheet: white, fade, hold.** The part opens on a flat
 white screen (404 onwards), fades a held picture in over ~129 frames (the first changing frame is
 in 441–449 and the last in 571–579, ~129 steps at one per frame), holds it from 580 to ~1110, and
-then leaves through a collapsing transition into GLENZ's mode change at ~1155–1160. B2's four
-keyframes are the white screen (430), the early fade (470), the fade near its end (560) and the
-held logo (900) — §3.1 of `reference-indices.md` has the measurements. The fade occupies 128
+then GLENZ's `zoomer2()` closes the picture down before GLENZ's own mode set at ~1155–1160 — both
+the hold and the close are the next part's, not this one's (`reference-indices.md` §3.5). B2's
+four keyframes are the white screen (430), the early fade (470), the fade near its end (560) and
+the held logo (900) — §3.1 of `reference-indices.md` has the measurements. The fade occupies 128
 frames, which is less than two supported keyframes need (§1.3 of that file), so the fade gets one
 keyframe in its first quarter and one near its end rather than two in its middle.
 
