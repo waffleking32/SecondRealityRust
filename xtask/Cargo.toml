@@ -13,3 +13,6 @@ serde_json = { workspace = true }
 # Only ever speaks http to 127.0.0.1:8386, so no TLS: dropping the default
 # features keeps rustls and ring out of the tree entirely.
 ureq = { version = "2", default-features = false, features = ["json"] }
+# `compare` writes one diff image per frame. Decoding-only compression would be
+# enough, but `png` carries both directions and is the crate the plan names.
+png = "0.17"

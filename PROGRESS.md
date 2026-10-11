@@ -37,6 +37,29 @@ project is measured against those exact bytes.
 Phase 3 has no dependency on Phase 2 and may be run in parallel if the music is worth
 retiring first.
 
+## Harness evidence (Task 13)
+
+`cargo xtask compare` was verified both ways against the Task 12 captures, with the
+tool's own exit code as the verdict:
+
+- **Identical inputs.** `cargo xtask compare --reference reference/check_a --rendered
+  reference/check_a --out out/self` → every frame 0.0000% differing, `verdict:
+  identical`, **exit code 0**. Reports: `out/self/part/report.json`,
+  `out/self/title/report.json`.
+- **Differing inputs.** A second capture from a point that cannot match
+  (`SECOND 5` — the end logo/credits block — at the same boot indices and geometry):
+  `--arg 5 --keys "KBD_left KBD_enter" --cycles 25000`, frames 400,600 (320×400) and
+  1100,1150 (320×200), into `out/check_neg/`. `cargo xtask compare --reference
+  reference/check_a --rendered out/check_neg --out out/neg` → title 99.5609% differing
+  (indexed), part 40.7172% differing (RGB: that capture's screen moved during the
+  indexed read, so it wrote no indices and the comparison fell back to RGB),
+  `verdict: different`, **exit code 1**, diff PNGs at `out/neg/title/diff_000400.png`
+  and `out/neg/part/diff_001100.png`.
+
+A comparison that cannot run at all (a geometry or frame-count mismatch, a missing
+manifest or frame file) is refused with a legible message and exit code 2, so a script
+can tell "the frames differ" from "the tool could not tell".
+
 ## Phase log
 
 (Append one entry per completed phase: what was built, evidence, deviations,

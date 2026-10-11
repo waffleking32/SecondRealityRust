@@ -1,0 +1,1268 @@
+//! `xtask compare`: run the port, diff its frames against the reference, report.
+//!
+//! This is the other half of the harness `xtask reference capture` opened:
+//! capture says what the original drew at a frame, compare says how far the
+//! port is from it. It turns "the picture is slightly off" into a number.
+//!
+//! Two manifest shapes meet here (the controller's Ruling 2): the capture
+//! manifest written by `reference capture` (`reference.rs`), and the dump
+//! manifest written by `secondreality --headless --dump-dir`. They share
+//! `version`, `width`, `height` and `frames: [{index, idx, rgb}]`; everything
+//! else on either side is ignored.
+//!
+//! Three properties are the reason the tool exists:
+//!
+//! - **Indexed comparison when both sides have indices.** The emulator widens
+//!   the DAC with `(c*259+33)>>6` and the port adopts the same rule (Task 11's
+//!   ruling), but comparing indices never depends on that rule at all — and it
+//!   is stricter: two palette entries may widen to the same RGB while the
+//!   indices still differ, and an index is what the part actually wrote. RGB
+//!   is the fallback, used only when one side lacks the indices (a capture
+//!   whose coherence check failed, D15).
+//! - **Frames pair by manifest index, not by position in the list.** A capture
+//!   that holds a different number of frames is refused rather than compared
+//!   off the end: a skipped frame must not silently shift the rest.
+//! - **Exit code 0 when every frame is identical, 1 when any differs** (and 2
+//!   for "could not compare at all", which is not a fidelity measurement), so
+//!   a phase's exit criteria can be checked by a script.
+//!
+//! A geometry mismatch is a hard error, not a truncated comparison: the port's
+//! frame is resized from the view every tick, so a run can legitimately hold
+//! frames of more than one size, and comparing the overlapping corner of two
+//! different geometries would report a number that means nothing.
+
+use std::fmt;
+use std::fs;
+use std::io::BufWriter;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+
+use serde::{Deserialize, Serialize};
+
+/// What a manifest may say it is; anything else is refused rather than read.
+const MANIFEST_VERSION: u32 = 1;
+
+/// The file a capture directory is described by, on both sides.
+const MANIFEST_FILE: &str = "manifest.json";
+
+/// The report this tool writes next to the diff images.
+const REPORT_FILE: &str = "report.json";
+
+/// The report format's own version, independent of the manifests' (`MANIFEST_VERSION`
+/// is what both sides must say; this is what this tool writes).
+const REPORT_VERSION: u32 = 1;
+
+/// Why a comparison could not produce a number.
+#[derive(Debug)]
+pub enum CompareError {
+    /// The two frames hold different numbers of pixels. Reported in pixels,
+    /// the reference side first, so the message names which side is which.
+    GeometryMismatch { reference: usize, rendered: usize },
+    /// The two captures do not hold the same number of frames.
+    FrameCountMismatch { reference: usize, rendered: usize },
+    /// A manifest, a frame file, or the layout of the two sides could not be
+    /// read or matched. The message names what and where.
+    Io(String),
+}
+
+impl fmt::Display for CompareError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompareError::GeometryMismatch { reference, rendered } => write!(
+                f,
+                "geometry differs: the reference frame holds {reference} pixels where the rendered \
+                 frame holds {rendered}; comparing the overlap would report a number that means \
+                 nothing"
+            ),
+            CompareError::FrameCountMismatch { reference, rendered } => write!(
+                f,
+                "frame counts differ: the reference holds {reference} frames where the rendered \
+                 side holds {rendered}; pairing them by index is impossible"
+            ),
+            CompareError::Io(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for CompareError {}
+
+/// How far apart one pair of frames is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameDiff {
+    /// Pixels whose value differs at all. For an indexed pair that is one
+    /// index; for an RGB pair, any of the three channels.
+    pub differing_pixels: u64,
+    pub total_pixels: u64,
+    pub differing_percent: f32,
+    /// The largest single-value difference anywhere in the frame — an index
+    /// difference for an indexed pair, a channel difference for an RGB one.
+    pub max_channel_delta: u8,
+}
+
+/// Compare two indexed frames, byte for byte.
+///
+/// Both slices must be the same length; a mismatch is a hard error, not a
+/// truncated comparison.
+pub fn compare_indexed(reference: &[u8], rendered: &[u8]) -> Result<FrameDiff, CompareError> {
+    compare_pixels(reference, rendered, 1)
+}
+
+/// Compare two RGB8 frames, one output pixel per source pixel.
+///
+/// Used only when one side has no indices: the emulator widens the DAC with
+/// `(c*259+33)>>6` and the port adopted the same rule (Task 11's ruling), so
+/// both sides widen identically and a one-step channel difference is a real
+/// difference. No tolerance is applied — a tolerance would be a claim the
+/// manifests cannot support.
+pub fn compare_rgb(reference: &[u8], rendered: &[u8]) -> Result<FrameDiff, CompareError> {
+    compare_pixels(reference, rendered, 3)
+}
+
+/// `stride` bytes per pixel: 1 for indices, 3 for RGB8.
+fn compare_pixels(reference: &[u8], rendered: &[u8], stride: usize) -> Result<FrameDiff, CompareError> {
+    if reference.len() % stride != 0 || rendered.len() % stride != 0 {
+        return Err(CompareError::Io(format!(
+            "a frame of {} and {} bytes is not a whole number of {stride}-byte pixels",
+            reference.len(),
+            rendered.len()
+        )));
+    }
+    let reference_pixels = reference.len() / stride;
+    let rendered_pixels = rendered.len() / stride;
+    if reference_pixels != rendered_pixels {
+        return Err(CompareError::GeometryMismatch {
+            reference: reference_pixels,
+            rendered: rendered_pixels,
+        });
+    }
+
+    let (differing, max_channel_delta) = differences(reference, rendered, stride);
+    let differing_pixels = differing.iter().filter(|differs| **differs).count() as u64;
+    let total_pixels = reference_pixels as u64;
+    Ok(FrameDiff {
+        differing_pixels,
+        total_pixels,
+        differing_percent: percent(differing_pixels, total_pixels),
+        max_channel_delta,
+    })
+}
+
+/// One walk over two frames of `stride`-byte pixels: which pixels differ, and
+/// the widest single-value difference anywhere in them.
+///
+/// The counts and the diff image are both built from this walk, so the number
+/// and the picture cannot disagree about where the difference is.
+fn differences(reference: &[u8], rendered: &[u8], stride: usize) -> (Vec<bool>, u8) {
+    let mut max_channel_delta = 0u8;
+    let mut differing = Vec::with_capacity(reference.len() / stride);
+    for (reference_pixel, rendered_pixel) in reference
+        .chunks_exact(stride)
+        .zip(rendered.chunks_exact(stride))
+    {
+        let mut differs = false;
+        for (a, b) in reference_pixel.iter().zip(rendered_pixel) {
+            let delta = a.abs_diff(*b);
+            max_channel_delta = max_channel_delta.max(delta);
+            differs |= delta != 0;
+        }
+        differing.push(differs);
+    }
+    (differing, max_channel_delta)
+}
+
+fn percent(differing: u64, total: u64) -> f32 {
+    if total == 0 {
+        0.0
+    } else {
+        differing as f32 * 100.0 / total as f32
+    }
+}
+
+/// Frame numbers are paired by their manifest index, not by position in the
+/// list, so a capture that skipped a frame cannot silently shift the rest.
+///
+/// Both sides must name the same number of frames; a side that holds fewer is
+/// refused (`FrameCountMismatch`) rather than compared off the end. The pairs
+/// are returned in index order, so the report and the diff images line up —
+/// and each pair records both indices, so two sides that name *different*
+/// frames are visible in the report rather than hidden by the pairing.
+pub fn pair_indices(reference: &[u32], rendered: &[u32]) -> Result<Vec<(u32, u32)>, CompareError> {
+    if reference.len() != rendered.len() {
+        return Err(CompareError::FrameCountMismatch {
+            reference: reference.len(),
+            rendered: rendered.len(),
+        });
+    }
+    let mut reference: Vec<u32> = reference.to_vec();
+    let mut rendered: Vec<u32> = rendered.to_vec();
+    reference.sort_unstable();
+    rendered.sort_unstable();
+    Ok(reference.into_iter().zip(rendered).collect())
+}
+
+/// `identical` only when every frame matched; one differing frame is enough.
+pub fn verdict(percents: &[f32]) -> &'static str {
+    if percents.iter().all(|percent| *percent == 0.0) {
+        "identical"
+    } else {
+        "different"
+    }
+}
+
+// --- the two manifests ----------------------------------------------------
+
+/// The fields both manifests share (Ruling 2). Everything else — the
+/// capture's recipe, the dump's part name — is ignored.
+#[derive(Debug, Deserialize)]
+struct Manifest {
+    version: u32,
+    width: u16,
+    height: u16,
+    frames: Vec<FrameRef>,
+}
+
+/// One frame on either side.
+///
+/// `rgb` is on both sides and always a file. `idx` is present only when that
+/// side produced indices — a capture whose coherence check failed writes none
+/// (D15) — and the port's dump carries each frame's own geometry, because
+/// `Engine::tick` resizes the frame from the view and a part can switch to
+/// double-scan mid-run.
+#[derive(Debug, Deserialize)]
+struct FrameRef {
+    index: u32,
+    #[serde(default)]
+    idx: Option<String>,
+    rgb: String,
+    #[serde(default)]
+    width: Option<u16>,
+    #[serde(default)]
+    height: Option<u16>,
+}
+
+impl FrameRef {
+    /// This frame's geometry: its own when it carries one, the manifest's
+    /// otherwise.
+    fn geometry(&self, manifest: &Manifest) -> (u16, u16) {
+        (
+            self.width.unwrap_or(manifest.width),
+            self.height.unwrap_or(manifest.height),
+        )
+    }
+}
+
+/// One capture on disk: a manifest and the frame files it names.
+#[derive(Debug)]
+struct Capture {
+    /// Empty for a directory that holds `manifest.json` itself; otherwise the
+    /// subdirectory's name.
+    name: String,
+    dir: PathBuf,
+    manifest: Manifest,
+}
+
+/// Find the capture or captures `dir` holds.
+///
+/// A directory with its own `manifest.json` is one capture. Otherwise every
+/// immediate subdirectory that holds one is a capture, named by that
+/// subdirectory — `reference/check_a` is laid out that way: the demo changes
+/// display geometry between the title screen and the part after it, one
+/// manifest carries one geometry, so Task 12 captured one screen at a time.
+fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
+    if !dir.is_dir() {
+        return Err(CompareError::Io(format!(
+            "{} is not a directory",
+            dir.display()
+        )));
+    }
+    if dir.join(MANIFEST_FILE).is_file() {
+        return Ok(vec![Capture {
+            name: String::new(),
+            dir: dir.to_path_buf(),
+            manifest: read_manifest(dir)?,
+        }]);
+    }
+
+    let mut captures = Vec::new();
+    let entries =
+        fs::read_dir(dir).map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
+        let path = entry.path();
+        if path.is_dir() && path.join(MANIFEST_FILE).is_file() {
+            captures.push(Capture {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                manifest: read_manifest(&path)?,
+                dir: path,
+            });
+        }
+    }
+    captures.sort_by(|a, b| a.name.cmp(&b.name));
+    if captures.is_empty() {
+        return Err(CompareError::Io(format!(
+            "{} holds no {MANIFEST_FILE} (looked in it and in every subdirectory)",
+            dir.display()
+        )));
+    }
+    Ok(captures)
+}
+
+fn read_manifest(dir: &Path) -> Result<Manifest, CompareError> {
+    let path = dir.join(MANIFEST_FILE);
+    let json = fs::read_to_string(&path)
+        .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    let manifest: Manifest = serde_json::from_str(&json)
+        .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    if manifest.version != MANIFEST_VERSION {
+        return Err(CompareError::Io(format!(
+            "{} says version {}; this tool reads version {MANIFEST_VERSION}",
+            path.display(),
+            manifest.version
+        )));
+    }
+    Ok(manifest)
+}
+
+/// Pair the two sides' captures by name. Every capture on either side must
+/// have a counterpart: an unmatched name is said out loud rather than skipped,
+/// because silently measuring less than was asked for is how a green run lies.
+fn pair_captures<'a>(
+    reference: &'a [Capture],
+    rendered: &'a [Capture],
+) -> Result<Vec<(&'a Capture, &'a Capture)>, CompareError> {
+    let mut pairs = Vec::with_capacity(reference.len());
+    let mut missing = Vec::new();
+    for reference_capture in reference {
+        match rendered.iter().find(|c| c.name == reference_capture.name) {
+            Some(rendered_capture) => pairs.push((reference_capture, rendered_capture)),
+            None => missing.push(format!("{:?}", reference_capture.name)),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(CompareError::Io(format!(
+            "the rendered side holds no capture named {} (it holds {})",
+            missing.join(", "),
+            names(rendered)
+        )));
+    }
+
+    let extra: Vec<String> = rendered
+        .iter()
+        .filter(|c| !reference.iter().any(|r| r.name == c.name))
+        .map(|c| format!("{:?}", c.name))
+        .collect();
+    if !extra.is_empty() {
+        return Err(CompareError::Io(format!(
+            "the rendered side holds {} where the reference holds {}; a capture with no reference \
+             cannot be measured",
+            extra.join(", "),
+            names(reference)
+        )));
+    }
+    Ok(pairs)
+}
+
+fn names(captures: &[Capture]) -> String {
+    if captures.is_empty() {
+        return "nothing".to_string();
+    }
+    captures
+        .iter()
+        .map(|c| format!("{:?}", c.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+// --- comparing whole captures ---------------------------------------------
+
+/// The frames of both sides, paired by sorted manifest index.
+fn paired_frames<'a>(
+    reference: &'a Capture,
+    rendered: &'a Capture,
+) -> Result<Vec<(&'a FrameRef, &'a FrameRef)>, CompareError> {
+    let reference_indices: Vec<u32> = reference.manifest.frames.iter().map(|f| f.index).collect();
+    let rendered_indices: Vec<u32> = rendered.manifest.frames.iter().map(|f| f.index).collect();
+    // The count and pairing contract; the zip below is the same pairing,
+    // because both lists are then sorted the same way.
+    pair_indices(&reference_indices, &rendered_indices)?;
+
+    let mut reference_frames: Vec<&FrameRef> = reference.manifest.frames.iter().collect();
+    let mut rendered_frames: Vec<&FrameRef> = rendered.manifest.frames.iter().collect();
+    reference_frames.sort_by_key(|f| f.index);
+    rendered_frames.sort_by_key(|f| f.index);
+    Ok(reference_frames.into_iter().zip(rendered_frames).collect())
+}
+
+/// One capture's report, already written to disk.
+struct CaptureOutcome {
+    report: Report,
+    path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+struct Report {
+    version: u32,
+    /// `indexed`, `rgb`, or `mixed` when one side had indices for some frames
+    /// only. The indexed path is used whenever both sides have indices.
+    mode: &'static str,
+    frames: Vec<FrameReport>,
+    summary: Summary,
+}
+
+#[derive(Debug, Serialize)]
+struct FrameReport {
+    /// The reference frame's manifest index; `rendered_index` is the frame it
+    /// was paired with — the same number unless a side's list is sparse.
+    index: u32,
+    rendered_index: u32,
+    differing_pixels: u64,
+    total_pixels: u64,
+    differing_percent: f32,
+    max_channel_delta: u8,
+    /// The diff image beside this report: differing pixels in magenta over a
+    /// dimmed copy of the reference.
+    diff_image: String,
+}
+
+#[derive(Debug, Serialize)]
+struct Summary {
+    worst_percent: f32,
+    mean_percent: f32,
+    verdict: &'static str,
+}
+
+fn summarise(percents: &[f32]) -> Summary {
+    let worst_percent = percents.iter().copied().fold(0.0f32, f32::max);
+    let mean_percent = if percents.is_empty() {
+        0.0
+    } else {
+        percents.iter().sum::<f32>() / percents.len() as f32
+    };
+    Summary {
+        worst_percent,
+        mean_percent,
+        verdict: verdict(percents),
+    }
+}
+
+/// Compare every frame of one capture pair, write its report and one diff
+/// image per frame, and hand back what was written.
+fn compare_capture(
+    reference: &Capture,
+    rendered: &Capture,
+    out: &Path,
+) -> Result<CaptureOutcome, CompareError> {
+    fs::create_dir_all(out).map_err(|e| CompareError::Io(format!("{}: {e}", out.display())))?;
+
+    let mut frames = Vec::new();
+    let mut percents = Vec::new();
+    let mut modes = Vec::new();
+    for (reference_frame, rendered_frame) in paired_frames(reference, rendered)? {
+        let reference_geometry = reference_frame.geometry(&reference.manifest);
+        let rendered_geometry = rendered_frame.geometry(&rendered.manifest);
+        if reference_geometry != rendered_geometry {
+            return Err(CompareError::GeometryMismatch {
+                reference: reference_geometry.0 as usize * reference_geometry.1 as usize,
+                rendered: rendered_geometry.0 as usize * rendered_geometry.1 as usize,
+            });
+        }
+        let (width, height) = reference_geometry;
+        let expected_rgb = width as usize * height as usize * 3;
+
+        // The colour frame is always there, and it is what the diff image
+        // draws from — even when the comparison itself is by index.
+        let reference_rgb = read_frame(&reference.dir, &reference_frame.rgb)?;
+        if reference_rgb.len() != expected_rgb {
+            return Err(CompareError::Io(format!(
+                "{} holds {} bytes; {width}x{height} RGB8 needs {expected_rgb}",
+                reference.dir.join(&reference_frame.rgb).display(),
+                reference_rgb.len()
+            )));
+        }
+
+        let (diff, mask) = match (&reference_frame.idx, &rendered_frame.idx) {
+            // Indexed when *both* sides have indices: the stricter comparison,
+            // and the one the DAC widening rule cannot affect. Either side
+            // missing them (a capture whose coherence check failed, D15) puts
+            // both on the RGB path.
+            (Some(reference_idx), Some(rendered_idx)) => {
+                let reference_bytes = read_frame(&reference.dir, reference_idx)?;
+                let rendered_bytes = read_frame(&rendered.dir, rendered_idx)?;
+                let expected_idx = width as usize * height as usize;
+                for (file, bytes) in [
+                    (reference.dir.join(reference_idx), &reference_bytes),
+                    (rendered.dir.join(rendered_idx), &rendered_bytes),
+                ] {
+                    if bytes.len() != expected_idx {
+                        return Err(CompareError::Io(format!(
+                            "{} holds {} bytes; {width}x{height} indices need {expected_idx}",
+                            file.display(),
+                            bytes.len()
+                        )));
+                    }
+                }
+                modes.push("indexed");
+                let diff = compare_indexed(&reference_bytes, &rendered_bytes)?;
+                // Where the difference is, from the same single-pass walk the
+                // numbers are counted from: the number and the picture cannot
+                // disagree about the rule.
+                let (mask, _) = differences(&reference_bytes, &rendered_bytes, 1);
+                (diff, mask)
+            }
+            _ => {
+                let rendered_rgb = read_frame(&rendered.dir, &rendered_frame.rgb)?;
+                modes.push("rgb");
+                let diff = compare_rgb(&reference_rgb, &rendered_rgb)?;
+                let (mask, _) = differences(&reference_rgb, &rendered_rgb, 3);
+                (diff, mask)
+            }
+        };
+
+        let diff_image = format!("diff_{:06}.png", reference_frame.index);
+        write_diff_image(&out.join(&diff_image), &reference_rgb, &mask, width, height)?;
+
+        percents.push(diff.differing_percent);
+        frames.push(FrameReport {
+            index: reference_frame.index,
+            rendered_index: rendered_frame.index,
+            differing_pixels: diff.differing_pixels,
+            total_pixels: diff.total_pixels,
+            differing_percent: diff.differing_percent,
+            max_channel_delta: diff.max_channel_delta,
+            diff_image,
+        });
+    }
+
+    let mode = match (
+        modes.iter().all(|mode| *mode == "indexed"),
+        modes.iter().any(|mode| *mode == "indexed"),
+    ) {
+        (true, _) => "indexed",
+        (false, true) => "mixed",
+        (false, false) => "rgb",
+    };
+    let report = Report {
+        version: REPORT_VERSION,
+        mode,
+        frames,
+        summary: summarise(&percents),
+    };
+    let path = out.join(REPORT_FILE);
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|e| CompareError::Io(format!("cannot serialise {}: {e}", path.display())))?;
+    json.push('\n');
+    fs::write(&path, json).map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    Ok(CaptureOutcome { report, path })
+}
+
+fn read_frame(dir: &Path, file: &str) -> Result<Vec<u8>, CompareError> {
+    let path = dir.join(file);
+    fs::read(&path).map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))
+}
+
+/// Differing pixels in magenta over a dimmed copy of the reference, one output
+/// pixel per source pixel.
+fn write_diff_image(
+    path: &Path,
+    reference_rgb: &[u8],
+    differing: &[bool],
+    width: u16,
+    height: u16,
+) -> Result<(), CompareError> {
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+    let mut image = Vec::with_capacity(reference_rgb.len());
+    for (pixel, differs) in reference_rgb.chunks_exact(3).zip(differing) {
+        if *differs {
+            image.extend_from_slice(&MAGENTA);
+        } else {
+            // Half brightness, so the magenta reads as the difference rather
+            // than as picture.
+            image.extend(pixel.iter().map(|channel| channel / 2));
+        }
+    }
+
+    let file =
+        fs::File::create(path).map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    let mut encoder = png::Encoder::new(BufWriter::new(file), u32::from(width), u32::from(height));
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    writer
+        .write_image_data(&image)
+        .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    writer
+        .finish()
+        .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
+    Ok(())
+}
+
+/// Where one capture's report and diff images go.
+fn capture_out(out: &Path, name: &str) -> PathBuf {
+    if name.is_empty() {
+        out.to_path_buf()
+    } else {
+        out.join(name)
+    }
+}
+
+/// `cargo xtask compare`: optionally run a command to produce the rendered
+/// frames, diff them against the reference, print and write the report.
+///
+/// Returns the exit code the process should end with: 0 when every frame of
+/// every capture is identical, 1 when any differs. A comparison that cannot
+/// run at all is an `Err`, and `main` gives that its own exit code, so a
+/// script can tell "the frames differ" from "the tool could not tell".
+pub fn command(
+    reference: &Path,
+    rendered: Option<&Path>,
+    run: Option<&str>,
+    out: Option<&Path>,
+) -> Result<ExitCode, CompareError> {
+    if run.is_some() && rendered.is_none() {
+        return Err(CompareError::Io(
+            "--run needs --rendered: the command has to leave its frames where the comparison can \
+             find them, and comparing the reference with itself would say nothing"
+                .into(),
+        ));
+    }
+    if let Some(command) = run {
+        // Through `sh -c`, so it can be a whole command line rather than a
+        // single path.
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .status()
+            .map_err(|e| CompareError::Io(format!("cannot run {command:?}: {e}")))?;
+        if !status.success() {
+            return Err(CompareError::Io(format!(
+                "--run exited with {status}: {command:?}"
+            )));
+        }
+    }
+
+    let rendered = rendered.unwrap_or(reference);
+    let out = out.unwrap_or(reference);
+    let reference_captures = resolve_captures(reference)?;
+    let rendered_captures = resolve_captures(rendered)?;
+
+    let mut identical = true;
+    for (reference_capture, rendered_capture) in pair_captures(&reference_captures, &rendered_captures)? {
+        let capture_out = capture_out(out, &reference_capture.name);
+        let outcome = compare_capture(reference_capture, rendered_capture, &capture_out)?;
+        for frame in &outcome.report.frames {
+            let prefix = if reference_capture.name.is_empty() {
+                "frame".to_string()
+            } else {
+                format!("{} frame", reference_capture.name)
+            };
+            println!(
+                "{prefix} {}: {:.4}% differing ({}/{} px), max delta {}",
+                frame.index,
+                frame.differing_percent,
+                frame.differing_pixels,
+                frame.total_pixels,
+                frame.max_channel_delta
+            );
+        }
+        println!("report: {}", outcome.path.display());
+        identical &= outcome.report.summary.verdict == "identical";
+    }
+
+    let verdict = if identical { "identical" } else { "different" };
+    println!("verdict: {verdict}");
+    Ok(if identical {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitCode;
+
+    // --- pixel comparison -------------------------------------------------
+
+    #[test]
+    fn identical_indexed_frames_report_zero_difference() {
+        let r = compare_indexed(&[1, 2, 3, 4], &[1, 2, 3, 4]).unwrap();
+        assert_eq!(r.differing_pixels, 0);
+        assert_eq!(r.differing_percent, 0.0);
+        assert_eq!(r.max_channel_delta, 0);
+        assert_eq!(r.total_pixels, 4);
+    }
+
+    #[test]
+    fn a_single_differing_index_is_counted_once() {
+        let r = compare_indexed(&[1, 2, 3, 4], &[1, 2, 9, 4]).unwrap();
+        assert_eq!(r.differing_pixels, 1);
+        // Also in the brief's plan is `max_channel_delta == 7` for this fixture.
+        // That cannot be: the one differing pixel is 3 against 9, a delta of 6.
+        // The delta the brief asks for is pinned by the fixture below.
+        assert_eq!(r.max_channel_delta, 6);
+        assert_eq!(r.differing_percent, 25.0);
+    }
+
+    #[test]
+    fn the_widest_differing_index_sets_max_channel_delta() {
+        let r = compare_indexed(&[1, 2, 3, 4], &[1, 9, 3, 4]).unwrap();
+        assert_eq!(r.differing_pixels, 1);
+        assert_eq!(r.max_channel_delta, 7);
+        assert_eq!(r.differing_percent, 25.0);
+    }
+
+    #[test]
+    fn an_index_difference_is_counted_even_when_the_rgb_matches() {
+        // Two palette entries may widen to the same RGB. The indices still
+        // differ, and the index comparison is the stricter one.
+        let r = compare_indexed(&[5], &[6]).unwrap();
+        assert_eq!(r.differing_pixels, 1);
+    }
+
+    #[test]
+    fn mismatched_geometry_is_an_error_not_a_partial_diff() {
+        assert!(matches!(
+            compare_indexed(&[1, 2, 3, 4], &[1, 2]),
+            Err(CompareError::GeometryMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn identical_rgb_frames_report_zero_difference() {
+        let r = compare_rgb(&[1, 2, 3, 4, 5, 6], &[1, 2, 3, 4, 5, 6]).unwrap();
+        assert_eq!(r.differing_pixels, 0);
+        assert_eq!(r.total_pixels, 2);
+        assert_eq!(r.max_channel_delta, 0);
+    }
+
+    #[test]
+    fn an_rgb_pixel_counts_once_however_many_channels_differ() {
+        // One pixel differs in all three channels; the second is equal.
+        let r = compare_rgb(&[0, 0, 0, 10, 10, 10], &[1, 2, 3, 10, 10, 10]).unwrap();
+        assert_eq!(r.differing_pixels, 1);
+        assert_eq!(r.total_pixels, 2);
+        assert_eq!(r.max_channel_delta, 3);
+        assert_eq!(r.differing_percent, 50.0);
+    }
+
+    #[test]
+    fn mismatched_rgb_geometry_is_an_error_not_a_partial_diff() {
+        assert!(matches!(
+            compare_rgb(&[1, 2, 3], &[1, 2, 3, 4, 5, 6]),
+            Err(CompareError::GeometryMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn an_rgb_frame_that_is_not_whole_pixels_is_refused() {
+        // A truncated write must be a legible refusal, not a comparison of the
+        // pixels that happened to be there.
+        let error = compare_rgb(&[1, 2, 3, 4, 5], &[1, 2, 3, 4, 5]).unwrap_err();
+        assert!(matches!(error, CompareError::Io(_)), "{error}");
+    }
+
+    // --- pairing ----------------------------------------------------------
+
+    #[test]
+    fn frames_are_paired_by_manifest_index_not_by_position() {
+        assert_eq!(
+            pair_indices(&[10, 20], &[10, 20]).unwrap(),
+            vec![(10, 10), (20, 20)]
+        );
+        assert!(matches!(
+            pair_indices(&[10], &[10, 20]),
+            Err(CompareError::FrameCountMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn pairing_sorts_by_index_before_it_pairs() {
+        // A manifest may list its frames in any order; the pairing is by the
+        // index each frame carries, so the report and the diff images line up.
+        assert_eq!(
+            pair_indices(&[600, 400], &[400, 600]).unwrap(),
+            vec![(400, 400), (600, 600)]
+        );
+        assert_eq!(
+            pair_indices(&[20, 10], &[10, 20]).unwrap(),
+            vec![(10, 10), (20, 20)]
+        );
+    }
+
+    #[test]
+    fn a_side_that_skipped_frames_is_refused_not_shifted() {
+        // The whole point of counting: one side holding fewer frames must not
+        // let the rest of the capture slide one place over.
+        assert!(matches!(
+            pair_indices(&[100, 200, 300], &[100, 300]),
+            Err(CompareError::FrameCountMismatch {
+                reference: 3,
+                rendered: 2
+            })
+        ));
+        assert!(matches!(
+            pair_indices(&[100, 300], &[100, 200, 300]),
+            Err(CompareError::FrameCountMismatch {
+                reference: 2,
+                rendered: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn the_verdict_is_identical_only_when_every_frame_matches() {
+        assert_eq!(verdict(&[0.0, 0.0]), "identical");
+        assert_eq!(verdict(&[0.0, 0.01]), "different");
+        // No frames is vacuously identical; nothing differed.
+        assert_eq!(verdict(&[]), "identical");
+    }
+
+    // --- whole captures ---------------------------------------------------
+
+    #[test]
+    fn comparing_a_capture_with_itself_is_identical() {
+        let dir = scratch("self");
+        write_reference_capture(&dir, (4, 2), &[flat(400, 7, 8), flat(600, 9, 8)]);
+        let out = scratch("self-out");
+
+        let code = command(&dir, Some(&dir), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["version"], 1);
+        assert_eq!(report["mode"], "indexed");
+        assert_eq!(report["summary"]["verdict"], "identical");
+        assert_eq!(report["summary"]["worst_percent"], 0.0);
+        assert_eq!(report["summary"]["mean_percent"], 0.0);
+        assert_eq!(report["frames"].as_array().unwrap().len(), 2);
+        for frame in report["frames"].as_array().unwrap() {
+            assert_eq!(frame["differing_pixels"], 0);
+            assert_eq!(frame["total_pixels"], 8);
+            assert_eq!(frame["max_channel_delta"], 0);
+            assert_eq!(frame["differing_percent"], 0.0);
+            let image = out.join(frame["diff_image"].as_str().unwrap());
+            assert!(image.is_file(), "{} was not written", image.display());
+        }
+    }
+
+    #[test]
+    fn a_differing_frame_is_reported_as_different_with_a_diff_image() {
+        let reference = scratch("diff-reference");
+        let rendered = scratch("diff-rendered");
+        // 4x2: one pixel differs, so the report says one of eight.
+        let mut rgb = flat(0, 4, 8).rgb;
+        rgb[..3].copy_from_slice(&[8, 8, 8]);
+        write_reference_capture(&reference, (4, 2), &[flat(0, 4, 8)]);
+        write_reference_capture(&rendered, (4, 2), &[FrameData { index: 0, idx: None, rgb }]);
+        let out = scratch("diff-out");
+
+        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::from(1));
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["summary"]["verdict"], "different");
+        assert_eq!(report["summary"]["worst_percent"], 12.5);
+        let frame = &report["frames"][0];
+        assert_eq!(frame["differing_pixels"], 1);
+        assert_eq!(frame["total_pixels"], 8);
+        assert_eq!(frame["differing_percent"], 12.5);
+
+        let image = out.join(frame["diff_image"].as_str().unwrap());
+        assert!(image.is_file(), "{} was not written", image.display());
+        let (width, height, pixels) = read_png(&image);
+        assert_eq!((width, height), (4, 2));
+        // The differing pixel is magenta; the rest is a dimmed copy of the
+        // reference, so a reader can see where the difference is.
+        assert_eq!(&pixels[..3], &[255, 0, 255]);
+        assert_eq!(&pixels[3..6], &[2, 2, 2]);
+    }
+
+    #[test]
+    fn the_indices_decide_when_both_sides_have_them() {
+        // Same RGB on both sides, different indices: the stricter comparison
+        // is the indexed one, and it must be the one that runs.
+        let reference = scratch("indexed-reference");
+        let rendered = scratch("indexed-rendered");
+        write_reference_capture(
+            &reference,
+            (4, 2),
+            &[FrameData {
+                index: 0,
+                idx: Some(vec![5; 8]),
+                rgb: vec![20; 24],
+            }],
+        );
+        write_reference_capture(
+            &rendered,
+            (4, 2),
+            &[FrameData {
+                index: 0,
+                idx: Some(vec![6; 8]),
+                rgb: vec![20; 24],
+            }],
+        );
+        let out = scratch("indexed-out");
+
+        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::from(1));
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["mode"], "indexed");
+        assert_eq!(report["frames"][0]["differing_pixels"], 8);
+    }
+
+    #[test]
+    fn the_rgb_frames_are_used_when_the_reference_has_no_indices() {
+        // A capture whose coherence check failed writes no .idx (D15). The
+        // comparison falls back to RGB rather than refusing.
+        let reference = scratch("rgb-reference");
+        let rendered = scratch("rgb-rendered");
+        write_reference_capture(
+            &reference,
+            (4, 2),
+            &[FrameData {
+                index: 0,
+                idx: None,
+                rgb: vec![20; 24],
+            }],
+        );
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[(FrameData { index: 0, idx: Some(vec![9; 8]), rgb: vec![24; 24] }, (4, 2))],
+        );
+        let out = scratch("rgb-out");
+
+        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::from(1));
+        let report = read_json(&out.join("report.json"));
+        assert_eq!(report["mode"], "rgb");
+        assert_eq!(report["frames"][0]["differing_pixels"], 8);
+        assert_eq!(report["frames"][0]["max_channel_delta"], 4);
+    }
+
+    #[test]
+    fn a_geometry_mismatch_between_the_sides_is_a_hard_error() {
+        let reference = scratch("geometry-reference");
+        let rendered = scratch("geometry-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 1, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[(flat(0, 1, 16), (4, 4))],
+        );
+        let out = scratch("geometry-out");
+
+        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        assert!(matches!(error, CompareError::GeometryMismatch { .. }));
+        let message = error.to_string();
+        assert!(message.contains("8") && message.contains("16"), "{message}");
+    }
+
+    #[test]
+    fn a_frame_that_changed_geometry_mid_run_is_a_hard_error() {
+        // The port resizes the frame from the view every tick, so one run can
+        // hold frames of two sizes; the reference holds one size per capture.
+        let reference = scratch("doublescan-reference");
+        let rendered = scratch("doublescan-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 1, 8), flat(1, 1, 8)]);
+        write_rendered_capture(
+            &rendered,
+            "testcard",
+            &[(flat(0, 1, 8), (4, 2)), (flat(1, 1, 16), (4, 4))],
+        );
+        let out = scratch("doublescan-out");
+
+        assert!(matches!(
+            command(&reference, Some(&rendered), None, Some(&out)),
+            Err(CompareError::GeometryMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn a_frame_count_mismatch_between_the_sides_is_a_hard_error() {
+        let reference = scratch("count-reference");
+        let rendered = scratch("count-rendered");
+        write_reference_capture(&reference, (4, 2), &[flat(100, 1, 8), flat(200, 1, 8)]);
+        write_rendered_capture(&rendered, "testcard", &[(flat(100, 1, 8), (4, 2))]);
+        let out = scratch("count-out");
+
+        assert!(matches!(
+            command(&reference, Some(&rendered), None, Some(&out)),
+            Err(CompareError::FrameCountMismatch {
+                reference: 2,
+                rendered: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn a_directory_without_a_manifest_is_a_legible_error() {
+        let dir = scratch("no-manifest");
+        let out = scratch("no-manifest-out");
+
+        let error = command(&dir, Some(&dir), None, Some(&out)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("manifest.json"), "{message}");
+        assert!(message.contains(&dir.display().to_string()), "{message}");
+    }
+
+    #[test]
+    fn a_missing_frame_file_is_a_legible_error() {
+        let dir = scratch("missing-frame");
+        write_reference_capture(&dir, (4, 2), &[flat(0, 1, 8)]);
+        fs::remove_file(dir.join("frame_000000.rgb")).unwrap();
+        let out = scratch("missing-frame-out");
+
+        let error = command(&dir, Some(&dir), None, Some(&out)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("frame_000000.rgb"), "{message}");
+    }
+
+    #[test]
+    fn a_capture_tree_is_matched_by_name() {
+        // `reference/check_a` holds two captures — the title screen (320x400
+        // Mode X) and a part screen (320x200 chain-4) — because one manifest
+        // carries one geometry. Comparing the tree compares each capture.
+        let reference = scratch("tree-reference");
+        let rendered = scratch("tree-rendered");
+        for root in [&reference, &rendered] {
+            write_reference_capture(&root.join("title"), (4, 4), &[flat(400, 1, 16)]);
+            write_reference_capture(&root.join("part"), (4, 2), &[flat(1100, 1, 8)]);
+        }
+        let out = scratch("tree-out");
+
+        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(out.join("title/report.json").is_file());
+        assert!(out.join("part/report.json").is_file());
+        let title = read_json(&out.join("title/report.json"));
+        assert_eq!(title["frames"][0]["total_pixels"], 16);
+        let part = read_json(&out.join("part/report.json"));
+        assert_eq!(part["frames"][0]["total_pixels"], 8);
+    }
+
+    #[test]
+    fn a_capture_tree_that_holds_a_different_screen_is_different() {
+        let reference = scratch("tree-diff-reference");
+        let rendered = scratch("tree-diff-rendered");
+        write_reference_capture(&reference.join("title"), (4, 2), &[flat(400, 1, 8)]);
+        write_reference_capture(&rendered.join("title"), (4, 2), &[flat(400, 2, 8)]);
+        let out = scratch("tree-diff-out");
+
+        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::from(1));
+        let report = read_json(&out.join("title/report.json"));
+        assert_eq!(report["summary"]["verdict"], "different");
+        assert_eq!(report["frames"][0]["differing_pixels"], 8);
+    }
+
+    #[test]
+    fn a_capture_the_other_side_lacks_is_a_legible_error() {
+        let reference = scratch("tree-missing-reference");
+        let rendered = scratch("tree-missing-rendered");
+        write_reference_capture(&reference.join("title"), (4, 2), &[flat(400, 1, 8)]);
+        write_reference_capture(&reference.join("part"), (4, 2), &[flat(1100, 1, 8)]);
+        write_reference_capture(&rendered.join("title"), (4, 2), &[flat(400, 1, 8)]);
+        let out = scratch("tree-missing-out");
+
+        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("part"), "{message}");
+    }
+
+    #[test]
+    fn the_run_command_is_a_shell_command_line() {
+        // `--run` goes to `sh -c`, so it can be a whole command line rather
+        // than a single path.
+        let reference = scratch("run-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+        let produced = scratch("run-produced");
+        // What the command will copy into place: the captured frames.
+        write_reference_capture(&produced, (4, 2), &[flat(0, 5, 8)]);
+        // Where the comparison will look: a path nothing has created.
+        let rendered = scratch("run-rendered").join("dump");
+        let out = scratch("run-out");
+        let shell = format!(
+            "mkdir -p {} && cp {}/manifest.json {} && cp {}/frame_000000.idx {} && cp {}/frame_000000.rgb {}",
+            rendered.display(),
+            produced.display(),
+            rendered.display(),
+            produced.display(),
+            rendered.display(),
+            produced.display(),
+            rendered.display(),
+        );
+
+        let code = command(&reference, Some(&rendered), Some(&shell), Some(&out)).unwrap();
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(out.join("report.json").is_file());
+    }
+
+    #[test]
+    fn a_run_command_that_fails_is_reported() {
+        let reference = scratch("run-fail-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+        let rendered = scratch("run-fail-rendered");
+        let out = scratch("run-fail-out");
+
+        let error = command(&reference, Some(&rendered), Some("exit 3"), Some(&out)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("exit 3"), "{message}");
+    }
+
+    #[test]
+    fn a_run_command_with_no_rendered_directory_is_refused() {
+        // The command has to write its frames somewhere; without --rendered
+        // the comparison would silently compare the reference with itself.
+        let reference = scratch("run-alone-reference");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+
+        let error = command(&reference, None, Some("true"), None).unwrap_err();
+        assert!(error.to_string().contains("--rendered"), "{error}");
+    }
+
+    #[test]
+    fn the_rendered_side_may_be_left_out_and_means_the_reference() {
+        let dir = scratch("default-rendered");
+        write_reference_capture(&dir, (4, 2), &[flat(0, 5, 8)]);
+        let out = scratch("default-rendered-out");
+
+        assert_eq!(command(&dir, None, None, Some(&out)).unwrap(), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn the_real_check_a_captures_parse() {
+        // The real input, not an example: `reference/check_a` holds two
+        // captures, and the tool reads their manifests as written.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/check_a");
+        let captures = resolve_captures(&root).unwrap();
+
+        let names: Vec<&str> = captures.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["part", "title"]);
+
+        let title = &captures[1];
+        assert_eq!((title.manifest.width, title.manifest.height), (320, 400));
+        assert_eq!(title.manifest.frames.len(), 2);
+        assert_eq!(title.manifest.frames[0].index, 400);
+        assert!(title.manifest.frames.iter().all(|f| f.idx.is_some()));
+
+        let part = &captures[0];
+        assert_eq!((part.manifest.width, part.manifest.height), (320, 200));
+        assert_eq!(part.manifest.frames[0].index, 1100);
+    }
+
+    // --- helpers ----------------------------------------------------------
+
+    /// A frame as the tests write it: indices optional, RGB always present.
+    struct FrameData {
+        index: u32,
+        idx: Option<Vec<u8>>,
+        rgb: Vec<u8>,
+    }
+
+    /// A frame of one repeated index and one repeated RGB value.
+    fn flat(index: u32, value: u8, pixels: usize) -> FrameData {
+        FrameData {
+            index,
+            idx: Some(vec![value; pixels]),
+            rgb: vec![value; pixels * 3],
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("xtask-compare-test-{name}"));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// Write a capture in the capture manifest's shape: the recipe fields, one
+    /// geometry for the whole capture, palette entries per frame.
+    fn write_reference_capture(dir: &Path, geometry: (u16, u16), frames: &[FrameData]) {
+        fs::create_dir_all(dir).unwrap();
+        let entries: Vec<_> = frames.iter().map(|f| frame_entry(dir, f, None)).collect();
+        let manifest = serde_json::json!({
+            "version": 1,
+            "oracle": "dosbox-automation test",
+            "upstream_commit": "071a82e",
+            "exe": "SECOND.EXE",
+            "arguments": ["2"],
+            "cycles": 25000,
+            "width": geometry.0,
+            "height": geometry.1,
+            "frame_origin": "boot",
+            "skip_boot_frames": 300,
+            "keys": ["KBD_left", "KBD_enter"],
+            "frames": entries,
+        });
+        write_manifest(dir, manifest);
+    }
+
+    /// Write a capture in the port's dump shape: the first frame's geometry at
+    /// the top level, each frame's own geometry inside it.
+    fn write_rendered_capture(dir: &Path, part: &str, frames: &[(FrameData, (u16, u16))]) {
+        fs::create_dir_all(dir).unwrap();
+        let entries: Vec<_> = frames
+            .iter()
+            .map(|(f, geometry)| frame_entry(dir, f, Some(*geometry)))
+            .collect();
+        let first = frames.first().map(|(_, g)| *g).unwrap_or((0, 0));
+        let manifest = serde_json::json!({
+            "version": 1,
+            "part": part,
+            "width": first.0,
+            "height": first.1,
+            "frames": entries,
+        });
+        write_manifest(dir, manifest);
+    }
+
+    fn frame_entry(dir: &Path, frame: &FrameData, geometry: Option<(u16, u16)>) -> serde_json::Value {
+        let name = format!("frame_{:06}", frame.index);
+        let rgb = format!("{name}.rgb");
+        fs::write(dir.join(&rgb), &frame.rgb).unwrap();
+        let mut entry = serde_json::json!({ "index": frame.index, "rgb": rgb });
+        if let Some(bytes) = &frame.idx {
+            let idx = format!("{name}.idx");
+            fs::write(dir.join(&idx), bytes).unwrap();
+            entry["idx"] = serde_json::Value::String(idx);
+        }
+        match geometry {
+            Some((width, height)) => {
+                entry["width"] = width.into();
+                entry["height"] = height.into();
+            }
+            // The capture manifest records the palette the frame uses.
+            None => entry["palette"] = serde_json::json!({ "0": [0, 0, 0] }),
+        }
+        entry
+    }
+
+    fn write_manifest(dir: &Path, manifest: serde_json::Value) {
+        let json = serde_json::to_string_pretty(&manifest).unwrap();
+        fs::write(dir.join("manifest.json"), format!("{json}\n")).unwrap();
+    }
+
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// Read a PNG back: `(width, height, RGB8 pixels)`.
+    fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
+        let decoder = png::Decoder::new(fs::File::open(path).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buffer = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buffer).unwrap();
+        buffer.truncate(info.buffer_size());
+        (info.width, info.height, buffer)
+    }
+}

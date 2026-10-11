@@ -1,11 +1,15 @@
 //! Repository tooling.
 //!
-//! The first subcommand is `reference capture`: drive the emulated original,
-//! write keyframes under `reference/`, and record what produced them. The
-//! oracle sits behind a trait, so an unusable emulator degrades to a
-//! documented alternative instead of blocking a phase (`docs/decisions.md`
-//! D10). The API shapes are D14.
+//! `reference capture` drives the emulated original, writes keyframes under
+//! `reference/`, and records what produced them. The oracle sits behind a
+//! trait, so an unusable emulator degrades to a documented alternative instead
+//! of blocking a phase (`docs/decisions.md` D10). The API shapes are D14.
+//!
+//! `compare` is the other half: it diffs the port's frames against those
+//! captures and reports the difference per frame, exiting non-zero when any
+//! frame differs so a phase's exit criteria can be checked by a script.
 
+mod compare;
 mod oracle;
 mod reference;
 
@@ -31,6 +35,26 @@ enum Command {
     Reference {
         #[command(subcommand)]
         command: ReferenceCommand,
+    },
+    /// Diff frames against a reference capture and report how far apart they
+    /// are. Exit code 0 when every frame is identical, 1 when any differs.
+    Compare {
+        /// The capture to measure against: a directory holding `manifest.json`,
+        /// or one holding capture subdirectories (as `reference/check_a` does).
+        #[arg(long)]
+        reference: PathBuf,
+        /// Where the frames to measure came from, in the same shape. Defaults
+        /// to `--reference`, which compares the reference with itself.
+        #[arg(long)]
+        rendered: Option<PathBuf>,
+        /// A command line to run first, through `sh -c`, that writes the
+        /// rendered frames. Needs `--rendered`.
+        #[arg(long = "run")]
+        run: Option<String>,
+        /// Where `report.json` and the diff images go. Defaults to
+        /// `--reference`; a tree writes one report per capture, by name.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -72,18 +96,33 @@ enum ReferenceCommand {
 
 fn main() -> ExitCode {
     match run(Cli::parse()) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(message) => {
             eprintln!("error: {message}");
-            ExitCode::FAILURE
+            // Exit code 2 is "could not tell": `compare` owns 0 (identical)
+            // and 1 (different), and a script must be able to tell a measured
+            // difference from a comparison that never ran.
+            ExitCode::from(2)
         }
     }
 }
 
-fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let Command::Reference {
-        command:
-            ReferenceCommand::Capture {
+fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    match cli.command {
+        Command::Reference {
+            command:
+                ReferenceCommand::Capture {
+                    exe,
+                    cwd,
+                    arguments,
+                    cycles,
+                    frames,
+                    out,
+                    skip_boot_frames,
+                    keys,
+                },
+        } => {
+            let options = CaptureOptions {
                 exe,
                 cwd,
                 arguments,
@@ -91,45 +130,48 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 frames,
                 out,
                 skip_boot_frames,
-                keys,
-            },
-    } = cli.command;
-    let options = CaptureOptions {
-        exe,
-        cwd,
-        arguments,
-        cycles,
-        frames,
-        out,
-        skip_boot_frames,
-        keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
-    };
-    // Refuse what cannot be reproduced before starting anything.
-    reference::validate_options(&options)?;
+                keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
+            };
+            // Refuse what cannot be reproduced before starting anything.
+            reference::validate_options(&options)?;
 
-    let mut oracle = DosboxOracle::spawn(options.cycles, &options.cwd)?;
-    capture(&mut oracle, &options)?;
-    oracle.shutdown()?;
+            let mut oracle = DosboxOracle::spawn(options.cycles, &options.cwd)?;
+            capture(&mut oracle, &options)?;
+            oracle.shutdown()?;
 
-    // Print what Task 13 will read, not what was in memory: re-read the file
-    // that was just written.
-    let written =
-        CaptureManifest::from_json(&std::fs::read_to_string(options.out.join("manifest.json"))?)?;
-    println!(
-        "captured {} frame(s) of {}x{} at {} cycles/ms into {} (oracle {}, origin {})",
-        written.frames.len(),
-        written.width,
-        written.height,
-        written.cycles,
-        options.out.display(),
-        written.oracle,
-        written.frame_origin,
-    );
-    for frame in &written.frames {
-        match &frame.idx {
-            Some(idx) => println!("  frame {}: {idx}, {}", frame.index, frame.rgb),
-            None => println!("  frame {}: {} (rgb only)", frame.index, frame.rgb),
+            // Print what Task 13 will read, not what was in memory: re-read
+            // the file that was just written.
+            let written = CaptureManifest::from_json(&std::fs::read_to_string(
+                options.out.join("manifest.json"),
+            )?)?;
+            println!(
+                "captured {} frame(s) of {}x{} at {} cycles/ms into {} (oracle {}, origin {})",
+                written.frames.len(),
+                written.width,
+                written.height,
+                written.cycles,
+                options.out.display(),
+                written.oracle,
+                written.frame_origin,
+            );
+            for frame in &written.frames {
+                match &frame.idx {
+                    Some(idx) => println!("  frame {}: {idx}, {}", frame.index, frame.rgb),
+                    None => println!("  frame {}: {} (rgb only)", frame.index, frame.rgb),
+                }
+            }
+            Ok(ExitCode::SUCCESS)
         }
+        Command::Compare {
+            reference,
+            rendered,
+            run,
+            out,
+        } => Ok(compare::command(
+            &reference,
+            rendered.as_deref(),
+            run.as_deref(),
+            out.as_deref(),
+        )?),
     }
-    Ok(())
 }
