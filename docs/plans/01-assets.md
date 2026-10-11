@@ -1046,13 +1046,28 @@ first, then captures everything against it.
    (`AUTOTYPE left enter` with `-w`/`-p`), which removes the host round-trips from the boot
    entirely. D14:526-529 names this as "would remove the input round-trips".
 2. **One `input/sequence`.** Send `SECOND 2\n`, then `KBD_left`, then `KBD_enter` as a *single*
-   sequence with absolute `t` (ms on the sequence timeline) — the emulator's own timeline decides
-   when each lands, so the host's response time stops mattering.
+   sequence, so the host stops being in the loop between the steps.
+
+   **Corrected before execution — this route is weaker than it first looked, and the correction is
+   measured, not reasoned.** The plan originally said "absolute `t` (ms on the sequence timeline)",
+   as if a sequence could be pinned to the emulator's own clock from process start. It cannot:
+   `webserver/input.cpp:288-320` re-bases *every* frame-based sequence so its first event is frame 0
+   **relative to the call**, and `:274` schedules a PIC-based one at `PIC_FullIndex()` **plus** its
+   `t`. Both anchors are therefore "when the host posted", which is the very thing that jitters.
+   Route 2 still removes the inter-step round-trips (the `wait_for_text` polls and the separate
+   POSTs), so it is worth measuring — but it cannot remove the anchor, and route 1 is the one that
+   removes the host from the boot entirely: `[autoexec]` commands run *in the guest*, and `AUTOTYPE`
+   schedules its keys through `MAPPER_AutoType` → `PIC_AddEvent` (`gui/mapper.cpp:1220-1244`) on the
+   emulated clock — the same clock the demo animates on, which is what makes a keystroke land at a
+   fixed demo position rather than a fixed host instant.
 
 **Files:**
 - Modify: `xtask/src/oracle/dosbox.rs` (whichever route wins), `xtask/src/reference.rs`
   (`CaptureOptions` gains the recipe), `docs/decisions.md` (a new D17 — the measured outcome,
   either way)
+- Modify **only if step 5's index check says the recipe moved what frame 400 means**:
+  `reference/check_a/` (re-captured). The Files list names it so that step 6's `git add … reference`
+  is not staging an unexplained change.
 
 **Interfaces:**
 - Produces: a boot that repeats, and the `CaptureOptions`/CLI surface that expresses it.
@@ -1126,6 +1141,33 @@ Capture a coarse sweep — a dozen or so indices spanning a few seconds from a `
 indices hold the logo fading in, the logo held, and the first frames of GLENZ. This is the discovery
 procedure every later capture task repeats; write it in `reference-indices.md` so the next person
 does not reinvent it.
+
+**Two corrections before this step is run.**
+
+*The sweep writes to `out/`, never into `reference/`.* It is discovery, not a reference: the frames
+it produces are thrown away once the indices are read off the sheet. This also means the next
+paragraph costs nothing.
+
+*A sweep that spans a part boundary will be **refused**, and that refusal is the discovery.* Step 1
+pins the mixed-geometry refusal, and a sweep from BEGLOGO into GLENZ crosses 320×400 Mode X into
+320×200 chain-4 — so `capture` stops at the first GLENZ index with `GeometryChanged`. That is not an
+obstacle to sweep around; it is how the boundary is found: the change lies between the last index the
+sweep captured and the one it refused. Sweep ascending, read the refusal, then narrow. Reference
+captures are then one geometry each into `reference/parts/` — which is exactly what step 3 does.
+
+- [ ] **Step 2b: Measure whether the pinned cycles change what an index shows**
+
+`reference/check_a/` was captured at `--cycles 25000`; this task captures at `30000`. Before two
+cycle conventions share the tree, settle whether they mean the same screen at the same boot index:
+capture one held index (BEGLOGO's logo-held frame is ideal — it holds still) at `25000` and at
+`30000` and `cargo xtask compare` the two. Write the result in the index table's method section.
+
+Expected: **identical** — the counter counts emulator-rendered frames, and one frame is one emulated
+vertical refresh whatever the cycles, so the cycles should change how long a capture takes in wall
+time and nothing about what it contains. If it is *not* identical, that is a bigger finding than this
+task: it means a boot index is only meaningful next to the cycles that produced it, and
+`reference/check_a/` cannot be compared against any B3+ capture without a re-capture. Either way the
+number goes in the table, because every later phase depends on the answer.
 
 - [ ] **Step 3: Capture BEGLOGO's keyframes**
 
@@ -1208,7 +1250,10 @@ non-looping case and says so.
 in `SECOND.EXE`'s pack manifest at all — each has its own EXE in the tree (`GRID/DOLINE.EXE`,
 `HARD/B.EXE`, `TWIST/DOL.EXE`), so they are not reachable through the `SECOND n` command line this
 part uses. Their references need a different boot and belong to the phase that ports them. "All
-parts" in this phase's exit criterion means the 20 numbered parts plus the hidden one.
+parts" in this phase's exit criterion means the 20 slots of `docs/fidelity/part-sequence.md` §1 — the
+19 parts the sequence runs (slots 1–16 and 18–20) plus DDSTARS (slot 17, the hidden one). **Twenty
+references, not twenty-one:** the spec's table numbers 20 slots and slot 17 *is* the hidden part, so
+there is no 21st part to capture. B2–B5's lists total exactly 20 (1 + 7 + 8 + 4).
 
 ---
 
@@ -1222,6 +1267,12 @@ parts" in this phase's exit criterion means the 20 numbered parts plus the hidde
 
 The B2–B5 checks prove reproducibility within a session. This one probes the weaker claim — that a
 capture still means the same thing later. Any part that fails gets the §8.4 treatment.
+
+**Ruling: if the phase does not span days, this step is recorded as not performed, not skipped
+silently.** It cannot be run inside one session, and pretending otherwise would put a claim in the
+table that nothing measured. Do it if the phase genuinely spans; otherwise the row says so and
+names why, which is the same standard the rest of the phase is held to. A part that fails when it
+*is* run gets the §8.4 treatment.
 
 - [ ] **Step 2: Write the policy down** in `reference-indices.md`: what a capture index means, that
   it is only valid under the B1 recipe with the pinned cycles, and that a part which cannot be
@@ -1261,4 +1312,4 @@ Exit criteria from spec §10, with the evidence each task leaves:
 | Every needed asset decodes | `cargo xtask assets verify --decode` exit 0 |
 | …and matches the source art | cross-format tests (A2/A3) plus the contact sheets and the recorded look (A8) |
 | Provenance file complete | `cargo xtask assets verify --tree` exit 0 against `assets/PROVENANCE.md` |
-| References captured for all parts | `reference/parts/<name>/` for all 20 numbered parts plus the hidden one, one row each in `docs/fidelity/reference-indices.md`, each with a re-capture comparison at exit 0 |
+| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each with a re-capture comparison at exit 0 |
