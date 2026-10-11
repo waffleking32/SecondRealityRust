@@ -100,3 +100,40 @@ decodes are ported from `VFLI.C:161-172` and `:203-246` as written, including
 rather than the format's line pairing. No file in either tree carries either chunk
 type (`PRAX4.FLI`'s histogram is `0x0B:1 0x0C:41 0x0F:1`), so those two paths are
 cited from the authority and unmeasured, which `sr_assets::anim`'s module docs say.
+
+## A4 — Two FLI decoding choices where the port follows the format rather than VFLI.C's own reading
+
+**Part:** PAM (`PAM/PRAX4.FLI`), Phase 4. Both are choices about what a decode *is*, not about
+malformed input; A3 covers the malformed-input paths.
+
+**Original:** two places where `PAM/VFLI.C` reads a valid file in a narrower way than the format
+allows, and where the tree's one file makes the two readings identical:
+
+1. **Which palette entries a colour chunk lands in.** `VFLI.C:157` sets the DAC index from the
+   chunk's `first` field (`outportb(0x3c8,a)`) but `:158` stores the same payload into its own
+   `palette[]` array **from index 0**, never offset by `first` — and `0x0004` does the same pair
+   at `:169`/`:170`. The array is what `:47-52` dumps as `pal.pal` for `PAM/ANIM.C` to read back
+   (`:19-21`), so on a file whose `first` is not 0, the palette `VFLI.C` saves would place the
+   chunk's colours at entries 0..count−1 while the screen shows them at first..first+count−1.
+2. **The canvas geometry.** `VFLI.C` hardcodes the stride 320 (`:183`, `:218`, `:254`) and the
+   canvas end 64,000 (`:184`, `:219`, `:256`), so a FLI of any other shape is decoded as if it
+   were 320 wide: each decoded row advances 320 bytes, whatever the header says, and the picture
+   shears.
+
+**Port:** a colour chunk's range is applied **at `first`**, which is the DAC's reading and what
+the screen shows, and the canvas is the header's width × height, as in every other decoder in
+`sr_assets` (with the engine's area rule).
+
+**Why:** with `first` read as the DAC reads it, the palette a frame is returned with is the
+palette the part displayed, which is the only thing the port needs it for — `VFLI.C`'s own array
+is a dump buffer for a second tool, not a picture. And the geometry is the file's own declaration;
+`VFLI.C`'s 320 is a limitation of the tool that converted this one animation, not a property of
+the format, so shearing a differently-shaped file onto a 320-wide canvas would be reproducing a
+conversion bug rather than the demo.
+
+**Measured difference:** **zero on the curated tree**, for both. `PRAX4.FLI`'s one colour chunk
+carries `first` 0 and 256 entries, so the port's range and `VFLI.C`'s from-0 store are the same
+entries — measured by reading the chunk's two big-endian words at its body (`01 00 00 00`, offset
+150) and by the palette test's equality with `PAM/PAL.PAL` entry for entry. And the file's header
+declares 320×200 at offsets 8 and 10, so the header geometry and the hardcoded one are the same
+numbers; the tree holds exactly one FLI, so no other shape exists to differ on.

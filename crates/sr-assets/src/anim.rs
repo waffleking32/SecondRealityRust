@@ -54,6 +54,8 @@
 //!   The DAC is what the demo shows and what a palette is, so this decoder
 //!   applies the range at `first`; `PRAX4.FLI`'s `first` is 0, where the two
 //!   readings are the same file. `VFLI.C`'s own store is its `pal.pal` dump.
+//!   This and the geometry note below are register entry A4 in
+//!   `docs/fidelity/APPROXIMATIONS.md`, with a measured difference of zero.
 //!
 //! The initial canvas is zeros. `VFLI.C`'s VRAM starts as whatever DOS left
 //! (`:6`) and its `lookup` table is the identity (`:39`), and `PRAX4.FLI` does
@@ -133,6 +135,11 @@
 //! resets it. No file in either tree carries one, which is why the choice is
 //! visible only here.
 //!
+//! The refusals above and this one shape are the register's entry A3 in
+//! `docs/fidelity/APPROXIMATIONS.md` — every place the port substitutes defined
+//! behaviour for `VFLI.C`'s undefined — each with its measured difference, which
+//! is zero: no shipped file reaches any of them.
+//!
 //! # A note on the geometry
 //!
 //! The canvas is the header's width and height, as elsewhere in the crate —
@@ -140,7 +147,7 @@
 //! unused pixel counter at `:98`) and
 //! 64,000 as the end, which is the same decode for `PRAX4.FLI`, the tree's only
 //! FLI; a file of another shape would be sheared onto a 320-wide canvas by
-//! `VFLI.C` and is decoded at its own geometry here.
+//! `VFLI.C` and is decoded at its own geometry here. Register entry A4.
 
 use sr_engine::{Palette, Surface};
 
@@ -601,9 +608,15 @@ pub(crate) fn decode_ani(bytes: &[u8]) -> Result<Vec<Image>, AssetError> {
                 cursor += run as usize;
             } else {
                 // A skip writes nothing: the pixels the frame before left there
-                // are the frame (ASMYT.ASM:46-48's `sub di, ax`).
-                fill_ani(&mut canvas, cursor, -run as usize, None)?;
-                cursor += -run as usize;
+                // are the frame (ASMYT.ASM:46-48's `sub di, ax`). `unsigned_abs`
+                // and not `-run`: as an `i8` the byte is negative, and `0x80` is
+                // `i8::MIN`, which negating overflows — the one run byte that
+                // panics where every other one would not. `ANIM.C` cannot write
+                // it (runs are capped at 120, `:48`, `:54`), and malformed input
+                // must be an error here, never a panic (`crate`'s promise).
+                let skip = run.unsigned_abs() as usize;
+                fill_ani(&mut canvas, cursor, skip, None)?;
+                cursor += skip;
             }
         }
         canvases.push(canvas);

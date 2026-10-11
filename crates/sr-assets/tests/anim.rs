@@ -50,6 +50,13 @@ fn word(bytes: &[u8], at: usize) -> u16 {
 /// FNV-1a over a frame's 64,000 pixels: one number that pins the whole picture,
 /// so "the first frame is stable" is checked against all of it and not against
 /// the corners.
+///
+/// **A regression pin, not evidence.** The digest, the pixel sum and the non-zero
+/// count in the test below move if the decode changes, which is what they are
+/// for; they cannot show the decode is *right*, because they came from the same
+/// decode. The evidence is elsewhere: the `.ANI` cross-check (two readers sharing
+/// no code agreeing on all 42 frames) and the comparisons against the files' own
+/// bytes (the palette against `PAL.PAL`, the fragments against `OUT.ANI`).
 fn fnv1a64(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
         (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
@@ -66,9 +73,20 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 /// the walk finds 42, and the last frame repeats the first, which is what a
 /// looping animation's writer would leave behind. Both numbers are pinned here
 /// so that "41" and "42" can never quietly swap.
+///
+/// The magic is pinned to the byte for the same reason: `sniff` accepts `0xAF11`
+/// and `0xAF12`, so this file drifting from one to the other would change nothing
+/// anywhere — and which one it carries is a measurement this task had to make
+/// (`docs/fidelity/asset-inventory.md` §E.5; the brief's step 3 said `0xAF12`),
+/// so it gets an assertion rather than a sentence.
 #[test]
 fn the_fli_decodes_to_the_frames_its_own_record_walk_finds() {
     let fli = asset("PAM/PRAX4.FLI");
+    assert_eq!(
+        &fli[4..6],
+        &[0x11, 0xAF],
+        "the stored magic is 0xAF11 — the classic FLI, not 0xAF12"
+    );
     assert_eq!(
         sniff(&fli),
         Some(Format::Fli),
@@ -96,6 +114,9 @@ fn the_fli_decodes_to_the_frames_its_own_record_walk_finds() {
     );
     assert_eq!(first.iter().map(|&b| b as u64).sum::<u64>(), 1_378_265);
     assert_eq!(fnv1a64(first), 0xd527_b14f_0319_fd6a);
+    // The three numbers above are regression pins (see `fnv1a64`): they came from
+    // this decode, so they catch a change, and the cross-checks below are what
+    // says the decode is the file's.
 
     assert_eq!(
         frames[41].pixels(),
@@ -288,7 +309,7 @@ fn walk_records(ani: &[u8], base: impl Fn(&[Vec<u8>]) -> Vec<u8>) -> Vec<Vec<u8>
                 cursor += run as usize;
                 p += 1;
             } else {
-                cursor += -run as usize;
+                cursor += run.unsigned_abs() as usize;
             }
         }
         frames.push(canvas);
@@ -467,10 +488,19 @@ fn the_five_in_fragments_are_the_ani_as_tasm_db_source() {
 }
 
 /// A short `.ANI` is refused at the byte it stops, in the same shape as the FLI:
-/// a run with no colour byte, and a frame with no terminator. A frame's records
-/// end where `ANIM.C:59` wrote the `0x00`; nothing else bounds them.
+/// a run with no colour byte, a skip whose frame runs out before its terminator,
+/// and a frame with no terminator. A frame's records end where `ANIM.C:59` wrote
+/// the `0x00`; nothing else bounds them.
+///
+/// `0x80` is the one run byte whose sign is a trap: as an `i8` it is `-128`, the
+/// minimum, so negating it overflows where every other byte does not. It cannot
+/// come out of `ANIM.C` — runs are capped at 120 either way (`:48`, `:54`), so
+/// `0x80` is 48 past any byte that encoder writes — which is exactly why it needs
+/// the assertion rather than an argument. Here it is a skip of 128 pixels with no
+/// terminator after it, so the refusal must be an `AssetError` and not a panic.
 #[rstest::rstest]
 #[case(&[0x7F], 2, 1)]
+#[case(&[0x80], 2, 1)]
 #[case(&[0x05, 0x09, 0x03], 4, 3)]
 fn a_short_ani_is_refused_at_the_byte_it_stops(
     #[case] bytes: &[u8],
@@ -530,6 +560,46 @@ fn no_ani_prefix_panics_or_produces_a_frame_the_whole_file_does_not() {
         load_frames(&[], Format::Ani).unwrap().is_empty(),
         "no records, no frames"
     );
+}
+
+/// Byte strings no file ever produced, through both decoders, asserting only that
+/// they come back at all: the crate's promise is that malformed input is an
+/// `AssetError`, and "an `AssetError`, never a panic" is a claim about *all*
+/// input, not about the input the tree happens to hold.
+///
+/// This is the test the run byte `0x80` needed. As an `i8` it is `-128`, the
+/// minimum, so the one obvious way to write "skip this many" — `-run` — overflows
+/// exactly there and nowhere else; the real file cannot carry it (runs are capped
+/// at 120) and the prefix sweeps only walk real bytes, so nothing else here would
+/// have found it. `0x80` is also not rare in random input, which is why a fuzz
+/// case of a few hundred strings is the cheap way to keep that class covered.
+#[test]
+fn random_byte_strings_are_refused_rather_than_panicked_on() {
+    // xorshift64, fixed seed: reproducible, and no dependency for a test helper.
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for case in 0..512 {
+        let len = (next() % 512) as usize;
+        let mut bytes = Vec::with_capacity(len);
+        while bytes.len() < len {
+            bytes.extend_from_slice(&next().to_le_bytes());
+        }
+        bytes.truncate(len);
+        if case % 8 == 0 {
+            // Bias some cases towards the record bytes the decoders dispatch on.
+            for byte in bytes.iter_mut() {
+                *byte = [0x00u8, 0x01, 0x7F, 0x80, 0x88, 0xFF][(*byte as usize) % 6];
+            }
+        }
+        let _ = load_frames(&bytes, Format::Ani);
+        let _ = load_frames(&bytes, Format::Fli);
+    }
 }
 
 // -------------------------------------------------------------------------------------------
