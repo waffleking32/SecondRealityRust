@@ -32,6 +32,16 @@ pub const REFERENCE_ROOT: &str = "reference";
 /// capture waits for this text before sending `--keys` (D14).
 pub const SETUP_SCREEN_TEXT: &str = "Soundcard";
 
+/// How long `AUTOTYPE` waits before its first key, in seconds.
+///
+/// Every step it waits for is on the emulated clock, so this only has to be
+/// after the setup screen is up — the screen then waits for an answer, and a
+/// longer wait costs wall-clock time rather than determinism. Measured under
+/// `--boot autoexec`: the screen's text is up at boot frame 16 (0.23 s), so
+/// five seconds leaves about 4.8 s of margin and is what D17's captures were
+/// taken with.
+pub const AUTOTYPE_WAIT_SECONDS: f64 = 5.0;
+
 const MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug)]
@@ -82,6 +92,29 @@ impl From<OracleError> for CaptureError {
     }
 }
 
+/// How the guest is taken from the emulator's boot to the demo.
+///
+/// A boot index means a screen only as precisely as the boot repeats, so this
+/// is part of the capture recipe exactly like the cycles are, and the manifest
+/// records it (D17).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum BootRecipe {
+    /// Phase 0's recipe: the host types `MOUNT`, `C:` and the program line
+    /// over the API and answers the setup screen with a frame-scheduled key
+    /// sequence anchored to when the host posted it. Two runs put the same
+    /// screen 43-45 frames apart, because every step waits on the host (D15).
+    #[default]
+    Typed,
+    /// The emulator's own shell runs the recipe from its `[autoexec]` section
+    /// and `AUTOTYPE` answers the setup screen from the PIC clock, so the
+    /// whole boot is a function of the emulated clock the demo animates on
+    /// and the same boot frame is the same screen in every run (D17).
+    Autoexec,
+}
+
 /// Everything a capture needs, and everything the manifest records about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureOptions {
@@ -98,8 +131,14 @@ pub struct CaptureOptions {
     pub out: PathBuf,
     /// Frames skipped from that same origin before the capture begins.
     pub skip_boot_frames: u64,
-    /// `KBD_*` key names sent in order once the setup screen appears.
+    /// `KBD_*` key names sent in order once the setup screen appears. Under
+    /// [`BootRecipe::Autoexec`] they become `AUTOTYPE` buttons instead, named
+    /// the way the mapper names them (`KBD_left` -> `left`).
     pub keys: Vec<String>,
+    /// How the guest reaches the demo. The default is what every capture
+    /// written before this field existed used, so their indices keep meaning
+    /// what they meant when they were taken (D17).
+    pub boot: BootRecipe,
     /// Where to write one PNG of the frames this capture takes — the sheet a
     /// person looks at to see *what* was captured. `None` writes none.
     ///
@@ -112,6 +151,62 @@ pub struct CaptureOptions {
 /// `--keys "KBD_left KBD_enter"`: whitespace-separated key names, in order.
 pub fn keys_from_script(script: &str) -> Vec<String> {
     script.split_whitespace().map(str::to_owned).collect()
+}
+
+impl CaptureOptions {
+    /// The `[autoexec]` lines the guest's own shell has to run for this
+    /// capture, or an empty list for the typed recipe.
+    ///
+    /// The mount names the absolute directory for the same reason `spawn`
+    /// absolutises the allow-list: the guest resolves a relative host path
+    /// against the emulator's own working directory, not ours.
+    pub fn autoexec_lines(&self) -> Result<Vec<String>, CaptureError> {
+        if self.boot != BootRecipe::Autoexec {
+            return Ok(Vec::new());
+        }
+        let cwd = self.cwd.canonicalize().map_err(|e| CaptureError::Io {
+            path: self.cwd.clone(),
+            message: e.to_string(),
+        })?;
+        autoexec_lines(&cwd, &self.exe, &self.arguments, &self.keys)
+    }
+}
+
+/// The recipe the guest runs itself, as the shell will read it: mount the
+/// reference read-only, then `AUTOTYPE` the setup-screen answer, then run the
+/// program (D17).
+///
+/// `AUTOTYPE` comes before the program line because the program does not
+/// return: it schedules its key presses on the PIC clock and exits, and the
+/// shell runs the demo underneath them. The wait it is given is
+/// [`AUTOTYPE_WAIT_SECONDS`].
+pub fn autoexec_lines(
+    cwd: &Path,
+    exe: &Path,
+    arguments: &[String],
+    keys: &[String],
+) -> Result<Vec<String>, CaptureError> {
+    let program = crate::oracle::guest_command_line(exe, arguments).ok_or_else(|| {
+        CaptureError::Options(format!("--exe {} has no file name to run", exe.display()))
+    })?;
+    let mut lines = vec![format!("MOUNT C -RO {}", cwd.display()), "C:".to_owned()];
+    if !keys.is_empty() {
+        let buttons: Vec<&str> = keys.iter().map(|key| autotype_name(key)).collect();
+        lines.push(format!(
+            "AUTOTYPE -w {AUTOTYPE_WAIT_SECONDS} {}",
+            buttons.join(" ")
+        ));
+    }
+    lines.push(program);
+    Ok(lines)
+}
+
+/// `AUTOTYPE` names buttons the way the mapper does: `left`, `enter`, `kp_8`
+/// (`gui/mapper.cpp`), where `input/sequence` names the same keys by their
+/// `KBD_KEYS` enumerators. The capture's surface stays the `KBD_*` spelling
+/// `reference/check_a`'s manifest records, so the prefix is all that differs.
+fn autotype_name(key: &str) -> &str {
+    key.strip_prefix("KBD_").unwrap_or(key)
 }
 
 /// `frame_000100` — six digits, so a directory listing sorts by frame.
@@ -158,6 +253,12 @@ pub struct CaptureManifest {
     /// there, and `skip_boot_frames` says how much of the boot was skipped.
     pub frame_origin: String,
     pub skip_boot_frames: u64,
+    /// How the guest was taken to the demo. A manifest written before D17 does
+    /// not carry it and is the typed recipe, which is what `default` means —
+    /// and it has to be in the manifest at all because the same boot index is
+    /// a different screen under a different recipe.
+    #[serde(default)]
+    pub boot: BootRecipe,
     pub keys: Vec<String>,
     pub frames: Vec<FrameRef>,
 }
@@ -264,8 +365,10 @@ pub fn capture(
     oracle.set_cycles(options.cycles)?;
 
     oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
-    if !options.keys.is_empty() {
+    if options.boot == BootRecipe::Typed && !options.keys.is_empty() {
         // The setup screen has to be answered before the demo draws anything.
+        // Under the `Autoexec` recipe the guest answers it itself, from the
+        // `[autoexec]` section this run was started with (D17).
         oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
         oracle.send_keys(&options.keys.join(" "))?;
     }
@@ -321,6 +424,7 @@ pub fn capture(
         height,
         frame_origin: FRAME_ORIGIN.to_owned(),
         skip_boot_frames: options.skip_boot_frames,
+        boot: options.boot,
         keys: options.keys.clone(),
         frames,
     };
@@ -463,6 +567,7 @@ mod tests {
             out: out.to_path_buf(),
             skip_boot_frames: 5000,
             keys: keys_from_script("KBD_left KBD_enter"),
+            boot: BootRecipe::default(),
             sheet: None,
         }
     }
@@ -486,6 +591,7 @@ mod tests {
             height: 200,
             frame_origin: "boot".into(),
             skip_boot_frames: 5000,
+            boot: BootRecipe::Autoexec,
             keys: vec!["KBD_left".into(), "KBD_enter".into()],
             frames: vec![FrameRef {
                 index: 100,
@@ -517,6 +623,7 @@ mod tests {
             height: 400,
             frame_origin: "boot".into(),
             skip_boot_frames: 5000,
+            boot: BootRecipe::Autoexec,
             keys: vec!["KBD_left".into(), "KBD_enter".into()],
             frames: vec![FrameRef {
                 index: 100,
@@ -527,14 +634,136 @@ mod tests {
         })
         .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        // A capture is only reproducible with the cycles it was pinned to and
-        // the key sequence that answered the setup screen (D14).
+        // A capture is only reproducible with the cycles it was pinned to, the
+        // boot recipe that reached the demo, and the key sequence that
+        // answered the setup screen (D14, D17).
         assert_eq!(value["cycles"], 25000);
         assert_eq!(value["frame_origin"], "boot");
         assert_eq!(value["skip_boot_frames"], 5000);
+        assert_eq!(value["boot"], "autoexec");
         assert_eq!(value["keys"][1], "KBD_enter");
         assert_eq!(value["width"], 320);
         assert_eq!(value["height"], 400);
+    }
+
+    #[test]
+    fn a_manifest_written_before_the_boot_recipe_existed_means_the_typed_one() {
+        // reference/check_a was captured over the API-typed boot, and its
+        // manifest has no `boot` field; reading it must not invent a recipe it
+        // was not taken with.
+        let json = r#"{
+            "version": 1,
+            "oracle": "dosbox-automation 0.85.1 (6d100)",
+            "upstream_commit": "071a82e",
+            "exe": "SECOND.EXE",
+            "arguments": ["2"],
+            "cycles": 25000,
+            "width": 320,
+            "height": 400,
+            "frame_origin": "boot",
+            "skip_boot_frames": 300,
+            "keys": ["KBD_left", "KBD_enter"],
+            "frames": [{"index": 400, "idx": "frame_000400.idx", "rgb": "frame_000400.rgb"}]
+        }"#;
+        let manifest = CaptureManifest::from_json(json).unwrap();
+        assert_eq!(manifest.boot, BootRecipe::Typed);
+    }
+
+    #[test]
+    fn the_autoexec_recipe_runs_the_whole_boot_in_the_guest() {
+        // D17's route: every line is a guest command, and AUTOTYPE must come
+        // before the program because the program does not return — it is the
+        // only line that can answer the setup screen the program draws.
+        let cwd = Path::new("/reference/original");
+        let exe = cwd.join("SECOND.EXE");
+        let lines = autoexec_lines(
+            cwd,
+            &exe,
+            &["2".to_owned()],
+            &keys_from_script("KBD_left KBD_enter"),
+        )
+        .unwrap();
+        assert_eq!(
+            lines,
+            vec![
+                "MOUNT C -RO /reference/original".to_owned(),
+                "C:".to_owned(),
+                format!("AUTOTYPE -w {AUTOTYPE_WAIT_SECONDS} left enter"),
+                "SECOND.EXE 2".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_recipe_with_no_keys_leaves_the_setup_screen_alone() {
+        // AUTOTYPE with an empty button list is an error, and a capture that
+        // means to show the setup screen must not have it pressed through.
+        let lines = autoexec_lines(
+            Path::new("/reference/original"),
+            Path::new("/reference/original/SECOND.EXE"),
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            lines,
+            vec![
+                "MOUNT C -RO /reference/original".to_owned(),
+                "C:".to_owned(),
+                "SECOND.EXE".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn autotype_names_are_the_kbd_names_without_the_prefix() {
+        assert_eq!(autotype_name("KBD_left"), "left");
+        assert_eq!(autotype_name("KBD_kp_8"), "kp_8");
+        // A name the mapper already spells is passed through rather than
+        // mangled: the two namespaces only differ by the prefix.
+        assert_eq!(autotype_name("left"), "left");
+    }
+
+    #[test]
+    fn the_typed_recipe_gives_the_guest_nothing_to_run() {
+        let opts = options(vec![5100], Path::new("/tmp/never-written"));
+        assert_eq!(opts.boot, BootRecipe::Typed);
+        assert!(opts.autoexec_lines().unwrap().is_empty());
+
+        // And the autoexec recipe resolves the mount to the same directory the
+        // emulator's allow-list does, which takes an absolute path.
+        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+        opts.boot = BootRecipe::Autoexec;
+        let lines = opts.autoexec_lines().unwrap();
+        assert_eq!(lines[0], format!("MOUNT C -RO {}", opts.cwd.canonicalize().unwrap().display()));
+        assert_eq!(lines.last().unwrap(), "SECOND.EXE 2");
+    }
+
+    #[test]
+    fn the_guest_answers_the_setup_screen_under_the_autoexec_recipe() {
+        // The keys travel in the emulator's config under this recipe, not over
+        // the API: the capture must not wait for the screen and press them
+        // again, because the guest has already answered it on the emulated
+        // clock by the time boot returns (D17).
+        let out = scratch_dir("autoexec-keys");
+        let mut opts = options(vec![5100], &out);
+        opts.boot = BootRecipe::Autoexec;
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        let manifest = capture(&mut oracle, &opts).unwrap();
+        assert_eq!(manifest.boot, BootRecipe::Autoexec);
+        assert!(oracle.waited_for_text.is_empty());
+        assert_eq!(oracle.keys, None);
+        std::fs::remove_dir_all(&out).unwrap();
+
+        // The typed recipe still does both, which is what the contrast the
+        // decision in D17 rests on actually is.
+        let out = scratch_dir("typed-keys");
+        let opts = options(vec![5100], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        capture(&mut oracle, &opts).unwrap();
+        assert_eq!(oracle.waited_for_text, vec![SETUP_SCREEN_TEXT.to_owned()]);
+        assert_eq!(oracle.keys.as_deref(), Some("KBD_left KBD_enter"));
+        std::fs::remove_dir_all(&out).unwrap();
     }
 
     #[test]
@@ -761,6 +990,7 @@ mod tests {
         counter: u64,
         stepped_frames: Vec<u64>,
         keys: Option<String>,
+        waited_for_text: Vec<String>,
         cycles: Option<u32>,
     }
 
@@ -771,6 +1001,7 @@ mod tests {
                 counter: 0,
                 stepped_frames: Vec::new(),
                 keys: None,
+                waited_for_text: Vec::new(),
                 cycles: None,
             }
         }
@@ -806,7 +1037,8 @@ mod tests {
         fn shutdown(&mut self) -> Result<(), OracleError> {
             Ok(())
         }
-        fn wait_for_text(&mut self, _needle: &str, _timeout: Duration) -> Result<(), OracleError> {
+        fn wait_for_text(&mut self, needle: &str, _timeout: Duration) -> Result<(), OracleError> {
+            self.waited_for_text.push(needle.to_owned());
             Ok(())
         }
         fn frame_counter(&mut self) -> Result<u64, OracleError> {

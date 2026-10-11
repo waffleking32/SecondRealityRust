@@ -1304,12 +1304,15 @@ mod tests {
         let title = &captures[1];
         assert_eq!((title.manifest.width, title.manifest.height), (320, 400));
         assert_eq!(title.manifest.frames.len(), 2);
-        assert_eq!(title.manifest.frames[0].index, 400);
+        // Re-captured under the autoexec boot and 30000 cycles (D17): the same
+        // two screens as the typed-recipe capture, at the indices that boot
+        // puts them at.
+        assert_eq!(title.manifest.frames[0].index, 700);
         assert!(title.manifest.frames.iter().all(|f| f.idx.is_some()));
 
         let part = &captures[0];
         assert_eq!((part.manifest.width, part.manifest.height), (320, 200));
-        assert_eq!(part.manifest.frames[0].index, 1100);
+        assert_eq!(part.manifest.frames[0].index, 1350);
     }
 
     // --- helpers ----------------------------------------------------------

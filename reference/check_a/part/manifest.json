@@ -6,20 +6,21 @@
   "arguments": [
     "2"
   ],
-  "cycles": 25000,
+  "cycles": 30000,
   "width": 320,
   "height": 200,
   "frame_origin": "boot",
-  "skip_boot_frames": 1000,
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
   "keys": [
     "KBD_left",
     "KBD_enter"
   ],
   "frames": [
     {
-      "index": 1100,
-      "idx": "frame_001100.idx",
-      "rgb": "frame_001100.rgb",
+      "index": 1350,
+      "idx": "frame_001350.idx",
+      "rgb": "frame_001350.rgb",
       "palette": {
         "0": [
           0,
@@ -64,9 +65,9 @@
       }
     },
     {
-      "index": 1150,
-      "idx": "frame_001150.idx",
-      "rgb": "frame_001150.rgb",
+      "index": 1450,
+      "idx": "frame_001450.idx",
+      "rgb": "frame_001450.rgb",
       "palette": {
         "0": [
           0,

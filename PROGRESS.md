@@ -37,8 +37,10 @@ rather than from reasoning. The phase's human-look evidence is the user's own re
 music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
 magic.
 
-**Part B (references) is the remaining work** — B1 through B6, and B1 is a spike whose outcome gates the
-rest. Phase 1's exit criterion is not met until every part has a reference that re-captures identically.
+**Part B (references) is the remaining work** — B1 through B6. B1 is done and its outcome is D17: the
+boot repeats under `--boot autoexec` (`[autoexec]` + `AUTOTYPE`) with the emulator run silent
+(`mixer_nosound`), and B2–B5 capture under that recipe at `--cycles 30000`. Phase 1's exit criterion is
+not met until every part has a reference that re-captures identically.
 
 Phase 2 is *Shell + easy tier*, whose exit criterion is **BEGLOGO frame-diff-identical** — that is the
 project's central technical risk, and it is answered there, not in Phase 9. Phase 3 (music) has no
@@ -83,6 +85,11 @@ tool's own exit code as the verdict:
 A comparison that cannot run at all (a geometry or frame-count mismatch, a missing
 manifest or frame file) is refused with a legible message and exit code 2, so a script
 can tell "the frames differ" from "the tool could not tell".
+
+Both checks above were re-run after B1 re-captured `reference/check_a` (D17; the same two
+screens at new indices, frames byte-identical to the ones they replace), and the numbers
+are the same: self-comparison `verdict: identical` exit 0, the `SECOND 5` negative
+`verdict: different` exit 1 with title 99.5609% and part 40.7172%.
 
 ## Phase log
 

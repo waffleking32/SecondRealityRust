@@ -27,7 +27,7 @@ use clap::{Parser, Subcommand};
 
 use oracle::dosbox::DosboxOracle;
 use oracle::Oracle;
-use reference::{capture, keys_from_script, CaptureManifest, CaptureOptions};
+use reference::{capture, keys_from_script, BootRecipe, CaptureManifest, CaptureOptions};
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "Repository tooling")]
@@ -134,9 +134,18 @@ enum ReferenceCommand {
         #[arg(long, default_value_t = 0)]
         skip_boot_frames: u64,
         /// Key names sent once the setup screen appears, whitespace
-        /// separated, e.g. "KBD_left KBD_enter".
+        /// separated, e.g. "KBD_left KBD_enter". Under --boot autoexec they
+        /// are the buttons AUTOTYPE presses instead.
         #[arg(long)]
         keys: Option<String>,
+        /// How the guest reaches the demo. `typed` is Phase 0's recipe: the
+        /// host types the mount and the command line over the API and answers
+        /// the setup screen there, so a boot index is the same screen only as
+        /// precisely as the host's timing repeats (D15). `autoexec` has the
+        /// emulator's own shell run the recipe and AUTOTYPE answer the setup
+        /// screen on the emulated clock, which makes the boot repeat (D17).
+        #[arg(long, value_enum, default_value_t = BootRecipe::Typed)]
+        boot: BootRecipe,
         /// Write one PNG of the frames this capture takes, to look at. The
         /// tiles are the frames, in the order they were captured, and their
         /// indices are printed as they are laid out. A path inside the
@@ -174,6 +183,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                     out,
                     skip_boot_frames,
                     keys,
+                    boot,
                     sheet,
                 },
         } => {
@@ -186,12 +196,16 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 out,
                 skip_boot_frames,
                 keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
+                boot,
                 sheet,
             };
-            // Refuse what cannot be reproduced before starting anything.
+            // Refuse what cannot be reproduced before starting anything. The
+            // guest's recipe is built here because the emulator has to be
+            // started with it in its config: `[autoexec]` runs at boot.
+            let autoexec = options.autoexec_lines()?;
             reference::validate_options(&options)?;
 
-            let mut oracle = DosboxOracle::spawn(options.cycles, &options.cwd)?;
+            let mut oracle = DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
             capture(&mut oracle, &options)?;
             oracle.shutdown()?;
 
@@ -201,7 +215,8 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 options.out.join("manifest.json"),
             )?)?;
             println!(
-                "captured {} frame(s) of {}x{} at {} cycles/ms into {} (oracle {}, origin {})",
+                "captured {} frame(s) of {}x{} at {} cycles/ms into {} (oracle {}, origin {}, \
+                 boot {:?})",
                 written.frames.len(),
                 written.width,
                 written.height,
@@ -209,6 +224,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 options.out.display(),
                 written.oracle,
                 written.frame_origin,
+                written.boot,
             );
             for frame in &written.frames {
                 match &frame.idx {

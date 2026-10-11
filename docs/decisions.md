@@ -775,3 +775,94 @@ that a later phase is most likely to trip over:
   sawtooth.** It passes against both. The property is currently guaranteed by the constant
   (`8 + band * 7`) rather than by a test; a strict-increase walk over all eight band boundaries
   would pin it.
+
+## D17 — A boot that repeats, and what still does not (2026-10-11)
+
+B1 asked whether the boot can be made to repeat. It can, and it took two changes rather
+than one: the guest has to run its own boot recipe (route 1), and the emulator has to be
+run silent. With both, the same boot index is the same screen in every run, and captures
+of a screen that moves repeat byte for byte. Measured on
+`dosbox-automation 0.85.1 (6d100)`, `SECOND 2`, 30000 cycles/ms, on a 320×200 part screen
+whose picture changes ~3–7% of its pixels per frame (the vector object turning over its
+checkered floor) — a screen where a one-frame difference is visible.
+
+**What repeats is the boot, and it was measured on the emulator's own clock, not through
+the API.** A Lua script that yields once per frame (`dosbox.wait_frames(1)`) and reports
+`dosbox.output` records the frame the setup menu's text appears on and the first graphics
+frame. Five runs of `--boot autoexec` — three before and two after the silent change —
+gave **menu frame 16 and first graphics frame 404 every time**. The typed recipe gave
+45/46 and 80/81 on an idle host: a frame of jitter at its best, and 43–45 frames under
+load (D15). Route 1 shifts the whole demo timeline later by a fixed amount: measured with
+one audio device on both recipes, the typed recipe's two video-mode changes at frames 83
+and 809 move to 407 and 1133, a pure +324, with the title screen lasting 726 frames in
+both. Under the silent recipe the demo runs on the emulated clock instead, so its own
+title-to-part change lands at frame 1160 — the parts are the same, the clock they run on
+is the emulated one.
+
+**Route 1 is `[autoexec]` + `AUTOTYPE`** (`BootRecipe::Autoexec`, `--boot autoexec`). The
+primary config gains an `[autoexec]` section — `MOUNT C -RO <abs cwd>`, `C:`,
+`AUTOTYPE -w 5 left enter`, `SECOND.EXE 2` — and the emulator's own shell runs it at boot.
+`AUTOTYPE` comes before the program line because the program does not return: it schedules
+its press/release pairs through `MAPPER_AutoType` → `PIC_AddEvent` (`gui/mapper.cpp:1220-1244`)
+on the emulated clock, then exits. Nothing in the boot waits on the host, so nothing in it
+jitters with the host. `--keys "KBD_left KBD_enter"` is unchanged as the flag's surface;
+under this recipe the names lose only their `KBD_` prefix, because that is the only
+difference between the `KBD_KEYS` enumerators and the mapper's button names
+(`KBD_left` → `left`, `left` → `left`).
+
+**Silent is part of the recipe, and it is not the boot's doing.** With a real audio device
+the mixer follows the host's audio clock and the demo's music and animation drift against
+the frame counter *continuously*: two route-1 captures at indices 2125/2250/2400 differed
+by 14.28/35.26/24.56% of pixels (max channel delta 142/158/162). SDL's dummy audio driver
+alone removed most of it but still let two runs land a frame or two apart over twenty
+seconds (at index 2000, byte-identical only after shifting one run's counters by −2). The
+emulator's own `nosound` mode (`--set mixer_nosound=true`, `mixer.cpp:2943-2946`: sound
+still emulated, no host output) leaves the emulated clock in charge, and then the emulator
+is deterministic per frame. `spawn` now sets both (`SDL_AUDIODRIVER=dummy` and the setting).
+
+**The captures.** With `--boot autoexec --cycles 30000` and the silent emulator, three
+captures at indices 2125/2250/2400 were byte-identical in all three pairwise comparisons
+(0.0000%, `verdict: identical`, exit 0), as were three at 1800/2000 after the `nosound`
+fix. The frames are not a still screen: within one run those three indices differ from
+each other by 20–40% of pixels, and one frame of the animation is worth ~2.6–4.2% of
+bytes, so the identical pairs could have differed. For contrast, the typed recipe at the
+same indices with the same silent emulator differed by 12.66–15.79% — the boot anchor's
+cost, now that it is the only difference left.
+
+**Route 2 was skipped, and the ruling allowed skipping it.** One `input/sequence` carrying
+the typed command line plus the setup answer needs a character→key map (the sequence takes
+only `KBD_*` key events — `webserver/input.cpp:449-465`) and spawn plumbing for the keys,
+well over the ~30 lines that made it worth measuring; and it cannot remove the anchor
+anyway, because the sequence is re-based to the frame at call time
+(`webserver/input.cpp:288-320`). The typed recipe's 12.66–15.79% above is that anchor's
+cost, measured directly.
+
+**What still does not repeat is the capture's sampling, not the boot.** The tool's frame
+grab lands 0–3 frames after the requested index — D15's `FRAME_READ_SLOP`, now measured on
+the tool itself by matching four captures of index 3000 against emulator-clock grabs:
+3000, 3000, 3001, 3003. The emulator itself was byte-identical at the same counter in
+every run — bursts at 1800, 2000 and 3000, all under a silent emulator, matched at shift
+0 across runs (0.0000–0.01%) — so the 14–21% spread between those four captures is the
+sampling, not the demo. On a still screen it
+costs nothing; on a moving one it is a different picture. Tightening it — a counter check
+*after* the grab, so a late sample is refused instead of written under the wrong index —
+is the next change if B2–B5 need it.
+
+**The cost of a boot.** ~5.9 s wall from process start to the first graphics frame (frame
+404), the 5 s `AUTOTYPE` wait included; the typed recipe booted in ~1.2 s but at host
+timing. A three-frame capture reaching index 2400 costs ~35 s. The setup screen's text is
+up at frame 16 (0.23 s), so the 5 s wait carries ~4.8 s of margin and could be shorter if
+boot time ever matters.
+
+**`reference/check_a` was re-captured**, because the recipe moved what its indices mean:
+frame 400 is now the setup screen, not the title screen. The new captures are the same
+two screens at the indices this boot puts them at — `title` at 700/900 (320×400), `part`
+at 1350/1450 (320×200) — with `cycles: 30000`, `boot: "autoexec"` and the same key names
+in the manifest, and the frames are byte-identical to the ones they replace. The harness
+checks were re-run against the new tree: self-comparison `verdict: identical` exit 0, the
+`SECOND 5` negative still `verdict: different` (title 99.5609%) exit 1.
+
+**For B2–B5.** Pass `--boot autoexec --cycles 30000`. Boot-relative indices are now one
+convention: the autoexec boot's. A part's frames can be found by sweeping as before, but
+they no longer move between runs, and a capture taken on a busy host can still land a few
+frames late — re-run it if a pair that should be identical is not.

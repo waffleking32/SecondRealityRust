@@ -153,6 +153,21 @@ pub fn assemble_planes(
 /// frames, and how long for the emulator to come up.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 
+/// The guest's command line for `exe`: its file name and the arguments, as the
+/// shell runs it. `None` when the path has no file name to run.
+///
+/// Both boot recipes run this one line — the typed recipe types it, the
+/// `[autoexec]` recipe has the guest's own shell read it (D17) — so they
+/// cannot come to disagree about what the manifest's `arguments` mean.
+pub fn guest_command_line(exe: &Path, arguments: &[String]) -> Option<String> {
+    let mut line = exe.file_name()?.to_string_lossy().into_owned();
+    for argument in arguments {
+        line.push(' ');
+        line.push_str(argument);
+    }
+    Some(line)
+}
+
 /// The reference emulator. [`dosbox::DosboxOracle`] is the implementation of
 /// record; a second one is only written if that becomes unusable (D10).
 pub trait Oracle {
@@ -215,6 +230,19 @@ mod tests {
             entry.copy_from_slice(&DAC_BIN[i * 3..i * 3 + 3]);
         }
         palette
+    }
+
+    #[test]
+    fn the_guest_command_line_is_the_file_name_and_its_arguments() {
+        // Both boot recipes run this line (D17), so its shape is pinned here
+        // rather than only under whichever recipe happens to be default.
+        let exe = Path::new("/reference/original/SECOND.EXE");
+        assert_eq!(
+            guest_command_line(exe, &["2".to_owned()]),
+            Some("SECOND.EXE 2".to_owned())
+        );
+        assert_eq!(guest_command_line(exe, &[]), Some("SECOND.EXE".to_owned()));
+        assert_eq!(guest_command_line(Path::new(""), &[]), None);
     }
 
     #[test]

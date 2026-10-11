@@ -8,7 +8,7 @@
 
 use std::env;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -253,6 +253,10 @@ pub struct DosboxOracle {
     token: String,
     base_url: String,
     scratch: PathBuf,
+    /// The guest ran its own boot recipe out of `[autoexec]`
+    /// (`BootRecipe::Autoexec`), so `boot` waits for the setup screen instead
+    /// of typing one (D17).
+    autoexec: bool,
 }
 
 impl DosboxOracle {
@@ -263,7 +267,15 @@ impl DosboxOracle {
     /// there, and `--set` cannot fill it (D14). The spawn therefore points
     /// `XDG_CONFIG_HOME` at a scratch directory holding a primary config, and
     /// does not pass `--noprimaryconf`.
-    pub fn spawn(cycles: u32, allowed_base: &Path) -> Result<DosboxOracle, OracleError> {
+    ///
+    /// `autoexec` are the lines that same config gives the guest's shell to
+    /// run at boot (`BootRecipe::Autoexec`, D17); empty means the typed
+    /// recipe, where the host drives the boot over the API instead.
+    pub fn spawn(
+        cycles: u32,
+        allowed_base: &Path,
+        autoexec: &[String],
+    ) -> Result<DosboxOracle, OracleError> {
         // The mount policy compares the guest's MOUNT argument with the
         // allow-list, and the guest resolves a relative host path against the
         // emulator's own working directory, not ours. Absolutise here so the
@@ -292,34 +304,16 @@ impl DosboxOracle {
         std::fs::create_dir_all(&config_dir)
             .and_then(|_| std::fs::create_dir_all(scratch.join("run")))
             .map_err(|e| OracleError::Transport(format!("cannot prepare {}: {e}", scratch.display())))?;
-        let mut config = File::create(config_dir.join("dosbox-automation.conf")).map_err(|e| {
-            OracleError::Transport(format!("cannot write the scratch config: {e}"))
+        let config_path = config_dir.join("dosbox-automation.conf");
+        std::fs::write(&config_path, primary_config(&allowed_base, autoexec)).map_err(|e| {
+            OracleError::Transport(format!("cannot write {}: {e}", config_path.display()))
         })?;
-        writeln!(
-            config,
-            "# Written by xtask reference capture; deleted when the capture ends.\n\
-             [webserver]\n\
-             webserver_enabled = true\n\
-             mount_allowed_bases = {}\n",
-            allowed_base.display()
-        )
-        .map_err(|e| OracleError::Transport(format!("cannot write the scratch config: {e}")))?;
 
         let token = generate_token()?;
         let log_path = scratch.join("emulator.log");
         let log = File::create(&log_path)
             .map_err(|e| OracleError::Transport(format!("cannot write {}: {e}", log_path.display())))?;
-        let child = Command::new(&binary)
-            // `cpu_cycles`, not `cycles`: `cycles=` at startup forces legacy
-            // mode, where the runtime PUT is refused with 409 (D14).
-            .arg("--set")
-            .arg(format!("cpu_cycles={cycles}"))
-            .env("XDG_CONFIG_HOME", scratch.join("xdg"))
-            .env("LD_LIBRARY_PATH", &libraries)
-            .env("SDL_VIDEODRIVER", "dummy")
-            .env("DOSBOX_API_TOKEN", &token)
-            .current_dir(scratch.join("run"))
-            .stdin(Stdio::null())
+        let child = emulator_command(&binary, &scratch, cycles, &libraries, &token)
             .stdout(Stdio::from(log.try_clone().map_err(|e| {
                 OracleError::Transport(format!("cannot redirect the emulator log: {e}"))
             })?))
@@ -335,6 +329,7 @@ impl DosboxOracle {
             token,
             base_url,
             scratch,
+            autoexec: !autoexec.is_empty(),
         };
         match oracle.wait_for_api(&log_path) {
             Ok(()) => {}
@@ -588,6 +583,14 @@ impl Oracle for DosboxOracle {
     }
 
     fn boot(&mut self, exe: &Path, cwd: &Path, args: &[String]) -> Result<(), OracleError> {
+        if self.autoexec {
+            // The guest's shell already ran the whole recipe out of
+            // `[autoexec]`, `AUTOTYPE` included, so there is nothing to type
+            // and no key to send: this waits for the screen every route has to
+            // pass through, which also catches a mount the policy refused
+            // before the capture waits on frames that would never come (D17).
+            return self.wait_for_text(crate::reference::SETUP_SCREEN_TEXT, SHELL_TIMEOUT);
+        }
         let cwd = absolute(cwd)?;
         // The mount policy is enforced by the guest MOUNT command, so a
         // refused base shows up as screen text, not as an HTTP error.
@@ -597,14 +600,9 @@ impl Oracle for DosboxOracle {
         self.type_line("C:")?;
         self.wait_for_text("C:\\>", DEFAULT_WAIT)?;
 
-        let name = exe.file_name().ok_or_else(|| {
+        let line = super::guest_command_line(exe, args).ok_or_else(|| {
             OracleError::Transport(format!("{} has no file name to run", exe.display()))
         })?;
-        let mut line = name.to_string_lossy().into_owned();
-        for arg in args {
-            line.push(' ');
-            line.push_str(arg);
-        }
         self.type_line(&line)
     }
 
@@ -785,6 +783,66 @@ impl Drop for DosboxOracle {
     }
 }
 
+/// The emulator process, as capture starts it: headless, silent, on the pinned
+/// cycles, with the token its API answers to.
+///
+/// Its output goes nowhere on purpose. A real audio device paces the mixer by
+/// the host's audio clock, and the demo's music and animation then drift
+/// against the frame counter between runs — a *silent* run is what makes a
+/// moving screen repeat, and no boot recipe can undo the drift (D17). SDL's
+/// dummy driver alone still let two runs land a frame or two apart over twenty
+/// seconds; the emulator's own `nosound` mode leaves the emulated clock in
+/// charge. Nothing captures audio, so nothing is lost.
+fn emulator_command(
+    binary: &Path,
+    scratch: &Path,
+    cycles: u32,
+    libraries: &str,
+    token: &str,
+) -> Command {
+    let mut command = Command::new(binary);
+    command
+        // `cpu_cycles`, not `cycles`: `cycles=` at startup forces legacy
+        // mode, where the runtime PUT is refused with 409 (D14).
+        .arg("--set")
+        .arg(format!("cpu_cycles={cycles}"))
+        .arg("--set")
+        .arg("mixer_nosound=true")
+        .env("XDG_CONFIG_HOME", scratch.join("xdg"))
+        .env("LD_LIBRARY_PATH", libraries)
+        .env("SDL_VIDEODRIVER", "dummy")
+        .env("SDL_AUDIODRIVER", "dummy")
+        .env("DOSBOX_API_TOKEN", token)
+        .current_dir(scratch.join("run"))
+        .stdin(Stdio::null());
+    command
+}
+
+/// The primary config the scratch `XDG_CONFIG_HOME` holds: the mount
+/// allow-list, which is only ever read from this file (D14), and — when the
+/// capture boots through the guest (`BootRecipe::Autoexec`) — the `[autoexec]`
+/// section the shell runs at boot (D17).
+///
+/// The allow-list and the `MOUNT` in the autoexec lines name the same
+/// directory, so the mount the recipe performs is the one the policy allows.
+fn primary_config(allowed_base: &Path, autoexec: &[String]) -> String {
+    let mut config = format!(
+        "# Written by xtask reference capture; deleted when the capture ends.\n\
+         [webserver]\n\
+         webserver_enabled = true\n\
+         mount_allowed_bases = {}\n",
+        allowed_base.display()
+    );
+    if !autoexec.is_empty() {
+        config.push_str("[autoexec]\n");
+        for line in autoexec {
+            config.push_str(line);
+            config.push('\n');
+        }
+    }
+    config
+}
+
 /// A path the emulator and this process agree on: absolute, symlinks resolved.
 fn absolute(path: &Path) -> Result<PathBuf, OracleError> {
     path.canonicalize()
@@ -925,6 +983,71 @@ mod tests {
         ));
         assert!(matches!(map_http_error(409, "x"), OracleError::Http { status: 409, .. }));
         assert!(matches!(map_http_error(503, "{}"), OracleError::NotBooted));
+    }
+
+    #[test]
+    fn the_emulator_is_started_headless_silent_and_on_pinned_cycles() {
+        // The two settings and the two dummy drivers are the recipe D17 was
+        // measured with: a host video device, a host audio device, or an
+        // unpinned cycle count each make captures of a moving screen differ
+        // between runs.
+        let command = emulator_command(
+            Path::new("/emulator/dosbox-automation"),
+            Path::new("/scratch"),
+            30000,
+            "/deps/sdl3-build",
+            "token",
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec!["--set", "cpu_cycles=30000", "--set", "mixer_nosound=true"]
+        );
+        let env = |name: &str| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy().into_owned())
+        };
+        assert_eq!(env("SDL_VIDEODRIVER").as_deref(), Some("dummy"));
+        assert_eq!(env("SDL_AUDIODRIVER").as_deref(), Some("dummy"));
+        assert_eq!(env("LD_LIBRARY_PATH").as_deref(), Some("/deps/sdl3-build"));
+        assert_eq!(env("DOSBOX_API_TOKEN").as_deref(), Some("token"));
+        assert_eq!(
+            command.get_current_dir().map(Path::to_path_buf),
+            Some(PathBuf::from("/scratch/run"))
+        );
+    }
+
+    #[test]
+    fn the_scratch_config_carries_the_guest_recipe_only_when_there_is_one() {
+        // The typed recipe's config is what Phase 0 wrote: the allow-list and
+        // nothing else, because the host drives that boot over the API.
+        let typed = primary_config(Path::new("/reference/original"), &[]);
+        assert!(typed.contains("mount_allowed_bases = /reference/original"));
+        assert!(!typed.contains("[autoexec]"));
+
+        // The autoexec recipe's lines go into the same file, in order: the
+        // mount policy is only read from the primary config (D14), and the
+        // section the shell runs has to be readable there too (D17).
+        let lines = vec![
+            "MOUNT C -RO /reference/original".to_owned(),
+            "C:".to_owned(),
+            "AUTOTYPE -w 5 left enter".to_owned(),
+            "SECOND.EXE 2".to_owned(),
+        ];
+        let autoexec = primary_config(Path::new("/reference/original"), &lines);
+        assert!(autoexec.ends_with(
+            "[autoexec]\n\
+             MOUNT C -RO /reference/original\n\
+             C:\n\
+             AUTOTYPE -w 5 left enter\n\
+             SECOND.EXE 2\n"
+        ));
     }
 
     #[test]
