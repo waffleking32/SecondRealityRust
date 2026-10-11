@@ -251,11 +251,15 @@ unlinked build residue and are not recovered.
 
 Columns: `path` is the path under `assets/`; `blob` is the `.OBK` the bytes were recovered
 from; `record` names the OMF records the bytes came from; `range` is the half-open span of
-those records in the blob, `start..end`; `sha256` is the digest of the recovered file.
+those records in the blob, `start..end`; `sha256` is the digest of the recovered file; and
+`parts` is the same column the table above carries — the port's parts that need the file. The
+recovered file needs it for the same reason every other file does: a part's assets are looked
+at on one contact sheet per part (`cargo xtask assets verify --sheet`), and an asset with no
+`parts` entry is on no sheet at all.
 
-| path | blob | record | range | sha256 |
-|---|---|---|---|---|
-| `TECHNO/CIRCLE2.EGA` | `upstream/SecondReality/TECHNO/_CIRCLE2.OBK` | `LEDATA` (`0xA0`) × 8 | 65..8121 | `3920a4fe8556b550d8e353078ceb097af9c734b4e921df1abe276fc1a33a94d7` |
+| path | blob | record | range | sha256 | parts |
+|---|---|---|---|---|---|
+| `TECHNO/CIRCLE2.EGA` | `upstream/SecondReality/TECHNO/_CIRCLE2.OBK` | `LEDATA` (`0xA0`) × 8 | 65..8121 | `3920a4fe8556b550d8e353078ceb097af9c734b4e921df1abe276fc1a33a94d7` | TECHNO |
 
 ### Notes on the recovered file
 

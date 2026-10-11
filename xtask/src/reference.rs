@@ -19,6 +19,14 @@ use crate::oracle::{CapturedFrame, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIG
 /// (`.gitmodules`; `docs/decisions.md` D13).
 pub const UPSTREAM_COMMIT: &str = "071a82e";
 
+/// The tree the reference lives in, where the CLI's defaults put the mounted
+/// original (`reference/original`) and where every capture goes
+/// (`reference/parts/<part>/` in Part B). It is **input-only**: `compare`
+/// refuses an `--out` inside one of its captures, and this tool refuses a
+/// `--sheet` inside it, for the same reason — a file written among the frames
+/// is a file every later diff is measured against.
+pub const REFERENCE_ROOT: &str = "reference";
+
 /// The original's sound card setup screen. `SECOND.EXE` shows it whatever the
 /// block argument, and the default choice fails on this emulator, so the
 /// capture waits for this text before sending `--keys` (D14).
@@ -202,9 +210,10 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             options.cwd.display()
         )));
     }
-    // The mounted directory is the 1993 distribution itself and is read-only;
-    // nothing this tool writes may land in it, the same rule that keeps a
-    // report out of a reference capture.
+    // `reference/` is input-only: the mounted distribution and every capture
+    // live there, `compare` refuses an `--out` inside one of them, and this
+    // tool refuses a `--sheet` inside one for the same reason — the reference
+    // is read, never written, by anything but a capture.
     if let Some(sheet) = &options.sheet {
         crate::compare::refuse_output_inside(
             sheet,
@@ -212,7 +221,28 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             "--sheet",
             "that directory is the mounted original (SECOND.EXE and REALITY.FC), and every frame \
              diff in the project is measured against those exact bytes",
-            "Pass --sheet beside the capture instead, e.g. <capture-dir>/sheet.png",
+            "Pass --sheet outside the reference, e.g. out/<name>-sheet.png",
+        )
+        .map_err(CaptureError::Options)?;
+        crate::compare::refuse_output_inside(
+            sheet,
+            Path::new(REFERENCE_ROOT),
+            "--sheet",
+            "the reference tree holds the mounted original and every capture, and a file written \
+             among them is an extra file in the tree every later diff is measured against",
+            &format!("Pass --sheet outside {REFERENCE_ROOT}/, e.g. out/<name>-sheet.png"),
+        )
+        .map_err(CaptureError::Options)?;
+        // The capture it just wrote is a reference tree too, and the same rule
+        // applies to it: the frames and the manifest are the capture, and a
+        // sheet is a rendering of them, not part of them.
+        crate::compare::refuse_output_inside(
+            sheet,
+            &options.out,
+            "--sheet",
+            "that is this capture's own directory, and the frames and manifest in it are what every \
+             later diff reads — a sheet belongs beside it, not inside it",
+            "Pass --sheet outside the capture directory, e.g. out/<name>-sheet.png",
         )
         .map_err(CaptureError::Options)?;
     }
@@ -659,6 +689,40 @@ mod tests {
         // Beside the capture directory is where it belongs.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
         opts.sheet = Some(PathBuf::from("out/capture/sheet.png"));
+        assert!(validate_options(&opts).is_ok());
+    }
+
+    #[test]
+    fn a_sheet_anywhere_in_the_reference_tree_is_refused() {
+        // Not only the mounted directory: `reference/` holds the original and
+        // every capture, and it is input-only — `compare` refuses an `--out`
+        // inside one of its captures, and a sheet written among the frames is
+        // the same kind of extra file in the same kind of tree.
+        for sheet in [
+            "reference/sheet.png",
+            "reference/check_a/sheet.png",
+            "reference/parts/beglogo/sheet.png",
+        ] {
+            let mut opts = options(vec![5100], Path::new("out/capture"));
+            opts.sheet = Some(PathBuf::from(sheet));
+            assert!(
+                matches!(validate_options(&opts), Err(CaptureError::Options(_))),
+                "{sheet} must be refused"
+            );
+        }
+
+        // And not inside the capture this run writes, for the same reason: the
+        // frames and the manifest are the capture.
+        let mut opts = options(vec![5100], Path::new("out/capture"));
+        opts.sheet = Some(PathBuf::from("out/capture/sheet.png"));
+        assert!(matches!(
+            validate_options(&opts),
+            Err(CaptureError::Options(_))
+        ));
+
+        // Outside both is where it goes.
+        let mut opts = options(vec![5100], Path::new("out/capture"));
+        opts.sheet = Some(PathBuf::from("out/beglogo-sheet.png"));
         assert!(validate_options(&opts).is_ok());
     }
 

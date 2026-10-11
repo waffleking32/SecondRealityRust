@@ -139,8 +139,10 @@ enum ReferenceCommand {
         keys: Option<String>,
         /// Write one PNG of the frames this capture takes, to look at. The
         /// tiles are the frames, in the order they were captured, and their
-        /// indices are printed as they are laid out. A path inside `--cwd` is
-        /// refused: that directory is the original, mounted read-only.
+        /// indices are printed as they are laid out. A path inside the
+        /// reference tree (`reference/`, which holds the mounted original and
+        /// every capture) is refused: the reference is input-only, and a sheet
+        /// goes beside it, e.g. `out/<name>-sheet.png`.
         #[arg(long)]
         sheet: Option<PathBuf>,
     },

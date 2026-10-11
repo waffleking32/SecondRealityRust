@@ -27,8 +27,9 @@
 //! - **0** everything asked for checked out.
 //! - **1** a check failed: a digest that does not match the record, a length
 //!   that does not match the record's `bytes` column, a provenance row with no
-//!   file, a file with no provenance row, or an asset whose own magic says it is
-//!   a picture and which does not decode.
+//!   file, a file with no provenance row, an asset whose own magic says it is a
+//!   picture and which does not decode, or an asset a recorded refusal says must
+//!   not decode and which does.
 //! - **2** the tool could not run: no `assets/` where it was told to look, an
 //!   unreadable or malformed `PROVENANCE.md`, a `--sheet` inside the tree, or
 //!   nothing asked for at all.
@@ -45,16 +46,20 @@
 //! column as evidence, would invent assets that do not exist. A table is read
 //! here only when its header holds both `path` and `sha256`, and its rows are
 //! read through those two names. The `parts` column is read when the table has
-//! one, which is why A5's *Recovered assets* table contributes a file to the
-//! tree check and to no part's sheet.
+//! one, and A5's *Recovered assets* table has one so that the file it records —
+//! the one asset with no source art to compare against — is on its part's sheet
+//! like every other asset. A row without the column is on no sheet, and the
+//! tool says nothing about it that the record does not.
 //!
 //! **A file that refuses to decode is a finding, not a shrug.** The rule is: if
 //! a file's own first bytes say it is a picture ([`sr_assets::sniff`]), the
 //! port's decoder must read it, or the tree has a problem. The one file whose
 //! refusal *is* the recorded outcome is named in [`REFUSED_ON_RECORD`] with the
 //! record that says so — so the check cannot pass by quietly tolerating
-//! everything: a second refusal is a finding, and a recorded refusal that
-//! starts decoding is said out loud too.
+//! everything. Both other directions are findings: a refusal at a path that is
+//! not on that list is a finding, and so is a *recorded* refusal that stops
+//! happening — a decoder that grew lenient leaves the file's digest unchanged,
+//! so `--tree` cannot see it and this is the only check that can.
 //!
 //! **Two headerless formats are opened by construction, and only because their
 //! names are the construction the crate documents.** `sr_assets` says of
@@ -80,7 +85,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use sha2::{Digest, Sha256};
-use sr_assets::{load, load_frames, pal, sniff, AssetError, Format, Image};
+use sr_assets::{load, load_frames, pal, sniff, Format, Image};
 use sr_engine::{dac_expand, Palette};
 
 use crate::sheet::{self, Tile};
@@ -188,9 +193,11 @@ pub struct Row {
     pub sha256: String,
     /// The recorded length in bytes, where the table has a `bytes` column.
     pub bytes: Option<usize>,
-    /// The port's parts that need the file, from the `parts` column. Empty for
-    /// a row in a table without one — A5's recovered table names no parts, and
-    /// no part is invented for it.
+    /// The port's parts that need the file, from the `parts` column — the main
+    /// table and A5's recovered table both carry it. Empty for a row in a table
+    /// without one, and a part is never invented for such a row: a file nobody
+    /// records a part for is on nobody's sheet, and the tool says so rather than
+    /// guessing from the directory it lives under.
     pub parts: Vec<String>,
     /// Which table the row was read from: the `##` heading it sat under.
     pub table: String,
@@ -320,11 +327,16 @@ pub fn parse_provenance(text: &str) -> Result<Vec<Row>, VerifyError> {
              column; this tool reads the record by those column names, never by position"
         )));
     }
-    for pair in rows.windows(2) {
-        if pair[0].path == pair[1].path {
+    // One path, one row — anywhere in the file, not only next to it: the two
+    // tables are read in file order and a path that appears in both would be
+    // hashed twice and decoded twice, which is how a record that disagrees with
+    // itself gets read as agreement.
+    let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+    for row in &rows {
+        if let Some(first) = seen.insert(row.path.as_str(), row.table.as_str()) {
             return Err(VerifyError::Malformed(format!(
-                "{PROVENANCE_FILE} records {} twice, under the \"{}\" and \"{}\" tables",
-                pair[0].path, pair[0].table, pair[1].table
+                "{PROVENANCE_FILE} records {} twice, under the \"{first}\" and \"{}\" tables",
+                row.path, row.table
             )));
         }
     }
@@ -538,10 +550,33 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             Kind::Frames { .. } => animations += 1,
             Kind::Palette { .. } => palettes += 1,
             Kind::Headerless => headerless += 1,
-            Kind::Refused { .. } => refused += 1,
+            // A refusal that stops happening is counted as the finding it is,
+            // below, not as a refusal.
+            Kind::Refused { decoded: false, .. } => refused += 1,
+            Kind::Refused { decoded: true, .. } => {}
         }
-        println!("ok   {}: {}", row.path, inspected.kind);
+        // A refusal the record expects is the check passing. A refusal the
+        // record expects that *decodes* is the check failing, and it has to
+        // fail: the file's digest is unchanged when the decoder grows lenient,
+        // so `--tree` cannot see it — this is the only place that can, and a
+        // phase that went green while this line said the premise was broken
+        // would be the exact regression §E.2 is a record of.
+        if matches!(inspected.kind, Kind::Refused { decoded: true, .. }) {
+            findings += 1;
+            println!("FAIL {}: {}", row.path, inspected.kind);
+        } else {
+            println!("ok   {}: {}", row.path, inspected.kind);
+        }
         if let (Some(_), Some(tile)) = (sheets, inspected.tile) {
+            if row.parts.is_empty() {
+                // An asset the record names no part for is on no sheet, and a
+                // sheet that is missing an asset must not look complete: say it
+                // where the sheets are listed, not only in a parser.
+                println!(
+                    "note {}: the record names no part for this file, so it is on no sheet",
+                    row.path
+                );
+            }
             for part in &row.parts {
                 by_part.entry(part.clone()).or_default().push(tile.clone());
             }
@@ -689,10 +724,14 @@ impl fmt::Display for Kind {
                 decoded,
             } => match decoded {
                 false => write!(f, "refused as recorded: {message} ({record})"),
+                // A finding, not a note: the file's digest is unchanged when a
+                // decoder grows lenient enough to read it, so `--tree` cannot
+                // see this and nothing else can either.
                 true => write!(
                     f,
-                    "decoded, where the record says it must be refused — the tree is no longer the \
-                     tree that record was written for ({record})"
+                    "decoded, where the record says it must be refused — a refusal that stops \
+                     happening is the regression that record exists to catch, and the stale \
+                     REFUSED_ON_RECORD entry has to go once the record says otherwise ({record})"
                 ),
             },
         }
@@ -739,14 +778,18 @@ fn inspect(path: &str, bytes: &[u8]) -> Result<Inspected, String> {
 
 /// The formats with a magic: a picture or an animation, and either way the
 /// decoder has to read it.
-fn decode(path: &str, bytes: &[u8], format: Format) -> Result<Inspected, AssetError> {
+///
+/// Errors are messages rather than `AssetError`s because the tool only ever
+/// prints them, and because "the decoder refused it" and "the decoder returned
+/// nothing" are the same kind of outcome here: a finding.
+fn decode(path: &str, bytes: &[u8], format: Format) -> Result<Inspected, String> {
     match format {
         Format::Fli => {
-            let frames = load_frames(bytes, format)?;
-            Ok(frames_inspected(path, format, frames))
+            let frames = load_frames(bytes, format).map_err(|e| e.to_string())?;
+            frames_inspected(path, format, frames)
         }
         _ => {
-            let image = load(bytes, format)?;
+            let image = load(bytes, format).map_err(|e| e.to_string())?;
             Ok(picture_inspected(path, format, image))
         }
     }
@@ -783,19 +826,26 @@ fn picture_inspected(path: &str, format: Format, image: Image) -> Inspected {
     }
 }
 
-fn frames_inspected(path: &str, format: Format, frames: Vec<Image>) -> Inspected {
+/// An animation: `count` frames, reported at the first frame's geometry.
+///
+/// A container that holds *no* frames is a finding, not a panic: `decode_fli` on
+/// a header-only file and `decode_ani` on empty bytes both return an empty list,
+/// and a tool whose contract is report-don't-panic reports it.
+fn frames_inspected(path: &str, format: Format, frames: Vec<Image>) -> Result<Inspected, String> {
     let count = frames.len();
-    let first = frames
-        .into_iter()
-        .next()
-        .expect("a decoder returns at least one frame");
+    let Some(first) = frames.into_iter().next() else {
+        return Err(format!(
+            "{format} holds no frames at all — the container parsed and its frame list is empty, \
+             so either it is not an animation or it is a stub of one"
+        ));
+    };
     let palette = palette_use(&first.palette);
     let (width, height) = (u32::from(first.width()), u32::from(first.height()));
     let rgb = match palette {
         PaletteUse::Entries(_) => through_palette(first.pixels(), &first.palette),
         PaletteUse::None => through_indices(first.pixels()),
     };
-    Inspected {
+    Ok(Inspected {
         kind: Kind::Frames {
             format,
             count,
@@ -809,7 +859,7 @@ fn frames_inspected(path: &str, format: Format, frames: Vec<Image>) -> Inspected
             rgb,
             label: format!("{path} ({format} frame 1 of {count}, {width}x{height})"),
         }),
-    }
+    })
 }
 
 /// A file with no magic. `.PAL` and `.ANI` are the two the crate documents as
@@ -839,7 +889,8 @@ fn headerless(path: &str, bytes: &[u8]) -> Result<Inspected, String> {
         "ani" => {
             let frames = load_frames(bytes, Format::Ani)
                 .map_err(|e| format!("its name says ANI, so it has to be one: {e}"))?;
-            Ok(frames_inspected(path, Format::Ani, frames))
+            frames_inspected(path, Format::Ani, frames)
+                .map_err(|e| format!("its name says ANI, so it has to be one: {e}"))
         }
         _ => Ok(Inspected {
             kind: Kind::Headerless,
@@ -971,11 +1022,17 @@ mod tests {
         );
 
         // The recovered file is the last row, in its own table, and that table
-        // names no part — so no part is invented for it.
+        // carries the same `parts` column the main one does — so the one asset
+        // with no source art beside it is on its part's sheet like every other
+        // asset, which is the asset a person most needs to see there.
         let recovered = rows.last().unwrap();
         assert_eq!(recovered.path, "TECHNO/CIRCLE2.EGA");
         assert_eq!(recovered.table, "Recovered assets");
-        assert!(recovered.parts.is_empty(), "{recovered:?}");
+        assert_eq!(recovered.parts, vec!["TECHNO".to_string()]);
+        assert!(
+            recovered.bytes.is_none(),
+            "that table records no `bytes` column"
+        );
 
         // The three tables that are not provenance contribute no rows.
         for path in ["MAIN/DATA/O2.SCI", "BEG/TMP.BBM", "END/NUTS.LBM"] {
@@ -1055,6 +1112,26 @@ mod tests {
         );
         let error = parse_provenance(&text).unwrap_err();
         assert!(matches!(error, VerifyError::Malformed(_)), "{error}");
+    }
+
+    #[test]
+    fn one_path_in_two_tables_is_malformed_however_far_apart_they_are() {
+        // The curated and the recovered tables are two tables in one file, and
+        // a path in both would be hashed and decoded twice. Adjacent rows are
+        // the easy half of that; the rows here are not adjacent at all.
+        let text = format!(
+            "## Files\n\n| path | sha256 |\n|---|---|\n| `a.UH` | `{}` |\n\n## Recovered assets\n\n\
+             | path | blob | sha256 |\n|---|---|---|\n| `a.UH` | `x.OBK` | `{}` |\n",
+            digest('1'),
+            digest('2'),
+        );
+        let error = parse_provenance(&text).unwrap_err();
+        assert!(matches!(error, VerifyError::Malformed(_)), "{error}");
+        let message = error.to_string();
+        assert!(
+            message.contains("Files") && message.contains("Recovered assets"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -1235,6 +1312,24 @@ mod tests {
             "{}",
             inspected.kind
         );
+    }
+
+    #[test]
+    fn a_container_that_holds_no_frames_is_a_finding_not_a_panic() {
+        // `decode_ani` on empty bytes and `decode_fli` on a header with no frame
+        // records both return an empty list. This tool's contract is
+        // report-don't-panic, so a degenerate container is reported like any
+        // other unreadable asset — exit 1, not exit 101.
+        let error = inspect("SOMEWHERE/EMPTY.ANI", b"").unwrap_err();
+        assert!(error.contains("no frames at all"), "{error}");
+
+        let mut header_only = vec![0u8; 128];
+        header_only[4] = 0x11;
+        header_only[5] = 0xAF;
+        header_only[8..10].copy_from_slice(&320u16.to_le_bytes());
+        header_only[10..12].copy_from_slice(&200u16.to_le_bytes());
+        let error = inspect("SOMEWHERE/EMPTY.FLI", &header_only).unwrap_err();
+        assert!(error.contains("no frames at all"), "{error}");
     }
 
     #[test]

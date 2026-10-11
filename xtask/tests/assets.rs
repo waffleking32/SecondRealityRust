@@ -156,6 +156,50 @@ fn a_recorded_length_that_does_not_match_the_file_is_reported() {
 }
 
 #[test]
+fn a_recorded_refusal_that_starts_decoding_is_a_failed_check() {
+    // The register's inverse direction. If the decoder ever grew lenient enough
+    // to read the truncated `COMAN/COMBG.UH` — clipping it instead of refusing
+    // it — the file's digest would be unchanged, `--tree` would still pass, and
+    // the phase's gate would go green while the premise the record rests on was
+    // broken. Nothing but this check can see that, so it has to fail.
+    let root = scratch("refusal-decoded");
+    let tree = root.join("assets");
+    fs::create_dir_all(tree.join("COMAN")).unwrap();
+    // Any file that decodes, at the path the record says must not: the point is
+    // that a refusal recorded as the shipped outcome has stopped happening.
+    fs::copy(
+        repo_root().join("assets/DDSTARS/TEXTS.16"),
+        tree.join("COMAN/COMBG.UH"),
+    )
+    .unwrap();
+    fs::write(
+        tree.join("PROVENANCE.md"),
+        format!(
+            "| path | sha256 | parts |\n|---|---|---|\n| `COMAN/COMBG.UH` | `{}` | 3DSINFLD |\n",
+            "0".repeat(64)
+        ),
+    )
+    .unwrap();
+
+    let run = xtask(&root, &["assets", "verify", "--decode"]);
+
+    assert_eq!(
+        run.code,
+        1,
+        "a recorded refusal that decodes is a failed check:\n{}",
+        run.output()
+    );
+    let output = run.output();
+    assert!(output.contains("FAIL COMAN/COMBG.UH"), "{output}");
+    assert!(
+        output.contains("decoded, where the record says it must be refused"),
+        "{output}"
+    );
+    assert!(output.contains("REFUSED_ON_RECORD"), "{output}");
+    assert!(output.contains("verdict: 1 finding(s)"), "{output}");
+}
+
+#[test]
 fn every_asset_in_the_tree_decodes() {
     // The real tree, and the full check: every file re-hashed against the
     // provenance and every asset decoded.
@@ -205,6 +249,70 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
             file.display()
         );
     }
+
+    // Every asset the record names a part for is on that part's sheet — the
+    // recovered file included, which is the one with no source art beside it
+    // and so the one a person most needs to see there.
+    let output = run.output();
+    let techno = sheet_tiles(&output, "TECHNO.png");
+    assert_eq!(techno.len(), 4, "TECHNO's sheet: {techno:?}");
+    assert!(
+        techno.iter().any(|tile| tile.contains("CIRCLE2.EGA")),
+        "the recovered asset is on TECHNO's sheet: {techno:?}"
+    );
+
+    // And nothing is silently on no sheet: the tile maps of all 21 sheets
+    // between them name every path the record lists. Every file the record
+    // names a part for has a tile somewhere, and this asserts the converse too
+    // by counting.
+    let mut tiles = Vec::new();
+    for part in [
+        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "GRAB",
+        "JPLOGO", "LNS&ZOOM", "MAIN", "MNTSCRL", "PAM", "PANICEND", "RAYSCRL", "START", "TECHNO",
+        "TUNNELI", "U2A", "U2E",
+    ] {
+        tiles.extend(sheet_tiles(&output, &format!("{part}.png")));
+    }
+    assert_eq!(tiles.len(), 150, "one tile per curated file");
+    assert!(
+        !output.contains("names no part for this file"),
+        "every recorded file has a part: {output}"
+    );
+}
+
+/// The tiles of one sheet, from the map the tool prints beside it: the lines
+/// after its `sheet <path>` header and before the next one, each
+/// `  r<row>c<column> <label>`.
+fn sheet_tiles(output: &str, sheet: &str) -> Vec<String> {
+    let mut tiles = Vec::new();
+    let mut inside = false;
+    for line in output.lines() {
+        if line.starts_with("sheet ") {
+            inside = line.contains(sheet);
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let mut fields = line.trim().splitn(2, ' ');
+        let (Some(position), Some(label)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        // The map's own lines, and nothing else: `r3c2 <path> (…)`.
+        let is_position = position
+            .strip_prefix('r')
+            .and_then(|rest| rest.split_once('c'))
+            .is_some_and(|(row, column)| {
+                !row.is_empty()
+                    && !column.is_empty()
+                    && row.chars().all(|c| c.is_ascii_digit())
+                    && column.chars().all(|c| c.is_ascii_digit())
+            });
+        if is_position {
+            tiles.push(label.to_owned());
+        }
+    }
+    tiles
 }
 
 #[test]

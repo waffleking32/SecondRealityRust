@@ -962,11 +962,20 @@ decoder, 1 refused on record, 0 finding(s)` and `sheets: 21 written`. Three thin
 not fix and the implementation had to decide, all recorded in `xtask/src/assets.rs`'s module
 docs: (1) **one file's refusal is the recorded outcome** — `COMAN/COMBG.UH` is the truncated
 copy A1 §E.2 measures, and the tool treats a refusal there as the check *passing*, in a named,
-cited `REFUSED_ON_RECORD` list, so a second refusal is a finding; (2) **`--decode` opens a
+cited `REFUSED_ON_RECORD` list, so a second refusal is a finding — and so is a *recorded* refusal
+that stops happening, which is the only check that can see a decoder grow lenient (that leaves
+the file's digest unchanged, so `--tree` cannot); (2) **`--decode` opens a
 headerless file only where `sr_assets` documents the construction** (`.PAL`, `.ANI` by name),
 and reports everything else with no magic — `.U`, `.1BM`, `.EGA`, `.DAT`, `.EXE`-family data —
-as not decoded rather than inventing a geometry; (3) `load_path` was not needed: the bytes are
-read once and both hashed and decoded. Two findings went into
+as not decoded rather than inventing a geometry; (3) `load_path` was not needed: each check
+reads the bytes it needs itself (`--tree` to hash them, `--decode` to decode them, so a run with
+both reads every file twice — the two checks stay independent, and a hash does not need a
+decoder). A5's recovered table carries the same `parts` column the main table does, so
+`TECHNO/CIRCLE2.EGA` — the one asset with no source art beside it — is on TECHNO's sheet like
+every other asset; the sheets between them hold 150 tiles for 150 files. And
+`reference capture --sheet` refuses a path anywhere in `reference/` (the mounted original, any
+capture, and this run's own `--out`), not only inside the mounted directory: the reference is
+input-only, and a sheet goes beside it. Two findings went into
 `docs/fidelity/asset-inventory.md`: **§E.22** (the `Uh1` files do carry a palette; §A's four
 rows corrected) and **§E.23** (`CREDITS/PICS/PIC02.LBM` is the original's own "PART-PIC
 MISSING (PXL SUX)" placeholder). Step 5 — looking at the sheets — is a person's, and the
