@@ -639,8 +639,14 @@ The last frames of the 320×400 screen are a transition, not the picture: 5800, 
 all have the same row structure — rows 50–349 picture, black above and below — while **5950** has
 rows 0–24 black, 25–174 picture, 175–184 black, 185–349 picture, 350–399 black: the window is being
 split and shifted as the next part takes the screen. No keyframe is taken in it, and 5950 is the
-last 320×400 index sampled. The next part (U2A) starts at 5960 or 5961 and is 320×200 — §5 is its
-row.
+last 320×400 index sampled under `out/b3-alku-boundary2`.
+
+**The window is a measurement of where the change *can* be, not a fixed frame, and the next part's
+own first frames sit inside it.** `out/b3-alku-sweep1` was refused at 6300 with the message
+`frame 6300 is 320x200 where the capture started at 320x400`, so *that* session's 5960 was still
+320×400 ALKU, while `out/b3-u2a-scan` (another session) captured 5960 as 320×200 U2A (§5.5). The
+changeover is one to a few frames wide depending on the session, which is why no reference keyframe
+belongs near either side of it. U2A is 320×200 and §5 is its row.
 
 ---
 
@@ -944,8 +950,8 @@ have moving keyframes at all.
 **Only 7900 carries `.idx`.** The frame it holds is the washed white one, and the palette holds
 still while the indices are read, so D15 keeps both; every animated frame of this part is RGB-only
 because the screen really does move during the ~20-frame read — D15's moving case, not §1.6's
-read-layout case. Those eight frames judge Phase 2 through the RGB path, where the DAC's widening
-rule is load-bearing (`docs/decisions.md:422-423`).
+read-layout case. So three of the reference's four frames judge Phase 2 through the RGB path, where
+the DAC's widening rule is load-bearing (`docs/decisions.md:422-423`).
 
 ### 6.5 Where the part ends, and what follows it
 
