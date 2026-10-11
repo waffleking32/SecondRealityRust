@@ -15,20 +15,31 @@
 //! pixel, row-major, `width` bytes to a row.
 //!
 //! The header is `"RIX3"`, a little-endian `u16` width, a little-endian `u16`
-//! height, then **one byte of palette type and one byte of storage type** — two
-//! fields, not one `u16`. The arithmetic says so as plainly as the files do: the
-//! palette is at 10 = 4 + 2 + 2 + 1 + 1, and all 11 RIX3 files in either tree
-//! carry `AF 00` there — a 12-byte header would put the palette at 12, which is
-//! the third byte of the first entry, and the 768 bytes at 10 are exactly a
-//! `.LBM`'s `CMAP / 4` (below). What the two bytes *mean* is not in the tree —
-//! no reader touches them — and comes from the format's documentation outside it
-//! (ColoRIX, the "new" VGA Paint format): byte 8 is the palette type, `0xAF`
-//! being a VGA DAC palette; byte 9 is the storage type, `0x00` being linear and
-//! one byte per pixel, with `0x80` compression, `0x40` an extension block and
-//! `0x20` encryption. Both readings are what the parts already assume —
-//! `KOE.PAS` writes the 768 bytes to the DAC untranslated, and reads the pixels
-//! as a flat block — and a file that names any other palette or storage is
-//! refused rather than read with the wrong geometry (see the refusals below).
+//! height, and then **two bytes that are two fields** — a palette type and a
+//! storage type — rather than one `u16`. The split and the value are measured:
+//! the palette is at 10 = 4 + 2 + 2 + 1 + 1, a 12-byte header would put it at 12,
+//! which is the third byte of the first palette entry in every one of the 11 RIX3
+//! files in either tree, and **all four curated files** (all 11 upstream) carry
+//! `AF 00` at 8 and 9 while the 768 bytes at 10 are exactly a `.LBM`'s `CMAP / 4`
+//! (below).
+//!
+//! **What those two bytes mean is not in the tree, and is not cited to it.** No
+//! reader in the tree touches bytes 4 through 9: `WATER/KOE.PAS:35-40`,
+//! `FOREST/READ2.PAS:110-121`, `FOREST/READ.PAS:117-118` and
+//! `WATER/DEMO.PAS:108-109` seek to 10 and 778 and to nothing else. So there is
+//! no `file:line` anywhere for the field *names*, and none is claimed here. The
+//! names come from the format's documentation outside the tree (ColoRIX, the
+//! "new" VGA Paint format), which reads byte 8 as the palette type with `0xAF` =
+//! VGA (six-bit DAC triples) and byte 9 as the storage type with `0x00` = linear,
+//! `0x80` = compressed, `0x40` = extension block, `0x20` = encrypted. On that
+//! external reading — and on the measured constant, which is why the refusal
+//! cannot reject a file in the tree — a byte 8 other than `0xAF` or a byte 9
+//! other than `0x00` is refused with [`AssetError::Unsupported`]: reading one
+//! would mean inventing a palette layout or a pixel layout the tree never shows.
+//! The parts' own reads are *consistent* with both names — `KOE.PAS:39` hands the
+//! 768 bytes to ports `0x3c8`/`0x3c9` untranslated, `KOE.PAS:40` reads the pixels
+//! as a flat block — but consistency is not citation, and the refusals below rest
+//! on the constant, not on the meaning.
 //!
 //! **The palette is six bits and is copied verbatim**, like the Origin family's
 //! and unlike the IFF `CMAP`'s, which is eight bits and goes through the
@@ -66,8 +77,8 @@
 //!
 //! | construct | why | does any file need it? |
 //! |---|---|---|
-//! | palette type other than `0xAF` | the 768 bytes would not be DAC triples | no — all 11 files carry `0xAF` |
-//! | storage type other than `0x00` | compressed, planar, extension-block, encrypted or direct-colour pixels, none of which this decoder reads | no — all 11 carry `0x00` |
+//! | palette type other than `0xAF` | the 768 bytes at 10 would not be the DAC triples every reader in the tree assumes (the name is the external reading above, the constant is measured) | no — all 11 files carry `0xAF` |
+//! | storage type other than `0x00` | a compressed, planar, extension-block, encrypted or direct-colour layout this decoder does not read | no — all 11 carry `0x00` |
 //! | a canvas over the engine's largest surface | `check_geometry`, the same area rule as A2 and A3 | no |
 //! | a palette byte above 63 | not a six-bit DAC value | no |
 //! | a payload past the canvas, or short of a whole row | the file and its header disagree | no — ten files are exact, one is a whole-row crop |
@@ -136,15 +147,17 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, AssetError> {
 
     if palette_type != PALETTE_TYPE_VGA {
         return Err(unsupported(format!(
-            "the palette type is {palette_type:#04x}; the tree's RIX3 files all carry 0xaf, a VGA \
-             DAC palette, which is what the parts write to ports 0x3c8/0x3c9"
+            "the palette type is {palette_type:#04x}; every RIX3 file in the tree carries 0xaf, \
+             which the format's own documentation (not the tree: no reader here reads this byte) \
+             names a VGA palette, and which is what the parts write to ports 0x3c8/0x3c9"
         )));
     }
     if storage != STORAGE_LINEAR {
         return Err(unsupported(format!(
-            "the storage type is {storage:#04x}, not linear (0x00); 0x80 is compressed, 0x40 an \
-             extension block and 0x20 encryption, none of which this decoder reads, and the low \
-             nibble names planar storage"
+            "the storage type is {storage:#04x}, not linear (0x00), which is the only value any \
+             RIX3 file in the tree carries; by the format's own documentation 0x80 is compressed, \
+             0x40 an extension block and 0x20 encryption, and the low nibble names planar storage, \
+             none of which this decoder reads"
         )));
     }
 

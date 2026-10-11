@@ -134,7 +134,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | LNS&ZOOM | `LENS/LENSPIC.LBM` | 26708 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of LENS.EXB: LENS/DOOBJS.BAT:2 glvp lenspic.lbm -xv! |
 | LNS&ZOOM | `LENS/LENS.U` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | the lens effect's source screen: LENS/CALC.C:66 fopen("lens.u") |
 | RAYSCRL | `WATER/BKG.CLX` | 64778 | RIX3 | RIX3 screen: 320x200, palette at offset 10 | standalone | linked: WATER/BKR.PAS:2 {$L bkg.obj} |
-| RAYSCRL | `WATER/MIEKKA.SCI` | 14778 | RIX3 | RIX3 screen: 400x250, palette at offset 10 | standalone | linked: WATER/MIEK.PAS:2 {$L miekka.obj} |
+| RAYSCRL | `WATER/MIEKKA.SCI` | 14778 | RIX3 | RIX3 screen: header claims 400x250, palette at offset 10; the payload is 14,000 bytes = 35 rows, so the picture is 400x35 — the header's height overclaims (§E.16) | standalone | linked: WATER/MIEK.PAS:2 {$L miekka.obj} |
 | RAYSCRL | `WATER/WAT1.DAT` | 23096 | 00 00 00 00 | 23096 bytes of binary data, no magic, leading zeros | standalone | linked: WATER/T1.PAS:2 {$L wat1.obj} |
 | RAYSCRL | `WATER/WAT2.DAT` | 23034 | 00 00 00 00 | 23034 bytes of binary data, no magic, leading zeros | standalone | linked: WATER/T2.PAS:2 {$L wat2.obj} |
 | RAYSCRL | `WATER/WAT3.DAT` | 27818 | 00 00 00 00 | 27818 bytes of binary data, no magic, leading zeros | standalone | linked: WATER/T3.PAS:2 {$L wat3.obj} |
@@ -414,6 +414,27 @@ Each of these is something a later task must know before it writes a loader or a
     offset 2, which is what `LENS/MAIN.C:296-298` reads (`*(int *)(lensexp+2)`). It is data
     the part generates (`LENS/MAIN.C:374` writes it) as well as data it links, so the copy in
     `assets/` is the shipped one.
+16. **`WATER/MIEKKA.SCI`'s header overclaims its height: it declares 400x250 and carries 35
+    rows.** The file is 14,778 bytes and its first ten bytes are `52 49 58 33 90 01 fa 00 af 00`
+    — `RIX3`, width 400, height **250** — but the pixel payload is 14,778 − 778 = **14,000
+    bytes, which is exactly 35 rows of 400, with no partial row**: the last pixel row ends on
+    the file's last byte. It is a crop of the sword screen, not a truncation, and the crop
+    relationship is exact: those 14,000 pixel bytes are `WATER/SWORD.SCI`'s pixels from offset
+    778 for 14,000 bytes (that file being the same picture complete, 400x250, 100,778 bytes),
+    and the 768 bytes at offset 10 are `WATER/SWORD.SCI`'s palette byte for byte — which is in
+    turn `WATER/SWORD.LBM`'s `CMAP` divided by four, 768 of 768 bytes. (Both `SWORD` files are
+    in the upstream tree only; §F records why they are not curated.) The part depends on the
+    crop and not on the canvas: `WATER/MAKEOB.BAT:2` links this file (`binobj miekka.sci miekka
+    _miekka`), `WATER/MIEKKA.OBJ`'s `LEDATA` payload is this file byte for byte, and
+    `WATER/DEMO.PAS:109` reads `400*34` = 13,600 bytes from offset 778, which fits inside the
+    14,000. **The RIX3 decoder loads this file as 400x35.** Compare §E.2: `COMAN/COMBG.UH` is
+    the tree's other header-versus-payload disagreement, and it is a truncation whose cut does
+    not land on a row boundary. Row count confirmed with
+
+    ```sh
+    python3 -I -c "import sys; d=open(sys.argv[1],'rb').read(); print('file', len(d), 'payload', len(d)-778, 'rows', (len(d)-778)//400, 'remainder', (len(d)-778)%400)" assets/WATER/MIEKKA.SCI
+    # file 14778 payload 14000 rows 35 remainder 0
+    ```
 
 ---
 
