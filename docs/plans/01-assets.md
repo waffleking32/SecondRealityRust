@@ -188,8 +188,11 @@ impl Image { pub fn width(&self) -> u16; pub fn height(&self) -> u16; pub fn pix
 /// internally, so callers never need to tell raw from RLE from bit-planes.
 /// `OriginBare` has no header and therefore no magic: `sniff` never returns it and
 /// `load` refuses it, because it cannot know the geometry. `raw_surface` is its door.
+/// `Omf` likewise is a container the crate reads (A5) and never a runtime asset: `sniff`
+/// never returns it and `load` refuses it, but it exists so `AssetError` can name the
+/// container honestly when a blob is malformed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Format { Origin, OriginBare, Iff, Rix3, Pal, Fli, Ani }
+pub enum Format { Origin, OriginBare, Iff, Rix3, Pal, Fli, Ani, Omf }
 
 #[derive(Debug)]
 pub enum AssetError {
