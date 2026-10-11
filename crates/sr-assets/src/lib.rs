@@ -6,7 +6,10 @@
 //! formats ([`anim`]) — the FLI `sniff` reads and the `.ANI` it cannot, which
 //! `load_frames` is the door for. [`omf`] (A5) is the odd one out:
 //! it reads the `.OBK`/`.OBJ` container the original's linker put assets in,
-//! never an image, and exists to prove the tree complete.
+//! never an image, and exists to prove the tree complete. [`font`] (A7) is the
+//! last of them and the only one that is not a decoder: it is the strip view a
+//! part draws its text through, and the geometry it slices with is the part's,
+//! read off its own text routine.
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
 //! a pixel somewhere before:
@@ -30,6 +33,7 @@
 //!   an [`AssetError`], never a panic and never a short read.
 
 pub mod anim;
+pub mod font;
 pub mod iff;
 pub mod omf;
 pub mod origin;
@@ -85,7 +89,9 @@ impl std::fmt::Debug for Image {
 /// animation container with a magic (a `u32` size then `11 AF`, `PAM/PRAX4.FLI`)
 /// and [`Format::Ani`] the one without (a record stream that starts with a run
 /// length), and neither has a single picture to return: [`load_frames`] is their
-/// door. [`Format::Omf`] is not an image format
+/// door. [`font`] (A7) reads a strip a part draws its text from and is not a
+/// container either: no `Format` covers it, because a font strip is a decoded
+/// [`Image`] plus the geometry its own part's text routine states. [`Format::Omf`] is not an image format
 /// at all: it is the build container [`omf::extract_ledata`] reads, never
 /// returned by [`sniff`] (an OMF file opens with a record type, not a magic) and
 /// refused by [`load`].

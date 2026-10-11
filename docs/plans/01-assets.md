@@ -877,6 +877,25 @@ impl Font {
 }
 ```
 
+**A7's measurement, recorded here as it was implemented** (the discipline A2's corrections
+follow: the plan is edited rather than worked around). The two `.UH` strips are **proportional
+strips, not grids of cells**, and the parts' routines say so rather than a dimension:
+`ENDSCRL/MAIN.C:103-122` finds each glyph by scanning for a run of inked columns — 74 runs for
+the 74 characters of `fonaorder` (`:13`), widths 3..25, and 41 of the 74 straddle one of the
+20-column cells — while the one cell the routine *does* state by hand is its blank, in the
+strip's last 20 columns (`fonap[32]=1500-20`, `:123`; rows from `FONAY 30`, `:6`). So
+`cell = (20, 30)` — 1500/20 = 75 = 74 characters + the blank — and the cells of the `Font` are
+the *scan's* runs, not slices at that pitch: cutting at 20 puts a sliver of `C` in `B`'s cell
+and moves every later glyph, which is what the task's warning describes and what
+`tests/font.rs::the_glyphs_do_not_sit_on_the_cells_they_are_cut_into` pins. `from_image`
+therefore *checks* the cell against the strip (both dimensions must divide it, and the rows must
+be the strip's — which refuses `ALKU`'s `32`, `ALKU/MAIN.C:218`, against a 30-row strip whose
+linked copy is padded by `dw 1500*5 dup(?)`, `ALKU/INCLUDE.ASM:19`) and reads the glyphs from
+the scan, and `glyph` addresses **cells by index** (`ch - first`) because the parts' orders are
+not ASCII-contiguous past `X`. `GRAB/BLOWFNT.1BM` is not a strip any part uses — nothing links
+it, nothing opens a `.1bm`, and its pixels are a 10×5 grid of 32-pixel cells on a 320×200 canvas
+— so A7 dropped it (§E.14 of `docs/fidelity/asset-inventory.md`, and A7's report).
+
 - [ ] **Step 1: Find the cell geometry in `ENDSCRL`'s text routine and write it down** in the test's
   own comment, with the `file:line` it came from.
 - [ ] **Step 2: Write the failing test** — 1500×30 with the cell size the source gives yields a whole

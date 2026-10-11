@@ -180,7 +180,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | START | `START/HZPIC.P` | 60706 | FD FC | Origin RLE PIC: 640x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: START/MAKEFILE:3 _hzpic.obj (built by START/DOHZ.BAT:1) |
 | START | `START/HZPIC.PAL` | 768 | 03 00 02 00 | 768 bytes, no magic: a VGA palette | standalone | the setup menu's palette (floor list) |
 | START | `START/HZPIC.LBM` | 59352 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: START/DOHZ.BAT:1 lbm2p hzpic.lbm |
-| GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 30-pixel font strip (floor list) |
+| GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 320x200 canvas of 32-pixel cells on its first 160 rows, linked into nothing — dropped as a font strip by A7 (§E.14) (floor list) |
 | GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
 
 ### A.2 Assets whose bytes exist only inside a build blob: one recovered, two answered
@@ -446,9 +446,16 @@ Each of these is something a later task must know before it writes a loader or a
     from the pack (`TECHNO/KOE.C:605`) — and neither is needed: `TECHNO/MAKEFILE:7`
     comments `_pic1.obk _pic2.obk` out of the link.
 14. **`GRAB/BLOWFNT.1BM` has no magic and no header** (64,000 bytes) yet the `.1BM` extension
-    is an Amiga-style one. It is a font strip, one byte per pixel, 320×200 by its size; the
-    port's font-strip task (A7) reads it with geometry supplied by the caller, exactly as it
-    does for `ALKU/FONA.UH`.
+    is an Amiga-style one. Its pixels are a 320×200 canvas carrying a 10×5 grid of 32-pixel
+    cells with the rules drawn between them — columns 31 + 32k inked in every row of 0..159,
+    rows 31 + 32k filling the canvas, glyphs `A`, `B`, `C`, `D`, … in the 50 cells — and the
+    canvas's last 40 rows hold nothing at all, so even that grid does not tile the file.
+    **A7 dropped it as a font strip**: no part links its glyph rows (no `.OBJ` or `.EXE` in
+    either tree contains any of them) and no part opens a `.1bm` — the extension is named
+    once in all of `upstream/`, in a tool's comment (`GRAB/GFXSAVE.H:5`) — so no part's text
+    routine states what its cell is, and reading it as a font would be inventing the grid
+    (`.superpowers/sdd/01-assets/task-A7-report.md`). It stays in `assets/` as a floor file;
+    `sr_assets::raw_surface` is its door.
 15. **`LENS/LENS.EXP` has a one-word header**: `u16 0` at offset 0 then a `u16` count at
     offset 2, which is what `LENS/MAIN.C:296-298` reads (`*(int *)(lensexp+2)`). It is data
     the part generates (`LENS/MAIN.C:374` writes it) as well as data it links, so the copy in
