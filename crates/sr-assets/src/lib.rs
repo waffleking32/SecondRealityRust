@@ -1,8 +1,8 @@
 //! Asset decoding for the port: the original's formats, read as they are.
 //!
-//! One module per family. Task A2 lands the Origin PIC container ([`origin`]);
-//! IFF (A3), RIX3 and `.PAL` (A4) and the two animation formats (A6) follow and
-//! plug into [`load`] and [`sniff`].
+//! One module per family. Task A2 lands the Origin PIC container ([`origin`])
+//! and A3 the IFF images ([`iff`]); RIX3 and `.PAL` (A4) and the two animation
+//! formats (A6) follow and plug into [`load`] and [`sniff`].
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
 //! a pixel somewhere before:
@@ -16,6 +16,7 @@
 //! - **A decoder never reads past its input.** Malformed and truncated input is
 //!   an [`AssetError`], never a panic and never a short read.
 
+pub mod iff;
 pub mod origin;
 
 use std::path::{Path, PathBuf};
@@ -160,24 +161,24 @@ pub fn sniff(bytes: &[u8]) -> Option<Format> {
 }
 
 /// Decode `bytes` as `format`. [`Format::Origin`] reads its own magic to choose
-/// between the family's five variants.
+/// between the family's five variants; [`Format::Iff`] reads its `FORM` type the
+/// same way, between `ILBM` and `PBM `.
 ///
 /// Every other format is [`AssetError::Unsupported`] until its decoder lands:
-/// IFF with task A3, RIX3 and `.PAL` with A4, FLI and ANI with A6.
+/// RIX3 and `.PAL` with A4, FLI and ANI with A6.
 pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
     match format {
         Format::Origin => origin::decode(bytes),
+        Format::Iff => iff::decode(bytes),
         Format::OriginBare => Err(AssetError::Unsupported {
             format,
             what: "no header, so no geometry: raw_surface(bytes, width, height) is its door"
                 .to_string(),
         }),
-        Format::Iff | Format::Rix3 | Format::Pal | Format::Fli | Format::Ani => {
-            Err(AssetError::Unsupported {
-                format,
-                what: "no decoder for this format yet".to_string(),
-            })
-        }
+        Format::Rix3 | Format::Pal | Format::Fli | Format::Ani => Err(AssetError::Unsupported {
+            format,
+            what: "no decoder for this format yet".to_string(),
+        }),
     }
 }
 
@@ -195,10 +196,11 @@ pub fn load_path(path: &Path) -> Result<Image, AssetError> {
 /// `.ANI` scheme carry more than one, and those land with task A6.
 pub fn load_frames(bytes: &[u8], format: Format) -> Result<Vec<Image>, AssetError> {
     match format {
-        Format::Origin => Ok(vec![load(bytes, format)?]),
+        Format::Origin | Format::Iff => Ok(vec![load(bytes, format)?]),
         _ => Err(AssetError::Unsupported {
             format,
-            what: "not implemented; only the Origin family is a container this decoder reads yet"
+            what: "not implemented; only the Origin family and IFF are containers this decoder \
+                   reads yet"
                 .to_string(),
         }),
     }
