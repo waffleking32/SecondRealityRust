@@ -95,7 +95,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | U2E | `VISU/C/SCENE/U2E.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: the material palette is copied out of the .00M at offset 16 (U2E.C:337), and the viewer reads .MAT/.PAL beside it (VISU/C/MAIN.C:225-239) |
 | U2E | `VISU/C/SCENE/U2E.MAT` | 480 | 3B 66 6F 72 | ASCII text | standalone | scene material list |
 | U2E | `VISU/C/SCENE/U2E.INF` | 19 | 66 6F 76 20 | ASCII text | standalone | scene info text |
-| U2A | `VISU/C/U2ABG.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: VISU/C/MAKEFILE:40 u2a.obj+_bg.obk |
+| U2A | `VISU/C/U2ABG.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | linked: VISU/C/MAKEFILE:40 u2a.obj+_bg.obk |
 | U2A | `VISU/C/U2ABG.LBM` | 19906 | FORM | IFF ILBM (FORM .... ILBM) | standalone | source art of VISU/C/U2ABG.UH |
 | U2A | `VISU/C/U2A.PAL` | 768 | 00 00 00 01 | 768 bytes, no magic: a VGA palette | standalone | the city scene palette |
 | U2E | `VISU/C/SCENE/U2E.PAL` | 768 | 00 00 00 0F | 768 bytes, no magic: a VGA palette | standalone | the U2E scene palette |
@@ -109,7 +109,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | PAM | `PAM/PRAX4.FLI` | 335476 | 74 1E 05 00 | Autodesk FLI animation: magic AF 11 at offset 4, 320x200; the first u32 is the file size | standalone | the FLI the animation was built from (task A6 reads it) |
 | BEGLOGO | `BEG/SRTITLE.UP` | 44575 | FD FC | Origin RLE PIC: 320x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: BEG/MAKEFILE:21 link ...+_pic.obk |
 | BEGLOGO | `BEG/SRTITLE.LBM` | 53254 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of BEG/SRTITLE.UP |
-| GLENZ | `GLENZ/FC.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: GLENZ/MAKEFILE:3 _fc.obk |
+| GLENZ | `GLENZ/FC.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | linked: GLENZ/MAKEFILE:3 _fc.obk |
 | GLENZ | `GLENZ/FC.LBM` | 25552 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of GLENZ/FC.UH |
 | TUNNELI | `TUNNELI/TUNNEL.DAT` | 35328 | A0 00 6E 00 | 35328 bytes of binary data, no magic | standalone | linked: TUNNELI/TUN10.PAS:31 {$L tunneli.obj} |
 | TUNNELI | `TUNNELI/SINIT.DAT` | 12292 | 00 00 00 00 | 12292 bytes of binary data, no magic, leading zeros | standalone | linked: TUNNELI/TUN10.PAS:33 {$L sinit.obj} |
@@ -128,7 +128,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | LNS&ZOOM | `LENS/LENS.EX2` | 6860 | E0 01 00 00 | 6860 bytes of binary data, no magic | standalone | linked: LENS/MAKEFILE:4-5 _lensex2.obk |
 | LNS&ZOOM | `LENS/LENS.EX3` | 1538 | E0 01 00 00 | 1538 bytes of binary data, no magic | standalone | linked: LENS/MAKEFILE:4-5 _lensex3.obk |
 | LNS&ZOOM | `LENS/LENS.EX4` | 6252 | E0 01 15 00 | 6252 bytes of binary data, no magic | standalone | linked: LENS/MAKEFILE:4-5 _lensex4.obk |
-| LNS&ZOOM | `LENS/LENS.EXB` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | linked: LENS/MAKEFILE:4 _lensexb.obk |
+| LNS&ZOOM | `LENS/LENS.EXB` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | linked: LENS/MAKEFILE:4 _lensexb.obk |
 | LNS&ZOOM | `LENS/LENS.EXP` | 18864 | 00 00 96 05 | 18864 bytes of binary data, no magic | standalone | linked: LENS/MAKEFILE:5 _lensexp.obk |
 | LNS&ZOOM | `LENS/FILLER` | 4224 | 21 21 21 21 | 4224 bytes of binary data, no magic | standalone | linked: LENS/MAKEFILE:4 _filler.obk (the 4K pad LENS/MAKEFILE:3 explains) |
 | LNS&ZOOM | `LENS/LENSPIC.LBM` | 26708 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of LENS.EXB: LENS/DOOBJS.BAT:2 glvp lenspic.lbm -xv! |
@@ -181,7 +181,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | START | `START/HZPIC.PAL` | 768 | 03 00 02 00 | 768 bytes, no magic: a VGA palette | standalone | the setup menu's palette (floor list) |
 | START | `START/HZPIC.LBM` | 59352 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: START/DOHZ.BAT:1 lbm2p hzpic.lbm |
 | GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 320x200 canvas of 32-pixel cells on its first 160 rows, linked into nothing — dropped as a font strip by A7 (§E.14) (floor list) |
-| GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes (no palette in the file) | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
+| GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
 
 ### A.2 Assets whose bytes exist only inside a build blob: one recovered, two answered
 
@@ -554,6 +554,41 @@ Each of these is something a later task must know before it writes a loader or a
     screen pages (`ulosta_frame(0x0a000)`/`tw_setstart(0)` alternating with `0x0a400`/`16384`).
     Task A6's decoders assert all 42 pairs; this finding is the record so Phase 4 does not have
     to re-derive it.
+22. **The `Uh1` files carry a palette, and their own `colours` word says they do not.** Four
+    curated files start `55 68 31 00` — `VISU/C/U2ABG.UH`, `GLENZ/FC.UH`, `GLENZ/EYE4.UH`,
+    `LENS/LENS.EXB` (and `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH`, the same file) — and §A's rows for
+    them said "(no palette in the file)". **That parenthetical is wrong**, and this is the
+    measurement that says so; the four rows have been corrected to point here. A8 found it by
+    looking at the sheet this tree's own decoder draws.
+    - The bytes: words 0..7 are `6855 0031 0140 00c8 0000 0000 0000 0000` — magic `Uh`, word 1
+      = 0x31 = 49, 320×200, then four zero words. Offsets 16..784 hold **768 bytes of palette**,
+      252–255 of whose 256 entries are non-black, and the pixels run from 49×16 = **784** to the
+      end: 64,784 = 16 + 768 + 64,000 exactly. §E.3 already reads the file this way ("784 bytes
+      of header and palette then the pixels").
+    - The writer says the same thing, and says why the `colours` word misleads:
+      `GRAB/GLVP.C:988-1010` (`saveunpheaderpal`) writes `putw(49,f1)` at `:996`, **four**
+      `putw(0,f1)` at `:999-1002` — the fourth commented `// palette` — then
+      `fwrite(pal,1,768,f1)` at `:1003` and the pixels at `:1004-1009`. The `colours` field is
+      one of the zeros the writer emits on purpose, so it never says whether a palette is
+      there; the container's magic and word 1 do.
+    - The loader agrees: `sr_assets::origin`'s `Uh` path reads the palette from 16..784 and the
+      pixels from 784, and `cargo xtask assets verify --decode` prints
+      `VISU/C/U2ABG.UH: Origin PIC 320x200, palette: 252 of 256 entries set` (254 and 255 for
+      the two GLENZ files, 255 for LENS.EXB) — where a palette-less file prints `palette: none
+      set in the file`.
+    - The sheet agrees: A8's `out/assets/GLENZ.png` draws `GLENZ/EYE4.UH` as the blue eye the
+      file is named for, and `LNS&ZOOM.png` draws `LENS/LENS.EXB` as the bald lens head.
+      `GLENZ/FC.UH`, `LENS/LENS.EXB` and `VISU/C/U2ABG.UH` each have their `.LBM` source art
+      beside them in `assets/`, drawn through its own `CMAP`, and the sheets show the pairs
+      agreeing.
+23. **One credits picture is the original's own placeholder, and it ships that way.**
+    `CREDITS/PICS/PIC02.LBM` (7,000 bytes, IFF `ILBM`, 160×100, palette 48 of 256 entries set)
+    decodes to a black frame hand-lettered in red and blue: **"PART-PIC MISSING (PXL SUX)"** —
+    the authors' card for a picture that was never drawn. Nothing is wrong with the file or with
+    the decoder: §E.20 measures each credits picture's blob payload as byte-identical to the
+    matching `.LBM`'s decoded pixels (all 21), so the shipped credits really did show that card.
+    Recorded because "the picture looks wrong" is otherwise the obvious reading of it, and a
+    later CREDITS task must not "repair" it.
 
 ---
 
@@ -608,3 +643,10 @@ from a blob**, whose origin is a record, not a path — which is what makes the 
 plus that guard. As of the review-fix commit the loop printed no `DIFFERS` lines and
 `checked 149 files`; as of A5 it prints one `RECOVERED: assets/TECHNO/CIRCLE2.EGA`, still no
 `DIFFERS` lines, and `checked 150 files`.
+
+A8 made the loop a command: `cargo xtask assets verify --tree` re-hashes all 150 files against
+the record's own digests (the `sha256` column, and the `bytes` column beside it), reports a
+recorded file that is missing, a file that has no row, and a digest that does not match, and
+exits **0** on this tree with `150 file(s) recorded, 150 in the tree, 0 finding(s)`. It is the
+loop above plus the two things the loop cannot see: that the record's numbers are the file's,
+and that nothing was added to the tree without a row.

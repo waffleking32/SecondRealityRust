@@ -954,6 +954,24 @@ windowed bug was found by a person looking at output, and no test could have fou
     (u32, u32, Vec<u8>)` where `Tile { width, height, rgb, label }`, so both callers share one
     layout and one PNG writer.
 
+**A8's measured result, recorded here as A2's and A7's are.** The tool is built and the checks
+run: `cargo xtask assets verify --tree --decode --sheet out/assets` on the curated tree exits
+**0** and prints `tree: 150 file(s) recorded, 150 in the tree, 0 finding(s)`,
+`decode: 150 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 87 headerless with no
+decoder, 1 refused on record, 0 finding(s)` and `sheets: 21 written`. Three things the plan did
+not fix and the implementation had to decide, all recorded in `xtask/src/assets.rs`'s module
+docs: (1) **one file's refusal is the recorded outcome** — `COMAN/COMBG.UH` is the truncated
+copy A1 §E.2 measures, and the tool treats a refusal there as the check *passing*, in a named,
+cited `REFUSED_ON_RECORD` list, so a second refusal is a finding; (2) **`--decode` opens a
+headerless file only where `sr_assets` documents the construction** (`.PAL`, `.ANI` by name),
+and reports everything else with no magic — `.U`, `.1BM`, `.EGA`, `.DAT`, `.EXE`-family data —
+as not decoded rather than inventing a geometry; (3) `load_path` was not needed: the bytes are
+read once and both hashed and decoded. Two findings went into
+`docs/fidelity/asset-inventory.md`: **§E.22** (the `Uh1` files do carry a palette; §A's four
+rows corrected) and **§E.23** (`CREDITS/PICS/PIC02.LBM` is the original's own "PART-PIC
+MISSING (PXL SUX)" placeholder). Step 5 — looking at the sheets — is a person's, and the
+report names the 21 sheets and what each should show.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```rust

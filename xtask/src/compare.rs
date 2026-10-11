@@ -629,12 +629,15 @@ fn output_root(out: Option<&Path>) -> PathBuf {
 /// deepest ancestor that exists is canonicalised and the rest appended. The
 /// path does not have to exist yet, but it still has to be comparable with a
 /// path that does.
-fn resolve(path: &Path) -> Result<PathBuf, CompareError> {
+///
+/// Shared with the other guards over what this tool writes, because a guard
+/// that only compares strings is a guard a trailing `/.` walks through.
+pub(crate) fn resolve(path: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
-            .map_err(|e| CompareError::Io(format!("cannot read the working directory: {e}")))?
+            .map_err(|e| format!("cannot read the working directory: {e}"))?
             .join(path)
     };
     for ancestor in absolute.ancestors() {
@@ -646,23 +649,45 @@ fn resolve(path: &Path) -> Result<PathBuf, CompareError> {
     Ok(absolute)
 }
 
-/// Refuse a report directory inside the reference: the captures are inputs,
-/// not outputs, and a report written among them would dirty the bytes every
-/// later diff is measured against. Both paths are resolved first, so a
-/// relative path, a trailing slash or a `..` cannot slip past.
-fn refuse_out_inside_reference(out: &Path, reference: &Path) -> Result<(), CompareError> {
+/// Refuse to write `out` inside `input`: the inputs are read, never written, and
+/// a report or a sheet landing among them would dirty the bytes every later
+/// check is measured against. Both paths are resolved first, so a relative
+/// path, a trailing slash or a `..` cannot slip past.
+///
+/// `flag` is the option to pass somewhere else, `why` says what would be
+/// damaged, and `elsewhere` tells the caller where to put it instead — the
+/// message has to be usable without reading this source.
+pub(crate) fn refuse_output_inside(
+    out: &Path,
+    input: &Path,
+    flag: &str,
+    why: &str,
+    elsewhere: &str,
+) -> Result<(), String> {
     let out = resolve(out)?;
-    let reference = resolve(reference)?;
-    if out.starts_with(&reference) {
-        return Err(CompareError::Io(format!(
-            "--out {} is inside --reference {}: the reference captures are inputs, not outputs, and \
-             a report written among them would dirty the frames every later diff is measured \
-             against. Pass --out somewhere else; the default is {DEFAULT_OUT}",
+    let input = resolve(input)?;
+    if out.starts_with(&input) {
+        return Err(format!(
+            "{flag} {} is inside the input tree {}: {why}. {elsewhere}",
             out.display(),
-            reference.display()
-        )));
+            input.display()
+        ));
     }
     Ok(())
+}
+
+/// The reference directory is input-only: a report written among the captures
+/// would dirty the bytes every later diff is measured against.
+fn refuse_out_inside_reference(out: &Path, reference: &Path) -> Result<(), CompareError> {
+    refuse_output_inside(
+        out,
+        reference,
+        "--out",
+        "the reference captures are inputs, not outputs, and a report written among them would \
+         dirty the frames every later diff is measured against",
+        &format!("Pass --out somewhere else; the default is {DEFAULT_OUT}"),
+    )
+    .map_err(CompareError::Io)
 }
 
 /// `cargo xtask compare`: optionally run a command to produce the rendered

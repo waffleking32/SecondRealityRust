@@ -92,6 +92,13 @@ pub struct CaptureOptions {
     pub skip_boot_frames: u64,
     /// `KBD_*` key names sent in order once the setup screen appears.
     pub keys: Vec<String>,
+    /// Where to write one PNG of the frames this capture takes — the sheet a
+    /// person looks at to see *what* was captured. `None` writes none.
+    ///
+    /// It is an output of the capture but not part of what the capture *is*:
+    /// the frames and the manifest are the reference, and the sheet is how a
+    /// person reads them (see [`write_sheet`]).
+    pub sheet: Option<PathBuf>,
 }
 
 /// `--keys "KBD_left KBD_enter"`: whitespace-separated key names, in order.
@@ -194,6 +201,20 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             options.exe.display(),
             options.cwd.display()
         )));
+    }
+    // The mounted directory is the 1993 distribution itself and is read-only;
+    // nothing this tool writes may land in it, the same rule that keeps a
+    // report out of a reference capture.
+    if let Some(sheet) = &options.sheet {
+        crate::compare::refuse_output_inside(
+            sheet,
+            &options.cwd,
+            "--sheet",
+            "that directory is the mounted original (SECOND.EXE and REALITY.FC), and every frame \
+             diff in the project is measured against those exact bytes",
+            "Pass --sheet beside the capture instead, e.g. <capture-dir>/sheet.png",
+        )
+        .map_err(CaptureError::Options)?;
     }
     Ok(())
 }
@@ -315,6 +336,53 @@ fn write_frame(
     })
 }
 
+/// One PNG of a capture's frames, for a person to look at.
+///
+/// Written from what the capture left on disk rather than from the pixels in
+/// memory, for the same reason `main` re-reads the manifest: a sheet drawn from
+/// anything else could show something the capture did not write. The frames are
+/// tiles in the order they were captured — the layout is [`crate::sheet`]'s, the
+/// same one `assets verify --sheet` uses — and because nothing can draw text in
+/// a PNG, the tile positions are printed against the frame indices.
+pub fn write_sheet(
+    sheet: &Path,
+    out: &Path,
+    manifest: &CaptureManifest,
+) -> Result<(), CaptureError> {
+    let mut tiles = Vec::with_capacity(manifest.frames.len());
+    for frame in &manifest.frames {
+        let file = out.join(&frame.rgb);
+        let rgb = std::fs::read(&file).map_err(|e| CaptureError::Io {
+            path: file,
+            message: e.to_string(),
+        })?;
+        tiles.push(crate::sheet::Tile {
+            width: u32::from(manifest.width),
+            height: u32::from(manifest.height),
+            rgb,
+            // The frame's own name for its file, and the index it was captured
+            // at — the two things a person needs to tell two frames apart.
+            label: format!("frame {} ({})", frame.index, frame.rgb),
+        });
+    }
+    let columns = crate::sheet::columns_for(tiles.len());
+    let (width, height, rgb) = crate::sheet::contact_sheet(&tiles, columns);
+    crate::sheet::write_png(sheet, width, height, &rgb).map_err(|e| CaptureError::Io {
+        path: sheet.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    println!(
+        "sheet {}: {} tile(s), {columns} column(s), {width}x{height}",
+        sheet.display(),
+        tiles.len()
+    );
+    for (index, tile) in tiles.iter().enumerate() {
+        let (row, column) = crate::sheet::position(index, columns);
+        println!("  r{row}c{column} {}", tile.label);
+    }
+    Ok(())
+}
+
 /// The palette entries an indexed frame uses, in index order.
 fn used_palette(indexed: &[u8], palette: &[[u8; 3]; 256]) -> BTreeMap<u8, [u8; 3]> {
     let mut used = BTreeMap::new();
@@ -365,6 +433,7 @@ mod tests {
             out: out.to_path_buf(),
             skip_boot_frames: 5000,
             keys: keys_from_script("KBD_left KBD_enter"),
+            sheet: None,
         }
     }
 
@@ -543,6 +612,64 @@ mod tests {
             assert_eq!(palette.len(), distinct.len());
             assert!(palette.len() < 256);
         }
+    }
+
+    #[test]
+    fn a_capture_is_written_as_one_sheet_a_person_can_look_at() {
+        // The point of the flag: after a capture, one PNG holding what was
+        // taken, in the order it was taken — B2–B5 find a part's frames by
+        // looking at it, so the tiles have to be the frames themselves.
+        let out = scratch_dir("sheet");
+        let opts = options(vec![5100, 5200], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame()]);
+        let manifest = capture(&mut oracle, &opts).unwrap();
+        let sheet = out.join("sheet.png");
+
+        write_sheet(&sheet, &out, &manifest).unwrap();
+
+        let (width, height, rgb) = read_png(&sheet);
+        // Two 320x200 tiles, one column of cells each: 2 + 2 * (320 + 2*1 + 2)
+        // wide and 2 + (200 + 2*1 + 2) tall.
+        assert_eq!((width, height), (650, 206));
+        let frame_rgb = decode_frame(FRAME_BIN).unwrap().rgb;
+        // The tiles are the frames, drawn from the files the capture wrote.
+        let at = |x: u32, y: u32| {
+            let at = ((y * width + x) * 3) as usize;
+            [rgb[at], rgb[at + 1], rgb[at + 2]]
+        };
+        assert_eq!(at(3, 3), [frame_rgb[0], frame_rgb[1], frame_rgb[2]]);
+        assert_eq!(at(327, 3), [frame_rgb[0], frame_rgb[1], frame_rgb[2]]);
+        // And the gutter between the two cells is the sheet's background, not
+        // frame pixels: two frames side by side are still two frames.
+        assert_eq!(at(324, 3), [40, 40, 40]);
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn a_sheet_inside_the_mounted_directory_is_refused() {
+        // reference/original holds the 1993 distribution and is read-only:
+        // every frame diff in the project is measured against those bytes.
+        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+        opts.sheet = Some(opts.cwd.join("sheet.png"));
+        assert!(matches!(
+            validate_options(&opts),
+            Err(CaptureError::Options(_))
+        ));
+
+        // Beside the capture directory is where it belongs.
+        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+        opts.sheet = Some(PathBuf::from("out/capture/sheet.png"));
+        assert!(validate_options(&opts).is_ok());
+    }
+
+    /// Read a PNG back: `(width, height, RGB8 pixels)`.
+    fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
+        let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buffer = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buffer).unwrap();
+        buffer.truncate(info.buffer_size());
+        (info.width, info.height, buffer)
     }
 
     #[test]

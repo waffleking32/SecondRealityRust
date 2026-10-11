@@ -8,12 +8,19 @@
 //! `compare` is the other half: it diffs the port's frames against those
 //! captures and reports the difference per frame, exiting non-zero when any
 //! frame differs so a phase's exit criteria can be checked by a script.
+//!
+//! `assets verify` is the same idea one phase earlier: it checks the curated
+//! asset tree against its own record, decodes every asset, and writes a contact
+//! sheet per part — see `assets.rs`, which also carries the exit-code contract
+//! the two tools share.
 
+mod assets;
 mod compare;
 mod oracle;
 mod reference;
+mod sheet;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -60,6 +67,41 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Work with the curated asset tree in `assets/`.
+    Assets {
+        #[command(subcommand)]
+        command: AssetsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AssetsCommand {
+    /// Check the curated tree against its provenance, decode every asset, and
+    /// write a contact sheet per part to look at.
+    ///
+    /// Exit code 0 when everything asked for checked out, 1 when a check
+    /// failed (a digest that does not match `assets/PROVENANCE.md`, a
+    /// provenance row with no file, a file with no provenance row, an asset
+    /// whose magic says it is a picture and which does not decode), and 2 when
+    /// the tool could not run at all (no `assets/`, an unreadable or malformed
+    /// provenance, a refused `--sheet`, or nothing asked for).
+    Verify {
+        /// Re-hash every file in the tree and compare it with the digest
+        /// `assets/PROVENANCE.md` records for it.
+        #[arg(long)]
+        tree: bool,
+        /// Decode every asset that has a decoder and report what each one is:
+        /// format, dimensions and palette size for a picture, frame count for
+        /// an animation, and what a headerless file is not.
+        #[arg(long)]
+        decode: bool,
+        /// Write one PNG per part, each of that part's assets a tile, into this
+        /// directory. Nothing is scaled and no text is drawn, so the tile order
+        /// is printed as it goes. A directory inside `assets/` is refused: the
+        /// tree is input-only.
+        #[arg(long)]
+        sheet: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -95,6 +137,12 @@ enum ReferenceCommand {
         /// separated, e.g. "KBD_left KBD_enter".
         #[arg(long)]
         keys: Option<String>,
+        /// Write one PNG of the frames this capture takes, to look at. The
+        /// tiles are the frames, in the order they were captured, and their
+        /// indices are printed as they are laid out. A path inside `--cwd` is
+        /// refused: that directory is the original, mounted read-only.
+        #[arg(long)]
+        sheet: Option<PathBuf>,
     },
 }
 
@@ -124,6 +172,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                     out,
                     skip_boot_frames,
                     keys,
+                    sheet,
                 },
         } => {
             let options = CaptureOptions {
@@ -135,6 +184,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 out,
                 skip_boot_frames,
                 keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
+                sheet,
             };
             // Refuse what cannot be reproduced before starting anything.
             reference::validate_options(&options)?;
@@ -164,6 +214,9 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                     None => println!("  frame {}: {} (rgb only)", frame.index, frame.rgb),
                 }
             }
+            if let Some(sheet) = &options.sheet {
+                reference::write_sheet(sheet, &options.out, &written)?;
+            }
             Ok(ExitCode::SUCCESS)
         }
         Command::Compare {
@@ -176,6 +229,21 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             rendered.as_deref(),
             run.as_deref(),
             out.as_deref(),
+        )?),
+        Command::Assets {
+            command:
+                AssetsCommand::Verify {
+                    tree,
+                    decode,
+                    sheet,
+                },
+        } => Ok(assets::command(
+            Path::new(assets::DEFAULT_TREE),
+            &assets::Options {
+                tree,
+                decode,
+                sheet,
+            },
         )?),
     }
 }
