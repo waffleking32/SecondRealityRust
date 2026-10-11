@@ -1264,18 +1264,37 @@ cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter
     --frames <i-1,i,j,k,k+1> --out reference/parts/beglogo --sheet out/beglogo.png
 ```
 
-**A capture holds one support frame beyond each end of its keyframe range**, and that is not
-optional — B1b established it. The oracle's alignment is ±1 frame between sessions, `compare` searches
-for it, and a search needs a neighbour to find: a capture holding only its keyframes has exactly one
-candidate per index, so the alignment shows up as a real 9–15% difference instead of being absorbed.
-One frame at each end is enough and they are **support, not keyframes**: they go in the manifest and
-not in the index table.
+**The capture that will be compared *against* holds one support frame beyond each end of the keyframe
+range; the reference holds keyframes only.** That asymmetry is not a style choice — B1b's review
+measured the symmetric version failing. `compare` pairs *every* frame of the reference, so a support
+frame sitting in the reference is itself a reference index, and its own counterpart lies one further
+out still: two captures both holding `N₁-1 … N_k+1` still refuse at the outermost index (exit 2,
+"reference frame 2451 … the nearest rendered index is 2449"). With the reference holding `N₁ … N_k`
+and the partner holding `N₁-1 … N_k+1`, every reference index has a counterpart in the window.
 
-Two of B1b's other numbers decide how much this costs. A run of requested indices closer together than
-25 frames is now grabbed *before* any of them is read, so the neighbours are capturable at all — the
-DAC read costs ~300 ms (1024 requests, 99% of a chain-4 frame) and used to sit between grabs, which is
-why consecutive indices were previously refused. And the read itself is untouched: same bytes, same
-coherence rule.
+So the two commands in this task are not the same command:
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames <i,j,k> --out reference/parts/beglogo --sheet out/beglogo.png
+
+# the re-capture that will be compared against it: one support frame beyond each end
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames <i-1,i,j,k,k+1> --out out/beglogo-recapture
+```
+
+Support frames are support: they go in the manifest and not in the index table, and the directory
+holding them is scratch (`out/`), not `reference/`.
+
+**Leave room after a support run.** B1b's other numbers decide the rest. A run of requested indices
+closer together than 25 frames is grabbed *before* any of them is read, because the DAC read costs
+~300 ms (1024 requests, 99% of a chain-4 frame) and used to sit between grabs — which is why
+consecutive indices were previously refused. The price is that the run's reads are deferred: a batch of
+*k* frames spends ~23·*k* rendered frames reading afterwards, so a list that puts a support run
+immediately before a distant keyframe is refused (`--frames 2448..2452,2540` fails; 2540 arrives during
+the batch's reads). Keyframes hundreds of frames apart are naturally fine — a trio defers ~69 frames —
+but do not build a list where a distant index follows a batched run by less than ~25·*k* frames.
 
 - [ ] **Step 4: Re-capture and prove the reference is reproducible**
 
@@ -1433,4 +1452,4 @@ Exit criteria from spec §10, with the evidence each task leaves:
 | Every needed asset decodes | `cargo xtask assets verify --decode` exit 0 |
 | …and matches the source art | cross-format tests (A2/A3) plus the contact sheets and the recorded look (A8) |
 | Provenance file complete | `cargo xtask assets verify --tree` exit 0 against `assets/PROVENANCE.md` |
-| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each holding one support frame beyond each end of its keyframe range and carrying a re-capture comparison. **A held screen shows exit 0, offset 0, byte-identical; a moving one shows the measured offset and residue** (B1b/D19: same alignment group → identical, different group → offset ±1 with 0.2–0.6 % residue). This criterion is stated per screen kind because the oracle's own reproducibility is per screen kind, and restating it is what B1b measured rather than assumed |
+| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each carrying a re-capture comparison whose partner holds one support frame beyond each end of the reference's keyframe range (the asymmetry is B1b's, and the symmetric version refuses — see B2). **A held screen shows exit 0, offset 0, byte-identical; a moving one shows the measured offset and residue** (B1b/D19: same alignment group → identical, different group → offset ±1 with 0.2–0.6 % residue). This criterion is stated per screen kind because the oracle's own reproducibility is per screen kind, and restating it is what B1b measured rather than assumed |
