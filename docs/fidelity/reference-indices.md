@@ -503,12 +503,14 @@ of the race fired eight times on JPLOGO: eight `PlaneTooSmall` refusals naming a
 (160 units, the low byte of `y*80` that `scrolly` writes to 0x0d for `y ≡ 2 (mod 16)`) on a screen
 whose rows `lineblit` writes as 80. **Nothing in the tree was produced by the race** — no `.idx` from
 any of these three parts survives — but the hand-check §1.9 asks for is what stands between the quiet
-value and a sheared plane, and every `.idx` this block filed was checked against its manifest's
-palette (RAYSCRL 13500: **0 mismatches of 64000 pixels**, 190 indices to 190 colours).
+value and a sheared plane. Only one `.idx` is filed by this block at all — RAYSCRL's 13500, whose
+part writes no CRTC register — and it was checked twice: **0 mismatches of 64000 pixels** through the
+manifest's palette, 190 indices to 190 colours (§15.3).
 
 **A `.idx` can be honest and still weaker evidence than the ones already in the tree, when the palette
-partly collapses.** 3DSINFLD's 15100 plane has no index carrying two RGB triples — so it is not
-sheared — but its **83 indices reach only 58 distinct colours** (21 triples are reachable from two or
+partly collapses.** A sweep frame of 3DSINFLD's (`out/b4b-ray-sweep2`'s 15100, not filed) has no
+index carrying two RGB triples — so it is not sheared — but its **83 indices reach only 58 distinct
+colours** (21 triples are reachable from two or
 three indices), because the part builds its palette from a formula (`COMAN/MAIN.C:128-150`) that
 rounds several entries together. On such a screen the coherence check has fewer distinct colours with
 which to catch a shear than a one-to-one palette gives it (LNS&ZOOM 2700: 64 indices ↔ 64 triples,
@@ -519,15 +521,19 @@ holds for ~350 frames — measured, 17500, 17501, 17600, 17699, 17700, 17701, 17
 `sha256` in `out/b4b-jp-sess1`, while 17499 and 17900 are not — and the source says why: `doit`
 recomputes the two row-mapping values only while its own `frame <= 511` (`JPLOGO/JP.C:79-83`) and the
 800-entry tables at `:123-165` saturate, so the `lasty/lasts` guard (`:96-99`) stops redrawing.
-**But the held bytes are not the same in a different session** — and the set of states is small and
-they **recur**: `out/b4b-jp-sweep1` holds `ae2c3d08…`, `-sess1` `c8d6faa0…`, and `-sess2` and the
-reviewer's `out/review-b4b/jp-sess` hold the *same* `ec3de2bb…` (0 px of 128000 differ, measured),
-so four sessions and a sweep produce three states. They differ by **patches** of rows rather than by
+**But the held bytes are not the same in a different session**, and the states are **discrete with
+measured repeats**: `out/b4b-jp-sweep1` holds `ae2c3d08…`, `-sess1` `c8d6faa0…`, and `-sess2` and the
+reviewer's `out/review-b4b/jp-sess` hold the *same* `ec3de2bb…` (0 px of 128000 differ, measured), so
+four sessions and a sweep produce three states. **Discrete, but not a small set**: twelve captures of
+the recipe hold **ten distinct byte-images at 17700** and nine at 17500, and among the seven
+re-capture probes the only repeat is `-ref5` = `-ref9` — so a state recurs and no particular one is
+reliably reachable (§17.3, §17.5). They differ by **patches** of rows rather than by
 a band or a shift (`sess1` vs `sess3` differ in rows 18–158 only; `sweep1` vs `sess1` in all but
 397–399), which is the guard leaving an earlier state's pixels where a row's parameters repeat. So
 the two lessons are: **look for the settle branch in a part's own loop before assuming a moving
 screen has no held picture**, and **census the hold across sessions** — RAYSCRL's held 13500 is
-byte-identical in every session that took it (§15.3), JPLOGO's hold is a draw from a small set. The
+byte-identical in every session that took it (§15.3), JPLOGO's hold is a draw from a wide, discrete
+set whose width seven probes measured and could not land the state the sessions hold (§17.5). The
 mechanism behind the draw is a *hypothesis* this block records rather than a finding: the doit
 counter can jump past 511 in one step (`frame += waitb()`, `:74-77`), freezing `y1`/`y2` at the
 pre-saturation value (§17.3).
@@ -554,7 +560,7 @@ byte, not the block's name.** `partsmask`'s entries are TASM **binary literals**
 and bit 3 is `vector`, i.e. **U2E**, which `test whattorun,8` at `:880-887` then runs. This ledger
 first said `SECOND 3` could not reach U2E, by misreading `0x1c` as "bits 2 and 4"; the reviewer's
 `out/review-b4b/s3-after` shows U2E's opening (`befaf38ae1…`) at 18000 and 18100 on a `SECOND 3` boot,
-and `out/b4b-s3-u2e` reproduces it (§18.1, §18.6). **What changes between boots is the boot
+and `out/b4b-s3-u2e2` reproduces it (§18.1, §18.6). **What changes between boots is the boot
 *index*, not the screen**: `VISU/C/U2E.C:195-215` skips `vid_init(1)` when the BIOS mode is 13h, but
 `fadeset()` and **CRTC 9 = `(old & 0xf0) | 0x80`** at `U2E.C:302-313` re-establish the 200-line display
 themselves, so the `SECOND 4` reference and the `SECOND 3` frames are byte-identical. A row must
@@ -588,7 +594,7 @@ table.
 | MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
 | RAYSCRL | `SECOND 3` | 320×200 Mode 13h; 13500 carries `.idx` | 13000, 13500, 14000, 14500 | `out/b4b-ray-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three of `out/b4b-ray-sess1`–`-sess3` **and** the reviewer's independent `out/review-b4b/ray-sess`. 13500 is **held** (13499 = 13500 = 13501 in every session, and its `.idx` is byte-identical across sessions); 13000, 14000 and 14500 move 0.10–6.37 % of pixels a frame. Census over the four sessions that hold a window: **4/4 (100 %)** on all four, every one presented at offset 0 (§15.4) |
 | 3DSINFLD | `SECOND 3` | 320×200, chain-4 off, 80-byte plane rows; RGB only | 15500, 16000, 16500, 16800 | `out/b4b-ray-sess1` | **exit 0, `verdict: identical`, 0.0000 %** against `out/b4b-ray-sess1` (offsets `{0: 3, +1: 1}`) and against `out/b4b-ray-sess2` (offsets `{0: 4}`), `mode: rgb`; exit 1 against `out/b4b-ray-sess3`, whose 15500 and 16000 are 0.0000 % at offset −1 and whose 16500/16800 are 38.9031 % and 41.7875 % (it sits two two-frame steps out of phase). Census: 15500 and 16000 **3/3 (100 %)**, 16500 **3/4 (75 %)**, 16800 **2/3 (67 %)** — **every keyframe settled**, each filed picture taken at `N` by at least one session. The reference was re-captured twice in fix round 1: the first row's 16500 was a picture no session takes at `N` (and its "no settled content" verdict for it was a misread of §1.8 rule 3), and its 16800 was taken only at `N−1` (§16.4) |
-| JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** (offset 0) against `out/b4b-jp-sess1`, `-sess2` and `-sess3`; 17500 0.0000 % against `sess2`, 41.3773 % and 39.3516 % against `sess1`/`sess3`; 17700 29.5719 %, 40.1914 % and 27.3664 %. Census over the three sessions: 17300 **3/3 (100 %)** settled (the entry's hold, presented at `N` by all three), 17500 **1/3 (33 %)** and 17700 **0/3** recorded as **no settled content** — the part holds for ~350 frames but the held picture is a different picture in every session (§17.3) |
+| JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1`, and the reviewer's `out/review-b4b/jp-sess` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** in all four sessions (`-sess1`–`-sess3` and `jp-sess`); 17500 0.0000 % against `-sess2` and `jp-sess` (which hold the same bytes) and 41.3773 %/39.3516 % against `-sess1`/`-sess3`; 17700 40.1914 % against `-sess2`/`jp-sess` and 29.5719 %/27.3664 % against `-sess1`/`-sess3`. Census over the four sessions: 17300 **4/4 (100 %)** and 17500 `aab611ef…` **2/4 (50 %)** settled; **17700 is settled as a state and unfiled as a file** — the state two sessions hold (`ec3de2bb…`, 2/4, taken at `N` by both) was not drawn by any of the **seven re-capture probes** this round ran (`out/b4b-jp-ref3…ref9`, each the same recipe, keyframes only, ~10 minutes of emulated run), and the filed `91d6ce6b…` is taken at `N` by none of the four. Twelve captures of the recipe hold **ten distinct** byte-images at 17700, so the residual there is the oracle's state spread and not a port error (§17.3, §17.5) |
 | U2E | `SECOND 4` (this capture) — `SECOND 3` reaches it too, at its own indices | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent `out/review-b4b/u2e-sess`; exit 1, `mode: rgb`, offsets `{0: 4}` against `out/b4b-u2e-sess1`–`-sess3`, each of which misses one keyframe at 55.4672–60.8406 % (a phase group, not a different screen). Census over the four sessions holding a window: 1000 **4/4 (100 %)** and 1600, 2600 and 3600 **3/4 (75 %)** each, every filed picture taken at `N` — **every keyframe settled** (§18.4, §18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/4) and the re-capture drew the one three of them do. `SECOND 3` reaches U2E as well and shows the same screens at different indices (§18.1, §18.6) |
 
 ### Adding a row
@@ -3108,9 +3114,11 @@ filings:
 
 The re-captures are `out/b4b-sinfld-ref3` (6e5994bf at 16800 ✓, but `19a8a5b0…` at 16500 — a picture
 no session takes at `N`, so not filable), then `out/b4b-sinfld-ref4` (missed both) and finally
-`out/b4b-sinfld-ref5`, which drew all four targets and is the filed reference. The terrain's phase
-differs between sessions by whole two-frame steps, so a re-capture is a draw from a small set — the
-same shape JPLOGO's hold states have (§17.3).
+`out/b4b-sinfld-ref5`, which drew all four targets and **is the filed reference — its four frames and
+manifest were copied into `reference/parts/3dsinfld/`** (the table in §16.2 is that copy's `sha256`,
+byte-for-byte). The terrain's phase
+differs between sessions by whole two-frame steps, so a re-capture here is a draw from a **small** set
+— two or three pictures, unlike JPLOGO's hold, whose state set turned out to be wide (§17.3).
 
 **The census**, by §1.8's rule, over the sessions that hold a window (three for 15500/16000/16800 —
 the reviewer's `ray-sess` holds no window there — and **four** for 16500, which it does hold):
@@ -3192,11 +3200,17 @@ moving-screen rule refuses the rest.
 | 17500 | `-sess1` `f8896c45…`, `-sess2` = `jp-sess` = the reference `aab611ef…`, `-sess3` `fe7c6802…` | **held per session — two distinct states across the four sessions** |
 | 17700 | part of each session's long hold: `-sweep1` `ae2c3d08…`, `-sess1` `c8d6faa0…`, `-sess2` = `jp-sess` `ec3de2bb…`, `-sess3` `c60e2fbc…` | **held per session — three distinct states across five captures** |
 
-**The states are discrete and they recur.** `out/review-b4b/jp-sess`'s 17700 is **byte-identical** to
-`out/b4b-jp-sess2`'s — 0 px of 128000 differ, measured here — and so is its 17500; that is the
-reviewer's fresh session landing in an existing state, so the set of states is small and a session
-picks one, it does not get a unique picture. Across four sessions and a sweep there are **three**
-states: `{sess2, jp-sess}`, `{sess1}`, `{sess3}`, with the sweep's fourth.
+**The states are discrete, they recur, and the set of them is not small.** `out/review-b4b/jp-sess`'s
+17700 is **byte-identical** to `out/b4b-jp-sess2`'s — 0 px of 128000 differ, measured here — and so is
+its 17500; that is the reviewer's fresh session landing in an existing state, so a session picks one
+rather than getting a unique picture. Across four sessions and a sweep there are **three** states:
+`{sess2, jp-sess}`, `{sess1}`, `{sess3}`, with the sweep's fourth. **But the set a session picks from
+is wide, and fix round 1 measured how wide**: across twelve captures of the recipe (the four census
+sessions, the sweep, and **seven re-capture probes**, `out/b4b-jp-ref3…-ref9`) there are **ten
+distinct byte-images at 17700** and nine at 17500, and the only repeat among the probes is `-ref5` =
+`-ref9` — the whole state, `4b94ea6d…` at 17500 and `e9bc3a26…` at 17700, drawn twice. So a state does
+recur, at both scales, and no *particular* state — `ec3de2bb…` included — is reliably reachable by
+re-capturing (§17.5).
 
 **The states differ by *patches* of rows, not by a band and not by a shift.** Row-by-row counts
 between the states at 17700:
@@ -3229,7 +3243,8 @@ PLZPART's plasma spread.
 census, 17500's filed `aab611ef…` has **2/4 (50 %)** — settled — and 17700's largest state taken at
 `N` is `ec3de2bb…` at **2/4**, also settled, while the first reference's `91d6ce6b…` is presented by
 **0/4**. Both earlier "no settled content" verdicts were knife edges of a three-session count, not
-statements about the part; §17.5 records the re-capture that files the recurring state.
+statements about the part. **What the census settles is the *state*, and §17.5 records that the
+*file* at 17700 could not be brought into it**: seven re-capture probes did not draw `ec3de2bb…`.
 
 ### 17.4 The racy offset read, measured on this part
 
@@ -3255,6 +3270,10 @@ cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter
 cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 17299,17300,17301,17400,17499,17500,17501,17600,17699,17700,17701,17800,17850,17900 \
     --out out/b4b-jp-sess1        # and -sess2, -sess3
+
+# the seven re-capture probes of fix round 1: the reference's own command, re-run
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 17300,17500,17700 --out out/b4b-jp-ref3    # … -ref4 … -ref9
 ```
 
 ```
@@ -3279,15 +3298,22 @@ frame 17500: 39.3516% differing (50370/128000 px), max delta 255
 frame 17700: 27.3664% differing (35029/128000 px), max delta 255
 verdict: different, mode: rgb, offsets {"0": 3}
 exit: 1
+
+$ … --rendered out/review-b4b/jp-sess          # the reviewer's independent session
+frame 17300: 0.0000% differing (0/128000 px), max delta 0
+frame 17500: 0.0000% differing (0/128000 px), max delta 0
+frame 17700: 40.1914% differing (51445/128000 px), max delta 255
+verdict: different, mode: rgb, offsets {"0": 3}
+exit: 1
 ```
 
-**The census**, by §1.8's rule, over the three sessions that hold a window:
+**The census**, by §1.8's rule, over the four sessions that hold a window:
 
 | keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
 |---|---|---|---|---|---|
 | JPLOGO 17300 (held) | 4 | 2 | `4b31e501…` **4/4 (100 %)**, presented at `N` by **all four** (and at `N+1`) | **yes** | yes |
 | JPLOGO 17500 | 4 | **3** (six pictures in the windows) | `aab611ef…` **2/4 (50 %)** — the filed one | **yes** | yes, exactly half |
-| JPLOGO 17700 (held) | 4 | 3 | `ec3de2bb…` **2/4 (50 %)** — the state `-sess2` and the reviewer's `jp-sess` both hold | **no** — the filed `91d6ce6b…` is presented by **0/4** | yes for the state, no for the file |
+| JPLOGO 17700 (held) | 4 | 3 | `ec3de2bb…` **2/4 (50 %)** — the state `-sess2` and the reviewer's `jp-sess` both hold | **no** — the filed `91d6ce6b…` is presented by **0/4**, and seven re-captures did not draw the state | yes for the state, no for the file |
 
 **The census is over four sessions, not three** — `out/review-b4b/jp-sess` holds `17299,17300,17301`,
 `17499,17500,17501` and `17699,17700,17701` and is a genuine session of the same recipe, so it counts
@@ -3295,11 +3321,21 @@ exit: 1
 0/3 — **both keyframes are knife edges of the count, not statements about the part** (§17.3).
 
 **17500 is settled as filed**: `aab611ef…` is at `N` in two of the four windows and pairs at 0.0000 %
-— the row below records the comparison. **17700 is not, and the fix is a re-capture**: the state two
-sessions hold is `ec3de2bb…` and the first reference's `91d6ce6b…` is presented by nobody, so the
-reference was re-captured to file the recurring state (`out/b4b-jp-ref4…`, §17.3's mechanism note
-applies: the states are discrete, so a re-capture is a draw from a small set, not a coin flip on a
-continuum).
+— the comparison above records it, against `-sess2` **and** against the reviewer's `jp-sess`, which
+holds the same bytes. **17700 is settled as a *state* and unfiled as a *file*.** §1.8's count over the
+sessions that hold a window — four — gives `ec3de2bb…` **2/4 (50 %)**, taken at `N` by both of the
+sessions that present it, and gives the first reference's `91d6ce6b…` **0/4**. §1.8's remedy for a
+filing that sits outside its own census is a re-capture, and **it was run and did not reach the
+state**: seven probes this round (`out/b4b-jp-ref3` … `out/b4b-jp-ref9`), each the same recipe,
+keyframes only, each ~10 minutes of emulated run, drew at 17700 `bd189d56…`, `b617d280…`,
+`e9bc3a26…`, `267894aa…`, `871848e1…`, `27ca885d…` and `e9bc3a26…` again — **six distinct states,
+none of them held by any census session** — and one of them (`-ref4`) reproduced 17500's filed
+picture (`aab611ef…`) while drawing an unheld state at 17700, which is what a draw from this set
+looks like (§17.3 measured the set: ten distinct byte-images at 17700 across twelve captures). The
+reference therefore keeps 17500 = `aab611ef…` (settled, 2/4) and 17700 = `91d6ce6b…` (**taken at `N`
+by none of the four**), and this row records that index as having **no settled filing**: the state the
+sessions hold exists and is countable, but no capture in this block drew it, so a Phase 2 diff at
+17700 must expect a residual there and must not read it as a port error (§1.8, §17.3).
 
 ---
 
@@ -3332,7 +3368,7 @@ once a vertical blank, and the main loop (`:376-540`) services the animation str
   `(old & 0xf0) | 0x80`** — scan doubling, a 200-line display — at `U2E.C:302-313`, in the same
   planar 80-byte layout the reference is captured in. **Measured:** `out/review-b4b/s3-after`'s 18000
   and 18100 (a `SECOND 3` boot) are `befaf38ae1…`, byte-identical to the `SECOND 4` boot's opening
-  hold (`out/b4b-u2e-sweep2`'s 530 = 590 = 660), and `out/b4b-s3-u2e` reproduces that independently
+  hold (`out/b4b-u2e-sweep2`'s 530 = 590 = 660), and `out/b4b-s3-u2e2` reproduces that independently
   (§18.6). *(Corrected by fix round 1: the first version said a full run would draw into JPLOGO's
   320×400 screen. It does not — it re-establishes the 200-line display itself.)*
 - **The music is `MUSIC0` at order 18** (`U2.ASM:882-885`, immediately before `exe19`) — the restart
@@ -3469,14 +3505,17 @@ the plan's B5 bullets before fix round 1 caught it.*
 
 | index (`SECOND 3`) | frame | what it is |
 |---|---|---|
-| 17900 | `668f1e1364…`, 320×400 | the white-out over JPLOGO's memory — **not** U2E. My own capture `out/b4b-s3-u2e` was refused here for exactly that reason: *"frame 18000 is 320x200 where the capture started at 320x400"* |
+| 17900 | `668f1e1364…`, 320×400 | the white-out over JPLOGO's memory — **not** U2E. My own first attempt, `out/b4b-s3-u2e`, was refused at 18000 for exactly that reason: *"frame 18000 is 320x200 where the capture started at 320x400"* |
 | 18000 | `befaf38ae151…`, 2 colours, mean 191.25 | **U2E's opening hold**, byte-identical to the `SECOND 4` boot's `out/b4b-u2e-sweep2` 530 = 590 = 660 |
 | 18100 | `befaf38ae151…` | the same hold |
 | 18200 | `09e7a22c15d9…`, 42 colours, mean 138.70 | U2E's first scene resolving |
 | 18500, 19000, 19500, 20000, 20500, 21000 | 44, 82, 13, 57, 52, 54 colours | U2E's scenes — the same kind of frames as the `SECOND 4` boot's 800–3600 |
 
 (`out/review-b4b/s3-after`, a `SECOND 3` capture of 9 frames, read off here; `out/b4b-s3-u2e2` is this
-block's own repeat of it.)
+block's own repeat of it — a separate session on the same boot — and its 18000 and 18100 are
+`befaf38ae151…` too, 2 colours, mean 191.25, with a `.idx` each, so the identity is reproduced rather
+than read off one session. Its later frames are the same scenes in another phase — 18500 differs from
+this table's 18500 by 9.5307 % of bytes, the §18.4 shape — where the opening hold is byte-exact.)
 
 **So the 320×200 screen on a `SECOND 3` boot after JPLOGO is U2E's and it is ~4000 frames long**, and
 the ending is only after it — which is what the plan's B5 bullet now says (§1.10's last item). Two

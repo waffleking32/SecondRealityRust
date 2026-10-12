@@ -1579,12 +1579,14 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
 - **The `SECOND 3` run's 320×200 stretch ends in (17000, 17100]** — found the way §1.2 says, by a
   sweep refused at 17100 (`out/b4b-ray-sweep2`) — and the 320×400 screen that follows is **JPLOGO's**.
   JPLOGO's own drawing runs to (17800, 17900] and the 320×400 screen to (17900, 18000] — **and the
-  320×200 screen from ~17930 is U2E's, not the ending's**: `SECOND 3` runs U2E after JPLOGO
-  (`partsmask[3]` is the binary literal `11100b` = `0x1c`, bit 3 set, guard at `MAIN/U2.ASM:880-887`)
-  and it runs for ~4000 frames. Measured: U2E's opening hold (`befaf38ae1…`) is at 18000 and 18100,
+  320×200 screen that starts inside (17900, 18000] is U2E's, not the ending's**: `SECOND 3` runs U2E
+  after JPLOGO (`partsmask[3]` is the binary literal `11100b` = `0x1c`, bit 3 set, guard at
+  `MAIN/U2.ASM:880-887`) and on a `SECOND 4` boot it runs ~3 900 frames (470 → (4200, 4400]).
+  Measured: U2E's opening hold (`befaf38ae1…`) is at 18000 and 18100,
   byte-identical to the `SECOND 4` boot's opening (`out/review-b4b/s3-after`; `out/b4b-s3-u2e2`). **B5's
   first part on a `SECOND 3` boot is therefore at ~22 000, not ~18 000** — a sweep that stops at
-  18000–21000 finds U2E.
+  18000–21000 finds U2E (and the end of U2E's own stretch on that boot is not yet measured; ~22 000 is
+  the `SECOND 4` extent added to U2E's start).
 - **ENDLOGO's opening is a white palette over the previous part's memory, not a blank screen.** By
   17900 the frame is 2 colours with 74221 px white — `END/END.C:61-63` writes 63 into 765 of the 768
   DAC entries (leaving index 255 alone), `:67-88` re-points the CRTC's start address and line count
@@ -1596,7 +1598,8 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
   "1=320x200x256 (tweak)"), but U2E **normalises the display itself**: `fadeset()` on all four 64 KB
   buffers and **CRTC 9 = `(old & 0xf0) | 0x80`** — scan doubling, a 200-line display — at
   `U2E.C:302-313`, in the same planar 80-byte layout. Measured: the `SECOND 3` frames at 18000/18100
-  are byte-identical to the `SECOND 4` reference's opening hold. **So the reference in
+  are byte-identical to the `SECOND 4` boot's opening hold (`out/b4b-u2e-sweep2`'s 530 = 590 = 660,
+  all `befaf38ae1…`). **So the reference in
   `reference/parts/u2e/` is usable on any boot that reaches U2E at its own indices** — the caveat is
   index remapping, not a different screen. (Fix round 1 corrected this bullet; the first version said
   a full run would draw into JPLOGO's 320×400 screen, which is wrong.)
@@ -1604,11 +1607,14 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
   while its own `frame <= 511` (`JPLOGO/JP.C:79-83`) and the frame tables reach their final values at
   frame 379 (`framey1t[379]/16 = 0`, `framey2t[379]/16 = 400`), so from frame 379 to the 700-frame cap
   the picture is **held**: measured, 17600–17850 is one `sha256` in a session. **The held states are
-  few and they recur** — two of four independent sessions hold byte-identical bytes at 17500 and 17700
-  (0 px of 128000 differ) — and they differ by *patches* of rows, not by a band or a shift, because
-  the `lasty/lasts` guard (`:96-99`) leaves an earlier state's pixels in place wherever a row's
-  parameters repeat. So the census decides which state is filed, and a re-capture can land on the
-  recurring one; JPLOGO's `doit` begins after a music wait (`:71`), which is what moves its boot
+  discrete and they recur, but the set of them is wide** — two of four independent sessions hold
+  byte-identical bytes at 17500 and 17700 (0 px of 128000 differ), and yet twelve captures of the
+  recipe hold **ten distinct byte-images at 17700**, the seven re-capture probes drawing six of them
+  and never the state the sessions hold — and they differ by *patches* of rows, not by a band or a
+  shift, because the `lasty/lasts` guard (`:96-99`) leaves an earlier state's pixels in place wherever
+  a row's parameters repeat. So the census decides which state a reference should file, and **a
+  re-capture is not a reliable way to reach one**: JPLOGO's 17700 is recorded as settled as a state and
+  unfiled as a file. JPLOGO's `doit` begins after a music wait (`:71`), which is what moves its boot
   index between sessions.
 - **The racy offset/chain-4 read of §1.7 and §1.9 is live on every planar part of this block.**
   JPLOGO's own capture log holds eight `PlaneTooSmall` refusals naming a 320-byte row (160 register
@@ -1616,7 +1622,11 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
   3DSINFLD writes CRTC 0x0c = 0x80 every frame, and 0x80 as the offset register is a 256-byte row the
   plan **accepts** at 200 rows; U2E writes the same register every frame through `vid_setswitch`. The
   hand-check rule §1.9 states is what stands between an accepted value and a sheared plane in the
-  tree, and every `.idx` this block filed was checked against its manifest's palette.
+  tree: this block filed **one** `.idx` of its own — RAYSCRL's 13500, from the one part of the four
+  that writes no CRTC register — and checked it twice against its manifest's palette (§15.3). The
+  three that *do* write CRTC registers (3DSINFLD's 0x0c, JPLOGO's 0x0c/0x0d, U2E's 0x0c) filed none
+  (§16.2, §18.1), and the one `.idx` a partner capture did produce from one of them — JPLOGO's
+  hold at 17700 — was hand-checked anyway, 0 mismatches of 128000 pixels (§17.4).
 - **Two parts of the same block can be on opposite sides of the reproducibility question.** RAYSCRL's
   13000/13500/14000/14500 are byte-identical across independent sessions (one of them a day older,
   from B4a's session), while 3DSINFLD's terrain updates every *second* frame and its sessions differ

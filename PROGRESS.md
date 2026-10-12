@@ -45,8 +45,11 @@ ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
 
 **Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames,
 and the states it holds are **discrete and recur** — two of four independent sessions hold the same
-bytes at 17500 and 17700 (0 px of 128000 differ), so the census decides which state to file and a
-re-capture can land on the recurring one. And **`SECOND 3` reaches U2E as well as `SECOND 4`**
+bytes at 17500 and 17700 (0 px of 128000 differ) — but **the set of them is wide**: twelve captures
+of the recipe hold ten distinct byte-images at 17700, and the seven re-capture probes B4b's fix round
+ran never drew the one the sessions hold. So the census decides which state a reference should file,
+and JPLOGO's 17700 is recorded as **settled as a state and unfiled as a file** — a residual to expect
+in a Phase 2 diff there, not a port error. And **`SECOND 3` reaches U2E as well as `SECOND 4`**
 (`partsmask[3]` is the binary literal `11100b` = `0x1c`, bits 2/3/4, and bit 3 is U2E), showing the
 **same screens at different boot indices** — U2E writes CRTC 9 = `(old & 0xf0) | 0x80` and
 `fadeset()`s its buffers itself (`VISU/C/U2E.C:302-313`), so the screen does not depend on the boot,
