@@ -231,22 +231,37 @@ the suspected change plus a hash already known to belong to the next part: §6.1
 frame by matching a flat white frame against `wfade`'s own law, and §6.5 found where PAM ends by
 matching a held logo against B2's BEGLOGO hash.
 
-### 1.7 Four things block 2 (GLENZ, TUNNELI, TECHNO, PANICEND) measured
+### 1.7 Five things block 2 (GLENZ, TUNNELI, TECHNO, PANICEND) measured
 
 **The stride fix is exercised, and it comes out right.** GLENZ's vector screen is the 92-byte
 plane row that `GLENZ/VIDINIT.ASM:306` writes (`dw 02e13h ; offset 92`), and the read assembles it
 at that stride: `reference/parts/glenz/frame_001499.idx` reproduces its RGB **pixel for pixel** by
 the check in `indexed_matches_rgb`, and its non-black rows are the RGB's — §7.3 has the
-measurement. No row in this block needed a stride refusal; the fix that landed before it was
-written for GLENZ and GLENZ is where it was confirmed.
+measurement. The fix that landed before this dispatch was written for GLENZ and GLENZ is where it
+was confirmed.
 
-**`.idx` presence is a read-*timing* property as well as a session one.** The same index with the
-same RGB bytes can carry indices in one capture and not in another depending only on **when the
-frame is read**. GLENZ 1500 is a held screen (1499 = 1500 = 1501 = 1600, one `sha256`) and it
-carries indices when it is captured on its own — the read happens ~20 frames after the grab — and
-none when it is the middle of a 3-index batch, whose read happens ~60 frames later: the palette
-moves over that window (§7.3). The practical consequence for B4/B5: **list a keyframe that should
-carry indices so that it is read immediately**, i.e. more than ~25 frames from its neighbours.
+**The offset register is read as two port operations with the guest running in between, so it can
+name another register's value, and nine frames of this block show it.** `out/b3-techpanic-boundary.log`
+holds **nine `PlaneTooSmall` refusals** — `this screen's rows are 320 bytes and it is 400 rows tall,
+so it needs 128000 bytes a plane; one plane holds 65536` — on 8700…8780, and in two other sessions
+the *same* 8700 is refused only for motion, with byte-identical RGB (`40044edc…`), so the displayed
+layout cannot really differ: the tool's `crtc_offset_register()` writes the index to 3d4h and reads
+3d5h in a separate request, and TECHNO's pan loop writes the CRTC index every frame, so the read
+returned the register the guest had selected in between. This is a tool-side question, not a
+reference one — every frame that *did* carry indices passed the pixel-exact check, so nothing in the
+tree is wrong — but it is why **a stride refusal in a log is not by itself evidence that the screen
+is unreadable**, and it is the only stride refusal this block produced (§9.6).
+
+**`.idx` presence is not predictable from the frame list, and the rule this section first
+stated for it was wrong.** The first version of this section said a held keyframe keeps its indices
+when it is read immediately and loses them inside a batch. **That is withdrawn**: the reviewer of
+this block checked `out/glenz-probe1`, the very run the claim cited, and it holds `.idx` for all
+three of 1499/1500/1501, byte-identical to the reference's (`75d561dc…`) — the batch kept them. What
+the artefacts do support is narrower: **on GLENZ every *moving* keyframe came back RGB-only, and the
+held picture carried indices in four captures and not in one** (`out/glenz-map1`'s 1250 has exactly
+the bytes of 1499 and no `.idx`, while 1400, 1450 and 1499 in the same run have it). So the
+determinant is not the read's position in the frame list, it has not been identified, and B4/B5
+should capture, look at what came back, and not space indices on the strength of a rule.
 
 **A screen can be refused for its colour depth rather than its stride, and TECHNO is the case.**
 TECHNO's 320×200 screen is not 256-colour at all: the part pokes the video-mode registers between
@@ -256,20 +271,38 @@ registers (`vga.cpp:60-96`, `VGA_DetermineMode`: M_VGA needs GC mode bit 6). The
 therefore refused with `UnmodelledMode` — *not* the flat-colour blind spot of §1.6 — and every
 TECHNO frame on that screen is RGB-only, which the comparison reports as `mode: rgb` (§9.4).
 
-**A moving screen's phase is not reproducible in every session, and the difference can be much
-larger than D17's 0.2–0.6 %.** Measured on this block, with the *held* frames of the same runs
-byte-identical throughout: GLENZ's rotating polyhedron differs between two re-captures of the same
-index by **18.66–34.32 %** of pixels; TUNNELI's dots by **8.07–10.18 %**; TECHNO's dithered
-interference by **70.68–97.50 %**; and TECHNO's troll picture was already on screen at 8200 in one
-session where three others show a flat black frame (a ≥150-frame difference in that section's
-timeline). Two commands differing only in their `--out` directory, run back to back, gave
-different bytes at 6300 (`3c2b0d8f…` against `c1460454…`). D17 measured three sessions identical
-at 2125/2250/2400 — the same part this block keyframes — so the reproducibility D17 measured is
-real but **conditional**, and these runs, on a host carrying other work, are the condition failing.
-What it means for the rows below: a *held* frame is reproducible byte for byte in every session
-seen; a *moving* frame is one exact picture that the oracle reproduces only when the two sessions
-run the demo's animation on the same clock, and the row records the spread rather than pretending
-to a tolerance.
+**A moving screen's phase differs between sessions, and the *percentage* a comparison reports is a
+lower bound on that difference, not a measure of it.** Three things measured on this block, held
+frames byte-identical throughout:
+
+- **The disagreement at a fixed index is a handful of frames, not tens, once the screen's own
+  per-frame rate is divided out.** GLENZ's polyhedron moves 10.64–25.43 % of its pixels a frame and
+  the same-index differences are 22.83–34.67 %, i.e. ≈1.5–2.5 frames; TUNNELI's dots move
+  2.05–10.69 % a frame and its same-index differences are 8.23–10.29 %, i.e. ≈1–4 frames. The raw
+  percentages looked like a chasm only because a rotating polyhedron and a dot tunnel each repaint
+  most of what moves in a single frame.
+- **Some screens saturate, and there the percentage cannot witness anything.** TECHNO's dithered
+  interference moves **89.10–98.69 % of pixels in one frame** (measured between adjacent indices
+  inside one capture: 8099→8100 is 98.69 %, 8100→8101 89.10 %, 6300→6301 98.04 %); so the
+  re-capture's 97.5047 % there is a *one-frame* statement, and 70.6844 % is smaller than one frame.
+- **The offset `compare` reports is the window it searched (±1 frame), not the gap between the
+  sessions.** Some screens are quantised into a few discrete results rather than drifting smoothly —
+  TUNNELI 3800 has three distinct pictures across five sessions of this block with three byte-identical
+  (`f861b1f2…` ×3), and the review of this block measured five of seven byte-identical at 3800 with
+  the others ≈0, ≈8 and ≈20–30 frames apart — and the error is corrected somewhere between, so it is
+  not a fixed per-session offset either.
+
+What a *music-gated* event does is a different size: TUNNELI's tunnel end and the TECHNO→PANICEND
+change sit at different indices by tens of frames between sessions (§8.5, §10.1), because those are
+gated on the music position, not on a frame count. One session also showed TECHNO's troll picture
+already up at 8200 where three others show flat black — a ≥150-frame difference in that section's
+timeline — and, per the review of this block, that must be read as **one session's observation whose
+frames no longer exist** (one command's re-capture replaced them; what survives is the `sha256` and
+colour census taken at the time, §9.5).
+
+For the rows below: a *held* frame is reproducible byte for byte in every session seen; a *moving*
+frame is one exact picture that the oracle reproduces when the two sessions happen to agree, and the
+row records the offsets and the percentages rather than pretending to a tolerance.
 
 **And the two-screen part's layout is `compare`'s own convention.** TECHNO's screens are two
 geometries, so its capture is two captures: a directory with no `manifest.json` is resolved by
@@ -296,7 +329,7 @@ table.
 | GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300/3000/3400 differ by 34.3219/23.9516/29.0187% at offset -1, and by 18.6625/9.2000/16.3281% in the re-run (§7.4) |
 | TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture` | exit 1, `mode: rgb` — every frame differs by 8.2250–10.1672%, offsets `{0: 2, -1: 2}`; the re-run 8.0672–10.1812% at `{-1: 1, +1: 3}` (§8.4) |
 | TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture` | exit 1, `mode: rgb` — 5000 identical, 0.0000%, offset 0; 4900/6300/8100 differ by 24.5938/72.8703/70.6844%; the re-run has 4900 and 5000 identical and 6300/8100 at 97.5047/71.7000% (§9.4) |
-| TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row; 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
+| TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row where the read succeeded (320-byte rows later, §9.6); 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
 | PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself (§10.3) |
 
 ### Adding a row
@@ -1099,7 +1132,7 @@ each other, **1620** grey again, **1700** the object higher, **1800** black agai
 
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
-| 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; the bytes of 1400, 1450, 1499, 1500, 1501, 1600 and 1250 are all one picture. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
+| 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; 1499, 1500 and 1501 are one picture, and 1250, 1400, 1450 and 1499 (in other captures) are the same bytes again. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
 | 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `9c42d079…` |
 | 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `71dd12f6…` |
 | 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `fab974e9…` |
@@ -1124,23 +1157,34 @@ The keyframe triple probe (`out/glenz-probe1`, 15 indices 1199…3401) and the m
 
 | keyframe | neighbours | reading |
 |---|---|---|
-| 1499 | 1499 = 1500 = 1501, one `sha256` (and 1400, 1450, 1499 and 1600 are the same bytes in other runs) | **held** — but held in the *index* plane with a palette that cycles: 1300 and 1620 are the same picture over a grey background, and the palette returns |
+| 1499 | 1499 = 1500 = 1501, one `sha256`; and 1250, 1400, 1450, 1499 in `out/glenz-map1` and 1500 in `out/glenz-stride-probe` are the same bytes | **held** — but held in the *index* plane with a palette that cycles: 1300 and 1620 are the same picture over a grey background, and the palette returns |
 | 2300 | 2099, 2100, 2101 are three different `sha256`; the partner's 2299/2300/2301 likewise | **moving** |
 | 3000 | 2699/2700/2701 and 2999/3000/3001 are three each | **moving** |
 | 3400 | 3399/3400/3401 are three | **moving** |
 
-**Which is why 1499's `.idx` needs a second measurement, and the second measurement is the one
-worth having.** 1499 carries `.idx` in the reference capture. The same screen does *not* when it is
-read late:
+**The hold is bounded, and this is where the first version of this section overstated it.** 1499,
+1500 and 1501 are one picture and 1400/1450/1250 hold it too, but **1600 does not**: in
+`out/glenz-stride-probe`, whose `--frames 1500,1600` is the run cited for the indices, 1600 is
+`86d42e74…`, **82.54 %** of its pixels away from 1499, mean brightness 100.3 against 13.2 — the
+grey-background palette phase. (In `out/b3-glenz-sweep1`, a *different session*, 1600 is
+`e45ab076…`, the held picture: another instance of §1.7's session dependence, and the reason the
+index alone does not decide what is on screen.)
 
-- `out/glenz-stride-probe` captured `--frames 1500,1600` — two single-index reads — and **1500
-  carries `.idx`** (rgb `e45ab076…`, idx `75d561dc…`, byte-identical to the reference's 1499).
-- `out/glenz-probe1` captured `--frames …,1499,1500,1501,…` — one 3-index batch, whose reads run
-  ~60 frames after the grabs — and **all three came back RGB-only**.
+**`.idx` presence on this screen is not something this block can predict, and the rule its first
+version stated has been withdrawn.** The measurement is short and goes both ways in the artefacts
+already on disk:
 
-So GLENZ is §1.3's "a frame inside a batch is read at the end of that batch" case, on a *held*
-screen whose palette moves. The screen is held; the DAC is not, and the indexed read is honest
-about the second.
+- `out/glenz-stride-probe` (`--frames 1500,1600`, two single-index reads): **1500 carries `.idx`**
+  (rgb `e45ab076…`, idx `75d561dc…`).
+- `out/glenz-probe1` (`--frames …,1499,1500,1501,…`, one 3-index batch): **all three carry `.idx`**,
+  each byte-identical to the reference's 1499 — so a batch's later read did *not* cost them.
+- `out/glenz-map1` (13 indices, ≥50 apart): 1250 — the same held bytes — has **no** `.idx`, while
+  1400, 1450 and 1499 in the same run keep theirs.
+
+So the read's position in the frame list is not the determinant, and what is left standing is only
+this: **every moving keyframe of GLENZ came back RGB-only, and its held picture carried indices in
+four captures and not in one.** The first version of this section claimed more than the artefacts
+support; the review of this block caught it, and the claim is withdrawn rather than repaired.
 
 **And that `.idx` is what confirms the 92-byte stride.** `indexed_matches_rgb` compares every pixel
 of the widened index plane with the RGB frame — not a sample, not a colour census — so
@@ -1151,7 +1195,7 @@ indices. A read sheared by two bytes a row against 92 (the old `width/4` = 80) c
 the second pass of this phase shipped exactly such a plane for ALKU and it passed the colour check
 only because that palette collapsed (§1.6).
 
-### 7.4 The re-capture: the held frame identical, three moving frames a whole phase away
+### 7.4 The re-capture: the held frame identical, the three moving frames ~1.5–2.5 frames of rotation apart
 
 ```bash
 # the reference: keyframes only
@@ -1189,22 +1233,27 @@ verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
 exit: 1
 ```
 
-**What kind of difference this is.** The held keyframe is byte-identical in both partners and in
-every session that has taken it, which is the strong claim. The three moving keyframes are not: the
-pictures are the *same scene at a different rotation* — `out/glenz-2300-compare.png` puts the
-reference's 2300, the partner's and the map's side by side and the polyhedron's orientation differs
-by more than a frame's worth — and the residue is 9–34 % of pixels rather than the 0.2–0.6 % D17
-measured, because a rotating polyhedron moves most of its edges in one frame and the sessions here
-are several frames apart in phase. **The ±1 support does not reach it**: both partners paired
-every
-moving keyframe at the same offset (-1), and the difference stayed large, which is the §4.4 shape
-of result — a whole number of animation steps apart, not one frame — with the difference that
-GLENZ's step is not a pixel pan and cannot be removed by shifting.
+**What kind of difference this is, in frames.** The held keyframe is byte-identical in both partners
+and in every session that has taken it, which is the strong claim. The three moving keyframes are
+not, and the percentage is the wrong unit for saying how far apart they are — **the screen's own
+per-frame rate divides out**. Measured inside the partner capture, adjacent indices 1 frame apart:
+2300 moves **25.43 %** of pixels a frame, 3000 **10.64 %**, 3400 **17.07 %** (and in the re-run's
+capture, 3400 **15.65 %**). Against those rates the same-index differences — 34.3219 %, 23.9516 %,
+29.0187 % in the first partner and 18.6625 %, 9.2000 %, 16.3281 % in the re-run — are **≈1.5–2.5
+frames of rotation**, not a distant phase. `out/glenz-2300-compare.png` shows the same scene at a
+visibly different orientation, and that is all it shows.
+
+**And this is what §1.7 means by the percentage being a lower bound**: GLENZ saturates, so once the
+polyhedron is a couple of frames further round, most of its edges have moved and the number stops
+growing. **The ±1 support does not reach even that**: both partners paired every moving keyframe at
+offset −1, so the true gap is larger than the window `compare` searched and the offset it reports is
+the window, not the gap — the same shape of result as §4.4's pan, with the difference that GLENZ's
+step is a rotation and cannot be removed by shifting pixels.
 
 **This is the row's honest reading, and it is worth separating the two halves**: 1499 is a
 reproducible reference; 2300, 3000 and 3400 are one exact picture each that the oracle reproduces
-only in a session whose animation phase matches, which two of two re-captures did not. No
-tolerance is added; the pixels stay exact and the row carries the numbers.
+only in a session whose animation phase matches, which two of two re-captures did not. No tolerance
+is added; the pixels stay exact and the row carries the numbers.
 
 ### 7.5 Where the part ends
 
@@ -1268,9 +1317,16 @@ refused as a miss (`the emulator reached frame 4702 before frame 4701 could be c
 `out/tunneli-recapture`'s first attempt), and the boundary run shows 4740/4750 black — the window
 is both grab-hostile and session-dependent, which is not what a reference index should be.
 
-Full hashes of the four files in `reference/parts/tunneli/` — all `.rgb`, no `.idx`. **Every frame
-of this part taken in the whole block came back without indices**, each refused with `the screen
-moved while it was read`: the part has no held screen to hang one on.
+Full hashes of the four files in `reference/parts/tunneli/` — all `.rgb`, no `.idx`. **Almost every
+frame of this part taken in the block came back without indices, and it is "almost"**: of the 43
+frames in the tunnel's index range (3700–4800) across every capture this block took, exactly **two**
+carry `.idx` — `out/b3-tunneli-sweep1`'s 3730 and `out/b3-glenz-sweep2`'s 3750 — and the other 41
+were refused with `the screen moved while it was read`. Both exceptions are near-black frames, and
+both were looked at by hand as §1.6 requires: 3730's plane is all zeros against an RGB with no
+non-black pixel (consistent, and worthless as stride evidence), while 3750's holds exactly 128
+non-zero pixels over indices 0/119/121 in rows 63–70 against an RGB with exactly 128 non-black
+pixels — the tunnel's first ring, and a small honest validation. Four keyframes were chosen, none of
+them one of those two: the part has no *held* screen to hang a keyframe on.
 
 | index | file | `sha256` |
 |---|---|---|
@@ -1295,10 +1351,12 @@ keyframe is moving and every one needs its supports:
 agreed.** `out/b3-glenz-sweep2` and `out/b3-tunneli-sweep1` took 3800, 3900 and 4000 and matched
 exactly (`f861b1f2…`, `259c3bbb…`, `96056aba…`), while 4200 and 4400 differed between those same
 two sessions by 0.0859 % and 0.1578 % of pixels — and then the reference capture's 3800
-(`e4d3646e…`) matches neither of them. So the agreement above was two sessions landing in one
-alignment group, not a property of the index, and it is the same caveat §5.4 attaches to U2A.
+(`e4d3646e…`) matches neither of them. `out/tunneli-recapture2`'s 3800 is `f861b1f2…` again, so
+across the five sessions of this block that took 3800 there are **three distinct pictures, one of
+them in three sessions** — the quantisation §1.7 records, not a smooth drift, and the same caveat
+§5.4 attaches to U2A.
 
-### 8.4 The re-capture: exit 1, a one-frame phase away, twice
+### 8.4 The re-capture: exit 1, ≈1–4 frames of tunnel apart
 
 ```bash
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
@@ -1335,9 +1393,34 @@ exit: 1
 frames at -1 and two at 0, the second pairs three at +1 — which is the alignment group being
 sampled either side, and the residue is the same size either way. `max delta 239` is the whole
 story of the size: a dot that has moved is a dot at a different place, and the pixels where it was
-go past every threshold. Since the screen is *made* of moving dots, the residue is a large
-fraction of the non-black pixels (≈3,000–6,000 of 64,000) rather than the 0.2–0.6 % D17 measured
-on a screen where most pixels hold still. **No tolerance is added and the row carries both runs.**
+go past every threshold.
+
+**How far apart the sessions are, in frames rather than in pixels.** Measured inside the partner
+capture, adjacent indices one frame apart: the tunnel moves **2.05–2.22 %** of pixels a frame at
+3800, **10.47–10.69 %** at 4200, **6.22–6.40 %** at 4500 and **8.74–9.08 %** at 4600. Against those
+rates the same-index differences (8.2250–10.1672 %) are **≈1 frame at 4200, 4500 and 4600 and ≈4
+frames at 3800** — and 3800 is also the index where the sessions quantise, three of five byte-identical.
+So the percentages are larger than D17's 0.2–0.6 % because this screen is *made* of moving dots, not
+because the sessions are far apart: **a dot tunnel repaints most of what moves in a single frame**,
+which is exactly the property that makes a percentage a lower bound (§1.7). **No tolerance is added
+and the row carries both runs.**
+
+### 8.5 Where the part ends
+
+`out/b3-tunnel-boundaries` took 4740…4790 at ten-frame steps, and `out/b3-tunneli-sweep1` took
+4650…4750: in the boundary run **4740, 4750 and 4760 are black** and **4770 is TECHNO's first
+interference ring**, while in the sweep's session 4700 and 4750 still have the tunnel's last dots.
+The tunnel is therefore over somewhere in **(4700, 4770]**, and where inside it depends on the
+session — one of the boundary sets §3.4, §5.5 and §6.5 have in common: a content change with no
+geometry refusal (both screens are 320×200), found by the sheet and a hash rather than by the
+capture. That is also why 4700 is not a keyframe (§8.2): it is inside the window, and the partner
+capture that asked for it was refused as a miss.
+
+The sizes are worth separating for B4/B5: the *animation* disagreement between sessions at a fixed
+index in this part is ≈1–4 frames (§8.4), while the *boundary* moves by tens of frames, because
+TUNNELI's exit is gated on its own frame count and the part's start is gated on the music
+(`TUNNELI/TUN10.PAS:3`, `veke = 1060`; the tunnel enters after the loader's music restart of
+`part-sequence.md` §3).
 
 ---
 
@@ -1358,8 +1441,9 @@ and DOSBox re-decides the display mode from those registers rather than from the
 (`vga.cpp:60-96`, `VGA_DetermineMode`, which returns `M_VGA` only while GC mode bit 6 is set).
 Every TECHNO frame on that screen therefore comes back RGB-only with
 `indexed capture failed (… not 256-colour …)`, which is a *different* refusal from ALKU's stride
-one and from the moving-screen coherence one. The 320×400 screen is plain Mode X and does carry
-indices.
+one and from the moving-screen coherence one. The 320×400 screen does carry indices — where the
+offset register reads a row the read can describe (§9.6), which is 8200 and 8250 of the frames
+below.
 
 ### 9.1 The sweeps, and what the sheets showed
 
@@ -1477,9 +1561,16 @@ exit: 1
 
 **Which frames reproduce is not a property of the frame's kind but of the index's timing**, and the
 two runs show it both ways: 5000 (the flat white hold) is identical in both; 4900 is 24.5938 % away
-in one run and identical in the other; 6300 and 8100 are 70–97 % away in both. Those two screens
-are a fine dither, so a phase difference of a frame or two repaints most of the frame — the same
-mechanism as §7.4 with a screen that has no structure to survive it.
+in one run and identical in the other; 6300 and 8100 are 70–97 % away in both.
+
+**And on these two screens the percentage is a lower bound with no room in it at all.** Adjacent
+indices one frame apart inside the partner capture: 4899→4900 **24.67 %**, 4900→4901 **24.91 %**
+(the rings screen), 6299→6300 **96.33 %**, 6300→6301 **98.04 %**, 8099→8100 **98.69 %**, 8100→8101
+**89.10 %** (the dither). So the re-run's 97.5047 % at 6300 and 71.7000 % at 8100 are **≈one frame**
+statements — the screen saturates — and neither number can witness a gap larger than a frame. That
+is the correction §1.7 records: read a moving row's percentage next to the screen's own per-frame
+rate before calling it a distance, and read `compare`'s offset as the ±1 window it searched, not as
+the gap.
 
 ### 9.5 The 320×400 re-capture, and the one session that disagreed
 
@@ -1502,15 +1593,41 @@ Both held frames are byte-identical between the two sessions; only the fade-in d
 differs by essentially every pixel, because at that index one session has the wash at one
 brightness and the other at another.
 
-**The first capture of this reference was a session whose timeline did not match, and it was
-caught and re-taken.** In it, the troll picture was *already on screen* at 8200 and 8300 — 78
-colours, 93,200 non-black pixels, i.e. the finished picture — where the partner, `b3-panic-sweep2`,
-`techno-troll-map2` and the re-captured reference all show flat black at 8200, the wash at 8300 and
-the picture from 8350. That is a ≥150-frame difference in this section's timeline between sessions,
-the largest instance of §1.7's finding in the block, and it is named here rather than deleted: the
-reference now in the tree is the one that agrees with three other sessions, and the outlier is one
-command's worth of evidence that a *single* capture is not enough to claim an index means one
-screen.
+**The first capture of this reference was a session whose timeline did not match, it was caught and
+re-taken — and what is left of it is one session's observation, not a measurement anyone can
+re-derive.** In it the troll picture was already on screen at 8200 and 8300, where the partner,
+`b3-panic-sweep2`, `techno-troll-map2` and the re-captured reference all show flat black at 8200,
+the wash at 8300 and the picture from 8350. **The frames no longer exist**: the re-capture writes
+into the same directory and `out/techno-troll.png` was overwritten with it, so all that survives is
+what was printed at the time — 8200's `sha256` was `a0949c8436d1087…` and both 8200 and 8300 had 78
+distinct colours and 93,200 non-black pixels, the finished picture. Read it as **one session
+observed doing something three others did not**, with no artefact a reviewer can check, and as the
+reason a single capture is not enough to claim an index means one screen. If the difference was
+real it is ≥150 frames of this section's timeline, which is the size §1.7 attributes to a
+music-gated event (the fade waits on `muscode 6`, `TECHNO/KOE.C:638-649`) rather than to the
+animation phase.
+
+### 9.6 Where the part ends, and what the 320×400 screen's rows really are
+
+Two things belong here, and the first corrects this section's own first version.
+
+**The 320×400 screen is not one row stride for its whole span.** `out/b3-techpanic-boundary.log`
+holds **nine `PlaneTooSmall` refusals** on 8700…8780 — `this screen's rows are 320 bytes and it is
+400 rows tall, so it needs 128000 bytes a plane; one plane holds 65536, and the display wraps` — so
+the offset register named a **320-byte plane row** there, not the 160-byte one the successful
+8200/8250 frames were read at. In two other sessions the same 8700 is refused only for motion
+(`out/b3-panic-sweep3`, `out/techno-troll-probe1`), with byte-identical RGB (`40044edc…`), so the
+displayed layout cannot differ between them: what differs is the register the tool's two-operation
+read returned (§1.7). The row's geometry column says 160-byte plane row because that is what the
+frames that carry `.idx` were read at, and this is what the rest of the span did.
+
+**And the part ends at the geometry change in (8780, 8790]**, where PANICEND takes the screen down
+to 200 lines. It is TECHNO's own second screen that the 8400 refusal belongs to — a capture started
+at 5200 (320×200) refusing at 8400 because that index is 320×400 — **not** the next part's: after
+8780 the 320×400 screen is gone and the section's last index taken is 8780 (`40044edc…`, the held
+picture). `TECHNO/KOE.C:588-616` is what put it there: mode 13h, `inittwk()`, CRTC 13h = 80, then
+`TROLL.UP` blitted 400 rows deep. The music-cue wait and MNTSCRL's 320×200 screen come after
+PANICEND, at ~9230 (§10.4), and there is no geometry refusal at *that* boundary at all.
 
 ---
 
