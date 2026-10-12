@@ -1645,6 +1645,23 @@ non-looping case and says so.
 
 **Files, interfaces, steps:** as B3.
 
+**What B5 measured, for B6 and for Phase 2** (detail in `docs/fidelity/reference-indices.md` §1.11
+and §§19–22, and in the task's report):
+
+- **All four references are filed** (`reference/parts/endlogo`, `cred`, `endscrl`, `ddstars`) and
+  every keyframe reproduces byte-for-byte at its own boot index in three separate sessions.
+- **The end sequence is three geometries in ~8000 frames**: ENDLOGO 320×400 (boundary with CRED in
+  (1200, 1240]), CRED 320×200 (boundary with ENDSCRL in (8840, 8940]), ENDSCRL 640×400.
+- **The B4b bullet's "~22 000" for the end sequence on a `SECOND 3` boot is confirmed by a sweep**:
+  `out/b5-s3-tail` finds U2E's 320×200 screen at 20500–21500 and is refused at 22000 (320×400), so
+  the boundary is in (21500, 22000] and ENDLOGO follows it.
+- **ENDSCRL is the one screen in the tree where the capture tool cannot take two frames one index
+  apart**, so its census is an offset-0 count and no session holds its ±1 window; the row says so and
+  §1.11 records the two failed remedies and what was used instead. Phase 2 must not read a
+  one-frame-out diff at ENDSCRL's keyframes as an alignment.
+- **CRED's `.idx` is refused on a still screen with a still palette** — a fourth cause for a missing
+  `.idx` (§1.7's list), namely the read's model of where the screen starts.
+
 **The vault is not in this task, or this phase.** GRID, HARD and TWIST are Phase 8's parts and are not
 in `SECOND.EXE`'s pack manifest at all — each has its own EXE in the tree (`GRID/DOLINE.EXE`,
 `HARD/B.EXE`, `TWIST/DOL.EXE`), so they are not reachable through the `SECOND n` command line this
