@@ -564,6 +564,7 @@ table.
 | PLZPART — the 320×200 cube | `SECOND 3` | 320×200 Mode X, 160-byte plane row; RGB only | 8500, 9500 | `out/b4-plz-sess1-cube` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 2}`, `mode: rgb`; the same against `sess2`, `sess3` and `sess4`. Both keyframes are byte-identical in every session captured — **4/4 (100 %)** over the ±1 window (§13.6) |
 | MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
 | RAYSCRL | `SECOND 3` | 320×200 Mode 13h; 13500 carries `.idx` | 13000, 13500, 14000, 14500 | `out/b4b-ray-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4b-ray-sess2` and `out/b4b-ray-sess3`. 13500 is **held** (13499 = 13500 = 13501 in every session, and its `.idx` is byte-identical across sessions); 13000, 14000 and 14500 move 0.10–6.37 % of pixels a frame and every session presents the filed picture at the same index — **3/3 (100 %)** support on all four (§15) |
+| 3DSINFLD | `SECOND 3` | 320×200, chain-4 off, 80-byte plane rows; 16800 carries `.idx` | 15500, 16000, 16500, 16800 | `out/b4b-ray-sess1` | exit 1, `mode: mixed` — 15500 (offset +1), 16000 and 16800 (offset −1) **0.0000 %**, 16500 43.0406 %; against `-sess2` the same (15500 at offset 0), and against `-sess3` 15500 and 16000 **0.0000 %** at offset −1 with 16500 47.6844 % and 16800 47.0812 %. Census over the three sessions: 16000 **3/3 (100 %)**, 15500 **3/3 (100 %)** and 16800 **2/3 (67 %)** settled, 16500 **0/3** recorded as **no settled content** (§16.4). The reference was re-captured once, §1.8-style: the first one's 15500 was a singleton and the re-capture drew the 3/3 picture |
 | JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** (offset 0) against `out/b4b-jp-sess1`, `-sess2` and `-sess3`; 17500 0.0000 % against `sess2`, 41.3773 % and 39.3516 % against `sess1`/`sess3`; 17700 29.5719 %, 40.1914 % and 27.3664 %. Census over the three sessions: 17300 **3/3 (100 %)** settled (the entry's hold, presented at `N` by all three), 17500 **1/3 (33 %)** and 17700 **0/3** recorded as **no settled content** — the part holds for ~350 frames but the held picture is a different picture in every session (§17.3) |
 
 ### Adding a row
@@ -2937,6 +2938,132 @@ each). This is the MNTSCRL/LNS&ZOOM/MINVBALL shape (§19): the part's timeline i
 session draws the same bytes at the same boot index.
 
 
+---
+
+## 16. 3DSINFLD
+
+`SECOND 3`'s sixth part. `COMAN/MAKEFILE:18` builds `c.exe` and stages it as `3dsinfld.exe`; the
+sources are `COMAN/MAIN.C`, `COMAN/ASM.ASM` (`inittwk`), `COMAN/THELOOP.ASM` and the wave tables
+`w1dta.bin`/`w2dta.bin`. 320×200: `dis_partstart(); mov ax,13h; int 10h` (`MAIN.C:124-126`), then
+`inittwk()` (`ASM.ASM:36-78`) clears the palette, writes **CRTC 0x14 = 0 and 0x17 = 0xe3**, turns
+**chain-4 off** and sets the all-plane mask — and never writes CRTC 0x13, so the row stride stays mode
+13h's own offset 40, **80 bytes to a plane row**.
+
+**What it draws, and how it moves.** A voxel terrain — "3D-Sinusfield", the Comanche-style
+heightfield — under a black sky (the sky is index 0; the terrain's palette is built from a formula at
+`MAIN.C:128-150`, blues and magentas). `doit()` (`MAIN.C:66-118`) waits on the music
+(`while(!dis_exit() && dis_musplus()<0)`), then runs `while(!dis_exit() && frame<4444)` with a second
+music break (`a=dis_musplus(); if(a>-8 && a<0) break;` — so the 4444-frame cap is never reached on
+this boot), rendering a column at a time with `docol` into the off-screen page and **double buffering
+by toggling CRTC 0x0c between 0x80 and 0x00** (`MAIN.C:96-106`), then `docopy`. `frame +=
+(frepeat = dis_waitb())` counts **vblanks**, and each render iteration costs ~2 of them, so **the
+terrain's picture changes every second frame**: measured, at each of 15500, 16000 and 16500 one
+neighbour is byte-identical and the other is ~37–39 % away, and at 16800 it is the other way round.
+
+**Its extent is from (15000, 15100] to (16900, 17000]**, about 1900 frames. 15100 is the terrain
+*entering from the lower left* (58 colours, mean 7.95, content only in rows 167–199); 16900 is still
+the terrain; 17000 is flat black, one colour, `ea0787f6…` — the same black §11.5 records for MNTSCRL's
+gap — and JPLOGO's 320×400 screen is up by 17100.
+
+### 16.1 The sweeps, and what the sheets showed
+
+```
+out/b4b-ray-sweep1  13000,13500,…,17000,17500            exit 2, refused at 17500
+out/b4b-ray-sweep2  14600…15500 step 100, 16800…17400    exit 2, refused at 17100
+```
+
+| index | what is on screen |
+|---|---|
+| 15100 | the voxel terrain entering from the lower left; 58 colours, mean 7.95, content rows 167–199, the rest black. |
+| 15200, 15300 | the same terrain higher (15300: content rows 90–199). |
+| 15400, 15500 | the terrain under a thin black sky band (15400: 59 colours, rows 90–199; 15500: 45–46 colours, rows 88–199). |
+| 16000 | the terrain with a wide black band above it and a peak rising in the middle. |
+| 16500 | the terrain lower again with a red-magenta ridge at the right (64–67 colours). |
+| 16800, 16900 | the terrain in the lower half with a wide black band above (16800: 46–47 colours, rows 86–199; 16900: 54 colours, rows 109–199). |
+| 17000 | flat black, one colour. |
+
+### 16.2 The keyframes, and why these
+
+Four, 300–500 frames apart, one for each stage of the flight: the terrain newly entered (15500),
+mid-flight (16000, 16500) and near its end (16800). Every one is at least 300 frames from its
+neighbours, well over the ~60 a three-index support batch needs (§1.3).
+
+| index | frame files | `sha256` |
+|---|---|---|
+| 15500 | `.rgb` only | `6a891af9947163446f7289da619e5df464d836f77a55254bcd57906c4104886e` |
+| 16000 | `.rgb` only | `2d349adaa4150d235fcbdc99d95ffeb438e2e5d32489dec2b49a11189f6921e8` |
+| 16500 | `.rgb` only | `538942e6206ef86f1cbc4613eff8c60f77e9ffacac4b71adb6b13fae1c7cb078` |
+| 16800 | `.rgb` only | `47a0b32655ae5281c4f1e4356ed3c409fa8f8225f06c2ec56af0cab8b2444a15` |
+
+**All four are RGB-only** — no `.idx` from this part is filed, and that is the tool's ordinary
+refusal for a moving screen (the terrain redraws every second frame; measured 37–40 % of pixels
+between consecutive pictures). It matters that no plane was filed here, because **this part writes
+CRTC 0x0c every frame**: §1.9's hand-check rule would apply to any `.idx` filed from it, and the
+value it writes (`0x80`) is one `plan_indexed_read` *accepts* as a 256-byte plane row at 200 rows.
+Nothing in the tree was produced by that.
+
+### 16.3 Held or moving, measured
+
+| keyframe | triple (one session, `out/b4b-ray-sess1`) | reading |
+|---|---|---|
+| 15500 | `15499` = `15500` = `6a891af9…`, `15501` = `be95db6c…` (37.1719 % away) | moving, two-frame steps |
+| 16000 | `15999` = `16000` = `2d349ada…`, `16001` = `2744df3f…` (37.9094 %) | moving, two-frame steps |
+| 16500 | `16499` = `16500` = `9d129ad0…`, `16501` = `19a8a5b0…` (38.9031 %) | moving, two-frame steps |
+| 16800 | `16799` = `47a0b326…` (40.6437 % from `16800`), `16800` = `16801` = `6e5994bf…` | moving, two-frame steps |
+
+### 16.4 The re-capture and the census
+
+```bash
+# the reference, as first captured
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 15500,16000,16500,16800 --out reference/parts/3dsinfld --sheet out/3dsinfld.png
+
+# the partners: the same three sessions as RAYSCRL's (one geometry, both parts)
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 12900,12950,12999,13000,13001,13499,13500,13501,13999,14000,14001,14499,14500,14501,\
+14950,15000,15050,15499,15500,15501,15999,16000,16001,16499,16500,16501,16799,16800,16801,16900,\
+16950,17000 --out out/b4b-ray-sess1        # and -sess2, -sess3
+```
+
+```
+$ cargo xtask compare --reference reference/parts/3dsinfld --rendered out/b4b-ray-sess1 \
+      --out out/b4b-sinfld-cmp1
+frame 15500: 0.0000% differing (0/64000 px), max delta 0, rendered index 15501 (offset +1)
+frame 16000: 0.0000% differing (0/64000 px), max delta 0
+frame 16500: 43.0406% differing (27546/64000 px), max delta 255
+frame 16800: 0.0000% differing (0/64000 px), max delta 0, rendered index 16799 (offset -1)
+verdict: different, mode: mixed, offsets {"-1": 1, "0": 2, "+1": 1}
+exit: 1
+```
+
+**The first reference was re-captured for exactly the reason §1.8's rule exists.** Its 15500 was a
+*singleton* among the three sessions (sess1's own picture, presented empty in the other two windows),
+while the picture the sessions most often present at 15500 is `be95db6c…` — presented at `N` by one
+session and inside all three windows. The re-capture (`out/b4b-sinfld-ref2`, a separate sitting) drew
+`be95db6c…` at 15500, so the filed reference moved into the largest group and its support went
+**1/3 → 3/3**; 16000 and 16800 kept the bytes they had (`2d349ada…` 3/3, `47a0b326…` 2/3). 16500 came
+back `538942e6…` — the same picture the first reference had, and **0/3**: the sessions' picture there
+is `9d129ad0…` (2/3 at `N`), which no reference capture has drawn, so that keyframe stays unsettled
+whichever reference is filed.
+
+**The census**, by §1.8's rule, over the three sessions that hold a window:
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| 3DSINFLD 15500 | 3 | 3 | `be95db6c…` **3/3 (100 %)**, taken at `N` by one session and inside all three windows | **yes** (after the re-capture) | yes |
+| 3DSINFLD 16000 | 3 | 2 | `2d349ada…` **3/3 (100 %)** (tied with `2744df3f…`, also 3/3) | **yes** | yes |
+| 3DSINFLD 16500 | 3 | 3 | `19a8a5b0…` 3/3 but **never at `N`** — not filable; `9d129ad0…` 2/3 at `N` is filable but not held | no — the filed `538942e6…` is presented by **0/3** | **no** — no settled content |
+| 3DSINFLD 16800 | 3 | 2 | `47a0b326…` **2/3 (67 %)** (tied with `6e5994bf…`) | **yes** | yes |
+
+So **three of the four keyframes are settled** and one is not, and the reason is the terrain's
+two-frame step: the sessions sit one frame apart from one another at some indices, and the ±1 window
+either covers that or misses it by a frame. That is §1.8's knife edge at its plainest, and the row
+gives both numbers rather than a tolerance.
+
+**The 16800 plane was hand-checked**, because 3DSINFLD writes CRTC 0x0c every frame and §1.9's rule
+covers it: `frame_016800.idx` reproduces its RGB with **0 mismatches of 64000 pixels** through the
+manifest's palette (65 indices, 46 distinct colours — a partly collapsed palette, so the check has
+less to catch a shear with than a one-to-one one, but it is exact where the colours are).
 ---
 
 ## 17. JPLOGO
