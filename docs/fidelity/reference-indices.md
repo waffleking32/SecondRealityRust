@@ -511,18 +511,17 @@ rounds several entries together. On such a screen the coherence check has fewer 
 which to catch a shear than a one-to-one palette gives it (LNS&ZOOM 2700: 64 indices ↔ 64 triples,
 §12.2), so "the tool accepted it" is not enough there either.
 
-**A keyframe can be *held* because the part's own arithmetic saturates, and the held picture is then
-session-independent while its *index* is not.** JPLOGO's `doit` recomputes its two row-mapping values
-only while its own `frame <= 511` (`JPLOGO/JP.C:79-83`), and the 800-entry tables at `:123-165`
-saturate: replicating that integer arithmetic gives `framey1t[f]/16 = 0` and `framey2t[f]/16 = 400`
-for **f = 379…511**, i.e. a constant scale and an identity row map, so from doit frame 379 the
-`lasty/lasts` guard (`:96-99`) skips every redraw and the picture is frozen. Measured: 17600, 17700
-and 17800 are byte-identical in one session and the frames either side are 9.97 % and 56.42 % away.
-That is the first *held* keyframe in this ledger that is the last frame of a moving effect rather
-than a still image or a palette hold — and because `doit` begins after a music wait (`:71`), **the
-boot index it sits at moves between sessions**, so §1.8's census still decides what may be filed.
-**The lesson is to look for the settle branch in a part's own loop before assuming a moving screen
-has no held picture.**
+**A keyframe can be *held* without being reproducible, and a hold is not a property of the part.**
+JPLOGO holds for ~350 frames — measured, 17500, 17501, 17600, 17699, 17700, 17701, 17800 and 17850 are
+one `sha256` in `out/b4b-jp-sess1`, while 17499 and 17900 are not — and the source says why: `doit`
+recomputes the two row-mapping values only while its own `frame <= 511` (`JPLOGO/JP.C:79-83`) and the
+800-entry tables at `:123-165` saturate, so the `lasty/lasts` guard (`:96-99`) stops redrawing.
+**But the held picture is different bytes in a different session**: `out/b4b-jp-sweep1`'s held frame
+is `ae2c3d08…` and `-sess1`'s is `c8d6faa0…`, **31.1867 % (39919 px) apart**, same palette, same
+picture, different drawn row range — and the mechanism is *not* settled here (§17.3 records what was
+and was not modelled). So the two lessons are: **look for the settle branch in a part's own loop
+before assuming a moving screen has no held picture**, and **still run §1.8's census on it** —
+RAYSCRL's held 13500 is byte-identical in every session that took it (§15.3), JPLOGO's hold is not.
 
 **A screen's per-frame change is not stationary, so neither "held or moving" nor a rate may be
 carried over from another index of the same part.** RAYSCRL's 12999→13000 changes **64 px (0.10 %)**
@@ -565,6 +564,7 @@ table.
 | PLZPART — the 320×200 cube | `SECOND 3` | 320×200 Mode X, 160-byte plane row; RGB only | 8500, 9500 | `out/b4-plz-sess1-cube` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 2}`, `mode: rgb`; the same against `sess2`, `sess3` and `sess4`. Both keyframes are byte-identical in every session captured — **4/4 (100 %)** over the ±1 window (§13.6) |
 | MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
 | RAYSCRL | `SECOND 3` | 320×200 Mode 13h; 13500 carries `.idx` | 13000, 13500, 14000, 14500 | `out/b4b-ray-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4b-ray-sess2` and `out/b4b-ray-sess3`. 13500 is **held** (13499 = 13500 = 13501 in every session, and its `.idx` is byte-identical across sessions); 13000, 14000 and 14500 move 0.10–6.37 % of pixels a frame and every session presents the filed picture at the same index — **3/3 (100 %)** support on all four (§15) |
+| JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** (offset 0) against `out/b4b-jp-sess1`, `-sess2` and `-sess3`; 17500 0.0000 % against `sess2`, 41.3773 % and 39.3516 % against `sess1`/`sess3`; 17700 29.5719 %, 40.1914 % and 27.3664 %. Census over the three sessions: 17300 **3/3 (100 %)** settled (the entry's hold, presented at `N` by all three), 17500 **1/3 (33 %)** and 17700 **0/3** recorded as **no settled content** — the part holds for ~350 frames but the held picture is a different picture in every session (§17.3) |
 
 ### Adding a row
 
@@ -2937,6 +2937,161 @@ each). This is the MNTSCRL/LNS&ZOOM/MINVBALL shape (§19): the part's timeline i
 session draws the same bytes at the same boot index.
 
 
+---
+
+## 17. JPLOGO
+
+`SECOND 3`'s seventh and last part. `JPLOGO/MAKEFILE:24` builds `jp.exe` and stages it as
+`jplogo.exe`; the sources are `JPLOGO/JP.C` and `JPLOGO/ASM.ASM` (linked with `_PIC.OBK` and
+`READP.C`). **320×400 Mode X**: `mov ax,13h / int 10h` (`JP.C:173-174`) then `inittwk()`
+(`ASM.ASM:36-74`), which writes **CRTC 0x09 = 0 (400 rows)**, 0x14 = 0, 0x17 = `0xe3`, turns chain-4
+off and clears 64 KB — and never writes 0x13, so the stride stays mode 13h's offset 40, **80 bytes to
+a plane row**, which is what `lineblit` (`ASM.ASM:76-100`) writes.
+
+**What it draws.** The "Jellypic" — a woman in armour on a white horse with a sword — read row by row
+out of the picture object (`readp`, `JP.C:181-186`) into 400 rows of 184 bytes and drawn with
+`linezoom(vram+y*80, row[b], a)` (`JP.C:96-99`). Three phases:
+
+- an **entry** of ~83 frames (`while(y>0) { y -= a; a += 6; scrolly(y/64); dis_waitb(); }`,
+  `JP.C:210-220`), in which `scrolly` (`:30-45`) walks **CRTC 0x0d and 0x0c** down the picture and the
+  picture slides in. It is *held in pairs*: `out/b4b-jp-sess1` and `-sess2` both hold one `sha256`
+  (`4b31e501a3…`) at 17300 **and** 17301, and four sessions so far have it at 17300;
+- a **wobble** after a music wait (`:71`, `while(!dis_exit() && dis_musplus()<4)`):
+  17400→17500 10.8250 %, 17500→17600 9.9680 % in `out/b4b-jp-sweep1`;
+- a **hold** of ~350 frames: `out/b4b-jp-sess1` is one `sha256` (`c8d6faa0…`) at 17500, 17501, 17600,
+  17699, 17700, 17701, 17800 and 17850, while 17499 is `50e5a1c6…` and 17900 is the white-out. The
+  source explains a settle — `doit` recomputes `y1`/`y2` only while its own `frame <= 511`
+  (`JP.C:79-83`) and the tables saturate (`framey1[95:] = 0`, `framey2[95:] = 6400` by the source's own
+  arithmetic) — but **the held picture is a different picture in every session** (below), so the hold
+  is not by itself a reproducible target.
+
+**Its extent is from (17000, 17100] to (17900, 18000]** — about 900 frames — and it is the last
+320×400 screen of this boot. 17000 is the loader's flat black; 17900 is a **white rectangle** (2
+colours, 74221 px white in `b4b-jp-sweep1`) which is ENDLOGO's opening white over JPLOGO's leftover
+memory (`END/END.C:61-63` writes 63 into 765 of the 768 DAC entries, leaving index 255 alone).
+
+### 17.1 The sweep, and what the sheet showed
+
+```
+out/b4b-jp-sweep1  17100,17200,17300,17400,17500,17600,17700,17800,17900,18000,18100,18300,18600,18900
+                   exit 2, refused at 18000: "frame 18000 is 320x200 where the capture started at 320x400"
+```
+
+| index | what is on screen |
+|---|---|
+| 17100 | a band of the picture across the top of the frame: the entry has just begun. |
+| 17200, 17300, 17400 | the picture further in — the woman, the horse's head, the sword — with black bands still at its edges. |
+| 17500–17800 | the picture at full size, wobbling, the scale's comb pattern at its edges. |
+| 17900 | a white rectangle on black — ENDLOGO's white, not this part's drawing. |
+
+### 17.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 17300 | the picture **mid-entry** | `.rgb` only | `4b31e501a342b9797696c09e274d5fe048bd1304aa5712ce46cf92ecdffdb3d3` |
+| 17500 | the picture **wobbling** | `.rgb` only | `aab611ef273c3286ac0329ca295eedf263cdd55ffa4997ed222946b09f60d976` |
+| 17700 | the picture **held** in the reference's own session | `.rgb` only | `91d6ce6beb6bcec4401c8e17d96dac837e6ec4e2bd69a15dffa51cfee8295c41` |
+
+All three are RGB-only: this part's own rail refuses the indexed read loudly (§17.4) and D15's
+moving-screen rule refuses the rest.
+
+### 17.3 Held or moving, and the hold that is not one picture
+
+| keyframe | neighbours in the sessions | reading |
+|---|---|---|
+| 17300 | `out/b4b-jp-sess1`: 17299 `87c7fd8d…`, 17300 = 17301 = `4b31e501…`; `-sess2` the same | **held** (in pairs at least), and the one picture every session so far agrees on |
+| 17500 | `-sess1`: 17499 `50e5a1c6…`, 17500 = 17501 = `f8896c45…`; `-sess2`: 17499 `7248fe3d…`, 17500 = 17501 = `aab611ef…` | **held per session, different pictures**; the reference's `aab611ef…` is the one `-sess2` holds |
+| 17700 | part of each session's long hold: `-sweep1` `ae2c3d08…`, `-sess1` `c8d6faa0…`, `-sess2` `ec3de2bb…` | **held per session — and three different pictures** |
+
+**The held pictures are not the same bytes in different sessions, and that is this part's finding.**
+`out/b4b-jp-sweep1`'s hold is `ae2c3d08…` and `out/b4b-jp-sess1`'s is `c8d6faa0…` — **39919 px
+(31.1867 %)** apart, max channel delta 255, with nearly all colours in common (56 of 57) and the
+picture at a different **drawn row range**: reading pixel rows out of both frames, sweep1's picture
+fills rows 0–399 while sess1's leaves rows 0–5 and 395–399 showing the unwritten "comb". No integer
+vertical shift explains it (best is +0 at 31.19 %; ±1…4 are 35–41 %). `-sess2`'s is a third picture
+(`ec3de2bb…`), and the reference's own 17700 (`91d6ce6b…`) is a fourth that **no session's window
+contains**.
+
+**What is modelled and what is not.** A replication of `JP.C:110-165`'s integer arithmetic gives
+`framey1[95:] = 0` and `framey2[95:] = 6400`, so `(y1, y2) = (0, 400)` for every doit frame from 379
+up — the state that fills all 400 rows, which is what `b4b-jp-sweep1` shows. A session holding at
+`(6, 391)` instead corresponds to doit frames **187–188** in that replication, which a
+`frame += waitb()` counter cannot reach and then stop at, so something in the counter, the
+`lasty/lasts` guard (`:96-99`) or `linezoom`'s write pattern is outside what this block modelled.
+**It is recorded as unresolved rather than guessed at**, the way §13.5 records PLZPART's plasma
+spread — and the row is filed on what is measured: **JPLOGO's hold is real, and which bytes it holds
+is a property of the session, not of the part.** That has a direct consequence for §1.8: a late
+keyframe does not escape the census, which is why this part has no second-wave re-capture (a re-roll
+would be exactly the dice roll §1.8 rule 5 warns about).
+
+### 17.4 The racy offset read, measured on this part
+
+`out/b4b-jp-sweep1`'s log holds **eight `PlaneTooSmall` refusals, every one naming a 320-byte row**
+for a picture whose rows are 80. 320 bytes = 160 register units, and 160 is the low byte of `y*80`
+for `y ≡ 2 (mod 16)` — exactly what `scrolly` writes to CRTC 0x0d during the entry (`JP.C:36-45`).
+**The read returned 0x0d's value as if it were 0x13's** (§1.7's mechanism, in its loud half: at 400
+rows a 320-byte stride needs 128000 bytes a plane). **JPLOGO writes CRTC registers, so §1.9's
+hand-check rule applies to it** — no `.idx` was filed from the reference (all three keyframes are
+RGB-only), and the one the *partners* produced was checked anyway: `out/b4b-jp-sess2`'s
+`frame_017700.idx` reproduces its RGB with **0 mismatches of 128000 pixels** through the manifest's
+palette (59 indices, 57 distinct colours), so the held screen's plane is real at the 80-byte stride
+and not a sheared one.
+
+### 17.5 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 17300,17500,17700 --out reference/parts/jplogo --sheet out/jplogo.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 17299,17300,17301,17400,17499,17500,17501,17600,17699,17700,17701,17800,17850,17900 \
+    --out out/b4b-jp-sess1        # and -sess2, -sess3
+```
+
+```
+$ cargo xtask compare --reference reference/parts/jplogo --rendered out/b4b-jp-sess1 \
+      --out out/b4b-jp-cmp1
+frame 17300: 0.0000% differing (0/128000 px), max delta 0
+frame 17500: 41.3773% differing (52963/128000 px), max delta 255
+frame 17700: 29.5719% differing (37852/128000 px), max delta 255
+verdict: different, mode: rgb, offsets {"0": 3}
+exit: 1
+
+$ … --rendered out/b4b-jp-sess2
+frame 17300: 0.0000% differing (0/128000 px), max delta 0
+frame 17500: 0.0000% differing (0/128000 px), max delta 0
+frame 17700: 40.1914% differing (51445/128000 px), max delta 255
+verdict: different, mode: rgb, offsets {"0": 3}
+exit: 1
+
+$ … --rendered out/b4b-jp-sess3
+frame 17300: 0.0000% differing (0/128000 px), max delta 0
+frame 17500: 39.3516% differing (50370/128000 px), max delta 255
+frame 17700: 27.3664% differing (35029/128000 px), max delta 255
+verdict: different, mode: rgb, offsets {"0": 3}
+exit: 1
+```
+
+**The census**, by §1.8's rule, over the three sessions that hold a window:
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| JPLOGO 17300 (held) | 3 | 2 | `4b31e501…` **3/3 (100 %)**, presented at `N` by **all three** (and at `N+1`) | **yes** | yes |
+| JPLOGO 17500 | 3 | 4 | four pictures, **1/3 (33 %) each** | **yes** (tied) | **no** — no settled content |
+| JPLOGO 17700 (held) | 3 | 3 | three pictures, **1/3 each** — `c8d6faa0…`, `ec3de2bb…`, `c60e2fbc…`, one per session | no — the filed `91d6ce6b…` is presented by **0/3** | **no** — no settled content |
+
+**17300 is the part's one settled target and it is the entry's held frame**: every session so far
+(the reference, `b4b-jp-sweep1`, `-sess1`, `-sess2`, `-sess3`) holds `4b31e501…` at 17300, and the
+three census sessions also hold it at 17301 — the entry's window steps one picture every second
+frame, so a phase of one frame costs nothing. **17500 and 17700 are not settled, and the reason is
+§17.3**: the part holds for ~350 frames, but which bytes it holds is the session's business — the
+three sessions hold `c8d6faa0…`, `ec3de2bb…` and `c60e2fbc…`, each a singleton, and the reference's
+own 17700 (`91d6ce6b…`) appears in none of them. The row records both numbers rather than dressing
+the hold up: **JPLOGO is a part whose hold is real and whose hold is not reproducible**, and no
+re-capture was run — a re-roll would be exactly the dice roll §1.8 rule 5 warns about, and nothing
+in this block's data says which held picture a re-roll would land on.
 ---
 
 ## 19. What block 3 has that block 2 did not

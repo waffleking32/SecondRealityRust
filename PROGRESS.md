@@ -37,10 +37,19 @@ rather than from reasoning. The phase's human-look evidence is the user's own re
 music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
 magic.
 
-**Part B (references) is in progress — 12 of the 20 slots are captured**, at `reference/parts/`:
+**Part B (references) is in progress — 16 of the 20 slots are captured**, at `reference/parts/`:
 BEGLOGO (B2); ALKU, U2A, PAM (B3 block 1); GLENZ, TUNNELI, TECHNO (two screens), PANICEND (B3 block 2);
-MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a). RAYSCRL, 3DSINFLD, JPLOGO, U2E (B4b) and
-ENDLOGO, CRED, ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
+MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a); RAYSCRL, 3DSINFLD, JPLOGO (B4b, from a
+`SECOND 3` boot) and U2E (B4b, from a `SECOND 4` boot — the boot that reaches it). ENDLOGO, CRED,
+ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
+
+**Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames and
+**the held picture is not the same bytes in every session** (`ae2c3d08…` in one, `c8d6faa0…` in
+another, 31.1867 % apart), so a hold is not by itself reproducible and the census still decides; and
+`U2E` on a full run **inherits JPLOGO's 320×400 Mode X screen** (`VISU/C/U2E.C:195-215` skips
+`vid_init` when the BIOS mode is 13h), so the filed U2E reference — a `SECOND 4` boot's, 320×200 — is
+not what a full run draws. Both are recorded in `docs/fidelity/reference-indices.md` §1.10/§17/§18 and
+in the plan's Task B4 note.
 
 **What the references mean, and it is not what "frame-exact" suggests at first reading.** The boot
 repeats exactly (D17), and the frame grab is counter-verified on both sides, but **the emulator's own
