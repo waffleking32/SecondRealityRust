@@ -480,6 +480,63 @@ few hundred pixels of each other, exactly the knife edge §1.8 records for GLENZ
 place further down: **on a fast-moving screen the count measures the last decimal of the phase, not
 the reachability of the picture**, and a row that quotes it must say which it is.**
 
+### 1.10 Six things block 4 (RAYSCRL, 3DSINFLD, JPLOGO, U2E) measured
+
+**A capture refused for geometry still performs the indexed read for the index it refuses.** The 11th
+warning in `out/b4b-ray-sweep2`'s log belongs to the refused 17100: the loop grabs *and reads* a frame
+(`xtask/src/reference.rs:604-627`, `oracle.frame()`) before it compares geometries, so a log's
+warning count can be one higher than the number of frames on disk. Read a refused log's warnings
+against the frames that landed, not against the frames that were asked for.
+
+**The racy register read of §1.7/§1.9 is live on every planar part of this block, and the value it
+can return is one the plan accepts.** §1.9 recorded that a raced read "can pass `plan_indexed_read`
+and be used", with `pompota`'s 0x3c as the plausible quiet value. Three parts of this block write
+**CRTC 0x0c** (start address high) every frame — 3DSINFLD toggles it between `0x80` and `0x00` for
+its page flip (`COMAN/MAIN.C:96-106`), JPLOGO writes it and 0x0d from `scrolly` (`JPLOGO/JP.C:30-45`),
+and U2E reaches the same registers through `vid_setswitch` inside its copper
+(`VISU/C/U2E.C:130-141`, `VISU/AVID.ASM:341-357`) — and 0x80 read back as the offset register is a
+**256-byte** plane row, which `plan_indexed_read` accepts at 200 rows (51,200 ≤ 65,536). The loud half
+of the race fired eight times on JPLOGO: eight `PlaneTooSmall` refusals naming a **320-byte** row
+(160 units, the low byte of `y*80` that `scrolly` writes to 0x0d for `y ≡ 2 (mod 16)`) on a screen
+whose rows `lineblit` writes as 80. **Nothing in the tree was produced by the race** — no `.idx` from
+any of these three parts survives — but the hand-check §1.9 asks for is what stands between the quiet
+value and a sheared plane, and every `.idx` this block filed was checked against its manifest's
+palette (RAYSCRL 13500: **0 mismatches of 64000 pixels**, 190 indices to 190 colours).
+
+**A `.idx` can be honest and still weaker evidence than the ones already in the tree, when the palette
+partly collapses.** 3DSINFLD's 15100 plane has no index carrying two RGB triples — so it is not
+sheared — but its **83 indices reach only 58 distinct colours** (21 triples are reachable from two or
+three indices), because the part builds its palette from a formula (`COMAN/MAIN.C:128-150`) that
+rounds several entries together. On such a screen the coherence check has fewer distinct colours with
+which to catch a shear than a one-to-one palette gives it (LNS&ZOOM 2700: 64 indices ↔ 64 triples,
+§12.2), so "the tool accepted it" is not enough there either.
+
+**A keyframe can be *held* because the part's own arithmetic saturates, and the held picture is then
+session-independent while its *index* is not.** JPLOGO's `doit` recomputes its two row-mapping values
+only while its own `frame <= 511` (`JPLOGO/JP.C:79-83`), and the 800-entry tables at `:123-165`
+saturate: replicating that integer arithmetic gives `framey1t[f]/16 = 0` and `framey2t[f]/16 = 400`
+for **f = 379…511**, i.e. a constant scale and an identity row map, so from doit frame 379 the
+`lasty/lasts` guard (`:96-99`) skips every redraw and the picture is frozen. Measured: 17600, 17700
+and 17800 are byte-identical in one session and the frames either side are 9.97 % and 56.42 % away.
+That is the first *held* keyframe in this ledger that is the last frame of a moving effect rather
+than a still image or a palette hold — and because `doit` begins after a music wait (`:71`), **the
+boot index it sits at moves between sessions**, so §1.8's census still decides what may be filed.
+**The lesson is to look for the settle branch in a part's own loop before assuming a moving screen
+has no held picture.**
+
+**A screen's per-frame change is not stationary, so neither "held or moving" nor a rate may be
+carried over from another index of the same part.** RAYSCRL's 12999→13000 changes **64 px (0.10 %)**
+and 13000→13001 changes **23,908 px (37.36 %)**; 3DSINFLD's frames alternate **0 px and 37–40 %**
+because each render iteration costs two vblanks and the picture therefore changes every *second*
+frame. The triple around each keyframe (§1.3 rule 2) is what measures this, and it is not only for
+the census: it is how 13500 was found to be held and 13000 not, on the same screen, 500 frames apart.
+
+**A part's screen can depend on which boot reaches it, at the source level.** `VISU/C/U2E.C:195-215`
+checks the BIOS video mode, sets `jellywas = 1` when it is mode 13h, and **skips `vid_init(1)`** —
+the call that establishes 320×200 (`VISU/AVID.ASM:117-147`). On a full run U2E therefore inherits
+JPLOGO's 320×400 Mode X screen; on the `SECOND 4` boot its reference was captured from, it
+initialises 320×200 itself. A row must record which argument reaches the part *and* whether that
+argument changes the screen it draws into (§18.1).
 
 ---
 
@@ -507,6 +564,7 @@ table.
 | PLZPART — the 320×400 plasma | `SECOND 3` | 320×400 Mode X, 96-byte plane row, line-compare 60/61 (the lower view starts at scanline 61/62); RGB only | 6000, 7000, 7600 | `out/b4-plz-sess1-plasma` and `out/b4-plz-sess3-plasma` | exit 1, `mode: rgb`, offsets `{0: 3}` — 6000 **0.0000 %** (0 px) against `sess3` and 0.1641 % (210 px) against `sess1`; 7000 7.7344 % / 12.9266 %; 7600 9.3281 % / 24.4844 %, every one at max channel delta ≤ 25. Census over the sessions holding a window (5 at 6000, 4 at 7000, 3 at 7600): **no settled content on all three** — the filed picture is presented by 2/5 (40 %), 0/4 and 0/3, and the largest supports in the ±1 windows (3/5 at 6000, 2/4 at 7000) belong to pictures taken only at `N±1`, which rule 3's caveat forbids filing at `N`. The filed pictures are still the best *filable* ones at 6000; at 7000 and 7600 every picture taken at `N` is a singleton (§13.6) |
 | PLZPART — the 320×200 cube | `SECOND 3` | 320×200 Mode X, 160-byte plane row; RGB only | 8500, 9500 | `out/b4-plz-sess1-cube` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 2}`, `mode: rgb`; the same against `sess2`, `sess3` and `sess4`. Both keyframes are byte-identical in every session captured — **4/4 (100 %)** over the ±1 window (§13.6) |
 | MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
+| RAYSCRL | `SECOND 3` | 320×200 Mode 13h; 13500 carries `.idx` | 13000, 13500, 14000, 14500 | `out/b4b-ray-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4b-ray-sess2` and `out/b4b-ray-sess3`. 13500 is **held** (13499 = 13500 = 13501 in every session, and its `.idx` is byte-identical across sessions); 13000, 14000 and 14500 move 0.10–6.37 % of pixels a frame and every session presents the filed picture at the same index — **3/3 (100 %)** support on all four (§15) |
 
 ### Adding a row
 
@@ -2730,7 +2788,158 @@ follows it with no geometry change.
 
 ---
 
-## 15. What block 3 has that block 2 did not
+## 15. RAYSCRL
+
+`SECOND 3`'s fifth part — `WATER/X.BAT:1` stages `demo.exe` as `rayscrl.exe`, and the whole part is
+`WATER/DEMO.PAS` (190 lines of Turbo Pascal) plus `WATER/ROUTINES.ASM`'s `Putrouts1`. **320×200 mode
+13h, one index a byte, chain-4** (`mov ax,$13 / int $10`, `DEMO.PAS:75-77`), and **the part never
+writes a CRTC register**: its only ports are the DAC's (`port[$3c8]`/`port[$3c9]`, `DEMO.PAS:3-9`).
+
+**What it draws.** A raytraced scene — a large glossy blue sphere, a smaller one below it,
+concentric ripple rings on a blue floor, and one small object the part animates across the picture —
+copied into video memory once (`DEMO.PAS:111-113`) and then **scrolled**: `scr(sss)` (`:41-70`)
+calls `Putrouts1` with one of three position maps (`wat1`, `wat2`, `wat3`) and the font buffer `fbuf`,
+and `sss` cycles 0,1,2 (`:185-186`), so the picture advances every frame and the font column one step
+every third frame. The palette fades in over 128 frames (`for y := 0 to 63*2`, `:115-133`) and out
+over 64 (`:167-180`) when the music reaches the position the loop polls for (`cmp dx,-11`,
+`:159-166`).
+
+**Its extent on a `SECOND 3` boot is from (12900, 13000] to (14900, 15000]** — about 2000 frames,
+≈28 s. The start is §14.5's boundary seen from this side; the end is measured here (14900 full
+picture at 230 colours, 15000 the fadeout's tail at mean byte 0.11) and 3DSINFLD's terrain is
+entering at 15100.
+
+### 15.1 The sweeps, and what the sheets showed
+
+```
+out/b4b-ray-sweep1  13000,13500,14000,14500,15000,15500,16000,16500,17000,17500   exit 2, refused
+                    at 17500: "the display changed geometry between frames: frame 17500 is 320x400
+                    where the capture started at 320x200; capture one screen at a time"
+out/b4b-ray-sweep2  14600,14700,14800,14900,15000,15100,15200,15300,15400,15500,16800,16900,
+                    17000,17100,17200,17300,17400                                 exit 2, refused at
+                    17100, same message — so the 320×200 screen ends in (17000, 17100]
+```
+
+Both refusals are §1.2's discovery working: the 320×200 screen of this boot ends in **(17000, 17100]**
+and a 320×400 screen follows it. (The MINVBALL→RAYSCRL boundary could not be found this way — both
+screens are 320×200 — and is §14.5's.)
+
+| index | what is on screen |
+|---|---|
+| 13000 | the raytraced scene, mid fade-in: the large glossy sphere upper right, a smaller one below it, ripple rings on a blue floor, a small orange ellipse low-left. 35 colours, mean 23.15. |
+| 13500 | the same scene scrolled left, no object in frame. 190 colours, mean 27.81. |
+| 14000 | the same scene with a **golden comet** with a long wavy trail crossing from the upper left. 217 colours, mean 32.16. |
+| 14500 | the same scene with a **green-and-grey screwdriver-like object** at the left and a thin scanning line across the sphere. 230 colours, mean 44.21. |
+| 14600–14900 | the object decomposing into a spray of small white/orange squares that drifts right and shrinks. |
+| 15000 | **11 colours, mean byte 0.11**, 63303 of 64000 px black — the fadeout's tail. |
+| 15100 | (3DSINFLD) the voxel terrain entering from the lower left. |
+
+### 15.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 13000 | the scene **mid fade-in** | `.rgb` only | rgb `62ef53c7…` |
+| 13500 | the scene scrolled, no object | `.rgb` + `.idx` | rgb `92dc2c9e…`, idx `afda560c…` |
+| 14000 | the scene with the **golden comet** | `.rgb` only | rgb `6715eece…` |
+| 14500 | the scene with the **screwdriver object** | `.rgb` only | rgb `d1cb7f59…` |
+
+One keyframe per object the part animates across its held background, 500 frames apart — far more
+than the ~60 a three-index support batch needs (§1.3) — plus one in the fade-in so the part is
+covered from its first second.
+
+Full hashes of the five files in `reference/parts/rayscrl/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 13000 | `frame_013000.rgb` | `62ef53c7e8922139a30b07e4c3325f915bca582161ba67bf088782076888a52f` |
+| 13500 | `frame_013500.rgb` | `92dc2c9e51af55183c05db9e643e8209ff96d2235f0689278cdd4c518982db20` |
+| 13500 | `frame_013500.idx` | `afda560cbf29fce267ec3e29e949bb4deeb47ea4a81e57992354d916ff03e660` |
+| 14000 | `frame_014000.rgb` | `6715eece4a6dde27132007cda3f78c873cba92bd426393159b29cd6cfc5149f1` |
+| 14500 | `frame_014500.rgb` | `d1cb7f593fee5f9f09ea7d805556c630519502129f62cdfac26ac07a98c7e804` |
+
+### 15.3 Held or moving, measured — and the `.idx` hand-check
+
+The triples around each keyframe, hashed inside `out/b4b-ray-sess1` and `out/b4b-ray-sess2`
+(the same bytes in both sessions at every index):
+
+| keyframe | `K-1` | `K` | `K+1` | reading | per-frame change of its own 64000 px |
+|---|---|---|---|---|---|
+| 13000 | `ccb4bb02…` | `62ef53c7…` | `8f456780…` | **moving** | 12999→13000 **64 px (0.1000 %)**, 13000→13001 23908 px (37.3563 %) |
+| 13500 | `92dc2c9e…` | `92dc2c9e…` | `92dc2c9e…` | **held** | 0 px either side |
+| 14000 | `36f5c972…` | `6715eece…` | `8ee47d77…` | **moving** | 2059 px (3.2172 %) and 1962 px (3.0656 %) |
+| 14500 | `0158b387…` | `d1cb7f59…` | `123f0056…` | **moving** | 4079 px (6.3734 %) and 3100 px (4.8438 %) |
+
+13500 is the part's **held** keyframe and the reason it is one: 13499, 13500 and 13501 are
+byte-identical (and equal to the reference's frame), so a session's ±1 candidates are the same
+picture and the search finds offset 0 whatever the session's phase is (§1.3 rule 2). 13000's tiny
+`K-1` difference is worth noticing — a screen whose per-frame change is 0.10 % at one step and 37 %
+at the next (§1.10) — and it is why held-or-moving is measured per keyframe and not assumed from the
+part. `.idx` is present at 13500 and absent at every other index both sessions took; §5.3 records
+that this is the session's business rather than the screen's.
+
+**RAYSCRL writes no CRTC register**, so §1.9's hand-check rule is not triggered by this part; the
+check was done anyway, twice. `frame_013500.idx` has 190 distinct indices and 190 distinct RGB
+triples with no index carrying two triples (`/tmp/b4b/idxcheck.py`), and against the manifest's own
+palette with the `(c*259+33)>>6` widening it reproduces the RGB with **0 mismatches of 64000 pixels**
+(`/tmp/b4b/handcheck.py`). The palette does not collapse, so that is a real check and the plane is not
+sheared. It is also **byte-identical** to the plane `out/b4b-ray-sweep1` and `out/b4b-ray-sess1`
+wrote at the same index (`afda560c…`), so the indexed plane reproduces across sessions as well as the
+RGB does.
+
+### 15.4 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 13000,13500,14000,14500 --out reference/parts/rayscrl --sheet out/rayscrl.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 12900,12950,12999,13000,13001,13499,13500,13501,13999,14000,14001,14499,14500,14501,\
+14950,15000,15050,15499,15500,15501,15999,16000,16001,16499,16500,16501,16799,16800,16801,16900,\
+16950,17000 --out out/b4b-ray-sess1
+```
+
+(The partner list carries 3DSINFLD's keyframes as well — the two parts are adjacent on the same
+320×200 screen, so one session answers both, and the same command was run three times into
+`out/b4b-ray-sess1`, `-sess2` and `-sess3`.)
+
+```
+$ cargo xtask compare --reference reference/parts/rayscrl --rendered out/b4b-ray-sess1 \
+      --out out/b4b-ray-cmp1
+frame 13000: 0.0000% differing (0/64000 px), max delta 0
+frame 13500: 0.0000% differing (0/64000 px), max delta 0
+frame 14000: 0.0000% differing (0/64000 px), max delta 0
+frame 14500: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 4}
+exit: 0
+```
+
+**`out/b4b-ray-sess2` and `out/b4b-ray-sess3` give the identical report** — three independent
+sessions, each captured minutes apart, `exit 0`, `verdict: identical`, 0.0000 %, offsets `{0: 4}`.
+`mode: mixed` because 13500 is compared as indices (both sides hold `.idx` there) and the other three
+as RGB.
+
+**The census**, by §1.8's rule, over the three sessions that hold a window (the reference's own
+directory excluded; and every directory under `out/` was scanned for the frames, not just those with
+manifests, so a refused run holding a window would have counted — none does):
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| RAYSCRL 13000 | 3 | 3 | `62ef53c7…` **3/3 (100 %)** | **yes** | yes |
+| RAYSCRL 13500 (held) | 3 | 1 | `92dc2c9e…` **3/3 (100 %)** | **yes** | yes |
+| RAYSCRL 14000 | 3 | 3 | `6715eece…` **3/3 (100 %)** | **yes** | yes |
+| RAYSCRL 14500 | 3 | 3 | `d1cb7f59…` **3/3 (100 %)** | **yes** | yes |
+
+Every session presents the filed picture **at offset 0** on all four indices — including the held
+13500, where all three frames of each session's window are the filed picture (offsets `[-1, 0, 1]` in
+each). This is the MNTSCRL/LNS&ZOOM/MINVBALL shape (§19): the part's timeline is anchored and every
+session draws the same bytes at the same boot index.
+
+
+---
+
+## 19. What block 3 has that block 2 did not
 
 Not a section of its own in the table, but worth saying where a B4b or B5 reader will pass it: three
 of this block's four parts are **deterministic across sessions at every index measured** — MNTSCRL

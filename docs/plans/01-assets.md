@@ -1572,6 +1572,52 @@ second half and for B5.** Measured, and in `docs/fidelity/reference-indices.md` 
   and answer a question about a register that alternates every frame; batches of 6 or more were
   refused as misses on this part (host not keeping up), so **three is the batch size to plan with**.
 
+**What this task's second half (B4b: RAYSCRL, 3DSINFLD, JPLOGO on `SECOND 3`; U2E on `SECOND 4`)
+measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-indices.md` §1.10 and
+§§15–18:
+
+- **The `SECOND 3` run's 320×200 stretch ends in (17000, 17100]** — found the way §1.2 says, by a
+  sweep refused at 17100 (`out/b4b-ray-sweep2`) — and the 320×400 screen that follows is **JPLOGO's**.
+  JPLOGO's own drawing runs to (17800, 17900] and the 320×400 screen to (17900, 18000]; the 320×200
+  screen after that is the ending's, i.e. **B5's first part on a `SECOND 3` boot is at ~18000**.
+- **ENDLOGO's opening is a white palette over the previous part's memory, not a blank screen.** By
+  17900 the frame is 2 colours with 74221 px white — `END/END.C:61-63` writes 63 into 765 of the 768
+  DAC entries (leaving index 255 alone), `:67-88` re-points the CRTC's start address and line count
+  while keeping the 400-row screen, `:89-92` whitens again and waits 32 vblanks, and only then does it
+  read its own picture and blit 400 rows (`:94-97`). So what is on screen under that white is
+  **JPLOGO's leftover plane** — B5's sweeps should not read that frame as a screen of its own.
+- **U2E inherits the screen JPLOGO left on a full run.** `VISU/C/U2E.C:195-215` sets `jellywas = 1`
+  when the BIOS video mode is > 3 (mode 13h) and then **skips `vid_init(1)`**, which is the call that
+  sets 320×200 (`VISU/AVID.ASM:117-147`, "1=320x200x256 (tweak)"). So on a full run U2E draws into
+  JPLOGO's 320×400 Mode X screen, while on the `SECOND 4` boot its reference was captured from it
+  initialises 320×200 itself. **The reference in `reference/parts/u2e/` is a `SECOND 4` boot's and
+  its row says so** — a full run's U2E is a different screen, and Phase 2 must not diff a full run's
+  U2E against it without that being settled. This is a source reading, not a measurement: it is the
+  concrete thing behind the brief's "what a `SECOND 4` boot shows at a given index is not what a full
+  run shows".
+- **JPLOGO freezes, and the freeze is in the source.** `doit` only recomputes the wobble while its own
+  `frame <= 511` (`JPLOGO/JP.C:79-83`), and the frame tables reach their final values at frame 379
+  (`framey1t[379]/16 = 0`, `framey2t[379]/16 = 400`), so from frame 379 to the 700-frame cap the
+  picture is **frozen**: measured, 17600, 17700 and 17800 are byte-identical in one session. That is
+  the first held keyframe in this phase that is the last frame of a *moving* effect, and the strongest
+  kind of target for Phase 2 — but **it sits at a different boot index in different sessions**,
+  because JPLOGO's `doit` begins after a music wait (`JP.C:71`), so the row's census has to say which
+  session presents the filed picture and where.
+- **The racy offset/chain-4 read of §1.7 and §1.9 is live on every planar part of this block.**
+  JPLOGO's own capture log holds eight `PlaneTooSmall` refusals naming a 320-byte row (160 register
+  units — the low byte of `y*80` that `scrolly` writes to CRTC 0x0d, read back as if it were 0x13);
+  3DSINFLD writes CRTC 0x0c = 0x80 every frame, and 0x80 as the offset register is a 256-byte row the
+  plan **accepts** at 200 rows; U2E writes the same register every frame through `vid_setswitch`. The
+  hand-check rule §1.9 states is what stands between an accepted value and a sheared plane in the
+  tree, and every `.idx` this block filed was checked against its manifest's palette.
+- **Two parts of the same block can be on opposite sides of the reproducibility question.** RAYSCRL's
+  13000/13500/14000/14500 are byte-identical across independent sessions (one of them a day older,
+  from B4a's session), while 3DSINFLD's terrain updates every *second* frame and its sessions differ
+  by one or two of those steps at some indices — 37.1719 % at 15500 between two sessions, with no
+  integer shift explaining it. B5 should expect either shape wherever a part waits on the music
+  before its own frame counter starts, and should measure held-or-moving per keyframe with the
+  triple, as every row in this ledger does.
+
 ---
 
 ### Task B5: Block 5 and the hidden part — ENDLOGO, CRED, ENDSCRL, DDSTARS
