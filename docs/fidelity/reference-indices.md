@@ -246,8 +246,11 @@ holds **nine `PlaneTooSmall` refusals** — `this screen's rows are 320 bytes an
 so it needs 128000 bytes a plane; one plane holds 65536` — on 8700…8780, and in two other sessions
 the *same* 8700 is refused only for motion, with byte-identical RGB (`40044edc…`), so the displayed
 layout cannot really differ: the tool's `crtc_offset_register()` writes the index to 3d4h and reads
-3d5h in a separate request, and TECHNO's pan loop writes the CRTC index every frame, so the read
-returned the register the guest had selected in between. This is a tool-side question, not a
+3d5h in a separate request, and TECHNO writes the CRTC index several times a frame, so the read can
+return another register's value — and the value it returned is one the guest was writing: **160 =
+0xa0 is `plv * 0x20` for `plv = 5`, one of the eight values `TECHNO/KOE.C:385-389`, `:445-449` and
+`:573-577` write to CRTC register 0ch (start address low) in a rotating loop.** The tool read 0ch's
+value as if it were 13h's. This is a tool-side question, not a
 reference one — every frame that *did* carry indices passed the pixel-exact check, so nothing in the
 tree is wrong — but it is why **a stride refusal in a log is not by itself evidence that the screen
 is unreadable**, and it is the only stride refusal this block produced (§9.6).
@@ -1647,7 +1650,8 @@ the offset register named a **320-byte plane row** there, not the 160-byte one t
 8200/8250 frames were read at. In two other sessions the same 8700 is refused only for motion
 (`out/b3-panic-sweep3`, `out/techno-troll-probe1`), with byte-identical RGB (`40044edc…`), so the
 displayed layout cannot differ between them: what differs is the register the tool's two-operation
-read returned (§1.7). The row's geometry column says 160-byte plane row because that is what the
+read returned (§1.7), and 0xa0 — the value it named — is exactly one of the eight `plv * 0x20` values
+`TECHNO/KOE.C:385-389` writes to CRTC **0ch**, not 13h. The row's geometry column says 160-byte plane row because that is what the
 frames that carry `.idx` were read at, and this is what the rest of the span did.
 
 **And the part ends at the geometry change in (8780, 8790]**, where PANICEND takes the screen down
