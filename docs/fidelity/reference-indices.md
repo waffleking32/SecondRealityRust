@@ -657,10 +657,11 @@ same bytes** (`reference/parts/beglogo/frame_000430.rgb` and
 they still coincide: `END/END.C:62-63` points the DAC's write index at **0** and writes 63 into DAC
 entries **0–764**, while `BEG/BEG.C:25-33` writes 63 into **0–254** and then **black into 255**, and
 BEGLOGO's white *screen* is index 15 (`memset(vram,15,…)`, `:20-21`) — a different mechanism giving
-the same all-white pixels. **Unfiltered, ENDLOGO's four windows have eleven wrong-boot holders**:
-four at 429–431 (`out/b2-batch-probe`, `out/b2-white-probe`, `out/review-b3-readcost`,
-`out/rev-batch-probe`), six at 499–501 (`out/b4-mnt-sess1`–`-sess6`, MNTSCRL's `e68aa887…` on the
-`SECOND 3` boot) and one at 899–901 (`out/b3-alku-probe`, ALKU's `fec9afb5…`). The counts in this
+the same all-white pixels. **Unfiltered, ENDLOGO's four windows have ten wrong-boot holders**:
+three at 429–431 (`out/b2-batch-probe`, `out/review-b3-readcost`, `out/rev-batch-probe`), six at
+499–501 (`out/b4-mnt-sess1`–`-sess6`, MNTSCRL's `e68aa887…` on the `SECOND 3` boot) and one at
+899–901 (`out/b3-alku-probe`, ALKU's `fec9afb5…`). (`out/b2-white-probe` holds 429 and 431 but not
+430, so it is not a window holder at all and is not counted here.) The counts in this
 block's rows are therefore **filtered by recipe** — a session counts only when its manifest names the
 same `arguments`, `boot`, `cycles` and `keys`, and a manifest-less directory counts only when this
 block made it, with §19.4 naming the one same-recipe directory that rule sets aside and saying why.
@@ -3813,10 +3814,10 @@ census sessions `out/b5-endo-sess1`–`-sess3`, and the fix round's own re-run o
 `out/b5rev-endo-sess1b` (a `SECOND 5` capture of the same recipe, its frames byte-identical at every
 index). The scan covers all **319** directories under `out/` and `reference/parts/` that hold frames,
 not just those with manifests, so a refused run holding a window would have counted — and it is
-**filtered by recipe** as §1.11 records, which here excludes **eleven** wrong-boot window holders:
-`out/b2-batch-probe`, `out/b2-white-probe`, `out/review-b3-readcost` and `out/rev-batch-probe` at
-429–431 (all four holding `85789170…`, the white a `SECOND 2` boot produces just as a `SECOND 5` one
-does), `out/b4-mnt-sess1`–`-sess6` at 499–501 (MNTSCRL's `e68aa887…` on the `SECOND 3` boot) and
+**filtered by recipe** as §1.11 records, which here excludes **ten** wrong-boot window holders:
+`out/b2-batch-probe`, `out/review-b3-readcost` and `out/rev-batch-probe` at 429–431 (all three
+holding `85789170…`, the white a `SECOND 2` boot produces just as a `SECOND 5` one does),
+`out/b4-mnt-sess1`–`-sess6` at 499–501 (MNTSCRL's `e68aa887…` on the `SECOND 3` boot) and
 `out/b3-alku-probe` at 899–901 (ALKU's `fec9afb5…`). **A fifth same-recipe directory holds 430's
 window and is not counted**: `out/b5rev-endo-sess1`, a refused run of the fix round that carries no
 manifest — it holds 429–431, but its boot cannot be established from its bytes, which are the very
