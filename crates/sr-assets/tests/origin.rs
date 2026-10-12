@@ -471,12 +471,15 @@ fn load_path_refuses_a_file_it_cannot_identify() {
 /// The plan's Review Focus #1, on the Origin family: every loader returns an
 /// `AssetError`, never panics and never reads past its input. A compiler cannot
 /// prove the indexing in the row walker safe, so this cuts each real file at a
-/// spread of offsets — including every header boundary and every point a row's
-/// length prefix lands on — and requires an error rather than a panic.
+/// spread of offsets — ~200 cuts a file, stepped evenly through it, so most land
+/// in the payload and the first falls inside the 16-byte header — and requires
+/// an error rather than a panic.
 ///
 /// The cut files are also the sharpest test of the length checks: a row whose
 /// length word survives the cut while its data does not is exactly the case the
-/// original's `readp` would walk off the end of.
+/// original's `readp` would walk off the end of. The offsets are *not* chosen to
+/// land on every row's length word — the step is what chooses them, below — so
+/// this is a sample of the truncation space, not an enumeration of it.
 #[test]
 fn no_prefix_of_an_origin_asset_panics_or_decodes_silently() {
     let mut checked = 0;

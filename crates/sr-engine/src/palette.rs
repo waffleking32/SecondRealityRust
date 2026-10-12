@@ -38,8 +38,10 @@ impl Palette {
     /// component is shifted down by 2, which is the original's own conversion
     /// (`GRAB/LBM2U.C:170` writes `getc(f1)/4`); the DAC's 6 bits are the top 6.
     ///
-    /// **Not a `.PAL`.** The tree's `.PAL` files hold the *output* of that same
-    /// conversion, so they are six-bit DAC values already and shifting them down
+    /// **Not a `.PAL`.** The tree's five curated `.PAL` files hold the *output* of
+    /// that same conversion — three of them are cross-measured against the `CMAP`
+    /// of the picture beside them, and the parts' own reads say it for all five —
+    /// so they are six-bit DAC values already and shifting them down
     /// again darkens every colour by four. `sr_assets::pal::decode` reads them as
     /// they are; `sr_assets::pal`'s docs carry the measurements that settle it.
     pub fn from_vga(bytes: &[u8]) -> Palette {

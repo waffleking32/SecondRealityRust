@@ -63,9 +63,11 @@
 //!
 //! The parts disagree about the rows, and it is worth knowing which way.
 //! `ALKU`'s routine reads 32 rows of a 30-row strip: the `fona.inc` fragment
-//! is followed by `dw 1500*5 dup(?)` (`ALKU/INCLUDE.ASM:19`), 3,000 bytes of
-//! *uninitialised* padding that the linker filled with something the port
-//! cannot know, and its glyphs live in rows 0..17 of the strip's 30. What
+//! is followed by `dw 1500*5 dup(?)` (`ALKU/INCLUDE.ASM:19`) — **7,500 words,
+//! i.e. 15,000 bytes** of *uninitialised* padding, of which the two extra rows
+//! the routine reads are 2 × 1,500 = 3,000 — that the linker filled with
+//! something the port cannot know, and its glyphs live in rows 0..17 of the
+//! strip's 30. What
 //! exists is the strip, so `ALKU/FONA.UH` loads as 30 rows and a cell height
 //! of 32 is refused — a cell that does not divide the strip, which is
 //! [`Font::from_image`]'s other `Unsupported` arm.
@@ -218,8 +220,8 @@ impl Font {
         })
     }
 
-    /// The cell the strip holds, `ch as u32 - first as u32` of them: its
-    /// pixels, `cell().1` rows of the cell's own width, row-major, in the
+    /// The cell for `ch` — the cell at index `ch as u32 - first as u32`: its
+    /// pixels, `cell().1` rows of the glyph's own width, row-major, in the
     /// strip's own 2-bit values. `None` for a character before `first`, and
     /// for one past the strip's last cell.
     ///

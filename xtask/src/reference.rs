@@ -75,8 +75,12 @@ pub enum CaptureError {
         path: PathBuf,
         message: String,
     },
-    /// The emulator changed display geometry between frames, so one manifest
-    /// cannot honestly describe them all: capture one screen at a time.
+    /// The emulator changed display geometry between two of the frames this
+    /// capture took, so one manifest cannot honestly describe them all:
+    /// capture one screen at a time. What is compared is the frames taken *in
+    /// this run* — the first read sets the geometry the rest must match — so a
+    /// change before the first requested index, or between two runs, is not
+    /// seen here and is the caller's to avoid (D15: one capture, one screen).
     GeometryChanged {
         index: u64,
         expected: (u16, u16),

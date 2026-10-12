@@ -320,6 +320,48 @@ fn the_unlinked_picture_blob_is_a_slice_of_the_curated_picture() {
     );
 }
 
+/// §E.18's nine bytes, pinned. The record is the one Phase 2's ALKU work consumes: the
+/// shipped build's picture is *not* the curated copy, and which of the two an ALKU port
+/// should draw is a Phase 2 decision that must not have to re-derive the values.
+///
+/// `ALKU/INCLUDE.OBJ`'s payload (173,786 bytes) is `decode(HOI.IN0)` (65,535) +
+/// `decode(HOI.IN1)` (63,250) + `decode(FONA.INC)` (45,001) byte for byte
+/// (`docs/fidelity/asset-inventory.md` §E.18), and it is the tree's only *linked*
+/// payload whose picture bytes differ from the curated copy of the same art. Compared
+/// with `assets/ALKU/HOI.U`, exactly nine bytes differ, at offsets 19–27 — palette
+/// entries 1, 2 and 3 (`entry * 3 + {0,1,2}`): the shipped build holds three brightened
+/// greys, the curated file the `HOI.LBM` `CMAP ÷ 4` values, and two of the shipped
+/// values occur at no index of that `CMAP ÷ 4` at all.
+#[test]
+fn alkus_linked_picture_differs_from_the_curated_copy_in_nine_palette_bytes() {
+    let payload = payload("ALKU/INCLUDE.OBJ");
+    assert_eq!(payload.len(), 173_786, "the measured payload length");
+    let curated = asset("ALKU/HOI.U");
+
+    let differing: Vec<(usize, u8, u8)> = payload
+        .iter()
+        .zip(&curated)
+        .enumerate()
+        .filter(|(_, (linked, hoit))| linked != hoit)
+        .map(|(at, (linked, hoit))| (at, *linked, *hoit))
+        .collect();
+    assert_eq!(
+        differing,
+        vec![
+            (19, 10, 2),
+            (20, 10, 2),
+            (21, 10, 3),
+            (22, 30, 5),
+            (23, 30, 5),
+            (24, 30, 7),
+            (25, 63, 6),
+            (26, 63, 6),
+            (27, 63, 9),
+        ],
+        "§E.18's nine bytes at offsets 19–27: (offset, linked, assets/ALKU/HOI.U)"
+    );
+}
+
 /// Regenerates the one recovered asset from the blob it ships in. Not part of a normal
 /// run — it writes into the repository — and it is the tool that wrote the file:
 ///

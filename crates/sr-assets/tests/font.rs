@@ -268,7 +268,7 @@ fn fonaorder_len(part: &str) -> usize {
 #[case((20, 31), "31", "a cell one row taller than the strip")]
 #[case((20, 32), "32", "ALKU/MAIN.C:218 reads 32 rows of a 30-row strip")]
 #[case((17, 30), "17", "1,500 is not a whole number of 17-column cells")]
-#[case((16, 30), "16", "the blank's ink width is not the cell width")]
+#[case((16, 30), "16", "1,500 is not a whole number of 16-column cells either")]
 #[case((32, 32), "32", "CREDITS/MAIN.C:270-271's cell, on a strip it does not divide")]
 #[case((29, 30), "29", "1,500/29 = 51.7")]
 fn a_cell_that_does_not_divide_the_strip_is_refused(
@@ -285,6 +285,40 @@ fn a_cell_that_does_not_divide_the_strip_is_refused(
         what.contains(named),
         "{why}: the message must name {named}: {what}"
     );
+}
+
+/// A width that *divides* the strip but is not the routine's is accepted, and
+/// the glyphs do not change: they come from the scan, never from the cell.
+///
+/// `ENDSCRL`'s routine states 20 columns (`ENDSCRL/MAIN.C:123-124`), but 1,500
+/// also divides by 25 — the widest glyph, `W` — and by 30 and 50
+/// (`src/font.rs`'s module docs count all three). Nothing in the strip says
+/// which of them is *the* cell, so the loader may not invent a refusal for the
+/// ones the routine did not state; it refuses only a width the strip cannot be
+/// cut into. The contrast with the test above is the point, and so is the
+/// equality: a caller that states a different cell gets the same pixels back,
+/// and only [`Font::cell`] answers with what the caller stated.
+#[test]
+fn a_dividing_width_that_is_not_the_routine_s_is_accepted() {
+    let pick = |cell: (u16, u16)| {
+        let image = load_path(Path::new("../../assets/ENDSCRL/FONA.UH")).unwrap();
+        Font::from_image(image, cell, 'A').unwrap_or_else(|e| panic!("cell {cell:?}: {e}"))
+    };
+    let routine = pick(CELL);
+    let wide = pick((25, 30));
+
+    assert_eq!(
+        wide.cell(),
+        (25, 30),
+        "cell() reports the geometry the caller stated"
+    );
+    for ch in ['A', 'B', 'W', 'X'] {
+        assert_eq!(
+            wide.glyph(ch),
+            routine.glyph(ch),
+            "{ch}: the glyph is the scan's run, not the cell's slice"
+        );
+    }
 }
 
 /// A cell with no pixels in it is refused before anything is read out of the

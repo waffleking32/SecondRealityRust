@@ -13,11 +13,13 @@
 //! the output of the original's only 8→6 rule, the integer `/4` of
 //! `GRAB/LBM2U.C:170`, and applying any conversion again divides them by four:
 //!
-//! - The parts write them to the DAC untouched. `PAM/ANIM.C:17-19` —
+//! - The parts write them to the DAC untouched. `PAM/ANIM.C:19-21` —
 //!   `fopen("pal.pal","rb")`, `fread(pal,1,768,data)`, `tw_setpalette(pal)`.
 //!   `VISU/C/MAIN.C:234-241` — `fread(matpal,768,1,in)` for `<scene>.PAL`, at
 //!   `:262` written into the `.00M` the parts read their material palette from
-//!   (`VISU/C/U2A.C:243`, `VISU/C/U2E.C:337`), and at `:386` handed to
+//!   (`VISU/C/U2A.C:243-246` — `cp = (char *)(scenem+16)` at `:243` and the
+//!   live DAC write `outp(0x3c8,0); for(…;a<768;…) outp(0x3c9,cp[a]);` at
+//!   `:245-246`; `VISU/C/U2E.C:337` is the same pointer), and at `:386` handed to
 //!   `vid_setpal`. `PANIC/SHUTDOWN.C:41-42` — `read(fff,kuvapal,768)`, with the
 //!   fade table at `:62` computed as `(a*63 + kuvapal[b]*(64-a))/64`, arithmetic
 //!   that only makes sense over 0..63.

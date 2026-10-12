@@ -592,7 +592,16 @@ fn random_byte_strings_are_refused_rather_than_panicked_on() {
         }
         bytes.truncate(len);
         if case % 8 == 0 {
-            // Bias some cases towards the record bytes the decoders dispatch on.
+            // Bias some cases towards the bytes a length or a run takes at its
+            // extremes (`0x00`/`0x01`/`0x7F`/`0x80`/`0x88`/`0xFF`).
+            //
+            // These are deliberately *not* the bytes this format dispatches on:
+            // the FLI header is checked at `bytes[4]`/`bytes[5]` (`0x11`/`0x12`
+            // and `0xAF`, anim.rs:220) and its frame records at `0xF1FA`
+            // (`FRAME_MAGIC`), and none of those is in the alphabet — so no case
+            // here reaches the chunk dispatch. That path is `synthetic_fli`'s,
+            // below, which hands the real header to the decoder on purpose; this
+            // test's job is the length arithmetic on input no file produced.
             for byte in bytes.iter_mut() {
                 *byte = [0x00u8, 0x01, 0x7F, 0x80, 0x88, 0xFF][(*byte as usize) % 6];
             }

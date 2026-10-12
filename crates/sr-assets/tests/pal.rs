@@ -6,11 +6,12 @@
 //! A1. The format has no magic, so it is established from the parts that read it
 //! and from what the bytes are:
 //!
-//! - `PAM/ANIM.C:17-19` — `fopen("pal.pal","rb")`, `fread(pal,1,768,data)`,
+//! - `PAM/ANIM.C:19-21` — `fopen("pal.pal","rb")`, `fread(pal,1,768,data)`,
 //!   `tw_setpalette(pal)`: the 768 bytes go to the DAC as they are.
 //! - `VISU/C/MAIN.C:234-241` — `fread(matpal,768,1,in)` for `<scene>.PAL`, then
 //!   `fwrite(matpal,768,1,outb3)` into the `.00M` (`:262`) whose offset 16 the
-//!   parts read as the material palette (`VISU/C/U2A.C:243`), and `vid_setpal`
+//!   parts read as the material palette (`VISU/C/U2A.C:243`, written to the DAC
+//!   at `:245-246`), and `vid_setpal`
 //!   at `:386`.
 //! - `PANIC/SHUTDOWN.C:41-42` — `read(fff,kuvapal,768)`, and the fade table two
 //!   lines later (`:62`) computes `(a*63 + kuvapal[b]*(64-a))/64` — arithmetic
