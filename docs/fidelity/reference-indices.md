@@ -294,6 +294,7 @@ table.
 | U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
 | GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300/3000/3400 differ by 34.3219/23.9516/29.0187% at offset -1, and by 18.6625/9.2000/16.3281% in the re-run (§7.4) |
+| TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture` | exit 1, `mode: rgb` — every frame differs by 8.2250–10.1672%, offsets `{0: 2, -1: 2}`; the re-run 8.0672–10.1812% at `{-1: 1, +1: 3}` (§8.4) |
 
 ### Adding a row
 
@@ -1217,6 +1218,123 @@ and TUNNELI's first tunnel frame is at 3710** — a content boundary with no geo
 second one this phase has had to find that way (§1.6, §7.5 here). The black is `ea0787f6…`, the
 same bytes as `out/b3-pam-probe2`'s black in §6 and ALKU's black in §4.2: with no picture on
 screen the parts agree, which is why an index in the gap is not worth a keyframe.
+
+---
+
+## 8. TUNNELI
+
+`SECOND 2`'s third part: the dot tunnel. 320×200, mode 13h (`TUNNELI/TUN10.PAS:110-115`,
+`mov ax,$13` / `int $10`), from its first ring at 3710 to the last of its dots in the
+(4700, 4770] window — about 1060 of its own frames by the source's own count
+(`TUN10.PAS:3`, `const veke = 1060; { frame count to exit }`), ≈15 s.
+
+**Every keyframe in this part is a moving screen, and the tunnel's motion is fast enough that a
+one-frame phase difference moves most of its dots**: the re-captures differ by 8–10 % of pixels
+where ALKU's pan left 0 % and D17's moving case left 0.2–0.6 % (§8.4). That is the row's
+character: the reference is one exact frame of a fast animation, and the row says what sessions
+can differ by instead of implying they cannot.
+
+### 8.1 The sweeps, and what the sheets showed
+
+```
+out/b3-tunneli-sweep1  3730,3760,3800,3900,4000,4100,4200,4300,4400,4500,4600,4650,4700,4750  exit 0
+out/b3-tunnel-boundaries  (the run above, §7.5) 4740,4750,4760,4770,4780,4790                 exit 0
+```
+
+`b3-tunneli-sweep1.png`'s tiles, in the order the capture laid them out: **3730** black;
+**3760** a small dotted ellipse (the tunnel's mouth); **3800** the ring larger; **3900**, **4000**
+the tunnel filling the frame; **4100**, **4200** the walls skewing; **4300**, **4400**, **4500**
+the tunnel off-centre with its mouth moving up; **4600**, **4650** the dots thinning and the mouth
+dark; **4700**, **4750** the last sparse dots. In the boundary run **4740, 4750 and 4760** are all
+black while **4770** is TECHNO's first interference ring (§9.1) — i.e. in that session the tunnel
+was over by 4740, while in the sweep's session 4750 still had dots: the tunnel's *end* drifts by
+tens of frames between sessions, which is the same phenomenon as §7.4 and §9.5.
+
+### 8.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 3800 | the **tunnel's mouth** — a bright ring of dots around a black centre, the part's opening shape. | `.rgb` only | rgb `e4d3646e…` |
+| 4200 | the **full tunnel** — dots filling the frame, the mouth skewed. | `.rgb` only | rgb `d831c2c3…` |
+| 4500 | the **tunnel off-centre**, its mouth up and to the left, walls sweeping across the frame. | `.rgb` only | rgb `7f0f47ef…` |
+| 4600 | the **thin tunnel** — the same structure with the dots sparse and the mouth dark, the part's last distinctive shape before the screen goes black. | `.rgb` only | rgb `65c7d6de…` |
+
+Four screens across the one effect it is: the mouth, the full tunnel, the off-centre tunnel, the
+thinning one. **4700 was the obvious fourth and was dropped**: the partner capture for it was
+refused as a miss (`the emulator reached frame 4702 before frame 4701 could be captured`,
+`out/tunneli-recapture`'s first attempt), and the boundary run shows 4740/4750 black — the window
+is both grab-hostile and session-dependent, which is not what a reference index should be.
+
+Full hashes of the four files in `reference/parts/tunneli/` — all `.rgb`, no `.idx`: every one of
+them is a moving screen, and the read 20 frames late never reproduces it (measured on 16 frames
+across four captures, every one refused with `the screen moved while it was read`):
+
+| index | file | `sha256` |
+|---|---|---|
+| 3800 | `frame_003800.rgb` | `e4d3646eb6453a18270eff03c63c13e56aacc3631e1fe0c7b025f9afe9c1b717` |
+| 4200 | `frame_004200.rgb` | `d831c2c3e12402e754ec94b059d2a112f9c70a408122e9d073e06421a2ff6834` |
+| 4500 | `frame_004500.rgb` | `7f0f47ef6a510ce1c233b68ee60b9950bc66a5fe9490f9df81739bf674604ba2` |
+| 4600 | `frame_004600.rgb` | `65c7d6de46aeada6d0b2b58e8c2f0b0dac28289b9a62f95f2b0621b0c46ebcd9` |
+
+### 8.3 Held or moving, measured
+
+`out/tunneli-recapture`'s triples, hashed — three distinct `sha256` in every triple, so every
+keyframe is moving and every one needs its supports:
+
+| keyframe | `K-1` | `K` | `K+1` | reading |
+|---|---|---|---|---|
+| 3800 | `4cda6e68…` | `f65f2210…` | `b7d7f1a1…` | moving |
+| 4200 | `efbd8db4…` | `ff72ebb3…` | `931ac683…` | moving |
+| 4500 | `ac2b50d3…` | `a8547d71…` | `64440e1c…` | moving |
+| 4600 | `0ea6f434…` | `7dfaf5a9…` | `67b1dc97…` | moving |
+
+**The tunnel is not byte-identical between sessions even at indices where two sessions have
+agreed.** `out/b3-glenz-sweep2` and `out/b3-tunneli-sweep1` took 3800, 3900 and 4000 and matched
+exactly (`f861b1f2…`, `259c3bbb…`, `96056aba…`), while 4200 and 4400 differed between those same
+two sessions by 0.0859 % and 0.1578 % of pixels — and then the reference capture's 3800
+(`e4d3646e…`) matches neither of them. So the agreement above was two sessions landing in one
+alignment group, not a property of the index, and it is the same caveat §5.4 attaches to U2A.
+
+### 8.4 The re-capture: exit 1, a one-frame phase away, twice
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 3800,4200,4500,4600 --out reference/parts/tunneli --sheet out/tunneli.png
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 3799,3800,3801,4199,4200,4201,4499,4500,4501,4599,4600,4601 --out out/tunneli-recapture
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 3799,3800,3801,4199,4200,4201,4499,4500,4501,4599,4600,4601 --out out/tunneli-recapture2
+```
+
+`out/tunneli-recapture` (exit 0 as a capture):
+
+```
+frame 3800: 9.0328% differing (5781/64000 px), max delta 239
+frame 4200: 10.1672% differing (6507/64000 px), max delta 239, rendered index 4199 (offset -1)
+frame 4500: 8.2250% differing (5264/64000 px), max delta 239, rendered index 4499 (offset -1)
+frame 4600: 9.9516% differing (6369/64000 px), max delta 239
+verdict: different, mode: rgb, offsets {"0": 2, "-1": 2}
+exit: 1
+```
+
+Re-run (`out/tunneli-recapture2`, exit 0 as a capture):
+
+```
+frame 3800: 8.1297% differing (5203/64000 px), max delta 239, rendered index 3799 (offset -1)
+frame 4200: 10.1812% differing (6516/64000 px), max delta 239, rendered index 4201 (offset +1)
+frame 4500: 8.0672% differing (5163/64000 px), max delta 239, rendered index 4501 (offset +1)
+frame 4600: 10.0813% differing (6452/64000 px), max delta 239, rendered index 4601 (offset +1)
+verdict: different, mode: rgb, offsets {"-1": 1, "1": 3}
+exit: 1
+```
+
+**The two partners disagree with the reference in opposite directions** — the first pairs two
+frames at -1 and two at 0, the second pairs three at +1 — which is the alignment group being
+sampled either side, and the residue is the same size either way. `max delta 239` is the whole
+story of the size: a dot that has moved is a dot at a different place, and the pixels where it was
+go past every threshold. Since the screen is *made* of moving dots, the residue is a large
+fraction of the non-black pixels (≈3,000–6,000 of 64,000) rather than the 0.2–0.6 % D17 measured
+on a screen where most pixels hold still. **No tolerance is added and the row carries both runs.**
 
 ---
 
