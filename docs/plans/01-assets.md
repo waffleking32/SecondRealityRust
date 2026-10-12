@@ -1453,6 +1453,39 @@ in `reference-indices.md` §1.6 and §§4–6, and all of which later blocks wil
   0x13 = `0x5813` (a 176-byte row) and every frame with a picture on it comes back RGB-only, while
   PAM's copy of the same routine never writes 0x13, keeps 80-byte rows, and keeps its indices.
 
+**What block 2 (GLENZ, TUNNELI, TECHNO, PANICEND) measured, for B4 and B5 to read before they sweep.**
+All four are captured; the rows are in `reference-indices.md` §2 and the measurements in §§7–10.
+
+- **GLENZ's 92-byte row is read correctly and needed no refusal.** `reference/parts/glenz/frame_001499.idx`
+  reproduces its RGB pixel for pixel, so the stride fix is exercised and confirmed rather than merely
+  installed. Expect B4's PLZPART (`0x50` → a 160-byte plane row) to work the same way.
+- **`.idx` presence is also a *read-timing* property.** The same index with the same RGB carries
+  indices when it is captured on its own (~20 frames after the grab) and loses them when it is the
+  middle of a 3-index batch (~60 frames later, with GLENZ's palette moving in between). List a
+  keyframe that should carry indices at least ~25 frames from its neighbours.
+- **A refusal can name the colour depth rather than the stride.** TECHNO pokes the video mode
+  registers between VGA 256-colour and EGA 16-colour, DOSBox re-decides the mode from them, and
+  every frame on its 320×200 screen is refused with `UnmodelledMode` — RGB only, and `compare`
+  reports `mode: rgb`. That is a third kind of "no `.idx`", distinct from §1.6's stride refusal and
+  from the moving-screen coherence refusal.
+- **A part with two screens is two captures, and `compare` resolves the directory for you**: a
+  directory with no `manifest.json` is read as every immediate subdirectory that has one, named by
+  that subdirectory. TECHNO's are `reference/parts/techno/interference/` (320×200) and
+  `reference/parts/techno/troll/` (320×400), and the partner side mirrors the names. B4's PLZPART
+  (whose `0x3013h` is a third mode again) and U2E are the likely next users.
+- **A moving screen's phase is not reproducible in every session, and the difference can be large.**
+  GLENZ's rotating keyframes re-captured 18.66–34.32 % of pixels away; TUNNELI's dots 8.07–10.18 %;
+  TECHNO's dithered interference 70.68–97.50 %; two commands differing only in `--out`, run back to
+  back, gave different bytes at 6300; and one session had TECHNO's troll picture up at 8200 where
+  three others show flat black. Held frames were byte-identical throughout, and PANICEND's *moving*
+  collapse frame re-captured exactly — so this is not "moving is broken" but "a screen whose
+  animation advances by however many vblanks the host let pass drifts when the host misses one".
+  D17's identical sessions are real and conditional; sweep, re-capture and the row all have to
+  survive a session that drifted, so prefer indices that are held and re-run anything that exits 1.
+- **A boundary can be a content change with a black gap between the parts**: GLENZ's last frame
+  ~3650, flat black 3680–3700, TUNNELI's first ring 3710; TUNNELI's last dots ~4700–4760 (session
+  dependent), TECHNO's first rings 4770. Neither boundary is in the geometry.
+
 ---
 
 ### Task B4: Blocks 3 and 4 — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, 3DSINFLD, JPLOGO, U2E
