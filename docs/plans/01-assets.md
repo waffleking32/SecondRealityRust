@@ -1538,6 +1538,28 @@ are worth a note in the table:
 
 **Files, interfaces, steps:** as B3.
 
+**What this task's first half (B4a: MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, `SECOND 3`) changed, for the
+second half and for B5.** Measured, and in `docs/fidelity/reference-indices.md` §1.9, §11–§14:
+
+- **The split convention is confirmed**: PLZPART's `pompota` alternates CRTC 0x18 between 60 and 61
+  frame by frame and the captured frames' first content row alternates 61/62, so `Split::scanline` is
+  the register **plus one**. The register is animated by `do_drop` too (195/202/209 three frames
+  apart at the end of the plasma phase), so a row that quotes "the split" must say which phase.
+- **The block-2 note's expectation about PLZPART does not survive contact**: the part's two screens
+  both move 24–70 % of pixels *every* frame, so **no `.idx` exists for either of them** and the
+  160-byte (`0x5013h`) and 96-byte (`0x3013h`) strides are computed and never used. What the stride
+  arithmetic produces here is a loud `PlaneTooSmall` refusal caused by the racy register read naming
+  CRTC **0x0d**'s value (0xC0 = `cop_start`'s low byte), not by a real layout — and the same race
+  could name 0x3c and be accepted as a 120-byte row, which only the coherence check would catch.
+- **A part's screens can differ in reproducibility**: PLZPART's cube is byte-identical at its
+  keyframes in every session captured, while its plasma differs by 0.00–3.08 % at 6000 and 7.7–24.5 %
+  at 7000/7600 with a max channel delta of ≤25 — sub-frame colour perturbation, not a shifted
+  picture. §1.8's support count reads that as "no settled content" (largest support 1 of 2), so the
+  row says both numbers.
+- **Three consecutive frames can be taken on the plasma screen in one batch** (`--frames 6989,6990,6991`)
+  and answer a question about a register that alternates every frame; batches of 6 or more were
+  refused as misses on this part (host not keeping up), so **three is the batch size to plan with**.
+
 ---
 
 ### Task B5: Block 5 and the hidden part — ENDLOGO, CRED, ENDSCRL, DDSTARS
