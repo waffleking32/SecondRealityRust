@@ -486,6 +486,7 @@ table.
 | LNS&ZOOM | `SECOND 3` | 320×200 Mode 13h; 2700 and 5650 carry `.idx` | 2700, 3400, 4200, 4900, 5650 | `out/b4-lns-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 5}`, `mode: mixed`; the same against `out/b4-lns-sess3` and `out/b4-lns-sess5`. 2700 (the held face) and 5650 (the flat white the part exits on) are held; 3400 (the lens), 4200 and 4900 (the rotazoomer) move 6.7–39.8 % of pixels a frame and still carry the same bytes at the same index in all 5 independent sessions — **5/5 (100 %)** support each (§12.4). 5650's `.idx` is a flat-palette plane the coherence check cannot vouch for (§12.2) |
 | PLZPART — the 320×400 plasma | `SECOND 3` | 320×400 Mode X, 96-byte plane row, line-compare 60/61 (the lower view starts at scanline 61/62); RGB only | 6000, 7000, 7600 | `out/b4-plz-sess1-plasma` and `out/b4-plz-sess3-plasma` | exit 1, `mode: rgb`, offsets `{0: 3}` — 6000 **0.0000 %** (0 px) against `sess3` and 0.1641 % (210 px) against `sess1`; 7000 7.7344 % / 12.9266 %; 7600 9.3281 % / 24.4844 %, every one at max channel delta ≤ 25. Census: 6000 is the largest-support picture (**2/3**); 7000 and 7600 are **no settled content** — the filed 7000 is outside every group and at 7600 every group is a singleton (§13.6) |
 | PLZPART — the 320×200 cube | `SECOND 3` | 320×200 Mode X, 160-byte plane row; RGB only | 8500, 9500 | `out/b4-plz-sess1-cube` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 2}`, `mode: rgb`; the same against `sess2`, `sess3` and `sess4`. Both keyframes are byte-identical in every session captured — **4/4 (100 %)** over the ±1 window (§13.6) |
+| MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
 
 ### Adding a row
 
@@ -2404,32 +2405,6 @@ copper's once-a-frame `moveplz`/`pompota` rewriting of those parameters (`COPPER
 `:118-138`). That is one thing this block did not resolve, and it is recorded with its size measured
 rather than guessed at.
 
-### 13.7 Where the part begins, ends, and changes screens
-
-`out/b4-plz-start1` took 5710, 5720, 5730 and 5740, and **refused at 5730**: `the display changed
-geometry between frames: frame 5730 is 320x400 where the capture started at 320x200`. So LNS&ZOOM's
-white screen holds through 5720 and PLZPART's 320×400 screen is up by 5730 — the change is in
-**(5720, 5730]**, it is the `tw_opengraph2` mode set inside `init_plz()` (`PLZ.C:175`), and this is
-the one boundary in the block the refusals find by themselves.
-
-The plasma→cube change is the same kind and is also found by refusal: `out/b4-plz-cube-edge2` took
-8310 (320×400) and refused at 8340 (320×200), and `out/b4-plz-cube-edge1` refused at 8350, so **the
-320×400 screen ends in (8310, 8340]** and `tw_opengraph()` (`VECT.C:114`) is what ends it.
-
-The cube→MINVBALL change is **not** a geometry change — both screens are 320×200 — so it was found
-by content, the fourth such boundary in this ledger (U2A→PAM §6.5, GLENZ→TUNNELI §7.5, PANICEND→
-MNTSCRL §10.4). `out/b4-plz-minv-edge` took 10100, 10200, 10300 and 10400:
-
-| index | 10100 | 10200 | 10300 | 10400 |
-|---|---|---|---|---|
-| what | the cube, 156 colours | 79 colours, dark olive | 51 colours, dark olive | **pure black**, one colour |
-
-10100 is the cube by its palette (the plasma's greens and golds); 10400 is the next part's screen
-with its palette zeroed — `DOTS/MAIN.C:153-155` writes 0 to all 768 DAC entries right after the mode
-set, and the grey background only becomes visible when its 130-frame fade raises the palette
-(§14). Between them 10200 and 10300 are the cube dimming. **So the cube's screen runs to somewhere
-in (10300, 10400] and MINVBALL's black screen is up at 10400.**
-
 ### 13.6 The re-capture and the census
 
 ```bash
@@ -2519,3 +2494,190 @@ a frame of a screen the oracle draws at a slightly different point from session 
 distances given; Phase 2 comparing against them should read a residual of a few per cent at these
 indices as this, and not as a port error — and should read 8500/9500, which are exact in every
 session, as the part's precise targets.
+
+---
+### 13.7 Where the part begins, ends, and changes screens
+
+`out/b4-plz-start1` took 5710, 5720, 5730 and 5740, and **refused at 5730**: `the display changed
+geometry between frames: frame 5730 is 320x400 where the capture started at 320x200`. So LNS&ZOOM's
+white screen holds through 5720 and PLZPART's 320×400 screen is up by 5730 — the change is in
+**(5720, 5730]**, it is the `tw_opengraph2` mode set inside `init_plz()` (`PLZ.C:175`), and this is
+the one boundary in the block the refusals find by themselves.
+
+The plasma→cube change is the same kind and is also found by refusal: `out/b4-plz-cube-edge2` took
+8310 (320×400) and refused at 8340 (320×200), and `out/b4-plz-cube-edge1` refused at 8350, so **the
+320×400 screen ends in (8310, 8340]** and `tw_opengraph()` (`VECT.C:114`) is what ends it.
+
+The cube→MINVBALL change is **not** a geometry change — both screens are 320×200 — so it was found
+by content, the fourth such boundary in this ledger (U2A→PAM §6.5, GLENZ→TUNNELI §7.5, PANICEND→
+MNTSCRL §10.4). `out/b4-plz-minv-edge` took 10100, 10200, 10300 and 10400:
+
+| index | 10100 | 10200 | 10300 | 10400 |
+|---|---|---|---|---|
+| what | the cube, 156 colours | 79 colours, dark olive | 51 colours, dark olive | **pure black**, one colour |
+
+10100 is the cube by its palette (the plasma's greens and golds); 10400 is the next part's screen
+with its palette zeroed — `DOTS/MAIN.C:153-155` writes 0 to all 768 DAC entries right after the mode
+set, and the grey background only becomes visible when its 130-frame fade raises the palette
+(§14). Between them 10200 and 10300 are the cube dimming. **So the cube's screen runs to somewhere
+in (10300, 10400] and MINVBALL's black screen is up at 10400.**
+
+
+## 14. MINVBALL
+
+`SECOND 3`'s fourth part. `DOTS/MAKEFILE:20` builds `dots.exe` and stages it as `minvball.exe`; the
+source is `DOTS/MAIN.C` (512 dots, `:91`; the physics constants at `:102-113`) plus `DOTS/ASM.ASM`'s
+`drawdots` (`:52-218`), which blits the background picture and then draws the dots into it.
+
+**What it does.** `:125-126` sets mode 13h; `:127-147` builds a palette of 16 colours (from `cols[]`,
+`:72`), 100 greys and white at 255; `:148-150` reads that palette back; `:151` **zeroes the DAC**;
+`:152-155` fills rows 100-199 of video memory with a rising index ramp; `:168-169` copies that to
+`bgpic`; `:171-183` fades the palette up over 65 steps of **two** vblanks each — 130 frames — and then
+`:185` starts the main loop, `while(!dis_exit() && frame<2450)`, which advances the dot simulation by
+the vblanks that passed and calls `drawdots()` once a frame (`:283`). The loop also breaks on the
+music (`dis_musplus()` between -4 and 0, `:191-195`) and re-loads its darker palette after frame 2300
+(`:189`). The dots themselves go through four position phases inside those 2450 frames
+(`frame<500`, `<900`, `<1700`, `<2360`) and then the palette brightens (`<2400`) and whitens
+(`<2440`).
+
+320×200 mode 13h throughout — 80-byte plane rows, 64000 pixels.
+
+### 14.1 The sweeps, and what the sheets showed
+
+```
+out/b4-plz-minv-edge   10100,10200,10300,10400        exit 0 (4 frames)  — §13.7
+out/b4-minv-sweep1     10600,10900,…,13000 step 300   exit 0 (9 frames)
+```
+
+Tiles, in the order the capture laid them out. **10600** a handful of dots in the upper right and a
+faint ellipse low in the frame, over the grey floor; **10900** a ring of dots across the top with a
+scatter below it; **11200** a large ellipse over a **vortex** of dots; **11500** the same ellipse with
+the dots in a dense band; **11800** a fountain or tree shape of dots; **12100** the same, narrower and
+taller; **12400** sparse dots scattered across the frame; **12700** a wide cloud of dots;
+**13000** a different picture entirely — dark blue with orange and blue spheres, RAYSCRL's screen —
+so **MINVBALL's own drawing ends in (12700, 13000]** and the next part's screen is up at 13000 with no
+geometry change (the sweep exited 0).
+
+The dots' four position phases are the source's own (`DOTS/MAIN.C:202-241`: `frame<500`, `<900`,
+`<1700`, `<2360`), 500/400/800/690 frames long, and the sheet shows exactly four shapes in that
+order — a ring, a vortex, a fountain, then a scatter. (Where each phase starts follows from where the
+part's main loop starts, which this block did not measure directly: the first dots are visible at
+10600 and the background alone is up at 10500, so the loop begins in (10500, 10600] and the phases
+fall roughly 10530/11030/11430/12230 after it.)
+
+### 14.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 10900 | the **ring** — a ring of dots across the upper third over a scatter, above the grey floor. | `.rgb` only | rgb `726ec7e5…` |
+| 11200 | the **vortex** — a wide ellipse of dots over a swirling column. | `.rgb` only | rgb `954e4b30…` |
+| 11800 | the **fountain** — dots rising into a tree shape. | `.rgb` only | rgb `20764312…` |
+| 12400 | the **scatter** — dots thrown across the whole frame. | `.rgb` only | rgb `33dce4e8…` |
+
+Full hashes of the four files in `reference/parts/minvball/` (all `.rgb` only — the dots move every
+frame, so no frame of this part carries `.idx`):
+
+| index | file | `sha256` |
+|---|---|---|
+| 10900 | `frame_010900.rgb` | `726ec7e5e24d4f52f3421b80ea249304cf5985a9ee4ed54c3a46a318d2ca382e` |
+| 11200 | `frame_011200.rgb` | `954e4b30c825fe3839f80405245fca6953793cf201553d4fcda008e1efb7f720` |
+| 11800 | `frame_011800.rgb` | `207643123be0a4c4faad6e9f5d30404bc6e5e9de42a3e21d03808da1b377704f` |
+| 12400 | `frame_012400.rgb` | `33dce4e8add8345720310cfd17bb8000a687654d48b6f9307227b631d947179e` |
+
+One keyframe per position phase, spread 300–600 frames apart — far more than the ~60 a three-index
+support batch needs (§1.3) — so a comparison sees each of the shapes the part draws.
+
+### 14.3 Held or moving, measured
+
+| keyframe | neighbours | reading | rate, of 64000 pixels a frame |
+|---|---|---|---|
+| 10900 | 10899 / 10900 / 10901 three `sha256` | **moving** | 3306 px = **5.1656 %**, then 3201 px = 5.0016 % |
+| 11200 | 11199 / 11200 / 11201 three | **moving** | 4548 px = **7.1063 %**, then 4425 px = 6.9141 % |
+| 11800 | 11799 / 11800 / 11801 three | **moving** | 4222 px = **6.5969 %**, then 4557 px = 7.1203 % |
+| 12400 | 12399 / 12400 / 12401 three | **moving** | 2999 px = **4.6859 %**, then 3324 px = 5.1937 % |
+
+All measured between adjacent indices inside `out/b4-minv-sess1`. Every keyframe of this part is a
+moving screen — the background is static, but the 512 dots are redrawn every frame — and **the
+moving frames are byte-identical at the same index in every session captured**: the reference's
+10900, 11200, 11800 and 12400 are the same `sha256` as `out/b4-minv-sweep1`'s (a discovery session
+captured first) and as the census sessions' (§14.4). Like MNTSCRL and LNS&ZOOM, this part's timeline
+is anchored at its start and does not drift.
+
+### 14.4 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 10900,11200,11800,12400 --out reference/parts/minvball --sheet out/minvball.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 10899,10900,10901,11199,11200,11201,11799,11800,11801,12399,12400,12401 \
+    --out out/b4-minv-sess1
+```
+
+```
+$ cargo xtask compare --reference reference/parts/minvball --rendered out/b4-minv-sess1 \
+      --out out/b4-minv-recapture-diff1
+frame 10900: 0.0000% differing (0/64000 px), max delta 0
+frame 11200: 0.0000% differing (0/64000 px), max delta 0
+frame 11800: 0.0000% differing (0/64000 px), max delta 0
+frame 12400: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: rgb, offsets {"0": 4}
+exit: 0
+```
+
+**The census**, by §1.8's rule, over the three sessions that hold a window (the reference's own
+directory excluded):
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| MINVBALL 10900 | 3 | 3 | `726ec7e5…` **3/3 (100 %)** | **yes** | yes |
+| MINVBALL 11200 | 3 | 3 | `954e4b30…` **3/3 (100 %)** | **yes** | yes |
+| MINVBALL 11800 | 3 | 3 | `20764312…` **3/3 (100 %)** | **yes** | yes |
+| MINVBALL 12400 | 3 | 3 | `33dce4e8…` **3/3 (100 %)** | **yes** | yes |
+
+Every session presents the filed picture **at `N` or `N−1`** — `out/b4-minv-sess3` answers all four
+at offset −1 with `0.0000 %` (`frame 10900: 0.0000% differing (0/64000 px), max delta 0, rendered
+index 10899 (offset -1)`), which is exactly what the ±1 window is for and is not a difference in the
+pictures: its own 10900 is the reference's 10899 picture's neighbour in the animation, and the
+percentage is what says so (0.0000 %, max delta 0). Moving screens whose frames are byte-identical at
+the same index — as this part's are (§14.3) — still give the alignment search something to do when a
+session's *start* lands one frame either side.
+
+### 14.5 Where the part begins and ends
+
+The beginning is §13.7 from the other side: 10100, 10200 and 10300 are PLZPART's cube, 10400 is this
+part's screen with its palette zeroed (`DOTS/MAIN.C:151`), and 10500 is the background rising through
+the 130-frame fade — so **MINVBALL's first frame is in (10300, 10400]**, and, as at U2A→PAM,
+GLENZ→TUNNELI and PLZPART→MINVBALL, the boundary is a content change with **no geometry refusal**:
+both screens are 320×200 and every sweep crossed it at exit 0.
+
+The end is the same kind of boundary, and `out/b4-minv-sess3`'s two extra indices pin it:
+
+| index | 12700 | 12800 | **12900** | 13000 |
+|---|---|---|---|---|
+| colours | 47 | 47 | **1** | 35 |
+| what | dots scattered across the frame | dots (the scatter phase, still) | **flat `(231,231,231)`** — the part's white-out | dark blue with orange and blue spheres — RAYSCRL |
+
+12800 is still the scatter; **12900 is one colour, `0xe7` in every channel** — a flat grey that is
+the part's own ending, `DOTS/MAIN.C:242-256` re-adding the palette scaled by how far past frame 2360
+the frame is and `:258-270` then taking every entry down from 63 together (`c=63-a*2`), so that at
+some frame in the last 40 the whole palette is one value and the dots' indices underneath stop
+mattering. **13000 is RAYSCRL's screen**. So MINVBALL's own drawing ends in **(12900, 13000]** — about 2550 frames after
+its first, matching the 2450-frame cap on its own loop plus the 130-frame fade — and the next part
+follows it with no geometry change.
+
+---
+
+## 15. What block 3 has that block 2 did not
+
+Not a section of its own in the table, but worth saying where a B4b or B5 reader will pass it: three
+of this block's four parts are **deterministic across sessions at every index measured** — MNTSCRL
+(§11.3, seven indices over eight sessions), LNS&ZOOM (§12.3, five sessions) and MINVBALL (§14.3,
+three sessions and a discovery run) all draw the same bytes at the same boot index every time, moving
+screens included — and so is PLZPART's cube (§13.5, four sessions). Only PLZPART's plasma is not, and
+that one is sub-frame rather than a phase (§13.6). Block 2's moving screens were the opposite case
+for every keyframe it filed, which is what §1.8 was written for; the difference is the anchor: a part
+whose timeline is pinned to one music cue draws the same frames at the same indices, and a part whose
+*start* is a music wait with a *pinned* end (PLZPART's plasma) is the one case that drifts.
