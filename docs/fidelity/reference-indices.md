@@ -4204,8 +4204,8 @@ byte`, **20 of 20 frames in this block**, and nothing is read at a guessed strid
 
 **Its extent is unbounded, measured.** It starts in the boot's first frames — a probe at 415, 450
 and 480 finds the screen already up (4 colours, mean 0.00 → 0.08 → 0.11: the palette fade-in's first
-steps, `starpalfade`), and 500 is mean 0.13 — and **never ends on its own**: `do_stars`'s
-loop exits only when DIS function 2 returns non-zero (`mov bx,2 / int 0fch / or ax,ax / jz @@aga`,
+steps, `starpalfade`), and 500 is mean 0.13 — and **never ends on its own**: `do_stars`'s loop
+exits only when DIS function 2 returns non-zero (`mov bx,2 / int 0fch / or ax,ax / jz @@aga`,
 `:774-778`), which is `exitflag` — set by a key press and by nothing else (`DIS/DISINT.ASM`). A sweep
 to 8000 and a second to 20000 both show the same effect still running.
 
@@ -4273,7 +4273,7 @@ cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter
 # the partners: a support frame each side of every keyframe
 cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 1899,1900,1901,2999,3000,3001,4999,5000,5001,7999,8000,8001 --out out/b5-ddstars-sess1
-    # and -sess2, -sess3
+    # and -sess2, -sess3b (a third session, -sess3, was refused at 5001 and holds only two windows)
 ```
 
 ```
