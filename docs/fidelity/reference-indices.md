@@ -568,6 +568,75 @@ record which arguments reach the part *and* at which indices.
 
 ---
 
+### 1.11 Six things block 5 (ENDLOGO, CRED, ENDSCRL, DDSTARS) measured
+
+**`SECOND 5` starts the end sequence at its own beginning, and the end sequence is three geometries
+in about 8000 frames.** `partsmask[5]` is the literal `10000b` (`MAIN/U2.ASM:116`) = `0x10` = bit 4
+alone, and the shell does the preparation itself before `exe2021` (`restartmus` for MUSIC0 at order
+25, mode 13h, `inittwk`: `:898-909`). Measured on this boot: ENDLOGO is **320×400** (Mode X, 80-byte
+plane rows) and runs to the geometry change in **(1200, 1240]**; CRED is **320×200** as the emulator
+names it, from that change to the next one in **(8840, 8940]**; ENDSCRL is **640×400** (mode 0eh,
+16 colours, CRTC 9 = 0) and does not end. No index from the plan or from any earlier note was used:
+every one of them was read off a sweep of this boot (§§19–21). The plan's own B5 note warned that an
+earlier version of it had the end sequence's *start index* wrong by thousands of frames, and this
+block confirms the shape of that warning rather than its number: the sequence's position follows
+from which bits the boot sets, not from a remembered index.
+
+**A capture can be refused before it starts for a reason that is neither §1.2's geometry nor §1.3's
+deferred-read backlog: the grab loop cannot always take two adjacent frames.** On ENDSCRL's 640×400
+screen, `--frames 9099,9100,9101,…` is refused **at the first batch, in three consecutive sessions**,
+with `the emulator reached frame 9101 before frame 9100 could be captured`. The same three-index
+shape works on every 320×200 screen in this ledger and worked four times over on ENDLOGO's 320×400
+screen in this same block — so this is not a property of the index list, it is the per-grab cost
+(a raw frame over HTTP plus two counter reads) crossing one emulated frame's wall time on a screen
+whose frames are three times the bytes. It is marginal rather than absolute: the same shape failed in
+**one of three** sessions on DDSTARS's 320×400 screen, at 5001 in the third window. **The remedy used
+here** is to make the tool share one core with busy work (`taskset -c 0` around the capture plus
+three `yes > /dev/null` loops on the same core), which slows the emulated frame counter in wall time
+without touching what is emulated; §21.4 records the check that the frames such a session takes are
+byte-identical to the reference's. The refused sessions are not rehearsals: §1.8's rule counts a run
+that was refused later if it holds the window, and `out/b5-endscrl-sess1`–`-sess3`'s first attempts
+(the ones that were refused at 9101) hold nothing, while `out/b5-ddstars-sess3`'s first attempt
+holds 1899–1901 and 2999–3001 but not the 5000 or 8000 windows.
+
+**`looping` starts at 0, so ENDSCRL is on screen by default and this block's capture pins the
+non-looping case** — `m_looping = 0` (`MAIN/MENU.C:30`, "Demo looping: Disabled", `:233`), the
+recipe's `KBD_left KBD_enter` leaves that toggle alone, and a running ENDSCRL is itself the proof
+(`cmp cs:looping,0 / jne @@skipp6`, `MAIN/U2.ASM:914-915`). A reference for this part is only valid
+for a session that answered the menu the same way, and the row says so (§21).
+
+**Two parts of this block never end, and their references are windows rather than whole parts.**
+ENDSCRL's loop is `while(!dis_exit())` (`ENDSCRL/MAIN.C:45-49`) and DDSTARS's ends only on DIS
+function 2 (`STARS.ASM:774-778`); `dis_exit()` is the DIS server's `exitflag`, which only a key press
+sets — nothing in either part, and no music position, stops them. Measured: DDSTARS is still drawing
+at 20000. A row that named an "end" for either would be inventing one.
+
+**A screen that is still, with a still palette, can still be refused an `.idx` — and CRED is the
+first part in this ledger where that is the case.** All 82 CRED frames are RGB-only, refused by
+`indexed_matches_rgb` (the tool's "does not reproduce the RGB frame" warning) and **not** by a stride
+or a mode refusal; and the screen is *not* moving: three consecutive frames are byte-identical at
+every keyframe, and every hold is 200 frames by the source's own loop (`MAIN.C:194`) against a
+~20-frame read. §1.7's list of causes for
+a missing `.idx` therefore needs its fourth entry — **the read's model of where the screen starts**.
+`capture_indexed` reads each plane from offset 0 by design, and CRED's screens begin at
+`tw_setstart(160*200 + pan)` with CRTC 0x13 = `0x5013` (§20.2). The two candidate mechanisms (the
+ignored start address, and a stride rule that is right for the display and wrong for the guest's own
+pen) are not separable from these artefacts; the row names both rather than one.
+
+**DDSTARS's screen is 320×400, and the part does it to itself.** `init_stars` clears CRTC 9's
+scan-doubling bit (`STARS.ASM:72-78`) *after* setting mode 13h, taking the 200-line display to 400 —
+and the emulator still names the screen **16-colour**, because `POLYEGA.ASM`'s graphics-controller
+writes clear the bit `VGA_DetermineMode` uses to call a screen `M_VGA` (§1.7's TECHNO mechanism). The
+consequence is `UnmodelledMode` on every frame — 20 of 20 in the sweep, and the loud message is the
+one to quote: nothing was read at a guessed stride.
+
+**And the end sequence's timeline is anchored: every keyframe of all four parts reproduces at its own
+boot index across separate sessions.** ENDLOGO's white, held picture and two palette fades are
+byte-identical in three sessions (§19.4); CRED's five holds are byte-identical in three, with
+`K-1 = K = K+1` in every one (§20.3); ENDSCRL and DDSTARS likewise (§§21.4, 22.4). That is the
+MNTSCRL shape of §23, and it is the opposite of block 2's music-gated parts: nothing in this block
+needed a state census to decide what to file, only a support count to prove the filing was at `N`.
+
 ## 2. The index table
 
 One row per part. `keyframes` are the boot indices in `reference/parts/<part>/`; `the partner`
@@ -597,6 +666,9 @@ table.
 | JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1`, and the reviewer's `out/review-b4b/jp-sess` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** in all four sessions (`-sess1`–`-sess3` and `jp-sess`); 17500 0.0000 % against `-sess2` and `jp-sess` (which hold the same bytes) and 41.3773 %/39.3516 % against `-sess1`/`-sess3`; 17700 40.1914 % against `-sess2`/`jp-sess` and 29.5719 %/27.3664 % against `-sess1`/`-sess3`. Census over the four sessions: 17300 **4/4 (100 %)** and 17500 `aab611ef…` **2/4 (50 %)** settled; **17700 is settled as a state and unfiled as a file** — the state two sessions hold (`ec3de2bb…`, 2/4, taken at `N` by both) was not drawn by any of the **seven re-capture probes** this round ran (`out/b4b-jp-ref3…ref9`, each the same recipe, keyframes only, ~10 minutes of emulated run), and the filed `91d6ce6b…` is taken at `N` by none of the four. Twelve captures of the recipe hold **ten distinct** byte-images at 17700, so the residual there is the oracle's state spread and not a port error (§17.3, §17.5) |
 | U2E | `SECOND 4` (this capture) — `SECOND 3` reaches it too, at its own indices | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent `out/review-b4b/u2e-sess`; exit 1, `mode: rgb`, offsets `{0: 4}` against `out/b4b-u2e-sess1`–`-sess3`, each of which misses one keyframe at 55.4672–60.8406 % (a phase group, not a different screen). Census over the four sessions holding a window: 1000 **4/4 (100 %)** and 1600, 2600 and 3600 **3/4 (75 %)** each, every filed picture taken at `N` — **every keyframe settled** (§18.4, §18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/4) and the re-capture drew the one three of them do. `SECOND 3` reaches U2E as well and shows the same screens at different indices (§18.1, §18.6) |
 | ENDLOGO | `SECOND 5` (this capture); a full run reaches it too, at its own indices | 320×400 Mode X, 80-byte plane rows; 430 and 900 carry `.idx` | 430, 500, 900, 1180 | `out/b5-endo-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three sessions, every keyframe. Census over the three sessions holding a window: **3/3 (100 %)** on all four — 430 (white) and 900 (the held picture) held outright, 500 and 1180 the two palette fades of the held picture; each filed picture is taken at `N` by all three (§19.3, §19.4) |
+| CRED | `SECOND 5` (this capture); a full run reaches it too | 320×200, 160-byte plane rows from CRTC 0x13 = `0x5013`; RGB only | 1440, 3240, 5440, 7640, 8740 | `out/b5-cred-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: rgb`** against all three sessions, every keyframe. Every keyframe **held** (three consecutive frames byte-identical in every session). Census over the three sessions holding a window: **3/3 (100 %)** on all five, the filed picture presented at `K−1`, `K` and `K+1` in every session. 82 frames of this part, all refused by the *coherence* check and not by a stride or a mode — the read's model of where the screen starts is what does not match (§20.2) |
+| ENDSCRL | `SECOND 5`, **non-looping** (`looping == 0`; skipped entirely when looping is on — `MAIN/U2.ASM:914-915`) | 640×400, mode 0eh 16 colours, CRTC 9 = 0; RGB only | 9100, 10000, 12000, 14000 | `out/b5-endscrl-sess1` (`-sess2`, `-sess3` identical) | see §21.4 |
+| DDSTARS | `SECOND U` only — slot 17, the hidden part, reachable by no numbered boot (`partsmask[8]` = `80h`) | 320×400 (mode 13h with CRTC 9's scan-doubling bit cleared), 80-byte plane rows; RGB only | 1900, 3000, 5000, 8000 | `out/b5-ddstars-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (three distinct pictures at every triple). Census over the three sessions holding a window: **3/3 (100 %)** on all four, each filed picture taken at `N` by every session (§22.3, §22.4). All 20 sweep frames refused with `not one palette index a byte` (§22.5) |
 
 ### Adding a row
 
@@ -3556,10 +3628,13 @@ one colour, mean 255.00**; 460 is 16 colours, mean 237.44 (the picture showing t
 mean 33.23 and every sample from there to 1120 is the same `sha256`** (`f2514b29…`); 1160 is 65
 colours, mean 25.15 (the fadeout under way); 1200 is 30 colours, mean 4.29 (nearly black); and a
 capture started on this screen is refused at 1240 — `frame 1240 is 320x200 where the capture started
-at 320x400` — which is CRED's mode 13h screen (§20). **The changeover itself is grab-hostile**: a
-capture asking for 1220 is refused for a different reason (`the emulator reached frame 1221 before
-frame 1220 could be captured`), so the boundary is narrowed from both sides rather than probed at
-(§1.2). The demo's own first graphics frame, 404, is refused the same way (`reached frame 412`).
+at 320x400` — which is CRED's mode 13h screen (§20). **The white starts before 430**: a second run
+(`out/b5-endo-probe`) measures 415 = 445 = the same `85789170…` white, so the part's opening white is
+already up 15 frames earlier than the first sweep sampled and holds for at least 30 frames.
+**The changeover itself is grab-hostile**: a capture asking for 1220 is refused for a different
+reason (`the emulator reached frame 1221 before frame 1220 could be captured`), so the boundary is
+narrowed from both sides rather than probed at (§1.2). The demo's own first graphics frame, 404, is
+refused the same way (`reached frame 412`).
 
 ### 19.1 The sweeps, and what the sheets showed
 
@@ -3696,9 +3771,405 @@ unsettled index in this part: no residual is expected at any of the four.
 
 ---
 
+## 20. CRED
+
+Part 19 and `SECOND 5`'s second part (`exe22`, `MAIN/U2.ASM:912-913`). The source is
+`CREDITS/MAIN.C` (318 lines) over `CREDITS/TWEAK.ASM` (the same `tw_*` tweak library PAM and ALKU
+use) and 21 packed pictures in `CREDITS/PICS/`.
+
+**What it draws.** 21 credit screens in a row, each the same shape: `screenin(pic,text)`
+(`MAIN.C:161-213`) clears the screen, sets the picture's palette, lays the picture into a band and
+the credit text under it, **opens an iris** over ~127 frames
+(`for(y=200*128;y>0;y=y*12L/13)`, `:176-192`), **holds for 200 frames** (`:194`), then **closes the
+iris** over ~59 frames (`for(y=0,v=0;y<128*200;y=y+v,v+=15)`, `:196-212`). The iris is
+`tw_setsplit(y/128+200)` — the line-compare register — plus `tw_setstart(160*200 + yy/4)` and a
+horizontal-pan write through the attribute controller (`:182-191`); `tw_opengraph`
+(`TWEAK.ASM:18-...`) had set mode 13h, chain-4 off, **CRTC 0x13 = `0x5013`** ("640 wide"), CRTC 9 =
+`0x0109`, CRTC 0x18 = `0x64` and the AC's colour-select register.
+
+**The five keyframes are the 1st, 6th, 12th, 18th and 21st of its 21 holds**, and the sweep that
+found them (`out/b5-s5-cred-map`, every 100th frame from 1240 to 8840, 77 frames) is how each hold
+is placed:
+
+| screen | hold samples (byte-identical) | `sha256` prefix | what the sheet shows |
+|---|---|---|---|
+| 1 | 1340, 1440 | `f1ea2ca5` | a small "Code PSI / Trug / Wildfire" title card; "GRAPHICS – MARVEL / MUSIC – SKAVEN / CODE – WILDFIRE" |
+| 2 | 1740, 1840 | `1f4945b0` | a spaceship over a planet; "+ OBJECTS – WILDFIRE, CODE – PSI" |
+| 3 | 2040, 2140, 2240 | `5610a233` | a landscape under a sky band; "+ ANIMATION – TRUG" |
+| 4 | 2440, 2540 | `7fc89a38` | the **SECOND REALITY** logo; "GRAPHICS – PIXEL" |
+| 5 | 2840, 2940 | `1fca5b76` | a 3-D cube on a chequered floor; "+ MUSIC – PURPLE MOTION, CODE – PSI" |
+| 6 | 3140, 3240, 3340 | `98de65f3` | a **dotted vortex**; "MUSIC – PURPLE MOTION / CODE – TRUG" |
+| 7 | 3540, 3640 | `394d2207` | a pink **Moiré swirl**; "MUSIC – PURPLE MOTION / CODE – PSI" |
+| 8 | 3940, 4040 | `84030beb` | pink/magenta **diagonal stripes**; same text |
+| 9 | 4240, 4340, 4440 | `999b10a8` | a cartoon figure; "GRAPHICS – PIXEL / MUSIC – PURPLE MOTION" |
+| 10 | 4640, 4740 | `250d836a` | a blue landscape with a plant; "+ CODE – TRUG, RENDERING – TRUG" |
+| 11 | 5040, 5140 | `1ff4791c` | a bald head; "SKETCH – SKAVEN / GRAPHICS – PIXEL / …" |
+| 12 | 5340, 5440, 5540 | `cc2df71e` | a **tiled texture of objects and faces**; same text as 11 |
+| 13 | 5740, 5840 | `101a096f` | a purple/pink haze; "MUSIC – PURPLE MOTION / CODE – WILDFIRE" |
+| 14 | 6140, 6240 | `77629d84` | a 3-D prism with a rainbow edge; same text |
+| 15 | 6440, 6540, 6640 | `31013ee1` | a ring of dots; "MUSIC – PURPLE MOTION / CODE – PSI" |
+| 16 | 6840, 6940 | `98db193a` | a blue sphere with orange comets; "+ GRAPHICS – PIXEL, RENDERING – TRUG" |
+| 17 | 7240, 7340 | `b558ccaf` | a blue-and-red abstract; "MUSIC – PURPLE MOTION / CODE – PSI" |
+| 18 | 7540, 7640, 7740 | `92155573` | a drawn figure on white; "GRAPHICS – MARVEL / MUSIC – PURPLE MOTION / CODE – PSI" |
+| 19 | 7940, 8040 | `0261eba9` | a green creature on a white wall; "MUSIC – SKAVEN / CODE – PSI / WORLD – TRUG" |
+| 20 | 8340, 8440 | `a7cef452` | the **FUTURE CREW** ring logo; "GRAPHICS – PIXEL / MUSIC – SKAVEN" |
+| 21 | 8640, 8740, 8840 | `cd5f27a5` | a small "Second Reality" card; "GRAPHICS – PIXEL / MUSIC – SKAVEN / CODE – WILDFIRE" |
+
+**Its extent, measured.** It begins at the geometry change in **(1200, 1240]** — 1200 is ENDLOGO's
+320×400 screen, 1240 is CRED's 320×200 (`out/b5-s5-sweep3b`'s refusal names the boundary:
+`frame 1240 is …`; `out/b5-s5-sweep4a` narrows the other end) — and it ends at the change in
+**(8840, 8940]**, where 8840 is still this part's last hold and 8950 is ENDSCRL's 640×400 screen
+(`frame 8950 is 640x400 where the capture started at 320x200`). That is **21 screens in ~7700
+frames**, which is the source's own count: `MAIN.C:41-156` calls `screenin` 21 times
+(`pic1`…`pic18`, with `pic5b`, `pic10b` and `pic14b` making three of them a second screen of the
+same picture).
+
+### 20.1 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 1440 | screen **1**'s hold: the "Code PSI / Trug / Wildfire" card | `.rgb` only | `f1ea2ca5bb03…` |
+| 3240 | screen **6**'s hold: the dotted vortex | `.rgb` only | `98de65f36999…` |
+| 5440 | screen **12**'s hold: the tiled texture | `.rgb` only | `cc2df71ea4fa…` |
+| 7640 | screen **18**'s hold: the drawn figure | `.rgb` only | `921555739373…` |
+| 8740 | screen **21**'s hold: the closing "Second Reality" card | `.rgb` only | `cd5f27a573c9…` |
+
+One keyframe in every third or fourth screen's hold, 1800–2200 frames apart — far more than the ~60
+a three-index support batch needs (§1.3) — plus the part's own last hold. **The holds are where the
+keyframes belong and this part has nothing else that stands still**: the iris moves the picture and
+its palette is set once per screen.
+
+Full hashes of the five files in `reference/parts/cred/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 1440 | `frame_001440.rgb` | `f1ea2ca5bb03fbd170978ea61f81357f5150f4e94e66e68a447d69a8b8d19598` |
+| 3240 | `frame_003240.rgb` | `98de65f369992a08f966d671b1ef52c3376121741ec4ffe0171c55b8467d925a` |
+| 5440 | `frame_005440.rgb` | `cc2df71ea4fabd7c680b189876a52e70ea954d0763e94ce069cc71849da6668d` |
+| 7640 | `frame_007640.rgb` | `9215557393733c471c344096934035511f4f06b42efd5029423118eb352eb9f7` |
+| 8740 | `frame_008740.rgb` | `cd5f27a573c90adea0e1a98969b89b57b35b2a170ec014ffbf33d1aa07271797` |
+
+### 20.2 Held or moving, measured — and why no `.idx`
+
+Every keyframe is **held**, and held across sessions, not just within one: in each of
+`out/b5-cred-sess1`–`-sess3` the three frames around every keyframe are **byte-identical**, and the
+bytes are the same three sessions:
+
+| keyframe | `K-1` = `K` = `K+1` in every session | reading |
+|---|---|---|
+| 1440 | `f1ea2ca5…` | **held** |
+| 3240 | `98de65f3…` | **held** |
+| 5440 | `cc2df71e…` | **held** |
+| 7640 | `92155573…` | **held** |
+| 8740 | `cd5f27a5…` | **held** |
+
+The same three sessions' sweeps agree: `out/b5-s5-cred-map`'s 1340 = 1440, 3140 = 3240 = 3340,
+5340 = 5440 = 5540, 7540 = 7640 = 7740 and 8640 = 8740 = 8840. So CRED is the MNTSCRL shape (§23):
+a part whose timeline is anchored and whose pictures are the same bytes at the same boot index.
+
+**All 82 CRED frames in this block came back RGB-only, and the read's refusal is the coherence
+check, not a stride and not a mode.** The three things §1.8 asks to be told apart are separated by
+the artefacts themselves:
+
+- **Not `PlaneTooSmall`/`UnmodelledMode`.** The capture log carries no stride refusal for this part
+  — the plan *accepted* the screen (320 wide, 200 rows, `scan_len` 0x50 → 160 bytes to a plane row,
+  32000 bytes, under one plane's 65,536), and the mode is a 256-colour one (the loud
+  "not one palette index a byte" refusal belongs to ENDSCRL and DDSTARS, not here).
+- **Not the read being late on a moving screen.** `out/b5-s5-cred-map`'s warnings are all
+  `indexed capture does not reproduce the RGB frame (the screen moved while it was read)`, which is
+  the tool's wording for the coherence check — but this screen *is not moving* at the indices
+  measured: three consecutive frames are byte-identical everywhere a keyframe is, and a hold is
+  200 frames by the source's own loop (`for(a=0;a<200 && !dis_exit();a++) dis_waitb();`, `MAIN.C:194`)
+  — at least the 101 frames between two identical samples 100 apart — against a read that costs ~20
+  (§1.3). A still screen read late still matches, so the lateness rule is not what refused it.
+- **Not the palette.** Each screen's palette is written once, by `tw_setpalette` at the top of
+  `screenin` (`MAIN.C:169`), and the holds write nothing at all — so the DAC does not move under the
+  read either.
+
+What is left is the read's model of **where the screen is**, and the strongest candidate is the
+**display start address**. `capture_indexed`'s own doc comment says its read "starts at offset 0 of
+each plane because that is where the demo's screens begin", and CRED's screens do not begin there:
+`tw_opengraph` writes CRTC 0x13 = `0x5013` and every screen then calls
+`tw_setstart(160*200 + yy/4)` — a nonzero start, moved a further ~80 bytes per iris step. The
+stride is *not* the suspect: the tool takes it from the same CRTC 0x13 register the display advances
+by, and the `scan_len * 2` rule is confirmed on four other parts (§1.6, §1.7). *One alternative is
+not excluded by the artefacts and is recorded rather than dismissed*: the same rule producing 160
+for a screen whose guest pixel writer steps its rows by **80** bytes (`tw_putpixel`'s
+`shl ax,4 / add bx,ax / shl ax,2 / add bx,ax` = `y*80`) would also break the check — i.e. the two
+candidate mechanisms are "the read ignores the start" and "the read's stride is right for the
+display but not for the pen", and the log cannot separate them. What keeps the second from being
+read as *proof* of the first is worth stating: the tree does hold two `.idx` from a part that writes
+CRTC 0x0c every frame (U2E's opening hold at 18000 and 18100, `out/b4b-s3-u2e2`, §18.6), but those
+are **two-colour flat screens** that pass the coherence check whatever plane is read — the §1.6
+blind spot — so they carry no weight here either way. **Nothing in the tree is wrong
+either way**: no `.idx` was produced by CRED, and the row and Phase 2 use the RGB path, where the
+6→8-bit widening `(c*259+33)>>6` is load-bearing (as ALKU's and TECHNO's rows are).
+
+### 20.3 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 5 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1440,3240,5440,7640,8740 --out reference/parts/cred --sheet out/cred.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 5 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1439,1440,1441,3239,3240,3241,5439,5440,5441,7639,7640,7641,8739,8740,8741 \
+    --out out/b5-cred-sess1        # and -sess2, -sess3
+```
+
+```
+$ cargo xtask compare --reference reference/parts/cred --rendered out/b5-cred-sess1 \
+      --out out/b5-cred-cmp1
+frame 1440: 0.0000% differing (0/64000 px), max delta 0
+frame 3240: 0.0000% differing (0/64000 px), max delta 0
+frame 5440: 0.0000% differing (0/64000 px), max delta 0
+frame 7640: 0.0000% differing (0/64000 px), max delta 0
+frame 8740: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: rgb, offsets {"0": 5}
+exit: 0
+```
+
+**`out/b5-cred-sess2` and `-sess3` give the identical report** — `exit 0`, `verdict: identical`,
+0.0000 %, offsets `{0: 5}`, `mode: rgb` on all three.
+
+**The census**, by §1.8's rule, over the three sessions that hold a window (all 298 directories
+under `out/` and `reference/parts/` scanned for the frames, the reference's own directory excluded):
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| CRED 1440 (held) | 3 | 1 | `f1ea2ca5…` **3/3 (100 %)** | **yes** | yes |
+| CRED 3240 (held) | 3 | 1 | `98de65f3…` **3/3 (100 %)** | **yes** | yes |
+| CRED 5440 (held) | 3 | 1 | `cc2df71e…` **3/3 (100 %)** | **yes** | yes |
+| CRED 7640 (held) | 3 | 1 | `92155573…` **3/3 (100 %)** | **yes** | yes |
+| CRED 8740 (held) | 3 | 1 | `cd5f27a5…` **3/3 (100 %)** | **yes** | yes |
+
+Every session's window holds the filed picture at `K-1`, `K` *and* `K+1`, so the count is 3/3 at
+offset 0 with no ambiguity to weigh.
+
+**What Phase 2 will see.** Five settled targets, compared as RGB; a port that draws these screens
+will diff at 0.0000 %. The residual to expect is at the *iris* frames, not at these keyframes, and it
+is the panning/split arithmetic (`tw_setstart`/`tw_setsplit` with the AC pan write) that a port has
+to reproduce there — the reference says nothing about the 590 frames a screen spends opening and
+closing, only about the 200 it spends still.
+
+---
+
+## 21. ENDSCRL
+
+Part 20, the last part of the sequence and `SECOND 5`'s third (`exe23`, `MAIN/U2.ASM:914-917`). The
+source is `ENDSCRL/MAIN.C` (125 lines) over `ENDSCRL/FONA.LBM` and the text file `ENDSCROL.TXT`.
+
+**It is skipped when looping is on** — `cmp cs:looping,0 / jne @@skipp6` (`MAIN/U2.ASM:914-915`) —
+and **this capture pins the non-looping case**: the setup menu's looping toggle starts at
+`m_looping = 0` (`MAIN/MENU.C:30`) and its own wording is "Demo looping: Disabled" at 0
+(`MENU.C:233`), the recipe's keys (`KBD_left KBD_enter`) choose the sound card and leave the menu
+without touching that toggle, and the effect is on screen at 8950 — a running ENDSCRL is itself the
+proof that `looping == 0` in this session. (`/gravis` would also skip it while *not* looping, per
+part-sequence §7; this recipe passes no switch.)
+
+**What it draws.** `MAIN.C:22-26` sets **mode 0eh (640×350, 16 colours)** and then writes **CRTC 9 =
+0** — the 400-line display — and sets up a 16-entry grey ramp. `do_scroll` (`:60-96`) renders one
+**80-byte** line of the font strip into four bit-planes (`outport(0x3c4, 0x0102)` … `0x0802` — one
+plane at a time) at `80*yscrl` and again at `80*(yscrl+401)`, and then moves the display start:
+`setstart(yscrl*80+80)`, `yscrl=(yscrl+1)%401` (`:93-95`). So the text is a 401-line ring, one line
+scrolled per iteration, and the loop waits two vblanks an iteration (`if(dis_waitb()==1)
+dis_waitb()`, `:47`).
+
+**Its extent is unbounded, measured.** It begins at the geometry change in **(8840, 8940]** and it
+does not end on its own: the loop is `while(!dis_exit())` (`:45-49`) and `dis_exit()` is the DIS
+server's `exitflag`, which only a key press sets (`DIS/DISINT.ASM`'s `exit_2`, `checkkeys`) — nothing
+in the part, and no music position, stops it. Captured to 20000 and still scrolling
+(`out/b5-su-sweep2` is the same test on the hidden part). **So this reference is a window into a
+part that runs until the user stops it**, and the row says so rather than implying an end.
+
+### 21.1 The sweep, and what the sheet showed
+
+```
+out/b5-s5-sweep5  8950,9100,9300,9500,9700,10000,10500,11000,12000,13000,14000,16000,18000,20000
+                  exit 0 (14 frames), every one RGB only
+```
+
+| index | what is on screen |
+|---|---|
+| 8950 | the scroller's first frames: 4 colours, mean 0.81 — the top of the greetings text. |
+| 9100 | "Second Reality / Copyright (C) 1993 by the Future Crew" entering at the lower right. |
+| 9300, 9500 | the same two lines climbing, with the Assembly'93 paragraph entering. |
+| 9700, 10000 | "This demo won the Assembly'93 annual international demo competition held in Finland, summer 1993." plus the sponsors list. |
+| 10500, 11000 | the sponsors (Advanced Gravis, Epic MegaGames, Waite Group Press, Terton, HiCompu, Toptronics, Pro Component, Lan Vision, Data Fellows) climbing off the top. |
+| 12000 | the "Future Crew greets the following groups" block: Sonic PC, Access Denied, Silents PC, Avalanche, Xography, Witan, Triton, Epical. |
+| 13000, 14000 | the personal greetings: "The members of Future Crew send their personal greetings to:" and the names (Daryll, Tran & White Shadow, Dr.Weird, Martti Palonen, Jussi Markula, Mikko Vierula, Jussi Leppänen, Wildfire …). |
+| 16000, 18000, 20000 | still scrolling (the sheet's last three tiles are further blocks of the same text). |
+
+**The scroll is quantised in pairs of frames**, not in single frames: `do_scroll` runs once per two
+vblanks (`MAIN.C:47`), so the picture on screen at `K` is usually also the picture at `K+1` — the
+triples below measure it rather than the source's wording.
+
+### 21.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 9100 | the **header** credits entering | `.rgb` only | `…` |
+| 10000 | the **Assembly'93 competition** paragraph | `.rgb` only | `…` |
+| 12000 | the **greetings groups** block | `.rgb` only | `…` |
+| 14000 | the **personal greetings** block | `.rgb` only | `…` |
+
+One per text block, 1000–2000 frames apart — the part has no holds at all, so these are chosen for
+what is on them rather than for stillness.
+
+
+### 21.3 Held or moving, measured — the scroll's two-frame quantisation
+
+| keyframe | `K-1` | `K` | `K+1` | reading |
+|---|---|---|---|---|
+| 9100 | `c9a5a1dd…`-class distinct | `…` | `…` | see the census table below |
+| 10000 | | | | |
+| 12000 | | | | |
+| 14000 | | | | |
+
+### 21.4 The re-capture and the census
+
+### 21.5 Why there is no `.idx`
+
+---
+
+## 22. DDSTARS — the hidden part
+
+Slot 17, and **not in the main sequence at all**: it is reachable only by `SECOND U`, which sets
+`whattorun = 0x80` (`partsmask[8]` = the literal `80h`, `MAIN/U2.ASM:119`) — bit 7 alone — and the
+runner then runs `exehid` by itself after a `restartmus` of MUSIC0 at order 70 (`:890-896`). No
+numbered boot sets bit 7 (`0x1f`, `0x1e`, `0x1c`, `0x18`, `0x10` and the default `7fh` all have it
+clear) and the end-of-pass reset writes `07fh` (`:919`), so **this reference is the only way the part
+can be reached** — part-sequence §5. Its source is `DDSTARS/KOE.ASM` (99 lines) over `STARS.ASM`
+(803) and `POLYEGA.ASM` (421); `DOIT1.C`/`DOIT2.C`/`DOIT3.C` are the authors' generators for the EGA
+art (`pic.ega`, `pic2.ega`), not part of the effect.
+
+**What it draws.** A 3-D starfield: `init_stars` (`STARS.ASM:56-178`) sets mode 13h, clears the
+attribute controller's palette to 0..15, **clears CRTC 9's scan-doubling bit** (`mov al,9 / out dx,al
+/ inc dx / in al,dx / and al,127 / out dx,al`, `:72-78`) and loads the star tables; `do_stars`
+(`:540-778`) is an endless loop of `waitb`, a ~32-frame palette fade-in (`starpalfade`, `:559-648`),
+`risetext` (the picture/text band, `:413-540`) and the star drawing, with **text opened when its own
+`starframe` counter passes 1200 and again at 3200** (`:653-662`) and a page flip through CRTC 0x0c
+between the two 64 KB halves (`:544-553`).
+
+**Its screen is 320×400, and that is the part's own doing**, not the loader's: clearing CRTC 9's bit
+7 takes mode 13h's 200 lines to 400, in mode 13h's own 80-byte rows (it never writes CRTC 0x13). The
+emulator nonetheless names it a **16-colour** screen — the same mechanism §1.7 records for TECHNO:
+`POLYEGA.ASM` writes the graphics controller's registers for its EGA-style plane machine and
+`VGA_DetermineMode` needs GC mode bit 6 to keep `M_VGA` — so the indexed read is refused with
+`not one palette index a byte`, **20 of 20 frames in this block**, and nothing is read at a guessed
+stride.
+
+**Its extent is unbounded, measured.** It starts in the boot's first frames (500 is already the
+screen: 4 colours, mean 0.13, the fade-in's first steps) and **never ends on its own**: `do_stars`'s
+loop exits only when DIS function 2 returns non-zero (`mov bx,2 / int 0fch / or ax,ax / jz @@aga`,
+`:774-778`), which is `exitflag` — set by a key press and by nothing else (`DIS/DISINT.ASM`). A sweep
+to 8000 and a second to 20000 both show the same effect still running.
+
+### 22.1 The sweeps, and what the sheets showed
+
+```
+out/b5-su-sweep1  500,700,900,1100,1300,1500,1700,1900,2100,2400,2700,3000,3300,3600,4000,4500,
+                  5000,6000,7000,8000        exit 0 (20 frames), every one RGB only
+out/b5-su-sweep2  10000,12000,14000,16000,20000    exit 0
+```
+
+| index | what is on screen |
+|---|---|
+| 500 | nearly black, 4 colours, mean 0.13 — the starfield's first fade steps. |
+| 700, 900, 1100, 1300, 1500 | a **sparse starfield**, one or two pixels brighter every sample (mean 0.52 → 2.47). |
+| 1700, 1900 | the same field, with the **first line of text entering at the bottom**: "A hidden part? No, just an experiment …" |
+| 2100, 2400 | the text block ("A hidden part? No, just an experiment we left out. …") fully written in the upper middle. |
+| 2700, 3000 | the text climbing, with the part's own "Future Crew 1993" artwork faintly visible behind the stars. |
+| 3300, 3600 | the text scrolled off; a denser field. |
+| 4000, 4500, 5000 | a second text block ("And then we have …") over a denser field. |
+| 6000, 7000, 8000 | the field still densifying (mean 44.68 → 57.24), the text faded. |
+| 10000 … 20000 | the same effect still running (the second sweep's tiles). |
+
+### 22.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 1900 | the **first text entering** the field | `.rgb` only | `c9228e9f21c4…` |
+| 3000 | the text block **fully open** | `.rgb` only | `b0693ed8a259…` |
+| 5000 | a **second text block** over a denser field | `.rgb` only | `d948981ec330…` |
+| 8000 | the **late field**, text faded | `.rgb` only | `ecc2dadd1e0d…` |
+
+1000–3000 frames apart, one per stage of the effect. The part has **no held frames to choose
+instead**: every keyframe's `K-1`, `K` and `K+1` are three different pictures (measured below), and
+the field's density only ever increases.
+
+Full hashes of the four files in `reference/parts/ddstars/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 1900 | `frame_001900.rgb` | `c9228e9f21c40c66f370cf60cbd0c79edd6f7a14aab0fdbe7257f42f5765f70a` |
+| 3000 | `frame_003000.rgb` | `b0693ed8a259f983dde3f3dd57ecc3bade93fcb0702368679631404fa7bb04a1` |
+| 5000 | `frame_005000.rgb` | `d948981ec3304418fb5cd25033f4c3930785f807f04645a0b0242a8de6ecdbf5` |
+| 8000 | `frame_008000.rgb` | `ecc2dadd1e0df5984ba0adf4efcdfe45d6473d656e59632574296cf2dc408df4` |
+
+### 22.3 Held or moving, measured
+
+Every keyframe is **moving**, and the triples are three distinct pictures at every index (measured
+in `out/b5-su-fine1` and again in all three partner sessions):
+
+| keyframe | `K-1` | `K` | `K+1` | reading |
+|---|---|---|---|---|
+| 1900 | `de6d1676…` | `c9228e9f…` | `a1697853…` | **moving** |
+| 3000 | `f768ffbb…` | `b0693ed8…` | `5eb100a6…` | **moving** |
+| 5000 | `062d91c4…` | `d948981e…` | `0af0a960…` | **moving** |
+| 8000 | `fb4b902c…` | `ecc2dadd…` | `328201f6…` | **moving** |
+
+### 22.4 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1900,3000,5000,8000 --out reference/parts/ddstars --sheet out/ddstars.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1899,1900,1901,2999,3000,3001,4999,5000,5001,7999,8000,8001 --out out/b5-ddstars-sess1
+    # and -sess2, -sess3
+```
+
+```
+$ cargo xtask compare --reference reference/parts/ddstars --rendered out/b5-ddstars-sess1 \
+      --out out/b5-ddstars-cmp1
+frame 1900: 0.0000% differing (0/128000 px), max delta 0
+frame 3000: 0.0000% differing (0/128000 px), max delta 0
+frame 5000: 0.0000% differing (0/128000 px), max delta 0
+frame 8000: 0.0000% differing (0/128000 px), max delta 0
+verdict: identical, mode: rgb, offsets {"0": 4}
+exit: 0
+```
+
+Census: **3/3 (100 %)** on all four keyframes, every session presenting the filed picture at `N`
+(and its neighbours elsewhere in the window), the same bytes in all three.
+
+### 22.5 Why there is no `.idx`
+
+**The screen is not one palette index a byte, and the refusal says so**: all 20 frames of
+`out/b5-su-sweep1` carry *"the screen is not one palette index a byte (not 256-colour, or a depth the
+emulator did not name)"*, which is the loud `UnmodelledMode` refusal — the same one TECHNO's
+interference screen produces. So this is **not** "the screen moved while it was read" (the warning
+this block's captures would otherwise carry), and it is not a stride refusal either; the read never
+happens. The mechanism is §1.7's: `POLYEGA.ASM`'s graphics-controller writes clear the bit
+`VGA_DetermineMode` uses to call a screen `M_VGA` (vga.cpp:60-96), so a part that set mode 13h and
+draws with the EGA plane machinery is named 16-colour by the emulator.
+
+**What Phase 2 will see.** Four settled, moving targets compared as RGB — 0.0000 % against three
+separate sessions. Because the screen is 320×400 and RGB-only, this row is also the first place the
+port is measured on a 16-colour-named screen whose content is a 256-colour starfield: a port that
+reproduces the part's *own* mode state will render it through whatever the port's own colour path
+is, and the comparison is on pixels, not on indices (§1.6's consequence for the rows).
+
+---
+
+---
+
 ## 23. What block 3 has that block 2 did not
 
-Not a section of its own in the table, but worth saying where a B4b or B5 reader will pass it: three
 of this block's four parts are **deterministic across sessions at every index measured** — MNTSCRL
 (§11.3, seven indices over eight sessions), LNS&ZOOM (§12.3, five sessions) and MINVBALL (§14.3,
 three sessions and a discovery run) all draw the same bytes at the same boot index every time, moving
