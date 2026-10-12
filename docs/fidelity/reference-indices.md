@@ -345,56 +345,88 @@ geometries, so its capture is two captures: a directory with no `manifest.json` 
 ### 1.8 A moving keyframe's reference has to be checked against sessions, or it is a phantom diff
 
 Sessions do not sample a moving screen continuously — they land in **discrete alignment groups**, and
-the group sizes are wildly unequal. A reference frame drawn from a *minority* group is a target
-Phase 2 will miss for a reason that is the oracle's own, which is exactly the diff this phase exists
-to prevent. So each moving keyframe in this block was censused: **every capture on disk with this
-recipe** (134 directories whose manifest names `SECOND 2` at 30000 cycles, `autoexec` and the same
-keys — including B1's) was grouped by the `sha256` of the frame at that index.
+the group sizes are wildly unequal. A reference frame drawn from a minority group is a target Phase 2
+will miss for a reason that is the oracle's own, which is exactly the diff this phase exists to
+prevent. **This section's first version got the check wrong in three ways, all found by the review of
+block 2, and the rule below is the corrected one.** The defects, because they are easy to repeat:
 
-| keyframe | sessions | groups | largest group | reference in it? |
-|---|---|---|---|---|
-| GLENZ 1499 (held) | 7 | 1 | 7/7 | yes |
-| GLENZ 2300 | 7 | 5 | 3/7 | no (singleton) — re-captured once, still a singleton |
-| GLENZ 3000 | 19 | 7 | 7/19 (then 6/19) | no (singleton) — re-captured once, still a singleton |
-| GLENZ 3400 | 8 | 6 | 2/8 | no (singleton) — re-captured once, still a singleton |
-| TUNNELI 3800 | 9 | 3 | 7/9 | **yes, after the re-capture** (was a singleton, 3/5 at the time) |
-| TUNNELI 4200 | 6 | 4 | 3/6 | yes |
-| TUNNELI 4500 | 5 | 4 | 2/5 | yes |
-| TUNNELI 4600 | 6 | 5 | 2/6 | yes |
-| TECHNO-A 4900 | 5 | 2 | 4/5 | yes |
-| TECHNO-A 5000 | 6 | 1 | 6/6 | yes |
-| TECHNO-A 6300 | 7 | 2 | 6/7 | **yes, after the re-capture** (was a singleton) |
-| TECHNO-A 8100 | 5 | 2 | 4/5 | **yes, after the re-capture** (was a singleton) |
-| TECHNO-B 8200 (held) | 5 | 1 | 5/5 | yes |
-| TECHNO-B 8300 | 5 | 2 | 4/5 | yes |
-| TECHNO-B 8400 (held) | 5 | 1 | 5/5 | yes |
-| PANICEND 8792 | 2 (+1 refused capture) | 1 | 3/3 with the refused capture's frame | yes |
-| PANICEND 8800, 9000 (held) | 3 each | 1 each | 3/3 | yes |
+- **Fixed-index grouping under-counts.** A session that presents the reference's picture at its
+  neighbour's index is *agreeing with the oracle's own ambiguity*, which is what `compare`'s ±1
+  window is for; counting only same-index matches called GLENZ 2300 a 3/6 split when the window
+  makes it 6/9 for one picture.
+- **Counting the reference tree as one of its own sessions** adds exactly +1 to the reference's own
+  group in every row — a bias *toward passing*, in the one check whose job is to catch a bad
+  reference. The reference's directory is its own capture and must be excluded.
+- **"In the largest group" is vacuous when every group is a singleton**, which is what a fixed-index
+  count eventually reports for a screen that moves 25 % of its pixels a frame.
 
-The counts are sessions that hold a `manifest.json`; a **refused** capture writes none (§1.2), so
-its frames are content evidence rather than a session — `out/panic-probe1`'s 8792 is the third
-`c9bf5114…` above, and `out/techno-troll-probe1`'s black 8200 agrees with TECHNO-B's five.
+**The rule, and B4/B5 should follow it literally.**
 
-**What re-capturing the three cases bought, measured against one fresh session each:**
+1. **Run the check only on captures that hold `N-1`, `N` and `N+1`.** Single-index probes can answer
+   only offset 0 and inflate apparent disagreement. (The partner captures already hold the
+   neighbourhood; a sweep does not.)
+2. **For each picture, count the sessions that can present it at `N-1`, `N` or `N+1`.** This is a
+   *support count over the window*, not a partition: one session's window holds several pictures and
+   different sessions reach the same picture at different offsets. **Exclude the reference's own
+   capture directory from the count.**
+3. **File the picture with the largest support, and require it to pair at offset 0 or ±1 with
+   `0.0000 %` in at least half the sessions. The percentage is the discriminator, not the offset** —
+   a ±1 pairing with a large percentage is the window's edge, meaning the phase is two or more frames
+   out, and it must not be read as agreement. (One caveat the rule needs: the filed file must be the
+   frame some session actually took **at `N`**, so the candidates are the pictures seen at `N` — a
+   picture that only ever appears at `N±1` cannot be filed at `N`, whatever its support.)
+4. **If the largest support is below half, record the keyframe as having no settled content** and say
+   so, rather than implying a majority.
+5. **A row's headline number must come from the support count over sessions, never from a single
+   partner captured in the same sitting** — which is exactly how the first version of this check went
+   wrong: a partner taken two minutes after an in-place re-capture can be one frame behind it and
+   report 0.0000 % for a reference that most sessions do not present at all.
+
+**The census, by that rule**, over the 131 session directories that hold this recipe (`SECOND 2`,
+30000 cycles, `autoexec`, these keys) — B1's captures included, the reference tree excluded:
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| GLENZ 2300 | 9 | 9 | `dbe96c0a…` 6/9 (67 %) | **yes** | yes |
+| GLENZ 3000 | 21 | 15 | `05905a2c…` 8/21 (38 %) | **yes** | **no** — no settled content |
+| GLENZ 3400 | 10 | 13 | `d02e362e…` 3/10 (30 %) | **yes** | **no** — no settled content |
+| TUNNELI 3800 | 9 | 7 | `f861b1f2…` 7/9 (78 %) | **yes** | yes |
+| TUNNELI 4200 | 6 | 9 | `af4763b3…` 3/6 (50 %) | **yes** (tied) | yes, exactly half |
+| TUNNELI 4500 | 5 | 10 | `cb15de2d…` 2/5 (40 %) | **yes** (tied) | **no** |
+| TUNNELI 4600 | 6 | 14 | `16f8c1fd…` 1/6 (17 %) | **yes** (tied) | **no** |
+| TECHNO-A 4900 | 4 | 6 | `3dc29660…` 3/4 (75 %) | **yes** | yes |
+| TECHNO-A 5000 | 5 | 1 | `20f3d62f…` 5/5 (100 %) | **yes** | yes |
+| TECHNO-A 6300 | 6 | 6 | `3c2b0d8f…` 5/6 (83 %) | **yes** | yes |
+| TECHNO-A 8100 | 4 | 6 | `6033bbc4…` 3/4 (75 %) | **yes** | yes |
+| TECHNO-B 8300 | 4 | 4 | `17b9f92f…` 3/4 (75 %) | **yes** | yes |
+| PANICEND 8792 | 1 (+2 refused/content) | 3 | `c9bf5114…` 1/1 | **yes** (tied) | trivially |
+
+Held keyframes are not in the table because they need none of this: GLENZ 1499 is one picture in
+7/7 sessions, TECHNO 8200 in 5/5, TECHNO 8400 in 5/5, PANICEND 8800 and 9000 in 3/3 each.
+
+**Byte-identity is a knife edge on GLENZ, and the rule should be read with that in mind.**
+`05905a2c…` (7 sessions) and `dd85288b…` (2 sessions) at GLENZ 3000 are **19 pixels apart** — one
+phase split in two by byte-identity, not two alignments. So a "group" of one or two on that screen
+means "a picture within a few pixels of its neighbour", not "a different picture"; the support
+fractions there are a measure of the oracle's phase spread and not of a port's reachability, and the
+rows say so.
+
+**What filing the largest-support picture bought, measured against independent partners (captured
+separately, never in the same sitting as the reference):**
 
 | part | before | after |
 |---|---|---|
-| TUNNELI | 8.2250–10.1672 % on all four keyframes, offsets `{0: 2, -1: 2}` | 3800/4200/4500 **0.0000 %**, 4600 **0.0891 %** (57 px), offsets `{0: 4}` |
-| TECHNO 320×200 | 24.5938–72.8703 % on 4900/6300/8100 | **exit 0, `verdict: identical`, 0.0000 %, `{0: 4}`** |
-| GLENZ | 18.6625–34.3219 % on all three moving frames | 2300 **0.0000 %**, 3000 **0.0500 %** (32 px), 3400 **0.0016 %** (1 px), all at offset +1 |
+| TUNNELI | 8.2250–10.1672 % on all four keyframes | 3800/4200/4500 **0.0000 %**, 4600 **0.0891 %** (57 px) |
+| TECHNO 320×200 | 24.5938–72.8703 % on 4900/6300/8100 | **`exit 0, verdict: identical, 0.0000 %, {0: 4}`** |
+| GLENZ | 18.66/9.01/16.30 % at 2300/3000/3400 (the *second* reference, filed by mistake, two frames out) and 0.00/0.11/0.03 % against one partner for the first | 2300, 3000 and 3400 **byte-identical at offset 0** against the review's independent fresh partner, and 0/6/65 pixels against another (§7.4) |
 
-Nothing was widened to get those numbers: the same `compare`, the same ±1 window, the same keyframe
-indices. What changed is that the reference is now a picture the sessions actually produce.
+**The GLENZ case is why rule 5 exists.** The first re-capture was measured against a partner taken
+in the same sitting and read as "34.32 % → 0.0000 %"; the review's independent partner showed the
+filed reference was **two frames** out at all three indices while the reference it replaced was one
+frame out, i.e. the change had made the artefacts worse. The picture filed now is the one the
+sessions present — the review's own fresh partner holds those exact bytes at 2300, 3000 and 3400 —
+and the support counts above are what says so.
 
-**The rule this gives B4 and B5**, and it is cheap: after a part's keyframes are captured, capture
-the same indices in **at least two more sessions** (they can be the partner captures), group the
-frames by `sha256`, and if the reference is not in the largest group of three or more, re-capture it
-once and check again. **Do not loop.** If the re-capture also lands outside, the honest row says so —
-and if the largest group is not a majority at all, as GLENZ's three are not, the row must say the
-keyframe has no settled content rather than implying the oracle agrees with itself. Two cautions
-measured here: a **held** frame needs none of this (7/7, 5/5, 3/3 above), and a keyframe whose
-per-frame movement is small enough to quantise (TUNNELI 3800, 2.05 %/frame) *does* form a large
-group, while one that moves 10–25 % a frame (GLENZ) forms groups of two or three pictures at most.
 
 ---
 
@@ -412,7 +444,7 @@ table.
 | ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride; RGB only | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1, `mode: rgb` — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
 | U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
-| GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture3` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300 identical, 0.0000%, and 3000/3400 within 0.0500/0.0016%, all at offset +1 (§7.4). The three moving keyframes have **no majority group** (3/7, 7/19, 2/8) and this reference is outside all three |
+| GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture4`, and the review's independent `out/b3b2-rerev/fresh-partner` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300 **byte-identical at offset 0** against the review's independent partner and 0.0000% at offset -1 against ours; 3000 and 3400 byte-identical at offset 0 against the review's partner, 0.0094% (6 px) and 0.1016% (65 px) against ours. Every filed picture is the largest-support one at its index; 3000 and 3400 are below half the sessions and are recorded as **no settled content** (§1.8, §7.4) |
 | TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture3` | exit 1, `mode: rgb` — 3800, 4200 and 4500 identical, 0.0000%, offset 0, and 4600 0.0891% (57 px), offset 0. The reference is in the largest group on **all four** after the fix round 2 re-capture (3800: 7/9, 4200: 3/6, 4500: 2/5, 4600: 2/6) (§8.4) |
 | TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture3/interference` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — the fix round 2 re-capture put the reference in the largest group on all four (4900: 4/5, 5000: 6/6, 6300: 6/7, 8100: 4/5) where it had been a singleton at 6300 and 8100 (§9.4) |
 | TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row where the read succeeded (320-byte rows later, §9.6); 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
@@ -1219,9 +1251,9 @@ each other, **1620** grey again, **1700** the object higher, **1800** black agai
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
 | 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; 1499, 1500 and 1501 are one picture, and 1250, 1400, 1450 and 1499 (in other captures) are the same bytes again. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
-| 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `147e0d86…` |
-| 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `e0e63c74…` |
-| 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `e97c2524…` |
+| 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `dbe96c0a…` |
+| 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `05905a2c…` |
+| 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `d02e362e…` |
 
 One keyframe per screen the part has: the held opening, the glenz object, the red polyhedron with
 the glenz object inside it, and the red polyhedron with the glenz object at its edge. 2300 and
@@ -1233,9 +1265,9 @@ Full hashes of the five files in `reference/parts/glenz/`:
 |---|---|---|
 | 1499 | `frame_001499.rgb` | `e45ab0764b860f50376d560cf5a4d0f0e7ecca935021780385e3735e865fc28e` |
 | 1499 | `frame_001499.idx` | `75d561dc779e17cadaf4493b3e295378a9d02ed186049dc0edd754b3a130b32b` |
-| 2300 | `frame_002300.rgb` | `147e0d86e27b5146b3a8154680542a2e8401f262cb22d0923694c417ec5683ef` |
-| 3000 | `frame_003000.rgb` | `e0e63c74edc427d5a0be05ffaabcc4156622412d71ad900c8e467fb61dafb06d` |
-| 3400 | `frame_003400.rgb` | `e97c25246df785247fe2aa9656129542b773f6e590392b1ba626e752367e33e7` |
+| 2300 | `frame_002300.rgb` | `dbe96c0a69f93c6427de2b4c3108ad017fe55eb463fca948536fe525450d04cf` |
+| 3000 | `frame_003000.rgb` | `05905a2ce6a2ed25058df37f267c42d998eaaf62a0d692af925a8d7026650337` |
+| 3400 | `frame_003400.rgb` | `d02e362e964b03fcd280e4e3faa2dee8e9712a91ad95889442c1b5a05cee2760` |
 
 ### 7.3 Held or moving, measured — and where GLENZ's indices come from
 
@@ -1281,72 +1313,58 @@ indices. A read sheared by two bytes a row against 92 (the old `width/4` = 80) c
 the second pass of this phase shipped exactly such a plane for ALKU and it passed the colour check
 only because that palette collapsed (§1.6).
 
-### 7.4 The re-capture: the held frame identical, the three moving frames one rotation step out of phase
+### 7.4 The re-capture: the held frame identical, the moving three the pictures the sessions present
 
 ```bash
-# the reference: keyframes only (re-captured twice — the session filed here is the second,
-# which fix round 2's alignment-group check asked for; see the paragraph below the numbers)
+# the reference: keyframes only. Filed from a session captured into out/ and verified against the
+# census of §1.8 BEFORE it was filed — see the paragraph below for why that route and not a re-run
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 1499,2300,3000,3400 --out reference/parts/glenz --sheet out/glenz.png
 
 # the partner: a support frame each side of the three moving keyframes
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture3
+    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture4
 ```
 
-The comparison against the reference as it now stands (`out/glenz-recapture3`, exit 0 as a capture):
+`out/glenz-recapture4` (exit 0 as a capture) — an independent partner, captured after the reference
+was filed and in a separate sitting:
 
 ```
 frame 1499: 0.0000% differing (0/64000 px), max delta 0
-frame 2300: 0.0000% differing (0/64000 px), max delta 0, rendered index 2301 (offset +1)
-frame 3000: 0.0500% differing (32/64000 px), max delta 121, rendered index 3001 (offset +1)
-frame 3400: 0.0016% differing (1/64000 px), max delta 41, rendered index 3401 (offset +1)
-verdict: different, mode: mixed, offsets {"+1": 3, "0": 1}
+frame 2300: 0.0000% differing (0/64000 px), max delta 0, rendered index 2299 (offset -1)
+frame 3000: 0.0094% differing (6/64000 px), max delta 41, rendered index 2999 (offset -1)
+frame 3400: 0.1016% differing (65/64000 px), max delta 121, rendered index 3399 (offset -1)
+verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
 exit: 1
 ```
 
-**That is a different result from the one this section first carried, and the difference is the
-point.** The first reference's three moving frames were 18.6625–34.3219 % of pixels away from every
-session that took them (`out/glenz-recapture`, `out/glenz-recapture2`, both at offset −1); the
-re-captured reference is **byte-identical** at 2300 to a session one index away and within 32 and 1
-pixel at 3000 and 3400. Nothing was widened and `compare` was not changed — the reference itself is
-one rotation step nearer the phase the sessions land on, and **one frame of phase difference is
-sub-frame noise against GLENZ's 10.64–25.43 %-per-frame rotation**. See §1.8 for what the alignment
-groups are and why the reference was re-taken; the old numbers stand as the history of the previous
-reference, not as a claim about this one.
+**And against the review's own independent fresh partner (`out/b3b2-rerev/fresh-partner`, captured
+by the reviewer's harness in a different sitting again), all three moving keyframes are
+byte-identical at offset 0** — 0 pixels of 64,000 on each, checked by comparing the files directly
+because that capture does not hold 1499 and so cannot be compared whole.
 
-The two sessions that took the *first* reference, for the record — `out/glenz-recapture` 34.3219 /
-23.9516 / 29.0187 % and `out/glenz-recapture2` 18.6625 / 9.2000 / 16.3281 %, all at offset −1 — are
-the values that were replaced by the re-capture above, and they are quoted here only as the history
-of a reference that no longer exists on disk.
+**Why this reference and not the two before it.** The first reference's moving frames were 18.6625,
+9.2000 and 16.3281 % away from the sessions that took them, and the first re-capture — filed with a
+partner taken **two minutes later, in the same sitting** — looked like 0.0000 %, 0.0500 % and
+0.0016 % and was in fact the *worse* artefact: the review's independent partner put it **two frames**
+out at all three indices where the reference it had replaced was one frame out. That is rule 5 of
+§1.8, and it is the reason this section's numbers are now quoted against partners captured
+separately. The pictures filed here are the ones the census of §1.8 finds the sessions presenting —
+`dbe96c0a…` supported by 6 of 9 sessions at 2300, `05905a2c…` by 8 of 21 at 3000, `d02e362e…` by 3
+of 10 at 3400 — and the review's fresh partner holds exactly those three at exactly those indices.
 
-**What kind of difference this is, in frames.** The held keyframe is byte-identical in both partners
-and in every session that has taken it, which is the strong claim. The three moving keyframes are
-not, and the percentage is the wrong unit for saying how far apart they are — **the screen's own
-per-frame rate divides out**. Measured inside the partner capture, adjacent indices 1 frame apart:
-2300 moves **25.43 %** of pixels a frame, 3000 **10.64 %**, 3400 **17.07 %** (and in the re-run's
-capture, 3400 **15.65 %**). Against those rates the same-index differences — 34.3219 %, 23.9516 %,
-29.0187 % in the first partner and 18.6625 %, 9.2000 %, 16.3281 % in the re-run — are **≈1.5–2.5
-frames of rotation**, not a distant phase. `out/glenz-2300-compare.png` shows the same scene at a
-visibly different orientation, and that is all it shows.
+**And the two low ones are recorded as such rather than dressed up.** 8/21 and 3/10 are below half:
+at 3000 the two leading pictures are **19 pixels apart**, so the oracle's spread there is a knife
+edge that byte-identity splits into groups of 7, 6, 2 and singletons, and at 3400 the largest group
+is three sessions. **Phase 2 should read GLENZ's 3000 and 3400 as one exact phase of an animation the
+oracle spreads over a few frames**, and 2300 as a picture two thirds of sessions present. No
+tolerance is added; the pixels stay exact.
 
-**And this is what §1.7 means by the percentage being a lower bound**: GLENZ saturates, so once the
-polyhedron is a couple of frames further round, most of its edges have moved and the number stops
-growing. The old reference was 1.5–2.5 frames out — larger than the ±1 window `compare` may search,
-so the offset it printed (−1) was the window and not the gap; the new one is one frame out, the
-window reaches it, and the pictures then agree to the pixel. That is the same shape of result as
-§4.4's pan, with the difference that GLENZ's step is a rotation and cannot be removed by shifting
-pixels.
-
-**This is the row's honest reading, and the two halves are not the same claim.** 1499 is a
-reproducible reference: 7 of 7 sessions have the same bytes. The three moving keyframes are one
-exact picture each — and the census of §1.8 shows the oracle does not have a *majority* picture at
-them to prefer: the largest groups are **3 of 7** at 2300, **7 of 19** at 3000 (with a second group
-of 6) and **2 of 8** at 3400, and this reference is outside the largest at all three. Two re-captures
-were taken (§1.8's rule allows one after the check, and the first attempt was a different session
-again); neither landed in a group larger than a singleton. **No tolerance is added and the pixels
-stay exact**: Phase 2 should read GLENZ's moving keyframes as one exact phase of an animation the
-oracle itself spreads over a few frames, not as a picture every session agrees on.
+**How far apart, in frames.** Measured inside a partner capture, adjacent indices one frame apart:
+2300 moves **25.43 %** of pixels a frame, 3000 **10.64 %**, 3400 **17.07 %**. So the 18.66–34.32 %
+that started all this was **≈1.5–2.5 frames**, and a one-frame difference is the whole of what
+`compare` may search. **The ±1 window does not reach two frames**, which is why the *filed* picture
+has to be one the sessions actually present rather than merely a near neighbour of one.
 
 ### 7.5 Where the part ends
 

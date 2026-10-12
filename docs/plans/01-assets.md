@@ -1502,16 +1502,19 @@ All four are captured; the rows are in `reference-indices.md` §2 and the measur
 - **Every moving keyframe's reference must be checked against sessions, or it is a phantom diff.**
   Sessions land in discrete alignment groups whose sizes are wildly unequal, and a reference drawn
   from a minority group is a target Phase 2 will miss for the oracle's reason, not the port's. The
-  cheap check, measured on all thirteen moving keyframes of this block: capture the same indices in
-  at least two more sessions, group the frames by `sha256`, and if the reference is not in the
-  largest group of three or more, re-capture it once and check again. Three keyframes of this block
-  needed it (TUNNELI 3800: a singleton against 7/9; TECHNO 6300: against 6/7; TECHNO 8100: against
-  4/5) and the effect was 8.07–10.17 % and 70.68–97.50 % becoming **0.0000 %** on almost every
-  keyframe, with TECHNO's whole row turning into `verdict: identical`. Do not loop; if the
-  re-capture lands outside again, say so. GLENZ's three moving keyframes have **no majority group
-  at all** (largest 3/7, 7/19, 2/8), which is a finding about that screen rather than a gap to
-  close — a screen that moves 10–25 % of its pixels a frame has no group bigger than three pictures.
-  Held frames need none of this. (`reference-indices.md` §1.8.)
+  check, measured on all thirteen moving keyframes of this block over 131 sessions: **run it only on
+  captures that hold `N-1`, `N` and `N+1`** (a single-index probe can answer only offset 0);
+  **count, for each picture, the sessions that can present it anywhere in that window** — a support
+  count, not a partition — **with the reference's own capture directory excluded**; **file the
+  largest support and require a `0.0000 %` pairing within ±1 in at least half the sessions, reading
+  the percentage and not the offset as the discriminator**; and if the largest support is below half,
+  **record the keyframe as having no settled content**. A row's headline number comes from that
+  support count, **never from a single partner captured in the same sitting** — a partner taken two
+  minutes after an in-place re-capture can sit one frame behind it and report 0.0000 % for a reference
+  most sessions do not present at all, which is how this went wrong once. Measured effect of filing
+  the largest-support pictures: TUNNELI 8.07–10.17 % → three byte-identical keyframes and 57 px;
+  TECHNO's 320×200 row → `verdict: identical`; GLENZ's moving frames byte-identical against two
+  independent partners. Held frames need none of this. (`reference-indices.md` §1.8.)
 - **A boundary can be a content change with a black gap between the parts**: GLENZ's last frame
   ~3650, flat black 3680–3700, TUNNELI's first ring 3710; TUNNELI's last dots in (4700, 4770]
   (session dependent), TECHNO's first rings 4770. Neither boundary is in the geometry — and **the
