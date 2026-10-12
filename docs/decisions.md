@@ -556,6 +556,15 @@ in the manifest, so a frame index means the same thing in two runs. Nothing in t
 committed fixtures contradicts this: they are single frames identified by the screen they
 show, and `frame_info.json` records geometry, not an index.
 
+**Superseded by D17, and left standing as the record of what was measured then.** The 1657/1677/1718
+landmarks and "the title screen sits around frame 1700" are the **typed** recipe's, where every step
+of the boot waits on the host. Under the recipe every reference in the tree was captured with
+(`--boot autoexec` plus the silent emulator, D17), the setup screen is at **16** and the demo's
+first graphics frame at **404**. Nothing above is wrong about the run it measured; a reader landing
+here first should take the landmarks from D17 and this section's *rule* — indices count from the
+emulator's own start, so define the origin and record it — and not its numbers. (B6's close-out, the
+deferred minor from B1's review.)
+
 ### Fixtures
 
 `xtask/tests/fixtures/`, recorded from the live emulator, never hand-written:
@@ -1143,3 +1152,90 @@ twelve carrying. The aligned pair above carried 137–383 pixels. So a moving pa
 can be aligned and *still* report `verdict: different`; the number is recorded in the part's
 row, and no tolerance is introduced — a pixel tolerance is exactly what the user's ruling
 avoided (fix round 1, ruling 3).
+
+---
+
+## D20 — What a reference index means, and the fallback that was not needed (2026-10-12)
+
+Phase 1 closed (B6) with twenty references, a per-part evidence table in `PROGRESS.md` and a policy.
+The policy is a **decision**, not a summary: it fixes what a capture index means, what makes a
+capture valid, what is done when a part does not reproduce, and — the part a later phase is most
+likely to get wrong — that spec §8.4's structural-similarity fallback was **not used**. The full
+statement with its measurements is `docs/fidelity/reference-indices.md` **§1.12**; this entry is the
+durable version, so a later session does not have to read the method sections to find it.
+
+**An index is boot-relative and valid only under one recipe.** Frame 0 is the emulator's first
+rendered frame, and the counter counts emulated frames. Every capture under `reference/parts/` used
+
+```
+--arg <block> --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000
+```
+
+with the emulator run **silent** (`SDL_AUDIODRIVER=dummy` + `mixer_nosound=true`, D17). Silence is
+not decoration: with a real audio device the mixer follows the *host's* clock and the demo's
+animation drifts against the frame counter, continuously and differently per run (D17 measured two
+otherwise-identical autoexec captures 14.3/35.3/24.6 % of bytes apart until the emulator was also run
+silent). The cycles matter less than the recipe — index 900 captured at 25000 and at 30000 is
+byte-identical, §1.5 — but a capture that does not pin them is **refused, not produced**, because an
+unpinned capture is not reproducible. Every manifest records `boot`, `cycles`, `keys` and
+`arguments`; a frame set whose manifest says something else was captured some other way and is not
+comparable with the references.
+
+**Three claims of different strength, and a row means one of them.** The boot repeats exactly (menu
+frame 16, first graphics frame 404, five runs in five, D17). A **held** screen repeats byte for byte
+across sessions. A **moving** screen's alignment does **not**: sessions land in *discrete alignment
+groups* and a second capture lands in the same group about half the time (D17), because the emulated
+clock carries a host-timing term that neither the API nor `--set` reaches
+(`gui/sdl_gui.cpp:2555-2570`). That is why `compare` searches **±1 frame** and reports the signed
+offset per frame and the distribution per capture (D18) — and the asymmetry that makes the search
+usable is D19's: **the reference holds keyframes only; the capture compared against it holds one
+support frame beyond each end of the keyframe range**, and one on each side of every keyframe that
+moves (§1.3 rule 1).
+
+**Spec §8.4's structural-similarity fallback was not needed, and the distinction is the point.** ±1
+keeps the comparison **pixel-exact** and searches only the *alignment*: a paired frame is 0.0000 %
+or it is a difference, and no pixel tolerance exists anywhere in the toolchain. Structural similarity
+would give up exactness — "the pictures are similar enough" is a judgement the port cannot audit, and
+it is the kind of tolerance this phase refused everywhere else. Where the ±1 window cannot reach a
+difference the residue is **recorded and named** (ALKU's 5859 pan, §4.4); where no picture is
+presented by a majority the keyframe is recorded as having **no settled content** (§1.8 rule 4).
+The fallback stays available in the spec for a screen neither instrument can describe; nothing in
+this phase invoked it.
+
+**A part that does not reproduce — the ladder.** Census it by §1.8's rule over every session holding
+its window and **re-capture it into the largest alignment group** (this worked and is not marginal:
+TUNNELI 8–10 % → 0.0000 %, 3DSINFLD's 16500 43–48 % residual → `verdict: identical`, U2E's 2600 from
+0/3 to 2/3). Judge the re-capture against **independent** sessions, never a partner captured in the
+same sitting — §1.8 rule 5 exists because that mistake once made GLENZ's reference *worse*. If the
+largest support is below half the sessions, file the best *filable* picture and record the keyframe
+as having no settled content. Never: a pixel tolerance, a widened window, a structural-similarity
+substitution, or an unrecorded re-roll.
+
+**Recorded as unresolved, because a later phase will meet all three:**
+
+- **The oracle's rare excursion.** One session had TECHNO's rings ~30–40 frames early; it did not
+  reproduce in either of two VGA-content probes, and it is not the music clock (the player's counter
+  agrees to ≈1 music frame across sessions, rate identical to 1e-4), not a fixed offset and not a
+  counter stall (0 stalls ≥150 ms at 20 ms resolution to frame 4900). Rare, real, unexplained, not
+  reproducible; the ordinary spread is pinned (five mode transitions within 4 frames over four
+  sessions).
+- **ENDSCRL's deviation.** No session in the tree holds that part's ±1 window: the tool cannot take
+  two frames one index apart on its 640×400 screen (five recorded refusals, a sixth attempt killed;
+  two remedies tried and both failed *because the grabs are served by the emulator's own process*),
+  so its census is an **offset-0 count** — accepted because every session that took the index is
+  byte-identical at offset 0, so there is no disagreement for the window rule to inflate. A
+  one-frame-out diff there **is a difference, not an alignment**, and the offset-0 agreement proves
+  nothing about a ±1 pairing.
+- **The CRC-register read race in `xtask`'s oracle.** `crtc_offset_register()` and
+  `chain4_enabled()` each read the CRTC's index/data port pair in two requests with the guest running
+  in between, so a read can name the other register's value or a mid-write state. The loud half
+  refuses the frame (JPLOGO: eight refusals); the **quiet half can be used** and the coherence check
+  that would catch a resulting shear is blind on a palette-collapsing screen. Nothing in the tree is
+  wrong because of it — every `.idx` from a part that writes CRTC registers was hand-checked before
+  it was trusted — but the durable fix (read the pair coherently, or twice and require agreement)
+  belongs to whoever next touches the oracle.
+
+**And: the `phase-1` tag is withheld at the close-out.** The plan's B6 step 4 says commit *and* tag;
+the final whole-branch review comes after B6 and may require fixes, and a tag that has to be moved is
+worse than a tag applied a few commits later. The phase's exit criteria are met and its evidence is
+recorded; the tag goes on when that review is clean.

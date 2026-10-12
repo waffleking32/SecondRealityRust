@@ -24,6 +24,12 @@ so a frame set that was captured some other way says so. Indices are **boot-rela
 is the emulator's first rendered frame at process start (D14), the setup screen's text is up at
 16, and the demo's first graphics frame is 404.
 
+**§1.12 is the phase's non-determinism policy and a later phase should read it before its first
+comparison**: what an index means and what makes a capture valid, the ±1 alignment search and why
+spec §8.4's structural-similarity fallback was not needed, how a part that does not reproduce is
+handled, and the keyframes and mechanisms this phase could **not** settle (the ones that will show a
+Phase 2 residual that is the oracle's, not the port's).
+
 ---
 
 ## 1. The method
@@ -679,6 +685,189 @@ only a count to prove the filing was taken at `N`. **One part's count is an offs
 than a window count** — ENDSCRL's, because the screen refuses adjacent grabs (§21.4) — and the
 difference is stated in its row rather than papered over.
 
+---
+
+### 1.12 The non-determinism policy — what an index means, and what is not settled
+
+Sections 1.1–1.11 are method, written as each block found it. This section is **the policy**: what an
+index under `reference/parts/` means, what makes a capture valid, how a part that does not reproduce
+is handled, and the things this phase measured and could **not** settle. It was written at the close
+of Phase 1 (B6) and it is the phase's own statement of its evidence — where an earlier section and
+this one disagree, this one is the current reading.
+
+**What a capture index means.** A keyframe index is a **boot-relative emulator frame counter**:
+frame 0 is the emulator's first rendered frame at process start (D14), the counter counts emulated
+frames (`GFX_EndUpdate`, D17), and the setup screen's text is up at 16 and the demo's first graphics
+frame at 404 under this phase's recipe. An index names a *screen* only as precisely as the boot
+repeats — and it repeats exactly under one recipe and no other.
+
+**A capture index is valid only under the B1 recipe, at the pinned cycles, with the silent
+emulator.** Every capture in the tree was taken with
+
+```
+--arg <block> --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000
+```
+
+and an emulator run **silent** (`SDL_AUDIODRIVER=dummy` + `mixer_nosound=true`). `--boot autoexec`
+puts the mount, the command line and the setup-screen answer on the *emulated* clock (the guest's own
+`[autoexec]` runs it; `AUTOTYPE` schedules through `PIC_AddEvent`), which is why the same boot index
+is the same screen in five runs out of five, where the typed recipe's position is the host's timing
+(a frame of jitter at its best on an idle host, 43–45 frames between two D15 runs under load).
+**Silence is not
+optional decoration**: with a real audio device the mixer follows the *host's* clock and the demo's
+animation drifts against the frame counter, continuously and differently per run (two autoexec
+captures still differed 14.3/35.3/24.6 % of bytes until the emulator was also run silent — D17).
+The cycles matter less — capturing the held index 900 at 25000 and at 30000 gives byte-identical
+files (§1.5, measured) — but a capture that does not pin them is **refused** rather than produced,
+because an unpinned capture is not reproducible. Every manifest records `boot`, `cycles`, `keys` and
+`arguments`; a frame set whose manifest says something else was captured some other way and is not
+comparable with these references.
+
+**What is reproducible, and what is not.** Three separate claims, and a reader of a row needs to
+know which one it is making.
+
+- **The boot repeats.** Menu frame 16, first graphics frame 404, five runs in five (D17).
+- **A held screen repeats byte for byte**, within and across sessions (BEGLOGO 900 in five sessions;
+  CRED's five holds with `K-1 = K = K+1` in four).
+- **A moving screen's alignment is not reproducible across emulator sessions.** Sessions land in
+  **discrete alignment groups**, not a continuum, and the majority group is byte-identical; a second
+  capture lands in the same group about half the time (D17). The mechanism is measured rather than
+  guessed: DOSBox subtracts measured host present time from its tick budget
+  (`gui/sdl_gui.cpp:2555-2570`), so the emulated clock carries a host-timing term that neither the
+  API nor `--set` reaches.
+
+**The comparison searches ±1 frame and reports the offset — and that is a search of the alignment,
+never a tolerance on the pixels.** `compare` tries the rendered frame at `N-1`, `N` and `N+1`,
+pairs the candidate with the fewest differing pixels, and records a signed per-frame `offset` and the
+capture's offset distribution (D18). A paired frame is **0.0000 % or it is a difference**; no pixel
+tolerance was added anywhere in the toolchain, and a reference index with no candidate within the
+window is **refused, exit 2**, not paired from further away. The window is a constant
+(`ALIGNMENT_WINDOW = 1`), not a knob. The asymmetry that makes the search usable is D19's: **the
+reference holds keyframes only; the capture compared against it holds one support frame beyond each
+end of the keyframe range** — and, per §1.3 rule 1, one on each side of every keyframe that moves.
+
+**§8.4's structural-similarity fallback was not needed, and the reason is exactness.** Spec §8.4
+allows a part that proves non-deterministic to be "captured across multiple runs and compared on
+structural similarity". **No part needed it.** The ±1 frame search is a different instrument from
+structural similarity, and the difference is the whole point: the search keeps the comparison
+**pixel-exact** and moves only *which* rendered frame answers for a reference one — the pictures are
+compared byte for byte and the alignment is stated. Structural similarity would give up exactness: it
+would replace "the pictures are the same" with "the pictures are similar enough", which is a
+judgement the port cannot audit and exactly the kind of tolerance this phase refused at every turn.
+Where the ±1 window cannot reach the difference, the phase **records the residue and says what it
+is** (ALKU's pan, §4.4; the no-settled-content rows below) rather than defining it away. The
+fallback remains available in the spec if some later phase meets a screen neither the window nor a
+recorded residue can describe; nothing in this phase did.
+
+**How a part that does not reproduce is handled — the ladder, in order.**
+
+1. **Census it against every session that holds the keyframe's window, by §1.8's rule**, and
+   **re-capture it into the largest alignment group**. This is the remedy that worked, and it is not
+   marginal: TUNNELI went from 8.07–10.17 % on all four keyframes to 0.0000 % on three and 0.0891 %
+   on the fourth; 3DSINFLD's 16500 from a 43–48 % residual to `verdict: identical`; U2E's 2600 from
+   0/3 support to 2/3; TECHNO's 320×200 row to `exit 0, identical`. A re-capture is judged against
+   **independent** sessions, never against a partner captured in the same sitting — rule 5 exists
+   because that mistake once made a reference *worse* (GLENZ, §1.8).
+2. **If the largest support is below half the sessions, the keyframe has no settled content** and
+   the row says so (§1.8 rule 4); the best *filable* picture stays filed, and the residual is the
+   oracle's.
+3. **If the picture is exact but its phase is something the ±1 window cannot reach**, the row
+   records the measurement and no tolerance is added — ALKU's 5859 is the case: the picture differs
+   between sessions by a whole number of pixels of the part's own 1 px-per-9-frames pan, 0 px of
+   95,700 remain after the shift, and the spatial phase is not a temporal offset the search can
+   reach (§4.4).
+4. **If the ±1 window cannot be captured at all**, the census becomes an **offset-0 count** and the
+   row says so, naming the reason — ENDSCRL, below.
+5. **Never**: a pixel tolerance, a widened window, a structural-similarity substitution, or an
+   unrecorded re-roll.
+
+**The keyframes with no settled content, and what a Phase 2 diff there means.** These are the
+keyframes where the largest support over the ±1 window is below half the sessions, so no picture is
+presented by a majority:
+
+| keyframe | sessions with a window | support of the filed picture | why |
+|---|---|---|---|
+| GLENZ 3000 | 21 | 8/21 (38 %) | the screen's phase is split finer than byte-identity — `05905a2c…` and `dd85288b…` are **19 pixels apart**, one phase cut in two (§1.8) |
+| GLENZ 3400 | 10 | 3/10 (30 %) | same screen, same knife edge |
+| TUNNELI 4500 | 5 | 2/5 (40 %) | the dotted tunnel quantises into several groups |
+| TUNNELI 4600 | 6 | 1/6 (17 %) | as above; its partner comparison is still 0.0891 % (57 px) |
+| PLZPART plasma 6000 | 5 | 2/5 (40 %) | the plasma moves 70 % of its pixels a frame; the largest support *in the window* (3/5) belongs to a picture every session takes only at `N-1`, which §1.8 rule 3's caveat forbids filing at `N` |
+| PLZPART plasma 7000 | 4 | 0/4 | every picture taken at `N` is a singleton |
+| PLZPART plasma 7600 | 3 | 0/3 | nine pictures, 1/3 each |
+| JPLOGO 17700 | 4 | 2/4 for the *state*, 0/4 for the *file* | settled as a state and **unfiled as a file**: the state two sessions hold (`ec3de2bb…`) was not drawn by any of seven re-capture probes, and the filed `91d6ce6b…` is taken at `N` by none of the four (§17.5) |
+
+**A keyframe on this list is a Phase 2 residual that is the oracle's, not the port's.** A faithful
+port reproducing any of them will get a non-zero diff at that index against the filed picture; the
+row is what says so. Two knife-edge cases are *not* on the list but should be read beside it:
+TUNNELI 4200 and JPLOGO 17500 sit exactly at half (3/6 and 2/4), so a single further session can move
+them either way.
+
+**Unresolved — the oracle's rare, real excursion.** One session had TECHNO's rings **~30–40 frames
+early**. It did **not** reproduce in either of two VGA-content probes, and it is not any of the
+mechanisms the phase could test: **not the music clock** (the player's counter agrees to about one
+music frame — ≈1.3 video frames — across sessions and its rate is identical to 1e-4, so the mixer's
+wall-clock pacing cannot move a music-gated boundary by tens of frames), **not a fixed offset** and
+**not a counter stall** (0 stalls ≥150 ms at 20 ms resolution up to frame 4900). It is recorded as
+rare, real, unexplained and not reproducible. The compensating evidence is that the *ordinary* spread
+is pinned: five mode transitions within 4 frames across four sessions, and the tunnel→TECHNO content
+boundary at 4797 in both sessions watched. What a later phase should do if it meets one: the census
+counts sessions that hold the keyframe's window, so a session with an excursion simply does not
+count — do not let one decide a reference, and do not re-open the mechanism without a reproducing
+case.
+
+**Unresolved — ENDSCRL's deviation from §1.8's window rule, and what a one-frame-out diff there
+means.** ENDSCRL is the one screen in the tree where the tool **cannot take two frames one index
+apart**: `--frames 9099,9100,9101` is refused at the first batch with `the emulator reached frame
+9101 before frame 9100 could be captured` — five sessions record it and a sixth attempt was killed
+before it could write one, and a two-index list is refused the same way. The cause is the per-grab cost crossing one emulated
+frame's wall time (three HTTP requests and a 768,000-byte raw frame on a 640×400 screen), and **two
+remedies were tried and both failed** — sharing one core between the tool and busy loops, and pinning
+only the emulator to a starved core — **because the grabs are served by the emulator's own process**,
+so starving either starves both. The sessions are therefore captured with **three-frame gaps**
+(`9097,9100,9103`), and the census is an **offset-0 count**: 9/9 sessions byte-identical at 9100 and
+5/5 at each other keyframe.
+
+Accepted, and the acceptance is a measurement rather than a preference: §1.8 rule 1 warns that a
+single-index probe "can answer only offset 0 and inflate apparent disagreement", and that warning is
+about sessions that **differ** at `N` — here every session that took the index is byte-identical at
+offset 0, so there is no disagreement for the rule to inflate. It is not free, and the row says so:
+
+- **A one-frame-out diff at these keyframes is a difference, not an alignment.** A session one frame
+  out of phase would show the neighbouring line of scroll text — measured at **1.2–7.4 % of pixels
+  at a three-frame step**, and the picture advances a line per two vblanks — and `compare` would
+  report it as differing. ENDSCRL's reference has **no alignment slack for a port to hide behind, and
+  no ±1 evidence either**: the offset-0 agreement proves the sessions present these bytes at exactly
+  these indices; it does **not** prove that a ±1 pairing would have matched, because no session in
+  the tree holds one.
+- What the deviation does *not* affect: the four keyframes' own bytes, the three sessions'
+  `exit 0, verdict: identical, 0.0000 %`, or the row's comparability with the other nineteen on the
+  substance — every reference was filed from a picture sessions actually take at `N`. What it
+  affects is the *strength* of the support claim, and the row and §21.4 state the weaker one.
+
+**Unresolved (tool-side) — the CRC-register read race in `xtask`'s oracle.** `crtc_offset_register()`
+and `chain4_enabled()` each read the CRTC's index/data port pair in **two requests with the guest
+running in between**, so the value that comes back can belong to the other register — or to a
+mid-write state. It is live and it has fired: JPLOGO's log holds eight `PlaneTooSmall` refusals
+naming a 320-byte row for a picture whose rows are 80 (CRTC 0x0d's value read as 0x13's), and
+PLZPART's 384-byte refusal has two readings the capture cannot separate (§1.9). The loud half refuses
+the frame; the **quiet half is the one to know about**: a raced value can pass `plan_indexed_read`
+and be *used*, and the coherence check that would catch a resulting shear is blind on a screen whose
+palette collapses (ALKU's case, §1.6). **Nothing in the tree is wrong because of it** — every `.idx`
+filed from a part that writes CRTC registers was read by hand before it was trusted, and the rows say
+which and what the read showed — but the durable fix belongs to whoever next touches the oracle: read the index/data
+pair coherently, or read it twice and require agreement. That removes the race for every part instead
+of documenting it part by part. **Until then, any `.idx` filed from a part that writes CRTC registers
+is worth reading by hand**, which is a rule about the tool, not about the references.
+
+**And the phase's own day-apart probe.** B2–B5's re-captures prove reproducibility *within* a
+sitting or across minutes. B6 re-ran the oldest two captures a day later (2026-10-11 → 2026-10-12),
+in fresh emulator sessions, and compared them against the filed files: BEGLOGO — the first reference
+captured, whose 470 and 560 are moving in the palette — gave `exit 0, verdict: identical` on all
+four keyframes, every filed file `sha256`-equal to the new capture; ALKU — the oldest continuously
+drawn screen — gave `exit 0, verdict: identical` on all four, **5859 included**, its new capture
+landing on the reference's own pan phase. So a capture still means the same thing a day later for
+these two, which is the weakest and most directly tested form of the claim this section states.
+
 ## 2. The index table
 
 One row per part. `keyframes` are the boot indices in `reference/parts/<part>/`; `the partner`
@@ -709,7 +898,7 @@ table.
 | U2E | `SECOND 4` (this capture) — `SECOND 3` reaches it too, at its own indices | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent `out/review-b4b/u2e-sess`; exit 1, `mode: rgb`, offsets `{0: 4}` against `out/b4b-u2e-sess1`–`-sess3`, each of which misses one keyframe at 55.4672–60.8406 % (a phase group, not a different screen). Census over the four sessions holding a window: 1000 **4/4 (100 %)** and 1600, 2600 and 3600 **3/4 (75 %)** each, every filed picture taken at `N` — **every keyframe settled** (§18.4, §18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/4) and the re-capture drew the one three of them do. `SECOND 3` reaches U2E as well and shows the same screens at different indices (§18.1, §18.6) |
 | ENDLOGO | `SECOND 5` (this capture); a full run reaches it too, at its own indices | 320×400 Mode X, 80-byte plane rows; the reference carries `.idx` at 430 and 900, and **only 900 is index-compared** (no session holds a 430 `.idx`) | 430, 500, 900, 1180 | `out/b5-endo-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three sessions, every keyframe. Census over the four sessions holding a window: **4/4 (100 %)** on all four — 430 (white) and 900 (the held picture) held outright, 500 and 1180 the two palette fades of the held picture; each filed picture is taken at `N` by all four (§19.3, §19.4) |
 | CRED | `SECOND 5` (this capture); a full run reaches it too | 320×200, 160-byte plane rows from CRTC 0x13 = `0x5013`; RGB only | 1440, 3240, 5440, 7640, 8740 | `out/b5-cred-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: rgb`** against all three sessions, every keyframe. Every keyframe **held** (three consecutive frames byte-identical in every session). Census over the four sessions holding a window: **4/4 (100 %)** on all five, the filed picture presented at `K−1`, `K` and `K+1` in every session. 82 frames of this part, all refused by the *coherence* check and not by a stride or a mode — the read's model of where the screen starts is what does not match (§20.2) |
-| ENDSCRL | `SECOND 5`, **non-looping** (`looping == 0`; skipped entirely when looping is on — `MAIN/U2.ASM:914-915`); a full run reaches it too | 640×400, mode 0eh 16 colours, CRTC 9 = 0; RGB only | 9100, 10000, 12000, 14000 | `out/b5-es2-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (the 401-line ring scrolls a line per two vblanks). **No session in the tree holds this part's ±1 window** — the tool cannot take two frames one index apart on this 640×400 screen (six refusals, two remedies tried and recorded in §1.11) — so the census is an **offset-0 count**: **9/9 (100 %) at 9100** and **5/5 (100 %)** at 10000, 12000 and 14000, every session that took the index byte-identical to the filed picture (§21.3, §21.4) |
+| ENDSCRL | `SECOND 5`, **non-looping** (`looping == 0`; skipped entirely when looping is on — `MAIN/U2.ASM:914-915`); a full run reaches it too | 640×400, mode 0eh 16 colours, CRTC 9 = 0; RGB only | 9100, 10000, 12000, 14000 | `out/b5-es2-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (the 401-line ring scrolls a line per two vblanks). **No session in the tree holds this part's ±1 window** — the tool cannot take two frames one index apart on this 640×400 screen (five recorded refusals and a sixth attempt killed — §1.11, §21.4) — so the census is an **offset-0 count**: **9/9 (100 %) at 9100** and **5/5 (100 %)** at 10000, 12000 and 14000, every session that took the index byte-identical to the filed picture (§21.3, §21.4) |
 | DDSTARS | `SECOND U` only — slot 17, the hidden part, reachable by no numbered boot (`partsmask[8]` = `80h`) | 320×400 (mode 13h with CRTC 9's scan-doubling bit cleared), 80-byte plane rows; RGB only | 1900, 3000, 5000, 8000 | `out/b5-ddstars-sess1` (`-sess2`, `-sess3b` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (three distinct pictures at every triple). Census **per keyframe** over the sessions that hold that keyframe's window: 1900 **6/6 (100 %)**, 3000 **5/5 (100 %)**, 5000 **4/4 (100 %)**, 8000 **5/5 (100 %)** — every filed picture taken at `N` by every session, and the same `N±1` neighbours in all of them (§22.3, §22.4). All 20 sweep frames refused with `not one palette index a byte` (§22.5); `out/b5-ddstars-sess3`, refused at 5001, counts for 1900 and 3000 and not for 5000 or 8000 |
 
 ### Adding a row

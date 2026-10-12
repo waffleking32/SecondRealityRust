@@ -5,11 +5,12 @@ Phase status board. **Read this first if you are resuming work.**
 - `not started` — no work done
 - `in progress` — active; see the phase plan
 - `done` — exit criteria met, evidence recorded, `phase-N` tag applied
+- `complete — untagged` — exit criteria met and evidence recorded, tag deliberately not yet applied
 
 | # | Phase | State | Plan | Tag |
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
-| 1 | Assets & references | **in progress** | [01-assets.md](docs/plans/01-assets.md) | — |
+| 1 | Assets & references | **complete — untagged** | [01-assets.md](docs/plans/01-assets.md) | withheld — the whole-branch review comes first |
 | 2 | Shell + easy tier | not started | — | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
@@ -24,72 +25,125 @@ Phase status board. **Read this first if you are resuming work.**
 **Phase 0 is complete** (tag `phase-0`). The engine, the binary and the verification harness all
 work; no demo part has been ported yet.
 
-**Phase 1 is in progress.** Its plan is `docs/plans/01-assets.md`; its ledger (the recovery map, git-ignored
-scratch) is `.superpowers/sdd/01-assets/progress.md`.
+**Phase 1 is complete, and the `phase-1` tag is deliberately withheld.** Its exit criteria are met —
+the evidence is in the section below and in `docs/fidelity/reference-indices.md` — and its plan is
+`docs/plans/01-assets.md`; its ledger (the recovery map, git-ignored scratch) is
+`.superpowers/sdd/01-assets/progress.md`. The tag is withheld because the final whole-branch review
+comes after this close-out and may require fixes; a tag that has to be moved is worse than a tag
+applied a few commits later (B6's ruling, in the ledger). **The next action is that review; the tag
+goes on once it is clean, and Phase 2 starts from there.**
 
-**Part A (assets) is complete** — A1 through A8. `sr-assets` decodes Origin PIC (five variants plus a
-headerless case), IFF (ILBM and PBM), RIX3, `.PAL`, OMF `LEDATA`, FLI and `.ANI`, plus a proportional
-font-strip view. **361 workspace tests**; `assets/` holds **150 assets plus `PROVENANCE.md`** (149 curated
-plus one recovered from an EXE); `cargo xtask assets verify --tree --decode` exits **0** with `verdict: ok`
-and writes 21 contact sheets. Four approximation entries; 17 plan corrections, each from a measurement
-rather than from reasoning. The phase's human-look evidence is the user's own reading of the sheets
-("images look fine") — the noise-like tiles are non-picture data (3D scene files, TASM listings, S3M
-music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
-magic.
+### Phase 1's evidence (close-out, Task B6, 2026-10-12)
 
-**Part B (references) is complete — all 20 slots are captured**, at `reference/parts/`:
-BEGLOGO (B2); ALKU, U2A, PAM (B3 block 1); GLENZ, TUNNELI, TECHNO (two screens), PANICEND (B3 block 2);
-MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a); RAYSCRL, 3DSINFLD, JPLOGO (B4b, from a
-`SECOND 3` boot) and U2E (B4b, captured from a `SECOND 4` boot; `SECOND 3` reaches it too); ENDLOGO,
-CRED and ENDSCRL (B5, from a `SECOND 5` boot — the end sequence from its own beginning) and DDSTARS
-(B5, `SECOND U` only, the hidden part). **B6 closes the phase**: it writes the non-determinism policy
-and the phase's evidence, then tags it.
+**Part A (assets).** `sr-assets` decodes Origin PIC (five variants plus a headerless case), IFF (ILBM
+and PBM), RIX3, `.PAL`, OMF `LEDATA`, FLI and `.ANI`, plus a proportional font-strip view. `assets/`
+holds **150 assets plus `PROVENANCE.md`** (149 curated plus one recovered from an EXE), 151 files.
+`cargo xtask assets verify --tree --decode`, re-run at the close-out, exits **0** with `verdict: ok`:
 
-**One B5 finding every later reader of these rows needs.** ENDSCRL's screen is the one screen in the
-tree where the capture tool cannot take two frames one index apart (`the emulator reached frame 9101
-before frame 9100 could be captured`; two remedies tried and both failed, because the grabs are served
-by the emulator's own process), so **ENDSCRL's census is an offset-0 count and no session holds its
-±1 window** — the row says so, and `docs/fidelity/reference-indices.md` §1.11 and §21.4 have the
-measurement. Every other part of the block reproduces byte-for-byte at its own boot index across
-separate sessions: ENDLOGO's 430 and 900 and all of CRED's keyframes are held (ENDLOGO's 500 and 1180
-are palette fades over the held picture, moving in the palette and nowhere else), and DDSTARS's and
-ENDSCRL's keyframes are all moving.
+```
+decode: 150 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 87 headerless with no decoder,
+1 refused on record, 0 finding(s)
+```
 
-**Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames,
-and the states it holds are **discrete and recur** — two of four independent sessions hold the same
-bytes at 17500 and 17700 (0 px of 128000 differ) — but **the set of them is wide**: twelve captures
-of the recipe hold ten distinct byte-images at 17700, and the seven re-capture probes B4b's fix round
-ran never drew the one the sessions hold. So the census decides which state a reference should file,
-and JPLOGO's 17700 is recorded as **settled as a state and unfiled as a file** — a residual to expect
-in a Phase 2 diff there, not a port error. And **`SECOND 3` reaches U2E as well as `SECOND 4`**
-(`partsmask[3]` is the binary literal `11100b` = `0x1c`, bits 2/3/4, and bit 3 is U2E), showing the
-**same screens at different boot indices** — U2E writes CRTC 9 = `(old & 0xf0) | 0x80` and
-`fadeset()`s its buffers itself (`VISU/C/U2E.C:302-313`), so the screen does not depend on the boot,
-only the index does. Both are in `docs/fidelity/reference-indices.md` §1.10/§17/§18 and in the plan's
-Task B4 note.
+21 contact sheets come from the same pass. Four approximation entries; 17 plan corrections, each
+from a measurement rather than from reasoning. The human-look evidence is the user's own reading of
+the sheets ("images look fine"); the noise-like tiles are non-picture data (3D scene files, TASM
+listings, S3M music, lookup tables, palette strips) correctly rendered as byte views, and none of
+them carries a picture magic. **The workspace suite is 398 passed, 0 failed, 1 ignored, 0 warnings**
+(re-run at the close-out; it was 361 at Part A's close).
 
-**What the references mean, and it is not what "frame-exact" suggests at first reading.** The boot
-repeats exactly (D17), and the frame grab is counter-verified on both sides, but **the emulator's own
-picture at a given boot index is not fully reproducible between sessions**: sessions fall into **discrete
-alignment groups** rather than a continuum, and the majority group is byte-identical. `compare`
-therefore searches **±1 frame** and reports the offset (D18) — pixels stay exact, only the alignment is
-searched, and no pixel tolerance was added anywhere. A keyframe is filed only if the picture it holds is
-presentable by **at least half** the sessions at offset 0 or ±1 **with 0.0000 % differing**, with the
-reference's own capture excluded from the count (D19, and `reference-indices.md` §1.8); where no picture
-reaches that, the row records the keyframe as having **no settled content** — which is the honest answer
-for GLENZ 3000/3400 and PLZPART plasma 7000/7600, and is a property of those screens rather than a gap
-to be filled.
+**Part B (references) — all 20 slots captured**: **83 keyframe frames in 22 capture directories**
+under `reference/parts/`, every one of them carrying a `manifest.json` with the recipe and a row in
+`docs/fidelity/reference-indices.md` §2 with its command, hashes and re-capture comparison. (TECHNO
+and PLZPART each span two geometries and have one directory per screen; U2E is captured from a
+`SECOND 4` boot, which `SECOND 3` also reaches — the screen does not depend on the boot, only the
+index.) Held/moving is measured per keyframe, not assumed from the part (§1.3).
+
+| part | boot | keyframes | held / moving | reproducibility |
+|---|---|---|---|---|
+| BEGLOGO | `SECOND 2`, 320×400 Mode X | 430, 470, 560, 900 | 430 and 900 held; 470/560 moving — a palette fade over the held picture | **exit 0, identical, 0.0000 %, offsets `{0: 4}`**; 900 byte-identical in five sessions |
+| ALKU | `SECOND 1`, 320×400, 176-byte rows, RGB only | 900, 1719, 2719, 5859 | 900/1719/2719 held; 5859 moving — the part's own 1 px-per-9-frames pan | exit 1, `mode: rgb`: three held frames 0.0000 % at offset 0; 5859 differs by a whole number of pan pixels (15.2797 % at offset 0, **0 px of 95,700 after the shift**). No tolerance added (§4.4) |
+| U2A | `SECOND 1`, 320×200 | 6500, 7300, 7640 | 6500/7640 held; 7300 moving | exit 0, identical, 0.0000 %, offsets `{0: 3}` |
+| PAM | `SECOND 1`, 320×200 | 7710, 7760, 7830, 7900 | 7830/7900 held; 7710/7760 moving | exit 0, identical, 0.0000 %, offsets `{0: 4}` |
+| GLENZ | `SECOND 2`, 320×200, 92-byte plane row | 1499, 2300, 3000, 3400 | 1499 held (palette cycles); 2300/3000/3400 moving | exit 1, `mode: mixed`: 1499 identical at offset 0; the three moving frames are the largest-support pictures and are **byte-identical at offset 0** against the review's independent partner. **3000 and 3400: no settled content** (§1.8) |
+| TUNNELI | `SECOND 2`, 320×200, RGB only | 3800, 4200, 4500, 4600 | all four moving | exit 1, `mode: rgb`: 3800/4200/4500 identical 0.0000 % at offset 0; 4600 0.0891 % (57 px). **4500 and 4600: no settled content** |
+| TECHNO — interference | `SECOND 2`, 320×200 16-colour EGA, RGB only | 4900, 5000, 6300, 8100 | 4900/6300/8100 moving; 5000 a palette step that holds for one sampled pair and moves a frame away | **exit 0, identical, offsets `{0: 4}`** after the group-check re-capture (was 24.6–72.9 % before it) |
+| TECHNO — troll | `SECOND 2`, 320×400 Mode X | 8200, 8300, 8400 | 8200/8400 held; 8300 moving (the fade-in) | exit 1, `mode: mixed`: 8200/8400 identical at offset 0; 8300 99.9883 % at offset −1, its picture the largest support (3/4) |
+| PANICEND | `SECOND 2`, 320×200 | 8792, 8800, 9000 | 8800/9000 held; 8792 moving — the collapse itself | exit 0, identical, 0.0000 %, offsets `{0: 3}` |
+| MNTSCRL | `SECOND 3`, 320×200 Mode 13h | 500, 1100, 1700, 2300 | 500 held; 1100/1700/2300 moving (2.4–3.1 % a frame) | exit 0, identical, offsets `{0: 4}`; the same against three more sessions; **6/6 (100 %)** support |
+| LNS&ZOOM | `SECOND 3`, 320×200 Mode 13h | 2700, 3400, 4200, 4900, 5650 | 2700/5650 held; 3400/4200/4900 moving (6.7–39.8 % a frame) | exit 0, identical, offsets `{0: 5}`; **5/5 (100 %)** |
+| PLZPART — plasma | `SECOND 3`, 320×400 Mode X, line-compare 60/61 | 6000, 7000, 7600 | all three moving (~70 % of pixels a frame) | exit 1, `mode: rgb`, offsets `{0: 3}`: 6000 0.0000 %/0.1641 % across two sessions; 7000 7.73/12.93 %; 7600 9.33/24.48 %. **No settled content on all three** (2/5, 0/4, 0/3) — §13.6 |
+| PLZPART — cube | `SECOND 3`, 320×200 Mode X | 8500, 9500 | both moving (25–56 % a frame) | exit 0, identical, 0.0000 %, offsets `{0: 2}`; **4/4 (100 %)** |
+| MINVBALL | `SECOND 3`, 320×200 Mode 13h, RGB only | 10900, 11200, 11800, 12400 | all four moving (4.7–7.1 % a frame) | exit 0, identical, offsets `{0: 4}` (one session pairs all four at offset −1, 0.0000 %); **3/3 (100 %)** |
+| RAYSCRL | `SECOND 3`, 320×200 Mode 13h | 13000, 13500, 14000, 14500 | 13500 held; the rest moving | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions and the reviewer's; **4/4 (100 %)** — the cleanest row in the tree |
+| 3DSINFLD | `SECOND 3`, 320×200, 80-byte plane rows, RGB only | 15500, 16000, 16500, 16800 | all four moving, in **two-frame steps** | **exit 0, identical, 0.0000 %** against two sessions; exit 1 against one two steps out of phase (38.90 %/41.79 %). Census 3/3, 3/3, 3/4, 2/3 — **all four settled** after the fix round re-filed 16500 and 16800 |
+| JPLOGO | `SECOND 3`, 320×400 Mode X, RGB only | 17300, 17500, 17700 | all three held *within* a session, but the held bytes differ between sessions | exit 1, `mode: rgb`: 17300 0.0000 % in all four sessions; 17500 0.0000 % in two (2/4 = 50 %) and 39.4–41.4 % in the other two; 17700 40.19 % against two and 27.4–29.6 % against the others. **17700: settled as a state, unfiled as a file** — the state two sessions hold was not drawn by any of seven re-capture probes |
+| U2E | `SECOND 4` (and `SECOND 3`, other indices), 320×200 | 1000, 1600, 2600, 3600 | all four moving; the buffer rotation is not a fixed period | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent session; exit 1 against the three census sessions, each missing one keyframe by 55.5–60.8 % (a phase group, not a different screen). Census 4/4, 3/4, 3/4, 3/4 — every keyframe settled |
+| ENDLOGO | `SECOND 5`, 320×400 Mode X | 430, 500, 900, 1180 | 430/900 held; 500/1180 moving — palette fades over the held picture | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions; **4/4 (100 %)**. Only 900 is index-compared (no session holds a 430 `.idx`) |
+| CRED | `SECOND 5`, 320×200, 160-byte plane rows | 1440, 3240, 5440, 7640, 8740 | all five held | **exit 0, identical, 0.0000 %, offsets `{0: 5}`** against three sessions; **4/4 (100 %)**; all 82 frames RGB-only — the *coherence* check, not a stride and not a mode (§20.2) |
+| ENDSCRL | `SECOND 5`, **non-looping**, 640×400 mode 0eh 16-colour | 9100, 10000, 12000, 14000 | all four moving — the 401-line ring scrolls a line per two vblanks | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions. Its census is an **offset-0 count**, not a window count — see the caveat below: **9/9 at 9100, 5/5** at the rest |
+| DDSTARS (the hidden part) | `SECOND U` only, 320×400 | 1900, 3000, 5000, 8000 | all four moving | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions; per-keyframe census **6/6, 5/5, 4/4, 5/5 (100 % each)** |
+
+**Phase 1's exit criterion is met**: every slot of `part-sequence.md` §1 has a reference, a row and a
+re-capture comparison, and the criterion is stated per screen kind because the oracle's own
+reproducibility is per screen kind — a held screen shows exit 0, offset 0, byte-identical; a moving
+one shows the measured offset and residue.
+
+**The step-1 probe (B6) — the day-apart claim, which the in-session checks cannot reach.** The phase
+did span days: the first captures were committed 2026-10-11 and the probe ran 2026-10-12. B6
+re-captured the oldest references in fresh emulator sessions and compared them against the filed
+files. **BEGLOGO** (the first reference captured; its 470 and 560 move in the palette): all four
+keyframes **0.0000 %, `verdict: identical`, exit 0, offsets `{0: 4}`**, and all six filed files
+(`430.rgb`, `430.idx`, `470.rgb`, `560.rgb`, `900.rgb`, `900.idx`) **`sha256`-equal** to the new
+capture. **ALKU** (the oldest continuously drawn screen, and the one row whose moving keyframe does
+not reproduce pixel-for-pixel): all four keyframes **identical at offset 0, exit 0**, including 5859
+— the new session drew the reference's own pan phase, and its 5858/5859/5860 are one `sha256` again.
+So a capture still means the same thing a day later for both. This is the weaker claim the plan
+wanted probed and it is now measured, not assumed; what it does **not** cover is a screen outside
+these two kinds (a continuously redrawn screen that lands in a minority alignment group), which is
+what §1.8's census exists for.
+
+**What could not be confirmed — the negatives, which a resuming session must read as carefully as
+the table.** `docs/fidelity/reference-indices.md` §1.12 is the policy and carries the detail.
+
+- **Keyframes the filed reference does not fully settle** — the largest-support picture is presented
+  by fewer than half the sessions, so the row records **no settled content**: GLENZ 3000 and 3400,
+  TUNNELI 4500 and 4600, PLZPART plasma 6000, 7000 and 7600, and JPLOGO 17700 (*settled as a state,
+  unfiled as a file* — the filed picture is taken at `N` by none of the four sessions, and seven
+  probes never drew the state two of them hold). **A Phase 2 diff at these indices is the oracle's
+  residual, not a port error.** Two knife edges sit just outside the list at exactly half: TUNNELI
+  4200 (3/6) and JPLOGO 17500 (2/4).
+- **The oracle's rare excursion, unexplained.** One session had TECHNO's rings ~30–40 frames early.
+  It did not reproduce, and it is not the music clock (measured to ≈1 music frame across sessions),
+  not a fixed offset and not a counter stall (0 stalls ≥150 ms at 20 ms resolution to frame 4900).
+  Recorded as real, rare, not reproducible.
+- **ENDSCRL's deviation from the window rule, and what it costs.** No session in the tree holds this
+  part's ±1 window — the tool cannot take two frames one index apart on that 640×400 screen (five
+  sessions record the refusal and a sixth attempt was killed; two remedies tried and both failed,
+  because the grabs are served by the emulator's own process), so its census is an offset-0 count. Accepted *because* every session that took the index
+  is byte-identical at offset 0, so there is no disagreement for the rule to inflate — but a
+  one-frame-out diff there **is a difference, not an alignment**, and the offset-0 agreement proves
+  nothing about a ±1 pairing, because no session holds one.
+- **The CRC-register read race in `xtask`'s oracle, still live.** `crtc_offset_register()` and
+  `chain4_enabled()` each read the index/data port pair in two requests with the guest running in
+  between; the loud half refuses a frame (JPLOGO: eight refusals), the quiet half can be *used* and
+  the coherence check is blind to it on a palette-collapsing screen. Nothing in the tree is wrong
+  because of it — every `.idx` from a part that writes CRTC registers was hand-checked — but the
+  durable fix (read the pair coherently, or twice and require agreement) belongs to whoever next
+  touches the oracle.
+- **No `phase-1` tag, deliberately.** See the top of this section.
 
 **One Phase 2 result already came out of Part B.** PLZPART's plasma confirms on captured frames that the
 port's `Split::scanline` is the emulator's line-compare register **plus one** (`62/61/62` for a register
 alternating 60/61), which is what `Split`'s doc comment and D16 assert and what Phase 2 depends on.
 
-Phase 1's exit criterion is not met until every slot has a reference and a re-capture comparison, and
-B6 has written the policy and updated this file.
-
-Phase 2 is *Shell + easy tier*, whose exit criterion is **BEGLOGO frame-diff-identical** — that is the
-project's central technical risk, and it is answered there, not in Phase 9. Phase 3 (music) has no
-dependency on Phase 2 and may run in parallel if the music is worth retiring first.
+**The policy a later phase should read first** is `docs/fidelity/reference-indices.md` §1.12: what an
+index means, that it is valid only under the B1 recipe (`--boot autoexec`, the silent emulator) at the
+pinned cycles, that a moving screen's alignment is not reproducible between sessions so `compare`
+searches ±1 frame and reports the offset (D18), why spec §8.4's structural-similarity fallback was
+**not needed** (±1 keeps the comparison pixel-exact and searches only the alignment; structural
+similarity would give up exactness), how a part that does not reproduce is handled, and the unresolved
+items above. `docs/decisions.md` D20 records the same policy as a decision.
 
 Two things Phase 1 inherits and should not have to rediscover:
 
@@ -204,7 +258,11 @@ test card cycling the five visually-significant hardware behaviours of spec §2.
   orders 42 and 25 mid-run and drifted against every later part. D13, commit `692e6e8`.
 - **Capture indices are boot-relative and had to move.** Frame 0 is the emulator's first rendered
   frame; `SECOND.EXE` is not reached until counter ~1657, so frames 10/60/120 are DOS-shell frames
-  and the title screen is around frame 1700. `d0ed148`.
+  and the title screen is around frame 1700. `d0ed148`. **(The 1657/1700 landmarks are Phase 0's
+  typed-recipe numbers and are superseded by D17: under B1's `--boot autoexec` recipe the setup
+  screen is at 16 and the demo's first graphics frame at 404, and every reference in the tree is
+  boot-relative to that recipe. The numbers are left standing as the record of what was measured
+  then.)**
 - **`compare`'s `--out` defaulted into the reference tree**, writing reports into the project's
   input-of-record. Now defaults to `out/compare`, with a guard refusing an explicit `--out` inside
   any reference tree. `22eff72`.
