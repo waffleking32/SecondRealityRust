@@ -450,6 +450,7 @@ table.
 | TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row where the read succeeded (320-byte rows later, §9.6); 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1, its picture the largest support at 3/4 sessions over the ±1 window (§9.5) |
 | PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself, whose picture is the one session with a ±1 window and two refused captures also present (§10.3) |
 | MNTSCRL | `SECOND 3` | 320×200 Mode 13h; 500 carries `.idx` | 500, 1100, 1700, 2300 | `out/b4-mnt-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4-mnt-sess4` and `out/b4-mnt-sess6`. 500 is held (`e68aa887…` in every one of the 8 sessions that took it); 1100, 1700 and 2300 move within a session (~2.4–3.1 % of pixels a frame) but the same bytes at the same index in all 6 independent sessions, so each is supported **6/6 (100 %)** over the ±1 window (§11.4) |
+| LNS&ZOOM | `SECOND 3` | 320×200 Mode 13h; 2700 and 5650 carry `.idx` | 2700, 3400, 4200, 4900, 5650 | `out/b4-lns-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 5}`, `mode: mixed`; the same against `out/b4-lns-sess3` and `out/b4-lns-sess5`. 2700 (the held face) and 5650 (the flat white the part exits on) are held; 3400 (the lens), 4200 and 4900 (the rotazoomer) move 6.7–39.8 % of pixels a frame and still carry the same bytes at the same index in all 5 independent sessions — **5/5 (100 %)** support each (§12.4). 5650's `.idx` is a flat-palette plane the coherence check cannot vouch for (§12.2) |
 
 ### Adding a row
 
@@ -2018,3 +2019,166 @@ boundary is a content change with no geometry refusal at all**: both screens are
 nothing in `--frames` can find it, and the sheet is the discovery (§1.6). The black gap is two or
 three frames wide — narrower than the tens of frames GLENZ leaves — and it is the same
 `ea0787f6…` black as everywhere else.
+
+---
+
+## 12. LNS&ZOOM
+
+`SECOND 3`'s second part, and one binary holding two effects — `LENS/MAKEFILE:26` builds `lens.exe`
+and stages it as `lns&zoom.exe`. It is three routines one after another: `part1` (`LENS/MAIN.C:89-131`),
+`part2` (`:133-183`, the lens) and `part3` (`:185-272`, the rotazoomer), run from `main` as
+`part1(); while(dis_musplus()<-20); part2(); part3();` (`:379-386`). 320×200 mode 13h throughout
+(`setvmode(0x13)`, `:292`), and every frame of it carries `.idx` only when the palette happens to be
+still while the read runs — the lens and the rotazoomer both move a palette area every frame, so
+most of the part is RGB only.
+
+**What is on screen.** `part1` wipes the demon-face picture onto the screen with two vertical edges
+walking across it (`cp[x]=dp[x]`, `:114-129`), for at most 300 frames (`:107`), after a music wait
+(`:104`). `part2` runs 715 frames with `drawlens(x,y)` steering a bubble along `pathdata1` (`:159-165`),
+and `part3` is the rotazoomer: `rotpic90=back` (`:191`), a rotated/zoomed copy of the face, drawn
+until `frame = 2000` (`:211`) or a music break (`:213`), fading out from its frame 1872 (`:261-267`).
+It ends by loading the palette with 63 everywhere — `for(a=0;a<768;a++) palette[a]=63;` (`:274-275`)
+— which is the **flat white screen** 5650 is.
+
+**The part's extent** is **from its first frame in (2452, 2456] to the white screen that is still up
+at 5720** — about 3270 frames, ≈47 s, the longest part in this ledger so far.
+
+### 12.1 The sweeps, and what the sheets showed
+
+```
+out/b4-mnt-lns-boundary  2100,2150,…,2500 step 50          exit 0 (9 frames)  — §11.5
+out/b4-mnt-sweep2        2200,2500,…,4600 step 300          exit 0 (9 frames)
+out/b4-lns-start1        2452,2456,2460,2464,2468           exit 0 (5 frames)
+out/b4-lns-sweep2        2500,2550,…,3200 step 50           exit 0 (15 frames)
+out/b4-lns-sweep3        3300,3400,…,4300 step 100          exit 0 (11 frames)
+out/b4-lns-sweep1        4700,4900,…,6900 step 200           exit 2, refused at 5900 (320×200 → 320×400)
+out/b4-lns-end1          5450,5500,…,5750 step 50            exit 2, refused at 5750 (same change)
+out/b4-plz-start1        5710,5720,5730,5740                exit 2, refused at 5730 (same change)
+out/b4-lns-hold2         3560,3580,…,3680 step 20            exit 0 (7 frames)
+out/b4-lns-sess1 … -sess5  2699,2700,2701,…,5649,5650,5651  exit 0 each (15 frames)
+```
+
+Tiles. `b4-lns-sweep2`: **2500 … 2900** the face, one picture; **2950** a dark blue lens arriving at
+the top-left; **3000 / 3050 / 3100 / 3150 / 3200** the lens swimming across the face — left eye,
+centre, right eye, lower right. `b4-lns-sweep3`: **3300** the lens at the lower left; **3400** the
+lens over both eyes; **3500** the lens leaving to the right; **3600** the plain face again; **3700**
+the face brighter, mid-change; **3800 / 3900 / 4000 / 4100 / 4200 / 4300** the rotazoomer — the face
+rotated, magnified and sliding, with the blue bubbles scattered over black. `b4-lns-sweep1` (the
+five that captured): **4700 / 4900 / 5100 / 5300** the rotazoomer in different phases; **5500** it
+dark (mean 9.35). `b4-lns-end1`: **5550** mean 94.44, **5600** mean 177.10, **5650 = 5700** one
+`sha256` at mean 255.00 — **flat white**.
+
+### 12.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 2700 | the **face**, held — the demon face with the pentagram and yellow eyes, blue bubbles at the corners; byte-identical from 2490 to ~2945. | `.rgb` + `.idx` | rgb `6a152a31…`, idx `70175500…` |
+| 3400 | the **lens** — the bubble crossing the face over both eyes, the face behind it distorted. | `.rgb` only | rgb `6c81eadc…` |
+| 4200 | the **rotazoomer**, early — the rotated face at the right of the frame with the blue bubbles over black. | `.rgb` only | rgb `19e5682f…` |
+| 4900 | the **rotazoomer**, late — a magnified face fragment filling the lower half, bubbles above it. | `.rgb` only | rgb `248f6b83…` |
+| 5650 | the **white screen** the part ends on, held — one colour, 64000 pixels, `(255,255,255)`. | `.rgb` + `.idx` | rgb `20f3d62f…`, idx `f8636cd3…` |
+
+One keyframe per screen the part draws: the face it holds on, the lens, the rotazoomer at two points
+through its ~1790 frames, and the white flash it exits on. They are 700–800 frames apart, well over
+the ~60 a three-index support batch needs (§1.3). 2700's picture is the same bytes as `2490`, the
+frame MNTSCRL's black gap is followed by (§11.5) — the same face, drawn by the same blit, filed
+under two parts.
+
+Full hashes of the seven files in `reference/parts/lnszoom/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 2700 | `frame_002700.rgb` | `6a152a319d26f6c4f0c6cea6f9127f5a5b7b07c00da1d99a215446e1d4d21fd3` |
+| 2700 | `frame_002700.idx` | `70175500011ef854281c7ff89a82b449269ec15081a89ff181da84de60c55509` |
+| 3400 | `frame_003400.rgb` | `6c81eadc9c9f119cb3cbcbc2baee37733e7feff0bb47a2d733d915a4d2cb4d63` |
+| 4200 | `frame_004200.rgb` | `19e5682fdaa94598ea87b8236286807069c95546f855e65455b4db38107c5430` |
+| 4900 | `frame_004900.rgb` | `248f6b830e146d0454dc2b8a15f46c6030f8a1704b22626150736d7edce3b93f` |
+| 5650 | `frame_005650.rgb` | `20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8` |
+| 5650 | `frame_005650.idx` | `f8636cd395797afa4aa9ecad7839711fc32df00209fb7163a2690e8901f1788e` |
+
+**Both `.idx` files were checked by hand, and one of them cannot vouch for anything.** 2700's plane
+holds 64 distinct indices over 64000 pixels, every index has exactly one RGB triple, and the
+`(c*259+33)>>6` widening of the manifest's palette reproduces the RGB with **0 mismatches** — an
+honest plane on a picture, and the check that would catch a stride error if mode 13h's stride were
+wrong. **5650's cannot do that job**: its palette is 63 in every one of its 63 used entries, so
+every index widens to white and the coherence check passes whatever the plane says. Read by hand, the
+plane is *not* flat — 63 distinct indices, 50308 of them zero, the leftover index picture of the
+rotazoomer's last frame under a white palette — and it is the same bytes in all five sessions that
+took it, so it is reproducible. But it is the §1.6 blind spot in its purest form: **the white
+keyframe's `.idx` is evidence of nothing about the stride**, and Phase 2's indexed comparison of
+5650 compares a plane no one can check visually.
+
+### 12.3 Held or moving, measured
+
+| keyframe | neighbours | reading |
+|---|---|---|
+| 2700 | 2699 = 2700 = 2701, one `sha256`, and 2490…2900 sampled at 100 (9 points) are the same bytes in `b4-lns-sweep2` | **held** |
+| 3400 | three `sha256`; 4312 px (6.7375 %) and 4367 px (6.8234 %) a frame | **moving** |
+| 4200 | three `sha256`; 10052 px (15.7063 %) and 8248 px (12.8875 %) a frame | **moving** |
+| 4900 | three `sha256`; 25440 px (39.7500 %) and 24876 px (38.8687 %) a frame | **moving** |
+| 5650 | 5649 = 5650 = 5651, one `sha256`, and 5700 is the same bytes again | **held** |
+
+All the per-frame numbers are measured inside one capture between adjacent indices. The face's hold
+is bounded on both sides: 2950 is 2940 px (4.5938 %) away from 2900, so the hold ends in (2900, 2950],
+and the lens phase ends by returning the screen to *exactly* the hold's picture — 3600, 3620 and 3640
+are `6a152a31…` again, 3580 is 7859 px (12.2797 %) away from 3600 and 3660 is 64000 px (100 %) — so
+the face is held a second time for ~60 frames at (3580, 3660) before the rotazoomer starts. The
+rotazoomer is the fastest screen in this part: 3800→3900 is 93.3438 % of pixels and 3900→4000 is
+98.9062 %, so a one-frame phase difference there moves most of the picture (§1.7).
+
+### 12.4 The re-capture and the census
+
+```bash
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 2700,3400,4200,4900,5650 --out reference/parts/lnszoom --sheet out/lnszoom.png
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 2699,2700,2701,3399,3400,3401,4199,4200,4201,4899,4900,4901,5649,5650,5651 \
+    --out out/b4-lns-sess1
+```
+
+```
+$ cargo xtask compare --reference reference/parts/lnszoom --rendered out/b4-lns-sess1 \
+      --out out/b4-lns-recapture-diff1
+frame 2700: 0.0000% differing (0/64000 px), max delta 0
+frame 3400: 0.0000% differing (0/64000 px), max delta 0
+frame 4200: 0.0000% differing (0/64000 px), max delta 0
+frame 4900: 0.0000% differing (0/64000 px), max delta 0
+frame 5650: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 5}
+exit: 0
+```
+
+`out/b4-lns-sess3` and `out/b4-lns-sess5` — independent sessions, separate sittings — give the same
+report (`exit 0`, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: mixed`).
+
+**The census**, over the five sessions that hold a window (the reference's own directory excluded):
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| LNS 2700 (held) | 5 | 1 | `6a152a31…` **5/5 (100 %)** | **yes** | yes |
+| LNS 3400 | 5 | 3 | `6c81eadc…` **5/5 (100 %)** | **yes** | yes |
+| LNS 4200 | 5 | 3 | `19e5682f…` **5/5 (100 %)** | **yes** | yes |
+| LNS 4900 | 5 | 3 | `248f6b83…` **5/5 (100 %)** | **yes** | yes |
+| LNS 5650 (held) | 5 | 1 | `20f3d62f…` **5/5 (100 %)** | **yes** | yes |
+
+As with MNTSCRL, every session presents the filed picture **at `N`** — including the three screens
+that move 6–40 % of their pixels a frame — so the support counts and the `0.0000 %` pairings are the
+same fact. The index planes agree too: 2700's `.idx` is `70175500…` and 5650's `f8636cd3…` in all
+five sessions and in their `±1` neighbours.
+
+### 12.5 Where the part begins and ends
+
+The beginning is §11.5 read from the other side: MNTSCRL's last drawn frame is ~2445, **2450 and
+2452 are flat black** (`ea0787f6…`), and **2456 is already the face at mean 7.53** — so LNS&ZOOM's
+first frame is in **(2452, 2456]**, the black gap is three or four frames wide, and this boundary is
+also a content change with no geometry refusal. The face's palette then rises (2460 mean 16.13, 2480
+38.95) and settles by 2490 (mean 40.30, 25480 non-black pixels), which is the hold's first frame
+that is byte-identical to 2700.
+
+The end is a geometry change, so the refusal finds it: `b4-lns-sweep1` refused at **5900**, `end1` at
+**5750** and `plz-start1` at **5730** — each `320x200 → 320x400`. Narrowed by `plz-start1`, **5710 and
+5720 are still the white** (one `sha256` with 5650) and **5730 is already 320×400**, so the white
+that `part3`'s `palette[a]=63` (`MAIN.C:274-275`) leaves on the screen holds to ~5725 and PLZPART's
+Mode X screen follows it directly. Between 5450 (the rotazoomer, mean 39.59) and 5650 (white) the
+screen goes through the rotazoomer's own fade (5500 mean 9.35) and back up (5550 94.44, 5600 177.10)
+— the palette reaching white, with the picture still in the index plane underneath.
