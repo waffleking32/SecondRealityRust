@@ -3276,8 +3276,12 @@ once a vertical blank, and the main loop (`:376-540`) services the animation str
 ```
 out/b4b-u2e-sweep   420,500,600,700,800,900,1000,1200,1400,1600,1800,2000,2300,2600,3000,3500,
                     4000,5000                                                 exit 0 (18 frames)
-out/b4b-u2e-sweep2  430,450,470,490,520,560,640,760,820,3100,3400,3700,3900,3950,4050,4100,
-                    4200,4400,4600,4800                                       (fill)
+out/b4b-u2e-sweep2  430,450,470,490,520,560,640,760,820,…                  exit 2, refused as a
+                    *miss* at 520: four indices 20 apart are one 4-index batch (§1.3) and the next
+                    index was only 30 frames past its read
+out/b4b-u2e-sweep2  430,480,530,590,660,760,850,950,3100,3200,3400,3700,3900,3950,4050,4100,
+                    4200,4400,4600,4800                                       exit 2, refused at
+                    4400: "frame 4400 is 320x400 where the capture started at 320x200"
 ```
 
 | index | what is on screen |
