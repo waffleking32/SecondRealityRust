@@ -51,7 +51,9 @@ before frame 9100 could be captured`; two remedies tried and both failed, becaus
 by the emulator's own process), so **ENDSCRL's census is an offset-0 count and no session holds its
 ±1 window** — the row says so, and `docs/fidelity/reference-indices.md` §1.11 and §21.4 have the
 measurement. Every other part of the block reproduces byte-for-byte at its own boot index across
-separate sessions, ENDLOGO's and CRED's keyframes are held, and DDSTARS's and ENDSCRL's are moving.
+separate sessions: ENDLOGO's 430 and 900 and all of CRED's keyframes are held (ENDLOGO's 500 and 1180
+are palette fades over the held picture, moving in the palette and nowhere else), and DDSTARS's and
+ENDSCRL's keyframes are all moving.
 
 **Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames,
 and the states it holds are **discrete and recur** — two of four independent sessions hold the same

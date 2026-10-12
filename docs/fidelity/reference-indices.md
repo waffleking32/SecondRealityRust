@@ -584,10 +584,12 @@ from which bits the boot sets, not from a remembered index.
 
 **A capture can be refused before it starts for a reason that is neither §1.2's geometry nor §1.3's
 deferred-read backlog: the grab loop cannot take two adjacent frames on this block's 640×400
-screen.** `--frames 9099,9100,9101,…` is refused **at the first batch, in six consecutive sessions**
-— `the emulator reached frame 9101 before frame 9100 could be captured` (once 9102) — and a two-index
-list (`9099,9100`) is refused the same way, while a **two-frame gap works every time**: `9098,9100`
-and the twelve-index lists of §21.4 all capture. The same three-index shape is fine on every 320×200
+screen.** `--frames 9099,9100,9101,…` is refused **at the first batch — five sessions record it and a
+sixth was killed before it could** — with `the emulator reached frame 9101 before frame 9100 could be
+captured` (three of the five with nothing else running, two with the core-sharing remedy in place),
+and a two-index list (`9099,9100`) is refused the same way. A **two-frame gap works once** (`9098,9100`
+captures) but not in a three-index batch (refused at 9102), while a **three-frame gap works every
+time**: `9097,9100,9103` and the twelve-index lists of §21.4 all capture. The same three-index shape is fine on every 320×200
 screen in this ledger and worked four times over on ENDLOGO's 320×400 screen in this same block, so
 this is not a property of the index list. It is the per-grab cost crossing one emulated frame's wall
 time: a grab is three HTTP requests to the emulator (a counter read, a raw frame, a counter read) and
@@ -646,28 +648,35 @@ controller), so the indexed read is refused with `UnmodelledMode` on **20 of 20*
 loud message is the one to quote**: nothing was read at a guessed stride, and the noise-like picture
 this part produces is not "a screen that moved".
 
-**A census that counts by index alone counts the wrong sessions, and this block measured a case
-where the wrong session agrees perfectly.** `out/rev-batch-probe` — a directory from an earlier
+**A census that counts by index alone counts the wrong sessions, and this block measured several
+cases where the wrong session agrees perfectly.** `out/rev-batch-probe` — a directory from an earlier
 block, with no manifest — holds `85789170…` at 429, 430 **and** 431, which is exactly ENDLOGO's
 white, because **BEGLOGO's 430 on a `SECOND 2` boot and ENDLOGO's 430 on a `SECOND 5` boot are the
 same bytes** (`reference/parts/beglogo/frame_000430.rgb` and
-`reference/parts/endlogo/frame_000430.rgb` are one `sha256`): both parts open by writing 63 into 765
-of the 768 DAC entries over a blank screen. A census that scanned `out/` for the indices would have
-counted it as an ENDLOGO session at 3/3-or-better and it agrees byte for byte. The counts in this
+`reference/parts/endlogo/frame_000430.rgb` are one `sha256`). The two parts get there differently and
+they still coincide: `END/END.C:62-63` points the DAC's write index at **0** and writes 63 into DAC
+entries **0–764**, while `BEG/BEG.C:25-33` writes 63 into **0–254** and then **black into 255**, and
+BEGLOGO's white *screen* is index 15 (`memset(vram,15,…)`, `:20-21`) — a different mechanism giving
+the same all-white pixels. **Unfiltered, ENDLOGO's four windows have eleven wrong-boot holders**:
+four at 429–431 (`out/b2-batch-probe`, `out/b2-white-probe`, `out/review-b3-readcost`,
+`out/rev-batch-probe`), six at 499–501 (`out/b4-mnt-sess1`–`-sess6`, MNTSCRL's `e68aa887…` on the
+`SECOND 3` boot) and one at 899–901 (`out/b3-alku-probe`, ALKU's `fec9afb5…`). The counts in this
 block's rows are therefore **filtered by recipe** — a session counts only when its manifest names the
 same `arguments`, `boot`, `cycles` and `keys`, and a manifest-less directory counts only when this
-block made it — and §19.4 names the two directories the filter excluded. Byte-identity is not
-identity of a screen; the row's boot column is what says which part a frame belongs to.
+block made it, with §19.4 naming the one same-recipe directory that rule sets aside and saying why.
+Byte-identity is not identity of a screen; the row's boot column is what says which part a frame
+belongs to.
 
 **And the end sequence's timeline is anchored: every keyframe of all four parts reproduces at its own
 boot index across separate sessions.** ENDLOGO's white, held picture and two palette fades are
-byte-identical in three sessions (§19.4); CRED's five holds are byte-identical in three, with
-`K-1 = K = K+1` in every one (§20.3); DDSTARS's four moving keyframes are byte-identical in three
-sessions plus a probe (§22.4); and ENDSCRL's four are byte-identical in three (§21.4). That is the
-MNTSCRL shape of §23, and it is the opposite of block 2's music-gated parts: nothing in this block
-needed a *state* census to decide what to file, only a count to prove the filing was taken at `N`.
-**One part's count is an offset-0 count rather than a window count** — ENDSCRL's, because the screen
-refuses adjacent grabs (§21.4) — and the difference is stated in its row rather than papered over.
+byte-identical in four sessions (§19.4); CRED's five holds are byte-identical in four, with
+`K-1 = K = K+1` in every one (§20.3); DDSTARS's four moving keyframes are byte-identical in six, five
+and four sessions, per keyframe, plus a probe (§22.4); and ENDSCRL's four are byte-identical in nine
+(9100) and five (the others) (§21.4). That is the MNTSCRL shape of §23, and it is the opposite of
+block 2's music-gated parts: nothing in this block needed a *state* census to decide what to file,
+only a count to prove the filing was taken at `N`. **One part's count is an offset-0 count rather
+than a window count** — ENDSCRL's, because the screen refuses adjacent grabs (§21.4) — and the
+difference is stated in its row rather than papered over.
 
 ## 2. The index table
 
@@ -697,10 +706,10 @@ table.
 | 3DSINFLD | `SECOND 3` | 320×200, chain-4 off, 80-byte plane rows; RGB only | 15500, 16000, 16500, 16800 | `out/b4b-ray-sess1` | **exit 0, `verdict: identical`, 0.0000 %** against `out/b4b-ray-sess1` (offsets `{0: 3, +1: 1}`) and against `out/b4b-ray-sess2` (offsets `{0: 4}`), `mode: rgb`; exit 1 against `out/b4b-ray-sess3`, whose 15500 and 16000 are 0.0000 % at offset −1 and whose 16500/16800 are 38.9031 % and 41.7875 % (it sits two two-frame steps out of phase). Census: 15500 and 16000 **3/3 (100 %)**, 16500 **3/4 (75 %)**, 16800 **2/3 (67 %)** — **every keyframe settled**, each filed picture taken at `N` by at least one session. The reference was re-captured twice in fix round 1: the first row's 16500 was a picture no session takes at `N` (and its "no settled content" verdict for it was a misread of §1.8 rule 3), and its 16800 was taken only at `N−1` (§16.4) |
 | JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1`, and the reviewer's `out/review-b4b/jp-sess` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** in all four sessions (`-sess1`–`-sess3` and `jp-sess`); 17500 0.0000 % against `-sess2` and `jp-sess` (which hold the same bytes) and 41.3773 %/39.3516 % against `-sess1`/`-sess3`; 17700 40.1914 % against `-sess2`/`jp-sess` and 29.5719 %/27.3664 % against `-sess1`/`-sess3`. Census over the four sessions: 17300 **4/4 (100 %)** and 17500 `aab611ef…` **2/4 (50 %)** settled; **17700 is settled as a state and unfiled as a file** — the state two sessions hold (`ec3de2bb…`, 2/4, taken at `N` by both) was not drawn by any of the **seven re-capture probes** this round ran (`out/b4b-jp-ref3…ref9`, each the same recipe, keyframes only, ~10 minutes of emulated run), and the filed `91d6ce6b…` is taken at `N` by none of the four. Twelve captures of the recipe hold **ten distinct** byte-images at 17700, so the residual there is the oracle's state spread and not a port error (§17.3, §17.5) |
 | U2E | `SECOND 4` (this capture) — `SECOND 3` reaches it too, at its own indices | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent `out/review-b4b/u2e-sess`; exit 1, `mode: rgb`, offsets `{0: 4}` against `out/b4b-u2e-sess1`–`-sess3`, each of which misses one keyframe at 55.4672–60.8406 % (a phase group, not a different screen). Census over the four sessions holding a window: 1000 **4/4 (100 %)** and 1600, 2600 and 3600 **3/4 (75 %)** each, every filed picture taken at `N` — **every keyframe settled** (§18.4, §18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/4) and the re-capture drew the one three of them do. `SECOND 3` reaches U2E as well and shows the same screens at different indices (§18.1, §18.6) |
-| ENDLOGO | `SECOND 5` (this capture); a full run reaches it too, at its own indices | 320×400 Mode X, 80-byte plane rows; 430 and 900 carry `.idx` | 430, 500, 900, 1180 | `out/b5-endo-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three sessions, every keyframe. Census over the three sessions holding a window: **3/3 (100 %)** on all four — 430 (white) and 900 (the held picture) held outright, 500 and 1180 the two palette fades of the held picture; each filed picture is taken at `N` by all three (§19.3, §19.4) |
-| CRED | `SECOND 5` (this capture); a full run reaches it too | 320×200, 160-byte plane rows from CRTC 0x13 = `0x5013`; RGB only | 1440, 3240, 5440, 7640, 8740 | `out/b5-cred-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: rgb`** against all three sessions, every keyframe. Every keyframe **held** (three consecutive frames byte-identical in every session). Census over the three sessions holding a window: **3/3 (100 %)** on all five, the filed picture presented at `K−1`, `K` and `K+1` in every session. 82 frames of this part, all refused by the *coherence* check and not by a stride or a mode — the read's model of where the screen starts is what does not match (§20.2) |
-| ENDSCRL | `SECOND 5`, **non-looping** (`looping == 0`; skipped entirely when looping is on — `MAIN/U2.ASM:914-915`); a full run reaches it too | 640×400, mode 0eh 16 colours, CRTC 9 = 0; RGB only | 9100, 10000, 12000, 14000 | `out/b5-es2-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (the 401-line ring scrolls a line per two vblanks). **No session in the tree holds this part's ±1 window** — the tool cannot take two frames one index apart on this 640×400 screen (six refusals, two remedies tried and recorded in §1.11) — so the census is an **offset-0 count**: **5/5 (100 %) at 9100** and **3/3 (100 %)** at 10000, 12000 and 14000, every session byte-identical to the filed picture (§21.3, §21.4) |
-| DDSTARS | `SECOND U` only — slot 17, the hidden part, reachable by no numbered boot (`partsmask[8]` = `80h`) | 320×400 (mode 13h with CRTC 9's scan-doubling bit cleared), 80-byte plane rows; RGB only | 1900, 3000, 5000, 8000 | `out/b5-ddstars-sess1` (`-sess2`, `-sess3b` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (three distinct pictures at every triple). Census **per keyframe** over the sessions that hold that keyframe's window: 1900 **5/5 (100 %)**, 3000 **4/4 (100 %)**, 5000 **3/3 (100 %)**, 8000 **4/4 (100 %)** — every filed picture taken at `N` by every session, and the same `N±1` neighbours in all of them (§22.3, §22.4). All 20 sweep frames refused with `not one palette index a byte` (§22.5); `out/b5-ddstars-sess3`, refused at 5001, counts for 1900 and 3000 and not for 5000 or 8000 |
+| ENDLOGO | `SECOND 5` (this capture); a full run reaches it too, at its own indices | 320×400 Mode X, 80-byte plane rows; the reference carries `.idx` at 430 and 900, and **only 900 is index-compared** (no session holds a 430 `.idx`) | 430, 500, 900, 1180 | `out/b5-endo-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three sessions, every keyframe. Census over the four sessions holding a window: **4/4 (100 %)** on all four — 430 (white) and 900 (the held picture) held outright, 500 and 1180 the two palette fades of the held picture; each filed picture is taken at `N` by all four (§19.3, §19.4) |
+| CRED | `SECOND 5` (this capture); a full run reaches it too | 320×200, 160-byte plane rows from CRTC 0x13 = `0x5013`; RGB only | 1440, 3240, 5440, 7640, 8740 | `out/b5-cred-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: rgb`** against all three sessions, every keyframe. Every keyframe **held** (three consecutive frames byte-identical in every session). Census over the four sessions holding a window: **4/4 (100 %)** on all five, the filed picture presented at `K−1`, `K` and `K+1` in every session. 82 frames of this part, all refused by the *coherence* check and not by a stride or a mode — the read's model of where the screen starts is what does not match (§20.2) |
+| ENDSCRL | `SECOND 5`, **non-looping** (`looping == 0`; skipped entirely when looping is on — `MAIN/U2.ASM:914-915`); a full run reaches it too | 640×400, mode 0eh 16 colours, CRTC 9 = 0; RGB only | 9100, 10000, 12000, 14000 | `out/b5-es2-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (the 401-line ring scrolls a line per two vblanks). **No session in the tree holds this part's ±1 window** — the tool cannot take two frames one index apart on this 640×400 screen (six refusals, two remedies tried and recorded in §1.11) — so the census is an **offset-0 count**: **9/9 (100 %) at 9100** and **5/5 (100 %)** at 10000, 12000 and 14000, every session that took the index byte-identical to the filed picture (§21.3, §21.4) |
+| DDSTARS | `SECOND U` only — slot 17, the hidden part, reachable by no numbered boot (`partsmask[8]` = `80h`) | 320×400 (mode 13h with CRTC 9's scan-doubling bit cleared), 80-byte plane rows; RGB only | 1900, 3000, 5000, 8000 | `out/b5-ddstars-sess1` (`-sess2`, `-sess3b` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: rgb`** against all three sessions. Every keyframe **moving** (three distinct pictures at every triple). Census **per keyframe** over the sessions that hold that keyframe's window: 1900 **6/6 (100 %)**, 3000 **5/5 (100 %)**, 5000 **4/4 (100 %)**, 8000 **5/5 (100 %)** — every filed picture taken at `N` by every session, and the same `N±1` neighbours in all of them (§22.3, §22.4). All 20 sweep frames refused with `not one palette index a byte` (§22.5); `out/b5-ddstars-sess3`, refused at 5001, counts for 1900 and 3000 and not for 5000 or 8000 |
 
 ### Adding a row
 
@@ -3270,7 +3279,8 @@ out of the picture object (`readp`, `JP.C:181-186`) into 400 rows of 184 bytes a
 320×400 screen of this boot (the 320×200 screen after it is **U2E's**, not the ending's — §18.1,
 §18.6). 17000 is the loader's flat black; 17900 is a **white rectangle** (2
 colours, 74221 px white in `b4b-jp-sweep1`) which is ENDLOGO's opening white over JPLOGO's leftover
-memory (`END/END.C:61-63` writes 63 into 765 of the 768 DAC entries, leaving index 255 alone).
+memory (`END/END.C:61-63` points the DAC's write index at 0 and writes 63 into 765 entries, DAC
+entries 0–764).
 
 ### 17.1 The sweep, and what the sheet showed
 
@@ -3644,9 +3654,10 @@ per pixel, and `END.C:67-80` then writes CRTC 0x0c, 0x0d = 0 and **CRTC 9 = `(ol
 — the 400-line, one-scanline-a-row display — before `lineblit(vram+y*80, rowbuf)` walks **400** rows
 (`END.C:95-99`).
 
-**What it draws, in the order it draws it.** `END.C:51-63` unlocks the attribute controller and
-writes **63 into 765 of the 768 DAC entries** (index 255 is left alone), so the screen is a white
-field over whatever the previous part's memory held — on this boot, over the loader's leftovers.
+**What it draws, in the order it draws it.** `END.C:51-63` unlocks the attribute controller, points
+the DAC's write index at **0** (`outp(0x3c8,0)`) and then writes **63 into 765 entries** — DAC
+entries **0–764**, leaving the last three (765, 766, 767) untouched. So the screen is a white field
+over whatever the previous part's memory held — on this boot, over the loader's leftovers.
 `:67-92` re-points the CRTC to start address 0, takes the display to 400 lines and whitens again,
 then waits **32 vblanks**. Only then does it read its own picture (`readp(palette,-1,pic)`) and blit
 400 rows (`:94-99`); a **129-frame palette fade-in** from the white follows (`:101-106`), then a
@@ -3709,9 +3720,9 @@ The reference capture's own sheet, `out/endlogo.png`, is four tiles: **r0c0** = 
 | 900 | the **settled picture**, held | `.rgb` + `.idx` | rgb `f2514b291f572e3dbd028cadd7b2795be972740b5466f8520b5b8da468ace94d` |
 | 1180 | the **fadeout** | `.rgb` only | rgb `755f474763bf19617724d92a227e7b04df4cbee908366571c53c3c7753c0d670` |
 
-One keyframe per state the part has: its opening white, its fade-in, its hold, its fadeout. 500 is
-320 frames before 900 and 280 before 1180 — every pair far more than the ~60 a three-index support
-batch needs (§1.3). 900 is chosen in the middle of the hold, not at its edge, because only the hold's
+One keyframe per state the part has: its opening white, its fade-in, its hold, its fadeout. The
+gaps are **70** (430→500), **400** (500→900) and **280** (900→1180) — every one far more than the
+~60 a three-index support batch needs (§1.3). 900 is chosen in the middle of the hold, not at its edge, because only the hold's
 *start* is deterministic: the hold ends when the music reaches `dis_musplus() > -16` (`END.C:107-111`)
 and the fadeout's 64 frames follow it.
 
@@ -3756,7 +3767,16 @@ the manifest's own palette through the `(c*259+33)>>6` widening:
   rather than a reading: a *one-colour* white screen has nothing for the coherence check to catch a
   shear with, so this `.idx` is filed on the strength of the screen being the part's own white
   (`END.C:61-63`) and of nothing else — it is the weakest `.idx` in this block and the row says so.
-  Nothing rides on it: `compare` compares 430 as indices only because *both* sides hold one.
+
+**And 430 is not index-compared, although the reference holds an `.idx` for it.** `compare` takes
+the indexed path only when *both* sides hold one (`xtask/src/compare.rs:606,746`), and **no session
+holds `frame_000430.idx`** — the three census sessions produced `.idx` at 429, 899, 900 and 901 and
+not at 430 — measured, `ls out/b5-endo-sess1` shows `frame_000429.idx frame_000899.idx
+frame_000900.idx frame_000901.idx` and no `frame_000430.idx` — so that frame is judged on its
+pixels.
+Only **900** is index-compared. The hand-check of 430's plane is therefore a check on the *filed
+artefact* and not on a comparison this row ran: it says the reference's own `.idx` is honest, which
+matters to any later comparison in which both sides hold one.
 
 ### 19.4 The re-capture and the census
 
@@ -3783,25 +3803,34 @@ exit: 0
 ```
 
 **`out/b5-endo-sess2` and `-sess3` give the identical report** — `exit 0`, `verdict: identical`,
-0.0000 %, offsets `{0: 4}`, `mode: mixed` (430 and 900 are compared as indices, 500 and 1180 as RGB).
+0.0000 %, offsets `{0: 4}`, `mode: mixed` — **900 is the one keyframe compared as indices**; 430 is
+RGB because the reference holds an `.idx` its partners do not, and 500 and 1180 because the fade
+refuses theirs (§19.3).
 Three sessions of the same recipe, run separately, present the reference's bytes at its own index.
 
-**The census**, by §1.8's rule, over the three sessions that hold a window (`out/b5-endo-sess1`–`-sess3`;
-the reference's own directory excluded; all 304 directories under `out/` and `reference/parts/` were
-scanned for the frames, not just those with manifests, so a refused run holding a window would have
-counted — and the count is **filtered by recipe** as §1.11 records, because two directories from
-other boots hold these very indices: `out/rev-batch-probe`, whose 429–431 are ENDLOGO's white bytes
-over a `SECOND 2` boot, and `out/b3-alku-probe`, whose 899–901 are ALKU's screen):
+**The census**, by §1.8's rule, over every session in the tree that holds a window — the three
+census sessions `out/b5-endo-sess1`–`-sess3`, and the fix round's own re-run of them,
+`out/b5rev-endo-sess1b` (a `SECOND 5` capture of the same recipe, its frames byte-identical at every
+index). The scan covers all **319** directories under `out/` and `reference/parts/` that hold frames,
+not just those with manifests, so a refused run holding a window would have counted — and it is
+**filtered by recipe** as §1.11 records, which here excludes **eleven** wrong-boot window holders:
+`out/b2-batch-probe`, `out/b2-white-probe`, `out/review-b3-readcost` and `out/rev-batch-probe` at
+429–431 (all four holding `85789170…`, the white a `SECOND 2` boot produces just as a `SECOND 5` one
+does), `out/b4-mnt-sess1`–`-sess6` at 499–501 (MNTSCRL's `e68aa887…` on the `SECOND 3` boot) and
+`out/b3-alku-probe` at 899–901 (ALKU's `fec9afb5…`). **A fifth same-recipe directory holds 430's
+window and is not counted**: `out/b5rev-endo-sess1`, a refused run of the fix round that carries no
+manifest — it holds 429–431, but its boot cannot be established from its bytes, which are the very
+white a `SECOND 2` boot gives at the same index (§1.11); it is named here rather than folded in.
 
 | keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
 |---|---|---|---|---|---|
-| ENDLOGO 430 (held) | 3 | 1 | `85789170…` **3/3 (100 %)** | **yes** | yes |
-| ENDLOGO 500 | 3 | 3 (one per window) | `fb8fbf2a…` **3/3 (100 %)** | **yes** | yes |
-| ENDLOGO 900 (held) | 3 | 1 | `f2514b29…` **3/3 (100 %)** | **yes** | yes |
-| ENDLOGO 1180 | 3 | 3 (one per window) | `755f4747…` **3/3 (100 %)** | **yes** | yes |
+| ENDLOGO 430 (held) | 4 | 1 | `85789170…` **4/4 (100 %)** | **yes** | yes |
+| ENDLOGO 500 | 4 | 1 | `fb8fbf2a…` **4/4 (100 %)** | **yes** | yes |
+| ENDLOGO 900 (held) | 4 | 1 | `f2514b29…` **4/4 (100 %)** | **yes** | yes |
+| ENDLOGO 1180 | 4 | 1 | `755f4747…` **4/4 (100 %)** | **yes** | yes |
 
 Every session's window holds the filed picture **at offset 0**, and the neighbours each session
-holds at `N±1` are the *same three* pictures in all three sessions (`8807e602…`/`fb8fbf2a…`/`bab01979…`
+holds at `N±1` are the *same three* pictures in all four sessions (`8807e602…`/`fb8fbf2a…`/`bab01979…`
 at 500, `da11d611…`/`755f4747…`/`67eeee93…` at 1180) — so this part's timeline is **anchored to the
 boot index** the way MNTSCRL's, LNS&ZOOM's and MINVBALL's are (§23), music-gated steps included.
 
@@ -3976,19 +4005,21 @@ exit: 0
 **`out/b5-cred-sess2` and `-sess3` give the identical report** — `exit 0`, `verdict: identical`,
 0.0000 %, offsets `{0: 5}`, `mode: rgb` on all three.
 
-**The census**, by §1.8's rule, over the three sessions that hold a window (all 304 directories
-under `out/` and `reference/parts/` scanned for the frames, the reference's own directory excluded,
-and the count filtered by recipe as §1.11 records):
+**The census**, by §1.8's rule, over every session in the tree that holds a window — the three
+census sessions plus the fix round's own `out/b5rev-cred-sess1` (a `SECOND 5` capture of the same
+recipe whose frames are byte-identical at every index). The scan covers all **319** directories under
+`out/` and `reference/parts/` that hold frames, the reference's own directory excluded, and the count
+is filtered by recipe as §1.11 records:
 
 | keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
 |---|---|---|---|---|---|
-| CRED 1440 (held) | 3 | 1 | `f1ea2ca5…` **3/3 (100 %)** | **yes** | yes |
-| CRED 3240 (held) | 3 | 1 | `98de65f3…` **3/3 (100 %)** | **yes** | yes |
-| CRED 5440 (held) | 3 | 1 | `cc2df71e…` **3/3 (100 %)** | **yes** | yes |
-| CRED 7640 (held) | 3 | 1 | `92155573…` **3/3 (100 %)** | **yes** | yes |
-| CRED 8740 (held) | 3 | 1 | `cd5f27a5…` **3/3 (100 %)** | **yes** | yes |
+| CRED 1440 (held) | 4 | 1 | `f1ea2ca5…` **4/4 (100 %)** | **yes** | yes |
+| CRED 3240 (held) | 4 | 1 | `98de65f3…` **4/4 (100 %)** | **yes** | yes |
+| CRED 5440 (held) | 4 | 1 | `cc2df71e…` **4/4 (100 %)** | **yes** | yes |
+| CRED 7640 (held) | 4 | 1 | `92155573…` **4/4 (100 %)** | **yes** | yes |
+| CRED 8740 (held) | 4 | 1 | `cd5f27a5…` **4/4 (100 %)** | **yes** | yes |
 
-Every session's window holds the filed picture at `K-1`, `K` *and* `K+1`, so the count is 3/3 at
+Every session's window holds the filed picture at `K-1`, `K` *and* `K+1`, so the count is 4/4 at
 offset 0 with no ambiguity to weigh.
 
 **What Phase 2 will see.** Five settled targets, compared as RGB; a port that draws these screens
@@ -4091,14 +4122,17 @@ looks like: at 9100 only rows 309–377 differ, and how many *pixels* that is de
 the line carries — 3074 px for the two-line header, 14711 px for the sponsor block.
 
 **There is no held moment in this part, and there is no `±1` window either — not because the screen
-lacks one, but because the tool cannot take it here.** Measured six times: `--frames
-9099,9100,9101,…` is refused at the first batch with `the emulator reached frame 9101 before frame
-9100 could be captured` in six consecutive sessions (once `9102`, and three of the six with the
-core-sharing remedy of §1.11 in place), and a two-index list, `9099,9100`, is refused the same way
-(`out/b5-es-test2`, and again as `b5-es-test3` with the emulator alone pinned to a starved core). §1.11 records the two remedies that were tried and why both failed. **What
-the sessions were captured with instead is a three-frame gap** — `9097,9100,9103` and the same
-around each keyframe — which every attempt to take it succeeded with (`out/b5-es-test5` for the
-probe, and the three sessions of §21.4, twelve indices each).
+lacks one, but because the tool cannot take it here.** Measured: `--frames 9099,9100,9101,…` is
+refused at the first batch with `the emulator reached frame 9101 before frame 9100 could be captured`
+— **five sessions record that refusal** (three with nothing else running, two with the core-sharing
+remedy of §1.11 in place, one of those naming `9102`) and a sixth attempt was killed before it could
+write one; and a two-index list, `9099,9100`, is refused the same way (`out/b5-es-test2`, and again
+as `b5-es-test3` with the emulator alone pinned to a starved core). §1.11 records the two remedies
+that were tried and why both failed. **What the sessions were captured with instead is a three-frame
+gap** — `9097,9100,9103` and the same around each keyframe — which every attempt to take it succeeded
+with (`out/b5-es-test5` for the probe, and the three sessions of §21.4, twelve indices each); a
+two-frame gap captures once (`out/b5-es-test4`, 9098 and 9100) but not in a three-index batch
+(refused at `9102`).
 
 ### 21.4 The re-capture and the census
 
@@ -4132,16 +4166,25 @@ holds this part's `N-1, N` and `N+1`** — the count is 0 at every keyframe, for
 above — so the count below is an **offset-0 count**: sessions of the recipe that took the keyframe's
 own index, and whether their frame is byte-identical to the filed picture.
 
+Every same-recipe directory in the tree that took the index is counted, not only the ones captured
+*for* the census — the discovery captures and the fix round's re-runs hold these indices too, and
+their frames are byte-identical:
+
 | keyframe | sessions holding `N` | byte-identical to the filed picture at `N` | ≥ half the sessions? |
 |---|---|---|---|
-| ENDSCRL 9100 | 5 (`-es2-sess1`, `-es2-sess2`, `-es2-sess3`, `-es-test5`, `-es-test4`) | **5/5 (100 %)** | yes |
-| ENDSCRL 10000 | 3 (`-es2-sess1`–`-sess3`) | **3/3 (100 %)** | yes |
-| ENDSCRL 12000 | 3 (`-es2-sess1`–`-sess3`) | **3/3 (100 %)** | yes |
-| ENDSCRL 14000 | 3 (`-es2-sess1`–`-sess3`) | **3/3 (100 %)** | yes |
+| ENDSCRL 9100 | **9** — `-es2-sess1`, `-es2-sess2`, `-es2-sess3`, `-es-test5`, `-es-test4`, `-es-diag`, `-s5-sweep5`, `b5rev-es-keys`, `b5rev-es-gap2` | **9/9 (100 %)** | yes |
+| ENDSCRL 10000 | **5** — `-es2-sess1`–`-sess3`, `-s5-sweep5`, `b5rev-es-keys` | **5/5 (100 %)** | yes |
+| ENDSCRL 12000 | **5** — the same five | **5/5 (100 %)** | yes |
+| ENDSCRL 14000 | **5** — the same five | **5/5 (100 %)** | yes |
 
-The two extra sessions at 9100 are the probes that established the three-frame-gap remedy
-(`out/b5-es-test4`, `out/b5-es-test5`); they are of the same recipe and are listed rather than
-folded in silently.
+Those extra sessions are worth naming because they were not run for the census: `out/b5-es-test4` and
+`out/b5-es-test5` are the probes that established the three-frame-gap remedy, `out/b5-es-diag` is the
+single-index diagnostic run, `out/b5-s5-sweep5` is the discovery sweep, and `out/b5rev-es-keys` and
+`out/b5rev-es-gap2` are the fix round's own runs. All seven are of the recipe (`SECOND 5`, `autoexec`,
+30000 cycles, these keys) and all seven hold the filed picture's bytes at the index. The same scan
+also shows why the recipe filter matters even here: `out/b4b-ray-sess1`–`-sess3`, `out/b4b-ray-sweep1`
+and `reference/parts/rayscrl` — `SECOND 3` captures of a 320×200 screen — hold index 14000, and
+`out/b5-su-sweep2`, the hidden part's own sweep, holds 10000 through 14000.
 
 **What the count is and what it is not.** It is not a support count over a window, and the row says
 so. §1.8 rule 1 warns that a single-index probe "can answer only offset 0 and inflate apparent
@@ -4293,16 +4336,18 @@ $ cargo xtask compare --reference reference/parts/ddstars --rendered out/b5-ddst
 ```
 
 **The census**, by §1.8's rule, **per keyframe** and over every session in the tree that holds that
-keyframe's window (filtered by recipe, §1.11; the reference's own directory excluded; a directory
-with no manifest counts when this block made it, and `out/b5-ddstars-sess3` is exactly the case rule
-2 is about — its run was refused at 5001, so it holds the 1900 and 3000 windows and not the others):
+keyframe's window — the three full census sessions, the refused `out/b5-ddstars-sess3`, the earlier
+probe `out/b5-su-fine1` and the fix round's own `out/b5rev-dd-sess1` (all of the same recipe, all
+byte-identical at every index). Filtered by recipe, §1.11; the reference's own directory excluded;
+`out/b5-ddstars-sess3` is exactly the case rule 2 is about — its run was refused at 5001, so it
+counts at 1900 and 3000 and not at 5000 or 8000:
 
 | keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
 |---|---|---|---|---|---|
-| DDSTARS 1900 | **5** | 1 | `c9228e9f…` **5/5 (100 %)** | **yes** | yes |
-| DDSTARS 3000 | **4** | 1 | `b0693ed8…` **4/4 (100 %)** | **yes** | yes |
-| DDSTARS 5000 | **3** | 1 | `d948981e…` **3/3 (100 %)** | **yes** | yes |
-| DDSTARS 8000 | **4** | 1 | `ecc2dadd…` **4/4 (100 %)** | **yes** | yes |
+| DDSTARS 1900 | **6** | 1 | `c9228e9f…` **6/6 (100 %)** | **yes** | yes |
+| DDSTARS 3000 | **5** | 1 | `b0693ed8…` **5/5 (100 %)** | **yes** | yes |
+| DDSTARS 5000 | **4** | 1 | `d948981e…` **4/4 (100 %)** | **yes** | yes |
+| DDSTARS 8000 | **5** | 1 | `ecc2dadd…` **5/5 (100 %)** | **yes** | yes |
 
 Every window in every session holds the filed picture **at `N`** (offset 0), and the neighbours each
 session keeps at `N±1` (`de6d1676…`/`a1697853…` at 1900, `f768ffbb…`/`5eb100a6…` at 3000,
