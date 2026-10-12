@@ -371,6 +371,10 @@ keys — including B1's) was grouped by the `sha256` of the frame at that index.
 | PANICEND 8792 | 3 | 1 | 3/3 | yes |
 | PANICEND 8800, 9000 (held) | 3 each | 1 each | 3/3 | yes |
 
+The counts are sessions that hold a `manifest.json`; a **refused** capture writes none (§1.2), so
+its frames are content evidence rather than a session — `out/panic-probe1`'s 8792 is the third
+`c9bf5114…` above, and `out/techno-troll-probe1`'s black 8200 agrees with TECHNO-B's five.
+
 **What re-capturing the three cases bought, measured against one fresh session each:**
 
 | part | before | after |
