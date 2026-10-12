@@ -319,9 +319,11 @@ TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, P
 8784/8784/8784/8784), and the tunnel→TECHNO content boundary (a probe counting non-zero bytes in
 VGA memory: a black plateau at 4774–4793 and the rings at 4797) is within 1–3 frames in two more.
 **What is left over is occasional and unexplained**: one capture session of this block
-(`out/b3-tunnel-boundaries`) had TECHNO's rings on screen by 4770 where two freshly watched sessions
-draw them at 4797, ~30–40 frames early, and that excursion did not reproduce in six sessions of
-watching. It is not the music clock (which agrees within a frame), it is not a fixed per-session
+(`out/b3-tunnel-boundaries`) had TECHNO's rings on screen by 4770 — ~30–40 frames early — while two
+independent sessions watched with a VGA-content probe put them at 4797 in both. (The four sessions
+watched through the video *mode* cannot see the rings' arrival at all: TECHNO draws them in the
+tunnel's own 256-colour mode, before its mode change, and that change is 4797–4801 in every session
+watched.) It is not the music clock (which agrees within a frame), it is not a fixed per-session
 offset, and it is not the counter stalling (two sessions watched at 20 ms resolution to frame 4900
 showed no gap over 150 ms and 0.0701 frames/ms in both). B4/B5 should read a re-capture that exits 1
 by the numbers in its own row, and treat an index whose screen is a tens-of-frames outlier as one

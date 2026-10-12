@@ -1497,8 +1497,8 @@ All four are captured; the rows are in `reference-indices.md` §2 and the measur
   music-gated part *starts* a frame or two either side and everything after it inherits that as a
   constant offset. Music-gated *boundaries* are therefore pinned: the five mode changes of this
   block sit within 4 frames across four sessions. One capture session was ~30–40 frames early in
-  one region and did not reproduce in six sessions of watching; treat that shape as one session's
-  observation. Prefer held indices, and re-run anything that exits 1.
+  one region and did not reproduce in two independent sessions watched with a VGA-content probe;
+  treat that shape as one session's observation. Prefer held indices, and re-run anything that exits 1.
 - **A boundary can be a content change with a black gap between the parts**: GLENZ's last frame
   ~3650, flat black 3680–3700, TUNNELI's first ring 3710; TUNNELI's last dots in (4700, 4770]
   (session dependent), TECHNO's first rings 4770. Neither boundary is in the geometry — and **the
