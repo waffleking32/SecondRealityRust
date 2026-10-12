@@ -596,6 +596,7 @@ table.
 | 3DSINFLD | `SECOND 3` | 320×200, chain-4 off, 80-byte plane rows; RGB only | 15500, 16000, 16500, 16800 | `out/b4b-ray-sess1` | **exit 0, `verdict: identical`, 0.0000 %** against `out/b4b-ray-sess1` (offsets `{0: 3, +1: 1}`) and against `out/b4b-ray-sess2` (offsets `{0: 4}`), `mode: rgb`; exit 1 against `out/b4b-ray-sess3`, whose 15500 and 16000 are 0.0000 % at offset −1 and whose 16500/16800 are 38.9031 % and 41.7875 % (it sits two two-frame steps out of phase). Census: 15500 and 16000 **3/3 (100 %)**, 16500 **3/4 (75 %)**, 16800 **2/3 (67 %)** — **every keyframe settled**, each filed picture taken at `N` by at least one session. The reference was re-captured twice in fix round 1: the first row's 16500 was a picture no session takes at `N` (and its "no settled content" verdict for it was a misread of §1.8 rule 3), and its 16800 was taken only at `N−1` (§16.4) |
 | JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1`, and the reviewer's `out/review-b4b/jp-sess` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** in all four sessions (`-sess1`–`-sess3` and `jp-sess`); 17500 0.0000 % against `-sess2` and `jp-sess` (which hold the same bytes) and 41.3773 %/39.3516 % against `-sess1`/`-sess3`; 17700 40.1914 % against `-sess2`/`jp-sess` and 29.5719 %/27.3664 % against `-sess1`/`-sess3`. Census over the four sessions: 17300 **4/4 (100 %)** and 17500 `aab611ef…` **2/4 (50 %)** settled; **17700 is settled as a state and unfiled as a file** — the state two sessions hold (`ec3de2bb…`, 2/4, taken at `N` by both) was not drawn by any of the **seven re-capture probes** this round ran (`out/b4b-jp-ref3…ref9`, each the same recipe, keyframes only, ~10 minutes of emulated run), and the filed `91d6ce6b…` is taken at `N` by none of the four. Twelve captures of the recipe hold **ten distinct** byte-images at 17700, so the residual there is the oracle's state spread and not a port error (§17.3, §17.5) |
 | U2E | `SECOND 4` (this capture) — `SECOND 3` reaches it too, at its own indices | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent `out/review-b4b/u2e-sess`; exit 1, `mode: rgb`, offsets `{0: 4}` against `out/b4b-u2e-sess1`–`-sess3`, each of which misses one keyframe at 55.4672–60.8406 % (a phase group, not a different screen). Census over the four sessions holding a window: 1000 **4/4 (100 %)** and 1600, 2600 and 3600 **3/4 (75 %)** each, every filed picture taken at `N` — **every keyframe settled** (§18.4, §18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/4) and the re-capture drew the one three of them do. `SECOND 3` reaches U2E as well and shows the same screens at different indices (§18.1, §18.6) |
+| ENDLOGO | `SECOND 5` (this capture); a full run reaches it too, at its own indices | 320×400 Mode X, 80-byte plane rows; 430 and 900 carry `.idx` | 430, 500, 900, 1180 | `out/b5-endo-sess1` (`-sess2`, `-sess3` identical) | **exit 0, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`** against all three sessions, every keyframe. Census over the three sessions holding a window: **3/3 (100 %)** on all four — 430 (white) and 900 (the held picture) held outright, 500 and 1180 the two palette fades of the held picture; each filed picture is taken at `N` by all three (§19.3, §19.4) |
 
 ### Adding a row
 
@@ -3523,7 +3524,179 @@ things follow that the rows use: the reference in `reference/parts/u2e/` is **us
 reaches U2E** (the screens are byte-identical), and its **indices are `SECOND 4` boot indices**, so a
 `SECOND 3` or full-run diff must use the indices of *that* boot.
 
-## 19. What block 3 has that block 2 did not
+## 19. ENDLOGO
+
+Part 18 of the sequence and the first part of `SECOND 5`'s block. `SECOND 5` is
+`partsmask[5]` = the binary literal `10000b` (`MAIN/U2.ASM:116`) = `0x10` = **bit 4 only**, the
+`&16=scrollers` bit, so that boot runs ENDLOGO, CRED and ENDSCRL and nothing else — the end
+sequence **from its own beginning**, which is what this row's indices are. The shell does the
+preparation itself before `exe2021`: `restartmus` for MUSIC0 at order 25, `mov ax,13h / int 10h`,
+`inittwk`, then the part (`MAIN/U2.ASM:898-909`) — so the mode 13h screen ENDLOGO starts from is the
+shell's, not the loader's.
+
+The source is `END/END.C` (130 lines) over `END/ASM.ASM` (`lineblit`), `readp.c` and the packed
+picture `_PIC.OBK`. **Its screen is 320×400 with 80-byte plane rows**: mode 13h puts the bytes one
+per pixel, and `END.C:67-80` then writes CRTC 0x0c, 0x0d = 0 and **CRTC 9 = `(old & ~0x80) & ~0x1f`**
+— the 400-line, one-scanline-a-row display — before `lineblit(vram+y*80, rowbuf)` walks **400** rows
+(`END.C:95-99`).
+
+**What it draws, in the order it draws it.** `END.C:51-63` unlocks the attribute controller and
+writes **63 into 765 of the 768 DAC entries** (index 255 is left alone), so the screen is a white
+field over whatever the previous part's memory held — on this boot, over the loader's leftovers.
+`:67-92` re-points the CRTC to start address 0, takes the display to 400 lines and whitens again,
+then waits **32 vblanks**. Only then does it read its own picture (`readp(palette,-1,pic)`) and blit
+400 rows (`:94-99`); a **129-frame palette fade-in** from the white follows (`:101-106`), then a
+music wait — `for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }`,
+`:107-111` — and a **64-frame fadeout** (`:112-117`).
+
+**Its extent is from the boot's first graphics frame to the geometry change in (1200, 1240]** —
+about 800 frames. Measured on the sweep `out/b5-s5-sweep2` (430…1200): 430 is a **plain white field,
+one colour, mean 255.00**; 460 is 16 colours, mean 237.44 (the picture showing through the white);
+500 is 56 colours, mean 167.31 (mid fade-in); 540 is 66 colours, mean 99.54; **580 is 69 colours,
+mean 33.23 and every sample from there to 1120 is the same `sha256`** (`f2514b29…`); 1160 is 65
+colours, mean 25.15 (the fadeout under way); 1200 is 30 colours, mean 4.29 (nearly black); and a
+capture started on this screen is refused at 1240 — `frame 1240 is 320x200 where the capture started
+at 320x400` — which is CRED's mode 13h screen (§20). **The changeover itself is grab-hostile**: a
+capture asking for 1220 is refused for a different reason (`the emulator reached frame 1221 before
+frame 1220 could be captured`), so the boundary is narrowed from both sides rather than probed at
+(§1.2). The demo's own first graphics frame, 404, is refused the same way (`reached frame 412`).
+
+### 19.1 The sweeps, and what the sheets showed
+
+```
+out/b5-s5-sweep1  500,700,900,1100,1400,…            exit 2, refused at 1400 (320x200 where the
+                                                     capture started at 320x400)
+out/b5-s5-sweep2  430,460,500,540,580,620,660,700,740,780,840,900,960,1020,1080,1120,1160,1200,
+                  1240,1280,1320,1360,1400,1450,1500   exit 2, refused at 1240, same message
+```
+
+| index | what is on screen |
+|---|---|
+| 430 | a **white field**, one colour, mean 255.00 — `END.C:61-63`/`:89-92`'s white over the loader's memory. |
+| 460 | the same white with the picture faintly through it: 16 colours, mean 237.44. |
+| 500 | the **fade-in under way**: the "FUTURE CREW" 3-D logo block, washed towards white, 56 colours, mean 167.31. |
+| 540 | nearly settled, 66 colours, mean 99.54. |
+| 580 … 1120 | the settled picture — the two rounded blocks lettered FUTURE and CREW on black, 69 colours, mean 33.23 — **byte-identical at every sample**. |
+| 1160 | the **fadeout**: the same picture at 65 colours, mean 25.15. |
+| 1200 | the fadeout's tail, 30 colours, mean 4.29. |
+| 1240+ | (CRED, §20) mode 13h's 320×200 screen. |
+
+The reference capture's own sheet, `out/endlogo.png`, is four tiles: **r0c0** = 430 (white),
+**r0c1** = 500 (fade-in), **r1c0** = 900 (settled), **r1c1** = 1180 (fadeout under way).
+
+### 19.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 430 | the **opening white** | `.rgb` + `.idx` | rgb `857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561` |
+| 500 | the **fade-in** over the held picture | `.rgb` only | rgb `fb8fbf2a4401b08668adcc0edf890a46bf30e559649ec46ccf1c9823ce0f3a21` |
+| 900 | the **settled picture**, held | `.rgb` + `.idx` | rgb `f2514b291f572e3dbd028cadd7b2795be972740b5466f8520b5b8da468ace94d` |
+| 1180 | the **fadeout** | `.rgb` only | rgb `755f474763bf19617724d92a227e7b04df4cbee908366571c53c3c7753c0d670` |
+
+One keyframe per state the part has: its opening white, its fade-in, its hold, its fadeout. 500 is
+320 frames before 900 and 280 before 1180 — every pair far more than the ~60 a three-index support
+batch needs (§1.3). 900 is chosen in the middle of the hold, not at its edge, because only the hold's
+*start* is deterministic: the hold ends when the music reaches `dis_musplus() > -16` (`END.C:107-111`)
+and the fadeout's 64 frames follow it.
+
+Full hashes of the six files in `reference/parts/endlogo/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 430 | `frame_000430.rgb` | `857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561` |
+| 430 | `frame_000430.idx` | `eec19bc6af0b3b6dfb97a08782c65f4bb3c3203e789a015d2008b0d689ad08be` |
+| 500 | `frame_000500.rgb` | `fb8fbf2a4401b08668adcc0edf890a46bf30e559649ec46ccf1c9823ce0f3a21` |
+| 900 | `frame_000900.rgb` | `f2514b291f572e3dbd028cadd7b2795be972740b5466f8520b5b8da468ace94d` |
+| 900 | `frame_000900.idx` | `c0e0e259e96dfffd984763818a7891c6af610bdcd8e282375a10336c6637b03c` |
+| 1180 | `frame_001180.rgb` | `755f474763bf19617724d92a227e7b04df4cbee908366571c53c3c7753c0d670` |
+
+### 19.3 Held or moving, measured — and the `.idx` hand-check
+
+The triples around each keyframe, hashed inside `out/b5-endo-sess1` (and the same bytes in `-sess2`
+and `-sess3` at every index):
+
+| keyframe | `K-1` | `K` | `K+1` | reading | per-frame change of its own 128000 px |
+|---|---|---|---|---|---|
+| 430 | `85789170…` | `85789170…` | `85789170…` | **held** | 0 px either side |
+| 500 | `8807e602…` | `fb8fbf2a…` | `bab01979…` | **moving** (palette fade) | 499→500 115331 px (90.1023 %), max delta 4; 500→501 41568 px (32.4750 %), max delta 5 |
+| 900 | `f2514b29…` | `f2514b29…` | `f2514b29…` | **held** | 0 px either side |
+| 1180 | `da11d611…` | `755f474f…` | `67eeee93…` | **moving** (palette fade) | 1179→1180 32911 px (25.7117 %), 1180→1181 42751 px (33.3992 %), max delta 5 |
+
+The two moving keyframes are moving **in the palette and in nothing else** — their per-pixel
+differences are large in *count* and tiny in *amplitude* (max channel delta 4–5), which is the
+signature §1.4 records for BEGLOGO's fade, and it is why both came back RGB-only: an indexed read is
+20+ frames late and 20+ fade steps have passed by the time the DAC is read, so D15's coherence rule
+refuses the pair (§1.3). 430 is held outright — 32 vblanks of one white (`END.C:92`) — and 900 is
+the middle of a ~570-frame hold.
+
+**ENDLOGO writes CRTC registers** (0x09, 0x0c, 0x0d at `END.C:67-80`), so §1.9's hand-check rule
+applies to the two `.idx` files it filed, and both were checked with `/tmp/b5/idxcheck.py` against
+the manifest's own palette through the `(c*259+33)>>6` widening:
+
+- `frame_000900.idx`: **72 distinct indices, 69 distinct RGB triples, no index carrying two triples,
+  and 0 mismatches of 128000 pixels.** The palette does not collapse — 69 colours is enough for the
+  check to have caught a shear — so this is a real check and the plane is not sheared.
+- `frame_000430.idx`: 1 index, 1 triple, 0 mismatches of 128000 px. That is the §1.6 blind spot
+  rather than a reading: a *one-colour* white screen has nothing for the coherence check to catch a
+  shear with, so this `.idx` is filed on the strength of the screen being the part's own white
+  (`END.C:61-63`) and of nothing else — it is the weakest `.idx` in this block and the row says so.
+  Nothing rides on it: `compare` compares 430 as indices only because *both* sides hold one.
+
+### 19.4 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 5 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 430,500,900,1180 --out reference/parts/endlogo --sheet out/endlogo.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 5 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 429,430,431,499,500,501,899,900,901,1179,1180,1181 --out out/b5-endo-sess1
+    # and -sess2, -sess3, minutes apart
+```
+
+```
+$ cargo xtask compare --reference reference/parts/endlogo --rendered out/b5-endo-sess1 \
+      --out out/b5-endo-cmp1
+frame 430: 0.0000% differing (0/128000 px), max delta 0
+frame 500: 0.0000% differing (0/128000 px), max delta 0
+frame 900: 0.0000% differing (0/128000 px), max delta 0
+frame 1180: 0.0000% differing (0/128000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 4}
+exit: 0
+```
+
+**`out/b5-endo-sess2` and `-sess3` give the identical report** — `exit 0`, `verdict: identical`,
+0.0000 %, offsets `{0: 4}`, `mode: mixed` (430 and 900 are compared as indices, 500 and 1180 as RGB).
+Three sessions of the same recipe, run separately, present the reference's bytes at its own index.
+
+**The census**, by §1.8's rule, over the three sessions that hold a window (`out/b5-endo-sess1`–`-sess3`;
+the reference's own directory excluded; all 293 directories under `out/` and `reference/parts/` were
+scanned for the frames, not just those with manifests, so a refused run holding a window would have
+counted — none does):
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| ENDLOGO 430 (held) | 3 | 1 | `85789170…` **3/3 (100 %)** | **yes** | yes |
+| ENDLOGO 500 | 3 | 3 (one per window) | `fb8fbf2a…` **3/3 (100 %)** | **yes** | yes |
+| ENDLOGO 900 (held) | 3 | 1 | `f2514b29…` **3/3 (100 %)** | **yes** | yes |
+| ENDLOGO 1180 | 3 | 3 (one per window) | `755f4747…` **3/3 (100 %)** | **yes** | yes |
+
+Every session's window holds the filed picture **at offset 0**, and the neighbours each session
+holds at `N±1` are the *same three* pictures in all three sessions (`8807e602…`/`fb8fbf2a…`/`bab01979…`
+at 500, `da11d611…`/`755f4747…`/`67eeee93…` at 1180) — so this part's timeline is **anchored to the
+boot index** the way MNTSCRL's, LNS&ZOOM's and MINVBALL's are (§23), music-gated steps included.
+
+**What Phase 2 will see.** Every keyframe is a settled target: a port that draws ENDLOGO's white at
+the boot index this row names, its fade-in 70 frames later, its picture, and its fadeout, will diff
+at 0.0000 %. The two fade keyframes are palette-only, so a port whose *picture* is right but whose
+fade curve is off will show a difference in every pixel at a small max delta there — that is the
+fade's arithmetic (`(128-c)*63+palette[a]*c)/128`, `END.C:103`), not the geometry. There is no
+unsettled index in this part: no residual is expected at any of the four.
+
+---
+
+## 23. What block 3 has that block 2 did not
 
 Not a section of its own in the table, but worth saying where a B4b or B5 reader will pass it: three
 of this block's four parts are **deterministic across sessions at every index measured** — MNTSCRL
