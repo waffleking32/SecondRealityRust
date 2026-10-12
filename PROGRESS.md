@@ -10,7 +10,7 @@ Phase status board. **Read this first if you are resuming work.**
 | # | Phase | State | Plan | Tag |
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
-| 1 | Assets & references | **complete — untagged** | [01-assets.md](docs/plans/01-assets.md) | withheld — the whole-branch review comes first |
+| 1 | Assets & references | **complete — untagged** | [01-assets.md](docs/plans/01-assets.md) | withheld — the review is done and its findings applied; the tag is the last act |
 | 2 | Shell + easy tier | not started | — | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
@@ -30,8 +30,9 @@ the evidence is in the section below and in `docs/fidelity/reference-indices.md`
 `docs/plans/01-assets.md`; its ledger (the recovery map, git-ignored scratch) is
 `.superpowers/sdd/01-assets/progress.md`. The tag is withheld because the final whole-branch review
 comes after this close-out and may require fixes; a tag that has to be moved is worse than a tag
-applied a few commits later (B6's ruling, in the ledger). **The next action is that review; the tag
-goes on once it is clean, and Phase 2 starts from there.**
+applied a few commits later (B6's ruling, in the ledger). **The review has now run and its findings
+are applied** (the two fix dispatches are recorded at the end of the evidence section below);
+**the remaining action is `git tag phase-1`, and Phase 2 starts from there.**
 
 ### Phase 1's evidence (close-out, Task B6, 2026-10-12)
 
@@ -45,8 +46,11 @@ decode: 150 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 87 headerl
 1 refused on record, 0 finding(s)
 ```
 
-21 contact sheets come from the same pass. Four approximation entries; 17 plan corrections, each
-from a measurement rather than from reasoning. The human-look evidence is the user's own reading of
+21 contact sheets come from the same pass. Four approximation entries; the plan was corrected in place
+as each task measured what it had guessed, from `3f49511` (the Origin PIC model) to `9b53969` (what B5
+measured), and every correction came from a measurement rather than from reasoning. (The close-out
+said "17 plan corrections"; no enumeration reproduces that number, so it is withdrawn rather than
+restated.) The human-look evidence is the user's own reading of
 the sheets ("images look fine"); the noise-like tiles are non-picture data (3D scene files, TASM
 listings, S3M music, lookup tables, palette strips) correctly rendered as byte views, and none of
 them carries a picture magic. **The workspace suite is 398 passed, 0 failed, 1 ignored, 0 warnings**
@@ -57,7 +61,7 @@ under `reference/parts/`, every one of them carrying a `manifest.json` with the 
 `docs/fidelity/reference-indices.md` §2 with its command, hashes and re-capture comparison. (TECHNO
 and PLZPART each span two geometries and have one directory per screen; U2E is captured from a
 `SECOND 4` boot, which `SECOND 3` also reaches — the screen does not depend on the boot, only the
-index.) Held/moving is measured per keyframe, not assumed from the part (§1.3).
+index.) Held/moving is measured per keyframe, not assumed from the part (§1.4).
 
 | part | boot | keyframes | held / moving | reproducibility |
 |---|---|---|---|---|
@@ -70,7 +74,7 @@ index.) Held/moving is measured per keyframe, not assumed from the part (§1.3).
 | TECHNO — interference | `SECOND 2`, 320×200 16-colour EGA, RGB only | 4900, 5000, 6300, 8100 | 4900/6300/8100 moving; 5000 a palette step that holds for one sampled pair and moves a frame away | **exit 0, identical, offsets `{0: 4}`** after the group-check re-capture (was 24.6–72.9 % before it) |
 | TECHNO — troll | `SECOND 2`, 320×400 Mode X | 8200, 8300, 8400 | 8200/8400 held; 8300 moving (the fade-in) | exit 1, `mode: mixed`: 8200/8400 identical at offset 0; 8300 99.9883 % at offset −1, its picture the largest support (3/4) |
 | PANICEND | `SECOND 2`, 320×200 | 8792, 8800, 9000 | 8800/9000 held; 8792 moving — the collapse itself | exit 0, identical, 0.0000 %, offsets `{0: 3}` |
-| MNTSCRL | `SECOND 3`, 320×200 Mode 13h | 500, 1100, 1700, 2300 | 500 held; 1100/1700/2300 moving (2.4–3.1 % a frame) | exit 0, identical, offsets `{0: 4}`; the same against three more sessions; **6/6 (100 %)** support |
+| MNTSCRL | `SECOND 3`, 320×200 Mode 13h | 500, 1100, 1700, 2300 | 500 held; 1100/1700/2300 moving (2.4–3.1 % a frame) | exit 0, identical, offsets `{0: 4}`; the same against two more independent sessions (`-sess4`, `-sess6`); **6/6 (100 %)** support |
 | LNS&ZOOM | `SECOND 3`, 320×200 Mode 13h | 2700, 3400, 4200, 4900, 5650 | 2700/5650 held; 3400/4200/4900 moving (6.7–39.8 % a frame) | exit 0, identical, offsets `{0: 5}`; **5/5 (100 %)** |
 | PLZPART — plasma | `SECOND 3`, 320×400 Mode X, line-compare 60/61 | 6000, 7000, 7600 | all three moving (~70 % of pixels a frame) | exit 1, `mode: rgb`, offsets `{0: 3}`: 6000 0.0000 %/0.1641 % across two sessions; 7000 7.73/12.93 %; 7600 9.33/24.48 %. **No settled content on all three** (2/5, 0/4, 0/3) — §13.6 |
 | PLZPART — cube | `SECOND 3`, 320×200 Mode X | 8500, 9500 | both moving (25–56 % a frame) | exit 0, identical, 0.0000 %, offsets `{0: 2}`; **4/4 (100 %)** |
@@ -132,6 +136,55 @@ the table.** `docs/fidelity/reference-indices.md` §1.12 is the policy and carri
   durable fix (read the pair coherently, or twice and require agreement) belongs to whoever next
   touches the oracle.
 - **No `phase-1` tag, deliberately.** See the top of this section.
+
+**Carried into Phase 2 — make the reference record machine-readable, then verify it.** The reference
+tree's bytes are pinned by `docs/fidelity/reference-indices.md` alone: no test reads
+`reference/parts/`, and the natural self-check (`compare` of the tree against itself) can catch a
+*missing or truncated* file but never a byte changed in place. A `xtask reference verify` was
+deliberately not built at the close-out, and the reason is a measurement: the hash check is **not
+machine-addressable against the document** — 90 rows carry a full digest in two naming shapes
+(77 bare, 13 path-prefixed), they name 78 distinct files of which 10 carry two or three different
+digests, and 24 of the tree's 105 `frame_*` files have no row by name at all (their digests sit in
+per-part tables whose directory is named only in the prose). A verifier resting on that would fail
+on 24 correctly-filed files today and would stop checking whenever a sentence is reworded. The fix is
+to make the record machine-readable **where it is written**: `reference capture` should put a
+`sha256` into each frame entry of the manifest it writes (the manifest already has a `version` field
+for exactly this kind of change), after which `xtask reference verify` can walk the tree with
+`compare`'s all-the-way-down rule, fail loudly on a file the manifest does not name and on a named
+file that is missing, and compare every digest against the manifest rather than against prose. Until
+then, a byte changed in place is the one failure nothing in the tree reports.
+
+**The deferred minors, triaged by the whole-branch review (41 items).** **Eleven were "action now"**
+and are applied in the final fix round: the `origin.rs` sweep comment that claimed cuts the loop
+does not make and the `anim.rs` bias comment whose alphabet never reaches the dispatch it names (both
+now say what they do), the §E.18 nine-byte record now **pinned by a test** (`tests/omf.rs`, because
+Phase 2's ALKU work is its consumer), `font.rs`'s 15,000-byte padding figure and `glyph`'s garbled
+doc sentence, a new `tests/font.rs` case for a dividing width that is not the routine's, the
+`ANIM.C`/`U2A.C` citation slips, `palette.rs`'s five-file claim, `reference.rs`'s geometry-guard doc,
+the decode summary that did not sum (the code dispatch) and the music counter's address and rate —
+`0x105B0E`, 0.7424/frame — copied out of the git-ignored ledger into `reference-indices.md` §1.7 and
+D20 before the ledger goes. **Fifteen items are "later"**, to fix when the file is next touched: A1's §E
+citations and two wording slips; A3's `Unsupported` wording for malformed input, its duplicated chunk
+walk, its unexercised `Ok` arm and its "nearly all" comment; A4's `pal.rs:6-10` argument and
+`tests/rix.rs`'s "depend on"; A5's three count/range slips; A7's absent `APPROXIMATIONS.md` entry for
+ALKU's 32-vs-30 rows (**Phase 2 owns it** — its durable home must exist before the Phase 2 plan is
+written) and `lib.rs:94`'s over-long sentence; A8's present-but-unreadable provenance fixture and its
+empty-frame advice; B1's "17 keypad keys" and D17's loose referent. **Seven were dropped** as
+working-artifact prose or unreachable/labelled cases, and **one was already stale**: A1's ":188's
+'the only copy…' is untrue" had been removed by A5 (`df6610e`) and is struck from the list rather
+than carried as live.
+
+**The whole-branch review and its fix round.** The review (2026-10-12, on `da3d553`) found no
+Critical and confirmed the phase finished with its exit criteria met, re-deriving every load-bearing
+number itself — including three captures re-taken byte-identically in fresh sessions. Its findings
+were applied in two dispatches: the code half (`acfe436`: `compare` walks a capture tree all the way
+down and prints `captures: N measured` beside the verdict, the `--out`/`--sheet` guard collapses `..`
+lexically, the decode summary adds up, and two latent width bounds are documented) and the
+documentation half (the support-frame rule in `CLAUDE.md`/D19/the plan's criterion, the stale numbers
+in D20/§1.12/§1.10, D16's now-closed split caveat, the TUNNELI→TECHNO boundary, `docs/fidelity/bugs.md`
+written at last, the spec's display-mode table annotated, and the eleven minors above). Nothing
+reopened a captured frame, a decoded byte or a claim the phase rests on, and no emulator run was
+needed. **The `phase-1` tag is still the last act and is not applied here.**
 
 **One Phase 2 result already came out of Part B.** PLZPART's plasma confirms on captured frames that the
 port's `Split::scanline` is the emulator's line-compare register **plus one** (`62/61/62` for a register
