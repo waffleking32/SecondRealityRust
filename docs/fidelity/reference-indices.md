@@ -1102,7 +1102,7 @@ each other, **1620** grey again, **1700** the object higher, **1800** black agai
 | 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; the bytes of 1400, 1450, 1499, 1500, 1501, 1600 and 1250 are all one picture. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
 | 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `9c42d079…` |
 | 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `71dd12f6…` |
-| 3400 | the **red polyhedron with the glenz object at its edge**, the part's second-to-last screen before the object leaves the frame. | `.rgb` only | rgb `fab974e9…` |
+| 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `fab974e9…` |
 
 One keyframe per screen the part has: the held opening, the glenz object, the red polyhedron with
 the glenz object inside it, and the red polyhedron with the glenz object at its edge. 2300 and
@@ -1240,8 +1240,8 @@ can differ by instead of implying they cannot.
 ### 8.1 The sweeps, and what the sheets showed
 
 ```
-out/b3-tunneli-sweep1  3730,3760,3800,3900,4000,4100,4200,4300,4400,4500,4600,4650,4700,4750  exit 0
-out/b3-tunnel-boundaries  (the run above, §7.5) 4740,4750,4760,4770,4780,4790                 exit 0
+out/b3-tunneli-sweep1    3730,3760,3800,3900,4000,4100,4200,4300,4400,4500,4600,4650,4700,4750  exit 0
+out/b3-tunnel-boundaries 3680…3750 and 4740…4790, ten apart — the run in §7.5                     exit 0
 ```
 
 `b3-tunneli-sweep1.png`'s tiles, in the order the capture laid them out: **3730** black;
@@ -1268,9 +1268,9 @@ refused as a miss (`the emulator reached frame 4702 before frame 4701 could be c
 `out/tunneli-recapture`'s first attempt), and the boundary run shows 4740/4750 black — the window
 is both grab-hostile and session-dependent, which is not what a reference index should be.
 
-Full hashes of the four files in `reference/parts/tunneli/` — all `.rgb`, no `.idx`: every one of
-them is a moving screen, and the read 20 frames late never reproduces it (measured on 16 frames
-across four captures, every one refused with `the screen moved while it was read`):
+Full hashes of the four files in `reference/parts/tunneli/` — all `.rgb`, no `.idx`. **Every frame
+of this part taken in the whole block came back without indices**, each refused with `the screen
+moved while it was read`: the part has no held screen to hang one on.
 
 | index | file | `sha256` |
 |---|---|---|
@@ -1345,8 +1345,9 @@ on a screen where most pixels hold still. **No tolerance is added and the row ca
 
 `SECOND 2`'s fourth part: the techno bars and the EGA interference, then the "panic picture"
 (troll) that the next part collapses. **It is the first part this phase has captured whose screens
-span two geometries** — a 320×200 screen from ~4770 to ~8150 and a 320×400 one from ~8160 to 8780 —
-which is B3 step 2's case and is captured here as two captures with a row each (§1.7,
+span two geometries** — a 320×200 screen from ~4770 to the change in (8150, 8200], and a 320×400
+one from there to 8780 — which is B3 step 2's case and is captured here as two captures with a row
+each (§1.7,
 `reference/parts/techno/interference/` and `reference/parts/techno/troll/`).
 
 **The 320×200 screen is not 256-colour, and that is the part's own doing.** TECHNO switches the
@@ -1387,7 +1388,7 @@ black; **8300** the troll picture washed out to white; **8350–8450** the pictu
 8700** the same bytes (`40044edc…`) — the picture is held.
 
 The 320×400 section's shape, from the frames and their hashes: a flat black screen from the mode
-change (~8160) to ~8290, a white-wash fade at ~8300, and the finished picture held from ~8350 to
+change to ~8290, a white-wash fade at ~8300, and the finished picture held from ~8350 to
 8780, where the 320×200 screen returns (§10).
 
 ### 9.2 The keyframes, and why these
@@ -1516,8 +1517,9 @@ screen.
 ## 10. PANICEND
 
 `SECOND 2`'s fifth part: the fake ending — TECHNO's picture collapsing to a line and then to a
-single dot on black. 320×200, from the geometry change at ~8790, whose first visible effect is the
-320×400 screen's 400 lines being halved back to 200 (the `SHUTDOWN.C` asm writes CRTC 09h = 41h,
+single dot on black. 320×200, from the geometry change in (8780, 8790], whose first visible effect
+is the 320×400 screen's 400 lines being halved back to 200 (the `SHUTDOWN.C` asm writes
+CRTC 09h = 41h,
 one more scanline repeat), to the next part's first drawn frame at ~9230. **It is the shortest
 part in the block and the one whose screens reproduce best.**
 
@@ -1596,7 +1598,9 @@ verdict: identical, mode: mixed, offsets {"0": 3}
 exit: 0
 ```
 
-**All three are byte-identical, including the moving one.** 8792 is a frame in the middle of the
+**All three are byte-identical, including the moving one** — and 8792's bytes are the same in
+three separate sessions (`out/panic-probe1`, the reference and the partner all hold
+`c9bf5114b3e70b84…`), so the agreement is not one lucky pair. 8792 is a frame in the middle of the
 collapse and it re-captured exactly, which is the opposite of GLENZ's and TUNNELI's moving frames
 in the same block — evidence that the session-to-session difference §1.7 records is a property of
 *some* animated screens, not of "moving" as a category: PANICEND's collapse is driven by
