@@ -566,6 +566,7 @@ table.
 | RAYSCRL | `SECOND 3` | 320×200 Mode 13h; 13500 carries `.idx` | 13000, 13500, 14000, 14500 | `out/b4b-ray-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4b-ray-sess2` and `out/b4b-ray-sess3`. 13500 is **held** (13499 = 13500 = 13501 in every session, and its `.idx` is byte-identical across sessions); 13000, 14000 and 14500 move 0.10–6.37 % of pixels a frame and every session presents the filed picture at the same index — **3/3 (100 %)** support on all four (§15) |
 | 3DSINFLD | `SECOND 3` | 320×200, chain-4 off, 80-byte plane rows; 16800 carries `.idx` | 15500, 16000, 16500, 16800 | `out/b4b-ray-sess1` | exit 1, `mode: mixed` — 15500 (offset +1), 16000 and 16800 (offset −1) **0.0000 %**, 16500 43.0406 %; against `-sess2` the same (15500 at offset 0), and against `-sess3` 15500 and 16000 **0.0000 %** at offset −1 with 16500 47.6844 % and 16800 47.0812 %. Census over the three sessions: 16000 **3/3 (100 %)**, 15500 **3/3 (100 %)** and 16800 **2/3 (67 %)** settled, 16500 **0/3** recorded as **no settled content** (§16.4). The reference was re-captured once, §1.8-style: the first one's 15500 was a singleton and the re-capture drew the 3/3 picture |
 | JPLOGO | `SECOND 3` | 320×400 Mode X, 80-byte plane rows; RGB only | 17300, 17500, 17700 | `out/b4b-jp-sess1` | exit 1, `mode: rgb`, offsets `{0: 3}` — 17300 **0.0000 %** (offset 0) against `out/b4b-jp-sess1`, `-sess2` and `-sess3`; 17500 0.0000 % against `sess2`, 41.3773 % and 39.3516 % against `sess1`/`sess3`; 17700 29.5719 %, 40.1914 % and 27.3664 %. Census over the three sessions: 17300 **3/3 (100 %)** settled (the entry's hold, presented at `N` by all three), 17500 **1/3 (33 %)** and 17700 **0/3** recorded as **no settled content** — the part holds for ~350 frames but the held picture is a different picture in every session (§17.3) |
+| U2E | `SECOND 4` | 320×200; RGB only | 1000, 1600, 2600, 3600 | `out/b4b-u2e-sess1` | exit 1, `mode: rgb`, offsets `{0: 4}` — 1000 **0.0000 %** in all three sessions, 1600 in `sess1`/`sess2`, 2600 in `sess2`/`sess3` and 3600 in `sess1`/`sess3`; the pairs that miss are 55.4672–60.8406 % at offset 0. Census over the three sessions: 1000 **3/3 (100 %)** and 1600, 2600 and 3600 **2/3 (67 %)** each — **every keyframe settled** (§18.5). The reference was re-captured once: its first 2600 was a picture no session holds (0/3) and the re-capture drew the one two of them do (2/3) |
 
 ### Adding a row
 
@@ -3219,6 +3220,141 @@ own 17700 (`91d6ce6b…`) appears in none of them. The row records both numbers 
 the hold up: **JPLOGO is a part whose hold is real and whose hold is not reproducible**, and no
 re-capture was run — a re-roll would be exactly the dice roll §1.8 rule 5 warns about, and nothing
 in this block's data says which held picture a re-roll would land on.
+---
+
+## 18. U2E
+
+`SECOND 4`'s only part — block 4 is the vector part and nothing else. `VISU/C/MAKEFILE:45` builds
+`u2e.exe` and stages it into `main\data`; the source is `VISU/C/U2E.C` (628 lines) over the VISU
+library. It is the phase's only part whose *screen size depends on which boot reaches it*.
+
+**What it draws.** A copper-driven scene player: `readfile(scene.00M)` plus animation streams
+(`.0AA`, `.0XY`), drawn with the `vid_*` primitives and switched with `dis_setcopper(2, copper2)` and
+`vid_window(0,319,25,174,512,9999999)` (`U2E.C:352-353`). The copper (`:115-141`) rotates **four
+display buffers** through the CRTC start address (`vid_setswitch(-1, clr)`), counting `syncframe`
+once a vertical blank, and the main loop (`:376-540`) services the animation stream with
+`currframe += repeat*2`, ending when the stream ends (`xit`) or the demo exits.
+
+### 18.1 Which boot reaches it, and the screen that boot gives it
+
+- **`SECOND 4` reaches it; `SECOND 3` cannot.** Bit 3 gates U2E and bit 2 gates MNTSCRL…JPLOGO
+  (`MAIN/U2.ASM:856`, `:880`); `SECOND 3` = `0x1c` has bits 2 and 4 but not 3, `SECOND 4` = `0x18`
+  has 3 and 4 but not 2. So on `SECOND 4` U2E is the **first** show part after the loader, and this
+  row's indices are `SECOND 4` boot indices.
+- **The music is `MUSIC0` at order 18** (`U2.ASM:882-885`, immediately before `exe19`) — the restart
+  the brief names. On `SECOND 4` the initial load starts `MUSIC1` at order 0 (`:767-775`, block 1
+  skipped) and U2E's restart replaces it; on a full run the same restart fires after everything else.
+- **And the screen differs.** `U2E.C:195-215` asks the BIOS for the current mode and sets
+  `jellywas = 1` when it is > 3 (mode 13h), then `if(!jellywas) { vid_init(1); … }`. `vid_init(1)` is
+  `VISU/AVID.ASM:117-147`'s "1=320x200x256 (tweak)". **On `SECOND 4` nothing has set a mode, so U2E
+  initialises 320×200 itself** — measured: every frame of this row is 320×200 — **and on a full run
+  JPLOGO has just left a 320×400 Mode X screen, so U2E skips `vid_init` and inherits it.** The second
+  half of that is a *source reading, not a measurement*, and it is why this reference must not be used
+  to diff a full run's U2E without that being settled first (§1.10).
+- **U2E writes the CRTC every frame**, through `vid_setswitch(-1, clr)` → `_vid_setswitch` writes
+  register 0x0c (`VISU/AVID.ASM:341-357`). §1.9's hand-check rule therefore applies to any `.idx`
+  filed from it.
+
+
+### 18.2 The sweeps, and what the sheets showed
+
+```
+out/b4b-u2e-sweep   420,500,600,700,800,900,1000,1200,1400,1600,1800,2000,2300,2600,3000,3500,
+                    4000,5000                                                 exit 0 (18 frames)
+out/b4b-u2e-sweep2  430,450,470,490,520,560,640,760,820,3100,3400,3700,3900,3950,4050,4100,
+                    4200,4400,4600,4800                                       (fill)
+```
+
+| index | what is on screen |
+|---|---|
+| 420 | flat black, one colour, `ea0787f6…` — still the loader's screen. |
+| 500 | a palette fade-in under way: 4 colours, mean 168. |
+| 600 = 700 | one `sha256`, `ef539f9e…` (4 colours, mean 158.30) — the fade's hold. |
+| 800 | 37 colours, mean 133.61: a corridor scene with white door panels and a small metallic craft. |
+| 900 | 53 colours — the same scene, the craft closer. |
+| 1000 | 54 colours: a console scene, vertical red bars and instrument panels. |
+| 1200 | 42 colours: a grey building/corridor in a red frame. |
+| 1400, 1600, 1800 | 86–92 colours: the fly-by over a city of striped towers with a green craft. |
+| 2000 | 11 colours, mean 133.06: an interior corridor, a scene change. |
+| 2300 | 57 colours: a structure with white square windows on a red floor. |
+| 2600, 3000 | 63–66 colours: the same structure from other angles. |
+| 3500 | 51 colours: a purple-grey wall and a lattice. |
+| 4000 | 40 colours, mean 92.59: **"Future Crew"** in 3-D letters over a red field. |
+| 5000 | 118 colours, mean 12.84: **the credits screen** — `GRAPHICS - MARVEL / MUSIC - SKAVEN / CODE - WILDFIRE` — which is the ending, not this part. |
+
+### 18.3 The keyframes, and why these
+
+Four, spread 600–1000 frames apart across the part's ~3800 frames of drawing, one per screen the
+sheets show: the corridor scene, the saucer under the towers, the scene change after the first dark
+transition, and the crescent ships over a plane.
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 1000 | a dark grey-brown **corridor wall** with a grey panel at its left (36 colours, mean 81.52) | `.rgb` only | `9cf5d972d36168e7d3e4d7a767a88460abd4491b8f8632cc6a4948e557c6c37a` |
+| 1600 | the **green saucer** in the foreground with grey buildings behind (79 colours, mean 80.25) | `.rgb` only | `e7a10cd78e7478d52ed64742b9209fc00dfb9ac9c9e198d1286be73eb2711811` |
+| 2600 | the **saucer under vertical striped towers** (89 colours, mean 81.79) | `.rgb` only | `58293d898530080a96bed5fdaa4c8a56821cb66dd115312cbaaecfa427aad2a0` |
+| 3600 | two small **metallic crescent craft** over a grey plane on black (54 colours, mean 62.77) | `.rgb` only | `f8d4a0e8bd79d1f4e41178b63fc66eb8559eac76d7db0c2cda9d49cd24c3d23e` |
+
+All four are RGB-only — D15's coherence rule refuses a screen whose buffers rotate under the read —
+and **no `.idx` is filed from this part**. That matters because U2E writes the CRTC start address
+every frame through `vid_setswitch` inside its copper (§18.1); had a plane been filed, §1.9's
+hand-check rule would have applied to it, and no sheared one can have entered the tree.
+
+### 18.4 Held or moving, measured
+
+Every keyframe is **moving** — the scenes animate and the displayed buffer rotates — but each picture
+is on screen for **two** frames: at every keyframe one neighbour is byte-identical and the other is
+not (`out/b4b-u2e-sess1`: 999 = 1000, 1001 different; 1599 different, 1600 different; 3599 = 3600,
+3601 different). That is why a one-frame session offset costs nothing: the ±1 window lands on the
+same picture. (Measured, not derived: the copper's switch rate comes from the schedule the main loop
+writes into `cl[].frames`, `U2E.C:434-444`.)
+
+### 18.5 The re-capture and the census
+
+```bash
+# the reference, re-captured once after the first session's census showed 2600 outside every group
+cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1000,1600,2600,3600 --out reference/parts/u2e --sheet out/u2e.png
+
+# the partners: a support frame each side of every keyframe
+cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 999,1000,1001,1599,1600,1601,2599,2600,2601,3599,3600,3601 --out out/b4b-u2e-sess1
+```
+
+```
+$ cargo xtask compare --reference reference/parts/u2e --rendered out/b4b-u2e-sess1 \
+      --out out/b4b-u2e-cmp1
+frame 1000: 0.0000% differing (0/64000 px), max delta 0
+frame 1600: 0.0000% differing (0/64000 px), max delta 0
+frame 2600: 58.4328% differing (37397/64000 px), max delta 255
+frame 3600: 0.0000% differing (0/64000 px), max delta 0
+verdict: different, mode: rgb, offsets {"0": 4}
+exit: 1
+
+$ … --rendered out/b4b-u2e-sess2        $ … --rendered out/b4b-u2e-sess3
+frame 1000: 0.0000%                     frame 1000: 0.0000%
+frame 1600: 0.0000%                     frame 1600: 60.8406% (38938 px)
+frame 2600: 0.0000%                     frame 2600: 0.0000%
+frame 3600: 55.4672% (35499 px)         frame 3600: 0.0000%
+verdict: different, offsets {"0": 4}    verdict: different, offsets {"0": 4}
+```
+
+**The census**, by §1.8's rule, over the three sessions that hold a window:
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| U2E 1000 | 3 | 2 | `9cf5d972…` **3/3 (100 %)**, taken at `N` by all three | **yes** | yes |
+| U2E 1600 | 3 | 6 | `e7a10cd7…` **2/3 (67 %)** (tied at 2/3 with its two neighbours' pictures) | **yes** | yes |
+| U2E 2600 | 3 | 5 | `58293d89…` **2/3 (67 %)**, taken at `N` by two sessions | **yes** (after the re-capture) | yes |
+| U2E 3600 | 3 | 5 | `f8d4a0e8…` **2/3 (67 %)**, taken at `N` by two sessions | **yes** | yes |
+
+**Every keyframe is settled, and the re-capture is what made 2600 one.** The first reference's 2600
+was `085bffff…`, which appears in **none** of the three sessions' windows (48.6516 %, 57.0719 % and
+57.0719 % away), while the picture two sessions draw at `N` is `58293d89…`. Re-capturing moved the
+filed picture into that group and its support from **0/3 to 2/3**; 1000, 1600 and 3600 kept the bytes
+they had. U2E's timeline drifts between sessions — by 2600 and 3600 the sessions sit two or three
+buffer steps apart, which is why the later keyframes are 2/3 rather than 3/3 — but every keyframe is
+inside at least two sessions' ±1 windows, **which is what "settled" means here**.
 ---
 
 ## 19. What block 3 has that block 2 did not
