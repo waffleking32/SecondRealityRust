@@ -1578,31 +1578,38 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
 
 - **The `SECOND 3` run's 320×200 stretch ends in (17000, 17100]** — found the way §1.2 says, by a
   sweep refused at 17100 (`out/b4b-ray-sweep2`) — and the 320×400 screen that follows is **JPLOGO's**.
-  JPLOGO's own drawing runs to (17800, 17900] and the 320×400 screen to (17900, 18000]; the 320×200
-  screen after that is the ending's, i.e. **B5's first part on a `SECOND 3` boot is at ~18000**.
+  JPLOGO's own drawing runs to (17800, 17900] and the 320×400 screen to (17900, 18000] — **and the
+  320×200 screen from ~17930 is U2E's, not the ending's**: `SECOND 3` runs U2E after JPLOGO
+  (`partsmask[3]` is the binary literal `11100b` = `0x1c`, bit 3 set, guard at `MAIN/U2.ASM:880-887`)
+  and it runs for ~4000 frames. Measured: U2E's opening hold (`befaf38ae1…`) is at 18000 and 18100,
+  byte-identical to the `SECOND 4` boot's opening (`out/review-b4b/s3-after`; `out/b4b-s3-u2e2`). **B5's
+  first part on a `SECOND 3` boot is therefore at ~22 000, not ~18 000** — a sweep that stops at
+  18000–21000 finds U2E.
 - **ENDLOGO's opening is a white palette over the previous part's memory, not a blank screen.** By
   17900 the frame is 2 colours with 74221 px white — `END/END.C:61-63` writes 63 into 765 of the 768
   DAC entries (leaving index 255 alone), `:67-88` re-points the CRTC's start address and line count
   while keeping the 400-row screen, `:89-92` whitens again and waits 32 vblanks, and only then does it
   read its own picture and blit 400 rows (`:94-97`). So what is on screen under that white is
   **JPLOGO's leftover plane** — B5's sweeps should not read that frame as a screen of its own.
-- **U2E inherits the screen JPLOGO left on a full run.** `VISU/C/U2E.C:195-215` sets `jellywas = 1`
-  when the BIOS video mode is > 3 (mode 13h) and then **skips `vid_init(1)`**, which is the call that
-  sets 320×200 (`VISU/AVID.ASM:117-147`, "1=320x200x256 (tweak)"). So on a full run U2E draws into
-  JPLOGO's 320×400 Mode X screen, while on the `SECOND 4` boot its reference was captured from it
-  initialises 320×200 itself. **The reference in `reference/parts/u2e/` is a `SECOND 4` boot's and
-  its row says so** — a full run's U2E is a different screen, and Phase 2 must not diff a full run's
-  U2E against it without that being settled. This is a source reading, not a measurement: it is the
-  concrete thing behind the brief's "what a `SECOND 4` boot shows at a given index is not what a full
-  run shows".
-- **JPLOGO freezes, and the freeze is in the source.** `doit` only recomputes the wobble while its own
-  `frame <= 511` (`JPLOGO/JP.C:79-83`), and the frame tables reach their final values at frame 379
-  (`framey1t[379]/16 = 0`, `framey2t[379]/16 = 400`), so from frame 379 to the 700-frame cap the
-  picture is **frozen**: measured, 17600, 17700 and 17800 are byte-identical in one session. That is
-  the first held keyframe in this phase that is the last frame of a *moving* effect, and the strongest
-  kind of target for Phase 2 — but **it sits at a different boot index in different sessions**,
-  because JPLOGO's `doit` begins after a music wait (`JP.C:71`), so the row's census has to say which
-  session presents the filed picture and where.
+- **U2E's screen does not depend on the boot — its *indices* do.** `VISU/C/U2E.C:195-215` does set
+  `jellywas` and skip `vid_init(1)` when the BIOS mode is 13h (`VISU/AVID.ASM:117-147`,
+  "1=320x200x256 (tweak)"), but U2E **normalises the display itself**: `fadeset()` on all four 64 KB
+  buffers and **CRTC 9 = `(old & 0xf0) | 0x80`** — scan doubling, a 200-line display — at
+  `U2E.C:302-313`, in the same planar 80-byte layout. Measured: the `SECOND 3` frames at 18000/18100
+  are byte-identical to the `SECOND 4` reference's opening hold. **So the reference in
+  `reference/parts/u2e/` is usable on any boot that reaches U2E at its own indices** — the caveat is
+  index remapping, not a different screen. (Fix round 1 corrected this bullet; the first version said
+  a full run would draw into JPLOGO's 320×400 screen, which is wrong.)
+- **JPLOGO holds, its held states are discrete, and they recur.** `doit` only recomputes the wobble
+  while its own `frame <= 511` (`JPLOGO/JP.C:79-83`) and the frame tables reach their final values at
+  frame 379 (`framey1t[379]/16 = 0`, `framey2t[379]/16 = 400`), so from frame 379 to the 700-frame cap
+  the picture is **held**: measured, 17600–17850 is one `sha256` in a session. **The held states are
+  few and they recur** — two of four independent sessions hold byte-identical bytes at 17500 and 17700
+  (0 px of 128000 differ) — and they differ by *patches* of rows, not by a band or a shift, because
+  the `lasty/lasts` guard (`:96-99`) leaves an earlier state's pixels in place wherever a row's
+  parameters repeat. So the census decides which state is filed, and a re-capture can land on the
+  recurring one; JPLOGO's `doit` begins after a music wait (`:71`), which is what moves its boot
+  index between sessions.
 - **The racy offset/chain-4 read of §1.7 and §1.9 is live on every planar part of this block.**
   JPLOGO's own capture log holds eight `PlaneTooSmall` refusals naming a 320-byte row (160 register
   units — the low byte of `y*80` that `scrolly` writes to CRTC 0x0d, read back as if it were 0x13);

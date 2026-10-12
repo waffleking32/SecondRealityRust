@@ -40,16 +40,18 @@ magic.
 **Part B (references) is in progress — 16 of the 20 slots are captured**, at `reference/parts/`:
 BEGLOGO (B2); ALKU, U2A, PAM (B3 block 1); GLENZ, TUNNELI, TECHNO (two screens), PANICEND (B3 block 2);
 MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a); RAYSCRL, 3DSINFLD, JPLOGO (B4b, from a
-`SECOND 3` boot) and U2E (B4b, from a `SECOND 4` boot — the boot that reaches it). ENDLOGO, CRED,
+`SECOND 3` boot) and U2E (B4b, captured from a `SECOND 4` boot; `SECOND 3` reaches it too). ENDLOGO, CRED,
 ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
 
-**Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames and
-**the held picture is not the same bytes in every session** (`ae2c3d08…` in one, `c8d6faa0…` in
-another, 31.1867 % apart), so a hold is not by itself reproducible and the census still decides; and
-`U2E` on a full run **inherits JPLOGO's 320×400 Mode X screen** (`VISU/C/U2E.C:195-215` skips
-`vid_init` when the BIOS mode is 13h), so the filed U2E reference — a `SECOND 4` boot's, 320×200 — is
-not what a full run draws. Both are recorded in `docs/fidelity/reference-indices.md` §1.10/§17/§18 and
-in the plan's Task B4 note.
+**Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames,
+and the states it holds are **discrete and recur** — two of four independent sessions hold the same
+bytes at 17500 and 17700 (0 px of 128000 differ), so the census decides which state to file and a
+re-capture can land on the recurring one. And **`SECOND 3` reaches U2E as well as `SECOND 4`**
+(`partsmask[3]` is the binary literal `11100b` = `0x1c`, bits 2/3/4, and bit 3 is U2E), showing the
+**same screens at different boot indices** — U2E writes CRTC 9 = `(old & 0xf0) | 0x80` and
+`fadeset()`s its buffers itself (`VISU/C/U2E.C:302-313`), so the screen does not depend on the boot,
+only the index does. Both are in `docs/fidelity/reference-indices.md` §1.10/§17/§18 and in the plan's
+Task B4 note.
 
 **What the references mean, and it is not what "frame-exact" suggests at first reading.** The boot
 repeats exactly (D17), and the frame grab is counter-verified on both sides, but **the emulator's own
