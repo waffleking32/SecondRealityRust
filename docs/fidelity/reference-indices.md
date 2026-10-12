@@ -449,6 +449,7 @@ table.
 | TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture3/interference` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — the fix round 2 re-capture put the reference in the largest group on all four (4900: 4/5, 5000: 6/6, 6300: 6/7, 8100: 4/5) where it had been outside every group at 6300 and 8100 (supports now 4900: 3/4, 5000: 5/5, 6300: 5/6, 8100: 3/4, counted over the ±1 window — §1.8) (§9.4) |
 | TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row where the read succeeded (320-byte rows later, §9.6); 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1, its picture the largest support at 3/4 sessions over the ±1 window (§9.5) |
 | PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself, whose picture is the one session with a ±1 window and two refused captures also present (§10.3) |
+| MNTSCRL | `SECOND 3` | 320×200 Mode 13h; 500 carries `.idx` | 500, 1100, 1700, 2300 | `out/b4-mnt-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4-mnt-sess4` and `out/b4-mnt-sess6`. 500 is held (`e68aa887…` in every one of the 8 sessions that took it); 1100, 1700 and 2300 move within a session (~2.4–3.1 % of pixels a frame) but the same bytes at the same index in all 6 independent sessions, so each is supported **6/6 (100 %)** over the ±1 window (§11.4) |
 
 ### Adding a row
 
@@ -1824,3 +1825,196 @@ picture fading in — the same bytes in the reference run and in the earlier `b3
 it), so **PANICEND's own last drawn frame is the dot, the loader's music wait holds it, and the
 next part's first drawn frame is ~9230**. There is no geometry refusal at that boundary — both
 screens are 320×200 — so it was found by content, the third such boundary in this block.
+
+---
+
+## 11. MNTSCRL
+
+`SECOND 3`'s first part, and the first row in this ledger from a `SECOND 3` boot. Its source is
+`FOREST/` (staged as `mntscrl.exe` by `FOREST/X.BAT:1`); the runner restarts MUSIC1 at order 42
+before it (`MAIN/U2.ASM:860-863`, the `[entry]` site guarded by `whattorun & 4` and not
+`whattorun & 2`, i.e. exactly `SECOND 3`) and then runs `exe9` (`:865-866`).
+
+**What the part does.** `READ2.PAS:101-104` sets mode 13h and calls `dis_partstart`; `:110-115`
+reads 31 rows of 640 bytes out of `O2.SCI`; `:120-123` takes its palette from `hback+10` and its
+64000-byte picture from `hback+778` (`BGR.PAS:2-6` links `HILLBACK.CLX` as `hback`, built by
+`MAKEOB.BAT`), blits it to `$a000` and sets the DAC to all-black (`:124-126`); `:139-147` fades the
+palette up over 64 frames; `:153-159` **waits for a music cue** (`mov bx,6 / int 0fch`, `cmp dx,0 /
+jl @a` — loop while `muscode` is negative); `:170-181` runs 128 more frames while `scr(sss)` cycles
+the drawing phase; and `:195-224` is the main loop, whose exit is the music (`dx = -11` at `:200`
+sets `fadeout`), not a frame count: `{inc(frame);}` is **commented out** at `:221`, so the
+`frame = veke` half of the `until` at `:224` can never fire and `veke = 2800` (`:3`) never ends
+anything. `scr()` (`:56-93`) does the drawing: `ROUTINES.ASM`'s `Putrouts` walks the mask data and
+writes `background byte + mask byte` per pixel, and the `pos = 2` arm shifts the mask one byte with
+`move(font[1],font[0],237*31)` (`:86`) and pulls one new column out of `O2.SCI` with `scp`
+(`:87-88`), walking `scp` from 133 (`:151`) to 639. The screen is that background with a scrolling
+leaf overlay added over it — 320×200 the whole way, mode 13h's 80-byte plane rows, so nothing here
+exercises the stride fix.
+
+### 11.1 The sweeps, and what the sheets showed
+
+```
+out/b4-mnt-sweep1        400,600,…,2000 step 200            exit 2, refused at 400 as a MISS
+out/b4-mnt-start1        405,435                            exit 2, refused at 405 as a MISS
+out/b4-mnt-start3        415,445                            exit 2, refused at 415 as a MISS
+out/b4-mnt-start2        425,455                            exit 0
+out/b4-mnt-start4        420,450                            exit 0
+out/b4-mnt-sweep1        440,600,…,2000 step 200            exit 0 (9 frames)
+out/b4-mnt-fade1         425,430,…,500 step 5               exit 0 (16 frames)
+out/b4-mnt-fade2         505,515,…,615 step 10              exit 0 (12 frames)
+out/b4-mnt-sweep2        2200,2500,…,4600 step 300          exit 0 (9 frames)
+out/b4-mnt-lns-boundary  2100,2150,…,2500 step 50          exit 0 (9 frames)
+out/b4-mnt-lns-edge      2440,2450,…,2490 step 10          exit 0 (6 frames)
+out/b4-mnt-motion1       1499-1505 and 2099-2105            exit 0 (14 frames)
+out/b4-mnt-hold-edge     500,545,555,560,565               exit 0 (5 frames)
+out/b4-mnt-sess1 … -sess6  499,500,501,1099,1100,1101,1699,1700,1701,2299,2300,2301   exit 0 each (12 frames)
+```
+
+The three refusals are all the same failure and they locate the part's first graphics frame: the
+mode change stalls the renderer, and **400, 405 and 415 are grab-hostile** ("the emulator reached
+frame 420 before frame 405 could be captured", "reached 419 before frame 415"). **420 captures and
+is already 320×200** — flat black, `ea0787f6…`, the same bytes as every other black screen in this
+ledger (§4.2, §7.5) — so MNTSCRL's first graphics frame is in **(415, 420]** and indices just below
+it cannot be taken at all. This is §1.2's grab-hostile window seen from the other side: B2 met it
+just *below* a changeover and found the change by narrowing; here the change is inside the window.
+
+Tiles, in the order each run laid them out. `sweep1` (the 9 that captured): **440** the leaf
+overlay only, very dark, on black; **600** the same overlay over the landscape, full brightness;
+**800 / 1000 / 1200 / 1400 / 1600 / 1800 / 2000** the landscape with the leaf branch across it,
+shifting. `fade1` fills in the opening at five-frame steps: a fade (**425** mean 6.08, **430** 8.91,
+**435** 10.25, **440** 10.53) that saturates at **445** and does not move again. `fade2` shows the
+hold ending: the first 19-pixel change at **555** and the background appearing at **560-615** (mean
+15.48 → 47.65 as its palette entries fade up). `sweep2` and `lns-boundary` show the part still
+scrolling at **2200-2350**, fading out at **2400** (mean 14.54), black at **2450**, and the next
+part's face already fading in at **2460** (mean 16.13) — §11.5.
+
+### 11.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 500 | the **held opening** — the leaf overlay alone against black, its palette faded up to its resting values; byte-identical from 445 to 545, and the same bytes in all 8 sessions that took it. The part's own music wait (`READ2.PAS:153-159`) is this hold. | `.rgb` + `.idx` | rgb `e68aa887…`, idx `7be5af37…` |
+| 1100 | the **scroller**, early — the landscape with the leaf branch in the middle of the frame and its branches reaching up and right. | `.rgb` only | rgb `deb4d8fd…` |
+| 1700 | the **scroller**, middle — the same landscape with the branch shifted left and the pale ridge of the background to the left of it. | `.rgb` only | rgb `dc205228…` |
+| 2300 | the **scroller**, late — the branch over the middle-right of the landscape, ~80 frames before the fadeout starts. | `.rgb` only | rgb `eb4598d4…` |
+
+Four keyframes: one for the held opening, three spread 600 frames apart across the ~1900-frame
+scroll (which is one continuous motion — §11.3 measures no hold anywhere inside it), the last
+ending ~80 frames short of the fadeout so it is not in a palette fade. They are 600 frames apart,
+far more than the ~60 a three-index support batch needs (§1.3).
+
+Full hashes of the five files in `reference/parts/mntscrl/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 500 | `frame_000500.rgb` | `e68aa8870c98cbc4757f46dbea41ccb8dbbe68bbd2b5526c1d8eb05c9a5d7646` |
+| 500 | `frame_000500.idx` | `7be5af378a454a4d715e88bd5db721ef38e325c7060d618febaaaeb20a0ca5da` |
+| 1100 | `frame_001100.rgb` | `deb4d8fdd3b08538dcde01f82da7a6e3d462fb4d41de673c3e95fdf866e9413f` |
+| 1700 | `frame_001700.rgb` | `dc2052288fc3a2152df85fbf2d59bcf339edcf873a0a5f4f6a3bebab1511eba6` |
+| 2300 | `frame_002300.rgb` | `eb4598d4c64ecebb29adb226f5f7035f915679ed56acc8af9e1a63a68aa112f9` |
+
+**500's `.idx` was checked by hand, and the plane is honest.** It carries 107 distinct indices and
+**no zero bytes at all** (the palette, not the index plane, is what makes the picture look dark),
+and every one of the 64000 pixels has *exactly one* RGB triple for its index — 0 indices with more
+than one. So §1.6's flat-colour blind spot does not apply here: the widening rule reproduces the
+RGB from the plane (idx 42 ↔ `(24,65,24)`, idx 71 ↔ `(73,65,49)`, idx 126 ↔ `(49,49,49)`, each the
+`(c*259+33)>>6` widening of the manifest's 6-bit entry), and the 24,620 non-black RGB pixels are
+exactly the 24,620 pixels whose index widens to something other than black.
+
+### 11.3 Held or moving, measured
+
+| keyframe | neighbours | reading |
+|---|---|---|
+| 500 | 499 = 500 = 501 (`out/b4-mnt-sess1`, and the same in sess2–sess6); 445…500 in `out/b4-mnt-fade1` and 500, 545 in `out/b4-mnt-hold-edge` are one `sha256` | **held** |
+| 1100 | 1099 / 1100 / 1101 three `sha256`; 1552 px (2.4250 %) and 1542 px (2.4094 %) apart | **moving** |
+| 1700 | 1699 / 1700 / 1701 three; 1554 px (2.4281 %) and 1576 px (2.4625 %) | **moving** |
+| 2300 | 2299 / 2300 / 2301 three; 1972 px (3.0812 %) and 1960 px (3.0625 %) | **moving** |
+
+The per-frame numbers are measured **inside one capture**, between adjacent indices, so they are
+the screen's own rate and not a session-to-session difference (§1.7's rule for reading a
+percentage). The hold is bounded by measurement on both sides: 440 → 445 is a 6998-pixel
+(10.9344 %) step, so the hold starts in (440, 445], and 545 → 555 is a 19-pixel (0.0297 %) step, so
+it ends in (545, 555). Nothing inside the scroll holds: 425→430 is 20325 px (31.7578 %, the fade),
+555→560 is 39423 px (61.5984 %, the background's palette fade), and every step measured between
+1099 and 2301 is 2.4–3.1 % — there is no pair of identical frames anywhere in that span.
+
+**And unlike GLENZ's and TUNNELI's moving screens (§1.8), this part's moving frames are the *same
+bytes at the same index in every session*.** Every index that two captures from different sittings
+both hold agrees exactly:
+
+| index | sessions that took it | `sha256` |
+|---|---|---|
+| 425 | `b4-mnt-fade1`, `b4-mnt-start2` | `0f2daa91da02…` both |
+| 440 | `b4-mnt-sweep1`, `b4-mnt-fade1` | `86eeadce81e9…` both |
+| 455 | `b4-mnt-fade1`, `b4-mnt-start2` | `e68aa8870c98…` both |
+| 500 | `b4-mnt-fade1`, `b4-mnt-hold-edge`, `b4-mnt-sess1` … `sess6` (8) | `e68aa8870c98…` all |
+| 2100 | `b4-mnt-lns-boundary`, `b4-mnt-motion1` | `0e99c02d4f26…` both |
+| 2200 | `b4-mnt-lns-boundary`, `b4-mnt-sweep2` | `291f3e851e1f…` both |
+| 2500 | `b4-mnt-lns-boundary`, `b4-mnt-sweep2` | `6a152a319d26…` both |
+
+The mechanism is the one §1.7 identified for PANICEND: the part's timeline is anchored to *one*
+music cue and then advances by `dis_waitb()` counts, so a session difference in when the cue lands
+does not survive into the part — every session draws the same frame at the same boot index. The
+`READ2.PAS:153-159` wait is that anchor.
+
+### 11.4 The re-capture and the census
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 500,1100,1700,2300 --out reference/parts/mntscrl --sheet out/mntscrl.png
+
+# the partner: a support frame each side of every keyframe (500's are the same bytes)
+cargo xtask reference capture --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 499,500,501,1099,1100,1101,1699,1700,1701,2299,2300,2301 --out out/b4-mnt-sess1
+```
+
+```
+$ cargo xtask compare --reference reference/parts/mntscrl --rendered out/b4-mnt-sess1 \
+      --out out/b4-mnt-recapture-diff
+frame 500: 0.0000% differing (0/64000 px), max delta 0
+frame 1100: 0.0000% differing (0/64000 px), max delta 0
+frame 1700: 0.0000% differing (0/64000 px), max delta 0
+frame 2300: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 4}
+exit: 0
+```
+
+`out/b4-mnt-sess4` and `out/b4-mnt-sess6` — two **more independent sessions**, captured in
+separate sittings from the reference and from each other — give the identical report (`exit 0`,
+`verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`). No headline number here comes from
+a single partner (§1.8 rule 5).
+
+**The census**, by §1.8's rule — captures that hold `N-1, N, N+1` (the six sessions above), the
+reference's own directory excluded:
+
+| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+|---|---|---|---|---|---|
+| MNTSCRL 500 (held) | 6 | 1 | `e68aa887…` **6/6 (100 %)** | **yes** | yes |
+| MNTSCRL 1100 | 6 | 3 | `deb4d8fd…` **6/6 (100 %)** | **yes** | yes |
+| MNTSCRL 1700 | 6 | 3 | `dc205228…` **6/6 (100 %)** | **yes** | yes |
+| MNTSCRL 2300 | 6 | 3 | `eb4598d4…` **6/6 (100 %)** | **yes** | yes |
+
+Every one of the six sessions presents the filed picture **at `N`** (offset 0), not merely
+somewhere in the window — so the support count and the `0.0000 %` pairs are the same fact here, and
+this is the one part in the ledger whose moving keyframes are not a phase of an animation the
+oracle spreads over several frames but a picture every session draws at that index.
+
+### 11.5 Where the part begins and ends
+
+`out/b4-mnt-lns-edge` took 2440…2490 in tens:
+
+| index | 2440 | 2450 | 2460 | 2470 | 2480 | 2490 |
+|---|---|---|---|---|---|---|
+| `sha256` | `fd5afb16…` | `ea0787f6…` | `5217d4e0…` | `40732954…` | `1ee6e8fb…` | `6a152a31…` |
+| what | the scroller, faded to mean 3.92 | flat black | mean 16.13 | mean 35.04 | mean 38.95 | the next part's face, full |
+
+The last full-brightness scroller frame is **2350** (mean 56.77); 2400 is the fadeout (mean 14.54,
+every pixel changed — the palette dropping); 2450 is the black gap; **the next part's first frame is
+in (2450, 2460]** and LNS&ZOOM's face is *fading in* at 2460–2480 (61 distinct colours at 2460
+against 64 at 2490) before it holds at 2490 — 2490 and 2500 are the same bytes (`6a152a31…`) and
+carry `.idx`. So **MNTSCRL is ~2030 frames of the `SECOND 3` boot, from its first graphics frame in
+(415, 420] to a last drawn frame at ~2445, ≈29 s** — and, as at U2A→PAM and GLENZ→TUNNELI, **the
+boundary is a content change with no geometry refusal at all**: both screens are 320×200, so
+nothing in `--frames` can find it, and the sheet is the discovery (§1.6). The black gap is two or
+three frames wide — narrower than the tens of frames GLENZ leaves — and it is the same
+`ea0787f6…` black as everywhere else.
