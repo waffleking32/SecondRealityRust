@@ -164,8 +164,11 @@ The original retail release has been supplied separately and now lives at
 | `SECOND.EXE` | 1,451,093 | `a0b637b1c6729aeee8874cb7de701f608fe6ec3028fd72652a962a3a2bd25d8f` |
 | `REALITY.FC` | 992,188 | `cffb5839d0660f646c2474ff46452543997c3fc9469fa64401556c2d271aa63b` |
 
-Its `README.1ST` confirms the distribution is exactly these two files unpacked into one
-directory, and documents the command line: `SECOND 1`..`5` start at the beginning, title
+Its `README.1ST:34-38` lists five files in the unpacked directory — itself, the two demo files, and
+the two distributor text files (`FCINFO10.TXT`, `FILE_ID.DIZ`) that no part reads — so the demo
+itself is exactly `SECOND.EXE` and `REALITY.FC` unpacked into one directory
+(`part-sequence.md` §3 makes the same point), and the README documents the command line:
+`SECOND 1`..`5` start at the beginning, title
 screen, landscape scroller, vector part and end credits respectively.
 
 **Decision: the distributed release is the reference of record for every frame diff.**
@@ -657,9 +660,11 @@ and that is deterministic.
 services once per rendered frame, so a capture lands within a frame or two of the requested
 index — the capture refuses (rather than mislabelling) only when the emulator has run more
 than three frames past it. The emulator stalls for ~20 frames when the demo loads, which is
-normal and does not shift the demo-relative mapping. And the indexed read costs ~770
-requests (four planes, or one for chain-4, plus 768 for the DAC), so it takes roughly a
-third of a second: it is only meaningful where the screen holds, and the capture checks the
+normal and does not shift the demo-relative mapping. And the indexed read costs **1,024
+requests for the DAC alone** — 768 port reads plus the 256 index writes that select them —
+plus one framebuffer read per plane (four, or one for chain-4) and eight port writes, so it
+takes roughly a third of a second: it is only meaningful where the screen holds, and the
+capture checks the
 indices against the RGB frame before writing them.
 
 ## D16 — Phase 0's interface decisions, and the open question it did not close (2026-10-10)
@@ -718,8 +723,14 @@ less** than the number to write here, and taking it literally puts the split one
 
 Two caveats are recorded but **not** settled: `lines_scaled` divides the sum for a mode forced to
 single scan (`vga_draw.cpp:3594`), and `vblank_skip` — a vertical-blanking trick the emulator logs a
-warning about (`vga_draw.cpp:2245-2293`) — subtracts from it. Neither has been met yet, so the first
-part that splits must confirm the mapping against a capture rather than trust the `+ 1`.
+warning about (`vga_draw.cpp:2245-2293`) — subtracts from it. Neither has been met yet, and the `+ 1`
+itself **has now been confirmed against a capture**: PLZPART is the first part that splits, and
+`reference-indices.md` §1.9/§13.2 records the measurement — `pompota` (`PLZPART/COPPER.ASM:126-143`)
+alternates CRTC 0x18 between `0x3c` (60) and `0x3d` (61) frame by frame and the captured frames' lower
+view starts at **62, 61, 62**, with `Split::scanline` the register plus one; and the independent
+cross-check is `do_drop`'s own table (`COPPER.ASM:175-182`, `dtau`), whose register values 194/201/208
+sit one below the measured first content rows 195/202/209. So the mapping is measured rather than
+trusted; the two caveats above remain open for whatever mode meets them.
 
 **The lower view's origin is forced to 0.** `VGA_ProcessSplit` (`vga_draw.cpp:1139-1158`) sets the
 address counter to 0, clears panning, and resets the sub-row phase: the lower region of a hardware
@@ -1121,9 +1132,16 @@ because the rule only fires within a read's reach. Measured after the change:
   capture holding only the same three indices was **refused, exit 2**.
 
 **The convention that follows is asymmetric: the reference holds keyframes only; the
-capture that will be compared *against* it holds one support frame beyond each end of the
-keyframe range** (`--frames N₁-1 … N_k+1`). Not a style choice — the symmetric version was
-measured failing. `compare` pairs *every* frame of the reference, so a support frame sitting
+capture that will be compared *against* it holds `K-1, K, K+1` around every keyframe that
+moves, and nothing around one that holds.** B1b measured the ends-only form
+(`--frames N₁-1 … N_k+1`) and it is sufficient only when the keyframes are **contiguous**;
+B2's measurement showed it insufficient on the real parts, which are not — a session's
+phase is uniform across a capture, so an interior moving keyframe answered from its own
+index pairs at offset 0 and reports the one-step difference instead of aligning, and a held
+keyframe's ±1 candidates are the same bytes and need no support
+(`docs/fidelity/reference-indices.md` §1.3 rules 1–2, §1.4). Not a style choice — the
+symmetric version was measured failing. `compare` pairs *every* frame of the reference, so a
+support frame sitting
 in the reference is itself a reference index, and its own counterpart lies one further out
 still: two captures both holding `N₁-1 … N_k+1` still refuse at the outermost index (exit 2,
 "reference frame 2451 has no rendered frame within ±1 of it … the nearest rendered index is
@@ -1135,10 +1153,12 @@ support — they go in the manifest like any other frame, in the scratch directo
 (`out/…-recapture`), never in `reference/parts/`, and not in `reference-indices.md`'s table.
 
 **Leave room after a support run.** A batched run is read *after* it is taken, so a batch of
-*k* frames spends ~23·*k* rendered frames reading, and a distant index listed too soon behind
-it is refused. Measured: `--frames 2448,2449,2450,2451,2452,2540` captures the five and then
-refuses the sixth — "the emulator reached frame 2552 before frame 2540 could be captured",
-100 frames of deferral for five frames of support. That is a loud refusal and not a
+*k* frames spends ~20·*k* rendered frames reading — the 100 frames of deferral below, for five
+frames of support, are 20 a frame, and B2 measured three reads costing 57 frames (~19 each,
+`reference-indices.md` §1.3) — and a distant index listed too soon behind it is refused.
+Measured: `--frames 2448,2449,2450,2451,2452,2540` captures the five and then refuses the
+sixth — "the emulator reached frame 2552 before frame 2540 could be captured", 100 frames of
+deferral for five frames of support. That is a loud refusal and not a
 regression (the same list was refused before the batching too), but a capture list must not
 put a distant index less than ~25·*k* frames after a run of *k*. Keyframes hundreds of
 frames apart are naturally clear of it.
@@ -1204,8 +1224,9 @@ this phase invoked it.
 
 **A part that does not reproduce — the ladder.** Census it by §1.8's rule over every session holding
 its window and **re-capture it into the largest alignment group** (this worked and is not marginal:
-TUNNELI 8–10 % → 0.0000 %, 3DSINFLD's 16500 43–48 % residual → `verdict: identical`, U2E's 2600 from
-0/3 to 2/3). Judge the re-capture against **independent** sessions, never a partner captured in the
+TUNNELI's 8.07–10.18 % on all four keyframes → 0.0000 % on three and 0.0891 % on the fourth,
+3DSINFLD's 16500 38.9031 % residual → `verdict: identical`, U2E's 2600 from 0/4 to 3/4). Judge the
+re-capture against **independent** sessions, never a partner captured in the
 same sitting — §1.8 rule 5 exists because that mistake once made GLENZ's reference *worse*. If the
 largest support is below half the sessions, file the best *filable* picture and record the keyframe
 as having no settled content. Never: a pixel tolerance, a widened window, a structural-similarity
@@ -1214,7 +1235,8 @@ substitution, or an unrecorded re-roll.
 **Recorded as unresolved, because a later phase will meet all three:**
 
 - **The oracle's rare excursion.** One session had TECHNO's rings ~30–40 frames early; it did not
-  reproduce in either of two VGA-content probes, and it is not the music clock (the player's counter
+  reproduce in either of two VGA-content probes, and it is not the music clock (the player's counter —
+  the 16-bit word at physical `0x105B0E`, advancing 0.7424 a frame, `reference-indices.md` §1.7 —
   agrees to ≈1 music frame across sessions, rate identical to 1e-4), not a fixed offset and not a
   counter stall (0 stalls ≥150 ms at 20 ms resolution to frame 4900). Rare, real, unexplained, not
   reproducible; the ordinary spread is pinned (five mode transitions within 4 frames over four

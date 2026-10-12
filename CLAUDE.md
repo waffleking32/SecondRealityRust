@@ -93,13 +93,19 @@ indices closer together than one frame's indexed read (~25 rendered frames) is a
 before any of it is read; the read itself is unchanged (D19). Two things follow.
 
 The **reference holds keyframes only**; the capture that will be compared *against* it holds
-**one support frame beyond each end** of the keyframe range (`--frames N₁-1 … N_k+1`). That
-asymmetry is measured, not stylistic: `compare` pairs *every* frame of the reference, so a
-support frame in the reference is itself a reference index whose counterpart lies one further
-out — two captures both holding `N₁-1 … N_k+1` refuse at the outermost index (D19). The two
-captures are two different commands.
+**`K-1, K, K+1` around every keyframe that moves**, and **nothing around one that holds**
+(`--frames N₁-1 … N_k+1` is the shape only when the keyframes are contiguous, which none in
+the tree is). A keyframe that moves has to be answerable from its neighbour on either side:
+a session's animation phase is uniform across a capture, so an interior moving keyframe
+answered from its own index pairs at offset 0 and reports the one-step difference instead of
+aligning. A held keyframe needs no support at all — its ±1 candidates are the same bytes, so
+the search finds offset 0 whatever the partner's phase (`reference-indices.md` §1.3, §1.4).
+The asymmetry is measured, not stylistic: `compare` pairs *every* frame of the reference, so
+a support frame in the reference is itself a reference index whose counterpart lies one
+further out — two captures both holding `N₁-1 … N_k+1` refuse at the outermost index (D19).
+The two captures are two different commands.
 
-And a batched run is **read after it is taken**, so a run of *k* indices spends ~23·*k*
+And a batched run is **read after it is taken**, so a run of *k* indices spends ~20·*k*
 rendered frames reading afterwards: do not list a distant index less than ~25·*k* frames
 behind a support run, or it is refused (D19).
 

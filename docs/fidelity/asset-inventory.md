@@ -1,9 +1,9 @@
 # Asset inventory — every asset the port's parts need, and what it is
 
 Task A1 of Phase 1. This is the list every later task draws its test fixtures and its loader
-work from: which files the 20 numbered parts (plus the hidden one, the shell and the setup
-menu) load, in what format, and whether the bytes exist as a standalone file or only inside a
-build blob.
+work from: which files the 19 numbered parts (plus the hidden `DDSTARS`, the shell and the
+setup menu — 20 part EXEs in all) load, in what format, and whether the bytes exist as a
+standalone file or only inside a build blob.
 
 **Source of record** — `upstream/SecondReality` at `071a82e`. Two things name an asset, per
 the plan: the link inputs in a part's `MAKEFILE` (and the `.BAT`/`.LNK`/`.PRJ` equivalents
@@ -260,7 +260,7 @@ The 79 entries fall into exactly three groups, and they account for every one of
 
 | manifest group | entries | agrees with |
 |---|---|---|
-| the 20 part EXEs (19 numbered + `DDSTARS`) and `START.EXE`, `STARTMUS.EXE` | 22 | `docs/fidelity/part-sequence.md` §1 (the 20 numbered parts + the hidden one) |
+| the 20 part EXEs (19 numbered + `DDSTARS`) and `START.EXE`, `STARTMUS.EXE` | 22 | `docs/fidelity/part-sequence.md` §1 (19 numbered parts + the hidden `DDSTARS`, slot 17 — §3: "19 numbered parts + 1 hidden = 20 part EXEs") |
 | `U2A.*` (6: `.00M`, `.0AA`, `.0AB`, `.001`–`.003`) and `U2E.*` (45: `.00M`, `.0AA`, `.0AB`, `.001`–`.042`) | 51 | the files §A lists under `VISU/C/SCENE` — byte-identical, §B.4 |
 | `O2.SCI`, `TROLL.UP`, `ENDSCROL.TXT`, `U2END.BIN` and the two text files | 6 | the four assets `SECOND.EXE` itself carries: `O2.SCI` (MNTSCRL, `FOREST/READ2.PAS:110`), `TROLL.UP` (TECHNO, `TECHNO/KOE.C:605`), `ENDSCROL.TXT` (ENDSCRL, `ENDSCRL/MAIN.C:101`), `U2END.BIN` (the shell's end screen, `MAIN/U2.ASM:506`). The remaining two are the distributor's text files, read by the setup program's copy-to-disk step (`MAIN/START.C:40,53`) and displayed by nothing; §F says why they are not copied |
 

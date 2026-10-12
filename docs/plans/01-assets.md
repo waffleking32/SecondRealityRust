@@ -1338,9 +1338,10 @@ Two consequences, both measured in B2:
 closer together than 25 frames is grabbed *before* any of them is read, because the DAC read costs
 ~300 ms (1024 requests, 99% of a chain-4 frame) and used to sit between grabs — which is why
 consecutive indices were previously refused. The price is that the run's reads are deferred: a batch of
-*k* frames spends ~23·*k* rendered frames reading afterwards, so a list that puts a support run
+*k* frames spends ~20·*k* rendered frames reading afterwards (B1b's 100 frames for five is 20 a frame, and
+B2 measured ~19 a read), so a list that puts a support run
 immediately before a distant keyframe is refused (`--frames 2448..2452,2540` fails; 2540 arrives during
-the batch's reads). Keyframes hundreds of frames apart are naturally fine — a trio defers ~69 frames —
+the batch's reads). Keyframes hundreds of frames apart are naturally fine — a trio defers ~60 frames —
 but do not build a list where a distant index follows a batched run by less than ~25·*k* frames.
 
 **B2 measured the deferral itself, and the ceiling is the safe end of it.** Three reads cost 57
@@ -1512,12 +1513,14 @@ All four are captured; the rows are in `reference-indices.md` §2 and the measur
   support count, **never from a single partner captured in the same sitting** — a partner taken two
   minutes after an in-place re-capture can sit one frame behind it and report 0.0000 % for a reference
   most sessions do not present at all, which is how this went wrong once. Measured effect of filing
-  the largest-support pictures: TUNNELI 8.07–10.17 % → three byte-identical keyframes and 57 px;
+  the largest-support pictures: TUNNELI 8.07–10.18 % → three byte-identical keyframes and 57 px;
   TECHNO's 320×200 row → `verdict: identical`; GLENZ's moving frames byte-identical against two
   independent partners. Held frames need none of this. (`reference-indices.md` §1.8.)
 - **A boundary can be a content change with a black gap between the parts**: GLENZ's last frame
   ~3650, flat black 3680–3700, TUNNELI's first ring 3710; TUNNELI's last dots in (4700, 4770]
-  (session dependent), TECHNO's first rings 4770. Neither boundary is in the geometry — and **the
+  (session dependent), TECHNO's first rings **4797** — the 4770 sighting is the one anomalous session
+  §1.7 records and did not reproduce in two VGA-content probes, which put the rings at 4797 after a
+  black plateau at 4774–4793 (§8.5). Neither boundary is in the geometry — and **the
   8400 refusal a B3 sweep saw is TECHNO's own 320×400 screen, not the part after PANICEND**, which
   is a content change at ~9230 between two 320×200 screens and has no refusal at all. Sections
   §3.4/§4.5/§5.5/§6.5/§7.5/§8.5/§9.6/§10.4 all carry a "Where the part ends" heading; B4's sweeps
@@ -1588,8 +1591,9 @@ measured, for B5 and for Phase 2.** Measured, and in `docs/fidelity/reference-in
   18000–21000 finds U2E (and the end of U2E's own stretch on that boot is not yet measured; ~22 000 is
   the `SECOND 4` extent added to U2E's start).
 - **ENDLOGO's opening is a white palette over the previous part's memory, not a blank screen.** By
-  17900 the frame is 2 colours with 74221 px white — `END/END.C:61-63` writes 63 into 765 of the 768
-  DAC entries (leaving index 255 alone), `:67-88` re-points the CRTC's start address and line count
+  17900 the frame is 2 colours with 74221 px white — `END/END.C:61-63` points the DAC write index at 0
+  and writes 63 765 times, i.e. 765 bytes = the three channels of entries 0–254 (**entry 255 alone is
+  left unwritten**), `:67-88` re-points the CRTC's start address and line count
   while keeping the 400-row screen, `:89-92` whitens again and waits 32 vblanks, and only then does it
   read its own picture and blit 400 rows (`:94-97`). So what is on screen under that white is
   **JPLOGO's leftover plane** — B5's sweeps should not read that frame as a screen of its own.
@@ -1676,8 +1680,9 @@ there is no 21st part to capture. B2–B5's lists total exactly 20 (1 + 7 + 8 + 
 ### Task B6: Close the phase's reference evidence, and the non-determinism policy
 
 **Files:**
-- Modify: `PROGRESS.md`, `docs/fidelity/reference-indices.md`, `docs/decisions.md` (D18 if the policy
-  needs recording)
+- Modify: `PROGRESS.md`, `docs/fidelity/reference-indices.md`, `docs/decisions.md` (the number this
+  line first named was a guess; the policy was recorded as **D20**, "What a reference index means,
+  and the fallback that was not needed")
 
 - [ ] **Step 1: Re-capture one moving part from each block, a day's work apart or more**
 
@@ -1731,4 +1736,4 @@ Exit criteria from spec §10, with the evidence each task leaves:
 | Every needed asset decodes | `cargo xtask assets verify --decode` exit 0 |
 | …and matches the source art | cross-format tests (A2/A3) plus the contact sheets and the recorded look (A8) |
 | Provenance file complete | `cargo xtask assets verify --tree` exit 0 against `assets/PROVENANCE.md` |
-| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each carrying a re-capture comparison whose partner holds one support frame beyond each end of the reference's keyframe range (the asymmetry is B1b's, and the symmetric version refuses — see B2). **A held screen shows exit 0, offset 0, byte-identical; a moving one shows the measured offset and residue** (B1b/D19: same alignment group → identical, different group → offset ±1 with 0.2–0.6 % residue). This criterion is stated per screen kind because the oracle's own reproducibility is per screen kind, and restating it is what B1b measured rather than assumed |
+| References captured for all parts | `reference/parts/<name>/` for all 20 slots of `part-sequence.md` §1 (19 sequence parts plus the hidden DDSTARS, not 21 — see B5), one row each in `docs/fidelity/reference-indices.md`, each carrying a re-capture comparison whose partner holds `K-1, K, K+1` around every keyframe that moves and nothing around a held one — B1b's ends-only form (`N₁-1 … N_k+1`) is sufficient only for a contiguous range, which B2 measured none in the tree to be, and the symmetric version refuses (see B2, `reference-indices.md` §1.3 rules 1–2). **A held screen shows exit 0, offset 0, byte-identical; a moving one shows the measured offset and residue** (B1b/D19: same alignment group → identical, different group → offset ±1 with 0.2–0.6 % residue). This criterion is stated per screen kind because the oracle's own reproducibility is per screen kind, and restating it is what B1b measured rather than assumed |
