@@ -37,11 +37,21 @@ rather than from reasoning. The phase's human-look evidence is the user's own re
 music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
 magic.
 
-**Part B (references) is in progress — 16 of the 20 slots are captured**, at `reference/parts/`:
+**Part B (references) is complete — all 20 slots are captured**, at `reference/parts/`:
 BEGLOGO (B2); ALKU, U2A, PAM (B3 block 1); GLENZ, TUNNELI, TECHNO (two screens), PANICEND (B3 block 2);
 MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a); RAYSCRL, 3DSINFLD, JPLOGO (B4b, from a
-`SECOND 3` boot) and U2E (B4b, captured from a `SECOND 4` boot; `SECOND 3` reaches it too). ENDLOGO, CRED,
-ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
+`SECOND 3` boot) and U2E (B4b, captured from a `SECOND 4` boot; `SECOND 3` reaches it too); ENDLOGO,
+CRED and ENDSCRL (B5, from a `SECOND 5` boot — the end sequence from its own beginning) and DDSTARS
+(B5, `SECOND U` only, the hidden part). **B6 closes the phase**: it writes the non-determinism policy
+and the phase's evidence, then tags it.
+
+**One B5 finding every later reader of these rows needs.** ENDSCRL's screen is the one screen in the
+tree where the capture tool cannot take two frames one index apart (`the emulator reached frame 9101
+before frame 9100 could be captured`; two remedies tried and both failed, because the grabs are served
+by the emulator's own process), so **ENDSCRL's census is an offset-0 count and no session holds its
+±1 window** — the row says so, and `docs/fidelity/reference-indices.md` §1.11 and §21.4 have the
+measurement. Every other part of the block reproduces byte-for-byte at its own boot index across
+separate sessions, ENDLOGO's and CRED's keyframes are held, and DDSTARS's and ENDSCRL's are moving.
 
 **Two B4b findings bear on how the remaining references are read.** JPLOGO holds for ~350 frames,
 and the states it holds are **discrete and recur** — two of four independent sessions hold the same
