@@ -10,7 +10,7 @@ Phase status board. **Read this first if you are resuming work.**
 | # | Phase | State | Plan | Tag |
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
-| 1 | Assets & references | **complete — untagged** | [01-assets.md](docs/plans/01-assets.md) | withheld — the review is done and its findings applied; the tag is the last act |
+| 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | not started | — | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
@@ -263,6 +263,41 @@ exit 1. D18's table carries the same point on the moving part screen (14.8531% a
 exit 1).
 
 ## Phase log
+
+### Phase 1 — Assets & references (done, tag `phase-1`)
+
+Sixteen tasks on branch `phase-1-assets` (A1–A8, B1, B1b, B2–B6). **405 tests pass, zero failures, one
+ignored, zero warnings.**
+
+**What was built.** `sr-assets` reads the original's media in its own formats — Origin PIC in five
+variants plus a headerless case, IFF (ILBM and PBM), RIX3, `.PAL`, OMF `LEDATA`, FLI and `.ANI`, and a
+proportional font-strip view — with `cargo xtask assets verify` checking the curated tree against
+`assets/PROVENANCE.md` and rendering a contact sheet per part. `cargo xtask reference capture` drives
+the emulated original to capture reference frames, and `cargo xtask compare` diffs against them.
+
+**The asset tree.** 150 assets plus `PROVENANCE.md`; `assets verify --tree --decode` exits 0 with
+`verdict: ok`. All 149 curated copies were hashed against `upstream/SecondReality` at the close-out and
+every one is byte-identical; the 150th was recovered from an EXE's `LEDATA` records.
+
+**The references.** Every slot in `docs/fidelity/part-sequence.md` §1 — 19 sequence parts plus the
+hidden DDSTARS — has a capture under `reference/parts/`, 22 capture directories and 83 keyframes, each
+row in `docs/fidelity/reference-indices.md` carrying its indices, geometry, hashes and re-capture
+result.
+
+**What the phase learned about its own oracle, because it is what the references mean.** The boot
+repeats exactly once the host is out of it (`--boot autoexec` plus a silent emulator, D17), and the
+frame grab is counter-verified on both sides. But the emulator's picture at a given boot index is not
+fully reproducible: sessions fall into **discrete alignment groups**, the majority group byte-identical,
+so `compare` searches **±1 frame** and reports the offset while leaving every pixel exact (D18). A
+keyframe is filed only if at least half the sessions can present that picture at 0.0000 % within that
+window, with the reference's own capture excluded from the count (D19); where none can, the row records
+it as having **no settled content** rather than implying a majority. The §8.4 structural-similarity
+fallback was **not needed** (D20). One excursion to ~30–40 frames remains real, unreproduced and
+unexplained, and is recorded as such.
+
+**Phase 2 got one result out of this phase before starting.** PLZPART's plasma confirms on captured
+frames that the port's `Split::scanline` is the emulator's line-compare register **plus one** —
+`62/61/62` for a register alternating 60/61, with `do_drop`'s own `dtau` table cross-checking it.
 
 ### Phase 0 — Foundation & harness (done, tag `phase-0`)
 
