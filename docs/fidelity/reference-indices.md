@@ -431,25 +431,45 @@ and the support counts above are what says so.
 
 **The split's `+ 1` is measured now, not inferred.** §1's D16 caveat said "the first part that
 splits must confirm the mapping against a capture rather than trust the `+ 1`". PLZPART is that part,
-and the capture confirms it: `pompota` (`PLZPART/COPPER.ASM:118-138`) alternates CRTC 0x18 between
+and the capture confirms it: `pompota` (`PLZPART/COPPER.ASM:126-143`) alternates CRTC 0x18 between
 `0x3c` (60) and `0x3d` (61) frame by frame, and three consecutive captured frames show the lower
 view's first content row at **62, 61, 62** (`out/b4-plz-probe1`, §13.2). `Split::scanline` is the
 register plus one. Two things the measurement also puts on record: the register is *animated* —
-`do_drop` (`COPPER.ASM:196-215`) walks it down the screen at the end of each plasma phase, and
+`do_drop` (`COPPER.ASM:189-268`) walks it down the screen at the end of each plasma phase, and
 framed at 8289/8290/8291 the first content row is 195/202/209 — and what sits above the split is
 whatever the CRTC's start address points at, not a picture.
 
-**A stride refusal can be the racy register read, and the race has a quiet outcome as well as a loud
-one.** §1.7 records the read naming another register's value and the tool refusing the screen
-(TECHNO's 0xa0 from CRTC 0x0c). PLZPART adds the other half: the value it names may *pass*
-`plan_indexed_read` and be used. At 6000 the read returned `0xC0` — which is exactly the low byte of
-`cop_start = 96*(682-400) = 27072 = 0x69C0`, the value `PLZPART/COPPER.ASM:69-72` writes to CRTC
-register **0x0d** every frame — and the tool refused loudly because 384 × 400 bytes do not fit a
-plane (§13.4). Had it returned 0x3c, `pompota`'s other value, the plan would have accepted a
-**120-byte** plane row and the only thing between that and a sheared `.idx` in the reference tree
-would be the coherence check — which §1.6 already shows a flat palette blinds. Nothing in this
-block's artefacts is wrong (every PLZPART frame is RGB-only), but the quiet case is real and is why
-a `.idx` from a part that pokes the CRTC is worth reading by hand.
+**A stride refusal can be the racy register read, and that race has a quiet outcome as well as a
+loud one.** §1.7 records the read naming another register's value and the tool refusing the screen
+(TECHNO's 0xa0 from CRTC 0x0c). PLZPART's refusal at 6000 names a **384-byte** plane row (§13.4), and
+that number has **two explanations the capture cannot separate** — the message names the stride, not
+the register:
+
+- **the offset register read another register's value** (consistent with §1.7's mechanism): `0xC0` is
+  exactly the low byte of `cop_start = 96*(682-400) = 27072 = 0x69C0`, which `PLZPART/COPPER.ASM:69-72`
+  writes to CRTC register **0x0d** every frame; or
+- **the colour depth was misread as chain-4** — the *other half of the same race*: 384 is also exactly
+  `0x30 × 8`, the plasma's own offset value (48 units) taken as a chained row. `chain4_enabled()` is
+  the same two-operation port read (`crtc_offset_register` writes the index to 3c4h, then reads 3c5h
+  in a separate request), and `PLZ.C:95-118` writes 3c4h twice a frame, so a chain-4 bit caught
+  mid-write gives the identical message.
+
+The two differ in what they imply for the *quiet* failure, and that is why both are written down.
+Under the first, the value the read names can **pass** `plan_indexed_read` and be used: had it
+returned `pompota`'s other value, 0x3c, the plan would have accepted a **120-byte** plane row with
+only the coherence check between that and a sheared `.idx` in the reference tree — and §1.6 shows a
+flat palette blinds that check. Under the second, a racy *offset* value is multiplied by eight, so it
+would nearly always exceed a plane and refuse loudly; the quiet case needs the offset to be the
+register that is misread **and** the layout to be read right. Nothing in this block's artefacts is
+wrong either way (every PLZPART frame is RGB-only), but which of the two it was is not settled here,
+and the wider lesson stands: **any `.idx` filed from a part that writes CRTC registers is worth
+reading by hand.**
+
+**And the durable fix is in `xtask`'s oracle, not in this ledger** — recorded here so the next change
+to the oracle sees it: `crtc_offset_register()` and `chain4_enabled()` each read the index/data port
+pair in two requests with the guest running in between. Reading the pair coherently, or reading it
+twice and requiring agreement, would remove the race for every part rather than documenting it part
+by part. It is outside this task's scope and nothing in the tree is currently wrong because of it.
 
 **A part's two screens can differ in what "the same index" means, and the difference is smaller than
 one frame.** PLZPART's cube is byte-identical at its keyframes in every session captured (§13.5);
@@ -484,7 +504,7 @@ table.
 | PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself, whose picture is the one session with a ±1 window and two refused captures also present (§10.3) |
 | MNTSCRL | `SECOND 3` | 320×200 Mode 13h; 500 carries `.idx` | 500, 1100, 1700, 2300 | `out/b4-mnt-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: mixed`; the same result against `out/b4-mnt-sess4` and `out/b4-mnt-sess6`. 500 is held (`e68aa887…` in every one of the 8 sessions that took it); 1100, 1700 and 2300 move within a session (~2.4–3.1 % of pixels a frame) but the same bytes at the same index in all 6 independent sessions, so each is supported **6/6 (100 %)** over the ±1 window (§11.4) |
 | LNS&ZOOM | `SECOND 3` | 320×200 Mode 13h; 2700 and 5650 carry `.idx` | 2700, 3400, 4200, 4900, 5650 | `out/b4-lns-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 5}`, `mode: mixed`; the same against `out/b4-lns-sess3` and `out/b4-lns-sess5`. 2700 (the held face) and 5650 (the flat white the part exits on) are held; 3400 (the lens), 4200 and 4900 (the rotazoomer) move 6.7–39.8 % of pixels a frame and still carry the same bytes at the same index in all 5 independent sessions — **5/5 (100 %)** support each (§12.4). 5650's `.idx` is a flat-palette plane the coherence check cannot vouch for (§12.2) |
-| PLZPART — the 320×400 plasma | `SECOND 3` | 320×400 Mode X, 96-byte plane row, line-compare 60/61 (the lower view starts at scanline 61/62); RGB only | 6000, 7000, 7600 | `out/b4-plz-sess1-plasma` and `out/b4-plz-sess3-plasma` | exit 1, `mode: rgb`, offsets `{0: 3}` — 6000 **0.0000 %** (0 px) against `sess3` and 0.1641 % (210 px) against `sess1`; 7000 7.7344 % / 12.9266 %; 7600 9.3281 % / 24.4844 %, every one at max channel delta ≤ 25. Census: 6000 is the largest-support picture (**2/3**); 7000 and 7600 are **no settled content** — the filed 7000 is outside every group and at 7600 every group is a singleton (§13.6) |
+| PLZPART — the 320×400 plasma | `SECOND 3` | 320×400 Mode X, 96-byte plane row, line-compare 60/61 (the lower view starts at scanline 61/62); RGB only | 6000, 7000, 7600 | `out/b4-plz-sess1-plasma` and `out/b4-plz-sess3-plasma` | exit 1, `mode: rgb`, offsets `{0: 3}` — 6000 **0.0000 %** (0 px) against `sess3` and 0.1641 % (210 px) against `sess1`; 7000 7.7344 % / 12.9266 %; 7600 9.3281 % / 24.4844 %, every one at max channel delta ≤ 25. Census over the sessions holding a window (5 at 6000, 4 at 7000, 3 at 7600): **no settled content on all three** — the filed picture is presented by 2/5 (40 %), 0/4 and 0/3, and the largest supports in the ±1 windows (3/5 at 6000, 2/4 at 7000) belong to pictures taken only at `N±1`, which rule 3's caveat forbids filing at `N`. The filed pictures are still the best *filable* ones at 6000; at 7000 and 7600 every picture taken at `N` is a singleton (§13.6) |
 | PLZPART — the 320×200 cube | `SECOND 3` | 320×200 Mode X, 160-byte plane row; RGB only | 8500, 9500 | `out/b4-plz-sess1-cube` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 2}`, `mode: rgb`; the same against `sess2`, `sess3` and `sess4`. Both keyframes are byte-identical in every session captured — **4/4 (100 %)** over the ±1 window (§13.6) |
 | MINVBALL | `SECOND 3` | 320×200 Mode 13h; RGB only | 10900, 11200, 11800, 12400 | `out/b4-minv-sess1` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}`, `mode: rgb`; the same against `sess2` and `sess3` — and `sess3` pairs all four at **offset −1** with 0.0000% (0 px, max delta 0), its own 10899 being the reference's 10900 picture's place in the animation. Every keyframe is moving (4.7–7.1 % of pixels a frame) and every session presents the filed picture over the ±1 window — **3/3 (100 %)** (§14.4) |
 
@@ -1968,15 +1988,17 @@ exactly the 24,620 pixels whose index widens to something other than black.
 
 The per-frame numbers are measured **inside one capture**, between adjacent indices, so they are
 the screen's own rate and not a session-to-session difference (§1.7's rule for reading a
-percentage). The hold is bounded by measurement on both sides: 440 → 445 is a 6998-pixel
-(10.9344 %) step, so the hold starts in (440, 445], and 545 → 555 is a 19-pixel (0.0297 %) step, so
-it ends in (545, 555). Nothing inside the scroll holds: 425→430 is 20325 px (31.7578 %, the fade),
+percentage). The hold is bounded by measurement on both sides: 440 → 445 is a **269-pixel
+(0.4203 %)** step — the palette's last one, and 6998 px (10.9344 %) is the *previous* step, 435→440 —
+so the hold starts in (440, 445]; 545 → 555 is a 19-pixel (0.0297 %) step, so it ends in
+(545, 555). Nothing inside the scroll holds: 425→430 is 20325 px (31.7578 %, the fade),
 555→560 is 39423 px (61.5984 %, the background's palette fade), and every step measured between
 1099 and 2301 is 2.4–3.1 % — there is no pair of identical frames anywhere in that span.
 
 **And unlike GLENZ's and TUNNELI's moving screens (§1.8), this part's moving frames are the *same
-bytes at the same index in every session*.** Every index that two captures from different sittings
-both hold agrees exactly:
+bytes at the same index in every session*.** Every index that two captures both hold agrees exactly,
+whatever the gap between them (the pairs below are 2 minutes to half an hour apart, and both sweeps
+in the list were taken before the reference existed):
 
 | index | sessions that took it | `sha256` |
 |---|---|---|
@@ -2016,10 +2038,12 @@ verdict: identical, mode: mixed, offsets {"0": 4}
 exit: 0
 ```
 
-`out/b4-mnt-sess4` and `out/b4-mnt-sess6` — two **more independent sessions**, captured in
-separate sittings from the reference and from each other — give the identical report (`exit 0`,
-`verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`). No headline number here comes from
-a single partner (§1.8 rule 5).
+`out/b4-mnt-sess4` and `out/b4-mnt-sess6` — two **more independent sessions**, separate captures
+(the six span about ten minutes of wall-clock, the reference among them) — give the identical report
+(`exit 0`, `verdict: identical`, 0.0000 %, offsets `{0: 4}`, `mode: mixed`). No headline number here
+comes from a single partner (§1.8 rule 5), and the agreement is cross-checked rather than assumed:
+discovery runs taken **before the reference was filed** already hold the same bytes at 500
+(`out/b4-mnt-fade1`, `out/b4-mnt-hold-edge`) and at 2300 (`out/b4-mnt-lns-boundary`).
 
 **The census**, by §1.8's rule — captures that hold `N-1, N, N+1` (the six sessions above), the
 reference's own directory excluded:
@@ -2148,7 +2172,7 @@ keyframe's `.idx` is evidence of nothing about the stride**, and Phase 2's index
 
 | keyframe | neighbours | reading |
 |---|---|---|
-| 2700 | 2699 = 2700 = 2701, one `sha256`, and 2490…2900 sampled at 100 (9 points) are the same bytes in `b4-lns-sweep2` | **held** |
+| 2700 | 2699 = 2700 = 2701, one `sha256`, and 2500…2900 sampled at 50 (9 points) are the same bytes in `b4-lns-sweep2` | **held** |
 | 3400 | three `sha256`; 4312 px (6.7375 %) and 4367 px (6.8234 %) a frame | **moving** |
 | 4200 | three `sha256`; 10052 px (15.7063 %) and 8248 px (12.8875 %) a frame | **moving** |
 | 4900 | three `sha256`; 25440 px (39.7500 %) and 24876 px (38.8687 %) a frame | **moving** |
@@ -2157,10 +2181,11 @@ keyframe's `.idx` is evidence of nothing about the stride**, and Phase 2's index
 All the per-frame numbers are measured inside one capture between adjacent indices. The face's hold
 is bounded on both sides: 2950 is 2940 px (4.5938 %) away from 2900, so the hold ends in (2900, 2950],
 and the lens phase ends by returning the screen to *exactly* the hold's picture — 3600, 3620 and 3640
-are `6a152a31…` again, 3580 is 7859 px (12.2797 %) away from 3600 and 3660 is 64000 px (100 %) — so
+are `6a152a31…` again, 3580 is 3051 px (4.7672 %) away from 3600 and 3660 is 64000 px (100 %) — so
 the face is held a second time for ~60 frames at (3580, 3660) before the rotazoomer starts. The
-rotazoomer is the fastest screen in this part: 3800→3900 is 93.3438 % of pixels and 3900→4000 is
-98.9062 %, so a one-frame phase difference there moves most of the picture (§1.7).
+rotazoomer is the fastest screen in this part: 3700→3800 is 93.3438 % of pixels, 3800→3900
+98.9062 % and 3900→4000 98.1312 %, so a one-frame phase difference there moves most of the
+picture (§1.7).
 
 ### 12.4 The re-capture and the census
 
@@ -2184,8 +2209,11 @@ verdict: identical, mode: mixed, offsets {"0": 5}
 exit: 0
 ```
 
-`out/b4-lns-sess3` and `out/b4-lns-sess5` — independent sessions, separate sittings — give the same
-report (`exit 0`, `verdict: identical`, 0.0000 %, offsets `{0: 5}`, `mode: mixed`).
+`out/b4-lns-sess3` and `out/b4-lns-sess5` — independent sessions, separate captures about ten
+minutes apart — give the same report (`exit 0`, `verdict: identical`, 0.0000 %, offsets `{0: 5}`,
+`mode: mixed`). The corroboration that does not rest on that spacing: the discovery runs captured
+**before the reference** (`out/b4-lns-sweep2`, `-sweep3`, `-sweep1`, `-end1`) hold the same bytes at
+every one of the five keyframes — all five checked by hash, not assumed.
 
 **The census**, over the five sessions that hold a window (the reference's own directory excluded):
 
@@ -2262,7 +2290,8 @@ out/b4-plz-idx1         6000,7000                      exit 0 (2 frames)
 
 Tiles. `b4-plz-sweep1` (the twelve, all 320×400): **5800** a pale, washed-out plasma (the part's
 `cop_drop=128` entrance), **6000 / 6200 / 6400 / 6600** a blue-and-magenta plasma in the middle of
-the frame with black bands above and below, **6800 / 7000 / 7200** green and blue, **7400 / 7600**
+the frame with flat bands above and below — black by 7000 and `(4,4,4)` at 6000 — **6800 / 7000 /
+7200** green and blue, **7400 / 7600**
 cyan and orange, **7800 / 8000** almost black with a faint grey shape. `b4-plz-cube-sweep`:
 **8500** a small rainbow-textured cube in the upper left over black, **9000** the cube filling the
 frame, **9500** it larger still and open, **10000** a green plasma face across the whole frame,
@@ -2286,7 +2315,7 @@ row is not the same for all three:
 | 6990 | **61** | 340 |
 | 6991 | **62** | 341 |
 
-The split alternates 61/62 frame to frame, and that is exactly `COPPER.ASM:118-138`'s `pompota`,
+The split alternates 61/62 frame to frame, and that is exactly `COPPER.ASM:126-143`'s `pompota`,
 which sets CRTC register 0x18 to `0x3c` (60) on one frame and `0x3d` (61) on the next (with the 8th
 bit cleared through register 0x07 at `:126-129`). **The displayed first line of the lower view is the
 register's value plus one, 60→61 and 61→62, measured on the hardware rather than inferred from the
@@ -2295,7 +2324,7 @@ emulator's source.** The port writes `Split { scanline: 61 }` and `62` to reprod
 Two caveats the measurement carries: the upper view is what is black above the split (those frames'
 CRTC start address, `cop_start = 96*(682-400) = 27072` set at `PLZ.C:176`, points past the drawn
 plasma), so the *boundary* measured here is where the lower view begins and not a picture change; and
-the split does not stay at 60/61 for the whole part — `do_drop` (`COPPER.ASM:196-215`) walks the same
+the split does not stay at 60/61 for the whole part — `do_drop` (`COPPER.ASM:189-268`) walks the same
 register up the screen at the end of each plasma phase, and `b4-plz-probe1`'s 8289/8290/8291 show the
 first content row at **195 / 202 / 209**, moving down ~7 rows a frame. The 61/62 pair is the split in
 its steady state; the drop is the same register being animated.
@@ -2304,7 +2333,7 @@ its steady state; the drop is the same register being animated.
 
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
-| 6000 | the **plasma**, first palette — blue and magenta over the middle 280 rows, black above and below. | `.rgb` only | rgb `308d4d3a…` |
+| 6000 | the **plasma**, first palette — blue and magenta over the middle 280 rows, with a flat **`(4,4,4)`** above and below (not black: the filed file has no zero byte in it at all; at 7000 and 7600 the same bands are `(0,0,0)`, a palette phase). | `.rgb` only | rgb `308d4d3a…` |
 | 7000 | the **plasma**, second palette — green and blue. | `.rgb` only | rgb `6f41f697…` |
 | 7600 | the **plasma**, third palette — cyan and orange. | `.rgb` only | rgb `9a8f3fe5…` |
 | 8500 | the **cube**, small — a rainbow-textured cube in the upper left over black. | `.rgb` only | rgb `11fd1186…` |
@@ -2338,25 +2367,34 @@ warning: indexed capture failed (the screen is not one the indexed read can desc
 warning: indexed capture does not reproduce the RGB frame (the screen moved while it was read); keeping RGB only
 ```
 
-**384 bytes a plane row is register 0xC0 read as 13h** — and 0xC0 is not a stride this part ever
-sets: the plasma's offset register is `0x30` (`TWEAK.ASM:65-66`) and the cube's is `0x50`
-(`TWEAK.ASM:34-35`). It is, exactly, **the low byte of `cop_start`**: `PLZ.C:176` sets
-`cop_start = 96*(682-400) = 27072 = 0x69C0`, and `COPPER.ASM:69-72` writes `cop_start`'s low byte to
-CRTC register **0x0d** and its high byte to 0x0c, every frame, from the copper interrupt. This is
-§1.7's racy two-operation register read — `crtc_offset_register()` writes the index to 3d4h and reads
-3d5h in a *separate* request, and the guest runs in between — with a different register named:
-TECHNO's was 0x0c's `plv * 0x20`, this one is 0x0d's `cop_start & 0xFF`. It happened at 6000 twice
-(the reference capture, then a single-index re-run) and not at 7000 in either of the same two runs,
-so it is phase-of-the-frame dependent rather than permanent, and **it is a tool-side observation: no
-artefact in this tree was produced by it**, because every frame of this part is RGB-only anyway (the
-screens move).
+**384 bytes a plane row is not a stride this part ever sets** — the plasma's offset register is
+`0x30` (`TWEAK.ASM:65-66`) and the cube's is `0x50` (`TWEAK.ASM:34-35`) — and both of the ways it can
+arise are the same two-operation port read §1.7 records. **The message names the stride, not the
+register, so the two cannot be told apart from this log**, and both are written down (§1.9):
 
-It is worth recording what the race *could* have done here and did not: 0xC0 fails the plan loudly,
-but register **0x18** — which `pompota` writes 0x3c/0x3d to every frame — would have passed it
-silently as a 120-byte plane row, and only the coherence check would have stood between that and a
-sheared `.idx` in the reference tree. On this screen the check is never reached (the picture moves),
-but the same race on a *held* screen whose part pokes the CRTC could ship a sheared plane with a
-plausible stride. Flagged, not fixed: nothing in this task's scope is wrong.
+- **consistent with the offset register reading another register's value**: `0xC0` is exactly the low
+  byte of `cop_start`: `PLZ.C:176` sets `cop_start = 96*(682-400) = 27072 = 0x69C0`, and
+  `COPPER.ASM:69-72` writes that low byte to CRTC register **0x0d** and its high byte to 0x0c, every
+  frame, from the copper interrupt. TECHNO's version of this was 0x0c's `plv * 0x20`;
+- **or the colour depth being read as chain-4**: `chain4_enabled()` is the same racy pair (index to
+  3c4h, data from 3c5h, a separate request each), `PLZ.C:95-118` writes 3c4h twice a frame, and
+  384 is exactly `0x30 × 8` — the plasma's own offset taken as a chained row.
+
+It happened at 6000 twice (the reference capture, then a single-index re-run) and not at 7000 in
+either of the same two runs, so it is phase-of-the-frame dependent rather than permanent, and **it is
+a tool-side observation: no artefact in this tree was produced by it**, because every frame of this
+part is RGB-only anyway (the screens move).
+
+It is worth recording what the race *could* have done here and did not. If the offset register is the
+one misread, 0xC0 fails the plan loudly — but register **0x18**, which `pompota` writes 0x3c/0x3d to
+every frame, would have **passed** it silently as a 120-byte plane row, leaving only the coherence
+check between that and a sheared `.idx` in the reference tree; on this screen that check is never
+reached (the picture moves), but the same race on a *held* screen whose part writes CRTC registers
+could ship a sheared plane with a plausible stride. If instead the *layout* is what was misread, a
+racy offset is multiplied by eight and refuses loudly, so the quiet case needs the offset to be the
+misread register. **The fix belongs in the oracle** — read the pair coherently or twice, and require
+agreement — and is recorded in §1.9 for whoever next touches it. Nothing in this task's scope is
+wrong.
 
 ### 13.5 Held or moving, measured, and what the two screens do across sessions
 
@@ -2402,7 +2440,7 @@ differed by one frame between sessions would show up as a ~70 % difference at a 
 things meet: the plasma's C loop, which draws the even rows with one parameter set and the odd rows
 with another and then does the whole thing again with the planes swapped (`PLZ.C:95-118`), and the
 copper's once-a-frame `moveplz`/`pompota` rewriting of those parameters (`COPPER.ASM:104-107`,
-`:118-138`). That is one thing this block did not resolve, and it is recorded with its size measured
+`:126-143`). That is one thing this block did not resolve, and it is recorded with its size measured
 rather than guessed at.
 
 ### 13.6 The re-capture and the census
@@ -2452,50 +2490,71 @@ exit: 1
 Every frame pairs **at offset 0** in both — the ±1 window is never used, because a neighbour on this
 screen is 68.57–70.25 % away (§13.5).
 
-**The census**, by §1.8's rule, over the sessions that hold a window (cube: `sess1`–`sess4`; plasma: `sess1`, `sess3`, `sess4`; the
-reference's own directory excluded — `sess2-plasma` was refused as a miss at 7601 and writes no
-manifest, so its frames are content evidence and not a session):
+**The census**, by §1.8's rule. Rule 1's criterion is *captures that hold `N-1`, `N` and `N+1`*, and
+rule 2 excludes only the reference's own directory — so **a run that was refused later still counts
+when it holds the window**, which is why the census below has five sessions at 6000 and four at 7000:
+`out/b4-plz-sess2-plasma` was refused as a miss at 7601 and writes no manifest, but it holds valid
+windows at 6000 and 7000, and `out/review-b4a/plz-probe2` (the reviewer's own session) holds one at
+6000. The "support of the filed picture" column is the count over those windows; the "largest
+support" column is the same count over *every* picture in them, which is **not** the same as the
+largest *filable* picture — rule 3's caveat forbids filing at `N` a picture that only ever appears at
+`N±1`, so both numbers are given.
 
-| keyframe | sessions with a window | pictures at `N` | largest support | filed reference is it? | ≥ half the sessions? |
+| keyframe | sessions with a window | filable pictures (seen at `N`) | support of the filed picture | largest support over the ±1 window | filed picture ≥ half? |
 |---|---|---|---|---|---|
-| cube 8500 | 4 | 4 | `11fd1186…` **4/4 (100 %)** | **yes** | yes |
-| cube 9500 | 4 | 4 | `4190291b…` **4/4 (100 %)** | **yes** | yes |
-| plasma 6000 | 3 | 3 | `308d4d3a…` **2/3 (67 %)** (tied with two others) | **yes** | yes |
-| plasma 7000 | 3 | 3 | `8501036521b3…` and `ac34f7c7334f…` **2/3 (67 %)** each | **no** — the filed picture has **0/3** | yes (for those two, not for the filed one) |
-| plasma 7600 | 3 | 3 | nine pictures, **1/3 (33 %)** each | n/a — the filed picture has **0/3** | **no** — no settled content |
+| cube 8500 | 4 | 4 | `11fd1186…` **4/4 (100 %)** | 4/4 (its neighbours) | yes |
+| cube 9500 | 4 | 4 | `4190291b…` **4/4 (100 %)** | 4/4 (its neighbours) | yes |
+| plasma 6000 | **5** | 5 | `308d4d3a…` **2/5 (40 %)** | `390341ec…` 3/5, **only at `N−1`** — not filable | **no** — no settled content |
+| plasma 7000 | **4** | 4 | `6f41f697…` **0/4** | `8501036521b3…` and `ac34f7c7334f…` **2/4**, each only at `N−1`/`N+1` — not filable | **no** — no settled content |
+| plasma 7600 | **3** | 3 | `9a8f3fe5…` **0/3** | nine pictures, 1/3 (33 %) each | **no** — no settled content |
 
-**What the three plasma rows mean, in the ledger's own terms.** 6000 is settled enough by rule 3:
-the filed frame is a largest-support picture (tied at 2/3) and **two of the three sessions present it
-at offset 0** — `out/b4-plz-sess3-plasma` and `out/b4-plz-sess4-plasma` have the same three-hash
-window (`390341ec…`, `308d4d3a…`, `970eda59…`) — while `out/b4-plz-sess1-plasma` is 0.1641 % away at
-every offset. **7000 is where the rule bites and the filing does not satisfy it**: the sessions
-mostly present a *different* sub-frame state (`out/b4-plz-sess3-plasma`'s and
-`out/b4-plz-sess4-plasma`'s, 24 px apart, 2/3 support) and the filed frame is presented by none of
-them. 7600 is the third defect §1.8 lists — **every group is a singleton** (nine pictures over three
-sessions, the closest pair 54 px apart) — so "in the largest group" is vacuous there and no re-filing
-can lift it above 1/3.
+**So all three plasma keyframes are recorded as having no settled content, 6000 included** — §1.8
+rule 4 applies to each of them, and the paragraph that follows says why the filed bytes stay where
+they are anyway. The counts in detail:
 
-Neither was re-filed, and the reason is measured rather than preferred:
+- **6000: the filed `308d4d3a…` has 2 of 5 (40 %).** `out/b4-plz-sess3-plasma` and
+  `out/b4-plz-sess4-plasma` present it at their `N` — their windows are the same three hashes,
+  `390341ec1d8c`, `308d4d3a…`, `970eda5970e3` — while the reviewer's `out/review-b4a/plz-probe2` has
+  a *different* draw at `N` and `N+1` and shares only the first of those three with them
+  (`390341ec…`, at its `N−1`). So the picture with the largest support in the windows is
+  `390341ec1d8c` at **3/5 — presented by three sessions, every one of them at `N−1`** — which rule 3's
+  caveat will not let a row file at 6000 at all. Among pictures that *are* taken at 6000 the filed one
+  is the largest: 2/5, against 1/5 each for `sess1`'s, `sess2`'s and `plz-probe2`'s. And 2/5 is below
+  half.
+- **7000: the filed `6f41f697…` has 0 of 4.** Every picture taken at 7000 by any session is a
+  singleton, so the largest *filable* support there is 1 of 4 (25 %), and the two pictures with 2/4
+  (`sess3`'s and `sess4`'s `8501036521b3…` at their `N−1`, `ac34f7c7334f…` at their `N+1`) are not
+  filable at `N`. **This is why rule 4 applies rather than rule 3: there is no picture at 7000 for
+  the rule to file.**
+- **7600: nine pictures over three sessions, every one a singleton.** "In the largest group" is
+  vacuous, which is the third defect §1.8 lists, and no re-filing can lift it above 1/3.
 
-- **the spread is sub-frame, not a phase away.** The pairwise distances at the two indices are
-  0.0187 %–16.16 % (7000) and 0.0422 %–25.45 % (7600), every one of them with a **max channel delta
-  of 29 or less** — a picture drawn at a slightly different point in the frame, not a different
-  picture. On GLENZ §1.8 says a "group" of one or two means "a picture within a few pixels of its
-  neighbour"; here the *singletons themselves* are within a few thousand pixels of each other and
-  within 29/255 of a colour.
-- **a re-capture would be a dice roll against a measurement that is already good.** The filed
-  reference is a real keyframe-only capture and, at 6000, is in the largest group; re-capturing to
-  try to catch the 7000 majority risks leaving 6000 outside its group — which is exactly the mistake
-  §1.8 rule 5 was written for.
-- **and 7600 cannot be fixed at all**: no picture there has support above 1 of 3.
+Nothing was re-filed, and the reasons are measured rather than preferred:
+
+- **the spread is sub-frame, not a phase away.** Against the filed 6000 the other sessions' 6000
+  frames are 0 px, 118 px, 210 px, 316 px and 3942 px apart (0.0922 %, 0.1641 %, 0.2469 %, 3.0797 %);
+  at 7000 the pairwise distances are 0.0187–16.16 % and at 7600 0.0422–25.45 %, every one of them
+  with a **max channel delta of 29 or less**. On a screen whose own move is 70 % of the frame
+  (§13.5), that is a *fraction of a frame* — a picture drawn at a slightly different point in the
+  frame, not a different picture. On GLENZ §1.8 says a "group" of one or two means "a picture within
+  a few pixels of its neighbour"; here the singletons themselves are within a few thousand pixels of
+  each other and within 29/255 of a colour.
+- **no filing can do better than the one in place.** At 6000 the filed picture is the largest-support
+  picture *taken at `N`*; at 7000 and 7600 every picture taken at `N` is a singleton, so any choice
+  is as (un)settled as this one.
+- **and a re-capture would be a dice roll against a measurement that is already in the tree.** The
+  filed reference is a real keyframe-only capture; re-rolling for 7000 would put the filed frame at
+  the mercy of the same sub-frame draw that produced the current spread, and could drop 6000 out of
+  the state it does share — the mistake §1.8 rule 5 exists to prevent.
 
 **The row records it rather than dressing it up**: PLZPART's plasma keyframes are one exact point in
-a frame of a screen the oracle draws at a slightly different point from session to session, with the
-distances given; Phase 2 comparing against them should read a residual of a few per cent at these
-indices as this, and not as a port error — and should read 8500/9500, which are exact in every
-session, as the part's precise targets.
+a frame of a screen the oracle draws at a slightly different point from session to session, and
+**none of the three is a majority picture** — 2/5, 0/4 and 0/3. Phase 2 comparing against them should
+read a residual of a few per cent at these indices as this, and not as a port error — and should read
+8500/9500, which are exact in every session, as the part's precise targets.
 
 ---
+
 ### 13.7 Where the part begins, ends, and changes screens
 
 `out/b4-plz-start1` took 5710, 5720, 5730 and 5740, and **refused at 5730**: `the display changed
@@ -2660,8 +2719,9 @@ The end is the same kind of boundary, and `out/b4-minv-sess3`'s two extra indice
 | colours | 47 | 47 | **1** | 35 |
 | what | dots scattered across the frame | dots (the scatter phase, still) | **flat `(231,231,231)`** — the part's white-out | dark blue with orange and blue spheres — RAYSCRL |
 
-12800 is still the scatter; **12900 is one colour, `0xe7` in every channel** — a flat grey that is
-the part's own ending, `DOTS/MAIN.C:242-256` re-adding the palette scaled by how far past frame 2360
+12800 is still the scatter; **12900 is a single flat colour — `(231,231,231)` in this session and
+`(239,239,239)` in the reviewer's fresh one, so the invariant is "one colour in the last ~40 frames",
+not a value** — which is the part's own ending, `DOTS/MAIN.C:242-256` re-adding the palette scaled by how far past frame 2360
 the frame is and `:258-270` then taking every entry down from 63 together (`c=63-a*2`), so that at
 some frame in the last 40 the whole palette is one value and the dots' indices underneath stop
 mattering. **13000 is RAYSCRL's screen**. So MINVBALL's own drawing ends in **(12900, 13000]** — about 2550 frames after

@@ -1548,14 +1548,26 @@ second half and for B5.** Measured, and in `docs/fidelity/reference-indices.md` 
 - **The block-2 note's expectation about PLZPART does not survive contact**: the part's two screens
   both move 24–70 % of pixels *every* frame, so **no `.idx` exists for either of them** and the
   160-byte (`0x5013h`) and 96-byte (`0x3013h`) strides are computed and never used. What the stride
-  arithmetic produces here is a loud `PlaneTooSmall` refusal caused by the racy register read naming
-  CRTC **0x0d**'s value (0xC0 = `cop_start`'s low byte), not by a real layout — and the same race
-  could name 0x3c and be accepted as a 120-byte row, which only the coherence check would catch.
+  arithmetic produces here is a loud `PlaneTooSmall` refusal naming a 384-byte row, which has **two**
+  explanations the log cannot separate — the racy offset read naming CRTC **0x0d**'s value (0xC0 =
+  `cop_start`'s low byte) or the racy chain-4 bit read making 0x30 a chained row (0x30 × 8). Under
+  the first, the same race could name 0x3c and be **accepted** as a 120-byte row, which only the
+  coherence check would catch. **The durable fix is in `xtask`'s oracle** — read the index/data pair
+  coherently, or twice requiring agreement — and belongs to whoever next touches it; it is recorded
+  in `reference-indices.md` §1.9 and §13.4.
 - **A part's screens can differ in reproducibility**: PLZPART's cube is byte-identical at its
   keyframes in every session captured, while its plasma differs by 0.00–3.08 % at 6000 and 7.7–24.5 %
   at 7000/7600 with a max channel delta of ≤25 — sub-frame colour perturbation, not a shifted
-  picture. §1.8's support count reads that as "no settled content" (largest support 1 of 2), so the
-  row says both numbers.
+  picture. §1.8's support count reads **all three plasma keyframes as "no settled content"**: the
+  filed picture is presented by 2 of 5 sessions at 6000, 0 of 4 at 7000 and 0 of 3 at 7600, and the
+  largest supports in the ±1 windows are pictures taken only at `N±1`, which rule 3's caveat will not
+  let a row file. The row gives both numbers; **on this screen a "settled" target does not exist**, so
+  B4b and B5 should expect the same shape wherever a part's screen is drawn partly through the
+  copper.
+- **A run refused later still counts as a census session if it holds the window** (`N-1`, `N`,
+  `N+1`) — rule 2 excludes only the reference's own directory, and a missing manifest is not a
+  disqualifier. Counting `out/b4-plz-sess2-plasma` (refused at 7601) and the reviewer's own
+  `out/review-b4a/plz-probe2` is what turned PLZPART 6000 from 2/3 into 2/5 and moved it below half.
 - **Three consecutive frames can be taken on the plasma screen in one batch** (`--frames 6989,6990,6991`)
   and answer a question about a register that alternates every frame; batches of 6 or more were
   refused as misses on this part (host not keeping up), so **three is the batch size to plan with**.
