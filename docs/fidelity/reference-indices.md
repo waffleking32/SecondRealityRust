@@ -314,17 +314,24 @@ VGA retrace — `MAIN/COPPER.ASM:300-320` reprograms the PIT, polls 3DAh for the
 increments `copperframecount`, which `DIS/DISINT.ASM:161-181` hands back from `waitb` — so the
 guest's frames and the capture's frame counter are one clock, and the music is the only *other*
 clock in the machine. It was measured directly, by reading the music player's frame counter out of
-guest memory (a 16-bit word that advances 0.742 times a frame, i.e. ~52 Hz, where the video clock
+guest memory — the 16-bit word at **physical address `0x105B0E`**, in the DOS-extender's data, which
+advances **0.7424 times a frame** (the three sessions below measure 0.742016 / 0.742012 / 0.741909
+per frame, i.e. ~52 Hz, where the video clock
 advances 1.000 and the DOS tick 0.26): at video frame 900 it reads **371, 373, 374** in three
 sessions and at ~8103 it reads **5717, 5716, 5715** — a spread of **~1 music frame, ≈1.3 video
 frames**, with the rate identical to one part in ten thousand (0.742016 / 0.742012 / 0.741909).
+(Those two numbers — the address and the rate — are what makes the mechanism checkable; B3 block 2's
+report stated the counter's addresses dump-relative and the physical address survived only in the
+phase's git-ignored ledger, so they are recorded here before that ledger goes.)
 
 So the common few-frames spread has a mechanism and a size: a music-gated part *starts* a frame or
 two either side, and a part whose pictures then advance by a frame count inherits that as a constant
 offset — which is what GLENZ's ≈1.5–2.5 and TUNNELI's ≈1–4 frames are. It also means a
 music-gated *boundary* is pinned to the music and does not wander: the five mode changes of this
-block sit within 4 frames across four sessions (BEGLOGO 408/409/406/406, GLENZ 1163/1161/1162/1162,
-TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, PANICEND
+block sit within 4 frames across four sessions (BEGLOGO 408/409/406/406, GLENZ 1163/1161/1162/1162 —
+the capture probes of §3.4 bound that same change as **(1154, 1160]**, which is inside the one-to-two
+frame slop between the index a capture asks for and the frame it grabs, D19, so the two instruments
+do not disagree — TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, PANICEND
 8784/8784/8784/8784), and the tunnel→TECHNO content boundary (a probe counting non-zero bytes in
 VGA memory: a black plateau at 4774–4793 and the rings at 4797) is within 1–3 frames in two more.
 **What is left over is occasional and unexplained**: one capture session of this block
@@ -422,9 +429,9 @@ separately, never in the same sitting as the reference):**
 
 | part | before | after |
 |---|---|---|
-| TUNNELI | 8.2250–10.1672 % on all four keyframes | 3800/4200/4500 **0.0000 %**, 4600 **0.0891 %** (57 px) |
+| TUNNELI | 8.2250–10.1672 % on all four keyframes against `out/tunneli-recapture`, and 8.0672–10.1812 % against `out/tunneli-recapture2` — two partners, one pre-fix reference (§8.4) | 3800/4200/4500 **0.0000 %**, 4600 **0.0891 %** (57 px) |
 | TECHNO 320×200 | 24.5938–72.8703 % on 4900/6300/8100 | **`exit 0, verdict: identical, 0.0000 %, {0: 4}`** |
-| GLENZ | 18.66/9.01/16.30 % at 2300/3000/3400 (the *second* reference, filed by mistake, two frames out) and 0.00/0.11/0.03 % against one partner for the first | 2300, 3000 and 3400 **byte-identical at offset 0** against the review's independent fresh partner, and 0/6/65 pixels against another (§7.4) |
+| GLENZ | **against the review's independent fresh partner** (`out/b3b2-rerev`, `glenz-fresh3`): 18.6625/9.0125/16.2953 % at 2300/3000/3400 for the *second* reference, filed by mistake, two frames out, and 0.00/0.11/0.03 % for the first. **Against its own same-sitting partners** the *first* reference read 18.6625/9.2000/16.3281 % (`out/glenz-recapture2`) and the first re-capture read 0.0000/0.0500/0.0016 % (`out/glenz-recapture3`) — the §7.4 pair, and the reason a headline number is never quoted from one | 2300, 3000 and 3400 **byte-identical at offset 0** against the review's independent fresh partner, and 0/6/65 pixels against another (§7.4) |
 
 **The GLENZ case is why rule 5 exists.** The first re-capture was measured against a partner taken
 in the same sitting and read as "34.32 % → 0.0000 %"; the review's independent partner showed the
@@ -555,9 +562,12 @@ the census: it is how 13500 was found to be held and 13000 not, on the same scre
 a hunch.** 3DSINFLD's first reference had 15500 in one session's window only (1/3) while all three
 sessions' windows hold `be95db6c…`; re-capturing (a separate sitting) drew that picture and its
 support went **1/3 → 3/3**, with 16000 and 16800 keeping the bytes they had. U2E's first reference had
-2600 at **0/3** while two sessions draw `58293d89…` at `N`; the re-capture drew it and the support
-went **0/3 → 2/3**, with 1000, 1600 and 3600 unchanged. Both are the same procedure §1.8 rule 5
-describes, and both were checked with the same three sessions rather than a fresh partner — which is
+2600 at **0/4** — a picture no session holds — while three sessions draw `58293d89…` at `N`; the
+re-capture drew it and the support went **0/4 → 3/4**, with 1000, 1600 and 3600 unchanged. (Both
+counts are over the sessions that hold the keyframe's window: three partners for 3DSINFLD's 15500, and
+four for U2E's 2600 — the three partners plus the reviewer's `out/review-b4b/u2e-sess`, which the
+census of §18.5 counts and B4b's first pass did not.) Both are the same procedure §1.8 rule 5
+describes, and both were checked with the same sessions rather than a fresh partner — which is
 the part of the rule that keeps the re-roll from being a dice throw.
 
 **A part can be reached by more boots than its row first assumed, and the test is the `partsmask`
@@ -660,8 +670,10 @@ block, with no manifest — holds `85789170…` at 429, 430 **and** 431, which i
 white, because **BEGLOGO's 430 on a `SECOND 2` boot and ENDLOGO's 430 on a `SECOND 5` boot are the
 same bytes** (`reference/parts/beglogo/frame_000430.rgb` and
 `reference/parts/endlogo/frame_000430.rgb` are one `sha256`). The two parts get there differently and
-they still coincide: `END/END.C:62-63` points the DAC's write index at **0** and writes 63 into DAC
-entries **0–764**, while `BEG/BEG.C:25-33` writes 63 into **0–254** and then **black into 255**, and
+they still coincide: `END/END.C:62-63` points the DAC's write index at **0** and writes 63 **765
+times** — 765 *bytes*, which is the three channels of DAC entries **0–254** (**entry 255 is not
+written**; the loop stops three bytes short of it), while `BEG/BEG.C:25-33` writes 63 into **0–254**
+and then **black into 255**, and
 BEGLOGO's white *screen* is index 15 (`memset(vram,15,…)`, `:20-21`) — a different mechanism giving
 the same all-white pixels. **Unfiltered, ENDLOGO's four windows have ten wrong-boot holders**:
 three at 429–431 (`out/b2-batch-probe`, `out/review-b3-readcost`, `out/rev-batch-probe`), six at
@@ -743,8 +755,16 @@ capture's offset distribution (D18). A paired frame is **0.0000 % or it is a dif
 tolerance was added anywhere in the toolchain, and a reference index with no candidate within the
 window is **refused, exit 2**, not paired from further away. The window is a constant
 (`ALIGNMENT_WINDOW = 1`), not a knob. The asymmetry that makes the search usable is D19's: **the
-reference holds keyframes only; the capture compared against it holds one support frame beyond each
-end of the keyframe range** — and, per §1.3 rule 1, one on each side of every keyframe that moves.
+reference holds keyframes only; the capture compared against it holds `K-1, K, K+1` around each
+keyframe that moves and nothing around a held one** (§1.3 rules 1–2; the ends-only form is enough
+only for a contiguous range).
+
+**And a run now says how much it measured.** Since the final fix round, `compare` prints
+`captures: N measured` immediately before `verdict:` — a partial measurement must not be readable as
+a complete one (the whole-tree form once measured 18 of `reference/parts`'s 22 captures and still
+printed `verdict: identical`, exit 0). Every transcript in §§3–22 was taken before that line existed,
+so a quotation that goes straight from the per-frame lines to `verdict:` is a record of the tool as
+it then was, not a contradictory output.
 
 **§8.4's structural-similarity fallback was not needed, and the reason is exactness.** Spec §8.4
 allows a part that proves non-deterministic to be "captured across multiple runs and compared on
@@ -763,9 +783,10 @@ recorded residue can describe; nothing in this phase did.
 
 1. **Census it against every session that holds the keyframe's window, by §1.8's rule**, and
    **re-capture it into the largest alignment group**. This is the remedy that worked, and it is not
-   marginal: TUNNELI went from 8.07–10.17 % on all four keyframes to 0.0000 % on three and 0.0891 %
-   on the fourth; 3DSINFLD's 16500 from a 43–48 % residual to `verdict: identical`; U2E's 2600 from
-   0/3 support to 2/3; TECHNO's 320×200 row to `exit 0, identical`. A re-capture is judged against
+   marginal: TUNNELI went from 8.07–10.18 % on all four keyframes (8.0672–10.1812 % against one
+   pre-fix partner and 8.2250–10.1672 % against another, §1.8, §8.4) to 0.0000 % on three and 0.0891 %
+   on the fourth; 3DSINFLD's 16500 from a 38.9031 % residual to `verdict: identical` (§16.4); U2E's 2600
+   from 0/4 support to 3/4 (§18.5); TECHNO's 320×200 row to `exit 0, identical`. A re-capture is judged against
    **independent** sessions, never against a partner captured in the same sitting — rule 5 exists
    because that mistake once made a reference *worse* (GLENZ, §1.8).
 2. **If the largest support is below half the sessions, the keyframe has no settled content** and
@@ -804,7 +825,8 @@ them either way.
 
 **Unresolved — the oracle's rare, real excursion.** One session had TECHNO's rings **~30–40 frames
 early**. It did **not** reproduce in either of two VGA-content probes, and it is not any of the
-mechanisms the phase could test: **not the music clock** (the player's counter agrees to about one
+mechanisms the phase could test: **not the music clock** (the player's counter — the 16-bit word at physical `0x105B0E`, advancing
+0.7424 a frame, §1.7 — agrees to about one
 music frame — ≈1.3 video frames — across sessions and its rate is identical to 1e-4, so the mixer's
 wall-clock pacing cannot move a music-gated boundary by tens of frames), **not a fixed offset** and
 **not a counter stall** (0 stalls ≥150 ms at 20 ms resolution up to frame 4900). It is recorded as
@@ -1861,8 +1883,11 @@ the tunnel filling the frame; **4100**, **4200** the walls skewing; **4300**, **
 the tunnel off-centre with its mouth moving up; **4600**, **4650** the dots thinning and the mouth
 dark; **4700**, **4750** the last sparse dots. In the boundary run **4740, 4750 and 4760** are all
 black while **4770** is TECHNO's first interference ring (§9.1) — i.e. in that session the tunnel
-was over by 4740, while in the sweep's session 4750 still had dots: the tunnel's *end* drifts by
-tens of frames between sessions, which is the same phenomenon as §7.4 and §9.5.
+was over by 4740, while in the sweep's session 4750 still had dots. **That run is the one session
+§1.7 records as anomalous** (its rings ~27–30 frames early, and the four mode-watch sessions cannot
+see the rings' arrival at all); the two VGA-content probes put them at **4797**, after a black
+plateau at 4774–4793, so the tunnel's *end* drifts by tens of frames between sessions — the same
+phenomenon as §7.4 and §9.5 — and the content boundary is 4797, not 4770 (§8.5).
 
 ### 8.2 The keyframes, and why these
 
@@ -1942,15 +1967,17 @@ exit: 1
 ```
 
 **Three of the four keyframes are byte-identical and the fourth is 57 pixels**, against one fresh
-session; the reference is in the largest group on all four (7/9, 3/6, 2/5, 2/6 — §1.8's census),
+session; the reference is in the largest group on all four (7/9, 3/6, 2/5, 1/6 — §1.8's census),
 and 3800's group is the one the *previous* reference was outside of. That is what the alignment-group
 check bought: the same `compare`, the same ±1 window, the same indices, and one keyframe that the
 oracle reproduces rather than one it does not.
 
 **And the size is worth keeping in frames, not in pixels.** Measured inside a partner capture,
 adjacent indices one frame apart: the tunnel moves **2.05–2.22 %** of pixels a frame at 3800,
-**10.47–10.69 %** at 4200, **6.22–6.40 %** at 4500 and **8.74–9.08 %** at 4600. So the 8.0672–10.1812 %
-that the *previous* reference showed on every keyframe was **≈1 frame at 4200, 4500 and 4600 and ≈4
+**10.47–10.69 %** at 4200, **6.22–6.40 %** at 4500 and **8.74–9.08 %** at 4600. So the
+8.0672–10.1812 % that `out/tunneli-recapture2` showed on every keyframe — and the 8.2250–10.1672 %
+that `out/tunneli-recapture` showed; two partners, one pre-fix reference, §1.8's table — was **≈1
+frame at 4200, 4500 and 4600 and ≈4
 frames at 3800** — a screen made of moving dots repaints most of what moves in a single frame, which
 is why a raw percentage overstates the distance (§1.7), and why a reference four frames out of phase
 at 3800 read as 8 % rather than as a wall. **No tolerance is added and the pixels stay exact**; the
@@ -1961,11 +1988,14 @@ earlier partners' numbers are the history of a reference that has been replaced.
 `out/b3-tunnel-boundaries` took 4740…4790 at ten-frame steps, and `out/b3-tunneli-sweep1` took
 4650…4750: in the boundary run **4740, 4750 and 4760 are black** and **4770 is TECHNO's first
 interference ring**, while in the sweep's session 4700 and 4750 still have the tunnel's last dots.
-The tunnel is therefore over somewhere in **(4700, 4770]**, and where inside it depends on the
-session — one of the boundary sets §3.4, §5.5 and §6.5 have in common: a content change with no
-geometry refusal (both screens are 320×200), found by the sheet and a hash rather than by the
-capture. That is also why 4700 is not a keyframe (§8.2): it is inside the window, and the partner
-capture that asked for it was refused as a miss.
+**The boundary run is the one anomalous session §1.7 records, and its 4770 is not the content
+boundary**: the two independent VGA-content probes put the rings at **4797**, after a black plateau
+at 4774–4793, within 1–3 frames of each other, and the four mode-watch sessions bound TECHNO's
+16-colour transition at 4797–4801 in every session. So the tunnel's last dots are in **(4700, 4770]**
+and TECHNO's picture starts at **4797** — one of the boundary sets §3.4, §5.5 and §6.5 have in
+common: a content change with no geometry refusal (both screens are 320×200), found by the sheet and
+a hash rather than by the capture. That is also why 4700 is not a keyframe (§8.2): it is inside the
+window, and the partner capture that asked for it was refused as a miss.
 
 The sizes are worth separating for B4/B5: the *animation* disagreement between sessions at a fixed
 index in this part is ≈1–4 frames (§8.4), while the *boundary* moves by tens of frames, because
@@ -1979,7 +2009,7 @@ TUNNELI's exit is gated on its own frame count and the part's start is gated on 
 
 `SECOND 2`'s fourth part: the techno bars and the EGA interference, then the "panic picture"
 (troll) that the next part collapses. **It is the first part this phase has captured whose screens
-span two geometries** — a 320×200 screen from ~4770 to the change in (8150, 8200], and a 320×400
+span two geometries** — a 320×200 screen from 4797 (its first rings; §8.5) to the change in (8150, 8200], and a 320×400
 one from there to 8780 — which is B3 step 2's case and is captured here as two captures with a row
 each (§1.7,
 `reference/parts/techno/interference/` and `reference/parts/techno/troll/`).
@@ -2006,7 +2036,8 @@ out/b3-panic-sweep1   8000…8350 step 50    exit 2, refused at 8200 (320×400)
 out/b3-panic-sweep2   8200,8250,8300,8350,8400,8450                                       exit 0 (320×400)
 out/b3-panic-sweep3   8600,8700            exit 2, refused at 8800 (320×200)
 out/b3-panic-sweep4   8800…9500 step 100   exit 0
-out/b3-tunnel-boundaries 4740…4790 step 10 exit 0 — TECHNO's first rings are at 4770
+out/b3-tunnel-boundaries 4740…4790 step 10 exit 0 — its rings at 4770 are the anomalous session
+                                           (§1.7); the VGA-content probes put them at 4797 (§8.5)
 out/techno-troll-map2 8200…8700 step 50    exit 0
 out/techno-troll-probe1 8199,8200,8201,8399,8400,8401,8699,8700,8701,8779,8780,8781
                                            exit 2, refused as a miss at 8781
@@ -3469,8 +3500,8 @@ out of the picture object (`readp`, `JP.C:181-186`) into 400 rows of 184 bytes a
 320×400 screen of this boot (the 320×200 screen after it is **U2E's**, not the ending's — §18.1,
 §18.6). 17000 is the loader's flat black; 17900 is a **white rectangle** (2
 colours, 74221 px white in `b4b-jp-sweep1`) which is ENDLOGO's opening white over JPLOGO's leftover
-memory (`END/END.C:61-63` points the DAC's write index at 0 and writes 63 into 765 entries, DAC
-entries 0–764).
+memory (`END/END.C:61-63` points the DAC's write index at 0 and writes 63 into 765 **bytes** — DAC
+entries 0–254; entry 255 is not written).
 
 ### 17.1 The sweep, and what the sheet showed
 
@@ -3845,8 +3876,12 @@ per pixel, and `END.C:67-80` then writes CRTC 0x0c, 0x0d = 0 and **CRTC 9 = `(ol
 (`END.C:95-99`).
 
 **What it draws, in the order it draws it.** `END.C:51-63` unlocks the attribute controller, points
-the DAC's write index at **0** (`outp(0x3c8,0)`) and then writes **63 into 765 entries** — DAC
-entries **0–764**, leaving the last three (765, 766, 767) untouched. So the screen is a white field
+the DAC's write index at **0** (`outp(0x3c8,0)`) and then writes 63 **765 times**
+(`for(a=0;a<768-3;a++) outp(0x3c9,63);`, `:62-63`) — that is 765 **byte** writes, one byte per
+request, so it fills the three channels of DAC entries **0–254** and **leaves entry 255 unwritten**
+(the fix round that corrected this sentence first asserted the opposite — "765 entries, 0–764, so
+255 *is* written" — which confuses bytes with entries; three bytes make an entry, and 765 bytes stop
+one entry short of the 256th). So the screen is a white field
 over whatever the previous part's memory held — on this boot, over the loader's leftovers.
 `:67-92` re-points the CRTC to start address 0, takes the display to 400 lines and whitens again,
 then waits **32 vblanks**. Only then does it read its own picture (`readp(palette,-1,pic)`) and blit
