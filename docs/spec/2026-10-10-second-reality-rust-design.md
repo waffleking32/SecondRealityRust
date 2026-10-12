@@ -137,6 +137,15 @@ shell passes through to `START.EXE`.
 | 640×350×16 → 640×400 via CRTC reg 9 | ENDSCRL |
 | BIOS text mode 3 | setup menu, exit screens |
 
+**Superseded for three rows, by capture (Phase 1, 2026-10-12).** PAM is **320×200**, not
+320×400; COMAN/3DSINFLD is **320×200** with chain-4 off (80-byte plane rows); and the vector part II
+(U2E) is **320×200** and normalises its own display (CRTC 9 scan-doubling), so its screen does not
+depend on the boot — only its boot index does. The rows above are the spec's own record and are left
+standing; the measured geometries, per part, are in
+`docs/fidelity/reference-indices.md` (§6 PAM, §16 3DSINFLD, §18 U2E) and `PROGRESS.md`'s per-part
+table, and where the two disagree the capture is the current reading. (The same treatment D17 gives
+`PROGRESS.md`'s 1657/1700 landmarks.)
+
 ### 2.4 Hardware behaviours that are visually significant
 
 Everything else the original does with the VGA is a performance strategy and is
