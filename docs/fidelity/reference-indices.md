@@ -3769,15 +3769,13 @@ the manifest's own palette through the `(c*259+33)>>6` widening:
   shear with, so this `.idx` is filed on the strength of the screen being the part's own white
   (`END.C:61-63`) and of nothing else — it is the weakest `.idx` in this block and the row says so.
 
-**And 430 is not index-compared, although the reference holds an `.idx` for it.** `compare` takes
-the indexed path only when *both* sides hold one (`xtask/src/compare.rs:606,746`), and **no session
-holds `frame_000430.idx`** — the three census sessions produced `.idx` at 429, 899, 900 and 901 and
-not at 430 — measured, `ls out/b5-endo-sess1` shows `frame_000429.idx frame_000899.idx
-frame_000900.idx frame_000901.idx` and no `frame_000430.idx` — so that frame is judged on its
-pixels.
-Only **900** is index-compared. The hand-check of 430's plane is therefore a check on the *filed
-artefact* and not on a comparison this row ran: it says the reference's own `.idx` is honest, which
-matters to any later comparison in which both sides hold one.
+**And 430 is not index-compared, although the reference holds an `.idx` for it.** `compare` takes the
+indexed path only when *both* sides hold one (`xtask/src/compare.rs:606,746`), and **no session holds
+`frame_000430.idx`**: measured, `ls out/b5-endo-sess1` gives `frame_000429.idx frame_000899.idx
+frame_000900.idx frame_000901.idx` and no 430, so that frame is judged on its pixels. **Only 900 is
+index-compared.** The hand-check of 430's plane is therefore a check on the *filed artefact* and not
+on a comparison this row ran: it says the reference's own `.idx` is honest, which is what any later
+comparison in which both sides hold one rests on.
 
 ### 19.4 The re-capture and the census
 
