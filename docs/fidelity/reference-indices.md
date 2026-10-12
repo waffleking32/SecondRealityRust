@@ -231,6 +231,52 @@ the suspected change plus a hash already known to belong to the next part: §6.1
 frame by matching a flat white frame against `wfade`'s own law, and §6.5 found where PAM ends by
 matching a held logo against B2's BEGLOGO hash.
 
+### 1.7 Four things block 2 (GLENZ, TUNNELI, TECHNO, PANICEND) measured
+
+**The stride fix is exercised, and it comes out right.** GLENZ's vector screen is the 92-byte
+plane row that `GLENZ/VIDINIT.ASM:306` writes (`dw 02e13h ; offset 92`), and the read assembles it
+at that stride: `reference/parts/glenz/frame_001499.idx` reproduces its RGB **pixel for pixel** by
+the check in `indexed_matches_rgb`, and its non-black rows are the RGB's — §7.3 has the
+measurement. No row in this block needed a stride refusal; the fix that landed before it was
+written for GLENZ and GLENZ is where it was confirmed.
+
+**`.idx` presence is a read-*timing* property as well as a session one.** The same index with the
+same RGB bytes can carry indices in one capture and not in another depending only on **when the
+frame is read**. GLENZ 1500 is a held screen (1499 = 1500 = 1501 = 1600, one `sha256`) and it
+carries indices when it is captured on its own — the read happens ~20 frames after the grab — and
+none when it is the middle of a 3-index batch, whose read happens ~60 frames later: the palette
+moves over that window (§7.3). The practical consequence for B4/B5: **list a keyframe that should
+carry indices so that it is read immediately**, i.e. more than ~25 frames from its neighbours.
+
+**A screen can be refused for its colour depth rather than its stride, and TECHNO is the case.**
+TECHNO's 320×200 screen is not 256-colour at all: the part pokes the video-mode registers between
+VGA 256-colour and EGA 16-colour to make its interference (`TECHNO/KOE.C:236-258`, the GC mode
+register and the attribute controller's colour-select), and DOSBox re-decides the mode from those
+registers (`vga.cpp:60-96`, `VGA_DetermineMode`: M_VGA needs GC mode bit 6). The indexed read is
+therefore refused with `UnmodelledMode` — *not* the flat-colour blind spot of §1.6 — and every
+TECHNO frame on that screen is RGB-only, which the comparison reports as `mode: rgb` (§9.4).
+
+**A moving screen's phase is not reproducible in every session, and the difference can be much
+larger than D17's 0.2–0.6 %.** Measured on this block, with the *held* frames of the same runs
+byte-identical throughout: GLENZ's rotating polyhedron differs between two re-captures of the same
+index by **18.66–34.32 %** of pixels; TUNNELI's dots by **8.07–10.18 %**; TECHNO's dithered
+interference by **70.68–97.50 %**; and TECHNO's troll picture was already on screen at 8200 in one
+session where three others show a flat black frame (a ≥150-frame difference in that section's
+timeline). Two commands differing only in their `--out` directory, run back to back, gave
+different bytes at 6300 (`3c2b0d8f…` against `c1460454…`). D17 measured three sessions identical
+at 2125/2250/2400 — the same part this block keyframes — so the reproducibility D17 measured is
+real but **conditional**, and these runs, on a host carrying other work, are the condition failing.
+What it means for the rows below: a *held* frame is reproducible byte for byte in every session
+seen; a *moving* frame is one exact picture that the oracle reproduces only when the two sessions
+run the demo's animation on the same clock, and the row records the spread rather than pretending
+to a tolerance.
+
+**And the two-screen part's layout is `compare`'s own convention.** TECHNO's screens are two
+geometries, so its capture is two captures: a directory with no `manifest.json` is resolved by
+`compare` into every immediate subdirectory that has one, named by that subdirectory
+(`xtask/src/compare.rs:401-443`, the `reference/check_a` layout). `reference/parts/techno/` holds
+`interference/` (320×200) and `troll/` (320×400), and the partner side mirrors the names.
+
 ---
 
 ## 2. The index table
@@ -247,6 +293,7 @@ table.
 | ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride; RGB only | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1, `mode: rgb` — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
 | U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
+| GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300/3000/3400 differ by 34.3219/23.9516/29.0187% at offset -1, and by 18.6625/9.2000/16.3281% in the re-run (§7.4) |
 
 ### Adding a row
 
@@ -1002,3 +1049,174 @@ exit 0) shows the logo fading in at 7950, 7980, 8010 and 8040 and then holding a
 8130, all three of those the **same `sha256`, `cbdc67eb…`, as B2's held BEGLOGO logo under
 `SECOND 2`**. So the mode change is the next part's, and PAM's own screen is the 320×200 one it
 inherits and keeps — which is exactly why §5.5's boundary is not in the geometry.
+
+---
+
+## 7. GLENZ
+
+`SECOND 2`'s second part: the FC-logo band that BEGLOGO's picture collapses into, then a
+translucent "glenz" polyhedron over a checkered floor, then a red polyhedron with the glenz object
+moving through it. **320×200 throughout, and its rows are 92 bytes a plane** — the first part in
+the tree whose `.idx` exercises the stride the §1.6 fix was written for. It is also the first part
+this phase has captured whose *held* screen carries indices **only when the frame is read at the
+right moment** (§7.3), and the first whose *moving* screens do not reproduce at all across
+sessions (18.7–34.3 % of pixels, §7.4).
+
+The part's extent, measured on the `SECOND 2` boot: the 320×200 screen is up from the change
+§3.4/§3.5 puts in (1154, 1160] — `out/b3-glenz-sweep1`'s first frame, 1200, is already the FC-logo
+band — and the part's own drawing ends with the red polyhedron leaving the frame at ~3650. A flat
+black screen follows: 3680, 3690 and 3700 are all `ea0787f6…`, which is the same bytes as ALKU's
+black at `SECOND 1`'s 420–2020 and PAM's neighbours (§4.2) — with no picture up, the parts agree.
+TUNNELI's first tunnel ring is at 3710 (§7.5). So GLENZ is ~2500 frames of the `SECOND 2` boot,
+≈36 s.
+
+### 7.1 The sweeps, and what the sheets showed
+
+```
+out/b3-glenz-sweep1          1200,1600,…,6000 step 400              exit 0 (13 frames, 1 m 26 s)
+out/b3-glenz-sweep2          3650,3700,…,4000 step 50, then 4200…5200 exit 0
+out/b3-glenz-sweep3          1800,1900,2100,…,3500 step 100         exit 0
+out/glenz-map1               1250,1300,1400,1450,1499,1620,1700,1800,2000,2300,2600,3000,3400  exit 0
+out/b3-tunnel-boundaries     3680,…3750 step 10, then 4740,…4790     exit 0
+```
+
+Tiles, in the order each run laid them out. `sweep1`: **1200** black sky with a purple checkered
+floor across the bottom; **1600** the same; **2000** a blue/grey translucent polyhedron above the
+floor; **2400** the same object larger; **2800** a red polyhedron with the glenz object in front of
+it; **3200** larger; **3600** the red object alone; **4000** the dot tunnel (TUNNELI, §8);
+**4400** the tunnel; **4800** black; **5200–6000** TECHNO's interference (§9). `sweep3` fills in
+between: the glenz object rises from the horizon (1800, 1900), stands alone against a pale grey
+background (2300), and the red polyhedron takes over from ~2500. `glenz-map1` pins the opening:
+**1250** floor + object at the horizon, **1300** the same picture over a **grey** background (a
+different palette state), **1400 / 1450 / 1499** back to the black background and byte-identical to
+each other, **1620** grey again, **1700** the object higher, **1800** black again.
+
+### 7.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; the bytes of 1400, 1450, 1499, 1500, 1501, 1600 and 1250 are all one picture. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
+| 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `9c42d079…` |
+| 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `71dd12f6…` |
+| 3400 | the **red polyhedron with the glenz object at its edge**, the part's second-to-last screen before the object leaves the frame. | `.rgb` only | rgb `fab974e9…` |
+
+One keyframe per screen the part has: the held opening, the glenz object, the red polyhedron with
+the glenz object inside it, and the red polyhedron with the glenz object at its edge. 2300 and
+3000 are ~700 frames apart and 3400 ~400 beyond them, so every one of them can be supported (§1.3).
+
+Full hashes of the five files in `reference/parts/glenz/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 1499 | `frame_001499.rgb` | `e45ab0764b860f50376d560cf5a4d0f0e7ecca935021780385e3735e865fc28e` |
+| 1499 | `frame_001499.idx` | `75d561dc779e17cadaf4493b3e295378a9d02ed186049dc0edd754b3a130b32b` |
+| 2300 | `frame_002300.rgb` | `9c42d079e2734f57533879a270db2dfd29b5f0cb3028d26c4641b29a6b299551` |
+| 3000 | `frame_003000.rgb` | `71dd12f678be32c8785a6b562294de4822a77a18f4d910e857d0d51e7cf9a4ec` |
+| 3400 | `frame_003400.rgb` | `fab974e99d7507ca56531c5751490b0309890448dfdb7168b0c9ca0a56e28c7f` |
+
+### 7.3 Held or moving, measured — and where GLENZ's indices come from
+
+The keyframe triple probe (`out/glenz-probe1`, 15 indices 1199…3401) and the map hashed:
+
+| keyframe | neighbours | reading |
+|---|---|---|
+| 1499 | 1499 = 1500 = 1501, one `sha256` (and 1400, 1450, 1499 and 1600 are the same bytes in other runs) | **held** — but held in the *index* plane with a palette that cycles: 1300 and 1620 are the same picture over a grey background, and the palette returns |
+| 2300 | 2099, 2100, 2101 are three different `sha256`; the partner's 2299/2300/2301 likewise | **moving** |
+| 3000 | 2699/2700/2701 and 2999/3000/3001 are three each | **moving** |
+| 3400 | 3399/3400/3401 are three | **moving** |
+
+**Which is why 1499's `.idx` needs a second measurement, and the second measurement is the one
+worth having.** 1499 carries `.idx` in the reference capture. The same screen does *not* when it is
+read late:
+
+- `out/glenz-stride-probe` captured `--frames 1500,1600` — two single-index reads — and **1500
+  carries `.idx`** (rgb `e45ab076…`, idx `75d561dc…`, byte-identical to the reference's 1499).
+- `out/glenz-probe1` captured `--frames …,1499,1500,1501,…` — one 3-index batch, whose reads run
+  ~60 frames after the grabs — and **all three came back RGB-only**.
+
+So GLENZ is §1.3's "a frame inside a batch is read at the end of that batch" case, on a *held*
+screen whose palette moves. The screen is held; the DAC is not, and the indexed read is honest
+about the second.
+
+**And that `.idx` is what confirms the 92-byte stride.** `indexed_matches_rgb` compares every pixel
+of the widened index plane with the RGB frame — not a sample, not a colour census — so
+`frame_001499.idx` reproducing its RGB is the stride being right, and the independent check agrees:
+both the RGB and the plane have non-black content in **rows 154–199 only**, 200 of 200 rows agree
+on content-versus-black, and both have exactly **11,720** non-black pixels, across 8 distinct
+indices. A read sheared by two bytes a row against 92 (the old `width/4` = 80) could not do that:
+the second pass of this phase shipped exactly such a plane for ALKU and it passed the colour check
+only because that palette collapsed (§1.6).
+
+### 7.4 The re-capture: the held frame identical, three moving frames a whole phase away
+
+```bash
+# the reference: keyframes only
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1499,2300,3000,3400 --out reference/parts/glenz --sheet out/glenz.png
+
+# the partner: a support frame each side of the three moving keyframes
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture
+
+# the re-run (§2's rule for a moving row that exits 1)
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture2
+```
+
+First comparison (`out/glenz-recapture`, exit 0 as a capture):
+
+```
+frame 1499: 0.0000% differing (0/64000 px), max delta 0
+frame 2300: 34.3219% differing (21966/64000 px), max delta 154, rendered index 2299 (offset -1)
+frame 3000: 23.9516% differing (15329/64000 px), max delta 162, rendered index 2999 (offset -1)
+frame 3400: 29.0187% differing (18572/64000 px), max delta 162, rendered index 3399 (offset -1)
+verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
+exit: 1
+```
+
+Re-run (`out/glenz-recapture2`, exit 0 as a capture):
+
+```
+frame 1499: 0.0000% differing (0/64000 px), max delta 0
+frame 2300: 18.6625% differing (11944/64000 px), max delta 146, rendered index 2299 (offset -1)
+frame 3000: 9.2000% differing (5888/64000 px), max delta 162, rendered index 2999 (offset -1)
+frame 3400: 16.3281% differing (10450/64000 px), max delta 162, rendered index 3399 (offset -1)
+verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
+exit: 1
+```
+
+**What kind of difference this is.** The held keyframe is byte-identical in both partners and in
+every session that has taken it, which is the strong claim. The three moving keyframes are not: the
+pictures are the *same scene at a different rotation* — `out/glenz-2300-compare.png` puts the
+reference's 2300, the partner's and the map's side by side and the polyhedron's orientation differs
+by more than a frame's worth — and the residue is 9–34 % of pixels rather than the 0.2–0.6 % D17
+measured, because a rotating polyhedron moves most of its edges in one frame and the sessions here
+are several frames apart in phase. **The ±1 support does not reach it**: both partners paired
+every
+moving keyframe at the same offset (-1), and the difference stayed large, which is the §4.4 shape
+of result — a whole number of animation steps apart, not one frame — with the difference that
+GLENZ's step is not a pixel pan and cannot be removed by shifting.
+
+**This is the row's honest reading, and it is worth separating the two halves**: 1499 is a
+reproducible reference; 2300, 3000 and 3400 are one exact picture each that the oracle reproduces
+only in a session whose animation phase matches, which two of two re-captures did not. No
+tolerance is added; the pixels stay exact and the row carries the numbers.
+
+### 7.5 Where the part ends
+
+`out/b3-tunnel-boundaries` took 3680…3750 at ten-frame steps:
+
+| index | 3680 | 3690 | 3700 | 3710 | 3720 | 3730 | 3740 | 3750 |
+|---|---|---|---|---|---|---|---|---|
+| `sha256` | `ea0787f6…` | `ea0787f6…` | `ea0787f6…` | `d0f33e4a…` | `c75d7771…` | `36b6940b…` | `3654de07…` | `83a918e2…` |
+| what | black | black | black | the tunnel's first small ring | ring | ring | ring | ring growing |
+
+`sweep1`'s 3600 is the red polyhedron alone and 3650 (in `sweep2`) is the same object moving off
+the top-left corner, so **GLENZ's own drawing ends at ~3650, a 30-frame flat black screen follows,
+and TUNNELI's first tunnel frame is at 3710** — a content boundary with no geometry change, the
+second one this phase has had to find that way (§1.6, §7.5 here). The black is `ea0787f6…`, the
+same bytes as `out/b3-pam-probe2`'s black in §6 and ALKU's black in §4.2: with no picture on
+screen the parts agree, which is why an index in the gap is not worth a keyframe.
+
+---
+
