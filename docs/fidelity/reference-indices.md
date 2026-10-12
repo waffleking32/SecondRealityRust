@@ -3000,17 +3000,23 @@ neighbours, well over the ~60 a three-index support batch needs (§1.3).
 
 | index | frame files | `sha256` |
 |---|---|---|
-| 15500 | `.rgb` only | `6a891af9947163446f7289da619e5df464d836f77a55254bcd57906c4104886e` |
+| 15500 | `.rgb` only | `be95db6c1fa85a8776a334fe658dfa037e2f793f3b9ca509fb4a1b87bd1e5dc6` |
 | 16000 | `.rgb` only | `2d349adaa4150d235fcbdc99d95ffeb438e2e5d32489dec2b49a11189f6921e8` |
 | 16500 | `.rgb` only | `538942e6206ef86f1cbc4613eff8c60f77e9ffacac4b71adb6b13fae1c7cb078` |
-| 16800 | `.rgb` only | `47a0b32655ae5281c4f1e4356ed3c409fa8f8225f06c2ec56af0cab8b2444a15` |
+| 16800 | `.rgb` + `.idx` | rgb `47a0b32655ae5281c4f1e4356ed3c409fa8f8225f06c2ec56af0cab8b2444a15`, idx `7705a2624fcad0152e97f6b59aa0935ca1e5f0cc486099682c9870cffa732044` |
 
-**All four are RGB-only** — no `.idx` from this part is filed, and that is the tool's ordinary
-refusal for a moving screen (the terrain redraws every second frame; measured 37–40 % of pixels
-between consecutive pictures). It matters that no plane was filed here, because **this part writes
-CRTC 0x0c every frame**: §1.9's hand-check rule would apply to any `.idx` filed from it, and the
-value it writes (`0x80`) is one `plan_indexed_read` *accepts* as a 256-byte plane row at 200 rows.
-Nothing in the tree was produced by that.
+**15500's file is the re-captured one** (§16.4): the first reference's 15500 was
+`6a891af9947163446f7289da619e5df464d836f77a55254bcd57906c4104886e`, a picture 1 of the 3 sessions
+present, and the re-capture drew the 3/3 one. The other three keyframes kept their bytes.
+
+**Three of the four are RGB-only**, the tool's ordinary refusal for a moving screen (the terrain
+redraws every second frame; measured 37–40 % of pixels between consecutive pictures). **16800 carries
+`.idx` and was hand-checked by hand**, because **this part writes CRTC 0x0c every frame**: §1.9's
+rule applies to any `.idx` filed from it, and the value it writes (`0x80`) is one
+`plan_indexed_read` *accepts* as a 256-byte plane row at 200 rows. The check: 0 mismatches of 64000
+pixels against the manifest's own palette, through the `(c*259+33)>>6` widening — 65 indices
+reaching 46 distinct colours, so the palette is partly collapsed and the check has less to catch a
+shear with than a one-to-one palette, but it is exact where the colours are distinct.
 
 ### 16.3 Held or moving, measured
 
