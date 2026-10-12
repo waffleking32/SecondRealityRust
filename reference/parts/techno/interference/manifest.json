@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "SECOND.EXE",
+  "arguments": [
+    "2"
+  ],
+  "cycles": 30000,
+  "width": 320,
+  "height": 200,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "keys": [
+    "KBD_left",
+    "KBD_enter"
+  ],
+  "frames": [
+    {
+      "index": 4900,
+      "rgb": "frame_004900.rgb"
+    },
+    {
+      "index": 5000,
+      "rgb": "frame_005000.rgb"
+    },
+    {
+      "index": 6300,
+      "rgb": "frame_006300.rgb"
+    },
+    {
+      "index": 8100,
+      "rgb": "frame_008100.rgb"
+    }
+  ]
+}

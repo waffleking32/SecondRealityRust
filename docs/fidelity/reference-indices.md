@@ -295,6 +295,8 @@ table.
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
 | GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300/3000/3400 differ by 34.3219/23.9516/29.0187% at offset -1, and by 18.6625/9.2000/16.3281% in the re-run (§7.4) |
 | TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture` | exit 1, `mode: rgb` — every frame differs by 8.2250–10.1672%, offsets `{0: 2, -1: 2}`; the re-run 8.0672–10.1812% at `{-1: 1, +1: 3}` (§8.4) |
+| TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture` | exit 1, `mode: rgb` — 5000 identical, 0.0000%, offset 0; 4900/6300/8100 differ by 24.5938/72.8703/70.6844%; the re-run has 4900 and 5000 identical and 6300/8100 at 97.5047/71.7000% (§9.4) |
+| TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row; 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
 
 ### Adding a row
 
@@ -1335,6 +1337,178 @@ story of the size: a dot that has moved is a dot at a different place, and the p
 go past every threshold. Since the screen is *made* of moving dots, the residue is a large
 fraction of the non-black pixels (≈3,000–6,000 of 64,000) rather than the 0.2–0.6 % D17 measured
 on a screen where most pixels hold still. **No tolerance is added and the row carries both runs.**
+
+---
+
+## 9. TECHNO
+
+`SECOND 2`'s fourth part: the techno bars and the EGA interference, then the "panic picture"
+(troll) that the next part collapses. **It is the first part this phase has captured whose screens
+span two geometries** — a 320×200 screen from ~4770 to ~8150 and a 320×400 one from ~8160 to 8780 —
+which is B3 step 2's case and is captured here as two captures with a row each (§1.7,
+`reference/parts/techno/interference/` and `reference/parts/techno/troll/`).
+
+**The 320×200 screen is not 256-colour, and that is the part's own doing.** TECHNO switches the
+display between VGA 256-colour and EGA 16-colour to make the interference: it writes the graphics
+controller's mode register and the attribute controller's colour-select
+(`TECHNO/KOE.C:236-258`: `mov ax,0013h+256*20` on the CRTC, then the ATC's index 13h/20h pair),
+and DOSBox re-decides the display mode from those registers rather than from the BIOS mode
+(`vga.cpp:60-96`, `VGA_DetermineMode`, which returns `M_VGA` only while GC mode bit 6 is set).
+Every TECHNO frame on that screen therefore comes back RGB-only with
+`indexed capture failed (… not 256-colour …)`, which is a *different* refusal from ALKU's stride
+one and from the moving-screen coherence one. The 320×400 screen is plain Mode X and does carry
+indices.
+
+### 9.1 The sweeps, and what the sheets showed
+
+```
+out/b3-glenz-sweep1   1200…6000 step 400   exit 0 — its 5200…6000 tiles are this part's screen (§7.1)
+out/b3-tech-sweep1    5200…9200 step 400   exit 2, refused at 8400 (320×400 — the capture started 320×200)
+out/b3-techno-sweep1  4850,4900,4950,5000,5050,5100,5200,5400,5600,5900,6300,6700,7100,7500,7800,8100   exit 0
+out/b3-panic-sweep1   8000…8350 step 50    exit 2, refused at 8200 (320×400)
+out/b3-panic-sweep2   8200,8250,8300,8350,8400,8450                                       exit 0 (320×400)
+out/b3-panic-sweep3   8600,8700            exit 2, refused at 8800 (320×200)
+out/b3-panic-sweep4   8800…9500 step 100   exit 0
+out/b3-tunnel-boundaries 4740…4790 step 10 exit 0 — TECHNO's first rings are at 4770
+out/techno-troll-map2 8200…8700 step 50    exit 0
+out/techno-troll-probe1 8199,8200,8201,8399,8400,8401,8699,8700,8701,8779,8780,8781
+                                           exit 2, refused as a miss at 8781
+out/det-a, out/det-b  6300,8200            both exit 2 — the geometry refusal; see §1.7
+```
+
+Tiles. `b3-techno-sweep1.png`, in the order the capture laid them out: **4850**, **4900**
+concentric rings (cyan on black); **4950** the same rings over a pale ground; **5000**, **5050**
+flat white; **5100** the pink moiré; **5200**, **5400**, **5600**, **5900** the moiré mutating;
+**6300** diagonal stripes; **6700** purple diamonds; **7100** purple triangles; **7500** black;
+**7800** triangles again; **8100** a crosshatch. `b3-panic-sweep2.png`: **8200**, **8250**
+black; **8300** the troll picture washed out to white; **8350–8450** the picture at full contrast.
+`techno-troll-map2`: **8200**, **8250** black; **8300** the wash; **8350, 8400, 8450, 8500, 8600,
+8700** the same bytes (`40044edc…`) — the picture is held.
+
+The 320×400 section's shape, from the frames and their hashes: a flat black screen from the mode
+change (~8160) to ~8290, a white-wash fade at ~8300, and the finished picture held from ~8350 to
+8780, where the 320×200 screen returns (§10).
+
+### 9.2 The keyframes, and why these
+
+**The 320×200 screen** (`reference/parts/techno/interference/`):
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 4900 | the **interference rings** — concentric blue rings on black, the part's first drawn screen. | `.rgb` only | rgb `3dc29660…` |
+| 5000 | the **white flash** — every pixel is `255,255,255`; the same bytes at 5050 (a hold of at least 50 frames). | `.rgb` only | rgb `20f3d62f…` |
+| 6300 | the **diagonal-striped interference** — the moiré evolved into stripes across the frame. | `.rgb` only | rgb `3bec1847…` |
+| 8100 | the **crosshatch**, the last screen before the 320×400 mode change. | `.rgb` only | rgb `a1b5d861…` |
+
+**The 320×400 screen** (`reference/parts/techno/troll/`):
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 8200 | the **flat black screen** the mode change leaves — one colour, every pixel `(0,0,0)`. | `.rgb` + `.idx` | rgb `fec9afb5…`, idx `eec19bc6…` |
+| 8300 | the **fade-in** — the troll picture washed to white, 43 colours, every pixel non-black. | `.rgb` only | rgb `17b9f92f…` |
+| 8400 | the **held picture** — the troll at full contrast, 78 colours, 93,200 non-black pixels. | `.rgb` only | rgb `40044edc…` |
+
+**The `.idx` at 8200 was looked at by hand, because §1.6 says a flat-coloured frame's indices are
+the check's blind spot.** It is 128,000 bytes of zero — every index 0, which widens to the black
+the RGB holds — so it is *consistent* and it is also *worthless as evidence*: it cannot say whether
+the 160-byte row stride is right. That is recorded rather than counted as a validation.
+
+Full hashes:
+
+| file | `sha256` |
+|---|---|
+| `interference/frame_004900.rgb` | `3dc29660e9228e3d2de7c86129dc8ae2cbdd30c9f16d57408d2a077438f9f465` |
+| `interference/frame_005000.rgb` | `20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8` |
+| `interference/frame_006300.rgb` | `3bec1847cfb05e2b6876626c1fc0cde57b10fa320d8c0dff41e601c89bb05f25` |
+| `interference/frame_008100.rgb` | `a1b5d8610d7c3c1646c240c52f3822f45f9e7e9b6c89b9048579be1d7394c4aa` |
+| `troll/frame_008200.rgb` | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` |
+| `troll/frame_008200.idx` | `eec19bc6af0b3b6dfb97a08782c65f4bb3c3203e789a015d2008b0d689ad08be` |
+| `troll/frame_008300.rgb` | `17b9f92fc65b414d0fd7f36b126bb12278363d27b4cbbfeb3f6cd47ee77964a1` |
+| `troll/frame_008400.rgb` | `40044edca7d81510908734f1a3b15d670e724dff68d767348533e079f73fd81e` |
+
+### 9.3 Held or moving, measured
+
+| keyframe | neighbours | reading |
+|---|---|---|
+| 4900 | 4899/4900/4901 three different `sha256` (partner) | **moving** |
+| 5000 | 5000 = 5050 (sweep); 4999/5000/5001 three different in the partner | **held across the two samples the sweep took, moving across a frame** — the flash is a palette step, and one frame away is a different colour |
+| 6300 | 6299/6300/6301 three different | **moving** |
+| 8100 | 8099/8100/8101 three different | **moving** |
+| 8200 | 8199 = 8200 = 8201, one `sha256` (flat black) | **held** |
+| 8300 | 8299/8300/8301 three different | **moving** |
+| 8400 | 8399 = 8400 = 8401, one `sha256`; and the same bytes at 8350, 8450, 8500, 8600, 8700 | **held** |
+
+### 9.4 The 320×200 re-capture
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 4900,5000,6300,8100 --out reference/parts/techno/interference
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 4899,4900,4901,4999,5000,5001,6299,6300,6301,8099,8100,8101 \
+    --out out/techno-recapture/interference
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 4899,4900,4901,4999,5000,5001,6299,6300,6301,8099,8100,8101 \
+    --out out/techno-recapture2/interference          # the re-run
+```
+
+`out/techno-recapture` (exit 0 as a capture):
+
+```
+frame 4900: 24.5938% differing (15740/64000 px), max delta 138, rendered index 4899 (offset -1)
+frame 5000:  0.0000% differing (0/64000 px), max delta 0
+frame 6300: 72.8703% differing (46637/64000 px), max delta 206, rendered index 6301 (offset +1)
+frame 8100: 70.6844% differing (45238/64000 px), max delta 206, rendered index 8099 (offset -1)
+verdict: different, mode: rgb, offsets {"-1": 2, "0": 1, "1": 1}
+exit: 1
+```
+
+Re-run (`out/techno-recapture2`, exit 0 as a capture):
+
+```
+frame 4900:  0.0000% differing (0/64000 px), max delta 0
+frame 5000:  0.0000% differing (0/64000 px), max delta 0
+frame 6300: 97.5047% differing (62403/64000 px), max delta 255, rendered index 6299 (offset -1)
+frame 8100: 71.7000% differing (45888/64000 px), max delta 206
+verdict: different, mode: rgb, offsets {"-1": 1, "0": 3}
+exit: 1
+```
+
+**Which frames reproduce is not a property of the frame's kind but of the index's timing**, and the
+two runs show it both ways: 5000 (the flat white hold) is identical in both; 4900 is 24.5938 % away
+in one run and identical in the other; 6300 and 8100 are 70–97 % away in both. Those two screens
+are a fine dither, so a phase difference of a frame or two repaints most of the frame — the same
+mechanism as §7.4 with a screen that has no structure to survive it.
+
+### 9.5 The 320×400 re-capture, and the one session that disagreed
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8200,8300,8400 --out reference/parts/techno/troll --sheet out/techno-troll.png
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8200,8299,8300,8301,8400 --out out/techno-recapture/troll
+```
+
+```
+troll frame 8200:  0.0000% differing (0/128000 px), max delta 0
+troll frame 8300: 99.9883% differing (127985/128000 px), max delta 206, rendered index 8299 (offset -1)
+troll frame 8400:  0.0000% differing (0/128000 px), max delta 0
+verdict: different, mode: mixed, offsets {"-1": 1, "0": 2}
+exit: 1
+```
+
+Both held frames are byte-identical between the two sessions; only the fade-in differs, and it
+differs by essentially every pixel, because at that index one session has the wash at one
+brightness and the other at another.
+
+**The first capture of this reference was a session whose timeline did not match, and it was
+caught and re-taken.** In it, the troll picture was *already on screen* at 8200 and 8300 — 78
+colours, 93,200 non-black pixels, i.e. the finished picture — where the partner, `b3-panic-sweep2`,
+`techno-troll-map2` and the re-captured reference all show flat black at 8200, the wash at 8300 and
+the picture from 8350. That is a ≥150-frame difference in this section's timeline between sessions,
+the largest instance of §1.7's finding in the block, and it is named here rather than deleted: the
+reference now in the tree is the one that agrees with three other sessions, and the outlier is one
+command's worth of evidence that a *single* capture is not enough to claim an index means one
+screen.
 
 ---
 
