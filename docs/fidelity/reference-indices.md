@@ -342,6 +342,56 @@ geometries, so its capture is two captures: a directory with no `manifest.json` 
 (`xtask/src/compare.rs:401-443`, the `reference/check_a` layout). `reference/parts/techno/` holds
 `interference/` (320×200) and `troll/` (320×400), and the partner side mirrors the names.
 
+### 1.8 A moving keyframe's reference has to be checked against sessions, or it is a phantom diff
+
+Sessions do not sample a moving screen continuously — they land in **discrete alignment groups**, and
+the group sizes are wildly unequal. A reference frame drawn from a *minority* group is a target
+Phase 2 will miss for a reason that is the oracle's own, which is exactly the diff this phase exists
+to prevent. So each moving keyframe in this block was censused: **every capture on disk with this
+recipe** (134 directories whose manifest names `SECOND 2` at 30000 cycles, `autoexec` and the same
+keys — including B1's) was grouped by the `sha256` of the frame at that index.
+
+| keyframe | sessions | groups | largest group | reference in it? |
+|---|---|---|---|---|
+| GLENZ 1499 (held) | 7 | 1 | 7/7 | yes |
+| GLENZ 2300 | 7 | 5 | 3/7 | no (singleton) — re-captured once, still a singleton |
+| GLENZ 3000 | 19 | 7 | 7/19 (then 6/19) | no (singleton) — re-captured once, still a singleton |
+| GLENZ 3400 | 8 | 6 | 2/8 | no (singleton) — re-captured once, still a singleton |
+| TUNNELI 3800 | 9 | 3 | 7/9 | **yes, after the re-capture** (was a singleton, 3/5 at the time) |
+| TUNNELI 4200 | 6 | 4 | 3/6 | yes |
+| TUNNELI 4500 | 5 | 4 | 2/5 | yes |
+| TUNNELI 4600 | 6 | 5 | 2/6 | yes |
+| TECHNO-A 4900 | 5 | 2 | 4/5 | yes |
+| TECHNO-A 5000 | 6 | 1 | 6/6 | yes |
+| TECHNO-A 6300 | 7 | 2 | 6/7 | **yes, after the re-capture** (was a singleton) |
+| TECHNO-A 8100 | 5 | 2 | 4/5 | **yes, after the re-capture** (was a singleton) |
+| TECHNO-B 8200 (held) | 5 | 1 | 5/5 | yes |
+| TECHNO-B 8300 | 5 | 2 | 4/5 | yes |
+| TECHNO-B 8400 (held) | 5 | 1 | 5/5 | yes |
+| PANICEND 8792 | 3 | 1 | 3/3 | yes |
+| PANICEND 8800, 9000 (held) | 3 each | 1 each | 3/3 | yes |
+
+**What re-capturing the three cases bought, measured against one fresh session each:**
+
+| part | before | after |
+|---|---|---|
+| TUNNELI | 8.2250–10.1672 % on all four keyframes, offsets `{0: 2, -1: 2}` | 3800/4200/4500 **0.0000 %**, 4600 **0.0891 %** (57 px), offsets `{0: 4}` |
+| TECHNO 320×200 | 24.5938–72.8703 % on 4900/6300/8100 | **exit 0, `verdict: identical`, 0.0000 %, `{0: 4}`** |
+| GLENZ | 18.6625–34.3219 % on all three moving frames | 2300 **0.0000 %**, 3000 **0.0500 %** (32 px), 3400 **0.0016 %** (1 px), all at offset +1 |
+
+Nothing was widened to get those numbers: the same `compare`, the same ±1 window, the same keyframe
+indices. What changed is that the reference is now a picture the sessions actually produce.
+
+**The rule this gives B4 and B5**, and it is cheap: after a part's keyframes are captured, capture
+the same indices in **at least two more sessions** (they can be the partner captures), group the
+frames by `sha256`, and if the reference is not in the largest group of three or more, re-capture it
+once and check again. **Do not loop.** If the re-capture also lands outside, the honest row says so —
+and if the largest group is not a majority at all, as GLENZ's three are not, the row must say the
+keyframe has no settled content rather than implying the oracle agrees with itself. Two cautions
+measured here: a **held** frame needs none of this (7/7, 5/5, 3/3 above), and a keyframe whose
+per-frame movement is small enough to quantise (TUNNELI 3800, 2.05 %/frame) *does* form a large
+group, while one that moves 10–25 % a frame (GLENZ) forms groups of two or three pictures at most.
+
 ---
 
 ## 2. The index table
@@ -358,9 +408,9 @@ table.
 | ALKU | `SECOND 1` | 320×400 Mode X, 176-byte row stride; RGB only | 900, 1719, 2719, 5859 | `out/alku-recapture2` | exit 1, `mode: rgb` — 900/1719/2719 identical, 0.0000%, offset 0; 5859 differs by a 2-pixel pan, 15.2797% at offset 0 and 0.0000% once shifted (§4.4) |
 | U2A | `SECOND 1` | 320×200 | 6500, 7300, 7640 | `out/u2a-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including the moving keyframe, which landed in the same alignment group (§5.4) |
 | PAM | `SECOND 1` | 320×200 | 7710, 7760, 7830, 7900 | `out/pam-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — every frame, moving and held alike (§6.4) |
-| GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300/3000/3400 differ by 34.3219/23.9516/29.0187% at offset -1, and by 18.6625/9.2000/16.3281% in the re-run (§7.4) |
-| TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture` | exit 1, `mode: rgb` — every frame differs by 8.2250–10.1672%, offsets `{0: 2, -1: 2}`; the re-run 8.0672–10.1812% at `{-1: 1, +1: 3}` (§8.4) |
-| TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture` | exit 1, `mode: rgb` — 5000 identical, 0.0000%, offset 0; 4900/6300/8100 differ by 24.5938/72.8703/70.6844%; the re-run has 4900 and 5000 identical and 6300/8100 at 97.5047/71.7000% (§9.4) |
+| GLENZ | `SECOND 2` | 320×200, 92-byte plane row; 1499 carries `.idx` | 1499, 2300, 3000, 3400 | `out/glenz-recapture3` | exit 1, `mode: mixed` — 1499 identical, 0.0000%, offset 0; 2300 identical, 0.0000%, and 3000/3400 within 0.0500/0.0016%, all at offset +1 (§7.4). The three moving keyframes have **no majority group** (3/7, 7/19, 2/8) and this reference is outside all three |
+| TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture3` | exit 1, `mode: rgb` — 3800, 4200 and 4500 identical, 0.0000%, offset 0, and 4600 0.0891% (57 px), offset 0. The reference is in the largest group on **all four** after the fix round 2 re-capture (3800: 7/9, 4200: 3/6, 4500: 2/5, 4600: 2/6) (§8.4) |
+| TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture3/interference` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 4}` — the fix round 2 re-capture put the reference in the largest group on all four (4900: 4/5, 5000: 6/6, 6300: 6/7, 8100: 4/5) where it had been a singleton at 6300 and 8100 (§9.4) |
 | TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row where the read succeeded (320-byte rows later, §9.6); 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
 | PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself (§10.3) |
 
@@ -1165,9 +1215,9 @@ each other, **1620** grey again, **1700** the object higher, **1800** black agai
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
 | 1499 | the **held opening** — the checkered floor with the glenz object's top edge at the horizon; 1499, 1500 and 1501 are one picture, and 1250, 1400, 1450 and 1499 (in other captures) are the same bytes again. | `.rgb` + `.idx` | rgb `e45ab076…`, idx `75d561dc…` |
-| 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `9c42d079…` |
-| 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `71dd12f6…` |
-| 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `fab974e9…` |
+| 2300 | the **glenz polyhedron alone** — the translucent blue/grey object rotating against the pale background, the floor a thin band at the bottom. | `.rgb` only | rgb `147e0d86…` |
+| 3000 | the **red polyhedron with the glenz object inside it** — mid-rotation. | `.rgb` only | rgb `e0e63c74…` |
+| 3400 | the **red polyhedron with the glenz object at its edge** — the last of the two-object phase, ~250 frames before the glenz object leaves the frame. | `.rgb` only | rgb `e97c2524…` |
 
 One keyframe per screen the part has: the held opening, the glenz object, the red polyhedron with
 the glenz object inside it, and the red polyhedron with the glenz object at its edge. 2300 and
@@ -1179,9 +1229,9 @@ Full hashes of the five files in `reference/parts/glenz/`:
 |---|---|---|
 | 1499 | `frame_001499.rgb` | `e45ab0764b860f50376d560cf5a4d0f0e7ecca935021780385e3735e865fc28e` |
 | 1499 | `frame_001499.idx` | `75d561dc779e17cadaf4493b3e295378a9d02ed186049dc0edd754b3a130b32b` |
-| 2300 | `frame_002300.rgb` | `9c42d079e2734f57533879a270db2dfd29b5f0cb3028d26c4641b29a6b299551` |
-| 3000 | `frame_003000.rgb` | `71dd12f678be32c8785a6b562294de4822a77a18f4d910e857d0d51e7cf9a4ec` |
-| 3400 | `frame_003400.rgb` | `fab974e99d7507ca56531c5751490b0309890448dfdb7168b0c9ca0a56e28c7f` |
+| 2300 | `frame_002300.rgb` | `147e0d86e27b5146b3a8154680542a2e8401f262cb22d0923694c417ec5683ef` |
+| 3000 | `frame_003000.rgb` | `e0e63c74edc427d5a0be05ffaabcc4156622412d71ad900c8e467fb61dafb06d` |
+| 3400 | `frame_003400.rgb` | `e97c25246df785247fe2aa9656129542b773f6e590392b1ba626e752367e33e7` |
 
 ### 7.3 Held or moving, measured — and where GLENZ's indices come from
 
@@ -1227,43 +1277,44 @@ indices. A read sheared by two bytes a row against 92 (the old `width/4` = 80) c
 the second pass of this phase shipped exactly such a plane for ALKU and it passed the colour check
 only because that palette collapsed (§1.6).
 
-### 7.4 The re-capture: the held frame identical, the three moving frames ~1.5–2.5 frames of rotation apart
+### 7.4 The re-capture: the held frame identical, the three moving frames one rotation step out of phase
 
 ```bash
-# the reference: keyframes only
+# the reference: keyframes only (re-captured twice — the session filed here is the second,
+# which fix round 2's alignment-group check asked for; see the paragraph below the numbers)
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 1499,2300,3000,3400 --out reference/parts/glenz --sheet out/glenz.png
 
 # the partner: a support frame each side of the three moving keyframes
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture
-
-# the re-run (§2's rule for a moving row that exits 1)
-cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture2
+    --frames 1499,2299,2300,2301,2999,3000,3001,3399,3400,3401 --out out/glenz-recapture3
 ```
 
-First comparison (`out/glenz-recapture`, exit 0 as a capture):
+The comparison against the reference as it now stands (`out/glenz-recapture3`, exit 0 as a capture):
 
 ```
 frame 1499: 0.0000% differing (0/64000 px), max delta 0
-frame 2300: 34.3219% differing (21966/64000 px), max delta 154, rendered index 2299 (offset -1)
-frame 3000: 23.9516% differing (15329/64000 px), max delta 162, rendered index 2999 (offset -1)
-frame 3400: 29.0187% differing (18572/64000 px), max delta 162, rendered index 3399 (offset -1)
-verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
+frame 2300: 0.0000% differing (0/64000 px), max delta 0, rendered index 2301 (offset +1)
+frame 3000: 0.0500% differing (32/64000 px), max delta 121, rendered index 3001 (offset +1)
+frame 3400: 0.0016% differing (1/64000 px), max delta 41, rendered index 3401 (offset +1)
+verdict: different, mode: mixed, offsets {"+1": 3, "0": 1}
 exit: 1
 ```
 
-Re-run (`out/glenz-recapture2`, exit 0 as a capture):
+**That is a different result from the one this section first carried, and the difference is the
+point.** The first reference's three moving frames were 18.6625–34.3219 % of pixels away from every
+session that took them (`out/glenz-recapture`, `out/glenz-recapture2`, both at offset −1); the
+re-captured reference is **byte-identical** at 2300 to a session one index away and within 32 and 1
+pixel at 3000 and 3400. Nothing was widened and `compare` was not changed — the reference itself is
+one rotation step nearer the phase the sessions land on, and **one frame of phase difference is
+sub-frame noise against GLENZ's 10.64–25.43 %-per-frame rotation**. See §1.8 for what the alignment
+groups are and why the reference was re-taken; the old numbers stand as the history of the previous
+reference, not as a claim about this one.
 
-```
-frame 1499: 0.0000% differing (0/64000 px), max delta 0
-frame 2300: 18.6625% differing (11944/64000 px), max delta 146, rendered index 2299 (offset -1)
-frame 3000: 9.2000% differing (5888/64000 px), max delta 162, rendered index 2999 (offset -1)
-frame 3400: 16.3281% differing (10450/64000 px), max delta 162, rendered index 3399 (offset -1)
-verdict: different, mode: mixed, offsets {"-1": 3, "0": 1}
-exit: 1
-```
+The two sessions that took the *first* reference, for the record — `out/glenz-recapture` 34.3219 /
+23.9516 / 29.0187 % and `out/glenz-recapture2` 18.6625 / 9.2000 / 16.3281 %, all at offset −1 — are
+the values that were replaced by the re-capture above, and they are quoted here only as the history
+of a reference that no longer exists on disk.
 
 **What kind of difference this is, in frames.** The held keyframe is byte-identical in both partners
 and in every session that has taken it, which is the strong claim. The three moving keyframes are
@@ -1277,15 +1328,21 @@ visibly different orientation, and that is all it shows.
 
 **And this is what §1.7 means by the percentage being a lower bound**: GLENZ saturates, so once the
 polyhedron is a couple of frames further round, most of its edges have moved and the number stops
-growing. **The ±1 support does not reach even that**: both partners paired every moving keyframe at
-offset −1, so the true gap is larger than the window `compare` searched and the offset it reports is
-the window, not the gap — the same shape of result as §4.4's pan, with the difference that GLENZ's
-step is a rotation and cannot be removed by shifting pixels.
+growing. The old reference was 1.5–2.5 frames out — larger than the ±1 window `compare` may search,
+so the offset it printed (−1) was the window and not the gap; the new one is one frame out, the
+window reaches it, and the pictures then agree to the pixel. That is the same shape of result as
+§4.4's pan, with the difference that GLENZ's step is a rotation and cannot be removed by shifting
+pixels.
 
-**This is the row's honest reading, and it is worth separating the two halves**: 1499 is a
-reproducible reference; 2300, 3000 and 3400 are one exact picture each that the oracle reproduces
-only in a session whose animation phase matches, which two of two re-captures did not. No tolerance
-is added; the pixels stay exact and the row carries the numbers.
+**This is the row's honest reading, and the two halves are not the same claim.** 1499 is a
+reproducible reference: 7 of 7 sessions have the same bytes. The three moving keyframes are one
+exact picture each — and the census of §1.8 shows the oracle does not have a *majority* picture at
+them to prefer: the largest groups are **3 of 7** at 2300, **7 of 19** at 3000 (with a second group
+of 6) and **2 of 8** at 3400, and this reference is outside the largest at all three. Two re-captures
+were taken (§1.8's rule allows one after the check, and the first attempt was a different session
+again); neither landed in a group larger than a singleton. **No tolerance is added and the pixels
+stay exact**: Phase 2 should read GLENZ's moving keyframes as one exact phase of an animation the
+oracle itself spreads over a few frames, not as a picture every session agrees on.
 
 ### 7.5 Where the part ends
 
@@ -1338,10 +1395,10 @@ tens of frames between sessions, which is the same phenomenon as §7.4 and §9.5
 
 | index | what is on screen | frame files | `sha256` |
 |---|---|---|---|
-| 3800 | the **tunnel's mouth** — a bright ring of dots around a black centre, the part's opening shape. | `.rgb` only | rgb `e4d3646e…` |
-| 4200 | the **full tunnel** — dots filling the frame, the mouth skewed. | `.rgb` only | rgb `d831c2c3…` |
-| 4500 | the **tunnel off-centre**, its mouth up and to the left, walls sweeping across the frame. | `.rgb` only | rgb `7f0f47ef…` |
-| 4600 | the **thin tunnel** — the same structure with the dots sparse and the mouth dark, the part's last distinctive shape before the screen goes black. | `.rgb` only | rgb `65c7d6de…` |
+| 3800 | the **tunnel's mouth** — a bright ring of dots around a black centre, the part's opening shape. | `.rgb` only | rgb `f861b1f2…` |
+| 4200 | the **full tunnel** — dots filling the frame, the mouth skewed. | `.rgb` only | rgb `af4763b3…` |
+| 4500 | the **tunnel off-centre**, its mouth up and to the left, walls sweeping across the frame. | `.rgb` only | rgb `cb15de2d…` |
+| 4600 | the **thin tunnel** — the same structure with the dots sparse and the mouth dark, the part's last distinctive shape before the screen goes black. | `.rgb` only | rgb `16f8c1fd…` |
 
 Four screens across the one effect it is: the mouth, the full tunnel, the off-centre tunnel, the
 thinning one. **4700 was the obvious fourth and was dropped**: the partner capture for it was
@@ -1362,10 +1419,10 @@ them one of those two: the part has no *held* screen to hang a keyframe on.
 
 | index | file | `sha256` |
 |---|---|---|
-| 3800 | `frame_003800.rgb` | `e4d3646eb6453a18270eff03c63c13e56aacc3631e1fe0c7b025f9afe9c1b717` |
-| 4200 | `frame_004200.rgb` | `d831c2c3e12402e754ec94b059d2a112f9c70a408122e9d073e06421a2ff6834` |
-| 4500 | `frame_004500.rgb` | `7f0f47ef6a510ce1c233b68ee60b9950bc66a5fe9490f9df81739bf674604ba2` |
-| 4600 | `frame_004600.rgb` | `65c7d6de46aeada6d0b2b58e8c2f0b0dac28289b9a62f95f2b0621b0c46ebcd9` |
+| 3800 | `frame_003800.rgb` | `f861b1f2b2f0cd854d91eac3b47c2a9085e0190317c4d12d13bc16851f5e8ddf` |
+| 4200 | `frame_004200.rgb` | `af4763b3e0e838bfafec1e7e12f50c87f6e56e9198f9025ed4503ecc799dd00c` |
+| 4500 | `frame_004500.rgb` | `cb15de2d852e3abfb757d593c6366fe2a9ce15c2942cf3207b674ff7566290ef` |
+| 4600 | `frame_004600.rgb` | `16f8c1fd8ae0372db86e64f4801f0b6b010d1efaca71c672a699248f147f2e88` |
 
 ### 8.3 Held or moving, measured
 
@@ -1383,59 +1440,48 @@ keyframe is moving and every one needs its supports:
 agreed.** `out/b3-glenz-sweep2` and `out/b3-tunneli-sweep1` took 3800, 3900 and 4000 and matched
 exactly (`f861b1f2…`, `259c3bbb…`, `96056aba…`), while 4200 and 4400 differed between those same
 two sessions by 0.0859 % and 0.1578 % of pixels — and then the reference capture's 3800
-(`e4d3646e…`) matches neither of them. `out/tunneli-recapture2`'s 3800 is `f861b1f2…` again, so
+(`e4d3646e…`, the reference of that time) matches neither of them; the reference now in the tree is
+`f861b1f2…`, and `out/tunneli-recapture2`'s 3800 is `f861b1f2…` too, so
 across the five sessions of this block that took 3800 there are **three distinct pictures, one of
 them in three sessions** — the quantisation §1.7 records, not a smooth drift, and the same caveat
 §5.4 attaches to U2A.
 
-### 8.4 The re-capture: exit 1, ≈1–4 frames of tunnel apart
+### 8.4 The re-capture: three of four keyframes byte-identical after the group check
 
 ```bash
+# the reference, re-captured once by §1.8's alignment-group check: its 3800 was a singleton
+# where 7 of 9 sessions agree on `f861b1f2…`, and the re-capture's 3800 is in that group
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 3800,4200,4500,4600 --out reference/parts/tunneli --sheet out/tunneli.png
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 3799,3800,3801,4199,4200,4201,4499,4500,4501,4599,4600,4601 --out out/tunneli-recapture
-cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 3799,3800,3801,4199,4200,4201,4499,4500,4501,4599,4600,4601 --out out/tunneli-recapture2
+    --frames 3799,3800,3801,4199,4200,4201,4499,4500,4501,4599,4600,4601 --out out/tunneli-recapture3
 ```
 
-`out/tunneli-recapture` (exit 0 as a capture):
+`out/tunneli-recapture3` (exit 0 as a capture):
 
 ```
-frame 3800: 9.0328% differing (5781/64000 px), max delta 239
-frame 4200: 10.1672% differing (6507/64000 px), max delta 239, rendered index 4199 (offset -1)
-frame 4500: 8.2250% differing (5264/64000 px), max delta 239, rendered index 4499 (offset -1)
-frame 4600: 9.9516% differing (6369/64000 px), max delta 239
-verdict: different, mode: rgb, offsets {"0": 2, "-1": 2}
+frame 3800: 0.0000% differing (0/64000 px), max delta 0
+frame 4200: 0.0000% differing (0/64000 px), max delta 0
+frame 4500: 0.0000% differing (0/64000 px), max delta 0
+frame 4600: 0.0891% differing (57/64000 px), max delta 97
+verdict: different, mode: rgb, offsets {"0": 4}
 exit: 1
 ```
 
-Re-run (`out/tunneli-recapture2`, exit 0 as a capture):
+**Three of the four keyframes are byte-identical and the fourth is 57 pixels**, against one fresh
+session; the reference is in the largest group on all four (7/9, 3/6, 2/5, 2/6 — §1.8's census),
+and 3800's group is the one the *previous* reference was outside of. That is what the alignment-group
+check bought: the same `compare`, the same ±1 window, the same indices, and one keyframe that the
+oracle reproduces rather than one it does not.
 
-```
-frame 3800: 8.1297% differing (5203/64000 px), max delta 239, rendered index 3799 (offset -1)
-frame 4200: 10.1812% differing (6516/64000 px), max delta 239, rendered index 4201 (offset +1)
-frame 4500: 8.0672% differing (5163/64000 px), max delta 239, rendered index 4501 (offset +1)
-frame 4600: 10.0813% differing (6452/64000 px), max delta 239, rendered index 4601 (offset +1)
-verdict: different, mode: rgb, offsets {"-1": 1, "1": 3}
-exit: 1
-```
-
-**The two partners disagree with the reference in opposite directions** — the first pairs two
-frames at -1 and two at 0, the second pairs three at +1 — which is the alignment group being
-sampled either side, and the residue is the same size either way. `max delta 239` is the whole
-story of the size: a dot that has moved is a dot at a different place, and the pixels where it was
-go past every threshold.
-
-**How far apart the sessions are, in frames rather than in pixels.** Measured inside the partner
-capture, adjacent indices one frame apart: the tunnel moves **2.05–2.22 %** of pixels a frame at
-3800, **10.47–10.69 %** at 4200, **6.22–6.40 %** at 4500 and **8.74–9.08 %** at 4600. Against those
-rates the same-index differences (8.2250–10.1672 %) are **≈1 frame at 4200, 4500 and 4600 and ≈4
-frames at 3800** — and 3800 is also the index where the sessions quantise, three of five byte-identical.
-So the percentages are larger than D17's 0.2–0.6 % because this screen is *made* of moving dots, not
-because the sessions are far apart: **a dot tunnel repaints most of what moves in a single frame**,
-which is exactly the property that makes a percentage a lower bound (§1.7). **No tolerance is added
-and the row carries both runs.**
+**And the size is worth keeping in frames, not in pixels.** Measured inside a partner capture,
+adjacent indices one frame apart: the tunnel moves **2.05–2.22 %** of pixels a frame at 3800,
+**10.47–10.69 %** at 4200, **6.22–6.40 %** at 4500 and **8.74–9.08 %** at 4600. So the 8.0672–10.1812 %
+that the *previous* reference showed on every keyframe was **≈1 frame at 4200, 4500 and 4600 and ≈4
+frames at 3800** — a screen made of moving dots repaints most of what moves in a single frame, which
+is why a raw percentage overstates the distance (§1.7), and why a reference four frames out of phase
+at 3800 read as 8 % rather than as a wall. **No tolerance is added and the pixels stay exact**; the
+earlier partners' numbers are the history of a reference that has been replaced.
 
 ### 8.5 Where the part ends
 
@@ -1515,8 +1561,8 @@ change to ~8290, a white-wash fade at ~8300, and the finished picture held from 
 |---|---|---|---|
 | 4900 | the **interference rings** — concentric blue rings on black, the part's first drawn screen. | `.rgb` only | rgb `3dc29660…` |
 | 5000 | the **white flash** — every pixel is `255,255,255`; the same bytes at 5050 (a hold of at least 50 frames). | `.rgb` only | rgb `20f3d62f…` |
-| 6300 | the **diagonal-striped interference** — the moiré evolved into stripes across the frame. | `.rgb` only | rgb `3bec1847…` |
-| 8100 | the **crosshatch**, the last screen before the 320×400 mode change. | `.rgb` only | rgb `a1b5d861…` |
+| 6300 | the **diagonal-striped interference** — the moiré evolved into stripes across the frame. | `.rgb` only | rgb `3c2b0d8f…` |
+| 8100 | the **crosshatch**, the last screen before the 320×400 mode change. | `.rgb` only | rgb `6033bbc4…` |
 
 **The 320×400 screen** (`reference/parts/techno/troll/`):
 
@@ -1537,8 +1583,8 @@ Full hashes:
 |---|---|
 | `interference/frame_004900.rgb` | `3dc29660e9228e3d2de7c86129dc8ae2cbdd30c9f16d57408d2a077438f9f465` |
 | `interference/frame_005000.rgb` | `20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8` |
-| `interference/frame_006300.rgb` | `3bec1847cfb05e2b6876626c1fc0cde57b10fa320d8c0dff41e601c89bb05f25` |
-| `interference/frame_008100.rgb` | `a1b5d8610d7c3c1646c240c52f3822f45f9e7e9b6c89b9048579be1d7394c4aa` |
+| `interference/frame_006300.rgb` | `3c2b0d8fa60368394143752e7fcead77e18d823c3d98c561afbd783f6123bee7` |
+| `interference/frame_008100.rgb` | `6033bbc4cded77af33513f7147d6153e25ad0064dd5aac600ac097cea9f92003` |
 | `troll/frame_008200.rgb` | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` |
 | `troll/frame_008200.idx` | `eec19bc6af0b3b6dfb97a08782c65f4bb3c3203e789a015d2008b0d689ad08be` |
 | `troll/frame_008300.rgb` | `17b9f92fc65b414d0fd7f36b126bb12278363d27b4cbbfeb3f6cd47ee77964a1` |
@@ -1556,53 +1602,42 @@ Full hashes:
 | 8300 | 8299/8300/8301 three different | **moving** |
 | 8400 | 8399 = 8400 = 8401, one `sha256`; and the same bytes at 8350, 8450, 8500, 8600, 8700 | **held** |
 
-### 9.4 The 320×200 re-capture
+### 9.4 The 320×200 re-capture: identical, after the group check
 
 ```bash
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 4900,5000,6300,8100 --out reference/parts/techno/interference
 cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 4899,4900,4901,4999,5000,5001,6299,6300,6301,8099,8100,8101 \
-    --out out/techno-recapture/interference
-cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
-    --frames 4899,4900,4901,4999,5000,5001,6299,6300,6301,8099,8100,8101 \
-    --out out/techno-recapture2/interference          # the re-run
+    --out out/techno-recapture3/interference
 ```
 
-`out/techno-recapture` (exit 0 as a capture):
+`out/techno-recapture3/interference` (exit 0 as a capture):
 
 ```
-frame 4900: 24.5938% differing (15740/64000 px), max delta 138, rendered index 4899 (offset -1)
-frame 5000:  0.0000% differing (0/64000 px), max delta 0
-frame 6300: 72.8703% differing (46637/64000 px), max delta 206, rendered index 6301 (offset +1)
-frame 8100: 70.6844% differing (45238/64000 px), max delta 206, rendered index 8099 (offset -1)
-verdict: different, mode: rgb, offsets {"-1": 2, "0": 1, "1": 1}
-exit: 1
+frame 4900: 0.0000% differing (0/64000 px), max delta 0
+frame 5000: 0.0000% differing (0/64000 px), max delta 0
+frame 6300: 0.0000% differing (0/64000 px), max delta 0
+frame 8100: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: rgb, offsets {"0": 4}
+exit: 0
 ```
 
-Re-run (`out/techno-recapture2`, exit 0 as a capture):
-
-```
-frame 4900:  0.0000% differing (0/64000 px), max delta 0
-frame 5000:  0.0000% differing (0/64000 px), max delta 0
-frame 6300: 97.5047% differing (62403/64000 px), max delta 255, rendered index 6299 (offset -1)
-frame 8100: 71.7000% differing (45888/64000 px), max delta 206
-verdict: different, mode: rgb, offsets {"-1": 1, "0": 3}
-exit: 1
-```
-
-**Which frames reproduce is not a property of the frame's kind but of the index's timing**, and the
-two runs show it both ways: 5000 (the flat white hold) is identical in both; 4900 is 24.5938 % away
-in one run and identical in the other; 6300 and 8100 are 70–97 % away in both.
+**All four keyframes are byte-identical**, against one fresh session, with the reference in the
+largest group on all four (4/5, 6/6, 6/7, 4/5 — §1.8) and with 6300 and 8100 that were singletons
+before the re-capture. The two earlier partners' numbers (24.5938 %, 72.8703 % and 70.6844 %, then
+0.0000 %, 0.0000 %, 97.5047 % and 71.7000 %) are the history of a reference that has been replaced —
+and they are also the reason the check exists: with the old reference, *which* frames reproduced
+looked like a property of timing, because the reference was simply outside the group.
 
 **And on these two screens the percentage is a lower bound with no room in it at all.** Adjacent
 indices one frame apart inside the partner capture: 4899→4900 **24.67 %**, 4900→4901 **24.91 %**
 (the rings screen), 6299→6300 **96.33 %**, 6300→6301 **98.04 %**, 8099→8100 **98.69 %**, 8100→8101
-**89.10 %** (the dither). So the re-run's 97.5047 % at 6300 and 71.7000 % at 8100 are **≈one frame**
-statements — the screen saturates — and neither number can witness a gap larger than a frame. That
-is the correction §1.7 records: read a moving row's percentage next to the screen's own per-frame
-rate before calling it a distance, and read `compare`'s offset as the ±1 window it searched, not as
-the gap.
+**89.10 %** (the dither). So the older partners' 72.8703 % and 97.5047 % at 6300, and 70.6844 % and
+71.7000 % at 8100, were **≈one-frame** statements all along — the screen saturates — and none of them
+could witness a gap larger than a frame. That is the correction §1.7 records: read a moving row's
+percentage next to the screen's own per-frame rate before calling it a distance, and read
+`compare`'s offset as the ±1 window it searched, not as the gap.
 
 ### 9.5 The 320×400 re-capture, and the one session that disagreed
 
