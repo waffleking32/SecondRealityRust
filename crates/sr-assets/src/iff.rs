@@ -332,6 +332,15 @@ fn decode_chunky(
 /// the 38 upstream `ILBM` files is a multiple of 16 wide (measured), where both
 /// come to `w / 8`. A `PBM ` row has no planes, so the question does not arise
 /// there.
+///
+/// **The bound, said out loud rather than left in the arithmetic:** the two
+/// widths agree exactly when `ceil(w / 8)` is even, which is every width either
+/// tree holds. At an odd-`ceil` width this reader would take one byte per plane
+/// row more than the original's loop does, so such a file would decode
+/// *sheared* rather than being refused — the row's length is in no header, and
+/// no check could tell the padded reading from the unpadded one. No file of
+/// that shape is in either tree; a decoder meeting one would have to choose
+/// between the two readings with nothing in the file to choose by.
 fn decode_planar(
     bytes: &[u8],
     (at, end): (usize, usize),

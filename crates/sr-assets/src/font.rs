@@ -107,6 +107,14 @@ pub struct Font {
     glyphs: Vec<u8>,
     /// One entry per cell, in the strip's order: where the cell starts in
     /// `glyphs` and how many columns wide it is.
+    ///
+    /// A width is a `u16` and cannot need more of one: it is at most the
+    /// strip's own width, and every container this crate reads states its
+    /// width in 16 bits ([`Image::width`] returns a `u16`), so no strip a
+    /// decoder can hand [`Font::from_image`] is wider than 65,535 columns. The
+    /// scan's run length is a plain cast for that reason; a strip that broke
+    /// the bound is not representable in any of the tree's formats, so there
+    /// is no case to refuse and nothing for a wider type to carry.
     cells: Vec<(u32, u16)>,
     cell: (u16, u16),
     first: char,

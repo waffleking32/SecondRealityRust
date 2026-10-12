@@ -37,6 +37,18 @@
 //! clip to the row end, `LBM2P.C:81`), and is zero-filled here: the original
 //! leaves the tail of its row buffer holding the previous row, which is a
 //! different kind of wrong and not something the tree depends on.
+//!
+//! **A short `FC FC` payload is not always a truncation, and cannot be made
+//! one.** The header carries no plane count — `LBM16.C:61` hardcodes
+//! `colors=16` — so a bit-plane payload's count comes from its own length
+//! (`render`, below): a payload cut to a whole smaller number of planes decodes as a
+//! picture of that many planes — real pixels, the wrong ones, and no error
+//! anywhere — because nothing in the bytes tells such a file apart from one
+//! written that way. Only a payload that is no whole number of planes is
+//! refused as truncated, and a refusal of the rest would be the port inventing
+//! a distinction the format does not carry. `tests/origin.rs` cuts every Origin
+//! asset at ~200 offsets and pins exactly this: a cut that decodes is a smaller
+//! picture in the same format, not a lie about the bytes.
 
 use sr_engine::{Palette, Surface};
 

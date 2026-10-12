@@ -51,8 +51,10 @@ enum Command {
     /// either side of its reference index, and the offset is reported (D18).
     Compare {
         /// The capture to measure against: a directory holding `manifest.json`,
-        /// or one holding capture subdirectories (as `reference/check_a` does).
-        /// A capture is input-only: nothing this tool writes may land inside it.
+        /// or a tree holding capture directories at any depth below it (as
+        /// `reference/check_a` does directly and `reference/parts` does both
+        /// directly and one level deeper). A capture is input-only: nothing
+        /// this tool writes may land inside it.
         #[arg(long)]
         reference: PathBuf,
         /// Where the frames to measure came from, in the same shape. Defaults

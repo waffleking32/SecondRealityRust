@@ -197,6 +197,40 @@ fn a_recorded_refusal_that_starts_decoding_is_a_failed_check() {
     );
     assert!(output.contains("REFUSED_ON_RECORD"), "{output}");
     assert!(output.contains("verdict: 1 finding(s)"), "{output}");
+    // And the summary's own arithmetic, in the run a reviewer reads: the row
+    // used to be counted nowhere — `refused on record` dropped to 0 and no
+    // other category took it — so a one-row tree printed a line whose parts did
+    // not add up to the one it led with. Every row is in exactly one category,
+    // and this one is in the category that says the premise broke.
+    assert!(
+        output.contains(
+            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 headerless with \
+             no decoder, 0 refused on record, 1 refused on record that now decode, 1 finding(s)"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
+fn the_decode_summary_adds_up_when_a_recorded_file_cannot_be_read() {
+    // The other way a row leaves the picture/animation/palette/headerless
+    // categories: the file is not there to decode at all. It is a finding and
+    // it is counted, so the summary still adds up to the number of rows.
+    let run = xtask(
+        &fixture("assets-missing-file"),
+        &["assets", "verify", "--decode"],
+    );
+
+    assert_eq!(run.code, 1, "a missing file is a failed check:\n{}", run.output());
+    let output = run.output();
+    assert!(output.contains("FAIL GONE.TXT"), "{output}");
+    assert!(
+        output.contains(
+            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 headerless with \
+             no decoder, 0 refused on record, 1 that could not be decoded, 1 finding(s)"
+        ),
+        "{output}"
+    );
 }
 
 #[test]
@@ -357,5 +391,35 @@ fn a_sheet_directory_inside_the_assets_tree_is_refused() {
         !inside.exists(),
         "the refused directory must not be created: {}",
         inside.display()
+    );
+}
+
+#[test]
+fn a_sheet_path_that_dotdots_behind_a_missing_component_is_refused_too() {
+    // The bypass `--sheet` inherited from `compare`'s guard: only the deepest
+    // ancestor that exists is canonicalised, so a `..` behind a component
+    // nothing has made yet survived as text — outside the tree for the string
+    // comparison, inside it for every write, which is how a PNG lands among the
+    // assets with no provenance row. `missing` has to sit *beside* the tree and
+    // not inside it: a tail that starts inside `assets/` still compares as one
+    // (the first mismatching component is what `starts_with` looks for), and a
+    // test written that way passes whether or not the guard collapses the path.
+    let root = scratch("sheet-dotdot").join("tree");
+    copy_tree(&fixture("assets-hash-mismatch"), &root);
+    let inside = root.join("missing/../assets/sheets");
+    let run = xtask(
+        &root,
+        &["assets", "verify", "--sheet", inside.to_str().unwrap()],
+    );
+
+    assert_eq!(run.code, 2, "a refused --sheet is 2:\n{}", run.output());
+    assert!(run.output().contains("--sheet"), "{}", run.output());
+    assert!(
+        !root.join("assets/missing").exists(),
+        "the refusal is before anything is written, so not even the component on the way exists"
+    );
+    assert!(
+        !root.join("assets/sheets").exists(),
+        "nothing may be written into the tree by a refused --sheet"
     );
 }

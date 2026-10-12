@@ -522,6 +522,12 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
     let mut palettes = 0usize;
     let mut headerless = 0usize;
     let mut refused = 0usize;
+    // The two ways a row leaves the categories above: a recorded refusal that
+    // started decoding, and a file that could not be read or inspected at all.
+    // Both are findings, and both are counted, so the summary adds up to the
+    // number of rows it leads with whatever the tree does.
+    let mut decoded_refusals = 0usize;
+    let mut undecodable = 0usize;
     let mut by_part: BTreeMap<String, Vec<Tile>> = BTreeMap::new();
 
     for row in rows {
@@ -530,6 +536,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             Ok(bytes) => bytes,
             Err(error) => {
                 findings += 1;
+                undecodable += 1;
                 println!(
                     "FAIL {}: cannot be read, so it cannot be decoded ({error})",
                     row.path
@@ -541,6 +548,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             Ok(inspected) => inspected,
             Err(message) => {
                 findings += 1;
+                undecodable += 1;
                 println!("FAIL {}: {message}", row.path);
                 continue;
             }
@@ -553,7 +561,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             // A refusal that stops happening is counted as the finding it is,
             // below, not as a refusal.
             Kind::Refused { decoded: false, .. } => refused += 1,
-            Kind::Refused { decoded: true, .. } => {}
+            Kind::Refused { decoded: true, .. } => decoded_refusals += 1,
         }
         // A refusal the record expects is the check passing. A refusal the
         // record expects that *decodes* is the check failing, and it has to
@@ -583,10 +591,24 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
         }
     }
 
+    // The two extra categories are printed only when they hold something, so
+    // the line reads the same as it always has on a tree where nothing is
+    // wrong, and a run where something is names the bucket it went into: a
+    // summary whose parts do not add up to its own total is the run a reviewer
+    // reads.
+    let mut buckets = String::new();
+    if decoded_refusals > 0 {
+        buckets.push_str(&format!(
+            ", {decoded_refusals} refused on record that now decode"
+        ));
+    }
+    if undecodable > 0 {
+        buckets.push_str(&format!(", {undecodable} that could not be decoded"));
+    }
     println!(
         "decode: {} asset(s) — {pictures} picture(s), {animations} animation(s), {palettes} \
-         palette(s), {headerless} headerless with no decoder, {refused} refused on record, \
-         {findings} finding(s)",
+         palette(s), {headerless} headerless with no decoder, {refused} refused on record\
+         {buckets}, {findings} finding(s)",
         rows.len()
     );
     if let Some(directory) = sheets {

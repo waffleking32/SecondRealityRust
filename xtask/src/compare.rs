@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use serde::{Deserialize, Serialize};
@@ -390,19 +390,33 @@ impl FrameRef {
 #[derive(Debug)]
 struct Capture {
     /// Empty for a directory that holds `manifest.json` itself; otherwise the
-    /// subdirectory's name.
+    /// capture directory's path below the tree's root, `/`-separated —
+    /// `title`, `plzpart/plasma`.
     name: String,
     dir: PathBuf,
     manifest: Manifest,
 }
 
-/// Find the capture or captures `dir` holds.
+/// Find every capture `dir` holds, at any depth.
 ///
-/// A directory with its own `manifest.json` is one capture. Otherwise every
-/// immediate subdirectory that holds one is a capture, named by that
-/// subdirectory — `reference/check_a` is laid out that way: the demo changes
+/// A directory with its own `manifest.json` is a capture, and so is every
+/// directory below it that holds one, named by its path relative to `dir`.
+/// `reference/check_a` is two captures directly inside it: the demo changes
 /// display geometry between the title screen and the part after it, one
 /// manifest carries one geometry, so Task 12 captured one screen at a time.
+/// `reference/parts` is the shape that made this a walk of the *whole* tree:
+/// eighteen of its captures are immediate subdirectories and two parts —
+/// `plzpart` and `techno`, the two whose screens have two geometries each —
+/// hold theirs one level deeper.
+///
+/// **The walk goes all the way down because measuring less than was asked for
+/// is how a green run lies.** A scan of the first level only found 18 of
+/// `parts/`'s 22 captures — skipping both CRTC-writing parts and every one of
+/// the keyframes that have no settled content — and still printed `verdict:
+/// identical` with exit 0. Nothing below the root is skipped here, and a
+/// rendered side laid out differently is refused by [`pair_captures`] (the
+/// names have to match) rather than reduced to whatever the two sides happen to
+/// share.
 fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
     if !dir.is_dir() {
         return Err(CompareError::Io(format!(
@@ -410,28 +424,8 @@ fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
             dir.display()
         )));
     }
-    if dir.join(MANIFEST_FILE).is_file() {
-        return Ok(vec![Capture {
-            name: String::new(),
-            dir: dir.to_path_buf(),
-            manifest: read_manifest(dir)?,
-        }]);
-    }
-
     let mut captures = Vec::new();
-    let entries =
-        fs::read_dir(dir).map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
-        let path = entry.path();
-        if path.is_dir() && path.join(MANIFEST_FILE).is_file() {
-            captures.push(Capture {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                manifest: read_manifest(&path)?,
-                dir: path,
-            });
-        }
-    }
+    collect_captures(dir, dir, &mut captures)?;
     captures.sort_by(|a, b| a.name.cmp(&b.name));
     if captures.is_empty() {
         return Err(CompareError::Io(format!(
@@ -440,6 +434,53 @@ fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
         )));
     }
     Ok(captures)
+}
+
+/// Every capture at or below `dir`, named by its path relative to `root`.
+///
+/// The walk does **not** stop at a capture: a manifest inside a capture's own
+/// directory is a capture too, and stopping there is the skipped-capture
+/// failure this walk exists to prevent. Subdirectories are visited in sorted
+/// order so a tree is walked the same way however the filesystem lists it.
+fn collect_captures(
+    root: &Path,
+    dir: &Path,
+    captures: &mut Vec<Capture>,
+) -> Result<(), CompareError> {
+    if dir.join(MANIFEST_FILE).is_file() {
+        captures.push(Capture {
+            name: capture_name(root, dir),
+            dir: dir.to_path_buf(),
+            manifest: read_manifest(dir)?,
+        });
+    }
+    let entries =
+        fs::read_dir(dir).map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
+    let mut subdirectories = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| CompareError::Io(format!("{}: {e}", dir.display())))?;
+        let path = entry.path();
+        if path.is_dir() {
+            subdirectories.push(path);
+        }
+    }
+    subdirectories.sort();
+    for subdirectory in &subdirectories {
+        collect_captures(root, subdirectory, captures)?;
+    }
+    Ok(())
+}
+
+/// A capture's name: its path below `root`, `/`-separated, empty for the root
+/// itself. The separator is `/` on every platform so a name from one tree can
+/// be matched, and a report written, under another.
+fn capture_name(root: &Path, dir: &Path) -> String {
+    dir.strip_prefix(root)
+        .unwrap_or(Path::new(""))
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn read_manifest(dir: &Path) -> Result<Manifest, CompareError> {
@@ -896,9 +937,18 @@ fn output_root(out: Option<&Path>) -> PathBuf {
 }
 
 /// `path` with symlinks, `.` and `..` resolved as far as it exists: the
-/// deepest ancestor that exists is canonicalised and the rest appended. The
-/// path does not have to exist yet, but it still has to be comparable with a
-/// path that does.
+/// deepest ancestor that exists is canonicalised, the rest appended, and the
+/// whole of it collapsed lexically.
+///
+/// The collapse is what closes the `..` that sits behind a component that does
+/// not exist yet. `fs::canonicalize` refuses such a path — it resolves through
+/// the filesystem, and `missing/..` is not a directory because `missing` is not
+/// there — so `<parent>/missing/../ref/nested` used to come back with the
+/// `missing/..` still in it, which is inside `<parent>/ref` for every write and
+/// outside it for every string comparison. The components after the deepest
+/// existing ancestor cannot be symlinks (they do not exist), so collapsing them
+/// lexically is what the filesystem does with them when it comes to create the
+/// path.
 ///
 /// Shared with the other guards over what this tool writes, because a guard
 /// that only compares strings is a guard a trailing `/.` walks through.
@@ -913,10 +963,32 @@ pub(crate) fn resolve(path: &Path) -> Result<PathBuf, String> {
     for ancestor in absolute.ancestors() {
         if let Ok(resolved) = fs::canonicalize(ancestor) {
             let rest = absolute.strip_prefix(ancestor).unwrap_or(Path::new(""));
-            return Ok(resolved.join(rest));
+            return Ok(collapse(&resolved.join(rest)));
         }
     }
-    Ok(absolute)
+    Ok(collapse(&absolute))
+}
+
+/// `path` without its `.` components and with every `..` taken back off the
+/// component before it. Purely lexical — no filesystem is read — which is what
+/// makes it usable on a path that does not exist.
+fn collapse(path: &Path) -> PathBuf {
+    let absolute = path.is_absolute();
+    let mut collapsed = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Nothing left to take it off: `/..` is `/`, and a leading
+                // `..` on a relative path has to stay one.
+                if !collapsed.pop() && !absolute {
+                    collapsed.push(Component::ParentDir.as_os_str());
+                }
+            }
+            component => collapsed.push(component.as_os_str()),
+        }
+    }
+    collapsed
 }
 
 /// Refuse to write `out` inside `input`: the inputs are read, never written, and
@@ -1004,7 +1076,8 @@ pub fn command(
     let rendered_captures = resolve_captures(rendered)?;
 
     let mut identical = true;
-    for (reference_capture, rendered_capture) in pair_captures(&reference_captures, &rendered_captures)? {
+    let pairs = pair_captures(&reference_captures, &rendered_captures)?;
+    for (reference_capture, rendered_capture) in &pairs {
         let capture_out = capture_out(&out, &reference_capture.name);
         let outcome = compare_capture(reference_capture, rendered_capture, &capture_out)?;
         for frame in &outcome.report.frames {
@@ -1042,6 +1115,10 @@ pub fn command(
         identical &= outcome.report.summary.verdict == "identical";
     }
 
+    // How many captures were measured is printed with the verdict: a run that
+    // measured less than it was asked for has to be visible where the green
+    // result is, not worked out from the frame lines above it.
+    println!("captures: {} measured", pairs.len());
     let verdict = if identical { "identical" } else { "different" };
     println!("verdict: {verdict}");
     Ok(if identical {
@@ -1867,6 +1944,33 @@ mod tests {
     }
 
     #[test]
+    fn a_dotdot_behind_a_component_nothing_has_made_is_resolved_lexically() {
+        // The bypass this guard carried: only the deepest *existing* ancestor
+        // canonicalises, so a `..` behind a component that does not exist yet
+        // survived as text and the comparison below never saw it. The path
+        // below is inside `<parent>/ref` for every write — `create_dir_all`
+        // makes `missing` and then resolves `..` through it — and outside it
+        // for a string comparison: the report and the diff images landed among
+        // the captures, where the plain path was refused.
+        let parent = scratch("guard-dotdot-parent");
+        let reference = parent.join("ref");
+        write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
+
+        let out = parent.join("missing/../ref/nested");
+        // What the filesystem would do with it, named without the `..` — the
+        // path the comparison has to see.
+        assert_eq!(resolve(&out).unwrap(), resolve(&reference).unwrap().join("nested"));
+
+        let error = command(&reference, Some(&reference), None, Some(&out))
+            .expect_err("the path lands inside the reference");
+        assert!(error.to_string().contains("ref/nested"), "{error}");
+        // Refused before anything is written, so not even the `missing`
+        // component is left behind on the way.
+        assert!(!parent.join("missing").exists());
+        assert!(!reference.join("nested").exists());
+    }
+
+    #[test]
     fn a_report_directory_beside_the_reference_is_allowed() {
         let reference = scratch("guard-ok-reference");
         write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
@@ -1877,6 +1981,63 @@ mod tests {
             ExitCode::SUCCESS
         );
         assert!(out.join("report.json").is_file());
+    }
+
+    #[test]
+    fn the_whole_tree_form_finds_every_capture_the_per_part_form_finds() {
+        // `reference/parts` is the tree that hid four captures: eighteen of its
+        // capture directories are immediate subdirectories, and `plzpart` and
+        // `techno` — the two parts whose screens have two geometries each —
+        // hold theirs one level deeper. A scan of the first level measured 18
+        // of the 22 and still said `verdict: identical`, so the whole-tree form
+        // is pinned against the per-part form: the two have to find the same
+        // directories, no more and no fewer.
+        let parts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/parts");
+        let whole = resolve_captures(&parts).unwrap();
+        assert_eq!(whole.len(), 22, "the tree's capture directories, reviewed and pinned");
+
+        let mut per_part: Vec<PathBuf> = Vec::new();
+        for entry in fs::read_dir(&parts).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.is_dir() {
+                continue;
+            }
+            // Every subdirectory of `parts/` holds captures: eighteen hold one
+            // each and the two Mode X parts hold two — so a subdirectory with
+            // none is a change to the tree this test is about.
+            let captures = resolve_captures(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            per_part.extend(captures.into_iter().map(|capture| capture.dir));
+        }
+        assert_eq!(per_part.len(), 22, "the same 22, one invocation per part");
+
+        // Both directions: a whole-tree run may not miss a capture the per-part
+        // form finds, and may not measure one no per-part form finds.
+        for capture in &whole {
+            assert!(
+                per_part.contains(&capture.dir),
+                "the whole-tree form found {}, which no --reference <part> run finds",
+                capture.dir.display()
+            );
+        }
+        for dir in &per_part {
+            assert!(
+                whole.iter().any(|capture| &capture.dir == dir),
+                "the whole-tree form missed {}, which a per-part run finds",
+                dir.display()
+            );
+        }
+
+        // The names carry the nesting, because that is what pairs the two
+        // sides: a rendered tree laid out flat cannot silently match a nested
+        // reference capture, it is refused by name.
+        let names: Vec<&str> = whole.iter().map(|c| c.name.as_str()).collect();
+        for name in ["plzpart/cube", "plzpart/plasma", "techno/interference", "techno/troll"] {
+            assert!(names.contains(&name), "{name} is missing from {names:?}");
+        }
+        for name in ["3dsinfld", "endscrl", "pam"] {
+            assert!(names.contains(&name), "{name} is missing from {names:?}");
+        }
     }
 
     #[test]

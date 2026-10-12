@@ -203,3 +203,48 @@ fn frames_that_differ_at_matching_indices_exit_1() {
     assert!(run.stdout.contains("100.0000% differing"), "{}", run.output());
     assert_eq!(reports(&out).len(), 1);
 }
+
+#[test]
+fn a_tree_of_captures_is_measured_all_the_way_down() {
+    // `reference/parts`' shape, and the failure it hid: eighteen captures in
+    // the top directory and two parts that keep two each one level deeper. A
+    // scan of the first level compared 18 of the 22, skipped everything below
+    // and still printed `verdict: identical` with exit 0 — the run that says a
+    // phase is finished. Every capture below the root has to be measured, and
+    // the count is printed with the verdict so a partial run cannot look whole.
+    let tree = scratch("nested-tree");
+    write_capture(&tree.join("title"), &[(700, 1), (900, 2)]);
+    write_capture(&tree.join("plzpart/cube"), &[(1350, 3)]);
+    write_capture(&tree.join("techno/troll"), &[(8500, 4), (9500, 5)]);
+    let out = scratch("nested-out").join("reports");
+
+    let run = xtask(&[
+        "compare",
+        "--reference",
+        tree.to_str().unwrap(),
+        "--rendered",
+        tree.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+
+    assert_eq!(run.code, 0, "every frame is itself:\n{}", run.output());
+    assert!(run.stdout.contains("captures: 3 measured"), "{}", run.output());
+    let mut written: Vec<String> = reports(&out)
+        .into_iter()
+        .map(|path| {
+            path.parent()
+                .unwrap()
+                .strip_prefix(&out)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    written.sort();
+    assert_eq!(
+        written,
+        vec!["plzpart/cube", "techno/troll", "title"],
+        "one report per capture, named as the tree nests them"
+    );
+}
