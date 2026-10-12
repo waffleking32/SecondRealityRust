@@ -37,10 +37,29 @@ rather than from reasoning. The phase's human-look evidence is the user's own re
 music, lookup tables, palette strips) correctly rendered as byte views; none of them carries a picture
 magic.
 
-**Part B (references) is the remaining work** — B1 through B6. B1 is done and its outcome is D17: the
-boot repeats under `--boot autoexec` (`[autoexec]` + `AUTOTYPE`) with the emulator run silent
-(`mixer_nosound`), and B2–B5 capture under that recipe at `--cycles 30000`. Phase 1's exit criterion is
-not met until every part has a reference that re-captures identically.
+**Part B (references) is in progress — 12 of the 20 slots are captured**, at `reference/parts/`:
+BEGLOGO (B2); ALKU, U2A, PAM (B3 block 1); GLENZ, TUNNELI, TECHNO (two screens), PANICEND (B3 block 2);
+MNTSCRL, LNS&ZOOM, PLZPART (two screens), MINVBALL (B4a). RAYSCRL, 3DSINFLD, JPLOGO, U2E (B4b) and
+ENDLOGO, CRED, ENDSCR, DDSTARS (B5) remain, then B6 closes the phase.
+
+**What the references mean, and it is not what "frame-exact" suggests at first reading.** The boot
+repeats exactly (D17), and the frame grab is counter-verified on both sides, but **the emulator's own
+picture at a given boot index is not fully reproducible between sessions**: sessions fall into **discrete
+alignment groups** rather than a continuum, and the majority group is byte-identical. `compare`
+therefore searches **±1 frame** and reports the offset (D18) — pixels stay exact, only the alignment is
+searched, and no pixel tolerance was added anywhere. A keyframe is filed only if the picture it holds is
+presentable by **at least half** the sessions at offset 0 or ±1 **with 0.0000 % differing**, with the
+reference's own capture excluded from the count (D19, and `reference-indices.md` §1.8); where no picture
+reaches that, the row records the keyframe as having **no settled content** — which is the honest answer
+for GLENZ 3000/3400 and PLZPART plasma 7000/7600, and is a property of those screens rather than a gap
+to be filled.
+
+**One Phase 2 result already came out of Part B.** PLZPART's plasma confirms on captured frames that the
+port's `Split::scanline` is the emulator's line-compare register **plus one** (`62/61/62` for a register
+alternating 60/61), which is what `Split`'s doc comment and D16 assert and what Phase 2 depends on.
+
+Phase 1's exit criterion is not met until every slot has a reference and a re-capture comparison, and
+B6 has written the policy and updated this file.
 
 Phase 2 is *Shell + easy tier*, whose exit criterion is **BEGLOGO frame-diff-identical** — that is the
 project's central technical risk, and it is answered there, not in Phase 9. Phase 3 (music) has no
