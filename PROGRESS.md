@@ -47,14 +47,16 @@ decode: 150 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 87 headerl
 ```
 
 21 contact sheets come from the same pass. Four approximation entries; the plan was corrected in place
-as each task measured what it had guessed, from `3f49511` (the Origin PIC model) to `9b53969` (what B5
-measured), and every correction came from a measurement rather than from reasoning. (The close-out
+as each task measured what it had guessed — the commits touching `docs/plans/01-assets.md` run from
+`3f49511` (the Origin PIC model) to this fix round's `7c07c7c`, Part A's and Part B's interleaved —
+and every correction came from a measurement rather than from reasoning. (The close-out
 said "17 plan corrections"; no enumeration reproduces that number, so it is withdrawn rather than
 restated.) The human-look evidence is the user's own reading of
 the sheets ("images look fine"); the noise-like tiles are non-picture data (3D scene files, TASM
 listings, S3M music, lookup tables, palette strips) correctly rendered as byte views, and none of
-them carries a picture magic. **The workspace suite is 398 passed, 0 failed, 1 ignored, 0 warnings**
-(re-run at the close-out; it was 361 at Part A's close).
+them carries a picture magic. **The workspace suite is 405 passed, 0 failed, 1 ignored, 0 warnings**
+(398 at the close-out, re-run after the two fix dispatches — the code round's five tests and this
+round's two; it was 361 at Part A's close).
 
 **Part B (references) — all 20 slots captured**: **83 keyframe frames in 22 capture directories**
 under `reference/parts/`, every one of them carrying a `manifest.json` with the recipe and a row in

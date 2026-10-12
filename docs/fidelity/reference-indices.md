@@ -329,9 +329,10 @@ two either side, and a part whose pictures then advance by a frame count inherit
 offset — which is what GLENZ's ≈1.5–2.5 and TUNNELI's ≈1–4 frames are. It also means a
 music-gated *boundary* is pinned to the music and does not wander: the five mode changes of this
 block sit within 4 frames across four sessions (BEGLOGO 408/409/406/406, GLENZ 1163/1161/1162/1162 —
-the capture probes of §3.4 bound that same change as **(1154, 1160]**, which is inside the one-to-two
-frame slop between the index a capture asks for and the frame it grabs, D19, so the two instruments
-do not disagree — TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, PANICEND
+the capture probes of §3.4 bound that same change as **(1154, 1160]**, so the two readings' bounds
+differ by about two frames, no more than the one-to-two-frame slop between the index a capture asks
+for and the frame it actually grabs (D19); the instruments do not disagree
+— TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, PANICEND
 8784/8784/8784/8784), and the tunnel→TECHNO content boundary (a probe counting non-zero bytes in
 VGA memory: a black plateau at 4774–4793 and the rings at 4797) is within 1–3 frames in two more.
 **What is left over is occasional and unexplained**: one capture session of this block

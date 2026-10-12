@@ -10,7 +10,17 @@ do**, and **evidence** — the reference frames the port is compared against, wh
 `reference/parts/` and are indexed in `reference-indices.md` §2. The register grows as parts are
 ported: Phase 1 wrote the three entries the spec names; a later phase adds the artefact its own
 measurement turns up, and records an `APPROXIMATIONS.md` entry instead if the port cannot reproduce
-it at all (spec §5.2).
+it at all (spec §5.2). An entry whose part is *inferred* says so and says from what; an entry whose
+mechanism is only partly pinned says which half, and what would settle it.
+
+**Search `upstream/` binary-safe.** Much of the vendored original is latin-1 or has non-ASCII bytes
+in strings and comments (`PLZPART/TWEAK.ASM`, `ALKU/MAIN.C`, `PLZPART/COPPER.ASM` are all
+`Non-ISO extended-ASCII`), and `grep` does not decode those files: a plain `grep -rn 'dis_sync'
+upstream/` exits **1**, silently, with no match — a false negative that reads exactly like "nothing
+calls this". Use `grep -a` (`-a`, `--text`, or `--binary-files=text`) for any source search over
+`upstream/`, and treat a clean result as a *question*, not as evidence of absence. This is the same
+shape as the failure the whole-branch review kept catching: a check that reports absence rather than
+an error.
 
 ---
 
@@ -23,19 +33,41 @@ wrong beside it. Spec §5.1 records it as the first named required behaviour and
 rule exists.
 
 **Where the source does it.** `PLZPART/PLZ.C:44-45` holds the six 256-entry palette tables
-(`pals[6][768]`) and `plz()` (`:62-117`, the switch at `:73` and `:81-83`) hands them to the fade a
+(`pals[6][768]`) and `plz()` (`:62-122`, the switch at `:73` and `:81-83`) hands them to the fade a
 table at a time
 (`cop_fadepal = pals[curpal++]`, reset with `memset(fadepal,0,768)`); the tables themselves are built
-in `init_plz()` from `ptau` at `:179-217`, and the write path to the DAC is the **TWEAK library**
-(`PLZPART/TWEAK.H:5-7`: `tw_setpalette`, `tw_setpalarea`, `tw_setrgbpalette`), whose implementation
-is the binary `PLZPART/TWEAK.OBJ` and has no source in the tree. `init_plz()` fills each table from
+in `init_plz()` from `ptau` at `:179-217`, and `init_plz()` fills each table from
 entry **1** onward (`pptr=&pals[k][3]`, `:182` onward) and scales the rest in place at `:215-217`,
 so what entry 0 and the un-written entries hold is part of the picture, not an oversight to tidy.
 
-**What the port must do.** Reproduce the pixels, not the intention. The mechanism is not settled by
-this register — it is a Phase 5 job to pin against the frames, because the DAC write sits inside a
-library whose source is not vendored. **Do not "clean" the palette**, and do not substitute an
-interpolated ramp: the difference is exactly what the comparison is for.
+**The palette path is fully readable in the vendored tree**, and both layers are in `PLZPART/`:
+
+- the library primitives, `PLZPART/TWEAK.ASM` (350 lines, the source of the `TWEAK.OBJ` the part
+  links): **`tw_setpalette`** (`:168-189`) — `lds si,[pal]`, `mov cx,300h` (768), write index 0 at
+  `03c8h`, then **`rep outsb`**, i.e. a full 768-byte upload of entries 0–255; **`tw_setpalarea`**
+  (`:191-212`) — the ranged form: `mov cx,[cnt]`, `cx = cnt*3` bytes, the write index set to
+  `[start]`, `rep outsb` (the primitive by which a part *can* leave entries holding the previous
+  palette; this part's own upload, below, is the full-length one); and **`tw_setrgbpalette`**
+  (`:331-348`), one entry at a time.
+- the plasma's own upload, `PLZPART/COPPER.ASM:86-116` (`copper2`, registered as copper slot 2 by
+  `init_copper`, `:44-65`): when `do_pal` is set (`:96-105`) it points the DAC's write index at 0,
+  `lds` the pointer in `cop_pal` and `rep outsb`s **all 768 bytes**. Two buffers reach that pointer:
+  a `pals[k]` table (`PLZ.C:73-83`),
+  or **`fadepal`** — declared `db 768*2 dup(?)` (`COPPER.ASM:184`) and used as **768 16-bit
+  accumulators whose high bytes are the colours and whose low bytes are the fraction**, built by the
+  per-frame accumulate loop at `:238-254` (`add [cs:di+ccc+768], al` / `adc [cs:di+ccc], ah`; the
+  loop itself is `@@l4`, `:241-252`). Note that
+  the per-table reset is `memset(fadepal,0,768)` (`PLZ.C:81`): it zeroes the **colour** bytes and
+  leaves the fractional half standing across a table switch.
+
+**What the port must do.** Reproduce the pixels, not the intention: copy `copper2`'s upload, the
+`fadepal` accumulator and the fade loop as written, and **do not "clean" the palette** or substitute
+an interpolated ramp — the difference is exactly what the comparison is for. What remains for
+**Phase 5** is narrower than "the mechanism": it is to pin which of the two source-level candidates
+produces the *visible* banding, against the frames below — the accumulator half surviving the
+per-table `memset`, or the DAC shared with the plasma cube (`VECT.C:123` sets `cop_pal = fpal;
+do_pal = 1` on the same callback). The lines are all in the tree; only their visible outcome is to
+be measured.
 
 **Evidence.** `reference/parts/plzpart/plasma/` — 6000, 7000 and 7600 (`reference-indices.md` §13,
 §1.12): the filed plasma frames carry the banding (they are also three of the keyframes recorded as
@@ -49,6 +81,14 @@ z-buffer**: a dot drawn later paints its shadow (and itself) over an earlier dot
 is nearer, so shadows can appear on top of closer particles. The spec calls it "shadow particles
 rasterised over the cyan particles in the jumping-particle part"; the effect is plainly visible in
 the reference frames — a ring of cyan particles with their shadows crossing them.
+
+**The part is an inference, and it is the one thing here the spec does not state.** §5.1 names the
+artefact for "the jumping-particle part" without naming which part that is. `MINVBALL` is
+*identified*, not given, from three things that agree: the mechanism (a per-dot `oldposshadow` slot,
+`DOTS/ASM.ASM:36`, and the `;shadow` block at `:98`), the sequence (`part-sequence.md` slot 12 is
+`MINVBALL.EXE`, `DOTS/`, "MiniVectorBalls"), and the captures (`reference-indices.md` §14's frames
+show the cyan particles and their shadows). A later phase that finds the phrase means a different
+part should move the entry rather than delete it — the obligation is real either way.
 
 **Where the source does it.** `DOTS/ASM.ASM:36` gives each dot a slot pair
 (`x,y,z,oldposshadow,oldpos,…`) and `:98-108` is the shadow: it restores the pixel its own previous
@@ -65,7 +105,7 @@ artefact and changes the picture.
 **Evidence.** `reference/parts/minvball/` — 10900, 11200, 11800, 12400 (`reference-indices.md` §14).
 All four are moving keyframes at 3/3 (100 %) support, so a diff there is a real difference.
 
-## 3. `dis_sync()`'s off-by-one — the music-position lookup (library, all parts)
+## 3. `dis_sync()`'s off-by-one — the music-position lookup (library; two callers)
 
 **What it is.** The sync service does not return the code for the music position it is handed: it
 returns the **previous** table entry's code, and at the start of the table it reads the word *before*
@@ -78,19 +118,29 @@ steps of four bytes, stops at the first entry whose position is `>=` the current
 then returns `cs:[bx-2]` — the **second word of the entry before the match**, i.e. the previous
 row's code. When the position is at or before the first entry (order 0, row 0), that is the word
 immediately *before* `ordersync1`. The table itself is the `dw` list at `DIS/DISINT.ASM`'s
-`ordersync1` (`0000h,0 / 0200h,1 / 0300h,2 / … / 0d00h,10 / 3d00h,1 / …`). One caller in the tree:
-`PAM/OUTTAA.C:39` — `while(dis_sync()<10 && !dis_exit());`.
+`ordersync1` (`0000h,0 / 0200h,1 / 0300h,2 / … / 0d00h,10 / 3d00h,1 / …`).
+
+**Two parts call it, at six live sites** — so the off-by-one is a Phase 2 dependency, not a
+curiosity in one part:
+
+- `PAM/OUTTAA.C:39` — `while(dis_sync()<10 && !dis_exit());`.
+- `ALKU/MAIN.C:59, 66, 72, 79` — `while(dis_sync()<1..4 && !dis_exit());`, the gates on ALKU's four
+  text cards — and `:138` — `while(((a&1) || dis_sync()<4+tptr) && !dis_exit() && a<319)`, the
+  horizon pan's own gate. (`ALKU/MAIN.C:512-513` is the comment block that documents the codes:
+  `0 = …`, `1 = fc_pres`.) The phase's own `reference-indices.md` records the same thing for ALKU
+  (§4: "each card is gated on the music (`while(dis_sync()<1..4)`, `MAIN.C:59,66,72,79`)") and PAM
+  (§6, `:39`).
 
 **What the port must do.** Implement the lookup as written, off-by-one included: the code a caller
 sees is the one belonging to the entry *before* the row it is standing on, and the order-0 case reads
 whatever precedes the table (in the original that is not a value the table defines — reproduce the
 ported equivalent, and record what the original's word actually is if a part's timing depends on it).
 
-**Evidence.** No `.rgb` frame shows this — it is a timing/library behaviour. The evidence is the
-source above, and the port's first consumer is whichever part waits on `dis_sync()`
-(`PAM/OUTTAA.C:39`); its frames in `reference/parts/pam/` (7710, 7760, 7830, 7900,
-`reference-indices.md` §6) are where a wrong off-by-one would surface as a timing difference, but the
-check that pins it is a unit test on the ported lookup against this table.
+**Evidence.** No `.rgb` frame shows this — it is a timing/library behaviour — and the consumers are
+exactly the ports that must show it in their captures: ALKU, whose cards are gated on it
+(`reference/parts/alku/`, 900/1719/2719/5859, `reference-indices.md` §4), and PAM
+(`reference/parts/pam/`, 7710/7760/7830/7900, §6). A wrong off-by-one shows there as a timing
+difference; the check that pins it exactly is a unit test on the ported lookup against this table.
 
 ---
 

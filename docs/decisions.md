@@ -1208,9 +1208,10 @@ groups* and a second capture lands in the same group about half the time (D17), 
 clock carries a host-timing term that neither the API nor `--set` reaches
 (`gui/sdl_gui.cpp:2555-2570`). That is why `compare` searches **±1 frame** and reports the signed
 offset per frame and the distribution per capture (D18) — and the asymmetry that makes the search
-usable is D19's: **the reference holds keyframes only; the capture compared against it holds one
-support frame beyond each end of the keyframe range**, and one on each side of every keyframe that
-moves (§1.3 rule 1).
+usable is D19's: **the reference holds keyframes only; the capture compared against it holds
+`K-1, K, K+1` around every keyframe that moves and nothing around a held one** (§1.3 rules 1–2 —
+the ends-only form `N₁-1 … N_k+1` is enough only for a *contiguous* range, which no part in the tree
+has).
 
 **Spec §8.4's structural-similarity fallback was not needed, and the distinction is the point.** ±1
 keeps the comparison **pixel-exact** and searches only the *alignment*: a paired frame is 0.0000 %
