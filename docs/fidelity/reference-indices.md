@@ -300,6 +300,33 @@ timeline — and, per the review of this block, that must be read as **one sessi
 frames no longer exist** (one command's re-capture replaced them; what survives is the `sha256` and
 colour census taken at the time, §9.5).
 
+**What the phase error is and is not, measured after the fact.** The demo's own frame clock is the
+VGA retrace — `MAIN/COPPER.ASM:300-320` reprograms the PIT, polls 3DAh for the retrace edge and
+increments `copperframecount`, which `DIS/DISINT.ASM:161-181` hands back from `waitb` — so the
+guest's frames and the capture's frame counter are one clock, and the music is the only *other*
+clock in the machine. It was measured directly, by reading the music player's frame counter out of
+guest memory (a 16-bit word that advances 0.742 times a frame, i.e. ~52 Hz, where the video clock
+advances 1.000 and the DOS tick 0.26): at video frame 900 it reads **371, 373, 374** in three
+sessions and at ~8103 it reads **5717, 5716, 5715** — a spread of **~1 music frame, ≈1.3 video
+frames**, with the rate identical to one part in ten thousand (0.742016 / 0.742012 / 0.741909).
+
+So the common few-frames spread has a mechanism and a size: a music-gated part *starts* a frame or
+two either side, and a part whose pictures then advance by a frame count inherits that as a constant
+offset — which is what GLENZ's ≈1.5–2.5 and TUNNELI's ≈1–4 frames are. It also means a
+music-gated *boundary* is pinned to the music and does not wander: the five mode changes of this
+block sit within 4 frames across four sessions (BEGLOGO 408/409/406/406, GLENZ 1163/1161/1162/1162,
+TECHNO's 16-colour 4799/4799/4797/4801, TECHNO's 320×400 8194/8195/8196/8193, PANICEND
+8784/8784/8784/8784), and the tunnel→TECHNO content boundary (a probe counting non-zero bytes in
+VGA memory: a black plateau at 4774–4793 and the rings at 4797) is within 1–3 frames in two more.
+**What is left over is occasional and unexplained**: one capture session of this block
+(`out/b3-tunnel-boundaries`) had TECHNO's rings on screen by 4770 where two freshly watched sessions
+draw them at 4797, ~30–40 frames early, and that excursion did not reproduce in six sessions of
+watching. It is not the music clock (which agrees within a frame), it is not a fixed per-session
+offset, and it is not the counter stalling (two sessions watched at 20 ms resolution to frame 4900
+showed no gap over 150 ms and 0.0701 frames/ms in both). B4/B5 should read a re-capture that exits 1
+by the numbers in its own row, and treat an index whose screen is a tens-of-frames outlier as one
+session's observation until a second session agrees with it.
+
 For the rows below: a *held* frame is reproducible byte for byte in every session seen; a *moving*
 frame is one exact picture that the oracle reproduces when the two sessions happen to agree, and the
 row records the offsets and the percentages rather than pretending to a tolerance.

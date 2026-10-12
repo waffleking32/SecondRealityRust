@@ -1491,8 +1491,14 @@ All four are captured; the rows are in `reference-indices.md` §2 and the measur
   prints is the ±1 window it searched, not the gap. Held frames reproduce byte for byte in every
   session seen; PANICEND's *moving* collapse frame reproduced exactly too, so this is not "moving is
   broken" — it is that a screen gated on a frame count agrees only when the two sessions' phase
-  agrees, while a *music-gated* event (TUNNELI's end, TECHNO's fade) can sit tens of frames away.
-  Prefer held indices, and re-run anything that exits 1.
+  agrees. The size has a mechanism: the demo's frame clock is the VGA retrace and the music is the
+  only other clock, and the music player's own frame counter at a fixed video frame agrees to ~1
+  music frame (≈1.3 video frames) across sessions, with its rate identical to 1e-4 — so a
+  music-gated part *starts* a frame or two either side and everything after it inherits that as a
+  constant offset. Music-gated *boundaries* are therefore pinned: the five mode changes of this
+  block sit within 4 frames across four sessions. One capture session was ~30–40 frames early in
+  one region and did not reproduce in six sessions of watching; treat that shape as one session's
+  observation. Prefer held indices, and re-run anything that exits 1.
 - **A boundary can be a content change with a black gap between the parts**: GLENZ's last frame
   ~3650, flat black 3680–3700, TUNNELI's first ring 3710; TUNNELI's last dots in (4700, 4770]
   (session dependent), TECHNO's first rings 4770. Neither boundary is in the geometry — and **the
