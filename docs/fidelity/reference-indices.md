@@ -297,6 +297,7 @@ table.
 | TUNNELI | `SECOND 2` | 320×200; RGB only | 3800, 4200, 4500, 4600 | `out/tunneli-recapture` | exit 1, `mode: rgb` — every frame differs by 8.2250–10.1672%, offsets `{0: 2, -1: 2}`; the re-run 8.0672–10.1812% at `{-1: 1, +1: 3}` (§8.4) |
 | TECHNO — the 320×200 screen | `SECOND 2` | 320×200, 16-colour EGA mode; RGB only | 4900, 5000, 6300, 8100 | `out/techno-recapture` | exit 1, `mode: rgb` — 5000 identical, 0.0000%, offset 0; 4900/6300/8100 differ by 24.5938/72.8703/70.6844%; the re-run has 4900 and 5000 identical and 6300/8100 at 97.5047/71.7000% (§9.4) |
 | TECHNO — the 320×400 screen | `SECOND 2` | 320×400 Mode X, 160-byte plane row; 8200 carries `.idx` | 8200, 8300, 8400 | `out/techno-recapture/troll` | exit 1, `mode: mixed` — 8200 and 8400 identical, 0.0000%, offset 0; 8300 (the fade-in) 99.9883% at offset -1 (§9.5) |
+| PANICEND | `SECOND 2` | 320×200; 9000 carries `.idx` | 8792, 8800, 9000 | `out/panicend-recapture` | exit 0, `verdict: identical`, 0.0000%, offsets `{0: 3}` — including 8792, the collapse itself (§10.3) |
 
 ### Adding a row
 
@@ -1512,3 +1513,103 @@ screen.
 
 ---
 
+## 10. PANICEND
+
+`SECOND 2`'s fifth part: the fake ending — TECHNO's picture collapsing to a line and then to a
+single dot on black. 320×200, from the geometry change at ~8790, whose first visible effect is the
+320×400 screen's 400 lines being halved back to 200 (the `SHUTDOWN.C` asm writes CRTC 09h = 41h,
+one more scanline repeat), to the next part's first drawn frame at ~9230. **It is the shortest
+part in the block and the one whose screens reproduce best.**
+
+The source is `PANIC/SHUTDOWN.C`: it takes the palette the previous part left (`getpal`,
+`:43-48`), then `shutdown()` writes a line at row 200 of a 640-wide layout from both edges inward
+(`for(x=20;x<=160;x+=3) … tw_putpixel(x,200,0) …`, `:116-131`), leaves a pixel at (160, 200), and
+pulses its palette for 60 frames (`:132-138`). The panel that shows only a dot is that last loop
+and the `sleep(1)` after it.
+
+### 10.1 The sweeps, and what the sheets showed
+
+```
+out/b3-techpanic-sweep3 8600,8700,8800,8900,9000,9100,9200,9300,9400,9500   exit 2, refused at 8800 (320×200 → the capture started 320×400)
+out/b3-panic-sweep4     8800,8900,9000,9100,9200,9300,9400,9500            exit 0
+out/panic-probe1        8791…8799 step 1, then 8999,9000,9001              exit 2, refused as a miss at 8999
+out/b3-panic-mnt-boundary 9200…9300 step 10                                exit 0
+```
+
+Tiles: `b3-panic-sweep4.png` — **8800** a horizontal line across a black frame with a dot at its
+right end; **8900** black; **9000**, **9100**, **9200** black; **9300** the next part's picture
+(foliage) partly drawn; **9400**, **9500** that picture at full contrast. The pixel counts behind
+those thumbnails, which is what the thumbnails cannot show: at 8800 the line is 234 non-black
+pixels in row 100 from x = 40 to x = 276, and **8900, 9000, 9100 and 9200 are a single non-black
+pixel at (160, 100)** — the dot. `panic-probe1`'s 8791–8799 show the same thing at one-frame
+resolution: 8791–8794 are a horizontal *band* (the collapsed picture, still ~10 rows tall) and
+8795–8799 are the thin line.
+
+### 10.2 The keyframes, and why these
+
+| index | what is on screen | frame files | `sha256` |
+|---|---|---|---|
+| 8792 | the **collapse** — the previous part's picture squashed into a horizontal band around row 100, ~10 rows tall, with the black screen above and below. | `.rgb` only | rgb `c9bf5114…` |
+| 8800 | the **line and the dot** — a 234-pixel line in row 100 with the nucleus at (160, 100). | `.rgb` only | rgb `bb38c96b…` |
+| 9000 | the **dot alone** — one non-black pixel at (160, 100), its palette pulsing; the same bytes at 9100 and 9200. | `.rgb` + `.idx` | rgb `b412a265…`, idx `9d7106ca…` |
+
+Three keyframes, one per screen the part draws: the collapse, the line, the held dot. The dot's
+index is the part's hold — 8900 to 9230 is one frame repeated at least 340 times — and 9000 is
+deep inside it rather than at its edge.
+
+Full hashes of the five files in `reference/parts/panicend/`:
+
+| index | file | `sha256` |
+|---|---|---|
+| 8792 | `frame_008792.rgb` | `c9bf5114b3e70b841884ae7a075684ee2757983760355a7d8a8aedb914ae9484` |
+| 8800 | `frame_008800.rgb` | `bb38c96bfd2d1da8ae99a5e1569d5c2e99431b3e005a8ca0b5db989a173a3665` |
+| 9000 | `frame_009000.rgb` | `b412a26518f5e0281790d05c16ed0c7644b7382c5debb8f16a9437b7a6aa84e7` |
+| 9000 | `frame_009000.idx` | `9d7106cabab6980fa3e0f574a5fe2de7a3f8370fd5f336fb2bdaebb48b842c06` |
+
+**9000's `.idx` was checked by hand, and it is not a flat-colour case**: it holds exactly **one**
+non-zero index, `1`, at (160, 100) — the dot — against 63,999 zeros, which is what the RGB shows.
+So the panel is honest, and the one pixel is the only thing in it that could have caught a stride
+error.
+
+### 10.3 Held or moving, measured — and the re-capture is identical, collapse included
+
+| keyframe | neighbours | reading |
+|---|---|---|
+| 8792 | 8791 / 8792 / 8793 three different `sha256` (in both `panic-probe1` and the partner) | **moving** — the band is still shrinking |
+| 8800 | 8799 = 8800 = 8801, one `sha256` (partner), and 8795–8799 are the same bytes | **held** |
+| 9000 | 9000 = 9100 = 9200, one `sha256` (sweep) | **held** |
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8792,8800,9000 --out reference/parts/panicend --sheet out/panicend.png
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8791,8792,8793,8799,8800,9000 --out out/panicend-recapture
+```
+
+```
+$ cargo xtask compare --reference reference/parts/panicend --rendered out/panicend-recapture \
+      --out out/panicend-recapture-diff
+frame 8792: 0.0000% differing (0/64000 px), max delta 0
+frame 8800: 0.0000% differing (0/64000 px), max delta 0
+frame 9000: 0.0000% differing (0/64000 px), max delta 0
+verdict: identical, mode: mixed, offsets {"0": 3}
+exit: 0
+```
+
+**All three are byte-identical, including the moving one.** 8792 is a frame in the middle of the
+collapse and it re-captured exactly, which is the opposite of GLENZ's and TUNNELI's moving frames
+in the same block — evidence that the session-to-session difference §1.7 records is a property of
+*some* animated screens, not of "moving" as a category: PANICEND's collapse is driven by
+`dis_waitb()` counts (one step a frame, no per-iteration variability), while GLENZ's rotation and
+TUNNELI's tunnel advance by however many vblanks the host let pass. Two of the three frames are
+held outright, and the row's reproducibility rests on them and on 8792 together.
+
+### 10.4 Where the part ends
+
+`out/b3-panic-mnt-boundary` took 9200…9300 in tens: **9200, 9210, 9220** are the dot's black,
+**9230** is the next part's picture arriving dark from the top-right, and 9240 onward is that
+picture fading in — the same bytes in the reference run and in the earlier `b3-panic-sweep4` at
+9300. The picture is `FOREST/HILLBACK.CLX`, an MNTSCRL asset (the MNTSCRL contact sheet renders
+it), so **PANICEND's own last drawn frame is the dot, the loader's music wait holds it, and the
+next part's first drawn frame is ~9230**. There is no geometry refusal at that boundary — both
+screens are 320×200 — so it was found by content, the third such boundary in this block.
