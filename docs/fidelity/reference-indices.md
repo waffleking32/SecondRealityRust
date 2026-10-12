@@ -480,7 +480,7 @@ few hundred pixels of each other, exactly the knife edge §1.8 records for GLENZ
 place further down: **on a fast-moving screen the count measures the last decimal of the phase, not
 the reachability of the picture**, and a row that quotes it must say which it is.**
 
-### 1.10 Six things block 4 (RAYSCRL, 3DSINFLD, JPLOGO, U2E) measured
+### 1.10 Seven things block 4 (RAYSCRL, 3DSINFLD, JPLOGO, U2E) measured
 
 **A capture refused for geometry still performs the indexed read for the index it refuses.** The 11th
 warning in `out/b4b-ray-sweep2`'s log belongs to the refused 17100: the loop grabs *and reads* a frame
@@ -529,6 +529,15 @@ and 13000→13001 changes **23,908 px (37.36 %)**; 3DSINFLD's frames alternate *
 because each render iteration costs two vblanks and the picture therefore changes every *second*
 frame. The triple around each keyframe (§1.3 rule 2) is what measures this, and it is not only for
 the census: it is how 13500 was found to be held and 13000 not, on the same screen, 500 frames apart.
+
+**And §1.8's remedy works, twice in this block, when it is applied to a support count rather than
+a hunch.** 3DSINFLD's first reference had 15500 in one session's window only (1/3) while all three
+sessions' windows hold `be95db6c…`; re-capturing (a separate sitting) drew that picture and its
+support went **1/3 → 3/3**, with 16000 and 16800 keeping the bytes they had. U2E's first reference had
+2600 at **0/3** while two sessions draw `58293d89…` at `N`; the re-capture drew it and the support
+went **0/3 → 2/3**, with 1000, 1600 and 3600 unchanged. Both are the same procedure §1.8 rule 5
+describes, and both were checked with the same three sessions rather than a fresh partner — which is
+the part of the rule that keeps the re-roll from being a dice throw.
 
 **A part's screen can depend on which boot reaches it, at the source level.** `VISU/C/U2E.C:195-215`
 checks the BIOS video mode, sets `jellywas = 1` when it is mode 13h, and **skips `vid_init(1)`** —
