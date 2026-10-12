@@ -368,7 +368,7 @@ keys — including B1's) was grouped by the `sha256` of the frame at that index.
 | TECHNO-B 8200 (held) | 5 | 1 | 5/5 | yes |
 | TECHNO-B 8300 | 5 | 2 | 4/5 | yes |
 | TECHNO-B 8400 (held) | 5 | 1 | 5/5 | yes |
-| PANICEND 8792 | 3 | 1 | 3/3 | yes |
+| PANICEND 8792 | 2 (+1 refused, §footnote) | 1 | 3/3 with the refused capture's frame | yes |
 | PANICEND 8800, 9000 (held) | 3 each | 1 each | 3/3 | yes |
 
 The counts are sessions that hold a `manifest.json`; a **refused** capture writes none (§1.2), so
