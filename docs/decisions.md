@@ -205,8 +205,10 @@ resolved in favour of either build.
 `TUN10.EXE` are *not* the build that put the reference's frames on screen.** `TUN10.PAS:122`
 writes a second grey ramp of `(64-x) *3 div 4` at DAC entries 128..192 and `TUN10.EXE` compiles
 it as written (`idiv 4`, image offsets `0x1d0`-`0x1e3`), while every reference frame is drawn
-with `(64-x) *3 div 5` at those entries — exact at all 25 measurable entries, and the unique
-best of 21 candidate ramps rendered against the four frames (`APPROXIMATIONS.md` A6,
+with `(64-x) *3 div 5` at those entries — exact at all 42 entries the four frames exercise (38 of
+them with a non-black reference pixel), and the unique
+best of 81 candidate `(mul, div)` pairs — 70 distinct ramps — rendered against the four frames
+(`APPROXIMATIONS.md` A6,
 `docs/fidelity/tunneli.md` §5). The tree's `MAIN/DATA/TUNNELI.EXE` is PKLITE-packed, so which
 of the two copies of it put that ramp on screen is not resolvable from here; what *is* settled
 is that the frames and the tree's source disagree, and D12's ruling above ("the distributed

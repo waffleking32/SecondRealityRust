@@ -197,13 +197,17 @@ compiles exactly that: `3*(64-x)` then `idiv 4`, three times over for r, g and b
 pushed as `128+x` (image offsets `0x1d0`-`0x1e3`). **The build that shipped — the one every reference
 frame came from — is a later revision in this one expression: its second ramp is
 `(64 - x) * 3 div 5` at the same 65 entries.** Two measurements say so and neither is a fit to a
-shape: 25 of the ramp's entries are readable through the part's own dots (a dot's entry is
-`128 + round(x/1.3)`) and every one matches `3*(64-k) div 5` exactly, including the five where
-rounding rather than truncation would differ; and a search over 21 candidate ramps, each rendered
-over the four reference frames, puts the port's colour field 1,108 pixels from them at 3/5 and at
-least 4,200 at every other candidate — the source's own 3/4 is 6,376, and the runner-up (7/12) is
-4,200. With 3/5 the only differences left are pixels one side inks and the other leaves as
-background: never a wrong colour.
+shape: the four reference frames exercise **42** of the ramp's entries, **38** of them with a
+non-black reference pixel, over **5,275** informative pixels and **29** distinct greys (a dot's entry
+is `128 + round(x/1.3)`), and every one matches `3*(64-k) div 5` exactly — including the **17** where
+rounding rather than truncation would differ. And a search over every `(mul, div)` pair with
+`mul ≤ 7`, `div ≤ 15` — **81 candidates evaluated, 70 distinct ramps** — each rendered over the four
+reference frames, puts the port's colour field 1,108 pixels from them at 3/5 and at least 4,200 at
+every other candidate: the source's own 3/4 is 6,376 and the runner-up (7/12) is 4,200. With 3/5,
+**1,091 of the 1,108 are pixels the port inks that the reference leaves as background** — the
+ink-presence residual below, which no ramp can fix — and the other **17 are dot overlap**: both sides
+inked in different colours, **10 of them on first-ramp entries** (72, 75, 76, 83, 89) where no
+second-ramp value can reach them.
 
 **Port:** the *shipped* ramp, `3*(64-x) div 5`, with `TUN10.PAS:122` cited as the structure it
 reproduces and the derivation test
@@ -240,9 +244,11 @@ that has been replaced. At 4500 and 4600 nothing can attribute the residual, bec
 reproduces those pictures at all.
 
 **What is ruled out, measured rather than argued.** The colour field is right (§5) and the alignment
-is whole: at 3800 tick 78 leaves 179 pixels where 77 leaves 1,122 and 79 leaves 1,311, so a
-whole-tick error would cost thousands. The remaining differences are a few hundred of the 2,400–3,900
-inked dots, in both directions (at 3800 the port inks 179 that the reference does not and the
+is whole: at 3800 the port's tick 78 leaves 179 pixels whose colour the reference does not show,
+where its neighbours leave 754 and 953 — four times as many — so the comparison is at the right
+tick and not a near one. The remaining differences are a few hundred of the 2,400–3,900
+inked dots, in both directions (and 17 of the 1,108 at the aligned ticks are overlap rather than
+presence) (at 3800 the port inks 179 that the reference does not and the
 reference none that the port does not; at 4200, 347 and 26) — what two rings overlapping differently
 looks like, which is a *sub-frame* difference in the chain or an artefact of the erases' order.
 **What a later phase should watch:** Phase 9 compares every frame, and this residual is the number

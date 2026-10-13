@@ -423,10 +423,12 @@ with the measurement). **Fifteen unit tests** beside the part and two through th
 `TUN10.PAS:122` writes a second grey ramp of `(64-x) *3 div 4` at DAC entries 128..192, and the
 tree's own `TUN10.EXE` compiles exactly that (`3*(64-x)` then `idiv 4`, image offsets `0x1d0`-0x1e3).
 **The build that shipped is a later revision of that one expression: its ramp is `(64-x) *3 div 5`.**
-25 of the ramp's entries are readable through the part's own dots and every one matches, exactly
-(including the five where truncation and rounding differ); and a search over 21 candidate ramps
-rendered against the four reference frames puts the port's colour field 1,108 pixels from them at 3/5
-and at least 4,200 at every other (the source's own 3/4 is 6,376). The port takes the shipped ramp —
+the four reference frames exercise 42 of the ramp's entries (38 with a non-black reference pixel,
+5,275 informative pixels, 29 distinct greys) and every one matches, exactly — including the 17 where
+truncation and rounding differ; and a search over 81 candidate `(mul, div)` pairs — 70 distinct
+ramps — rendered against the four reference frames puts the port's colour field 1,108 pixels from
+them at 3/5 and at least 4,200 at every other (the source's own 3/4 is 6,376). Of the 1,108, 1,091
+are ink presence and 17 are dot overlap (10 of them on first-ramp entries). The port takes the shipped ramp —
 D12: "the distributed release is the reference of record for every frame diff… the source tree
 remains the reference for *how* every effect works" — with the derivation in
 `docs/fidelity/tunneli.md` §5, the entry in `APPROXIMATIONS.md` A6, and D12's own open item
@@ -444,23 +446,28 @@ port's.
 At the alignment the reference itself supplies — offset **3,722**, the port's ticks 78/478/778/878
 answering 3800/4200/4500/4600 — the port differs by **179 / 373 / 321 / 433 pixels of 64,000 (0.28 /
 0.58 / 0.50 / 0.68 %)**, and the difference is *presence*, not colour (the largest channel delta at
-3800 is 12, against ~235 at the other three, where a port dot meets the reference's black). The
+3800 is 12, against ~235 at the other three, where a port dot meets the reference's black; 17 pixels
+over the four frames are inked by both sides in different colours, 10 of them on first-ramp entries
+— dot overlap, not the ramp). The
 residual is attributed honestly rather than excused by the oracle: at 3800 the reference is
 **settled** (7 of 9 sessions, and the re-capture reproduced it byte for byte), so 179 pixels there
 are the port's or a sub-frame effect in it; at 4200 the census is exactly half; and at 4500 and 4600
 — **no settled content** — nothing can attribute them. `APPROXIMATIONS.md` A6 carries the table and
-what is ruled out (the ramp; a whole-tick error, which would cost thousands; and the pre-fix
+what is ruled out (the ramp; a whole-tick error — 754 and 953 pixels at ticks 77 and 79 against
+179 at 78; and the pre-fix
 partners' 8.07-10.18 %, which §8.4 itself reframes as "≈1 frame … ≈4 frames" — the history of a
 reference that has been replaced).
 
 **The unchecked read past `rows` (`:179-190`) is preserved because the source has it, and it is
-invisible.** Every y the part's own run puts outside `rows` reads a word of 64,000 — `aa2`'s copy of
+invisible.** The path that *is* visible is substituting 0, the value of `aa2`'s unwritten half: the
+run takes that branch 356,042 times and every one of those dots would land in row 0, where the
+reference's four frames ink 34 pixels in total. Every y the part's own run puts outside `rows` reads a word of 64,000 — `aa2`'s copy of
 `aa1` (`:99-100`) on one side, `aa1` past the wrap on the other — so the dot plots at `x + 64,000`,
 past the 64,000 bytes a 200-line mode 13h screen reads: more than 100,000 such reads in a full run,
 **not one** of them on screen, and a bounded read gives byte-identical frames. The path that *is*
-visible is substituting 0 (the value of `aa2`'s unwritten half): that plots at row 0 and costs 85,
-142 and 88 extra differing pixels at 4200, 4500 and 4600, which is why the read is modelled rather
-than zeroed.
+visible is substituting 0 (the value of `aa2`'s unwritten half): that plots at row 0 — the branch is
+only entered when the x sum is ≤ 319, so all 356,042 of them go there — which is why the read is
+modelled rather than zeroed.
 
 **The sheets, which are the evidence a person reads.** `out/p2-tunneli-aligned-sheet.png` (the
 port's four aligned frames) beside `out/p2-tunneli-reference-sheet.png` (the reference's own four):

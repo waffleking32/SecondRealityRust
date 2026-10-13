@@ -163,10 +163,12 @@ rather than for anything it draws.
 **But substituting 0 for the word would be visible, and the reference says so.** The words just past
 `rows` are not all 64,000: `aa2` is `array[0..200]` of which `:100`'s `move` writes the first 101, so
 its second half is never written and is 0 — and 0 is what a port would reach for if it "simplified"
-the read. That port plots at `x`, row 0, and differs from the reference by **85, 142 and 88 extra
-pixels** at 4200, 4500 and 4600 (measured with a scratch model of the loop that the port reproduces
-pixel for pixel, §7.2). So the read is *modelled*, not zeroed: the layout below is the declaration
-order of `TUN10.PAS:16-29` —
+the read. That port plots every one of those dots at its x sum, and the branch is only entered when
+that sum is already ≤ 319 (`:181-182`), so **all of them land in row 0**: `zeroing_the_read_would_
+paint_row_zero` measures **356,042** such reads over the run against a row the reference's four
+frames ink **34** pixels of (the port's own frames, 32). A row is 320 pixels wide, so the
+substitution repaints it; a y bound, by contrast, changes nothing at all. So the read is *modelled*,
+not zeroed: the layout below is the declaration order of `TUN10.PAS:16-29` —
 
 ```
 … putki, pcalc, aa1[0..100], rows[0..200], aa2[0..200], sinit[0..4096],
@@ -198,19 +200,24 @@ and that is this part's one measurement that overrides a line of `TUN10.PAS`:
   `128 + x` (`add ax,0x80` at `:1cc`).
 - **The build that shipped is a different one.** The reference's frames are drawn with
   `(64 - x) * 3 div 5` at the same 65 entries. Two independent readings say so:
-  - **Exact, entry by entry.** 25 of the ramp's entries are measurable through the part's own dots
-    (the ring `x` has `k = round(x/1.3)` and the dot's entry is `128 + k`), and every one matches
-    `3*(64-k) div 5` — including the five where rounding rather than truncation would differ
-    (`64-k = 38` is 22 here, 23 rounded, and the reference shows 22). A ramp fitted to the *shape*
-    would not be exact at 25 points.
+  - **Exact, entry by entry.** The four reference frames exercise **42** of the ramp's entries (the
+    ring `x` has `k = round(x/1.3)` and the dot's entry is `128 + k`), **38** of them with a
+    non-black reference pixel, over **5,275** informative pixels and **29** distinct greys, and
+    every one matches `3*(64-k) div 5` — including the **17** where rounding rather than truncation
+    would differ (`64-k = 38` is 22 here, 23 rounded, and the reference shows 22). A ramp fitted to
+    the *shape* would not be exact at 42 points.
   - **Unique, over a search.** `the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`
-    renders the port's picture at the four aligned ticks through every candidate `(64-x) * mul div
-    div` the shape could be (the reduced fractions with `mul ≤ 7`, `div ≤ 15`) and counts the pixels
-    the port inks that no reference frame shows in that colour: **1,108 at 3/5, and at least 4,200 at
-    every other candidate** (the runner-up is 7/12 with 4,200; the source's own 3/4 is 6,376). With
-    3/5 the *only* differences left are pixels the port inks that the reference leaves as
-    background — never a wrong colour. That is Task 4's method for BEGLOGO's fade constant applied
-    to a ramp, and plan Review Focus 5 is the rule it follows.
+    renders the port's picture at the four aligned ticks through every `(mul, div)` pair with
+    `mul ≤ 7`, `div ≤ 15` — **81 candidates evaluated, 70 distinct ramps**, and the test asserts the
+    count — and counts the pixels the port inks that no reference frame shows in that colour:
+    **1,108 at 3/5, and at least 4,200 at every other candidate** (the runner-up is 7/12 with 4,200;
+    the source's own 3/4 is 6,376). Of the 1,108 that remain at 3/5, **1,091 are pixels the port
+    inks that the reference leaves as background** — the ink-presence residual of §7.2, which no
+    ramp can fix — and **17 are dot overlap** (both sides inked in different colours), 10 of them on
+    *first-ramp* entries (72, 75, 76, 83, 89) where a second-ramp value cannot reach them at all. So
+    no *ramp* leaves a wrong colour: the residue is not a colour the ramp chose. That is Task 4's
+    method for BEGLOGO's fade constant applied to a ramp, and plan Review Focus 5 is the rule it
+    follows.
 - **Which one the port follows is D12's ruling.** "The distributed release is the reference of record
   for every frame diff… the source tree remains the reference for *how* every effect works." The
   effect — a two-ramp grey DAC, the phase alternation, the entry mapping — is the source's; the one
@@ -338,20 +345,25 @@ cargo xtask compare --reference reference/parts/tunneli --rendered out/p2-tunnel
 ```
 
 ```
-alignment: the rendered side's indices are read +3722 for pairing (--align); the offsets below are
-on top of that
+alignment: the rendered side's indices are read +3722 for pairing (--align); the offsets below are on top of that
 frame 3800: 0.2797% differing (179/64000 px), max delta 12
 frame 4200: 0.5828% differing (373/64000 px), max delta 239
 frame 4500: 0.5016% differing (321/64000 px), max delta 231
 frame 4600: 0.6766% differing (433/64000 px), max delta 239
-verdict: different, exit: 1
+report: out/p2-tunneli-aligned-diff/report.json
+captures: 1 measured
+verdict: different
 ```
 
+(verbatim; the command's exit code is 1, which is where `compare` puts its verdict — the lines above
+are its stdout.)
+
 **What that residual is, and what it is not.** It is *presence*, not colour: with the shipped ramp
-in place (§5) the port's colour field matches the reference's on every pixel both sides ink — the
-difference is a few hundred pixels the port inks where the reference shows background (and vice
-versa), which is what two rings overlapping differently looks like, and which is why 3800's largest
-channel delta is 12 while the other three are ~235 (a port dot against the reference's black).
+in place (§5) the port's colour field matches the reference's on every pixel both sides ink **except
+17 over the four frames** — 0 at 3800, 4200 and 4600 and 17 at 4500, 10 of them on first-ramp
+entries, i.e. two rings overlapping rather than the ramp (§5). The rest is a few hundred pixels the
+port inks where the reference shows background (and vice versa), which is why 3800's largest channel
+delta is 12 while the other three are ~235 (a port dot against the reference's black).
 Against the four keyframes:
 
 | reference index | port tick | differing pixels | % | the port's own motion per frame | the census (`§1.8`) |
@@ -370,10 +382,14 @@ the 179 pixels at 3800 are **not** the oracle's spread — that reference is rep
 reproduced — and neither, plausibly, are 373 at 4200. What is left is the port's own geometry, or a
 sub-frame difference in it, and it remains unidentified:
 
-- **Not a whole-tick error.** At 3800 the best tick is 78 at 179 pixels against 1,122 at 77 and
-  1,311 at 79 — a whole tick of this animation costs thousands, not hundreds.
+- **Not a whole-tick error.** At 3800 the port's tick 78 leaves 179 pixels whose colour the
+  reference does not show, where 77 leaves 754 and 79 leaves 953 — four times as many
+  (`the_alignment_is_whole_tick_or_nothing`). The original's animation advances one vblank at a
+  time, so a sub-frame alignment does not exist, and the comparison is at the right tick rather than
+  a near one.
 - **Not the ramp**: §5, measured.
-- **Not the shape**: 0.28–0.68 % is a few hundred *overlapping* dots out of ~2,400–3,900 inked, and
+- **Not the shape**: 0.28–0.68 % is a few hundred *overlapping* dots out of ~2,400–3,900 inked (17
+  of them inked on both sides in different colours), and
   the mask agrees in both directions at 3800 (the port inks 179 extra, the reference none) and
   347/26 at 4200.
 - **Not the earlier candidates.** The pre-fix partners' 8.07–10.18 % is the history of a reference
@@ -427,12 +443,17 @@ contain, not that a person has judged them.
   backwards.
 - `the_unchecked_read_covers_everything_the_arithmetic_can_reach` — the reachable range recomputed
   from the data files, asserted inside the modelled windows.
-- `the_unchecked_read_covers_everything_the_arithmetic_can_reach` (above) — and
-  `the_out_of_range_read_is_invisible_and_that_is_measured` walks the part's whole run and asserts
+- `the_out_of_range_read_is_invisible_and_that_is_measured` — walks the part's whole run and asserts
   that **not one** of the >100,000 out-of-range y values it produces reads a word a screen would
   show (§4). A read that is preserved because the source has it, and invisible on this art.
+- `zeroing_the_read_would_paint_row_zero` — the counterfactual §4's argument needs, measured: the
+  run takes that branch 356,042 times, all of them into a 320-pixel row the reference inks 34 pixels
+  of.
+- `the_alignment_is_whole_tick_or_nothing` — 179 pixels at tick 78 against 754 and 953 at its
+  neighbours, so §7.2's offset is the right tick and not a near one.
 - `the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit` — the shipped build's second
-  ramp, by a search over 21 candidates against the four reference frames, uniquely 3/5 (§5).
+  ramp, by a search over 81 candidate `(mul, div)` pairs (70 distinct ramps) against the four
+  reference frames, uniquely 3/5 (§5).
 - `the_ring_colour_rounds_unambiguously` — `round(x/1.3)` is at least 0.02 from a half over 4..80.
 - `the_palette_is_the_parts_own_ramps_and_leaves_0_to_63_alone` — both ramps' ends (the shipped
   3/5 one included, and the truncation it is not), the two black writes, entry 255, and entry 0

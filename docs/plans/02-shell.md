@@ -751,6 +751,14 @@ uniquely against the frames (§5 of the note, A6) — the port follows the shipp
 this is the one line of this part's source the port does not transcribe. `docs/fidelity/tunneli.md`
 §7 and `PROGRESS.md` carry the numbers.
 
+- [ ] **Step 4: Commit**
+
+```bash
+git add bins/secondreality/src/parts/tunneli.rs bins/secondreality/src/parts.rs \
+        bins/secondreality/tests/tunneli.rs docs/fidelity/tunneli.md
+git commit -m "Port TUNNELI: 77 rings, one plot per dot per frame, and the original's clip"
+```
+
 ### Task 6: ENDLOGO — the end picture
 
 White, a 129-step fade-in of the FUTURE/CREW picture, a music-gated hold, a 64-step fadeout, in
