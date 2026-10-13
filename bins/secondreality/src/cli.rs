@@ -267,6 +267,11 @@ fn exactly_one_char(raw: &str) -> Result<char, String> {
 ///
 /// An empty item is refused rather than skipped — `430,,470` is a typo, and a
 /// skipped item would dump a different set from the one the command names.
+///
+/// **A repeated index is dropped, keeping the order the list was written in.**
+/// Not a sort: the run visits indices in their own order whatever the command
+/// says, so the list only has to be a set. A repeat would dump the same frame
+/// twice and file two manifest entries under one index.
 fn indices(raw: &str) -> Result<Vec<u32>, String> {
     let items: Vec<&str> = raw.split(',').collect();
     if raw.is_empty() || items.iter().any(|item| item.is_empty()) {
@@ -274,13 +279,16 @@ fn indices(raw: &str) -> Result<Vec<u32>, String> {
             "--dump-frames expects a list like 430,470,560,900, got {raw:?}"
         ));
     }
-    items
-        .iter()
-        .map(|item| {
-            item.parse()
-                .map_err(|_| format!("--dump-frames expects a number, got {item:?}"))
-        })
-        .collect()
+    let mut wanted: Vec<u32> = Vec::with_capacity(items.len());
+    for item in items {
+        let index = item
+            .parse()
+            .map_err(|_| format!("--dump-frames expects a number, got {item:?}"))?;
+        if !wanted.contains(&index) {
+            wanted.push(index);
+        }
+    }
+    Ok(wanted)
 }
 
 /// The registry's names, for the message an unknown `--part` produces.
@@ -358,6 +366,16 @@ mod tests {
             ["--headless", "--dump-dir", "d", "--dump-frames", "430,x"].map(String::from)
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_repeated_dump_index_is_dropped_and_the_order_is_kept() {
+        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "5,5"]).unwrap();
+        assert_eq!(cli.dump_frames, Some(vec![5]));
+        // First occurrence wins, and the list is not reordered: the run walks
+        // its indices in its own order, so the list is a set, not a schedule.
+        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "900,430,900"]).unwrap();
+        assert_eq!(cli.dump_frames, Some(vec![900, 430]));
     }
 
     #[test]

@@ -1263,7 +1263,7 @@ the final whole-branch review comes after B6 and may require fixes, and a tag th
 worse than a tag applied a few commits later. The phase's exit criteria are met and its evidence is
 recorded; the tag goes on when that review is clean.
 
-## D21 — The shell's frame numbering, and the DAC a run starts from (2026-10-13)
+## D21 — The shell: the run's numbering, the DAC it starts from, and where it ends (2026-10-13)
 
 Phase 2's first task. Two things it settles that a reader of the plan would otherwise have to
 re-derive, and one API change it needed.
@@ -1288,6 +1288,22 @@ way with `Runner::part_frame() - 1`, so this is the existing idiom rather than a
 `index_is_reference()` is false; the dump's manifest carries `index_origin` (`boot` or `part`) and
 `anchor` (`u32` or `null`) so that two captures whose indices look comparable and are not cannot be
 diffed as if they were. `compare` ignores both fields.
+
+`boot` keys on **a run that begins at a part with a measured anchor**, and not on a run being a
+block's: four of the six blocks begin at parts nothing measures — `SECOND 1` at ALKU, `3` at MNTSCRL,
+`4` at U2E, `U` at DDSTARS — so `--block 1` is not `boot`-numbered merely for being a block run, and
+`--part beglogo` is. The two coincide for `SECOND 2` and `SECOND 5` today only because those are the
+phase's two block entries.
+
+**A run holds where its parts end, rather than stopping.** When a run's plan is done — or its next
+part is one the port has not written — the shell keeps ticking through an internal part that draws
+nothing and touches nothing, so every tick composes the surface and the DAC exactly as the last real
+part left them, and the index keeps counting. That is what the original's loader shows between two
+EXEs, and it is why `--part beglogo --dump-frames 430,470,560,900` is answerable: `BEG/BEG.C:87` ends
+`main()` when the fade has converged, and the reference's 900 is a *hold* belonging to the loader and
+the next part's music wait (§3.5), not a frame BEGLOGO draws. `SequenceStatus::Finished` is therefore
+reserved for a run that has *ended* — a part the port has that could not be started — and
+`--dump-frames` treats an index such a run never reached as a failure rather than a hole in the dump.
 
 **The DAC starts where the hardware starts.** BEGLOGO's keyframe 430 is index 15 over the DAC the
 machine already had — `BEG/BEG.C:20-21` fills A-space with 15 and only writes the DAC at `:25-34`,

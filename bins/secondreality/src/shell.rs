@@ -22,7 +22,7 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use sr_engine::part::{Part, PartStatus};
+use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
 use sr_engine::{Engine, EngineError, IndexedFrame, Palette, Tick};
 
@@ -139,16 +139,19 @@ const PART_ORDER: &[(&str, u8)] = &[
 /// numbering is this task's and the parts it numbers are the phase's next five:
 /// without it the one thing this module exists to get right could only be
 /// tested after the last of them landed.
-type PartSource = fn(&str) -> Option<Box<dyn Part>>;
+pub(crate) type PartSource = fn(&str) -> Option<Box<dyn Part>>;
 
 /// Whether a run is still going.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SequenceStatus {
     Continuing,
-    /// The run has no part left: every part retired, or the next one in the
-    /// block is not ported. A run that stops here has stopped *short* — the
-    /// frames after it belong to a part the port does not have, and a numbering
-    /// nothing supports is worse than no numbering at all.
+    /// The run has **ended**: a part the port has could not be started, which is
+    /// a broken build or a missing asset and not a part the port has yet to
+    /// write. A run whose parts have all retired is not finished — it
+    /// [`holds`](Sequence::holding) the screen its last part left, because that
+    /// is what the original's loader shows between two EXEs, and a requested
+    /// reference index past the end of the port's parts is often a frame the
+    /// reference holds too (BEGLOGO's 900 is exactly that).
     Finished,
 }
 
@@ -165,6 +168,15 @@ pub enum SequenceStatus {
 /// keeps the engine's surface, view and palette across `start`. BEGLOGO's
 /// keyframe 900 is that fact in the reference (§3.5: the hold belongs to the
 /// loader and the next part's music wait, not to BEGLOGO's loop).
+///
+/// **The run holds at the end of its parts.** `BEG/BEG.C:87` ends `main()` when
+/// the fade has converged, so the run that ported BEGLOGO has nothing left to
+/// draw at the fade's last step — and the reference's index 900 is still the
+/// same picture, because the loader and the next part's music wait are showing
+/// it. A `Sequence` whose plan is exhausted (or whose next part is one the port
+/// has not written) therefore keeps ticking and keeps composing the surface it
+/// has, through an internal part that draws nothing, rather than stopping. See
+/// [`holding`](Sequence::holding).
 pub struct Sequence {
     engine: Engine,
     source: PartSource,
@@ -184,7 +196,35 @@ pub struct Sequence {
     /// Where the run's numbering started, when the evidence gives one.
     anchor: Option<u32>,
     clock: Tick,
+    /// Whether the run is past its parts and showing the screen they left.
+    holding: bool,
     finished: bool,
+}
+
+/// The part a run holds with: it draws nothing and touches nothing, so every
+/// tick composes the surface and the DAC exactly as the last real part left
+/// them. That is what the original's loader does between two EXEs — BEGLOGO
+/// exits and GLENZ has not started, while the VGA keeps showing what is in
+/// video memory — and it is why a reference index past the end of the port's
+/// parts (BEGLOGO's 900) is answerable at all.
+struct Holding {
+    /// The part whose screen is being held, for the error message a `Part`
+    /// name ends up in. The run's own `part()` still names that part.
+    of: &'static str,
+}
+
+impl Part for Holding {
+    fn name(&self) -> &'static str {
+        self.of
+    }
+
+    fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
+        Ok(())
+    }
+
+    fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus {
+        PartStatus::Continuing
+    }
 }
 
 impl Sequence {
@@ -203,8 +243,10 @@ impl Sequence {
         Sequence::with_source(surface_width, surface_height, view, plan, parts::new_part)
     }
 
-    /// [`Sequence::new`] with the parts coming from somewhere else.
-    fn with_source(
+    /// [`Sequence::new`] with the parts coming from somewhere else. Crate-wide
+    /// rather than private so `headless`'s own tests can drive a run of stub
+    /// parts and see what a dump does with it.
+    pub(crate) fn with_source(
         surface_width: usize,
         surface_height: usize,
         view: View,
@@ -213,7 +255,8 @@ impl Sequence {
     ) -> Result<Sequence, ShellError> {
         // A run of nothing has no part to name and no frame to draw; the
         // binary never builds one, because every block has at least one part
-        // and every `--part` names one.
+        // and every `--part` names one. The empty name is what says so — see
+        // `ShellError`'s `Display`.
         let Some(&first) = plan.first() else {
             return Err(ShellError::UnknownPart { name: String::new() });
         };
@@ -232,6 +275,7 @@ impl Sequence {
             index: anchor.unwrap_or(0),
             anchor,
             clock: Tick::new(),
+            holding: false,
             finished: false,
         };
         // The DAC the machine already had, installed before the first part
@@ -241,30 +285,15 @@ impl Sequence {
         Ok(run)
     }
 
-    /// One logic tick. Returns `Finished` when the run is over.
+    /// One logic tick. Returns `Finished` only when the run has ended — see
+    /// [`SequenceStatus::Finished`], which is not where a run with no parts
+    /// left goes.
     pub fn tick(&mut self) -> SequenceStatus {
         if self.finished {
             return SequenceStatus::Finished;
         }
-        if self.live.is_none() {
-            // The next part, or the end: one the port cannot build stops the
-            // run where it stands rather than being skipped over.
-            let Some(&name) = self.plan.get(self.next) else {
-                self.finished = true;
-                return SequenceStatus::Finished;
-            };
-            self.next += 1;
-            if let Err(error) = self.start(name) {
-                // A part the port *has* but cannot start is a different thing
-                // from one it has not reached, and `tick` has no channel to
-                // report either on — so the loud one says so, and a run that
-                // ends here does not look like one that ended by design.
-                if matches!(error, ShellError::Engine(_)) {
-                    eprintln!("secondreality: {error}; the run ends here");
-                }
-                self.finished = true;
-                return SequenceStatus::Finished;
-            }
+        if self.live.is_none() && !self.take_next() {
+            return SequenceStatus::Finished;
         }
         let part = self.live.as_mut().expect("a part is live");
         let status = self.engine.tick(&mut **part, &mut self.frame);
@@ -276,6 +305,48 @@ impl Sequence {
             self.live = None;
         }
         SequenceStatus::Continuing
+    }
+
+    /// Put a part in `live` for this tick: the next one in the plan, or the
+    /// [`hold`](Sequence::holding) once there is none the port can run.
+    /// Returns false only when the run has ended.
+    fn take_next(&mut self) -> bool {
+        if self.holding {
+            return true;
+        }
+        let Some(&name) = self.plan.get(self.next) else {
+            return self.hold();
+        };
+        self.next += 1;
+        match self.start(name) {
+            Ok(()) => true,
+            // A part the port *has* but cannot start is a different thing from
+            // one it has not reached, and `tick` has no channel to report
+            // either on — so the loud one says so, and a run that ends here
+            // does not look like one that is holding.
+            Err(ShellError::Engine(error)) => {
+                eprintln!("secondreality: {error}; the run ends here");
+                self.finished = true;
+                false
+            }
+            // The port has not written this part: the run holds where it
+            // stands rather than skipping over it, and its frames keep the
+            // numbering the block gave them.
+            Err(_) => self.hold(),
+        }
+    }
+
+    /// Start holding the screen the run's last part left.
+    fn hold(&mut self) -> bool {
+        let mut part = Box::new(Holding { of: self.current });
+        if let Err(error) = self.engine.start(&mut *part) {
+            eprintln!("secondreality: {error}; the run ends here");
+            self.finished = true;
+            return false;
+        }
+        self.live = Some(part);
+        self.holding = true;
+        true
     }
 
     /// Feed wall-clock time: tick once per due frame, dropping the stale ones.
@@ -343,7 +414,8 @@ impl Sequence {
         self.anchor
     }
 
-    /// Whether the run is over.
+    /// Whether the run has ended: a part the port has could not be started.
+    /// False while the run holds.
     pub fn finished(&self) -> bool {
         self.finished
     }
@@ -439,6 +511,13 @@ pub enum ShellError {
 impl fmt::Display for ShellError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // An empty name is the empty plan: `Sequence::new` builds a
+            // `Sequence` around a run's first part, so a plan with no parts has
+            // no name to report and says what is wrong instead of quoting
+            // nothing at the caller.
+            ShellError::UnknownPart { name } if name.is_empty() => {
+                write!(f, "a run needs at least one part")
+            }
             ShellError::UnknownPart { name } => write!(f, "unknown part {name:?}"),
             ShellError::NotPorted { name } => write!(f, "{name} is not ported yet"),
             ShellError::Engine(e) => write!(f, "{e}"),
@@ -503,7 +582,6 @@ pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::part::{PartCtx, PartError};
 
     #[test]
     fn a_block_entry_anchor_is_the_boots_first_graphics_frame() {
@@ -704,7 +782,7 @@ mod tests {
     #[test]
     fn a_block_run_stops_at_the_first_part_the_port_cannot_run() {
         // `SECOND 2` runs BEGLOGO then GLENZ; GLENZ is not ported, so the run
-        // ends after BEGLOGO rather than silently skipping to TUNNELI and
+        // stops at BEGLOGO rather than silently skipping to TUNNELI and
         // producing frames in a numbering nothing supports.
         let mut run = for_part("beglogo").unwrap();
         run_out(&mut run, 8);
@@ -714,8 +792,27 @@ mod tests {
         // source cannot build rather than one the helper left out.
         let mut run = sequence_of(vec!["a", "glenz"]).unwrap();
         run_out(&mut run, 8);
-        assert!(run.finished(), "the run ends at the part it cannot run");
         assert_eq!(run.part(), "a", "the unported part must not be skipped to");
+        assert!(!run.finished(), "the port ran out of parts; the run has not ended");
+        assert_eq!(run.index(), 8, "and it holds rather than stopping: the index keeps counting");
+    }
+
+    #[test]
+    fn a_run_past_its_last_part_holds_the_screen_that_part_left() {
+        // `BEG/BEG.C:87` ends BEGLOGO's `main()` when the fade has converged,
+        // and the reference's 900 is the same picture: the loader and the next
+        // part's music wait are showing it. So one part and a long tick budget
+        // is a run, not a run that has gone nowhere.
+        let mut run = for_part("a").unwrap();
+        let ticks = run_out(&mut run, 8);
+        assert_eq!(ticks, 8, "the run keeps ticking after a has retired");
+        assert!(!run.finished());
+        assert_eq!(run.part(), "a", "the held frames are a's screen, and say so");
+        assert_eq!(run.index(), 8, "and the index keeps counting");
+        assert!(
+            run.frame().pixels.iter().all(|pixel| *pixel == 7),
+            "the hold drew over the screen it was holding"
+        );
     }
 
     #[test]
@@ -724,23 +821,59 @@ mod tests {
         // own count would put the second part's frames back at zero, and every
         // mid-block keyframe in `reference/` is behind one.
         let mut run = sequence_of(vec!["a", "b"]).unwrap();
-        run_out(&mut run, 8);
-        assert!(run.finished(), "two stubs, four ticks at most");
+        run_out(&mut run, 5);
         assert_eq!(run.part(), "b");
-        assert_eq!(run.index(), 3, "two frames from a and one from b, one index each");
+        assert_eq!(run.index(), 5, "two frames from a, one from b, two held");
     }
 
     #[test]
-    fn a_finished_run_keeps_reporting_itself_finished() {
-        let mut run = for_part("a").unwrap();
+    fn a_run_that_ended_keeps_reporting_itself_finished() {
+        let mut run = failing_run();
         run_out(&mut run, 8);
+        assert!(run.finished());
         assert_eq!(run.tick(), SequenceStatus::Finished);
         assert_eq!(run.tick(), SequenceStatus::Finished);
+    }
+
+    #[test]
+    fn a_part_that_asks_to_quit_hands_the_screen_to_the_next() {
+        // `dis_exit()` ends the part's own loop; the shell's next act is the
+        // next part, which is what ESC in a window will do.
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(8, 8),
+            vec!["quits", "b"],
+            |name| match name {
+                "quits" => Some(Box::new(Quits)),
+                other => stub_source(other),
+            },
+        )
+        .unwrap();
+        run_out(&mut run, 8);
+        assert_eq!(run.part(), "b", "the quitter's request moved the run on");
+    }
+
+    struct Quits;
+
+    impl Part for Quits {
+        fn name(&self) -> &'static str { "quits" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            ctx.request_exit();
+            PartStatus::Continuing
+        }
     }
 
     #[test]
     fn a_run_of_no_parts_is_refused_rather_than_ticked() {
-        assert!(sequence_of(Vec::new()).is_err());
+        let error = match sequence_of(Vec::new()) {
+            Err(error) => error,
+            Ok(_) => panic!("a run with nothing in it has no part to name"),
+        };
+        // The message is what a caller has to act on, and `unknown part ""` is
+        // not.
+        assert_eq!(error.to_string(), "a run needs at least one part");
     }
 
     #[test]
@@ -770,9 +903,10 @@ mod tests {
         assert!(matches!(err, ShellError::Engine(_)), "{err:?}");
     }
 
-    #[test]
-    fn a_part_that_fails_to_start_mid_run_ends_it_rather_than_being_skipped() {
-        let mut run = Sequence::with_source(
+    /// A run of one stub and then a part the port has that cannot start: the
+    /// one way a run *ends* rather than holding.
+    fn failing_run() -> Sequence {
+        Sequence::with_source(
             TEST_SURFACE,
             TEST_SURFACE,
             View::new(8, 8),
@@ -783,9 +917,14 @@ mod tests {
                 _ => None,
             },
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn a_part_that_fails_to_start_mid_run_ends_it_rather_than_being_skipped() {
+        let mut run = failing_run();
         assert_eq!(run_out(&mut run, 8), 3, "a's two frames, then the failing start");
-        assert!(run.finished());
+        assert!(run.finished(), "a part the port has that cannot start ends the run");
         assert_eq!(run.part(), "a", "the run ends where the part failed");
     }
 

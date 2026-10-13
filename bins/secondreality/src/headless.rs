@@ -72,8 +72,10 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 
 /// `--frames N`: step exactly N times, dumping the frame of every tick.
 ///
-/// A run that ends — the last part retired, or the next one is not ported —
-/// stops the dump early: a finished sequence produces no further frames.
+/// N ticks, whether or not the run's parts last that long: a run past its last
+/// part holds the screen that part left, so its later frames are that screen
+/// and not nothing. A run that *ends* stops the dump early, because a finished
+/// sequence produces no further frames.
 fn by_tick(
     run: &mut Sequence,
     dir: &Path,
@@ -97,6 +99,15 @@ fn by_tick(
 /// part whose keyframes are four numbers spread over 900 frames that is 900
 /// frames of 320×400 output to answer four, and every one of them has to be
 /// written before the first comparison can be made.
+///
+/// **Every requested index is produced, or the run is a failure.** A run that
+/// has retired its last part keeps ticking and holds the screen that part left
+/// (see [`Sequence`]), so the usual reason an index is still ahead — the part
+/// ended first, as BEGLOGO ends at its fade and the reference's 900 is the hold
+/// after it — is not a hole. A requested index the run cannot reach is one
+/// where the run *ended*, which is a part the port has that could not be
+/// started: that is a failure with an exit code, because a missing keyframe in
+/// a dump reads as a keyframe that matched.
 fn by_index(
     run: &mut Sequence,
     dir: &Path,
@@ -115,7 +126,11 @@ fn by_index(
         )
         .into());
     }
-    let last = wanted.iter().copied().max().expect("a parsed list is never empty");
+    // A hand-built `Cli` can carry an empty list, and a dump of nothing must say
+    // so rather than write a manifest with no frames in it.
+    let Some(last) = wanted.iter().copied().max() else {
+        return Err("--dump-frames was given no indices to dump".into());
+    };
 
     let mut frames = Vec::new();
     loop {
@@ -131,12 +146,19 @@ fn by_index(
         }
     }
 
-    // A keyframe the run ended before reaching is a hole in the dump, and a
-    // hole nobody mentioned reads as a keyframe that matched.
-    for missing in wanted.iter().filter(|index| !frames.iter().any(|f| f.index == **index)) {
-        eprintln!(
-            "secondreality: the run ended before frame {missing}; nothing was dumped for it"
-        );
+    let missing: Vec<u32> = wanted
+        .iter()
+        .copied()
+        .filter(|index| !frames.iter().any(|frame| frame.index == *index))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "the run ended at frame {} before reaching {}; nothing was dumped for \
+             {missing:?}",
+            run.index() - 1,
+            missing[0],
+        )
+        .into());
     }
     Ok(frames)
 }
@@ -299,6 +321,10 @@ struct Manifest<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shell::Sequence;
+    use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
+    use sr_engine::view::View;
+    use std::path::PathBuf;
 
     /// The integration test in `tests/shell.rs` can only run the test card,
     /// which is unanchored; the other half of the mapping is this one.
@@ -306,5 +332,90 @@ mod tests {
     fn the_manifest_word_follows_the_runs_own_numbering() {
         assert_eq!(index_origin(true), "boot");
         assert_eq!(index_origin(false), "part");
+    }
+
+    /// Fills the surface with 7 for `frames` frames and then retires.
+    struct Short(u32);
+
+    impl Part for Short {
+        fn name(&self) -> &'static str { "short" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            ctx.surface.clear(7);
+            if ctx.frame >= self.0 { PartStatus::Finished } else { PartStatus::Continuing }
+        }
+    }
+
+    /// A part the port has that cannot start — the one way a run *ends*.
+    struct Fails;
+
+    impl Part for Fails {
+        fn name(&self) -> &'static str { "fails" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
+            Err(PartError { part: "fails", message: "no".to_string() })
+        }
+        fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus { PartStatus::Continuing }
+    }
+
+    /// A run of one short stub, or of a stub and then a part that cannot start.
+    fn run_of(failing: bool) -> Sequence {
+        let plan = if failing { vec!["short", "fails"] } else { vec!["short"] };
+        Sequence::with_source(8, 8, View::new(8, 8), plan, |name| match name {
+            "short" => Some(Box::new(Short(1))),
+            "fails" => Some(Box::new(Fails)),
+            _ => None,
+        })
+        .unwrap()
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sr-headless-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_index_past_the_end_of_the_runs_parts_is_dumped_with_the_screen_held() {
+        // BEGLOGO's 900 in miniature: the part retires after two frames and the
+        // run has nothing left to draw, but the index is still answered — with
+        // the picture the part left, because that is what the loader shows.
+        let dir = scratch("hold");
+        let mut run = run_of(false);
+        let frames = by_index(&mut run, &dir, &[0, 1, 5]).unwrap();
+        assert_eq!(frames.len(), 3, "every requested index was dumped");
+        assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [0, 1, 5]);
+        assert!(!run.finished(), "and by holding, not by ending the run");
+        assert_eq!(run.part(), "short", "the held frames are the last part's own");
+
+        let held = std::fs::read(dir.join("short_000005.rgb")).unwrap();
+        let last = std::fs::read(dir.join("short_000001.rgb")).unwrap();
+        assert_eq!(held, last, "the hold rendered a different screen");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_index_a_run_that_ended_cannot_reach_is_a_failure() {
+        // The run ends because a part it *has* cannot start, and there is no
+        // hold after that: a dump missing frame 5 has to say so loudly, because
+        // a hole in a dump reads as a keyframe that matched.
+        let dir = scratch("ended");
+        let mut run = run_of(true);
+        let error = by_index(&mut run, &dir, &[0, 5]).unwrap_err().to_string();
+        assert!(error.contains("before reaching 5"), "{error}");
+        assert!(run.finished(), "the run ended, so there is no hold to answer from");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_list_of_indices_is_refused_rather_than_dumped() {
+        let dir = scratch("empty");
+        let mut run = run_of(false);
+        let error = by_index(&mut run, &dir, &[]).unwrap_err().to_string();
+        assert!(error.contains("no indices"), "{error}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
