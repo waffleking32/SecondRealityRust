@@ -91,16 +91,20 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let mut events = sdl.event_pump()?;
 
     let mut sampled = Instant::now();
+    let mut escape = EscapeKey::default();
     loop {
         let keys = keys_of(events.poll_iter());
         if keys.close {
             break;
         }
-        if keys.exit && !run.request_exit() && run.holding() {
-            // The exit flag has nothing to ask: the run's parts are over and
-            // the screen the last one left is being held. The original's shell
-            // is at `@@partsdone` there (`MAIN/U2.ASM:935`) and returns to DOS,
-            // which is this window closing.
+        if keys.exit {
+            escape.press();
+        }
+        if escape.apply(&mut run) {
+            // The exit flag has nothing left to act on: the run's parts are
+            // over and the screen the last one left is being held. The
+            // original's shell is at `@@partsdone` there (`MAIN/U2.ASM:935`) and
+            // returns to DOS, which is this window closing.
             break;
         }
         if keys.skip {
@@ -159,9 +163,10 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Keys {
     /// ESC: the exit flag (`DIS/DISINT.ASM:151-153`) — ask the running part to
-    /// quit. The part returns, the shell runs the next part, and the run is not
-    /// over: that is what `exit_2` (`:186-190`) returning 1 to the part's own
-    /// loop amounts to.
+    /// quit, so that the run goes on to the next part. In the original the
+    /// part's own loop returns (`exit_2` `:186-190`); in the port the shell
+    /// retires it at the end of that tick, because no part polls the flag yet
+    /// (D21).
     exit: bool,
     /// Ctrl: skip the running part (`MAIN/U2.ASM:205-207` — `partexecute`
     /// returns before `execute` when the key is down).
@@ -193,6 +198,54 @@ fn keys_of(events: impl IntoIterator<Item = Event>) -> Keys {
         }
     }
     keys
+}
+
+/// ESC, and the press the run may not be able to act on yet.
+///
+/// **A press between two parts must not be lost.** One iteration after a part
+/// retires there is no running part to ask and the run is not holding yet, so a
+/// press can land where nothing can take it — and that is exactly where the
+/// second press of "get me out" lands when the one before it ended the last
+/// part of a block. The original does not lose it either, and for a different
+/// reason: the key waits in the BIOS buffer and the *next* part's `checkkeys`
+/// consumes it (`DIS/DISINT.ASM:119-121`, `mov ah,1 / int 16h` to peek at what
+/// is waiting, `:122-123` to take it).
+#[derive(Debug, Default, Clone, Copy)]
+struct EscapeKey {
+    /// A press that has not been applied to a part yet.
+    waiting: bool,
+}
+
+impl EscapeKey {
+    /// Note a press. Idempotent: SDL reports auto-repeat as more presses, and
+    /// the original's buffered keystroke is one flag either way.
+    fn press(&mut self) {
+        self.waiting = true;
+    }
+
+    /// Apply a waiting press to `run`, and say whether the window should close.
+    ///
+    /// The press is asked of the running part if there is one; otherwise it
+    /// keeps waiting, because the run may be about to start the next part. It
+    /// is spent when it reaches a part and kept when it does not — so it is
+    /// never simply dropped, which is what a keystroke is: something the user
+    /// did, and did deliberately.
+    ///
+    /// With nothing left to play — the run is holding the screen its parts left
+    /// (`@@partsdone`, `MAIN/U2.ASM:935`) — the press is the way out of the
+    /// window. The other state with nothing to play, a run that has *ended*, is
+    /// not reached here: the loop breaks in the iteration the run ends in,
+    /// before the next press can arrive.
+    fn apply(&mut self, run: &mut Sequence) -> bool {
+        if !self.waiting {
+            return false;
+        }
+        if run.request_exit() {
+            self.waiting = false;
+            return false;
+        }
+        run.holding()
+    }
 }
 
 /// The window's status line: the part whose picture is up, where the run is in
@@ -415,6 +468,53 @@ mod tests {
         run.tick();
         assert_eq!(run.part(), "endscrl", "Ctrl skips the part it was pressed in");
         assert_eq!(run.index(), 404 + 4, "and the run's numbering never restarts");
+    }
+
+    #[test]
+    fn an_escape_between_two_parts_is_kept_and_then_closes_the_window() {
+        // The seam after the last part of a block: `endlogo` retires on its
+        // first tick, so the iteration that follows has no running part and no
+        // hold yet — `Sequence::request_exit` has nothing to ask. That press is
+        // "get me out", and a window that consumed it would need a third press
+        // to close. It waits instead, and acts as soon as there is nothing left
+        // to play.
+        let mut run = run_of(vec!["endlogo", "glenz"]);
+        let mut escape = EscapeKey::default();
+
+        run.tick();
+        assert!(!run.holding(), "the part retired this tick; the hold is next");
+        escape.press();
+        assert!(!escape.apply(&mut run), "nothing to ask, and somewhere to go: the press waits");
+
+        run.tick();
+        assert!(run.holding(), "the next part is one the port has not written");
+        assert!(escape.apply(&mut run), "and now the press is the way out");
+    }
+
+    #[test]
+    fn an_escape_between_two_parts_is_asked_of_the_next_one() {
+        // The other side of the same seam: the run *does* have a part to play,
+        // so the press is spent on it — the original's buffered keystroke, which
+        // the next part's `checkkeys` consumes (`DIS/DISINT.ASM:119-123`).
+        let mut run = run_of(vec!["endlogo", "cred"]);
+        let mut escape = EscapeKey::default();
+
+        run.tick();
+        escape.press();
+        assert!(!escape.apply(&mut run), "there is no part to ask yet");
+        run.tick();
+        assert_eq!(run.part(), "cred");
+        assert!(!escape.apply(&mut run), "the next part is asked, and the window stays open");
+        assert!(!escape.waiting, "the press has been spent");
+
+        run.tick();
+        assert_eq!(run.part(), "cred", "and that part is on its way out");
+        assert!(!escape.apply(&mut run), "a spent press is not a second one");
+
+        escape.press();
+        run.tick();
+        assert!(run.holding(), "the plan ran out with cred");
+        assert!(escape.apply(&mut run), "and a fresh press is the way out");
     }
 
     #[test]

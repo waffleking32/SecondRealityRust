@@ -23,7 +23,10 @@ const USAGE: &str = "\
 usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
-                     [--run-seconds <S>]";
+                     [--run-seconds <S>]
+keys:  in a window, ESC ends the part that is playing — and closes the window
+       once the run has nothing left to play; Ctrl skips the part that is
+       playing. No other key does anything, and nothing waits on a key.";
 
 fn main() -> ExitCode {
     let cli = match cli::Cli::parse(std::env::args().skip(1)) {

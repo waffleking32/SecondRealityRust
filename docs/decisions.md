@@ -1401,6 +1401,24 @@ it already claimed to be: a request made from outside, or in an earlier band, is
 later context until the next `start` clears it. `Engine::palette_mut` was Task 1's one engine
 addition and this is Task 10's.
 
+**Who acts on the flag is the port's one departure here, and it is worth stating.** In the original
+the *part* returns — `exit_2` is called by the part's own loop and `while(!dis_exit())` is how
+ENDSCRL ends. In the port **no part polls `ctx.exit_requested`**: the engine carries it and
+`Sequence::tick` retires the part at the end of the tick it was set in. The two agree on everything
+the phase can observe (the part stops, the screen holds what it left, the next part starts at the
+next index), and they differ the moment a part writes its own `while(!dis_exit())` loop: such a part
+would read the flag and return by itself, and it would be the first place the difference could show.
+The engine-level claim is tested (`a_request_from_outside_the_part_reaches_the_parts_own_context`);
+the shell-level one is `the_exit_flag_asks_the_running_part_to_quit_and_the_run_goes_on`.
+
+**An ESC press between two parts is kept, not dropped.** One iteration after a part retires there is
+no part to ask, and the port drains SDL's events once a tick, so a press that lands there would be
+lost — which is exactly where the second press of "get me out" lands when the first one ended a
+block's last part. The original does not lose it either: the key waits in the BIOS buffer and the
+next part's `checkkeys` consumes it (`DIS/DISINT.ASM:119-123`). `window::EscapeKey` is the port's
+buffer: the press waits until a part can be asked, and with nothing left to play it closes the
+window.
+
 **A block run was headless-only until the window drove a sequence.** Task 1's window still drove one
 `Runner`, so `--block` was refused there rather than silently running the default part instead. Task
 10 replaced that runner with the same `Sequence` a headless dump drives — one run, one counter, one

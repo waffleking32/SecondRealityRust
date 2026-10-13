@@ -62,26 +62,29 @@ cargo run --release --bin secondreality -- --block 2     # BEGLOGO, then it stop
 cargo run --release --bin secondreality -- --part beglogo
 ```
 
+**ESC** ends the part that is playing and the shell starts the next one — the original's exit flag
+(`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`), except that **no
+part the port has yet polls it**: the engine carries the flag and the *shell* retires the part at
+the end of the tick it was set in, so a part that reads `ctx.exit_requested` for itself would be the
+first to notice the difference. Once the run has nothing left to play, ESC closes the window, where
+the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
+(`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
+`ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
+a key.
+
+`--block 5` ends in ENDSCRL, whose own loop is `while(!dis_exit())` (`ENDSCRL/MAIN.C:45-49`) — the
+scroller runs until you exit, as it does in the demo, so leaving it is ESC twice: once to end the
+part, once to close the window (or the window's close button).
+
 A block plays the parts of that block the port has, in the demo's own order, and **stops at the
-first one it has not written** rather than skipping over it. `--block 5` ends with ENDSCRL, whose
-own loop is `while(!dis_exit())` (`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it
-does in the demo. The window's title bar is the run's status line: the part whose picture is up,
-that frame's index in the **reference's own numbering** (boot-relative emulator frames — the space
-everything under `reference/` is measured in), and the block it came from. A run that has stopped
-says why, and a run whose index is *not* the reference's — `--part tunneli` numbers its own frames
-from zero — says that instead.
+first one it has not written** rather than skipping over it. The window's title bar is the run's
+status line: the part whose picture is up, that frame's index in the **reference's own numbering**
+(boot-relative emulator frames — the space everything under `reference/` is measured in), and the
+block it came from. A run that has stopped says why, and a run whose index is *not* the
+reference's — `--part tunneli` numbers its own frames from zero — says that instead.
 
-Two keys, and they are the original's (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`):
-
-- **ESC** sets the exit flag the running part's own loop reads: that part ends and the run goes on
-  to the next. With the parts over it closes the window, where the original's shell returns to DOS
-  (`MAIN/U2.ASM:935`).
-- **Ctrl** skips the running part — dropped where it stands, the next one starting one index on.
-  The original's `ctrldown` is sticky and skips every later part as well; the port skips the part
-  the key interrupted.
-
-Nothing waits on a key: a part runs to its own end. `--headless` runs the same sequence on a
-machine with no display, and is what the comparisons below use.
+`--headless` runs the same sequence on a machine with no display, and is what the comparisons below
+use.
 
 ## Verification
 

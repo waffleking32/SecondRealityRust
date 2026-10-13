@@ -669,22 +669,34 @@ mod tests {
         // it to the part's loop, so what the part reads is *the part's* flag
         // and not a shell's private note. A part that never asks to quit
         // itself must still see the request.
+        //
+        // Two bands, and each one is asked: the claim is not only that the
+        // request arrives but that it is visible to every band of the tick it
+        // arrives in and to the ticks after it — band 0's context is built
+        // before band 1's, and under a per-call flag the second would read
+        // `false`.
+        #[derive(Default)]
         struct Reports {
             log: Log,
+            quits_in_band_0: bool,
         }
 
         impl Part for Reports {
             fn name(&self) -> &'static str { "reports" }
             fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
             fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-                self.log.0.borrow_mut().push(ctx.exit_requested.to_string());
+                self.log.0.borrow_mut().push(format!("{}:{}", ctx.band, ctx.exit_requested));
+                if self.quits_in_band_0 && ctx.band == 0 {
+                    ctx.request_exit();
+                }
                 PartStatus::Continuing
             }
+            fn band_count(&self) -> u16 { 2 }
         }
-        let mut part = Reports { log: Log::default() };
+        let mut part = Reports::default();
         let (mut e, mut f) = engine_with(&mut part);
         e.tick(&mut part, &mut f);
-        assert_eq!(part.log.0.borrow().as_slice(), ["false"], "nothing has asked yet");
+        assert_eq!(part.log.0.borrow().as_slice(), ["0:false", "1:false"], "nothing has asked yet");
 
         e.request_exit();
         assert!(e.exit_requested());
@@ -692,17 +704,44 @@ mod tests {
         e.tick(&mut part, &mut f);
         assert_eq!(
             part.log.0.borrow().as_slice(),
-            ["false", "true", "true"],
-            "the flag reaches the part itself, and stays set until the next start"
+            ["0:false", "1:false", "0:true", "1:true", "0:true", "1:true"],
+            "the flag reaches the part itself, every band of the tick, and stays set"
         );
 
         e.start(&mut part).unwrap();
         e.tick(&mut part, &mut f);
         assert_eq!(
-            part.log.0.borrow().as_slice(),
-            ["false", "true", "true", "false"],
+            part.log.0.borrow().as_slice()[6..],
+            ["0:false", "1:false"],
             "and the next part starts with a clean slate, as it is handed it"
         );
         assert!(!e.exit_requested());
+    }
+
+    #[test]
+    fn a_request_from_one_band_is_visible_to_the_next() {
+        // The same stickiness from the other end: a part that asks in band 0
+        // must find its own request still set in band 1's context — the
+        // contexts are per call, the flag is not.
+        struct QuitsInBandZero {
+            log: Log,
+        }
+
+        impl Part for QuitsInBandZero {
+            fn name(&self) -> &'static str { "quits-in-band-0" }
+            fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+            fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+                self.log.0.borrow_mut().push(ctx.exit_requested.to_string());
+                if ctx.band == 0 {
+                    ctx.request_exit();
+                }
+                PartStatus::Continuing
+            }
+            fn band_count(&self) -> u16 { 2 }
+        }
+        let mut part = QuitsInBandZero { log: Log::default() };
+        let (mut e, mut f) = engine_with(&mut part);
+        e.tick(&mut part, &mut f);
+        assert_eq!(part.log.0.borrow().as_slice(), ["false", "true"]);
     }
 }
