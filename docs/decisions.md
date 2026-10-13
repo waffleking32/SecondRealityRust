@@ -1508,3 +1508,96 @@ which is what changed it in the first place.
 `PROGRESS.md`'s Phase 2 section: the frames hashed out of band before and after the backfill with
 identical lists, the second run changing no byte, and all 105 digests checked against the pre-change
 list rather than against the tool's own work.
+
+## D24 — The vendored tree and the distributed release are not the same build: the rule, what the phase found, and the procedure for the next one (2026-10-13)
+
+D12 settled *which* artifact decides (the distributed release) and recorded one data point. Phase 2
+produced two more, and they are different kinds of difference, so this entry states the **procedure**
+a later phase follows when a reference frame disagrees with a faithful port. Phases 4–8 will meet it:
+every one of them diffs a part whose shipped build may not be the tree's.
+
+**The three instances, each measured in the part's own note and in `APPROXIMATIONS.md`.**
+
+1. **TUNNELI — one expression.** `TUNNELI/TUN10.PAS:122` writes a second grey ramp of
+   `(64 - x) * 3 div 4` and the tree's own `TUN10.EXE` compiles exactly that (`idiv 4`, image offsets
+   `0x1d0`-`0x1e3`), while every reference frame is drawn with `(64 - x) * 3 div 5`: exact at all
+   **42** of the ramp's entries the four frames exercise, and **unique** over 81 candidate
+   `(mul, div)` pairs (70 distinct ramps) — 1,108 px from the reference's colour field at 3/5 against
+   at least 4,200 at every other, the tree's own 3/4 among them at 6,376 (`tunneli.md` §5, A6).
+   *Decided:* the port writes the release's ramp, with the derivation as a permanent test.
+2. **CRED — data.** The shipped `MAIN/DATA/CRED.EXE` draws captions no source file in the tree
+   contains: `grep -rnia sketch upstream/SecondReality` returns exactly **one** hit and it is in the
+   shipped data, the packed `CRED.EXE` itself (a `--include` search of the sources returns none in
+   any letter case), and its screen 6's picture band has 8 of its 14 colours — 3,524 of 16,000 px —
+   in **none** of that screen's 256 palette entries. Nine of the shipped build's 21 screens are off
+   the tree's data at one hold sample each (`cred.md` §7, A10). *Decided:* the port keeps
+   `CREDITS/MAIN.C`'s own 21 screens and captions.
+3. **ENDSCRL — a build's behaviour and its art.** The shipped scroller's text pitch is **25 rows a
+   line** where `MAIN.C:6` says `FONAY 30`; its `[NN` control lines — **163** in the shipped text —
+   advance the ring by the number in the marker and draw nothing, where the tree's renderer draws the
+   two digits; its `fonaorder` names **seven** characters the tree's 74 do not; its raster differs
+   from `FONA.UH` in 53 px of the header band's 11,520; and its text has **no carriage returns**
+   (`endscrl.md` §6.2, A11). *Decided:* the port stays the tree's, as for CRED.
+
+**The procedure.** Three steps, in this order, before anything is changed:
+
+1. **Measure what the release does**, from the reference's own frames — a bit-exact match over the
+   whole candidate range where the difference is arithmetic (TUNNELI), a read-off of the picture or
+   the geometry where it is data (CRED, ENDSCRL), or a rule that *predicts* frames it was not fitted
+   to (ENDSCRL's control lines predict every band of frames 10000 and 14000 from the tree's own text
+   file, with no free parameter but the start). A fit to the test is not a measurement — Review Focus
+   5 of this phase's plan, and the 441/450/1145 brackets that a bit-exact scan rejected.
+2. **Check whether the tree can produce it at all.** A string no source file can emit, a pitch the
+   loop bound forbids, a ramp the tree's own binary compiles as a different instruction: if the tree
+   *cannot* produce the release's frame, no port of the tree will ever match it and the difference is
+   the release's data, not a bug to chase. If the tree *can* produce it, the port has a bug and the
+   divergence is not the explanation.
+3. **Decide and register.** A single expression or constant the release changed → port the release's
+   value, with the derivation as a permanent test (TUNNELI). Data, art or behaviour the tree does not
+   hold → keep the tree's translation — the alternative is inventing bytes no file in the tree
+   supports — and register the difference as an `APPROXIMATIONS.md` entry with its per-frame numbers,
+   the evidence for the attribution, and **a lead**: name the packed EXE and the pack table
+   (`MAIN/PACKFINA.INC`) where the release's own bytes are, so a later phase can turn "the shipped one
+   differs" into "here is what it says". A divergence with no entry is the failure this procedure
+   exists to prevent.
+
+**What is not established, and must not be implied.** The direction. Nothing in the tree dates the
+shipped build; "later revision" is an inference from an extra caption line reading as growth, and the
+honest word is **different** (the CRED review's own correction). And which of the two copies of a part
+EXE inside `SECOND.EXE` put a frame on screen is not resolvable from here — TUNNELI's `MAIN/DATA/
+TUNNELI.EXE` is PKLITE-packed — so the measurement is of the *frames*, never of a file the port can
+read.
+
+*Cost if wrong:* two phases resolving the same divergence in opposite directions, or a phase "fixing"
+a faithful port towards a build it cannot reconstruct — and losing, in the process, the tree's own
+provenance for the algorithm.
+
+## D25 — Every number in a fidelity note is reproducible, and an unobservable claim is stated as one (2026-10-13)
+
+Four review rounds across Phase 2's Tasks 4 and 5 were spent not on code but on **records claiming
+more than their measurements support**, and the shapes recurred in Tasks 6–10. They are worth naming
+because the next phase will write the same kind of note:
+
+| shape | the instance it was found in |
+|---|---|
+| an **absolute** over a space nobody measured | "never a wrong colour", against 17 pixels the same round recorded |
+| a **count that does not reproduce** | "21 candidate ramps" where the test evaluates 81 pairs / 70 distinct ramps |
+| a **proof for something unobservable** | the reference's frames "proving" an off-screen out-of-bounds read (the reviewer's model counted 283,689 such reads in 813 of 901 ticks, all landing past the screen, invisible in both builds) |
+| an **unknown dressed as a known** | nine frames attributed to the loader, both candidate causes ruleable out of the evidence already in the tree |
+| a **number stated once, in prose** | the zeroing variant's 85/142/88 px beside the withdrawn 85/146/90 |
+
+**The rule, for every later phase.** Every number and every absolute in a fidelity note is either
+**reproducible by a command the note names** or **produced by a test in the same commit**.
+"Never", "every", "all" and "only" are claims about a whole space and need a measurement over that
+space, not over the samples at hand. Where the measurement cannot exist — an off-screen write, an
+artefact no screen shows, a divergence whose other side is packed and unreadable — **the note says
+so**, because that is the finding, and it is worth more than a proof-shaped sentence. A measured
+constant is derived by **exhaustive match over its whole range, required to be unique**, never by a
+fit to a sample (Phase 2's constants: 446, 451, 1147 and TUNNELI's 5, each unique; the mean-fits gave
+441, 450 and 1145). And a constant is **not re-anchored to make a diff pass**: ENDSCRL is reported 82
+frames early because that is where the chain puts it, and moving it would be a fit.
+
+**And the record's own arithmetic is part of the claim.** A phase close re-runs its evidence; a number
+in the record that no command at the committed state reproduces is a defect of the same class as a
+wrong constant. Where the re-run disagrees with what a note or a ledger says, `PROGRESS.md` says which
+was measured when, and the note is corrected in the same commit rather than left standing.

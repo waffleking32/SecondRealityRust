@@ -452,11 +452,17 @@ localised (`bins/secondreality/tests/cred.rs` asserts both regions' byte counts 
 
 At 3240 the picture difference is not a palette the tree could upload: **8 of the band's 14 colours
 — 3,524 of its 16,000 pixels — are in none of the screen's 256 palette entries**
-(`the_references_sixth_screen_is_not_the_trees_picture_at_all`). And the captions are strings the
-tree cannot draw: `grep -rn SKETCH upstream/SecondReality` returns **no hits in any letter case**,
-while §20.1's table — written from the shipped build's own sheet — reads screens 11 and 12's
+(`the_references_sixth_screen_is_not_the_trees_picture_at_all`). And the captions are strings no
+source file in the tree contains: `grep -rnia sketch upstream/SecondReality` returns exactly **one**
+hit, and it is in the shipped *data* — `MAIN/DATA/CRED.EXE` (line 958 of grep's own counting of a
+binary file, not a byte offset) — while a search restricted to the sources (`--include='*.C'
+--include='*.ASM' --include='*.H' --include='*.INC' --include='*.PAS'`) returns none in any letter
+case. §20.1's table — written from the shipped build's own sheet — reads screens 11 and 12's
 captions as "SKETCH - SKAVEN / GRAPHICS - PIXEL / …" and describes screen 6 as "a dotted vortex".
 A port of this tree cannot produce either sentence's screen.
+*(Corrected at the Phase 2 close-out: this entry said "`grep -rn SKETCH upstream/SecondReality`
+returns no hits in any letter case", which the `-a` run contradicts — the word is in the packed EXE,
+which is where the release's own data lives.)*
 
 **The divergence is not confined to those three screens, and that is measured too.** The record's
 own sweep of this part (`out/b5-s5-cred-map`, the source of §20.1's table) holds a *hold sample* for

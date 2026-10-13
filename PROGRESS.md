@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; ENDLOGO likewise (exit 0, 430/500/900/1180); TUNNELI measured at the reference's own alignment (0.28–0.68 %, A6); ENDSCRL ported, its reference measured as the shipped build (exit 1, A11) | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | **complete — untagged** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below; tag withheld for the whole-branch review | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -22,8 +22,28 @@ Phase status board. **Read this first if you are resuming work.**
 
 ## Where to pick up
 
-**Phase 0 is complete** (tag `phase-0`). The engine, the binary and the verification harness all
-work; no demo part has been ported yet.
+**Phase 2 is complete — its exit criteria are met and its evidence is recorded below — and the
+`phase-2` tag is deliberately withheld.** The work is on branch **`phase-2-shell`**, HEAD `0c78cd3`
+(not yet merged to `master`); its plan is `docs/plans/02-shell.md` and its ledger (the rulings and
+the per-task results, git-ignored scratch) is `.superpowers/sdd/02-shell/progress.md`. The tag is
+withheld because the final whole-branch review runs after this close-out and may require fixes: a tag
+that has to be moved is worse than a tag applied a few commits later (Phase 1's ruling, B6). When the
+review is clean, `git tag phase-2` goes on wherever the branch then ends.
+
+**Phase 3 (music) is next.** It is not started: no plan exists yet, and a phase's plan is written
+just in time (`CLAUDE.md`). What Phase 3 inherits from this one:
+
+- **Every music gate in the port is a measured frame, and Phase 3 replaces them.** The phase's one
+  gate is ENDLOGO's hold — `END.C:107-111`'s `dis_musplus() > -16` loop, replaced by its measured
+  567 ticks (`APPROXIMATIONS.md` **A7**, `docs/fidelity/endlogo.md` §5). Phase 3's cue is the music
+  player's position, sampled once a tick, with `:110`'s −16 threshold. No other ported part polls
+  music (BEGLOGO's build has no gate — `docs/fidelity/beglogo.md` §1).
+- **The reference material it needs is already measured**: `reference-indices.md` §1.7's music
+  counter (`0x105B0E`, 0.7424/frame) and D13's correction of spec §2.2's restart table, plus D20.
+- **`_np_zinfo` is still open** in the narrowed form D8 now has: the ported parts do not touch it,
+  and the parts that do are GRID, HARD and the vault (Phase 8).
+- **The divergence rule it will need** if a sync cue disagrees with a faithful port is **D24** (and
+  for any number it writes into a note, **D25**).
 
 **Phase 1 is complete** — tag `phase-1` at `a17b1ab` — **and `master` holds it.** Its exit criteria
 are met (the evidence is in the section below and in `docs/fidelity/reference-indices.md`), its plan
@@ -38,7 +58,8 @@ section below), because a tag that has to be moved is worse than a tag applied a
 `phase-1-assets`, no divergence), so this was a single fast-forward: `master` *is* `a17b1ab`, no
 merge commit exists, and `master`'s tree hash equals `phase-1^{tree}` (`f5e2151b`) — what is tagged
 and what is on `master` are the same bytes. The two branches are kept rather than deleted. **Phase 2
-starts from `master`.**
+started from `master`** (`5cf3e88`, which is `phase-1` plus the merge record and the Phase 2 plan)
+and lives on `phase-2-shell`; it is merged to `master` when its tag goes on.
 
 ### Phase 1's evidence (close-out, Task B6, 2026-10-12)
 
@@ -222,6 +243,283 @@ The reference oracle's input is `reference/original/` — the 1993 retail distri
 (`SECOND.EXE` + `REALITY.FC`), committed unmodified. See `docs/decisions.md` D12 and
 `reference/original/PROVENANCE.md`. Do not modify those files: every frame diff in the
 project is measured against those exact bytes.
+
+### Phase 2's evidence (close-out, Task 11, 2026-10-13)
+
+**Exit criteria (spec §10): BEGLOGO frame-diff-identical; TUNNELI, ENDSCRL, CREDITS and ENDLOGO
+play; a runnable binary sequences them.** All three are met. Every comparison below was **re-run at
+the committed state** (`0c78cd3`, branch `phase-2-shell`) in one pass, each dump into a fresh output
+directory, and the numbers are the ones the phase's notes recorded when they were first taken (the
+dumps here were `--release` binaries; the notes' were `cargo run --bin` — the two agree on every
+figure and, for BEGLOGO and ENDLOGO, on every digest).
+
+| part | exit | offsets | differing | attribution of the non-zero frames |
+|---|---|---|---|---|
+| BEGLOGO | **0** | all 0 (`{0: 4}`) | **0.0000 %** on all four (0/128,000 px) | — (and both planes are byte-identical, below) |
+| TUNNELI, at the reference's own indices | 1 | all 0 | 3.7812 / 5.6312 / 3.1422 / 4.9344 % | the port holds the black screen its tick 1,060 left: a `--part tunneli` run has no boot anchor, so those indices are not its own — the numbering's gap, not the port's |
+| TUNNELI, at `--align 3722` | 1 | net 0 on all four | 0.2797 / 0.5828 / 0.5016 / 0.6766 % (179/373/321/433 px) | **A6**, per keyframe: 3800 settled (7/9, re-capture byte-identical) so its 179 px are the port's or a sub-frame effect; 4200 exactly half; 4500/4600 no settled content |
+| ENDLOGO | **0** | all 0 (`{0: 4}`) | **0.0000 %** on all four | — (and both planes byte-identical, below) |
+| CRED | 1 | all 0 (`{0: 5}`) | 0.0000 / 11.2563 / 9.5125 / 0.0000 / 5.8453 % | **A10**: the shipped `CRED.EXE` is not the tree's data — captions the source cannot draw, a different picture, 9 of 21 screens |
+| ENDSCRL | 1 | all 0 (`{0: 4}`) | 2.8473 / 11.0676 / 9.9617 / 6.6828 % | **A11** (the shipped build's pitch, `[NN` control lines, font order, raster and CRs) **plus the chain's 82 frames** (below) |
+
+**BEGLOGO — the exit criterion — is exit 0, and on both planes.** Verbatim, at `0c78cd3`:
+
+```
+$ cargo run --release --bin secondreality -- --headless --part beglogo \
+      --dump-frames 430,470,560,900 --dump-dir out/t11-beglogo
+$ cargo xtask compare --reference reference/parts/beglogo --rendered out/t11-beglogo \
+      --out out/t11-beglogo-diff
+frame 430: 0.0000% differing (0/128000 px), max delta 0
+frame 470: 0.0000% differing (0/128000 px), max delta 0
+frame 560: 0.0000% differing (0/128000 px), max delta 0
+frame 900: 0.0000% differing (0/128000 px), max delta 0
+report: out/t11-beglogo-diff/report.json
+captures: 1 measured
+verdict: identical
+exit: 0
+```
+
+`mode: mixed`, every frame paired at offset 0 — 430 and 900 through the **indexed** path (the
+reference files an `.idx` for both) and 470/560 through RGB. **The tool's verdict is not the whole
+claim**: hashing the port's six dumped files against the reference's own six gives **identical
+digests**, `430.rgb 85789170…`, `430.idx 283babe8…`, `470.rgb d0abd8cc…`, `560.rgb 05a130da…`,
+`900.rgb cbdc67eb…`, `900.idx e10481c7…`, and every one equals the value
+`reference-indices.md` §3.1 records **by hand** from Phase 1 — so the port is exact on the frames the
+indexed path skips as well as the ones it takes, and a wrong palette could not hide behind agreeing
+indices.
+
+**TUNNELI cannot be diffed, and its two readings say what it is instead.** At the reference's own
+indices — a numbering this part does not have — `compare` exits 1:
+
+```
+frame 3800: 3.7812% differing (2420/64000 px), max delta 190
+frame 4200: 5.6312% differing (3604/64000 px), max delta 239
+frame 4500: 3.1422% differing (2011/64000 px), max delta 231
+frame 4600: 4.9344% differing (3158/64000 px), max delta 239
+verdict: different     exit: 1
+```
+
+Every differing pixel is ink on the *reference* side, because the port's run retired at tick 1,060
+and holds the black screen its fade left there. At the alignment the reference supplies — port ticks
+78/478/778/878 answering 3800/4200/4500/4600, one offset of **3,722** — the same command with
+`--align 3722` exits 1 with **0.2797 / 0.5828 / 0.5016 / 0.6766 %** (179/373/321/433 px of 64,000),
+max channel delta 12 at 3800 (the other three are ~230, where a port dot meets the reference's
+black). That residual is **A6**, and it is attributed per keyframe rather than averaged: 3800 is
+settled (7 of 9 sessions; a re-capture reproduced it byte-for-byte) so its 179 px are the port's or a
+sub-frame difference in it; 4200 is exactly half; 4500 and 4600 have no settled content and nothing
+can attribute them. What is *not* claimed: that the frames agree. They do not, and the note's §7 and
+A6 carry the numbers a later phase meets again.
+
+**ENDLOGO — exit 0 on all four keyframes, and byte-identical on every file the reference files (RGB
+at all four, an index plane at 430 and 900):**
+
+```
+frame 430: 0.0000% differing (0/128000 px), max delta 0
+frame 500: 0.0000% differing (0/128000 px), max delta 0
+frame 900: 0.0000% differing (0/128000 px), max delta 0
+frame 1180: 0.0000% differing (0/128000 px), max delta 0
+verdict: identical     exit: 0
+```
+
+Digests: `430.rgb 85789170…` — **the same bytes as BEGLOGO's 430**, the two parts reaching the same
+white by opposite routes (BEGLOGO writes entry 255 black; ENDLOGO leaves 255 unwritten) — plus
+`430.idx eec19bc6…`, `500.rgb fb8fbf2a…`, `900.rgb f2514b29…`, `900.idx c0e0e259…`,
+`1180.rgb 755f4747…`, all equal to the values Phase 1's §19 records.
+
+**CRED — exit 1, all five keyframes paired at offset 0, `mode: rgb`:**
+
+```
+$ cargo run --release --bin secondreality -- --block 5 --headless \
+      --dump-frames 1440,3240,5440,7640,8740 --dump-dir out/t11-cred
+$ cargo xtask compare --reference reference/parts/cred --rendered out/t11-cred --out out/t11-cred-diff
+frame 1440: 0.0000% differing (0/64000 px), max delta 0
+frame 3240: 11.2563% differing (7204/64000 px), max delta 255
+frame 5440: 9.5125% differing (6088/64000 px), max delta 255
+frame 7640: 0.0000% differing (0/64000 px), max delta 0
+frame 8740: 5.8453% differing (3741/64000 px), max delta 255
+verdict: different     exit: 1
+```
+
+Two of the five are exact — through the same tick map, palette repair and geometry as the three that
+are not, which is what makes the difference the **data**: the shipped `CRED.EXE` draws captions the
+tree's source does not contain (`SKETCH` appears in no source file) and at least one different
+picture (3240's band: 3,524 of its 16,000 px are in none of that screen's 256 palette entries), with
+**nine** of the 21 screens off the tree's data at one hold sample each — **A10**, whose lead is the
+packed `MAIN/DATA/CRED.EXE` itself. The run is `--block 5` because 1440 is only reachable if
+ENDLOGO's measured length is right; the chain is part of this test.
+
+**ENDSCRL — exit 1, all four at offset 0, `mode: rgb`, max delta 243:**
+
+```
+$ cargo run --release --bin secondreality -- --block 5 --headless \
+      --dump-frames 9100,10000,12000,14000 --dump-dir out/t11-endscrl
+$ cargo xtask compare --reference reference/parts/endscrl --rendered out/t11-endscrl \
+      --out out/t11-endscrl-diff
+frame 9100: 2.8473% differing (7289/256000 px), max delta 243
+frame 10000: 11.0676% differing (28333/256000 px), max delta 243
+frame 12000: 9.9617% differing (25502/256000 px), max delta 243
+frame 14000: 6.6828% differing (17108/256000 px), max delta 243
+verdict: different     exit: 1
+```
+
+Two residuals in one number, and they are separated: **the chain's 82 frames** (next section) and
+**A11** — the shipped build's text pitch of 25 rows a line where `MAIN.C:6` says `FONAY 30`, its
+`[NN` control lines (163 in the shipped text) that advance the ring and draw nothing, its
+`fonaorder` naming seven characters the tree's does not, its raster's 53 px of the header band, and
+its renderer's text having no carriage returns. **A single alignment cannot absorb them** — the
+pitch moves the content 5 rows per line apart and the control lines skip blocks the port renders — and
+the shifted run shows both directions: `--align 82` on a dump of the shifted indices improves 9100
+(2.8473 → **2.1758 %**, 5570 px) and worsens 10000 (11.0676 → **12.5437 %**, 32112 px), with 12000
+9.5895 % and 14000 7.1887 %. The port stays where the chain puts it.
+
+#### The chain's residual, measured (the plan's Step 2)
+
+The port's own boundaries, read from the manifest's `part` field one index at a time:
+
+```
+$ cargo run --release --bin secondreality -- --block 5 --headless \
+      --dump-frames 1205,…,1215,8830,…,8840 --dump-dir out/t11-chain
+1210 endlogo 320x400   the fadeout's last step
+1211 endlogo 320x400   the tick that reports Finished — the loader's hold
+1212 cred    320x200   CRED's tick 0
+8834 cred    320x200   screen 21's last tick
+8835 endscrl 320x200   ENDSCRL's tick 0: the screen CRED left
+8837 endscrl 640x400   its tick 2: the mode's own screen
+```
+
+- **ENDLOGO's end lands inside the reference's window.** Its last drawn frame is 1210 (its Finished
+  tick, 1211, draws nothing new) and `SECOND 5`'s geometry change to CRED is in **(1200, 1240]**
+  (`reference-indices.md` §20, where 1200 is ENDLOGO's 320×400 screen and 1240 is CRED's 320×200).
+  ✓
+- **CRED's end does not — it is 6 to 105 frames early, and that is the finding.** The port's last
+  CRED frame is **8834**; the record's own sweep refuses its index 8940 as `640x400` while 8840 is
+  still CRED's hold, so the reference's last CRED frame is in **[8840, 8939]** (`cred.md` §7,
+  `reference-indices.md` §20). The gap is the same order as CRED's own per-screen drift, and this is
+  measured, not asserted: the record's hold samples put the reference's screen at
+  `(8840 − 1440) / 20 = 370 ± 10` ticks against the port's **363** (the source's own loops —
+  `screen_ticks()` = 1 parked + 1 show + 102 open + 200 hold + 59 close), so the port leads 2–12
+  frames a screen and by screen 21 leads 40–240. The reference's scroller start, measured from the
+  rows its first text line is drawn on — the one thing both builds agree on — is **8917 ±1**, so the
+  port's 8835 is **82 frames (41 scrolled lines) early**, inside the bracket (`endscrl.md` §6.1).
+  **It is left where the chain puts it**: the two numbers that put it there are ENDLOGO's measured
+  hold and CRED's source-derived screen length, and re-anchoring ENDSCRL to make its own diff pass is
+  the fit Review Focus 5 forbids.
+
+So the chain is **consistent with every measurement the tree holds** for ENDLOGO, and for CRED it is
+early by an amount the tree's own measurements bracket and partially explain (a per-screen length the
+port derives from the source against a reference length measured only to ±10 ticks per screen). The
+one thing this cannot settle is which of the two is right: the port's 363 is the source's arithmetic,
+and the reference's 360–380 is a measurement with ±10 of slack, so the 82 could be CRED's build
+differing, the port's translation differing, or both — and nothing in the tree separates them today.
+
+#### The falsification list (the plan's Step 3)
+
+Every measured constant this phase introduced, with what a one-frame error would change and the
+strongest check that exists for it. "Independent" here means a measurement produced for another
+purpose (`reference-indices.md` §19.1's sweep, written a phase before ENDLOGO's constants were
+derived) or by a different instrument (the tree's own `TUN10.EXE`, disassembled) — not the evidence
+the constant was derived from.
+
+| constant | value | how it was derived | one frame out would… | independent check |
+|---|---|---|---|---|
+| the boot anchor `shell::FIRST_GRAPHICS_FRAME` (`boot_anchor` for `beglogo`/`endlogo`) | 404 | `reference-indices.md` §1.12: the demo's first graphics frame under D17's recipe, measured in five runs of five | shift every index of a `--block 2`/`--block 5` run by one: BEGLOGO's 470 would hold `c = 25` and 560 `c = 115`, ENDLOGO's 500 `c = 50`, so all eight keyframes stop matching bit-exactly | **yes** — the comparisons themselves: the port's frames are diffed at the reference's indices, so an anchor error is a red diff at the eight keyframes, not a silent shift |
+| BEGLOGO `FADE_FIRST_INDEX` | 446 | 470 = ramp step 24 and 560 = step 114, **each unique** over 0…128 by bit-exact match on all 320×400 px; 470 − 24 = 560 − 114 = 446 (`beglogo.md` §3) | the whole 129-step ramp sits one frame early or late: 470/560 stop matching (a whole palette step, on every pixel the step moves), the acceptance run is red on two of its four frames, and every unheld frame of the ramp (476–556) is one step out too | **no** — 430 pins nothing (it is one index, 15, and entry 15 is white in the picture's own palette, so *all* 129 `c` render it), 900 pins only the ramp's end (`c ∈ {126,127,128}` are one palette), and the second keyframe is the same kind of evidence 90 frames away. The mean-fit over §3.3 gives 441 and is wrong |
+| ENDLOGO `FADE_IN_FIRST_INDEX` | 451 | 500 = ramp step 49, **uniquely**; the ramp counts up, so step 0 is 451 (`endlogo.md` §3) | 500 stops matching (`c = 48/50`) and the fade sits a frame early/late through its length; the hold's first frame becomes 579 or 581 | **yes** — §19.1's sweep, recorded in Phase 1 for another purpose, names 460 and 540 separately with a colour count and mean (two decimals over 384,000 bytes); the derivation test reproduces both, and a ±1 shift moves both |
+| ENDLOGO `FADE_OUT_FIRST_INDEX` (and `HOLD_TICKS` = 567 = 1147 − 580, `PART_LAST_INDEX` = 1210) | 1147 | 1180 = ramp step 30, **uniquely**; the ramp counts down, so `c = 63` is displayed at 1147 | 1180 stops matching (`c = 31/29`), the hold is 566 or 568, the last frame moves to 1209/1211 | **yes** — the same sweep names 1160 and 1200 separately, inside this ramp (`c = 50` and `c = 10` under 1147). The geometry window (1200, 1240] does **not** catch a one-frame error: 1210 and 1211 are both inside it |
+| ENDLOGO's lead-in tick map (blit at tick 36 = index 440, fade at tick 47 = 451) | 36 / 47 | `END.C:89-99`'s blanks and decode, counted into the tick map (`endlogo.md` §4) | the picture would enter video memory one frame earlier or later; 430 (tick 26, inside the blanks) cannot see it | **no** — ten of the 47 ticks are frames the port does not model and their cause is unidentified (**A7**); the map is consistent with every frame the reference holds, and the only frames that could check it (441–450, in the index plane) are not held |
+| ENDSCRL's chain (its tick 0 at index 8835; the reference's scroller start 8917 ±1; the residual's chain part 82 frames) | 82 | the rows the first text line is drawn on, the one thing both builds draw identically; ±1 because a picture is two ticks wide (`endscrl.md` §6.1) | the scroller's content moves half a line at each frame (the origin steps one 640-px line every two ticks) — real, but not separable from A11, whose pitch already moves the content 5 rows per line | **bracketed, not checked** — CRED's measured bracket (6 to 105 frames early) contains 82, and 81 or 83 would sit inside it too; nothing else in the tree can see a one-frame error |
+| CRED's screen length | 363 ticks (1 parked + 1 show + 102 open + 200 hold + 59 close) | the source's own loops (`MAIN.C:176`, `:194`, `:196`) and their exact integer sequences (`cred.md` §3) | every later screen's hold and the chain's offset move by (screen − 1) ticks — ±21 at screen 21; the keyframes still land inside their holds (the tightest has 34 frames to spare), and the chain's offset stays inside CRED's bracket | **yes, in the record's sweep** — its 16 wipe-state frames are 0 of 192,000 bytes from the port's, and a one-tick error moves each one step — **but those tests are `#[ignore]`d** (the capture is git-ignored scratch), so a fresh clone cannot re-run that check. The unconditional tests pin the ramps' endpoints and the split mapping, not the coupling |
+| TUNNELI's shipped second ramp `(64 - x) * 3 div 5` | 5 | **unique** over 81 `(mul, div)` candidates (70 distinct ramps) rendered against the four reference frames: 1,108 px at 3/5, ≥4,200 at every other, the tree's own 3/4 at 6,376 (`tunneli.md` §5) | the tree's `div 4` puts the port 6,376 px from the reference's colour field instead of 1,108, and the 17 entries where truncation and rounding differ stop matching | **yes** — the tree's own `TUN10.EXE` disassembles to `idiv 4` (`0x1d0`-`0x1e3`), so which build put the frames on screen is measured on two artifacts independently of the frames |
+| TUNNELI's alignment (offset 3,722) | 3,722 | the port's ticks 78/478/778/878 answer 3800/4200/4500/4600 — all four at one offset | one frame either way and each frame is its neighbour's picture: at 3800 the residual is 179 px against 754 and 953 at ticks 77 and 79 | **yes** — the neighbours are the check, and it is a permanent test (`the_alignment_is_whole_tick_or_nothing`) |
+| A11's shipped-build numbers: the 25-row pitch and the `[NN` rule | 25 / N | read off frames 10000, 12000 and 14000: every gap a multiple of 25 and the smallest 25; the `[NN` rule predicts ring rows 0/25/65/90/130 at 10000 and six 37-row steps at 14000 **from the tree's own text file** | a one-row pitch error moves every predicted band by one row and the rule stops predicting the frames it was not fitted to | **yes** — it is a *prediction* of frames recorded before it (the reviewer's model is 26,756 px off at 12000 without the rule against 1,120 with it). This is a measurement of the **release**, not a port constant |
+
+**The count, measured rather than assumed.** Of the port's own constants, **two** are checked by an
+independent fact — ENDLOGO's two fade indices, by §19.1's sweep — and **two** are not: BEGLOGO's
+`FADE_FIRST_INDEX`, whose only evidence is the pair of keyframes it was derived from, and ENDSCRL's
+chain, which is bracketed but not pinned. The plan's Step 3 expected two independent checks and one
+absence; the measurement says two and two, and the difference is recorded here rather than smoothed
+over. Two further entries in the table (the boot anchor and TUNNELI's alignment) are checked by the
+comparisons that use them, and CRED's screen length is checked only by tests a fresh clone cannot run.
+
+#### The verification commands, re-run
+
+```
+$ cargo xtask reference verify --tree reference
+ok   check_a/part: 2 frame(s), 4 file(s)
+… 24 captures …
+verdict: ok — 24 capture(s), 105 frame file(s), 25792000 bytes
+exit: 0
+
+$ cargo xtask assets verify --tree --decode
+decode: 151 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 88 headerless with no decoder,
+1 refused on record, 0 finding(s)
+verdict: ok
+exit: 0
+
+$ cargo test --workspace
+… 21 targets …
+test result: ok. 590 passed; 0 failed; 3 ignored; 0 warnings; exit 0
+
+$ cargo clippy --workspace -- -D warnings
+exit: 101 — NOT clean, see below
+```
+
+The 590 is the sum of the run's per-target `test result:` lines — 146 in `secondreality` (119 + 5 +
+6 + 5 + 2 + 2 + 5 + 2), 161 in `sr-assets` (30 + 18 + 37 + 17 + 25 + 14 + 20, plus its empty lib
+target), 104 in `sr-engine`, 179 in `xtask` (149 + 12 + 5 + 13), with two empty doc-test targets.
+The three ignored are `sr-assets/tests/omf.rs`'s write-into-`assets/` regenerator and CRED's two
+record tests. Zero rustc warnings, checked after forcing a recompile of every crate
+(`cargo check --workspace --all-targets` on touched sources: 0 warnings, exit 0); the suite takes
+about five minutes because several integration tests drive whole block-5 runs in the debug binary.
+
+The asset tree is **151 assets plus `PROVENANCE.md`** (152 files): Phase 2 curated one more,
+`CREDITS/FONA.INC` (Task 7), which is why the decode summary's headerless count is 88 where Phase 1's
+was 87.
+
+**`cargo clippy --workspace -- -D warnings` is not clean, and the plan's Step 4 asks it to be.** Five
+lints, all in `sr-engine` and all in files Phase 0 wrote (`copper.rs:29`, `palette.rs:33`,
+`part.rs:79`, `testcard.rs:92`, `tick.rs:25`): four `new_without_default`s and one
+`too_many_arguments` (`part.rs`'s 10-argument constructor). None is in a file this phase's own
+commits changed except `testcard.rs`, whose one Phase 2 commit touched a constant and its comment.
+This is recorded as an **open item for the whole-branch review** rather than fixed here: it is
+pre-existing, it is not one of spec §10's exit criteria, `CLAUDE.md`'s phase-completion list does not
+name clippy, and the four `Default` impls plus a decision about the ten-argument constructor are a
+code change the close-out should not make unreviewed. (The phase's tasks treated clippy as "no *new*
+warnings in the files I touched" — Task 1's report records the pre-existing `parts.rs:16` warning,
+Task 2's fixed the one warning its own change introduced — and no task's report records a run with
+`-D warnings`.)
+
+#### What could not be confirmed — the phase's own negatives
+
+- **Nobody has looked at the screen.** The plan's Task 10 Step 3 is the human look —
+  `cargo run --release --bin secondreality -- --block 5` (and `--block 2`) watched by the user — and
+  it is **not done**: the window was verified mechanically (its title bar read back with `xwininfo`,
+  the tick rate, the two hand-overs), and nobody has judged the picture. That is the phase's one
+  unverified claim, it is the user's step, and it is named here rather than implied: Phase 0's single
+  human look found a bug no test could see (the SDL texture-format misread).
+- **Music is deferred, not stubbed.** No audio is decoded, mixed or played in this phase; the one
+  gate a faithful port would wait on (ENDLOGO's `dis_musplus()` loop) is its measured 567 ticks
+  (**A7**), and Phase 3 replaces it with the real cue. Nothing else ported here touches music.
+- **Nine and ten frames the port does not model, causes unidentified** — BEGLOGO's 42-tick lead-in
+  (33 accounted for, **A5**) and ENDLOGO's 47 (**A7**). Both windows are between a 400-row
+  Origin decode-and-blit and a palette fade, both candidates ruled out are ruled out *by evidence*
+  (the loader cannot be it; `dis_partstart` is a version check costing no frame), and the frames
+  where a difference would appear (436–444, 441–450) are not held by the reference.
+- **Three parts diverge from the released demo, and the rule is D24's; the port is faithful to the
+  tree.** TUNNELI's one expression (followed the release), CRED's data (**A10**, followed the tree)
+  and ENDSCRL's build (**A11**, followed the tree). What each would take to *close* is named in its
+  entry — the packed EXEs and the pack table are the leads.
+- **TUNNELI's four keyframes are not a verdict** and its aligned residual (179/373/321/433 px) is
+  the port's or the oracle's at 3800 and 4200 and unattributable at 4500 and 4600 (**A6**, per
+  keyframe).
+- **ENDSCRL's ring equivalence is the phase's largest modelling claim and the reference cannot test
+  it end-to-end** (the reference is another build), so it rests on the unit test — a simulation of
+  the source's own arithmetic against the port's — plus the reviewer's independent reconstruction
+  (`endscrl.md` §2, §6.2).
+- **The chain's 82 frames are bracketed, not pinned** (above), and the phase does not claim to know
+  whether CRED's shipped build, the port's translation, or both produce them.
+- **One CRED record test's couplings are `#[ignore]`d** (the wipe states against the scratch
+  capture), disclosed in `cred.md` §3 and judged acceptable as disclosed by Task 8's review.
 
 ### Phase 2's evidence, appended task by task
 
@@ -759,6 +1057,62 @@ out/p2-endscrl-sheet.png` sits beside the reference's own sheet. **The human loo
 phase boundary**: nothing here claims a person has judged the frames.
 
 ## Phase log
+
+### Phase 2 — Shell + easy tier (exit criteria met, tag withheld)
+
+Eleven tasks on branch `phase-2-shell`, from `5cf3e88` to `0c78cd3`. **590 tests pass, zero
+failures, three ignored, zero warnings** (Phase 1 closed at 405, one ignored). Every comparison in
+the phase was re-run at the final commit; the numbers are in the evidence section above.
+
+**What was built.** `shell::Sequence` — one run, one frame counter in the **reference's own
+boot-index space**, so a diff needs no translation (D21) — with block entry (`--block 1..5,U`), a
+part registry, and the original's own keys (ESC ends the part and the run goes on, Ctrl skips one;
+D21). Five parts, each translated from its own source with a fidelity note in the same commit:
+**BEGLOGO** (the white, the 129-step fade, the blit, the preserved `setpalarea` byte-count bug),
+**TUNNELI** (77 rings, one plot per dot per frame, the source's own unchecked read), **ENDLOGO** (the
+end picture, two 129/64-step ramps, the music gate as its measured length), **CRED** (21 screens, the
+font the loader refuses, the iris's three registers, the first pan a measurement corrected) and
+**ENDSCRL** (a 400-line ring, the beam's wrap standing in for the second copy, the shipped
+greetings text). `sr-engine` took three changes, each recorded in D21/D16: the shell's DAC needed
+`Engine::palette_mut()`, the view origin widened to `u32` (D16's open item, closed), and the exit flag
+gained a door from outside (`Engine::request_exit`). Two tools joined `xtask`: `compare --align <N>`
+and `frames sheet --dir`.
+
+**The exit criteria.** BEGLOGO is frame-diff-identical — `compare` exits 0 on all four keyframes and
+every file the reference carries (RGB at all four, an index plane at 430 and 900) is byte-identical
+to it, with every digest equal to the value Phase 1 recorded by hand. ENDLOGO is the same. TUNNELI,
+ENDSCRL, CRED and ENDLOGO each run their own
+effect to their own end through the real binary. `--block 5` plays ENDLOGO → CRED → ENDSCRL in a
+window and a test asserts both hand-overs on consecutive reference indices (1211/1212, 8834/8835).
+
+**What the phase learned about its own source, and it is the phase's biggest finding.** The vendored
+tree is a **development snapshot, not the released build**, in three independent ways: TUNNELI's
+second palette ramp is one expression different (and the tree's own `.PAS` and `.EXE` agree with each
+other and disagree with the release), CRED's shipped credits are different *data* (captions the
+source cannot draw), and ENDSCRL's shipped scroller is a different build again (a 25-row pitch where
+the source says 30, control lines the source has no notion of, seven more characters in its font
+order, and no carriage returns). D12's rule already decided which artifact wins — the release, because
+the release is what the reference frames measure — and **D24 now records the procedure** for the
+next phase that meets it: measure what the release does, check whether the tree can produce it at
+all, then decide and register the divergence with its evidence and a lead.
+
+**And the phase's method is now written down too.** Four review rounds across Tasks 4 and 5 were
+spent not on code but on records claiming more than their measurements supported — an absolute over a
+space nobody measured, a count that did not reproduce, a proof for something unobservable, an unknown
+dressed as a known — and the same shapes recurred in the reviews of Tasks 6 to 10. **D25** is the rule
+those rounds produced: every number in a note is reproducible by a command it names or produced by a
+test in the same commit; absolutes need a measurement over their whole space; an unobservable claim
+is stated as one; measured constants are derived by exhaustive match required to be unique, never by
+a fit; and nothing is re-anchored to make a diff pass.
+
+**What it could not confirm, in one place.** Nobody has watched the window (the human look is
+deferred and is the user's step). No music is decoded or played, and ENDLOGO's hold is a measured
+frame standing in for a cue (A7). Nine and ten frames of the two parts' lead-ins are not modelled and
+their cause is unidentified (A5, A7). Three parts' references are other builds (A6, A10, A11).
+TUNNELI's residual is the oracle's or the port's and cannot be resolved further with what is
+captured. `cargo clippy --workspace -- -D warnings` is not clean (five pre-existing `sr-engine`
+lints), and the plan's Step 4 asked for it to be; it is recorded as an open item for the review
+rather than fixed unreviewed.
 
 ### Phase 1 — Assets & references (done, tag `phase-1`)
 

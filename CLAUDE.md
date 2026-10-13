@@ -199,7 +199,10 @@ A part is done when its frames match. Record the evidence in `PROGRESS.md`.
 `docs/fidelity/` holds one note per part, written as the part is ported: what the
 original did, what the port does, which techniques were translated literally and which
 were substituted, and the measured difference. Write the note in the same commit as
-the part.
+the part. **Every number in a note is reproducible by a command the note names, or is
+produced by a test in the same commit** (D25), and when a reference frame disagrees with
+a faithful port, **D24**'s procedure decides what to do — the vendored tree is a
+development snapshot and the shipped release is not the same artifact.
 
 ## Phase completion
 
@@ -208,4 +211,7 @@ A phase is done when its exit criteria are met and:
 - all tests pass,
 - frame diffs are recorded in `PROGRESS.md`,
 - `docs/decisions.md` is updated with anything that changed the approach,
-- `git tag phase-N` is applied.
+- `git tag phase-N` is applied **once the final whole-branch review is clean** — the
+  close-out records the evidence and withholds the tag, because a tag that has to be
+  moved is worse than a tag applied a few commits later (Phase 1's and Phase 2's
+  practice).
