@@ -338,8 +338,8 @@ cargo xtask compare --reference reference/parts/tunneli --rendered out/p2-tunnel
 ```
 
 ```
-alignment: the rendered side's indices are read +3722 for pairing (--align), so the offsets below
-are on top of that
+alignment: the rendered side's indices are read +3722 for pairing (--align); the offsets below are
+on top of that
 frame 3800: 0.2797% differing (179/64000 px), max delta 12
 frame 4200: 0.5828% differing (373/64000 px), max delta 239
 frame 4500: 0.5016% differing (321/64000 px), max delta 231
