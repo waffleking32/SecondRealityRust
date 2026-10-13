@@ -455,9 +455,11 @@ Two conventions are shared by all five and are stated once here:
 
 ### Task 4: BEGLOGO — the phase's exit criterion
 
-The Future Crew logo, white, fading in from white over a held picture, 320×400 Mode X. **70 lines
-of C** (`BEG/BEG.C`) over `BEG/ASM.ASM` (`inittwk`, `lineblit`, `setpalarea`) and `BEG/READP.C`
-(the Origin RLE row reader). It is the whole of BEGLOGO:
+The Future Crew logo, white, fading in from white over a held picture, 320×400 Mode X. **87 lines
+of C** (`BEG/BEG.C`) over `BEG/ASM.ASM` (118 lines: `lineblit`, `setpalarea`; its `inittwk` is dead
+code here — the shell sets the mode, `MAIN/U2.ASM:806-808`) and `BEG/READP.C` (64: the Origin RLE
+row reader) — 269 lines of source in three files, corrected from this plan's first draft, which said
+70 and 704. It is the whole of BEGLOGO:
 
 ```c
 dis_partstart();                                  // BEG.C:17
@@ -513,11 +515,14 @@ The code's constant is named for what it is:
 /// puts c = 0 at 446.
 ///
 /// The part spends 32 vertical blanks (`BEG/BEG.C:24`) and a 400-row RLE
-/// decode and plane blit (`:73-78`) before the fade, and the loader spends
-/// frames loading the EXE. The port decodes once, in one call, so all of that
-/// is inside this constant rather than a cost the port re-pays:
-/// `dis_partstart()` (`:17`) is a cue the port does not model (Global
-/// Constraints) and lands here too.
+/// decode and plane blit (`:73-78`) before the fade. The port decodes once, in
+/// one call, so all of that is inside this constant rather than a cost the port
+/// re-pays — **and nine of the forty-two ticks do not correspond to anything the
+/// port models at all**. Their cause is unidentified: the loader cannot be it
+/// (the reference's index 410 is already white, so the part's own memsets have
+/// run), and `dis_partstart` costs no frame (`DIS/DISC.ASM:51-64` is a version
+/// check). See `docs/fidelity/APPROXIMATIONS.md` A5, which Task 4 wrote after
+/// measuring this.
 const FADE_FIRST_INDEX: u32 = 446;
 ```
 
