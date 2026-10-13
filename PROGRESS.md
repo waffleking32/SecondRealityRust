@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; ENDLOGO likewise (exit 0, 430/500/900/1180); TUNNELI ported and measured at the reference's own alignment (0.28–0.68 %, A6) | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; ENDLOGO likewise (exit 0, 430/500/900/1180); TUNNELI measured at the reference's own alignment (0.28–0.68 %, A6); ENDSCRL ported, its reference measured as the shipped build (exit 1, A11) | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -689,6 +689,57 @@ that could not fail, which is the shape this phase's reviews keep finding:
   decode is 900's indices). The paragraph now says what the integration tests actually add: the path
   a run really takes, end to end, with the one reference *file* they do not compare byte-for-byte
   named (`frame_000430.idx`).
+
+#### Task 9 — ENDSCRL: the ring, and the shipped build the reference holds
+
+`bins/secondreality/src/parts/endscrl.rs`, registered as `endscrl`; `ENDSCRL/MAIN.C` translated act
+for act over `ENDSCRL/ASMYT.ASM`'s `setstart`/`setrgbpalette`, with the strip read as
+`assets/ENDSCRL/FONA.UH` through `sr_assets::font::Font` (which **accepts** this one: its cell is
+`(20, 30)` and `1500/20 = 75` — unlike CRED's, A8) and the text as `assets/MAIN/DATA/ENDSCROL.TXT`,
+the shipped 6,141 bytes and not the 1,007-byte file beside the source. **Ten unit tests** beside the
+part and four through the real binary.
+
+**The ring is 400 lines, not 401, and the beam's wrap is the second copy.** The port's surface is
+400 × 640 = 256,000 = the whole ring, and `View::source_index` is modulo it, so the original's
+`memcpy` to `80*(yscrl+401)` has no address and each line is written once; the display origin is
+`(yscrl + 1) * 640`, up to **256,000** — 124,930 past what the `u16` pair could sum to, which is
+Task 3's widening. The equivalence is not argued: `the_four_hundred_line_ring_shows_what_the_four_
+hundred_and_one_line_ring_shows` runs the original's own arithmetic — a 401-line ring written twice,
+start `yscrl*80 + 80` — beside the port's at every iteration of a 500-line run, comparing all 400
+displayed rows as bytes.
+
+**The comparison is exit 1, and it is a build difference, not an offset.** The two commands,
+verbatim:
+
+```
+$ cargo run --bin secondreality -- --block 5 --headless --dump-frames 9100,10000,12000,14000 \
+      --dump-dir out/p2-endscrl
+$ cargo xtask compare --reference reference/parts/endscrl --rendered out/p2-endscrl \
+      --out out/p2-endscrl-diff
+frame 9100: 2.8473% differing (7289/256000 px), max delta 243
+frame 10000: 11.0676% differing (28333/256000 px), max delta 243
+frame 12000: 9.9617% differing (25502/256000 px), max delta 243
+frame 14000: 6.6828% differing (17108/256000 px), max delta 243
+verdict: different
+exit: 1
+```
+
+**Two residuals, measured separately.** (1) **The chain's 82 frames**: the port's ENDSCRL tick 0 is
+index **8835** (measured through the binary — CRED's last frame at 8834, the geometry change at
+8837) and the reference's scroller begins at **8917 ±1**, measured from the one picture both builds
+draw identically (the first line of the text) — inside CRED's own bracket of 6 to 105 frames early
+(`cred.md` §7), so it is the chain's. `--align 82` on a dump of the shifted indices shows the same
+shift from the other side: 9100 2.8473 % → 2.1758 %. (2) **The shipped build**: the reference's text
+pitch is **25 rows a line where `MAIN.C:6` says `FONAY 30`** (measured over frame 12000's twelve
+whole text lines: every gap a multiple of 25, the smallest 25), its raster differs from `FONA.UH` in
+**53 of the header band's 11,520 pixels**, and its renderer's text has **no carriage returns** (the
+centring is one column further left than the tree's CRLF file gives). That is why no alignment
+reaches zero: the two builds advance the text at different rates in frames, so the content drifts.
+Registered as **A11**; the reasoning and the numbers are `docs/fidelity/endscrl.md` §6.
+
+**The sheets, and the look.** `cargo xtask frames sheet --dir out/p2-endscrl --out
+out/p2-endscrl-sheet.png` sits beside the reference's own sheet. **The human look is deferred to the
+phase boundary**: nothing here claims a person has judged the frames.
 
 ## Phase log
 

@@ -13,6 +13,7 @@
 pub mod beglogo;
 pub mod cred;
 pub mod endlogo;
+pub mod endscrl;
 pub mod tunneli;
 
 use sr_engine::part::Part;
@@ -30,6 +31,8 @@ pub fn registry() -> &'static [(&'static str, fn() -> Box<dyn Part>)] {
         ("endlogo", || Box::new(endlogo::Endlogo::new())),
         // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).
         ("cred", || Box::new(cred::Cred::new())),
+        // `ENDSCRL/MAIN.C`, block 5's last (`MAIN/U2.ASM:914-917`).
+        ("endscrl", || Box::new(endscrl::Endscrl::new())),
     ]
 }
 
