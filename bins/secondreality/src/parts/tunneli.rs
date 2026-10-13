@@ -268,8 +268,10 @@ impl Tunneli {
     ///
     /// What the reference *does* witness is that the read must not be replaced
     /// by 0: `aa2`'s unwritten half *is* 0, so a port that substituted 0 would
-    /// plot at `x` — row 0 — and differ from the reference by 85, 142 and 88
-    /// extra pixels at 4200, 4500 and 4600 (`docs/fidelity/tunneli.md` §4).
+    /// plot every one of those dots in row 0 — the branch is only entered when
+    /// the x sum is already ≤ 319 — and the reference's four frames ink **34
+    /// pixels in row 0 in total**, against 356,042 such reads in the run
+    /// (`zeroing_the_read_would_paint_row_zero`, `docs/fidelity/tunneli.md` §4).
     ///
     /// The windows this needs are the first 680 words after `rows` and the
     /// first 680 before it.
@@ -414,13 +416,15 @@ impl Tunneli {
         // `:122` `setrgb(128+x, (64-x) *3 div 4, …)`, the same ramp dimmed —
         // **except that the build which shipped is not the tree's `TUN10.PAS`
         // in this one expression.** The reference's frames are drawn with
-        // `(64 - x) * 3 div 5` at the same 65 entries: 25 of the ramp's entries
-        // are measurable through the part's own dots and every one of them
-        // matches `3*(64-x) div 5` exactly, including the five where rounding
-        // rather than truncation would differ; and the fit is *unique* — over
-        // 21 candidate ramps the port's colour field is 1,108 pixels away from
-        // the four reference frames at this ramp and at least 4,200 at every
-        // other (`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`).
+        // `(64 - x) * 3 div 5` at the same 65 entries: the four reference
+        // frames exercise 42 of them, 38 with a non-black reference pixel, over
+        // 5,275 informative pixels and 29 distinct greys, and every one matches
+        // `3*(64-x) div 5` exactly — including the 17 where rounding rather
+        // than truncation would differ. The fit is also *unique*: 81 candidate
+        // `(mul, div)` pairs (70 distinct ramps) are rendered against the four
+        // frames, and the port's colour field is 1,108 pixels away at this ramp
+        // and at least 4,200 at every other
+        // (`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`).
         // The tree's own `TUN10.EXE` compiles `:122` as written (`3*(64-x)` then
         // `idiv 4`, image offsets 0x1d0-0x1e3), so the two builds differ; D12
         // settles which one the port follows — the distributed release is the
@@ -1007,6 +1011,83 @@ mod tests {
     }
 
     #[test]
+    fn zeroing_the_read_would_paint_row_zero() {
+        // The counterfactual §4's argument rests on, measured rather than
+        // asserted: `aa2`'s unwritten half is 0 (`:100` copies only 101 of its
+        // 201 words), so a port that "simplified" `:186` by substituting 0 for
+        // the out-of-range word would plot every one of those dots at its x sum
+        // — and the branch is only entered when that sum is already ≤ 319
+        // (`:181-182`), so all of them land in row 0.
+        //
+        // The run takes the branch **356,042** times (the count below; the x
+        // sum is part of it, `:181-182`); a row is 320 pixels wide, and the
+        // reference's four frames ink **34** pixels of row 0 in total (the
+        // port's own, 32 — it draws the same picture). So the substitution
+        // repaints a row the original barely touches: visible, where a y bound
+        // is not. A *pixel* count of the variant's error would need the variant
+        // rendered, which is a second copy of the draw loop in a test; the two
+        // numbers this carries are what the claim needs.
+        let (mut rig, mut part) = started();
+        let mut moved = 0usize;
+        for tick in 0..=VEKE {
+            part.frame(&mut rig.ctx(tick));
+            for x in RING_BOTTOM..=RING_TOP {
+                let colour = part.putki[x].c.wrapping_add(ring_colour(x));
+                if colour < 64 {
+                    continue;
+                }
+                let bx = part.putki[x].x.wrapping_sub(part.putki[5].x);
+                let by = part.putki[x].y.wrapping_sub(part.putki[5].y);
+                let base = part.sade[x] as usize * DOTS_PER_RING * 2;
+                for dot in 0..DOTS_PER_RING {
+                    // `:181-182`'s bound decides whether `:186` runs at all.
+                    if part.pcalc[base + dot * 2].wrapping_add(bx) > 319 {
+                        continue;
+                    }
+                    let y = by.wrapping_add(part.pcalc[base + dot * 2 + 1]);
+                    if y > 200 {
+                        moved += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(moved, 356_042, "the run's out-of-range reads that a plot would move");
+
+        let mut reference_ink = 0usize;
+        let mut port_ink = 0usize;
+        for (tick, name) in ALIGNED {
+            let (picture, expected) = aligned_frame(tick, name);
+            for column in 0..SCREEN_WIDTH as usize {
+                port_ink += usize::from(picture[column] != 0);
+                reference_ink += usize::from(&expected[column * 3..column * 3 + 3] != [0, 0, 0]);
+            }
+        }
+        assert_eq!(reference_ink, 34, "the reference's ink in row 0, four frames");
+        assert!(
+            port_ink <= 64,
+            "the port draws the same picture, so its row 0 is nearly empty too: {port_ink}"
+        );
+    }
+
+    #[test]
+    fn the_alignment_is_whole_tick_or_nothing() {
+        // §7.2's offset is a whole tick and the reference settles it: at 3800
+        // the port's tick 78 leaves 179 pixels whose colour the reference does
+        // not show, where its neighbours leave 754 and 953 — four times as
+        // many. The original's animation advances one vblank at a time, so a
+        // sub-frame alignment does not exist: this is what says the comparison
+        // is at the right tick and not merely a near one, and it is why a
+        // residual of a few hundred pixels is not "half a tick out".
+        let at = |tick: u32| {
+            let (picture, expected) = aligned_frame(tick, "003800");
+            colour_error(second_ramp, &[(picture, expected)])
+        };
+        assert_eq!(at(78), 179, "the aligned tick");
+        let (before, after) = (at(77), at(79));
+        assert_eq!((before, after), (754, 953), "the neighbouring ticks");
+    }
+
+    #[test]
     fn the_ring_colour_rounds_unambiguously() {
         // :158 `round(x / 1.3)` over the loop's range: the port divides in
         // floating point, so the test is that no `x` lands near a half.
@@ -1034,7 +1115,8 @@ mod tests {
         // tree's `TUN10.PAS:122`; the derivation test below is what says so.
         assert_eq!(rig.palette.entry(128), [38, 38, 38], "64 * 3 div 5");
         assert_eq!(rig.palette.entry(129), [37, 37, 37], "63 * 3 div 5");
-        assert_eq!(rig.palette.entry(166), [15, 15, 15], "38 * 3 div 5, and 23 rounded");
+        assert_eq!(rig.palette.entry(166), [15, 15, 15], "26 * 3 div 5, and 16 rounded");
+        assert_eq!(rig.palette.entry(154), [22, 22, 22], "38 * 3 div 5, and 23 rounded");
         assert_eq!(rig.palette.entry(132), [0, 0, 0], "setrgb(132,0,0,0)");
         assert_eq!(rig.palette.entry(192), [0, 0, 0]);
         assert_eq!(rig.palette.entry(255), [0, 63, 0], "setrgb(255,0,63,0)");
@@ -1155,11 +1237,12 @@ mod tests {
     /// image offsets 0x1d0-0x1e3, read off the disassembly in
     /// `docs/fidelity/tunneli.md` §5. **The build that shipped is a different
     /// one.** At 3/4 the port's colour field is 6,376 pixels away from the four
-    /// frames; at 3/5 it is 1,108, and *every* one of those is a pixel the port
+    /// frames; at 3/5 it is 1,108, and *all but 17* of those are pixels the port
     /// inks that the reference leaves as background — the ink-presence residual
-    /// of §7.2, which no ramp can fix. Of the kind a ramp *can* fix — both sides
-    /// inked, different colour — 3/5 leaves 0 at 3800, 4200 and 4600 and 17 at
-    /// 4500, where two rings overlap; every other candidate in the search
+    /// of §7.2, which no ramp can fix. The 17 are the other kind, both sides
+    /// inked in different colours, and **10 of them sit on first-ramp entries**
+    /// (72, 75, 76, 83, 89) where no second-ramp value can reach them: they are
+    /// two rings overlapping, not the ramp. Every other candidate in the search
     /// leaves at least 3,500 over the four.
     #[test]
     fn the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit() {
@@ -1172,8 +1255,11 @@ mod tests {
             "the port's own ramp leaves {best} pixels wrong; the search's answer should be ~1,108"
         );
 
-        // `(64-x) * mul div div`, floor, over the reduced fractions a ramp of
-        // this shape could plausibly be. 3/5 is the unique minimum.
+        // `(64-x) * mul div div`, floor: `mul` 1..=7 against `div` 1..=15, less
+        // the pairs that are the shipped ramp in another spelling and the
+        // duplicates of smaller pairs — 81 candidates evaluated, 70 distinct
+        // ramps, and the count is asserted below so the record cannot drift
+        // from what runs. 3/5 is the unique minimum.
         let mut worse = Vec::new();
         for mul in 1..=7u32 {
             for div in 1..=15u32 {
@@ -1191,6 +1277,7 @@ mod tests {
                 worse.push((error, mul, div));
             }
         }
+        assert_eq!(worse.len(), 81, "the search's size, as the record states it");
         worse.sort();
         assert_eq!(
             (worse[0].1, worse[0].2),

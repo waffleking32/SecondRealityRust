@@ -293,6 +293,28 @@ fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
     assert!(aligned.output().contains("read +300"), "{}", aligned.output());
     assert!(aligned.output().contains("frame 700: 0.0000%"), "{}", aligned.output());
 
+    // A *negative* alignment works too — the same two captures, a reference
+    // numbered above the rendered side and the sign that maps them — so the
+    // option is a numbering offset in both directions and not a one-way door.
+    let negative_reference = scratch("align-negative-reference");
+    let negative_rendered = scratch("align-negative-rendered");
+    let negative_out = scratch("align-negative-out").join("reports");
+    write_capture(&negative_reference, &[(400, 5), (600, 5)]);
+    write_capture(&negative_rendered, &[(700, 5), (900, 5)]);
+    let negative = xtask(&[
+        "compare",
+        "--reference",
+        negative_reference.to_str().unwrap(),
+        "--rendered",
+        negative_rendered.to_str().unwrap(),
+        "--out",
+        negative_out.to_str().unwrap(),
+        "--align",
+        "-300",
+    ]);
+    assert_eq!(negative.code, 0, "{}", negative.output());
+    assert!(negative.output().contains("read -300"), "{}", negative.output());
+
     // An alignment that underflows is a mistake in the command (a sign, most
     // likely) and is refused rather than clamped: clamping would collide both
     // rendered frames on index 0 and pair them without saying so.

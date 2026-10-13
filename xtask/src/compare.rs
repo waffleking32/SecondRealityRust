@@ -672,6 +672,12 @@ fn paired_frames<'a>(
 
 /// The first frame whose *shifted* index is `index` and that no earlier pair has
 /// taken — [`take_frame`] under `--align`.
+///
+/// **There is no fallback to the unshifted index**, deliberately: under an
+/// alignment a miss means the pairing named an index the shifted list does not
+/// hold, and reaching for `take_frame` would pair whatever frame carries that
+/// number unshifted — a wrong pair, silently, which is the one failure this
+/// tool exists to refuse.
 fn take_frame_shifted<'a>(
     frames: &[&'a FrameRef],
     indices: &[u32],
@@ -684,7 +690,10 @@ fn take_frame_shifted<'a>(
             return Ok(frame);
         }
     }
-    take_frame(frames, taken, index)
+    Err(CompareError::Io(format!(
+        "the pairing named a frame at index {index} that the rendered manifest does not hold \
+         under this alignment"
+    )))
 }
 
 /// [`frame_with`] under `--align`: the frame whose shifted index is `index`.
