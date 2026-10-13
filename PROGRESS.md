@@ -356,7 +356,7 @@ crash but a live-looking picture read from several hundred lines away.
 
 `start_addr` is `u32`; `set_origin(pixel: u32)` now writes `start_addr` and zeroes `x_offset`
 (`x_offset` stays `u16`: an offset within a displayed line, not an origin); `source_index` is
-unchanged in shape and sums in `usize`. Spec §4.2 is amended in place above its struct sketch, and
+unchanged in shape and sums in `usize`. Spec §4.2 is amended in place below its struct sketch, and
 D16's open item is closed with the arithmetic and with what the `u16` was ever protecting (nothing —
 the fields were copied from a register pair that counts bytes within a plane).
 
@@ -400,6 +400,17 @@ $ # and the same command with the change stashed, into out/task3-before:
 Fifteen frames, byte for byte. The card still exercises both fields — its scroll phase pans within
 the line through `x_offset`, its split window walks `start_addr` — so the widening is covered
 end-to-end by the card as well as by the view's own unit tests.
+
+**Fix round 1 (review).** The review approved the change and found two small things. D16 item 1 and
+the plan both claimed a test asserted `sr-engine`'s empty `[dependencies]`, and no test in the tree
+did — the guard existed only in prose, just as Tasks 4–10 start adding crates to the binary. It is
+real now: `the_engine_has_no_runtime_dependencies` in `crates/sr-engine/src/lib.rs` reads the
+manifest's own text (not through a TOML crate, which would be the first dependency it forbids) and
+fails on any entry under `[dependencies]` or on a `[dependencies.x]` table. Mutation-checked both
+ways — a plain line and a table were each caught, naming the line — and the manifest ends the round
+byte-identical to `ee63aa7`'s. The second thing was a word: the two places that said §4.2's
+amendment sits "above the struct sketch" now say below, which is where it is. 484 passed, 0 failed,
+0 warnings.
 
 ## Phase log
 

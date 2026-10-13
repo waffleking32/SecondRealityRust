@@ -760,7 +760,7 @@ all, which makes the card a live test of the default.
 `u32`; `View::set_origin` takes a `u32` pixel and writes it there — the field with room for it —
 zeroing `x_offset`; and `source_index` is unchanged in shape, summing the origin in `usize`.
 `x_offset` stays `u16`: it is an offset *within* a displayed line, bounded by the widest line rather
-than by the buffer. Spec §4.2 is amended in place, above the struct sketch.
+than by the buffer. Spec §4.2 is amended in place, below the struct sketch.
 
 **The arithmetic that forced it.** CRED's display start is `tw_setstart(160*200)`
 (`CREDITS/MAIN.C:167`): 32,000 planar bytes, which at 80 bytes per 320-pixel logical line is
@@ -777,8 +777,8 @@ from where it belongs. Neither part can be diffed until the field can name its o
 were copied from the CRTC's 16-bit register pair — and that pair counts *bytes within a plane*, not
 pixels. A 16-colour planar scanline is 80 bytes, so 16 bits spans a 400-line buffer in the
 original's own layout, which is why the original never notices. The port's `View` counts pixels and
-sums the two fields into one origin, so the copied width buys it nothing and can name an origin no
-higher than 131,070 — 124,929 pixels short of its own 256,000-pixel surface's last one. The
+sums the two fields into one origin, so the copied width buys it nothing: an origin stops at
+131,070, which is 124,930 short of the 256,000 ENDSCRL's ring needs (256,000 − 131,070). The
 alternative — modelling the CRTC's per-plane byte counter — would put planar addressing into an
 engine that deliberately does not have it (spec §4.2: "The Mode X plane arithmetic disappears"), so
 the field widened instead.
