@@ -78,6 +78,17 @@ enum Command {
         /// `--out` inside `--reference` is refused.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Read the rendered side's frame indices this much higher (negative
+        /// for lower) when pairing them with the reference's. For a part the
+        /// port cannot give a boot anchor — TUNNELI begins after GLENZ — the
+        /// run draws its own ticks from zero and the reference's index for a
+        /// picture is a constant away; the constant is measured, and this is
+        /// how the comparison is made at it. The frames' own indices are not
+        /// rewritten, the alignment is printed before the frames, and every
+        /// reported offset is the net one. It changes the *pairing*, never the
+        /// pixels: each pair is still compared exactly.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        align: i32,
     },
     /// Look at a directory of frames the port or a capture wrote: one PNG of
     /// every frame in it, to read with the eyes rather than a percentage.
@@ -327,11 +338,13 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             rendered,
             run,
             out,
+            align,
         } => Ok(compare::command(
             &reference,
             rendered.as_deref(),
             run.as_deref(),
             out.as_deref(),
+            align,
         )?),
         Command::Frames {
             command: FramesCommand::Sheet { dir, out },

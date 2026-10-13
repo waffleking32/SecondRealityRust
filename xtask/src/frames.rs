@@ -233,6 +233,22 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_whose_manifest_names_no_frames_is_refused() {
+        // `compare`'s walk finds the capture and the manifest parses; there is
+        // simply nothing to draw. A sheet of no tiles is not a picture, and
+        // `write_png` refuses a 0x0 one — so the refusal has to come from here,
+        // naming the directory, rather than from the writer.
+        let dir = scratch("no-frames");
+        capture(&dir, 2, 2, &[]);
+        let error = sheet(&SheetOptions { dir: dir.clone(), out: sheet_of(&dir, "no-frames") })
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("holds no frames"), "{error}");
+        assert!(!sheet_of(&dir, "no-frames").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_frame_file_the_manifest_names_but_that_is_missing_is_refused() {
         // `verify` catches this for the reference tree; a dump can be read
         // straight after a run, and a hole in it must not be a blank tile.

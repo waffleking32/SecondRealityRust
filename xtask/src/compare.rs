@@ -595,20 +595,30 @@ fn names(captures: &[Capture]) -> String {
 fn paired_frames<'a>(
     reference: &'a Capture,
     rendered: &'a Capture,
+    align: i32,
 ) -> Result<Vec<(&'a FrameRef, &'a FrameRef)>, CompareError> {
     let mut reference_frames: Vec<&FrameRef> = reference.manifest.frames.iter().collect();
     let mut rendered_frames: Vec<&FrameRef> = rendered.manifest.frames.iter().collect();
     reference_frames.sort_by_key(|f| f.index);
     rendered_frames.sort_by_key(|f| f.index);
     let reference_indices: Vec<u32> = reference_frames.iter().map(|f| f.index).collect();
-    let rendered_indices: Vec<u32> = rendered_frames.iter().map(|f| f.index).collect();
+    // `--align N` reads the rendered side's indices `N` higher (or lower): a
+    // part the port cannot anchor draws its own ticks from zero, and the
+    // reference's index for a picture is then a constant away
+    // (`docs/fidelity/tunneli.md` §7.2). The frames' own indices stay what the
+    // manifest says; only the pairing moves, and the reported offset is the
+    // net one.
+    let rendered_indices: Vec<u32> = rendered_frames
+        .iter()
+        .map(|f| shifted_index(f.index, align))
+        .collect();
 
     let pairs = pair_indices(
         &reference_indices,
         &rendered_indices,
         |reference_index, rendered_index| {
             let reference_frame = frame_with(&reference_frames, reference_index)?;
-            let rendered_frame = frame_with(&rendered_frames, rendered_index)?;
+            let rendered_frame = frame_with_shifted(&rendered_frames, &rendered_indices, rendered_index)?;
             // A frame of another geometry cannot stand in for this one, so it
             // ranks below every candidate that can. If it is the only one it
             // is chosen, and the geometry check refuses it with both sizes
@@ -631,10 +641,56 @@ fn paired_frames<'a>(
     for (reference_index, rendered_index) in pairs {
         paired.push((
             take_frame(&reference_frames, &mut reference_taken, reference_index)?,
-            take_frame(&rendered_frames, &mut rendered_taken, rendered_index)?,
+            take_frame_shifted(
+                &rendered_frames,
+                &rendered_indices,
+                &mut rendered_taken,
+                rendered_index,
+            )?,
         ));
     }
     Ok(paired)
+}
+
+/// A manifest index as the pairing reads it: `align` added, refusing a result
+/// that is not a frame index at all.
+fn shifted_index(index: u32, align: i32) -> u32 {
+    (i64::from(index) + i64::from(align)).clamp(0, i64::from(u32::MAX)) as u32
+}
+
+/// The first frame whose *shifted* index is `index` and that no earlier pair has
+/// taken — [`take_frame`] under `--align`.
+fn take_frame_shifted<'a>(
+    frames: &[&'a FrameRef],
+    indices: &[u32],
+    taken: &mut [bool],
+    index: u32,
+) -> Result<&'a FrameRef, CompareError> {
+    for (position, frame) in frames.iter().enumerate() {
+        if indices[position] == index && !taken[position] {
+            taken[position] = true;
+            return Ok(frame);
+        }
+    }
+    take_frame(frames, taken, index)
+}
+
+/// [`frame_with`] under `--align`: the frame whose shifted index is `index`.
+fn frame_with_shifted<'a>(
+    frames: &[&'a FrameRef],
+    indices: &[u32],
+    index: u32,
+) -> Result<&'a FrameRef, CompareError> {
+    frames
+        .iter()
+        .zip(indices)
+        .find(|(_, shifted)| **shifted == index)
+        .map(|(frame, _)| *frame)
+        .ok_or_else(|| {
+            CompareError::Io(format!(
+                "the pairing named a frame at index {index} that the manifest does not hold"
+            ))
+        })
 }
 
 /// The first frame carrying `index` that no earlier pair has taken.
@@ -790,10 +846,11 @@ fn compare_capture(
     reference: &Capture,
     rendered: &Capture,
     out: &Path,
+    align: i32,
 ) -> Result<CaptureOutcome, CompareError> {
     let mut frames = Vec::new();
     let mut modes = Vec::new();
-    for (reference_frame, rendered_frame) in paired_frames(reference, rendered)? {
+    for (reference_frame, rendered_frame) in paired_frames(reference, rendered, align)? {
         let reference_geometry = reference_frame.geometry(&reference.manifest);
         let rendered_geometry = rendered_frame.geometry(&rendered.manifest);
         if reference_geometry != rendered_geometry {
@@ -861,7 +918,9 @@ fn compare_capture(
         frames.push(FrameReport {
             index: reference_frame.index,
             rendered_index: rendered_frame.index,
-            offset: frame_offset(reference_frame.index, rendered_frame.index),
+            // The net offset: the alignment in force is part of the answer, so
+            // a report made with `--align` cannot be misread as one without it.
+            offset: frame_offset(reference_frame.index, shifted_index(rendered_frame.index, align)),
             differing_pixels: diff.differing_pixels,
             total_pixels: diff.total_pixels,
             differing_percent: diff.differing_percent,
@@ -1076,6 +1135,7 @@ pub fn command(
     rendered: Option<&Path>,
     run: Option<&str>,
     out: Option<&Path>,
+    align: i32,
 ) -> Result<ExitCode, CompareError> {
     if run.is_some() && rendered.is_none() {
         return Err(CompareError::Io(
@@ -1104,6 +1164,14 @@ pub fn command(
     }
 
     let rendered = rendered.unwrap_or(reference);
+    if align != 0 {
+        // Loudly, because every offset below is on top of it: a comparison at
+        // an alignment is a measurement of the port at a declared offset, not
+        // of the two numberings being the same.
+        println!(
+            "alignment: the rendered side's indices are read {align:+} for pairing (--align), so              the offsets below are on top of that"
+        );
+    }
     let reference_captures = resolve_captures(reference)?;
     let rendered_captures = resolve_captures(rendered)?;
 
@@ -1111,7 +1179,7 @@ pub fn command(
     let pairs = pair_captures(&reference_captures, &rendered_captures)?;
     for (reference_capture, rendered_capture) in &pairs {
         let capture_out = capture_out(&out, &reference_capture.name);
-        let outcome = compare_capture(reference_capture, rendered_capture, &capture_out)?;
+        let outcome = compare_capture(reference_capture, rendered_capture, &capture_out, align)?;
         for frame in &outcome.report.frames {
             let prefix = format!("{}frame", capture_prefix(&reference_capture.name));
             // A frame paired at a non-zero offset says so on its own line: an
@@ -1394,7 +1462,7 @@ mod tests {
         write_reference_capture(&dir, (4, 2), &[flat(400, 7, 8), flat(600, 9, 8)]);
         let out = scratch("self-out");
 
-        let code = command(&dir, Some(&dir), None, Some(&out)).unwrap();
+        let code = command(&dir, Some(&dir), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::SUCCESS);
         let report = read_json(&out.join("report.json"));
@@ -1451,7 +1519,7 @@ mod tests {
         // the fixture.
         let out = scratch("offset-own-index-out");
         assert_eq!(
-            command(&reference, Some(&at_its_own_index), None, Some(&out)).unwrap(),
+            command(&reference, Some(&at_its_own_index), None, Some(&out), 0).unwrap(),
             ExitCode::from(1)
         );
         let report = read_json(&out.join("report.json"));
@@ -1459,7 +1527,7 @@ mod tests {
 
         let out = scratch("offset-one-later-out");
         assert_eq!(
-            command(&reference, Some(&one_later), None, Some(&out)).unwrap(),
+            command(&reference, Some(&one_later), None, Some(&out), 0).unwrap(),
             ExitCode::SUCCESS
         );
         let report = read_json(&out.join("report.json"));
@@ -1491,7 +1559,7 @@ mod tests {
         let out = scratch("offset-one-earlier-out");
 
         assert_eq!(
-            command(&reference, Some(&one_earlier), None, Some(&out)).unwrap(),
+            command(&reference, Some(&one_earlier), None, Some(&out), 0).unwrap(),
             ExitCode::SUCCESS
         );
         let report = read_json(&out.join("report.json"));
@@ -1522,7 +1590,7 @@ mod tests {
         let out = scratch("offset-tie-out");
 
         assert_eq!(
-            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            command(&reference, Some(&rendered), None, Some(&out), 0).unwrap(),
             ExitCode::SUCCESS
         );
         let report = read_json(&out.join("report.json"));
@@ -1550,7 +1618,7 @@ mod tests {
         let out = scratch("closest-out");
 
         assert_eq!(
-            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            command(&reference, Some(&rendered), None, Some(&out), 0).unwrap(),
             ExitCode::from(1)
         );
         let report = read_json(&out.join("report.json"));
@@ -1579,7 +1647,7 @@ mod tests {
         let out = scratch("consume-out");
 
         assert_eq!(
-            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            command(&reference, Some(&rendered), None, Some(&out), 0).unwrap(),
             ExitCode::from(1)
         );
         let report = read_json(&out.join("report.json"));
@@ -1606,7 +1674,7 @@ mod tests {
         write_reference_capture(&rendered, (4, 2), &[FrameData { index: 0, idx: None, rgb }]);
         let out = scratch("diff-out");
 
-        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::from(1));
         let report = read_json(&out.join("report.json"));
@@ -1653,7 +1721,7 @@ mod tests {
         );
         let out = scratch("indexed-out");
 
-        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::from(1));
         let report = read_json(&out.join("report.json"));
@@ -1683,7 +1751,7 @@ mod tests {
         );
         let out = scratch("rgb-out");
 
-        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::from(1));
         let report = read_json(&out.join("report.json"));
@@ -1704,7 +1772,7 @@ mod tests {
         );
         let out = scratch("geometry-out");
 
-        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        let error = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap_err();
         assert!(matches!(error, CompareError::GeometryMismatch { .. }));
         let message = error.to_string();
         assert!(message.contains("8") && message.contains("16"), "{message}");
@@ -1725,7 +1793,7 @@ mod tests {
         let out = scratch("doublescan-out");
 
         assert!(matches!(
-            command(&reference, Some(&rendered), None, Some(&out)),
+            command(&reference, Some(&rendered), None, Some(&out), 0),
             Err(CompareError::GeometryMismatch { .. })
         ));
     }
@@ -1742,7 +1810,7 @@ mod tests {
         // A path nothing has made yet: the refusal must not make it either.
         let out = scratch("count-out").join("reports");
 
-        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        let error = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap_err();
         match error {
             CompareError::NoFrameWithinWindow { index, window, .. } => {
                 assert_eq!((index, window), (200, 1));
@@ -1776,7 +1844,7 @@ mod tests {
         let out = scratch("dense-out");
 
         assert_eq!(
-            command(&reference, Some(&rendered), None, Some(&out)).unwrap(),
+            command(&reference, Some(&rendered), None, Some(&out), 0).unwrap(),
             ExitCode::SUCCESS
         );
         let report = read_json(&out.join("report.json"));
@@ -1789,7 +1857,7 @@ mod tests {
         let dir = scratch("no-manifest");
         let out = scratch("no-manifest-out");
 
-        let error = command(&dir, Some(&dir), None, Some(&out)).unwrap_err();
+        let error = command(&dir, Some(&dir), None, Some(&out), 0).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("manifest.json"), "{message}");
         assert!(message.contains(&dir.display().to_string()), "{message}");
@@ -1802,7 +1870,7 @@ mod tests {
         fs::remove_file(dir.join("frame_000000.rgb")).unwrap();
         let out = scratch("missing-frame-out");
 
-        let error = command(&dir, Some(&dir), None, Some(&out)).unwrap_err();
+        let error = command(&dir, Some(&dir), None, Some(&out), 0).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("frame_000000.rgb"), "{message}");
     }
@@ -1820,7 +1888,7 @@ mod tests {
         }
         let out = scratch("tree-out");
 
-        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(out.join("title/report.json").is_file());
@@ -1839,7 +1907,7 @@ mod tests {
         write_reference_capture(&rendered.join("title"), (4, 2), &[flat(400, 2, 8)]);
         let out = scratch("tree-diff-out");
 
-        let code = command(&reference, Some(&rendered), None, Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::from(1));
         let report = read_json(&out.join("title/report.json"));
@@ -1856,7 +1924,7 @@ mod tests {
         write_reference_capture(&rendered.join("title"), (4, 2), &[flat(400, 1, 8)]);
         let out = scratch("tree-missing-out");
 
-        let error = command(&reference, Some(&rendered), None, Some(&out)).unwrap_err();
+        let error = command(&reference, Some(&rendered), None, Some(&out), 0).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("part"), "{message}");
     }
@@ -1884,7 +1952,7 @@ mod tests {
             rendered.display(),
         );
 
-        let code = command(&reference, Some(&rendered), Some(&shell), Some(&out)).unwrap();
+        let code = command(&reference, Some(&rendered), Some(&shell), Some(&out), 0).unwrap();
 
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(out.join("report.json").is_file());
@@ -1897,7 +1965,7 @@ mod tests {
         let rendered = scratch("run-fail-rendered");
         let out = scratch("run-fail-out");
 
-        let error = command(&reference, Some(&rendered), Some("exit 3"), Some(&out)).unwrap_err();
+        let error = command(&reference, Some(&rendered), Some("exit 3"), Some(&out), 0).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("exit 3"), "{message}");
     }
@@ -1909,7 +1977,7 @@ mod tests {
         let reference = scratch("run-alone-reference");
         write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
 
-        let error = command(&reference, None, Some("true"), None).unwrap_err();
+        let error = command(&reference, None, Some("true"), None, 0).unwrap_err();
         assert!(error.to_string().contains("--rendered"), "{error}");
     }
 
@@ -1919,7 +1987,7 @@ mod tests {
         write_reference_capture(&dir, (4, 2), &[flat(0, 5, 8)]);
         let out = scratch("default-rendered-out");
 
-        assert_eq!(command(&dir, None, None, Some(&out)).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(command(&dir, None, None, Some(&out), 0).unwrap(), ExitCode::SUCCESS);
     }
 
     #[test]
@@ -1941,7 +2009,7 @@ mod tests {
         write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
         let inside = reference.join("reports");
 
-        let error = command(&reference, Some(&reference), None, Some(&inside)).unwrap_err();
+        let error = command(&reference, Some(&reference), None, Some(&inside), 0).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("--out"), "{message}");
         assert!(message.contains(&inside.display().to_string()), "{message}");
@@ -1954,7 +2022,7 @@ mod tests {
         let reference = scratch("guard-self-reference");
         write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
 
-        assert!(command(&reference, Some(&reference), None, Some(&reference)).is_err());
+        assert!(command(&reference, Some(&reference), None, Some(&reference), 0).is_err());
         assert!(!reference.join("report.json").exists());
     }
 
@@ -1964,13 +2032,14 @@ mod tests {
         write_reference_capture(&reference, (4, 2), &[flat(0, 5, 8)]);
 
         // A trailing `/.` names the reference itself.
-        assert!(command(&reference, Some(&reference), None, Some(&reference.join("."))).is_err());
+        assert!(command(&reference, Some(&reference), None, Some(&reference.join(".")), 0).is_err());
         // A path under the reference whose first component does not exist yet.
         assert!(command(
             &reference,
             Some(&reference),
             None,
-            Some(&reference.join("deep/../deeper"))
+            Some(&reference.join("deep/../deeper")),
+            0
         )
         .is_err());
     }
@@ -1993,7 +2062,7 @@ mod tests {
         // path the comparison has to see.
         assert_eq!(resolve(&out).unwrap(), resolve(&reference).unwrap().join("nested"));
 
-        let error = command(&reference, Some(&reference), None, Some(&out))
+        let error = command(&reference, Some(&reference), None, Some(&out), 0)
             .expect_err("the path lands inside the reference");
         assert!(error.to_string().contains("ref/nested"), "{error}");
         // Refused before anything is written, so not even the `missing`
@@ -2009,7 +2078,7 @@ mod tests {
         let out = scratch("guard-ok-out");
 
         assert_eq!(
-            command(&reference, Some(&reference), None, Some(&out)).unwrap(),
+            command(&reference, Some(&reference), None, Some(&out), 0).unwrap(),
             ExitCode::SUCCESS
         );
         assert!(out.join("report.json").is_file());
@@ -2103,7 +2172,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/check_a");
         let out = scratch("real-check-a-out");
 
-        assert_eq!(command(&root, Some(&root), None, Some(&out)).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(command(&root, Some(&root), None, Some(&out), 0).unwrap(), ExitCode::SUCCESS);
         for capture in ["part", "title"] {
             let report = read_json(&out.join(capture).join("report.json"));
             assert_eq!(report["summary"]["verdict"], "identical");

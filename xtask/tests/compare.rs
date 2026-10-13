@@ -248,3 +248,55 @@ fn a_tree_of_captures_is_measured_all_the_way_down() {
         "one report per capture, named as the tree nests them"
     );
 }
+
+#[test]
+fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
+    // What a part the port cannot anchor needs (TUNNELI: `docs/fidelity/
+    // tunneli.md` §7.2). The same two captures as the refusal above — 300
+    // frames apart in their numbering — compared with the alignment that maps
+    // one numbering onto the other: the port's tick 400 with the reference's
+    // 700, and 600 with 900.
+    let reference = scratch("align-reference");
+    let rendered = scratch("align-rendered");
+    let out = scratch("align-out").join("reports");
+    write_capture(&reference, &[(700, 5), (900, 5)]);
+    write_capture(&rendered, &[(400, 5), (600, 5)]);
+    let args = |align: &str| {
+        vec![
+            "compare".to_string(),
+            "--reference".to_string(),
+            reference.to_str().unwrap().to_string(),
+            "--rendered".to_string(),
+            rendered.to_str().unwrap().to_string(),
+            "--out".to_string(),
+            out.to_str().unwrap().to_string(),
+            "--align".to_string(),
+            align.to_string(),
+        ]
+    };
+    let run = |align: &str| {
+        let args = args(align);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        xtask(&refs)
+    };
+
+    // Without it, the same comparison this tree already refuses.
+    let refused = run("0");
+    assert_eq!(refused.code, 2, "{}", refused.output());
+    assert!(refused.output().contains("no rendered frame within"), "{}", refused.output());
+    assert!(reports(&out).is_empty(), "a refused comparison left a report");
+
+    // With it: every frame identical, and the console says the alignment was
+    // applied, so a report cannot be mistaken for one made without it.
+    let aligned = run("300");
+    assert_eq!(aligned.code, 0, "{}", aligned.output());
+    assert!(aligned.output().contains("read +300"), "{}", aligned.output());
+    assert!(aligned.output().contains("frame 700: 0.0000%"), "{}", aligned.output());
+
+    // And the offset reported is the *net* one: one frame further off, the
+    // pair is at +1 and the console says so on the frame's own line.
+    let off_by_one = run("301");
+    assert_eq!(off_by_one.code, 0, "{}", off_by_one.output());
+    assert!(off_by_one.output().contains("offset +1"), "{}", off_by_one.output());
+    assert!(off_by_one.output().contains("alignment: 2 of 2 frames paired"), "{}", off_by_one.output());
+}
