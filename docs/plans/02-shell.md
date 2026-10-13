@@ -717,14 +717,31 @@ entry 0 is written from a value the port owns and the note records what the orig
 cargo run --bin secondreality -- --headless --part tunneli --dump-frames 900,1060,2000 \
     --dump-dir out/p2-tunneli
 cargo xtask compare --reference reference/parts/tunneli --rendered out/p2-tunneli \
-    --out out/p2-tunneli-diff     # expected: exit 2, indices the run cannot answer; and if run
-                                  # at the reference's own indices, exit 1 with the oracle's spread
+    --out out/p2-tunneli-diff     # exit 2: the run cannot answer those indices at all
+
+cargo xtask frames sheet --dir out/p2-tunneli-aligned --out out/p2-tunneli-aligned-sheet.png
+cargo xtask frames sheet --dir reference/parts/tunneli --out out/p2-tunneli-reference-sheet.png
 ```
 
-The evidence for this part is a **contact sheet a human looks at** (`xtask reference capture
---sheet` renders one from any frame directory; the port's dump is a frame directory) beside the
-reference's own sheet, plus the recorded comparison. The note names the reference's §8.2 and §1.8
-findings as the reason the diff is not a verdict.
+The evidence for this part is a **contact sheet a human looks at** beside the reference's own
+sheet, plus the recorded comparison. The note names the reference's §8.2 and §1.8 findings as the
+reason the diff is not a verdict.
+
+**Corrected in place by Task 5, on three measured points.** *(a)* `--sheet` cannot be handed an
+arbitrary frame directory: it is wired into `assets verify` and `reference capture` and neither
+reads a directory of dumped frames, so Task 5 added `cargo xtask frames sheet --dir <DIR>
+--out <PNG>` — it walks the directory through `compare`'s own `capture_directories` and lays the
+frames out with `sheet`'s layout. *(b)* The second reading above, "if run at the reference's own
+indices, exit 1 with the oracle's spread", is wrong about what such a run measures: a `--part
+tunneli` run has no boot anchor — `shell::boot_anchor` is `None` for this part, because it begins
+after GLENZ — so its ticks are its own and at the reference's indices it is **holding the black
+screen its tick 1,060 left**, which is why every differing pixel is a reference dot
+(3.7812 / 5.6312 / 3.1422 / 4.9344 %, exit 1). The oracle's spread is not what that number is.
+*(c)* What *can* be measured is the alignment: the port's ticks **78, 478, 778 and 878** are the
+reference's 3800, 4200, 4500 and 4600 — one offset, **3,722**, for all four — and there the port
+differs by 1,270 / 2,125 / 1,214 / 1,965 pixels of 64,000 (1.98–3.32 %), less than one frame of the
+part's own motion at three of the four. `docs/fidelity/tunneli.md` §7 and `PROGRESS.md` carry the
+numbers; `APPROXIMATIONS.md` A6 carries the residual.
 
 - [ ] **Step 4: Commit**
 
