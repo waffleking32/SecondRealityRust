@@ -22,6 +22,7 @@
 
 mod assets;
 mod compare;
+mod frames;
 mod oracle;
 mod reference;
 mod sheet;
@@ -78,10 +79,41 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Look at a directory of frames the port or a capture wrote: one PNG of
+    /// every frame in it, to read with the eyes rather than a percentage.
+    Frames {
+        #[command(subcommand)]
+        command: FramesCommand,
+    },
     /// Work with the curated asset tree in `assets/`.
     Assets {
         #[command(subcommand)]
         command: AssetsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum FramesCommand {
+    /// Write one PNG of every frame in a directory (or a tree). The tiles are
+    /// laid out in the order the frames are read — the same contact-sheet
+    /// layout `reference capture --sheet` and `assets verify --sheet` use — and
+    /// each tile's position and index is printed. Nothing is scaled, so a
+    /// 320x400 frame is a 320x400 tile.
+    ///
+    /// Exit code 0 when a sheet was written, 2 when it could not be (no
+    /// directory, no `manifest.json` anywhere below it, no frames, a frame file
+    /// that cannot be read, an `--out` inside the directory being read).
+    Sheet {
+        /// The directory (or tree) of frames to read: a directory holding a
+        /// `manifest.json`, or one holding capture directories at any depth
+        /// below it. What `xtask compare --rendered` accepts is what this
+        /// accepts, because it is the same walk.
+        #[arg(long)]
+        dir: PathBuf,
+        /// Where the PNG goes. A path inside `--dir` is refused: the frames are
+        /// inputs, and a sheet belongs beside them.
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -301,6 +333,9 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             run.as_deref(),
             out.as_deref(),
         )?),
+        Command::Frames {
+            command: FramesCommand::Sheet { dir, out },
+        } => frames::sheet(&frames::SheetOptions { dir, out }),
         Command::Assets {
             command:
                 AssetsCommand::Verify {

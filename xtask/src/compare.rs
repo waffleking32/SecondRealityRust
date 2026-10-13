@@ -347,12 +347,16 @@ pub fn verdict(percents: &[f32]) -> &'static str {
 
 /// The fields both manifests share (Ruling 2). Everything else — the
 /// capture's recipe, the dump's part name — is ignored.
+///
+/// `frames`' sheet command reads the same struct, which is why it and
+/// [`read_manifest`] are crate-visible: two readers of one manifest shape is
+/// one fewer place for the two tools to disagree about what a capture is.
 #[derive(Debug, Deserialize)]
-struct Manifest {
-    version: u32,
-    width: u16,
-    height: u16,
-    frames: Vec<FrameRef>,
+pub(crate) struct Manifest {
+    pub(crate) version: u32,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) frames: Vec<FrameRef>,
 }
 
 /// One frame on either side.
@@ -363,21 +367,21 @@ struct Manifest {
 /// `Engine::tick` resizes the frame from the view and a part can switch to
 /// double-scan mid-run.
 #[derive(Debug, Deserialize)]
-struct FrameRef {
-    index: u32,
+pub(crate) struct FrameRef {
+    pub(crate) index: u32,
     #[serde(default)]
-    idx: Option<String>,
-    rgb: String,
+    pub(crate) idx: Option<String>,
+    pub(crate) rgb: String,
     #[serde(default)]
-    width: Option<u16>,
+    pub(crate) width: Option<u16>,
     #[serde(default)]
-    height: Option<u16>,
+    pub(crate) height: Option<u16>,
 }
 
 impl FrameRef {
     /// This frame's geometry: its own when it carries one, the manifest's
     /// otherwise.
-    fn geometry(&self, manifest: &Manifest) -> (u16, u16) {
+    pub(crate) fn geometry(&self, manifest: &Manifest) -> (u16, u16) {
         (
             self.width.unwrap_or(manifest.width),
             self.height.unwrap_or(manifest.height),
@@ -511,7 +515,7 @@ fn capture_name(root: &Path, dir: &Path) -> String {
         .join("/")
 }
 
-fn read_manifest(dir: &Path) -> Result<Manifest, CompareError> {
+pub(crate) fn read_manifest(dir: &Path) -> Result<Manifest, CompareError> {
     let path = dir.join(MANIFEST_FILE);
     let json = fs::read_to_string(&path)
         .map_err(|e| CompareError::Io(format!("{}: {e}", path.display())))?;
