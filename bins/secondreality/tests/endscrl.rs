@@ -5,6 +5,12 @@
 //! What is left over here is the wiring only a process can answer: the
 //! registry, the shell's block anchor and numbering, the asset read at the path
 //! a run really uses, and where in the chain the scroller begins.
+//!
+//! **Two runs, not four.** A run of `--block 5` reaches index 14000 in 13,596
+//! ticks and takes over two minutes in a debug build, so the checks are grouped
+//! by the dump they need: one far run for the keyframes and everything the
+//! four frames themselves answer, and one five-index run at the chain's
+//! boundary.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -17,6 +23,15 @@ const KEYFRAMES: &str = "9100,10000,12000,14000";
 /// port's CRED ends at 8834 (`cred.md` §7), so the scroller's own tick 0 is
 /// 8835.
 const BOUNDARY: &str = "8834,8835,8836,8837,8838";
+
+/// The frames the reference holds, by the same names `reference/` files them
+/// under, and the part every one of them belongs to.
+const REFERENCE_FRAMES: [(u32, &str); 4] = [
+    (9100, "frame_009100.rgb"),
+    (10000, "frame_010000.rgb"),
+    (12000, "frame_012000.rgb"),
+    (14000, "frame_014000.rgb"),
+];
 
 /// Where a `cargo run` of the acceptance command starts, and where the part's
 /// own asset paths resolve: it reads them relative to the working directory.
@@ -63,11 +78,15 @@ fn frames(manifest: &serde_json::Value) -> Vec<(u64, String, u64, u64)> {
 
 #[test]
 fn the_four_keyframes_dump_in_the_references_own_numbering() {
-    let (dir, manifest) = dump("numbering", KEYFRAMES);
     // A run of `SECOND 5` begins at ENDLOGO — the demo's first graphics frame,
     // 404 (`MAIN/U2.ASM:906-908`, `reference-indices.md` §1.12) — and the
     // manifest has to say its indices are that space: a part numbering would
     // make every index below incomparable with `reference/`.
+    let reference_before = std::fs::read_dir(repository_root().join("reference/parts/endscrl"))
+        .unwrap()
+        .count();
+
+    let (dir, manifest) = dump("keyframes", KEYFRAMES);
     assert_eq!(manifest["index_origin"], "boot");
     assert_eq!(manifest["anchor"], 404);
     assert_eq!(manifest["part"], "endscrl");
@@ -80,6 +99,28 @@ fn the_four_keyframes_dump_in_the_references_own_numbering() {
         assert_eq!(part, "endscrl", "{index}");
         assert_eq!((*width, *height), (640, 400), "{index}");
     }
+
+    // Each frame is dumped under the part that owns it, which is what makes the
+    // acceptance's dump files `endscrl_*.rgb`; and the four are the reference's
+    // own frames, same geometry — the comparison itself is `xtask compare`'s,
+    // and it is **not** zero (the unit tests measure the reference's build), so
+    // what this asserts is only that both sides are the same frame of the same
+    // part, so that the tool's report is about the pixels and not the wiring.
+    for (index, name) in REFERENCE_FRAMES {
+        let dumped = std::fs::read(dir.join(format!("endscrl_{index:06}.rgb"))).unwrap();
+        let expected =
+            std::fs::read(repository_root().join("reference/parts/endscrl").join(name)).unwrap();
+        assert_eq!(dumped.len(), expected.len(), "{index}");
+        assert_eq!(dumped.len(), 640 * 400 * 3, "{index}");
+    }
+
+    // `reference/` is input-only: a run that wrote into it would be the failure
+    // the `--out` guard exists for.
+    let reference_after = std::fs::read_dir(repository_root().join("reference/parts/endscrl"))
+        .unwrap()
+        .count();
+    assert_eq!(reference_before, reference_after, "the run touched the reference tree");
+    assert_eq!(reference_after, 5, "the reference tree holds its four frames and its manifest");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -90,9 +131,8 @@ fn the_chain_hands_the_scroller_its_tick_zero_at_the_index_the_note_records() {
     // tick after the mode set (`src/parts/endscrl.rs`'s tick map — the frame
     // size follows the view from the tick after the one that sets it).
     let (dir, manifest) = dump("boundary", BOUNDARY);
-    let listed = frames(&manifest);
     assert_eq!(
-        listed,
+        frames(&manifest),
         [
             (8834, "cred".to_string(), 320, 200),
             (8835, "endscrl".to_string(), 320, 200),
@@ -102,52 +142,7 @@ fn the_chain_hands_the_scroller_its_tick_zero_at_the_index_the_note_records() {
         ],
         "the port's CRED→ENDSCRL boundary is not where `cred.md` §7 and the unit tests put it"
     );
-    // And the frames are named for the part that owns them, which is what makes
-    // the acceptance's dump files `endscrl_*.rgb`.
-    for index in [8835u32, 8837] {
-        assert!(
-            dir.join(format!("endscrl_{index:06}.rgb")).exists(),
-            "{index} was not dumped under the scroller's own name"
-        );
-    }
+    assert!(dir.join("endscrl_008835.rgb").exists());
     assert!(dir.join("cred_008834.rgb").exists());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// The part the reference's own frames belong to is the one the run's dump
-/// names, at the index the chain gives it: a reader who finds a mismatch here
-/// has the port's chain and the reference's, side by side.
-#[test]
-fn the_references_own_frames_are_the_parts_the_reference_holds_them_for() {
-    let (dir, manifest) = dump("reference", "9100");
-    assert_eq!(frames(&manifest), [(9100, "endscrl".to_string(), 640, 400)]);
-    let dumped = std::fs::read(dir.join("endscrl_009100.rgb")).unwrap();
-    let expected = std::fs::read(
-        repository_root().join("reference/parts/endscrl/frame_009100.rgb"),
-    )
-    .unwrap();
-    // The comparison itself is `xtask compare`'s, and it is **not** zero: the
-    // reference's own build differs from the tree this part is ported from (the
-    // unit tests measure the 25-row pitch and the raster). What this asserts is
-    // only that both sides are the same frame of the same part, 640×400, so
-    // that the tool's report is about the pixels and not about the wiring.
-    assert_eq!(dumped.len(), expected.len());
-    assert_eq!(dumped.len(), 640 * 400 * 3);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// `reference/` is input-only, and this test reads it: a run that wrote into it
-/// would be the failure the `--out` guard exists for.
-#[test]
-fn the_reference_directory_is_not_written_to() {
-    let before = std::fs::read_dir(repository_root().join("reference/parts/endscrl"))
-        .unwrap()
-        .count();
-    let (dir, _) = dump("readonly", "9100");
-    let after = std::fs::read_dir(repository_root().join("reference/parts/endscrl"))
-        .unwrap()
-        .count();
-    assert_eq!(before, after, "the run touched the reference tree");
-    assert_eq!(after, 5, "the reference tree holds its four frames and its manifest");
     let _ = std::fs::remove_dir_all(&dir);
 }

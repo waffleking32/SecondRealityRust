@@ -127,7 +127,9 @@ checks: the longest line is **40 characters** (`textline[100]`, `:57`), and its 
 needs `tstart = (639 - 579) / 2 = 30` with the last drawn column at 607 (`scanbuf[4][80]`,
 `:58`). Both are asserted, so the port's bounds checks are never reached — and the scan's
 end-of-buffer case, where the original reads past `text[64000]`, is unreachable in the
-reference's own longest run: 20,000 is 186 lines in, and the shipped text holds 542.
+reference's own longest run: 20,000 is 184 lines in from the reference's own start of 8917
+(`(20,000 - 8917 - 3) / 2 / 30`, the arithmetic the test asserts), and the shipped text holds
+542.
 
 ## 5. Which text the part reads
 
@@ -158,16 +160,19 @@ residuals are in that number, and they are measured separately.
 
 ### 6.1 The chain's offset — 82 frames, measured
 
-The reference's scroller does not begin where the port's chain begins it. ENDSCRL's start
-is known only as the window **(8840, 8939]** (`cred.md` §7, from the sweep's own refusal of
-8940 as a 640×400 screen), and the port's CRED ends at 8834, so this part's tick 0 is
+The reference's scroller does not begin where the port's chain begins it. Its start is known
+only as a window: the sweep's log shows 8840 still CRED's screen and refuses 8940 as
+`640x400` (`cred.md` §7), and this part's first 640×400 frame is its tick **2** (the mode set
+is tick 1, and the frame follows the view from the tick after) — so the reference's start
+lies in **[8841, 8938]**, and the port's CRED ends at 8834, so this part's tick 0 is
 index 8835.
 
 `the_references_own_header_pins_the_chains_offset` measures the gap from the reference's own
-picture. It uses the one thing both builds agree on — **the first line of the text**: for
-its first 24 ring lines both draw the same strip rows (`FONAY` only enters when the line
-counter comes round), so the tick whose display puts "Second Reality" on the reference's
-own rows is the tick that answers the reference's 9100. That tick is the port's **183**
+picture. It uses the one thing both builds agree on — **the rows the first line of the text
+is drawn on**: for its first 24 ring lines both draw the same strip rows (`FONAY` only enters
+when the line counter comes round) and neither has read a control line yet (§6.2), so the
+tick whose display puts "Second Reality" on the reference's own rows is the tick that
+answers the reference's 9100. That tick is the port's **183**
 (index 9018), and it puts the reference's start at **8917** ±1 frame (a picture is two
 ticks wide, so nothing finer is observable):
 
@@ -179,16 +184,50 @@ chain's offset                 82 frames = 41 scrolled lines
 
 82 is inside CRED's own measured bracket — "6 to 105 frames early" (`cred.md` §7), whose
 cause is CRED's 2-to-12-frames-per-screen drift over 21 screens — so the offset is the
-chain's, not this part's. `xtask compare --align 82` on a dump of the shifted indices
-shows the same shift from the other side: 9100 goes from 2.8473 % to **2.1758 %**, and
-nothing there is zero, because of §6.2.
+chain's, not this part's. `xtask compare --align 82` on a dump of the shifted indices shows
+the same shift from the other side, and what an alignment *cannot* absorb:
+
+```
+$ cargo run --bin secondreality -- --block 5 --headless \
+      --dump-frames 9018,9918,11918,13918 --dump-dir out/p2-endscrl-shift
+$ cargo xtask compare --reference reference/parts/endscrl --rendered out/p2-endscrl-shift \
+      --align 82 --out out/p2-endscrl-shift-diff
+frame 9100: 2.1758% differing (5570/256000 px), max delta 243
+frame 10000: 12.5437% differing (32112/256000 px), max delta 243
+verdict: different
+```
+
+The dump is a *measurement* of where the port's frames sit, not a way to pass: the
+acceptance's own command is the one above, run at `--align 0`.
 
 ### 6.2 The shipped build, measured — the reason the diff cannot be zero
 
-Three differences, each a measurement of `reference/parts/endscrl`'s own frames against
-this tree's source and assets:
+Five differences, each a measurement of `reference/parts/endscrl`'s own frames against this
+tree's source and assets, in the order they matter:
 
-**The text's pitch is 25 rows a line, not 30.** `MAIN.C:6` is `#define FONAY 30` and `:94`
+**1. The `[NN` control lines — the dominant term, and it is in the text.** This tree's
+`MAIN.C` has no notion of one: `:66-74` reads a line to its newline and `:77-88` draws
+whatever is in it, so a `[15` line is drawn as the two digits (the `[` is not in
+`fonaorder`, so it is a two-column gap). The reference reads it as a **directive: advance
+the ring NN rows and draw nothing** — and every other line advances it 25. The rule
+reproduces the reference's own bands *to the row* on the text file this tree ships, with no
+free parameter but the start measured above:
+`the_references_control_lines_advance_the_ring_and_draw_nothing` predicts every band of
+frames 10000 and 14000 from the tree's file and finds each one in the reference. The
+readable numbers of the same measurement:
+
+| what | measured |
+|---|---|
+| the shipped text's control lines | **163**, in four sizes: `[8` ×6, `[10` ×14, `[12` ×135, `[15` ×8 |
+| frame 10000, the tree's own lines 16, 17, 19, 20, 22 | ring rows **0, 25, 65, 90, 130** — a `[15` between each pair, so each step is **40 = 25 + 15** |
+| frame 14000, the personal greetings | **six** `[12` lines on screen, each a **37 = 25 + 12** step (`Lord Cyrix / Access Denied` sits across one) |
+
+The `[10` and `[8` lines are *not* visible in any of this part's four reference frames —
+their first is text line 430 and the deepest line frame 14000 reaches is 108 — so their 35-
+and 33-row steps cannot be measured from what is committed, and neither the note nor the
+test claims them.
+
+**2. The text pitch is 25 rows a line, not 30.** `MAIN.C:6` is `#define FONAY 30` and `:94`
 steps `line=(line+1)%FONAY`, so a line of text is 30 ring lines — 30 displayed rows — apart
 in the tree's source. The reference's frame 12000 — whose bands §21.2 identifies as the
 "Future Crew greets the following groups" block, twelve whole lines — has gaps of
@@ -196,39 +235,62 @@ in the tree's source. The reference's frame 12000 — whose bands §21.2 identif
 the smallest 25, which cannot be one line's fragments because a line's ink is 18 rows tall.
 `the_references_text_runs_at_twenty_five_rows_a_line_where_the_source_says_thirty` pins that
 list, and the same measurement on the port's own frame gives gaps that are multiples of 30
-and never 25. The shipped build therefore steps the line counter at 25; the tree's source
-says 30, and the port draws what the source says.
+and never 25.
 
-**The raster is not `ENDSCRL/FONA.UH`'s.** At the tick whose header sits on the reference's
-own rows, the port's header band differs from the reference's in **53 pixels of 11,520** (18
-rows × 640), of which 22 are ink and the rest are values. The port's `FONA.UH` is the
-tree's — and the tree holds the same art twice: `ENDSCRL/FONA.LBM` decodes to that raster
-value for value (`the_strip_is_the_one_the_part_scans`, and `assets/PROVENANCE.md` rows
-164-165 read the two as source and converted form).
-The shapes, widths and columns agree — the same 13 column runs, to the pixel — so this is a
-re-drawn raster, not a misread one, and it is the same class of difference A10 records for
-CRED.
+**3. The shipped `fonaorder` names seven characters the tree's does not.** The tree's order
+(`MAIN.C:13`) is 74 characters; the shipped build's is **81** — the packed
+`MAIN/DATA/ENDSCRL.EXE` carries the tree's own tail followed by the seven it adds:
 
-**The text the renderer sees has no carriage returns.** `assets/MAIN/DATA/ENDSCROL.TXT`
+```
+$ xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE
+00002446: 3637 3839 213f 2c2e 3a8f 8f28 292b 0000  6789!?,.:..()+..
+00002456: ff87 2d2a 3d27 5a84 9459 2f26 0065 2201  ..-*='Z..Y/&.e".
+```
+
+`Z`, `Y`, `/`, `&`, and the two high bytes `\x84` (`ä`) and `\x94` — the blob is
+PKLITE-packed, so the run is interrupted by four bytes of the stream between `()+` and
+`-*='`. The shipped text uses five of them: `/` 83 times, `&` 26, `Z` 12, `Y` once, and `ä`
+twice. `fonaw` is 0 for all six here, so the port draws a two-column gap where the reference
+draws a glyph. Measured on frame 14000's own lines, where the port's rendered extent meets
+the reference's band: `Daryl / Sun Projects` **15** columns wider, `Tran & White Shadow`
+**14**, `Dr.Weird / DanTe` **15**, `Jussi Leppänen` **14**, `Emphii, Mace & Shaft` **14** —
+and `Martti Palonen`, `Jussi Markula`, `Mikko Vierula` and `Wildfire:`, which name none of
+the seven, within **1** column, which is the raster below.
+
+**4. The raster is not `ENDSCRL/FONA.UH`'s either.** At the tick whose header sits on the
+reference's own rows, the port's header band differs from the reference's in **53 pixels of
+11,520** (18 rows × 640), of which 22 are ink and the rest are values. The port's `FONA.UH`
+is the tree's — and the tree holds the same art twice: `ENDSCRL/FONA.LBM` decodes to that
+raster value for value (`the_strip_is_the_one_the_part_scans`, and `assets/PROVENANCE.md`
+rows 164-165 read the two as source and converted form). The shapes, widths and columns
+agree — the same 13 column runs in the header, to the pixel — so this is a re-drawn raster
+and not a misread one, and it is the same class of difference A10 records for CRED.
+
+**5. The text the renderer sees has no carriage returns.** `assets/MAIN/DATA/ENDSCROL.TXT`
 holds `\r\n`; the centring arithmetic `tstart=(639-tstart)/2` (`:73`) with `fonaw[13] = 0`
 and a two-column pen step makes a line with the CR exactly **one column** further left than
 without it. The reference's header starts at column **219** and its second line at **41** —
-the CR-less width in both cases; the port's are 218 and 40. What put the buffer in that state is **not established**: the
-part reads the file through the demo's own service — the packed `ENDSCROL.TXT` of
-`MAIN/PACKFINA.INC:51`, which is this same 6,141-byte file — and the tree holds no source for
-that service, so a text-mode read that drops CRs and a pack that stored the text without them
-are both open. What is measured is the buffer the renderer saw; the port models the part's
-source, which reads the file's bytes, so it keeps them. A11 carries the measurement and says
-the same about the mechanism.
+the CR-less width in both cases; the port's are 218 and 40. What put the buffer in that state
+is **not established**: the part reads the file through the demo's own service — the packed
+`ENDSCROL.TXT` of `MAIN/PACKFINA.INC:51`, which is this same 6,141-byte file — and the tree
+holds no source for that service, so a text-mode read that drops CRs and a pack that stored
+the text without them are both open.
 
-`the_references_own_header_pins_the_chains_offset` asserts all three numbers in one place:
-the tick, the start, and the 53-pixel remainder — the geometry, the metrics, the palette,
-the plane/bit mapping and the display's own walking of the ring are all exercised by that
-same comparison, which is what makes the remainder the raster's.
+**Two of these drift, and that is why no alignment reaches zero.** The pitch makes the port
+advance the text 5 rows further per line than the reference (60 frames against 50), and the
+control lines make the reference skip whole blocks the port renders — so the content moves
+apart as the part runs, at a rate a single frame shift cannot follow. `--align 82` shows it
+from the other side: 9100 improves (2.8473 % → **2.1758 %**, the chain's offset being the
+one thing an alignment *can* absorb), and 10000 worsens (11.0676 % → 12.5437 %).
+
+`the_references_own_header_pins_the_chains_offset` asserts the tick, the start and the
+53-pixel remainder in one place — the geometry, the metrics, the palette, the plane/bit
+mapping and the display's own walking of the ring are all exercised by that same
+comparison, which is what makes the remainder the font's.
 
 ## 7. Tests
 
-`bins/secondreality/src/parts/endscrl.rs` (10 unit tests, reading the curated `assets/` and
+`bins/secondreality/src/parts/endscrl.rs` (12 unit tests, reading the curated `assets/` and
 the committed `reference/`):
 
 | test | what it pins |
@@ -243,11 +305,14 @@ the committed `reference/`):
 | `the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` | the modelling equivalence, 400 displayed rows compared as bytes at every iteration of a 500-line run against the original's own 401-line arithmetic |
 | `the_references_text_runs_at_twenty_five_rows_a_line_where_the_source_says_thirty` | §6.2's pitch, on the reference's frame and on the port's |
 | `the_references_own_header_pins_the_chains_offset` | §6.1's tick, start and residual, and §6.2's 53-pixel raster difference |
+| `the_references_control_lines_advance_the_ring_and_draw_nothing` | §6.2's `[NN` rule: the 163 control lines and their four sizes, and every band of frames 10000 and 14000 predicted from the tree's own text and found in the reference |
+| `the_shipped_order_names_seven_characters_the_trees_does_not` | §6.2's seven extra characters: `fonaw` 0 for each, the text's own counts, and the 14/15-column width of the lines that name them against ≤ 1 for the rest |
 
-`bins/secondreality/tests/endscrl.rs` (4 tests through the real binary): the four keyframes
-dump in the reference's own numbering (`index_origin: boot`, anchor 404, 640×400); the
-chain hands this part its tick 0 at **8835** with CRED's screen at 8834 and the geometry
-change at 8837; each frame is dumped under the part that owns it; and a run leaves
-`reference/` alone.
+`bins/secondreality/tests/endscrl.rs` (2 tests through the real binary, and **two** runs of
+it — a far one is 13,596 ticks, so the checks are grouped by the dump they need): the four
+keyframes dump in the reference's own numbering (`index_origin: boot`, anchor 404, 640×400),
+each under the part that owns it, and the run leaves `reference/` alone; and the chain hands
+this part its tick 0 at **8835** with CRED's screen at 8834 and the geometry change at
+8837.
 
 Every number in this note is produced by a test in this commit or by a command named here.

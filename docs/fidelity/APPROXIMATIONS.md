@@ -502,59 +502,75 @@ INCLUDE.OBJ`'s own blobs have) and the caption strings, which is what would turn
 window differs" into "here is what it says". Phase 9 compares every frame; these three are where
 that phase will first look.
 
-## A11 — ENDSCRL: the shipped build's text pitch, font and carriage returns are not the tree's
+## A11 — ENDSCRL: the shipped build's control lines, pitch, order and carriage returns are not the tree's
 
 **Part:** ENDSCRL (`ENDSCRL/MAIN.C` over `ENDSCRL/ASMYT.ASM` and `ENDSCRL/FONA.UH`), Phase 2. A6's
 and A10's class — this tree is not the released build — and the one that decides this part's
 acceptance comparison. The port below the register *is* this tree's source read through this tree's
-asset; the reference is the **released demo**, whose ENDSCRL was built from other constants and
-art.
+asset; the reference is the **released demo**, whose ENDSCRL was built from other constants, other
+text handling and other art.
 
 **The original.** The shipped part is `MAIN/DATA/ENDSCRL.EXE`, **9,965 bytes**, which is the file
 `MAIN/PACKFINA.INC:50` packs (`0x26ED` unpacked, `0x140C` packed) and which PKLITE packed — the tree
 holds two builds of this part and the reference ran the other one.
 
-**Where they differ, measured.** Three differences, each measured on `reference/parts/endscrl`'s
-own frames by `bins/secondreality/src/parts/endscrl.rs`'s reference tests:
+**Where they differ, measured.** Five differences, each measured on `reference/parts/endscrl`'s own
+frames by `bins/secondreality/src/parts/endscrl.rs`'s reference tests, in the order they matter:
 
-1. **The line pitch is 25 rows, not `FONAY 30`.** `MAIN.C:6`/`:94` step `line=(line+1)%FONAY`, so a
-   line of text is 30 displayed rows below the last in the tree's source. Frame 12000's twelve
-   whole text lines (the "Future Crew greets the following groups" block, `reference-indices.md`
-   §21.2) have gaps of 25, 100, 50, 25, 25, 25, 25, 25, 25 rows: every gap a multiple of 25, the
-   smallest 25 — which cannot be one line's fragments, a line's ink being 18 rows tall. The port's
+1. **The `[NN` control lines — the dominant term, and it is in the text.** This tree's `MAIN.C` has
+   no notion of one: `:66-74` reads a line to its newline and `:77-88` draws what is in it, so a
+   `[15` line is drawn as the two digits. The shipped build reads it as a **directive: advance the
+   ring NN rows and draw nothing**, and every other line advances it 25. The shipped text holds
+   **163** of them (`[8` ×6, `[10` ×14, `[12` ×135, `[15` ×8), and the rule *predicts* every band of
+   frames 10000 and 14000 from this tree's own file, with no free parameter but the start below:
+   frame 10000's lines 16, 17, 19, 20 and 22 sit at ring rows **0, 25, 65, 90, 130** (a `[15`
+   between each pair: steps of **40 = 25 + 15**), and frame 14000's greetings show **six** `[12`
+   lines, each a **37 = 25 + 12** step. The `[10` and `[8` lines are not visible in any of the four
+   reference frames (their first is text line 430; the deepest line frame 14000 reaches is 108), so
+   their 35- and 33-row steps are **unmeasured** here and the note says so.
+2. **The line pitch is 25 rows, not `FONAY 30`.** Frame 12000's twelve whole text lines have gaps of
+   25, 100, 50, 25, 25, 25, 25, 25, 25 rows: every gap a multiple of 25, the smallest 25. The port's
    own frame under the same measurement has gaps that are multiples of 30 and never 25.
-2. **The raster is not `ENDSCRL/FONA.UH`'s.** At the tick whose "Second Reality" header sits on the
-   reference's own rows, the header band differs in **53 pixels of 11,520** (18 rows × 640; 22 of
-   them ink, the rest values). The *geometry* is the tree's to the pixel — the same 13 ink-column
-   runs once the one-column shift below is applied — so this is a re-drawn raster and not a misread
-   one.
-3. **The renderer's text has no carriage returns.** `assets/MAIN/DATA/ENDSCROL.TXT` is CRLF; with
+3. **The shipped `fonaorder` names seven characters the tree's does not** — `Z`, `Y`, `/`, `&`, and
+   the high bytes `\x84` (`ä`) and `\x94`. The tree's order is 74 characters; the shipped build's is
+   **81**, and the packed EXE carries the tree's own tail followed by the seven
+   (`xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE`). The text uses five of them:
+   `/` 83 times, `&` 26, `Z` 12, `Y` once, `ä` twice. `fonaw` is 0 for all six here, so the port
+   draws a two-column gap where the reference draws a glyph: on frame 14000 the lines naming one are
+   **14–15 columns wider** than the port's rendering, and the lines naming none are within **1**.
+4. **The raster is not `ENDSCRL/FONA.UH`'s.** At the tick whose header sits on the reference's own
+   rows, the header band differs in **53 pixels of 11,520** (18 rows × 640; 22 of them ink, the rest
+   values), while its glyph geometry — the same 13 ink-column runs — is the tree's to the pixel.
+   The port's `FONA.UH` is the tree's: `ENDSCRL/FONA.LBM` decodes to it value for value. So this is
+   a re-drawn raster and not a misread one.
+5. **The renderer's text has no carriage returns.** `assets/MAIN/DATA/ENDSCROL.TXT` is CRLF; with
    `fonaw[13] = 0` and a two-column pen step, a line's centring `(639 - width) / 2` (`MAIN.C:73`) is
-   exactly one column further left with the CR than without. The reference's header starts at
-   column **219** and its second line at **41** — the CR-less width in both cases; the port's are
-   218 and 40. The demo read the file through its own file service, which serves the
-   packed `ENDSCROL.TXT` (`MAIN/PACKFINA.INC:51`) — and what that service did to the CRs is
-   **not established**: the tree holds no source for it, so a text-mode read and a CR-stripped
-   pack entry are both open. The port models the part's source, which reads the file's bytes,
-   and keeps them.
+   exactly one column further left with the CR than without. The reference's header starts at column
+   **219** and its second line at **41** — the CR-less width in both cases; the port's are 218 and
+   40. The demo read the file through its own file service, which serves the packed `ENDSCROL.TXT`
+   (`MAIN/PACKFINA.INC:51`); what that service did to the CRs is **not established** — the tree
+   holds no source for it, so a text-mode read and a CR-stripped pack entry are both open.
 
 **Why the port does not follow the reference.** These are the *part's build* and the *demo's file
-service*, and the port's authority for the former is this tree's source (`MAIN.C:6` says 30) and
-for the latter is the tree's asset (which holds the CRs). Bending either to make the comparison
-pass would be a fit rather than a translation — the shape A10 records for CRED, where the port
-likewise keeps the tree's captions and pictures and the register carries the difference.
+service*; the port's authority for the former is this tree's source (`MAIN.C:6` says 30, and its
+renderer has no control-line rule) and for the latter the tree's asset (which holds the CRs).
+Bending either to make the comparison pass would be a fit rather than a translation — the shape A10
+records for CRED, where the port likewise keeps the tree's captions and pictures and the register
+carries the difference.
 
 **Measured difference.** `cargo xtask compare` exits **1** on all four keyframes: 9100
 **2.8473 %**, 10000 **11.0676 %**, 12000 **9.9617 %**, 14000 **6.6828 %**, max channel delta 243,
 every frame paired at offset 0 (`docs/fidelity/endscrl.md` §6). Of that, the **chain's own
 offset** is 82 frames — the port's ENDSCRL begins at index 8835 and the reference's at 8917 ±1,
-measured from the first line of the text, which both builds draw identically — and the remainder
-is this entry. Because the two builds advance the text at different rates in *frames* (the
-reference a line every 25 rows = 50 frames, the port every 30 = 60), the content drifts apart as
-the part runs, and a single frame alignment cannot reconcile them: `--align 82` improves 9100
-(2.8473 % → 2.1758 %) and worsens 10000 (11.0676 % → 12.5437 %). Phase 3's music work does not
+measured from the first line of the text, whose *rows* both builds draw identically — and the
+remainder is this entry. **Two of the five drift**, which is why a single frame alignment cannot
+reconcile them: the pitch moves the content 5 rows per line apart, and the control lines make the
+reference skip blocks the port renders. `--align 82` shows both sides of that: 9100 improves
+(2.8473 % → 2.1758 %) and 10000 worsens (11.0676 % → 12.5437 %). Phase 3's music work does not
 touch any of it.
 
 **Replaces:** nothing. **Leads for whoever takes it:** the two builds of this part are
-`ENDSCRL/ENDSCRL.EXE` (14,113 bytes) and `MAIN/DATA/ENDSCRL.EXE` (9,965, PKLITE-packed); the
-shipped one's font and its `FONAY` are inside that packed image.
+`ENDSCRL/ENDSCRL.EXE` (14,113 bytes) and `MAIN/DATA/ENDSCRL.EXE` (9,965, PKLITE-packed) — the
+shipped one's control-line rule, its `FONAY`, its 81-character order and its raster are all inside
+that packed image. **The mechanism of the control-line rule is unknown, as the CR's is: what is
+measured is the behaviour** — a `[NN` line advances the ring NN rows and draws nothing.

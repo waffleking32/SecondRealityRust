@@ -649,13 +649,15 @@ mod tests {
     /// 25-row gap a line gap rather than one line's fragments.
     const STRIP_INK_ROWS: usize = 18;
 
-    /// The reference's own CRED→ENDSCRL bracket, measured in the captures: the
-    /// sweep's log refuses 8940 as `640x400` and 8840 is still CRED's last hold
-    /// (`out/b5-s5-cred-map.log:83`), so the reference's scroller begins
-    /// somewhere in `[8840, 8939]` — `reference-indices.md` §20/§21,
+    /// The reference's own CRED→ENDSCRL bracket, measured in the captures. The
+    /// sweep's log shows 8840 still CRED's screen — so the last CRED frame, and
+    /// this part's tick 0, is at 8841 or later — and refuses 8940 as `640x400`,
+    /// so the geometry change is at 8940 or before; the port's change is its
+    /// tick 2 (`tests/endscrl.rs` measures it at 8837 for a tick 0 of 8835), so
+    /// the start lies in **`[8841, 8938]`** — `reference-indices.md` §20/§21,
     /// `docs/fidelity/cred.md` §7.
-    const REFERENCE_FIRST: u32 = 8840;
-    const REFERENCE_LAST: u32 = 8939;
+    const REFERENCE_FIRST: u32 = 8841;
+    const REFERENCE_LAST: u32 = 8938;
 
     /// Where the port's chain hands this part its tick 0 — measured through the
     /// binary in `tests/endscrl.rs` from the dump's own `part` fields.
@@ -1017,6 +1019,37 @@ mod tests {
         lines
     }
 
+    /// The text's lines, one per newline, the last empty when the file ends in
+    /// one — `read_line`'s own unit.
+    fn text_lines_of(text: &[u8]) -> Vec<&[u8]> {
+        text.split(|byte| *byte == LINE_END).collect()
+    }
+
+    /// The ring rows one text line advances the display by, in the **shipped**
+    /// build: `NN` for a `[NN` control line, 25 for anything else. It is not in
+    /// the tree's source — see the test below for the measurement.
+    ///
+    /// It reads a line of the buffer the *shipped* renderer sees, which has no
+    /// carriage returns (`the_shipped_order_…` and `endscrl.md` §6.2); the
+    /// tree's file has one at the end of every line, so the caller strips them.
+    fn shipped_advance(line: &[u8]) -> usize {
+        match line {
+            [b'[', digits @ ..] if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit) => {
+                core::str::from_utf8(digits).unwrap().parse().unwrap()
+            }
+            _ => 25,
+        }
+    }
+
+    /// The ring row each text line *starts* at under that rule.
+    fn shipped_ring_rows(text: &[u8]) -> Vec<usize> {
+        let mut rows = vec![0usize];
+        for line in text_lines_of(text) {
+            rows.push(rows.last().unwrap() + shipped_advance(line));
+        }
+        rows
+    }
+
     /// The row gaps between the *whole* bands of `lines`: the first and last
     /// are dropped, because the window's own ends cut the oldest and the newest
     /// line on screen.
@@ -1186,6 +1219,31 @@ mod tests {
         run_to(&mut rig, &mut part, matched[0].0 + 1);
         let ours = column_runs(&rendered_frame(&rig), top, bottom);
         assert_eq!(theirs.len(), 13, "the header's glyph runs: {theirs:?}");
+
+        // Of the header band's 53 differing pixels, 22 are ink on one side only
+        // and the rest are two inks of different values — the shipped raster,
+        // not the geometry (`the_shipped_order_…` is where the *widths* differ).
+        let frame = rendered_frame(&rig);
+        let (mut ink_only, mut values) = (0usize, 0usize);
+        for y in top..=bottom {
+            for x in 0..LINE_LEN - 1 {
+                let at = (y * LINE_LEN + x) * 3;
+                let mine = &frame[at..at + 3];
+                let theirs = &reference_9100[at + 3..at + 6];
+                if mine == theirs {
+                    continue;
+                }
+                let mine_ink = mine != [0, 0, 0];
+                let theirs_ink = theirs != [0, 0, 0];
+                if mine_ink != theirs_ink {
+                    ink_only += 1;
+                } else {
+                    values += 1;
+                }
+            }
+        }
+        assert_eq!((ink_only, values), (22, 31), "the header band's 53 pixels, split");
+
         let shifted: Vec<(usize, usize)> =
             theirs.iter().map(|(start, width)| (start - 1, *width)).collect();
         assert_eq!(ours, shifted, "the header's glyph runs are not the tree's");
@@ -1203,4 +1261,205 @@ mod tests {
         assert_eq!(ours[0].0, 40, "the port's second line starts here");
     }
 
+    #[test]
+    fn the_references_control_lines_advance_the_ring_and_draw_nothing() {
+        // **The shipped build's dominant difference, and it is in the text.**
+        // This tree's `MAIN.C` has no notion of a `[NN` line: `:66-74` reads a
+        // line to its newline and `:77-88` draws whatever is in it, so a `[15`
+        // line is drawn as the two digits (the `[` is not in `fonaorder`, so it
+        // is a two-column gap). The reference does something else, and the
+        // arithmetic names it: a `[NN` line **advances the ring NN rows and
+        // draws nothing**, and every other line advances it 25 — not the
+        // source's 30.
+        //
+        // The rule reproduces the reference's own bands to the row, on the text
+        // file this tree ships, with no free parameter but the start measured in
+        // `the_references_own_header_pins_the_chains_offset`: a line's ring row
+        // is the sum of the advances before it, and it appears at screen row
+        // `ring - n + 400`, `n` being the ring rows written by index K
+        // (`n = (K - 8917 - 3) / 2 + 1`).
+        let (_, part) = started();
+        // The buffer the shipped renderer sees: the tree's file without the
+        // carriage returns it holds (the port keeps them; §6.2).
+        let text: Vec<u8> = part.text.iter().copied().filter(|byte| *byte != b'\r').collect();
+        let lines = text_lines_of(&text);
+        let rows = shipped_ring_rows(&text);
+
+        // The control lines themselves: 163 of them, in four sizes, which is
+        // exactly what the shipped text carries.
+        let markers: Vec<usize> = lines
+            .iter()
+            .copied()
+            .map(shipped_advance)
+            .filter(|advance| *advance != 25)
+            .collect();
+        assert_eq!(markers.len(), 163, "the shipped text's control lines");
+        let mut sizes = markers.clone();
+        sizes.sort_unstable();
+        sizes.dedup();
+        assert_eq!(sizes, [8, 10, 12, 15], "the control lines' sizes");
+        let count = |size: usize| markers.iter().filter(|marker| **marker == size).count();
+        assert_eq!((count(8), count(10), count(12), count(15)), (6, 14, 135, 8));
+
+        // The prediction, against the reference's own frames.
+        for index in [10000u32, 14000] {
+            let n: usize = (index as usize - 8917 - 3) / 2 + 1;
+            let mut measured: Vec<usize> =
+                text_lines(&reference(index)).iter().map(|(top, _)| *top).collect();
+            measured.sort_unstable();
+            let predicted: Vec<usize> = (0..lines.len())
+                .filter(|line| !lines[*line].is_empty() && shipped_advance(lines[*line]) == 25)
+                .filter_map(|line| {
+                    let row = rows[line] as isize - n as isize + 400;
+                    (0..400).contains(&row).then_some(row as usize)
+                })
+                .collect();
+            assert!(!predicted.is_empty(), "frame {index}: nothing predicted");
+            for row in &predicted {
+                assert!(
+                    measured.contains(row),
+                    "frame {index}: the rule predicts a line at row {row}, and the reference \
+                     has {measured:?} (n = {n})"
+                );
+            }
+            // The window's own ends cut the oldest and the newest line on
+            // screen, so at most two measured rows are ones the rule did not
+            // predict.
+            let extra: Vec<usize> =
+                measured.iter().copied().filter(|row| !predicted.contains(row)).collect();
+            assert!(extra.len() <= 2, "frame {index}: unexplained bands at {extra:?}");
+        }
+
+        // The readable numbers of the same measurement, where the record quotes
+        // them. Frame 10000: the tree's own lines 16, 17, 19, 20 and 22, with a
+        // `[15` between each pair, sit at ring rows 0, 25, 65, 90 and 130 —
+        // 40 = 25 + 15 across each control line.
+        assert_eq!(lines[16], b"Advanced Gravis");
+        assert_eq!(lines[17], b"Canada");
+        assert_eq!(lines[18], b"[15");
+        assert_eq!(lines[19], b"Epic MegaGames");
+        assert_eq!(lines[20], b"USA");
+        assert_eq!(lines[21], b"[15");
+        assert_eq!(lines[22], b"Waite Group Press");
+        let n: usize = (10000 - 8917 - 3) / 2 + 1;
+        let _ = n;
+        for (line, ring_row) in [(16usize, 0usize), (17, 25), (19, 65), (20, 90), (22, 130)] {
+            assert_eq!(rows[line] % 400, ring_row, "line {line}'s ring row");
+        }
+        assert_eq!(rows[19] - rows[17], 40);
+        assert_eq!(rows[22] - rows[20], 40);
+
+        // Frame 14000: six `[12` control lines between the personal greetings,
+        // six 37-row steps (25 + 12).
+        let n14000: usize = (14000 - 8917 - 3) / 2 + 1;
+        let on_screen = |row: usize| row > n14000 - 400 && row <= n14000;
+        let mut steps: Vec<usize> = Vec::new();
+        for line in 0..lines.len() {
+            // Both lines the control line sits between have to be on screen for
+            // the step to be one the reference's frame shows.
+            if shipped_advance(lines[line]) == 12
+                && on_screen(rows[line - 1])
+                && on_screen(rows[line + 1])
+            {
+                steps.push(rows[line + 1] - rows[line - 1]);
+            }
+        }
+        assert_eq!(steps, [37, 37, 37, 37, 37, 37], "the six `[12` steps on screen");
+        assert_eq!(lines[88], b"[12");
+        assert_eq!(lines[89], b"Lord Cyrix / Access Denied");
+        assert_eq!(lines[90], b"[12");
+
+        // The `[10` and `[8` lines are **not** visible in any of this part's
+        // four reference frames — their first is text line 430, and the deepest
+        // line any keyframe reaches is 110 — so their 35- and 33-row steps
+        // cannot be measured from what is committed, and this test does not
+        // claim them.
+        assert!(lines.iter().position(|line| shipped_advance(line) == 10).unwrap() > 400);
+        assert!(lines.iter().position(|line| shipped_advance(line) == 8).unwrap() > 400);
+        let deepest = (0..lines.len()).filter(|line| rows[*line] < (14000 - 8917 - 3) / 2 + 1).max();
+        assert_eq!(deepest, Some(108), "the deepest line frame 14000 reaches");
+    }
+
+    #[test]
+    fn the_shipped_order_names_seven_characters_the_trees_does_not() {
+        // The other half of the font difference, and the bigger half on the
+        // frames that show it. This tree's `fonaorder` (`MAIN.C:13`) is 74
+        // characters; the shipped build's is **81** — the packed
+        // `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail followed by the seven
+        // it adds:
+        //
+        //     $ xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE
+        //     00002446: 3637 3839 213f 2c2e 3a8f 8f28 292b 0000  6789!?,.:..()+..
+        //     00002456: ff87 2d2a 3d27 5a84 9459 2f26 0065 2201  ..-*='Z..Y/&.e".
+        //
+        // (`Z`, `Y`, `/`, `&`, and the two high bytes `\x84` and `\x94`; the
+        // blob is PKLITE-packed, so the run is interrupted by four bytes of the
+        // stream between `()+` and `-*='`.) The shipped text uses five of them:
+        // `/` 83 times, `&` 26, `Z` 12 times, `Y` once, and `\x84` (`ä`,
+        // "Leppänen") twice. `fonaw` is 0 for every one of them here, so the
+        // port draws a two-column gap and the reference draws a glyph.
+        let (mut _rig, mut part) = started();
+        let text = part.text.clone();
+        for absent in [b'Y', b'Z', b'/', b'&', 0x84, 0x94] {
+            let strip = part.strip.as_ref().unwrap();
+            assert_eq!(strip.fonaw[usize::from(absent)], 0, "{absent} is in the tree's order");
+        }
+        let counts = |byte: u8| text.iter().filter(|ch| **ch == byte).count();
+        assert_eq!(
+            (counts(b'/'), counts(b'&'), counts(b'Z'), counts(b'Y'), counts(0x84)),
+            (83, 26, 12, 1, 2),
+            "what the shipped text asks for and the tree's order cannot draw"
+        );
+
+        // And what that costs, on frame 14000's own lines: the port's rendered
+        // ink extent against the reference's band, line by line. The lines the
+        // shipped order names characters in are the shipped glyph's own width
+        // wider — 15 for `/`, 14 for `&` and for `ä` — and every line without
+        // one is within the raster's single column.
+        let frame = reference(14000);
+        let bands: Vec<(usize, usize)> = text_lines(&frame);
+        // The port's own rendering of a text line: `read_line` walks the
+        // buffer to it, `render_line` draws each strip row of its ink, and the
+        // extent is over all of them — the same measurement `column_runs` makes
+        // of the reference's band.
+        let mut rendered_width = |line: usize| -> usize {
+            part.tptr = 0;
+            for _ in 0..=line {
+                part.read_line();
+            }
+            let (mut left, mut right) = (LINE_LEN, 0usize);
+            for row in 0..STRIP_INK_ROWS {
+                part.line = row;
+                for (x, pixel) in part.render_line().iter().enumerate() {
+                    if *pixel != 0 {
+                        left = left.min(x);
+                        right = right.max(x);
+                    }
+                }
+            }
+            right.saturating_sub(left)
+        };
+        for (band_row, line, difference) in [
+            (28usize, 91usize, 15usize), // "Daryl / Sun Projects" — one `/`
+            (65, 93, 14),                // "Tran & White Shadow" — one `&`
+            (102, 95, 15),               // "Dr.Weird / DanTe" — one `/`
+            (139, 97, 1),                // "Martti Palonen" — none: the raster's own column
+            (176, 99, 1),                // "Jussi Markula" — none
+            (213, 101, 1),               // "Mikko Vierula" — none
+            (250, 103, 14),              // "Jussi Leppänen" — one `ä`
+            (325, 106, 1),               // "Wildfire:" — none
+            (375, 108, 14),              // "Emphii, Mace & Shaft" — one `&`
+        ] {
+            let (top, bottom) = *bands.iter().find(|(top, _)| *top == band_row).unwrap();
+            let runs = column_runs(&frame, top, bottom);
+            let theirs: usize = runs[runs.len() - 1].0 + runs[runs.len() - 1].1 - runs[0].0;
+            let ours = rendered_width(line);
+            assert_eq!(
+                theirs - ours,
+                difference,
+                "line {line} at row {band_row}: the reference's band is {} columns wider",
+                theirs - ours
+            );
+        }
+    }
 }

@@ -726,16 +726,33 @@ exit: 1
 
 **Two residuals, measured separately.** (1) **The chain's 82 frames**: the port's ENDSCRL tick 0 is
 index **8835** (measured through the binary — CRED's last frame at 8834, the geometry change at
-8837) and the reference's scroller begins at **8917 ±1**, measured from the one picture both builds
-draw identically (the first line of the text) — inside CRED's own bracket of 6 to 105 frames early
-(`cred.md` §7), so it is the chain's. `--align 82` on a dump of the shifted indices shows the same
-shift from the other side: 9100 2.8473 % → 2.1758 %. (2) **The shipped build**: the reference's text
-pitch is **25 rows a line where `MAIN.C:6` says `FONAY 30`** (measured over frame 12000's twelve
-whole text lines: every gap a multiple of 25, the smallest 25), its raster differs from `FONA.UH` in
-**53 of the header band's 11,520 pixels**, and its renderer's text has **no carriage returns** (the
-centring is one column further left than the tree's CRLF file gives). That is why no alignment
-reaches zero: the two builds advance the text at different rates in frames, so the content drifts.
-Registered as **A11**; the reasoning and the numbers are `docs/fidelity/endscrl.md` §6.
+8837) and the reference's scroller begins at **8917 ±1**, measured from the one thing both builds
+agree on (the *rows* the text's first line is drawn on) — inside CRED's own bracket of 6 to 105
+frames early (`cred.md` §7), so it is the chain's. `--align 82` on a dump of the shifted indices
+shows the same shift from the other side: 9100 2.8473 % → 2.1758 %, and 10000 *worse* (11.0676 % →
+12.5437 %), which is the second residual. (2) **The shipped build**, five differences, the first of
+which is the dominant one:
+
+- **The `[NN` control lines**: the tree's `MAIN.C` has no rule for them and draws the digits; the
+  reference advances the ring by **the number in the marker** and draws nothing, and every other
+  line advances it 25. The shipped text holds **163** of them (`[8` ×6, `[10` ×14, `[12` ×135,
+  `[15` ×8), and the rule *predicts every band* of frames 10000 and 14000 from this tree's own
+  file: frame 10000's lines 16, 17, 19, 20, 22 sit at ring rows **0, 25, 65, 90, 130** (steps of
+  **40 = 25 + 15** across each `[15`), and frame 14000 shows **six** `[12` steps of **37 = 25 + 12**.
+  The `[10`/`[8` steps are not visible in any of the four frames — recorded as **unmeasured**.
+- **The pitch**: **25 rows a line where `MAIN.C:6` says `FONAY 30`** (frame 12000's twelve whole
+  lines: every gap a multiple of 25, the smallest 25).
+- **The shipped `fonaorder` names seven characters the tree's does not** (`Z Y / & \x84 \x94`; the
+  packed `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail plus those seven — `xxd -s 9286 -l 40`),
+  and the text uses five of them: on frame 14000 the lines naming one are **14–15 columns wider**
+  than the port's rendering, the lines naming none within 1.
+- **The raster** differs from `FONA.UH` in **53 of the header band's 11,520 pixels** (geometry
+  identical: the same 13 ink-column runs).
+- **The text has no carriage returns** (the centring is one column further left than the tree's CRLF
+  file gives); the mechanism is unestablished.
+
+The first two drift, which is why no alignment reaches zero. Registered as **A11**; the reasoning and
+the numbers are `docs/fidelity/endscrl.md` §6.
 
 **The sheets, and the look.** `cargo xtask frames sheet --dir out/p2-endscrl --out
 out/p2-endscrl-sheet.png` sits beside the reference's own sheet. **The human look is deferred to the
