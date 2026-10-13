@@ -979,8 +979,8 @@ end, and the port's does. Three things follow, and the note states all three wit
 
 1. the part writes each line **once** (the port's wrap is the second copy);
 2. `yscrl` runs `0..400` where the original's runs `0..401`;
-3. the display origin is `(yscrl+1) * 640` — up to 256,000, which is `u16::MAX` + 124,462 and the
-   reason Task 3 happened.
+3. the display origin is `(yscrl+1) * 640` — up to 256,000, which is 124,930 past what the `u16`
+   pair could sum to (131,070) and the reason Task 3 happened.
 
 This is a *modelling* equivalence, not a shortcut, and the diff at four moving keyframes is what
 tests it: the four indices are the only place it can be wrong.
