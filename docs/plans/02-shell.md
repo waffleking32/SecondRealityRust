@@ -328,6 +328,15 @@ read. **It must not touch a frame file** — a backfill that rewrote a frame wou
 it is protecting, so the test writes a capture, runs the backfill, and asserts every frame file's
 bytes are unchanged.
 
+**This is the one task in the project allowed to write inside `reference/`, and the exception is
+narrow and evidenced.** The input-only rule protects the *frames*; this writes metadata beside
+them. Three conditions, all of them the task's deliverable: the frames are hashed **out of band**
+first (`sha256sum` in the shell, not through the tool — `find reference -name 'frame_*' -exec
+sha256sum {} + | sort` before and after, and the two lists must be identical); the backfill is
+idempotent (a second run changes no byte of any file); and the digests it writes are checked
+against the *pre-change* out-of-band list, not against its own work. Without the first and third,
+the field would be self-certifying, which is worse than absent.
+
 - [ ] **Step 3: `xtask reference verify`**
 
 Walks the tree the way `compare` does (any depth, a `manifest.json` marks a capture), and for each
