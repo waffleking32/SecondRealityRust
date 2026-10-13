@@ -706,8 +706,13 @@ fn the_part_retires_after_veke_frames() { ... }   // :3 `veke = 1060`, :212
 The inner loop patches its own colour immediate (`mov byte ptr cs:[@c+3],al`, `TUN10.PAS:168`); the
 port makes it a variable, which is what spec §429 says to do with it. The clip is
 `cmp di,319 / ja @yli` on the x sum only, with the y term indexing `rows[bx*2]` unchecked
-(`:179-190`) — preserve that shape: a dot whose y is out of range is *not* clipped in the original,
-and a port that adds a y bound draws one fewer artefact than the original does. `waitr` rewrites
+(`:179-190`) — preserve that shape: a dot whose y is out of range is *not* clipped in the original.
+**Task 5 measured what that artefact is worth, and the answer is nothing visible one way or the
+other**: every out-of-range y the part's own run produces reads `aa2`'s copy of `aa1` — 64,000 — so
+the dot plots past the 64,000 bytes a 200-line mode 13h screen reads, in the original and in any
+port alike, and a bounded read gives byte-identical frames. The read is kept because the source has
+it (and *modelled* rather than zeroed: 0 is a value the read never produces at a reachable y, and
+substituting it plots at row 0 — 85/142/88 pixels the reference does not show). `waitr` rewrites
 DAC entry 0 each frame from the BIOS shift flags (`:52`) — the port has no keyboard flags yet, so
 entry 0 is written from a value the port owns and the note records what the original keyed it to.
 
@@ -727,29 +732,24 @@ The evidence for this part is a **contact sheet a human looks at** beside the re
 sheet, plus the recorded comparison. The note names the reference's §8.2 and §1.8 findings as the
 reason the diff is not a verdict.
 
-**Corrected in place by Task 5, on three measured points.** *(a)* `--sheet` cannot be handed an
-arbitrary frame directory: it is wired into `assets verify` and `reference capture` and neither
-reads a directory of dumped frames, so Task 5 added `cargo xtask frames sheet --dir <DIR>
---out <PNG>` — it walks the directory through `compare`'s own `capture_directories` and lays the
-frames out with `sheet`'s layout. *(b)* The second reading above, "if run at the reference's own
-indices, exit 1 with the oracle's spread", is wrong about what such a run measures: a `--part
-tunneli` run has no boot anchor — `shell::boot_anchor` is `None` for this part, because it begins
-after GLENZ — so its ticks are its own and at the reference's indices it is **holding the black
-screen its tick 1,060 left**, which is why every differing pixel is a reference dot
-(3.7812 / 5.6312 / 3.1422 / 4.9344 %, exit 1). The oracle's spread is not what that number is.
-*(c)* What *can* be measured is the alignment: the port's ticks **78, 478, 778 and 878** are the
-reference's 3800, 4200, 4500 and 4600 — one offset, **3,722**, for all four — and there the port
-differs by 1,270 / 2,125 / 1,214 / 1,965 pixels of 64,000 (1.98–3.32 %), less than one frame of the
-part's own motion at three of the four. `docs/fidelity/tunneli.md` §7 and `PROGRESS.md` carry the
-numbers; `APPROXIMATIONS.md` A6 carries the residual.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add bins/secondreality/src/parts/tunneli.rs bins/secondreality/src/parts.rs \
-        bins/secondreality/tests/tunneli.rs docs/fidelity/tunneli.md
-git commit -m "Port TUNNELI: 77 rings, one plot per dot per frame, and the original's clip"
-```
+**Corrected in place by Task 5, on four measured points.** *(a)* `--sheet` cannot be handed an
+arbitrary frame directory: it is wired into `assets verify` and `reference capture` and neither reads
+a directory of dumped frames, so Task 5 added `cargo xtask frames sheet --dir <DIR> --out <PNG>` — it
+walks the directory through `compare`'s own `capture_directories` and lays the frames out with
+`sheet`'s layout. *(b)* The second reading above, "if run at the reference's own indices, exit 1 with
+the oracle's spread", is wrong about what such a run measures: a `--part tunneli` run has no boot
+anchor — `shell::boot_anchor` is `None` for this part, because it begins after GLENZ — so its ticks
+are its own and at the reference's indices it is **holding the black screen its tick 1,060 left**,
+which is why every differing pixel is a reference dot (3.7812 / 5.6312 / 3.1422 / 4.9344 %, exit 1).
+The oracle's spread is not what that number is. *(c)* What can be measured is the alignment: the
+port's ticks **78, 478, 778 and 878** are the reference's 3800, 4200, 4500 and 4600 — one offset,
+**3,722**, for all four — and the tool now takes it, `cargo xtask compare … --align 3722`, because a
+run with no anchor had no way to be measured at all. At it the port differs by 179 / 373 / 321 / 433
+pixels of 64,000 (0.28–0.68 %), all of it ink present on one side only. *(d)* The port's second
+palette ramp is **not** `:122`'s: the shipped build's is `(64-x) *3 div 5`, measured exactly and
+uniquely against the frames (§5 of the note, A6) — the port follows the shipped build, per D12, and
+this is the one line of this part's source the port does not transcribe. `docs/fidelity/tunneli.md`
+§7 and `PROGRESS.md` carry the numbers.
 
 ### Task 6: ENDLOGO — the end picture
 
