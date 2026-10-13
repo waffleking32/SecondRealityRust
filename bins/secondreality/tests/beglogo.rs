@@ -45,6 +45,25 @@ fn frame_file(dir: &Path, index: u32, extension: &str) -> Vec<u8> {
     std::fs::read(dir.join(format!("beglogo_{index:06}.{extension}"))).unwrap()
 }
 
+/// How many bytes of `rendered` differ from `expected`.
+///
+/// **The lengths are asserted first, and they have to be.** `iter().zip()`
+/// stops at the shorter side, so a *truncated* dump — the one failure a
+/// comparison test exists to catch — would compare a prefix, count zero
+/// differences and pass, while the message printed `expected.len()` as if it
+/// were what had been compared. A check that cannot fail is worth less than no
+/// check, so the length is what makes this count a comparison.
+fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
+    assert_eq!(
+        rendered.len(),
+        expected.len(),
+        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
+        rendered.len(),
+        expected.len()
+    );
+    rendered.iter().zip(expected).filter(|(a, b)| a != b).count()
+}
+
 /// The reference's own frame, read from the tree it is committed in.
 ///
 /// `reference/` is input-only, and reading it from a test is established
@@ -95,25 +114,33 @@ fn the_opening_white_is_index_15_through_the_dac_the_shell_installed() {
 
 #[test]
 fn the_two_fade_frames_are_the_references_own_bytes() {
-    // The two frames the suite would otherwise pin only through `xtask
-    // compare`. They are RGB-only in the reference (`reference-indices.md`
-    // §3.1: the indexed read is late by about twenty fade steps, D15), so this
-    // is the same comparison the tool makes of them — the DAC's 6→8-bit
-    // widening included, which is why they are the pair that would show a
-    // widening that differed. 430 and 900 are pinned above and in the part's
-    // own unit tests (the white field; the decode against `frame_000900.idx`).
+    // 470 and 560 are RGB-only in the reference (`reference-indices.md` §3.1:
+    // the indexed read is late by about twenty fade steps, D15), so this is the
+    // comparison `xtask compare` makes of them — the DAC's 6→8-bit widening
+    // included, which is why the pair is where a widening that differed would
+    // show. The part's own derivation test matches the same two frames against
+    // the same bytes through its arithmetic; what this adds is the whole
+    // binary: the registry, the anchor, the asset read from the repository
+    // root, and the `.rgb` the dump wrote to disk.
     let (dir, _) = dump("fade");
     for index in [470, 560] {
         let dumped = frame_file(&dir, index, "rgb");
         let expected = reference_frame(index, "rgb");
-        let differing = dumped.iter().zip(&expected).filter(|(a, b)| a != b).count();
         assert_eq!(
-            differing, 0,
-            "frame {index} differs from the reference in {differing} of {} channels",
-            expected.len()
+            differing_bytes(&dumped, &expected),
+            0,
+            "frame {index} differs from the reference"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The guard above can fail, which is the whole point of it: a dump cut short
+/// is exactly the case a bare `zip` would report as identical.
+#[test]
+#[should_panic(expected = "a short read is not a comparison")]
+fn a_truncated_frame_is_refused_rather_than_counted() {
+    differing_bytes(&[1, 2, 3], &[1, 2, 3, 4]);
 }
 
 #[test]
@@ -125,7 +152,11 @@ fn the_held_frame_is_the_picture_the_part_read() {
     let (dir, _) = dump("held");
     let image = sr_assets::load_path(&repository_root().join(PICTURE)).unwrap();
     let dumped = frame_file(&dir, 900, "idx");
-    let differing = dumped.iter().zip(image.pixels()).filter(|(a, b)| a != b).count();
-    assert_eq!(differing, 0, "the held frame differs from the picture in {differing} of {} pixels", dumped.len());
+    let differing = differing_bytes(&dumped, image.pixels());
+    assert_eq!(
+        differing, 0,
+        "the held frame differs from the picture in {differing} of {} indices",
+        dumped.len()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

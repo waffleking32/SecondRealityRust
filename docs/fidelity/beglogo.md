@@ -253,10 +253,20 @@ part leaves alone; the white DAC's 255 + 1 writes; the ramp's truncating divide 
 `c = 1, palette = 0` case where it lands on 62, one below a rounded ramp); the 508-byte upload's
 exact edges; the blit at tick 32 and the still-white first fade step; and the derivation scan of §3.
 
-`tests/beglogo.rs` (four, through the real binary from the repository root): the four keyframes in
+`tests/beglogo.rs` (five, through the real binary from the repository root): the four keyframes in
 the reference's own numbering (`index_origin: boot`, anchor 404, 320×400 each); 430 as 128,000 bytes
 of 15 and pure white RGB; 470 and 560 byte-for-byte against `reference/parts/beglogo`'s own RGB
-frames — the pair the suite would otherwise pin only through `xtask compare`, and the pair that would
-show the DAC's 6→8-bit widening if it differed; and the held 900 equal to `assets/BEG/SRTITLE.UP` as
-decoded. Together those are the wiring the unit tests cannot reach: the registry, the asset path, the
-anchor, and the three reference frames the part's own arithmetic does not already pin.
+frames, the pair that would show the DAC's 6→8-bit widening if it differed; the held 900 equal to
+`assets/BEG/SRTITLE.UP` as decoded; and the guard that makes those comparisons able to fail at all.
+
+What the four add over the unit tests is **the path a run really takes**, end to end: the registry,
+the shell's anchor and numbering, the asset read at `assets/BEG/SRTITLE.UP` from the repository root,
+the DAC the shell installed, and the frames the dump wrote to disk and read back — where the unit
+tests drive the part's arithmetic and its screen directly. The one reference *file* the suite does
+not compare byte-for-byte is `frame_000430.idx`: 430's content is pinned as index 15 and one palette
+entry, from the frame's own record, rather than by reading those 128,000 bytes.
+
+The fifth test is a guard with a guard: `differing_bytes` asserts both frames are the same length
+before it counts anything, because `iter().zip()` stops at the shorter side and a *truncated* dump is
+the one failure a comparison test exists to catch. `a_truncated_frame_is_refused_rather_than_counted`
+proves that assertion fires, rather than describing it.

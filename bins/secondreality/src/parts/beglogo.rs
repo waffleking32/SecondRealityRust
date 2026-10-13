@@ -583,6 +583,15 @@ mod tests {
         // the art agree: the reference's held frame is its indices, byte for
         // byte — 0 of 128,000 pixels different.
         let held = reference("frame_000900.idx");
+        // The lengths first: `zip` stops at the shorter side, so a truncated
+        // reference frame would compare a prefix and count zero differences.
+        assert_eq!(
+            held.len(),
+            image.pixels().len(),
+            "the reference's held frame is {} bytes where the decode is {}",
+            held.len(),
+            image.pixels().len()
+        );
         let differing = image.pixels().iter().zip(&held).filter(|(a, b)| a != b).count();
         assert_eq!(
             differing, 0,

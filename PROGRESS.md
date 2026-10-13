@@ -435,8 +435,8 @@ DAC's 6→8-bit widening was live on two of the four frames that judge the phase
 
 **The part.** `bins/secondreality/src/parts/beglogo.rs`, registered as `beglogo`; `BEG/BEG.C`'s four
 acts translated act for act and tick for tick, with `sr_assets::load_path` reading
-`assets/BEG/SRTITLE.UP` in its original format. Ten tests: six beside the part (unit) and four
-through the real binary from the repository root (`tests/beglogo.rs`) — **494 passed, 0 failed, 0
+`assets/BEG/SRTITLE.UP` in its original format. Eleven tests: six beside the part (unit) and five
+through the real binary from the repository root (`tests/beglogo.rs`) — **495 passed, 0 failed, 0
 warnings** (was 484; the count went up, not down).
 
 Four things this task settled rather than assumed, and each changed what the code does:
@@ -518,6 +518,22 @@ independently of this report. Seven findings, all applied:
 
 The comparison was not re-run for the round: nothing changed in the part's tick mapping, its
 arithmetic or its palette path, so exit 0 is untouched by these edits.
+
+**Fix round 2 (scoped re-review).** Two things, both the same defect in different clothes — a check
+that could not fail, which is the shape this phase's reviews keep finding:
+
+- **The new comparison in `tests/beglogo.rs` counted over whatever two frames had in common.**
+  `iter().zip()` stops at the shorter side, so a *truncated* dump compared a prefix, reported zero
+  differences and passed, while the message printed the reference's length as though it were what had
+  been compared. The helper now asserts both lengths first — and
+  `a_truncated_frame_is_refused_rather_than_counted` (`#[should_panic]`) proves the assertion fires
+  rather than describing it. The same idiom in the part's own derivation test (the decode against
+  `frame_000900.idx`) is guarded the same way.
+- **A false count in `beglogo.md` §8** — "the three reference frames the part's own arithmetic does
+  not already pin" was not a set of three (the unit derivation already matches 470 and 560, and the
+  decode is 900's indices). The paragraph now says what the integration tests actually add: the path
+  a run really takes, end to end, with the one reference *file* they do not compare byte-for-byte
+  named (`frame_000430.idx`).
 
 ## Phase log
 
