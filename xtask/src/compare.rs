@@ -52,8 +52,7 @@ use std::process::{Command, ExitCode};
 
 use serde::{Deserialize, Serialize};
 
-/// What a manifest may say it is; anything else is refused rather than read.
-const MANIFEST_VERSION: u32 = 1;
+use crate::reference::MANIFEST_VERSION;
 
 /// The file a capture directory is described by, on both sides.
 pub(crate) const MANIFEST_FILE: &str = "manifest.json";

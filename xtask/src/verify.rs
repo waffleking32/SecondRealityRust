@@ -37,17 +37,21 @@
 //! **The exit code is the contract** (the convention `compare` set): **0**
 //! every capture checked out, **1** any finding, **2** the tool could not
 //! check — nothing at the tree path, no manifest anywhere below it, a manifest
-//! it cannot read or does not know the version of, or a file it cannot read
-//! (a file that is merely *absent* is a finding, because a manifest naming a
-//! file that is not there is a failed check and not a failure to check).
+//! it cannot read or does not know the version of, a capture whose manifest
+//! names no frames (there is nothing to tell, which is not the same as nothing
+//! wrong), or a file it cannot read (a file that is merely *absent* is a
+//! finding, because a manifest naming a file that is not there is a failed
+//! check and not a failure to check).
 //!
 //! **The reference tree is input-only, and `backfill` is its single narrow
 //! exception.** It writes the digest fields into manifests and **touches no
-//! frame file**; `verify` and `compare` write nothing at all. The exception is
-//! the phase plan's, and it is conditional on the evidence: the frames were
-//! hashed out of band before and after the backfill, the two lists are
-//! identical, the backfill is idempotent, and the digests it wrote were
-//! checked against the pre-change list rather than against its own work.
+//! frame file**; `verify` and `compare` write nothing at all, and `backfill`
+//! writes a manifest only when it had a digest to record in it and only when
+//! every key that manifest carries survives the write. The exception is the
+//! phase plan's, and it is conditional on the evidence: the frames were hashed
+//! out of band before and after the backfill, the two lists are identical, the
+//! backfill is idempotent, and the digests it wrote were checked against the
+//! pre-change list rather than against its own work.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -70,9 +74,10 @@ pub enum VerifyError {
     /// was asked to write a tree it cannot read. Nothing was checked/written.
     Io(String),
     /// A manifest is readable but is not the record this tool reads: not a
-    /// manifest at all, or one whose `version` is not the version it knows.
-    /// Kept apart from [`VerifyError::Io`] because the repair is different —
-    /// the file is there and is the wrong file — even though both exit 2.
+    /// manifest at all, one whose `version` is not the version it knows, or
+    /// one that names no frames. Kept apart from [`VerifyError::Io`] because
+    /// the repair is different — the file is there and is the wrong file —
+    /// even though both exit 2.
     Malformed(String),
 }
 
@@ -186,6 +191,16 @@ pub fn command(tree: &Path) -> Result<ExitCode, VerifyError> {
 
     for capture in &captures {
         let manifest = read_manifest(&capture.dir)?;
+        // A capture with no frames has nothing to check, and "nothing to
+        // check" must not read as "checked out": there is no finding here,
+        // only an answer this tool cannot give, which is exit 2.
+        if manifest.frames.is_empty() {
+            return Err(VerifyError::Malformed(format!(
+                "{}: the manifest names no frames, so there is nothing to check against it — a \
+                 capture that holds nothing checkable is not a capture that checked out",
+                capture.dir.join(MANIFEST_FILE).display()
+            )));
+        }
         let inspection = inspect(capture, &manifest, tree)?;
         files += inspection.files;
         bytes += inspection.bytes;
@@ -220,27 +235,44 @@ pub fn command(tree: &Path) -> Result<ExitCode, VerifyError> {
 /// `cargo xtask reference backfill`: record every frame file's digest in the
 /// manifest beside it, for a tree that was filed before `capture` wrote them.
 ///
-/// Fills in a digest that is missing and never writes over one that disagrees
-/// with the file: a backfill that re-recorded a changed frame would destroy the
-/// evidence the digest exists to be — the record would come to describe
-/// whatever the tree happens to be, which is worse than no record. A manifest
-/// whose recorded digest differs from the file is refused, with the file named
-/// and `reference verify` pointed at as the tool that lists every such file.
+/// **It writes nothing but the digests it records, and only into a manifest
+/// that had one to record.** Three consequences, each a guard:
+///
+/// - a manifest whose digests are all recorded is not written at all, so the
+///   documented `reference backfill --tree reference` cannot change a byte of a
+///   tree that is already recorded — idempotent in the strongest form, and a
+///   manifest whose spacing differs is left exactly as it is;
+/// - a manifest that would lose a key on the way through [`CaptureManifest`]
+///   is refused rather than rewritten: `serde` drops fields the struct does not
+///   model, and an additive field a later phase puts in a manifest must not be
+///   deleted by the one command licensed to write there ([`lost_keys`], and
+///   D23 for why such a field does not bump `version`);
+/// - a recorded digest that disagrees with its file is a **finding, exit 1**,
+///   not a rewrite and not an error: what failed is the check "the record
+///   describes the file", the same failure `verify` reports with the same code.
+///   It is never written over — a backfill run after a frame changed would
+///   otherwise record the change as the truth, which is worse than no record —
+///   and a digest that *must* change needs the re-capture that changed the
+///   frame (`reference capture` writes the manifest beside its frames).
 ///
 /// Reads, digests and re-serialises the whole tree before writing anything, so
-/// a tree this tool cannot read (a missing frame, an unreadable manifest) is
-/// left exactly as it was rather than half-recorded.
+/// a tree it cannot read (a missing frame, an unreadable manifest, a manifest it
+/// would lose keys from) is left exactly as it was rather than half-recorded,
+/// and a tree with any finding is not written at all.
 pub fn backfill(tree: &Path) -> Result<ExitCode, VerifyError> {
     let captures = captures_in(tree)?;
     let mut planned: Vec<(PathBuf, String)> = Vec::new();
     let mut recorded = 0usize;
+    let mut findings: Vec<Finding> = Vec::new();
 
     for capture in &captures {
-        let mut manifest = read_manifest(&capture.dir)?;
+        let (path, text) = read_manifest_text(&capture.dir)?;
+        let mut manifest = parse_manifest(&path, &text)?;
+        let mut recorded_here = 0usize;
+
         for frame in &mut manifest.frames {
             for file in frame_files(frame) {
-                let path = capture.dir.join(&file.name);
-                let bytes = fs::read(&path).map_err(|e| {
+                let bytes = fs::read(capture.dir.join(&file.name)).map_err(|e| {
                     VerifyError::Io(format!(
                         "cannot backfill {}: the manifest names it and it cannot be read ({e}); \
                          nothing was written",
@@ -249,36 +281,58 @@ pub fn backfill(tree: &Path) -> Result<ExitCode, VerifyError> {
                 })?;
                 let actual = sha256_hex(&bytes);
                 match &file.digest {
-                    Some(recorded_digest) if *recorded_digest == actual => {}
-                    Some(recorded_digest) => {
-                        return Err(VerifyError::Io(format!(
-                            "{}: the manifest records {} {recorded_digest} and the file is \
-                             {actual}; a backfill fills in a digest that is missing and will not \
-                             write over one that disagrees — run `xtask reference verify --tree {}` \
-                             to see every file that has changed. Nothing was written.",
-                            under(capture, &file.name),
-                            file.field.name(),
-                            capture.dir.display()
-                        )));
-                    }
+                    Some(digest) if *digest == actual => {}
+                    Some(digest) => findings.push(Finding {
+                        path: under(capture, &file.name),
+                        what: format!(
+                            "the manifest records {} {digest} and the file is {actual}",
+                            file.field.name()
+                        ),
+                    }),
                     None => {
                         file.field.record(frame, actual);
-                        recorded += 1;
+                        recorded_here += 1;
                     }
                 }
             }
         }
 
-        let path = capture.dir.join(MANIFEST_FILE);
-        let json = serialise(&manifest, &path)?;
-        let current = fs::read_to_string(&path)
-            .map_err(|e| VerifyError::Io(format!("cannot read {}: {e}", path.display())))?;
-        // Idempotence, in the only form that can be checked: the bytes the
-        // tool would write are the bytes that are there, so it writes nothing
-        // (not even the same content back, which would move the file's time).
-        if current != json {
-            planned.push((path, json));
+        // Only a manifest that had a digest to record is written at all, and
+        // only when writing it would not lose a key it carries.
+        if recorded_here == 0 {
+            continue;
         }
+        let json = serialise(&manifest, &path)?;
+        let before: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| VerifyError::Malformed(format!("{}: {e}", path.display())))?;
+        let after: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| VerifyError::Malformed(format!("{}: {e}", path.display())))?;
+        let lost = lost_keys(&before, &after);
+        if !lost.is_empty() {
+            return Err(VerifyError::Io(format!(
+                "{} holds {} that this tool does not model, and a backfill writes the digest fields \
+                 and nothing else — writing it would delete them. Nothing was written.",
+                path.display(),
+                lost.join(", ")
+            )));
+        }
+        planned.push((path, json));
+        recorded += recorded_here;
+    }
+
+    if !findings.is_empty() {
+        for finding in &findings {
+            println!("FAIL {}: {}", finding.path, finding.what);
+        }
+        println!(
+            "backfill: {} finding(s) — nothing was written. A digest that must change needs the \
+             re-capture that changed the frame (`xtask reference capture` writes the manifest \
+             beside its frames), and `xtask reference verify --tree {}` lists every file whose \
+             bytes have moved.",
+            findings.len(),
+            tree.display()
+        );
+        return Ok(ExitCode::from(1));
     }
 
     for (path, json) in &planned {
@@ -304,6 +358,52 @@ pub fn backfill(tree: &Path) -> Result<ExitCode, VerifyError> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// The paths at which `before` holds a key `after` does not, as `frames[0].part`.
+///
+/// [`CaptureManifest`] deliberately does not deny unknown fields: an additive
+/// field must not stop an older reader, and such a field does not bump
+/// `version` (D23). The consequence is that `serde` **drops** every key the
+/// struct does not model, so re-serialising a manifest a later phase has
+/// extended would delete the field. `backfill` checks this before queueing a
+/// write and refuses the tree rather than writing it: the one command licensed
+/// to write inside `reference/` must not be able to write more than it is
+/// licensed to.
+fn lost_keys(before: &serde_json::Value, after: &serde_json::Value) -> Vec<String> {
+    let mut lost = Vec::new();
+    collect_lost_keys(before, after, "", &mut lost);
+    lost
+}
+
+fn collect_lost_keys(
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    at: &str,
+    lost: &mut Vec<String>,
+) {
+    use serde_json::Value;
+    match (before, after) {
+        (Value::Object(before), Value::Object(after)) => {
+            for (key, value) in before {
+                let path = if at.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{at}.{key}")
+                };
+                match after.get(key) {
+                    Some(other) => collect_lost_keys(value, other, &path, lost),
+                    None => lost.push(path),
+                }
+            }
+        }
+        (Value::Array(before), Value::Array(after)) => {
+            for (index, (value, other)) in before.iter().zip(after).enumerate() {
+                collect_lost_keys(value, other, &format!("{at}[{index}]"), lost);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Every capture at or below `tree`, through `compare`'s walk — the same
 /// all-the-way-down rule, so the two tools cannot come to disagree about what
 /// a capture is.
@@ -314,10 +414,23 @@ fn captures_in(tree: &Path) -> Result<Vec<CaptureDir>, VerifyError> {
 /// Read a capture's manifest, refusing one this tool does not know the shape
 /// or the version of rather than checking it against the wrong rules.
 fn read_manifest(dir: &Path) -> Result<CaptureManifest, VerifyError> {
+    let (path, text) = read_manifest_text(dir)?;
+    parse_manifest(&path, &text)
+}
+
+/// A capture's manifest as it is on disk, with its path for the messages.
+///
+/// `backfill` needs the text as well as the parsed manifest: what it may write
+/// is bounded by the keys the file carries ([`lost_keys`]).
+fn read_manifest_text(dir: &Path) -> Result<(PathBuf, String), VerifyError> {
     let path = dir.join(MANIFEST_FILE);
-    let json = fs::read_to_string(&path)
+    let text = fs::read_to_string(&path)
         .map_err(|e| VerifyError::Io(format!("cannot read {}: {e}", path.display())))?;
-    let manifest: CaptureManifest = serde_json::from_str(&json)
+    Ok((path, text))
+}
+
+fn parse_manifest(path: &Path, text: &str) -> Result<CaptureManifest, VerifyError> {
+    let manifest: CaptureManifest = serde_json::from_str(text)
         .map_err(|e| VerifyError::Malformed(format!("{}: {e}", path.display())))?;
     if manifest.version != MANIFEST_VERSION {
         return Err(VerifyError::Malformed(format!(
@@ -807,15 +920,16 @@ mod tests {
 
     #[test]
     fn backfill_refuses_a_tree_it_cannot_read_and_writes_nothing() {
-        // The other guard: a manifest naming a file that is not there is not a
-        // tree to record digests in, and the tree is left exactly as it was —
-        // including the second capture, which could have been backfilled.
+        // Two captures, the one that had a digest to record first: a refused
+        // backfill must leave the whole tree alone, not record the first
+        // capture and abandon the second.
         let tree = scratch("backfill-unreadable");
-        let mut manifest = capture();
-        manifest.frames[0].sha256 = None;
-        let dir = write_capture(&tree, "", &manifest);
-        write_manifest(&dir, &manifest);
-        fs::remove_file(dir.join(FRAME_A)).unwrap();
+        let mut recordable = capture();
+        recordable.frames[0].sha256 = None;
+        let first = write_capture(&tree, "a", &recordable);
+        write_manifest(&first, &recordable);
+        let second = write_capture(&tree, "b", &capture());
+        fs::remove_file(second.join(FRAME_A)).unwrap();
         let before = tree_digest(&tree);
 
         match backfill(&tree) {
@@ -826,13 +940,21 @@ mod tests {
             other => panic!("expected a refusal, got {other:?}"),
         }
         assert_eq!(tree_digest(&tree), before, "a refused backfill wrote something");
+        // The capture that could have been recorded still has no digest: the
+        // refusal is the whole tree's, not the failing capture's.
+        assert_eq!(
+            read_manifest(&first).unwrap().frames[0].sha256,
+            None,
+            "the first capture was written before the second was found unreadable"
+        );
     }
 
     #[test]
     fn backfill_will_not_write_over_a_digest_that_disagrees() {
         // If it did, running it after a frame changed would bless the change:
         // the record would come to describe whatever the tree happens to be,
-        // which is worse than no record.
+        // which is worse than no record. It is a *finding* (exit 1), not a
+        // failure to read — the same code `verify` gives for the same fact.
         let tree = scratch("backfill-disagrees");
         let mut manifest = capture();
         manifest.frames[1].sha256 = Some(sha256_hex(b"not this file"));
@@ -840,14 +962,101 @@ mod tests {
         write_manifest(&dir, &manifest);
         let before = tree_digest(&tree);
 
+        assert_eq!(
+            backfill(&tree).unwrap(),
+            ExitCode::from(1),
+            "a changed frame is a finding, not a refusal to look"
+        );
+        assert_eq!(tree_digest(&tree), before, "a backfill with a finding wrote something");
+    }
+
+    #[test]
+    fn backfill_leaves_a_manifest_it_has_nothing_to_record_in_alone() {
+        // It writes only a manifest it had a digest to record in, so a
+        // manifest whose digests are all there is not re-formatted, re-ordered
+        // or otherwise touched.
+        let tree = scratch("backfill-formatted");
+        let manifest = capture();
+        let dir = write_capture(&tree, "", &manifest);
+        let canonical = fs::read_to_string(dir.join(MANIFEST_FILE)).unwrap();
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            canonical.replace("  ", "    "),
+        )
+        .unwrap();
+        let before = tree_digest(&tree);
+
+        assert_eq!(backfill(&tree).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(tree_digest(&tree), before, "a manifest with nothing to record was rewritten");
+    }
+
+    #[test]
+    fn backfill_refuses_a_manifest_it_would_lose_keys_from() {
+        // `CaptureManifest` models the fields this tool knows and `serde`
+        // drops the rest, so a manifest a later phase has extended would come
+        // back without its new field. The one command licensed to write inside
+        // `reference/` refuses rather than write that.
+        let tree = scratch("backfill-unknown-key");
+        let mut manifest = capture();
+        manifest.frames[1].sha256 = None;
+        let dir = write_capture(&tree, "", &manifest);
+        let mut value = serde_json::to_value(&manifest).unwrap();
+        value["future_field"] = serde_json::json!("what a later phase added");
+        value["frames"][1]["part"] = serde_json::json!("beglogo");
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            format!("{}\n", serde_json::to_string_pretty(&value).unwrap()),
+        )
+        .unwrap();
+        let before = tree_digest(&tree);
+
         match backfill(&tree) {
             Err(VerifyError::Io(message)) => {
-                assert!(message.contains(FRAME_B), "the file is named: {message}");
-                assert!(message.contains("will not write over"), "{message}");
-                assert!(message.contains("reference verify"), "{message}");
+                assert!(message.contains("future_field"), "the key is named: {message}");
+                assert!(message.contains("frames[1].part"), "the path is named: {message}");
+                assert!(message.contains("Nothing was written"), "{message}");
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
         assert_eq!(tree_digest(&tree), before, "a refused backfill wrote something");
+    }
+
+    #[test]
+    fn lost_keys_names_what_a_write_would_delete_by_path() {
+        let before: serde_json::Value =
+            serde_json::from_str(r#"{"a": 1, "b": {"c": 2}, "frames": [{"rgb": "x", "part": "b"}]}"#)
+                .unwrap();
+        let after: serde_json::Value =
+            serde_json::from_str(r#"{"a": 1, "b": {}, "frames": [{"rgb": "x"}]}"#).unwrap();
+        assert_eq!(
+            lost_keys(&before, &after),
+            vec!["b.c".to_owned(), "frames[0].part".to_owned()]
+        );
+        // Nothing lost is nothing reported, and neither are keys the write
+        // *adds* (`boot` has a default, so a manifest filed without one gains
+        // it) — that is the reader's semantics, not a deletion.
+        assert!(lost_keys(&after, &after).is_empty());
+        assert!(lost_keys(&after, &before).is_empty());
+    }
+
+    #[test]
+    fn a_capture_that_names_no_frames_cannot_be_checked() {
+        // Nothing checkable is not the same as nothing wrong: there is no
+        // answer to give, which is exit 2 and not a green run.
+        let tree = scratch("empty-capture");
+        let mut manifest = capture();
+        manifest.frames.clear();
+        let dir = write_capture(&tree, "", &manifest);
+        write_manifest(&dir, &manifest);
+        // A stray file beside it does not make it checkable either.
+        fs::write(dir.join("frame_000999.rgb"), [0u8; 12]).unwrap();
+
+        match command(&tree) {
+            Err(VerifyError::Malformed(message)) => {
+                assert!(message.contains("names no frames"), "{message}");
+                assert!(message.contains("manifest.json"), "the capture is named: {message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 }

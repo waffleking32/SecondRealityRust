@@ -173,9 +173,10 @@ enum ReferenceCommand {
     /// missing, is a length its geometry does not imply, is not named by the
     /// manifest beside it, or does not hash as its entry records; 2 when the
     /// tool could not check at all (nothing at the tree path, no manifest
-    /// below it, a manifest it cannot read or does not know, a file it cannot
-    /// read). A file that is merely absent is a finding and not exit 2: the
-    /// check that failed is "every file the manifest names exists".
+    /// below it, a manifest it cannot read or does not know, a capture whose
+    /// manifest names no frames, a file it cannot read). A file that is merely
+    /// absent is a finding and not exit 2: the check that failed is "every
+    /// file the manifest names exists".
     Verify {
         /// The tree to walk: every directory below it holding a
         /// `manifest.json` is a capture, at any depth. Nothing is written.
@@ -185,8 +186,13 @@ enum ReferenceCommand {
     /// Write every frame file's digest into the manifest beside it, for a tree
     /// filed before `capture` recorded them.
     ///
-    /// Fills in a digest that is missing; refuses (exit 2) a tree it cannot
-    /// read, and refuses to write over a digest that disagrees with the file.
+    /// Records a digest that is missing, and writes a manifest only when it
+    /// had one to record: one whose digests are all there is not touched, and
+    /// neither is one carrying a key this tool does not model — writing it
+    /// would delete that key. Exit 1 when a recorded digest disagrees with its
+    /// file: a changed frame is a finding, it is never written over, and
+    /// nothing is written. Exit 2 when it cannot record the tree at all (a
+    /// manifest or frame it cannot read, a manifest it would lose keys from).
     /// **The only command in this tool that writes inside `reference/`, and it
     /// touches no frame file** — the phase plan allows this once, on the
     /// condition that the frames are hashed out of band before and after.

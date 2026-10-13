@@ -262,9 +262,28 @@ fn backfill_records_the_digests_of_a_tree_filed_without_them() {
 }
 
 #[test]
+fn a_capture_that_names_no_frames_cannot_be_checked_and_exits_two() {
+    // "Nothing to check" is not "checked out": there is no finding here, only
+    // an answer this tool cannot give.
+    let tree = copied_capture("empty-capture");
+    let path = tree.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["frames"] = serde_json::json!([]);
+    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap())).unwrap();
+
+    let run = xtask(&manifest_dir(), &tree, "verify");
+    assert_eq!(run.code, 2, "{}", run.output());
+    assert!(run.output().contains("names no frames"), "{}", run.output());
+    assert!(run.output().contains("manifest.json"), "the capture is named: {}", run.output());
+}
+
+#[test]
 fn backfill_refuses_a_digest_that_disagrees_rather_than_recording_the_file() {
     // Otherwise a backfill run after a frame changed would bless the change,
-    // and the record would describe whatever the tree happens to be.
+    // and the record would describe whatever the tree happens to be. The
+    // failure is a *finding* — exit 1, the code `verify` gives the same fact —
+    // and it names the way out as well as the tool that lists the damage.
     let tree = copied_capture("backfill-disagrees");
     let path = tree.join("manifest.json");
     let json = fs::read_to_string(&path).unwrap().replace(
@@ -275,9 +294,59 @@ fn backfill_refuses_a_digest_that_disagrees_rather_than_recording_the_file() {
     let before = tree_bytes(&tree);
 
     let run = xtask(&manifest_dir(), &tree, "backfill");
+    assert_eq!(run.code, 1, "{}", run.output());
+    assert!(run.stdout.contains("FAIL frame_000010.rgb"), "{}", run.output());
+    assert!(run.output().contains("nothing was written"), "{}", run.output());
+    assert!(
+        run.output().contains("reference capture"),
+        "the message says how a digest legitimately changes: {}",
+        run.output()
+    );
+    assert_eq!(tree_bytes(&tree), before, "a backfill with a finding wrote something");
+}
+
+#[test]
+fn backfill_writes_nothing_into_a_manifest_it_would_lose_keys_from_and_exits_two() {
+    // The manifest is the only record of what was captured, and it is not the
+    // only thing that can be in the file: a field a later phase adds must not
+    // be deleted by the one command licensed to write inside `reference/`.
+    let tree = copied_capture("backfill-key");
+    let path = tree.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["frames"][0].as_object_mut().unwrap().remove("sha256");
+    manifest["future_field"] = serde_json::json!("what a later phase added");
+    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap())).unwrap();
+
+    // It has a digest to record, so it *would* write — and refuses instead.
+    let run = xtask(&manifest_dir(), &tree, "backfill");
     assert_eq!(run.code, 2, "{}", run.output());
-    assert!(run.output().contains("will not write over"), "{}", run.output());
-    assert_eq!(tree_bytes(&tree), before, "a refused backfill wrote something");
+    assert!(run.output().contains("future_field"), "{}", run.output());
+    assert!(run.output().contains("Nothing was written"), "{}", run.output());
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(written.get("future_field").is_some(), "the field was deleted");
+    assert!(
+        written["frames"][0].get("sha256").is_none(),
+        "a digest was written despite the refusal"
+    );
+}
+
+#[test]
+fn backfill_writes_only_a_manifest_that_had_a_digest_to_record() {
+    // A manifest whose digests are all recorded is not touched at all, so the
+    // documented `reference backfill --tree reference` cannot change a byte of
+    // a tree that is already recorded — even one formatted differently.
+    let tree = copied_capture("backfill-nothing-to-do");
+    let path = tree.join("manifest.json");
+    let reformatted = fs::read_to_string(&path).unwrap().replace("  ", "    ");
+    fs::write(&path, reformatted).unwrap();
+    let before = tree_bytes(&tree);
+
+    let run = xtask(&manifest_dir(), &tree, "backfill");
+    assert_eq!(run.code, 0, "{}", run.output());
+    assert!(run.output().contains("nothing written"), "{}", run.output());
+    assert_eq!(tree_bytes(&tree), before, "a manifest with nothing to record was rewritten");
 }
 
 /// The three frame files' bytes, in a fixed order.
