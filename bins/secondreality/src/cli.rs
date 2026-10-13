@@ -150,10 +150,15 @@ impl Cli {
         if self.block.is_some() && self.part.is_some() {
             return Err("give --part or --block, not both".to_string());
         }
-        if self.block.is_some() && !self.headless {
-            // A block is a run of several parts, and the window still drives
-            // one; the phase's window task is what changes that.
-            return Err("--block needs --headless".to_string());
+        // The block's first part has to be one the port can run, in **either**
+        // mode: the window drives the same `Sequence` a headless run dumps, so
+        // a block it cannot start at is a command-line mistake wherever it is
+        // asked for. Checked before the mode split — and here rather than where
+        // `--block` is read, so that a command line that contradicts itself
+        // says *that* first.
+        if let Some(block) = self.block {
+            let first = self.first_part()?;
+            shell::resolve(first).map_err(|e| format!("--block {block}: {e}"))?;
         }
         if !self.headless {
             // Silently ignoring a dump would be a trap: the run would look
@@ -196,13 +201,6 @@ impl Cli {
             if !(seconds.is_finite() && seconds > 0.0) {
                 return Err("--run-seconds must be a positive number of seconds".to_string());
             }
-        }
-        // The block's first part has to be one the port can run. Checked here
-        // rather than where `--block` is read, so that a command line that
-        // contradicts itself says *that* first.
-        if let Some(block) = self.block {
-            let first = self.first_part()?;
-            shell::resolve(first).map_err(|e| format!("--block {block}: {e}"))?;
         }
         self.dump_indices_are_reachable()
     }
@@ -473,6 +471,21 @@ mod tests {
         let unknown = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "1", "--block", "7"])
             .unwrap_err();
         assert!(unknown.contains("unknown block"), "{unknown}");
+    }
+
+    #[test]
+    fn a_block_is_a_run_the_window_drives_as_well_as_a_dump() {
+        // The window drives the same `Sequence` a headless run dumps, so a
+        // block is no longer refused outside `--headless`. What is still
+        // refused, in either mode, is a block whose first part the port cannot
+        // start at: `SECOND 3` begins at MNTSCRL.
+        let cli = parse(&["--block", "5"]).unwrap();
+        assert_eq!(cli.block, Some('5'));
+        assert!(!cli.headless, "the window is the default mode");
+        assert!(parse(&["--block", "2"]).is_ok());
+
+        let message = parse(&["--block", "3"]).unwrap_err();
+        assert!(message.contains("mntscrl is not ported yet"), "{message}");
     }
 
     #[test]

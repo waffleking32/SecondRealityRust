@@ -2,8 +2,10 @@
 //!
 //! Two ways to run it, chosen before anything is initialised: a window, which
 //! needs SDL2 and a display, or `--headless`, which needs neither and must not
-//! touch video at all. The engine keeps zero runtime dependencies; the window
-//! is a client of it like any other.
+//! touch video at all. Both drive the same `Sequence` — a block's ported parts
+//! in the demo's own order, or one part — so what a window plays and what a
+//! dump holds are the same run. The engine keeps zero runtime dependencies;
+//! the window is a client of it like any other.
 
 mod cli;
 mod headless;
@@ -13,8 +15,6 @@ mod window;
 
 use std::error::Error;
 use std::process::ExitCode;
-
-use sr_engine::Runner;
 
 use crate::shell::{Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
 
@@ -49,21 +49,17 @@ fn main() -> ExitCode {
     }
 }
 
-/// The runner the window drives: the demo's surface, the picture's starting
-/// geometry, and the one part the command line named.
+/// The run both modes drive: the ported parts of a block, in the demo's own
+/// order, or the one part `--part` named — numbered from the reference index
+/// the run's first part begins at, and drawn on the demo's own surface.
 ///
 /// The view leaves its line stride unset, so the beam reads the surface's own
 /// rows whatever the picture's width is: a part that draws through `Surface`
 /// and never touches the stride still gets its picture back un-sheared.
-fn new_runner(part_name: &str) -> Result<Runner, Box<dyn Error>> {
-    let part =
-        parts::new_part(part_name).ok_or_else(|| format!("unknown part {part_name:?}"))?;
-    Runner::new(SURFACE_WIDTH, SURFACE_HEIGHT, shell::start_view(), part).map_err(Into::into)
-}
-
-/// The sequence the headless mode drives: the ported parts of a block, in the
-/// demo's own order, or the one part `--part` named — numbered from the
-/// reference index the run's first part begins at.
+///
+/// Nothing here touches SDL: the window presents this run's frames and
+/// `--headless` dumps them, which is what keeps a machine with no display able
+/// to run the demo and answer for it.
 fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
     let plan = match cli.block {
         Some(block) => shell::block_plan(block)?,

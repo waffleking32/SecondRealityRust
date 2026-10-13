@@ -105,6 +105,19 @@ impl Engine {
         self.exit_requested
     }
 
+    /// Ask the running part to quit (`dis_exit()`), from **outside** the part:
+    /// the exit flag the demo's interrupt server sets from the keyboard —
+    /// "1=exit key pressed" (`DIS/DISINT.ASM:11`), set by `checkkeys` (`:112`)
+    /// and handed to the part's own loop by `exit_2` (`:186-190`).
+    ///
+    /// The request is exactly a part's own: the next [`PartCtx`] the part is
+    /// handed carries it, so a part that polls the flag returns of its own
+    /// accord, and [`exit_requested`](Engine::exit_requested) reports it until
+    /// the next `start` so a shell above the engine can act on it either way.
+    pub fn request_exit(&mut self) {
+        self.exit_requested = true;
+    }
+
     /// Call `part.init`. Copper slots are cleared first.
     pub fn start(&mut self, part: &mut dyn Part) -> Result<(), EngineError> {
         let name = part.name();
@@ -180,7 +193,12 @@ impl Engine {
                     band,
                     bands,
                     true,
-                    false,
+                    // The exit flag as it stands: a request made from outside
+                    // (`request_exit`) reaches the part through exactly this
+                    // field, and one made in an earlier band of this tick or by
+                    // a copper callback stays visible in the later ones — the
+                    // flag is sticky, not per-call.
+                    self.exit_requested,
                 );
                 (part.frame(&mut ctx), ctx.exit_requested)
             };
@@ -238,7 +256,7 @@ impl Engine {
                 band,
                 bands,
                 true,
-                false,
+                self.exit_requested,
             );
             f(&mut ctx);
             ctx.exit_requested
@@ -642,5 +660,49 @@ mod tests {
         let frames_before = r.part_frame();
         assert_eq!(r.advance(Duration::from_secs(1)), 0, "an exit request must stop the ticking");
         assert_eq!(r.part_frame(), frames_before);
+    }
+
+    #[test]
+    fn a_request_from_outside_the_part_reaches_the_parts_own_context() {
+        // The keyboard's exit flag, modelled: the DIS sets it from the
+        // interrupt (`DIS/DISINT.ASM:151-153`) and `exit_2` (`:186-190`) hands
+        // it to the part's loop, so what the part reads is *the part's* flag
+        // and not a shell's private note. A part that never asks to quit
+        // itself must still see the request.
+        struct Reports {
+            log: Log,
+        }
+
+        impl Part for Reports {
+            fn name(&self) -> &'static str { "reports" }
+            fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+            fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+                self.log.0.borrow_mut().push(ctx.exit_requested.to_string());
+                PartStatus::Continuing
+            }
+        }
+        let mut part = Reports { log: Log::default() };
+        let (mut e, mut f) = engine_with(&mut part);
+        e.tick(&mut part, &mut f);
+        assert_eq!(part.log.0.borrow().as_slice(), ["false"], "nothing has asked yet");
+
+        e.request_exit();
+        assert!(e.exit_requested());
+        e.tick(&mut part, &mut f);
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            part.log.0.borrow().as_slice(),
+            ["false", "true", "true"],
+            "the flag reaches the part itself, and stays set until the next start"
+        );
+
+        e.start(&mut part).unwrap();
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            part.log.0.borrow().as_slice(),
+            ["false", "true", "true", "false"],
+            "and the next part starts with a clean slate, as it is handed it"
+        );
+        assert!(!e.exit_requested());
     }
 }

@@ -198,6 +198,9 @@ pub struct Sequence {
     clock: Tick,
     /// Whether the run is past its parts and showing the screen they left.
     holding: bool,
+    /// The part the hold began at, when the port has not written it. `None`
+    /// when the plan itself ran out.
+    stopped_at: Option<&'static str>,
     finished: bool,
 }
 
@@ -282,6 +285,7 @@ impl Sequence {
             anchor,
             clock: Tick::new(),
             holding: false,
+            stopped_at: None,
             finished: false,
         };
         // The DAC the machine already had, installed before the first part
@@ -321,7 +325,7 @@ impl Sequence {
             return true;
         }
         let Some(&name) = self.plan.get(self.next) else {
-            return self.hold();
+            return self.hold(None);
         };
         self.next += 1;
         match self.start(name) {
@@ -338,12 +342,13 @@ impl Sequence {
             // The port has not written this part: the run holds where it
             // stands rather than skipping over it, and its frames keep the
             // numbering the block gave them.
-            Err(_) => self.hold(),
+            Err(_) => self.hold(Some(name)),
         }
     }
 
-    /// Start holding the screen the run's last part left.
-    fn hold(&mut self) -> bool {
+    /// Start holding the screen the run's last part left. `stopped_at` is the
+    /// plan name the run stopped at, when that is why the hold began.
+    fn hold(&mut self, stopped_at: Option<&'static str>) -> bool {
         let mut part = Box::new(Holding { of: self.current });
         if let Err(error) = self.engine.start(&mut *part) {
             eprintln!("secondreality: {error}; the run ends here");
@@ -352,6 +357,7 @@ impl Sequence {
         }
         self.live = Some(part);
         self.holding = true;
+        self.stopped_at = stopped_at;
         true
     }
 
@@ -424,6 +430,82 @@ impl Sequence {
     /// False while the run holds.
     pub fn finished(&self) -> bool {
         self.finished
+    }
+
+    /// Whether the run has nothing left to play and is holding the screen its
+    /// last part left — every part in the plan has retired, or the next one is
+    /// a part the port has not written.
+    ///
+    /// This is the original's `@@partsdone` (`MAIN/U2.ASM:935-968`): the shell
+    /// fades the music out, deinits the demo and returns to DOS. The port's
+    /// window takes it as the moment there is nothing left to watch.
+    pub fn holding(&self) -> bool {
+        self.holding
+    }
+
+    /// The part the run stopped at: the plan's next name, when the hold began
+    /// because the port has not written it. `None` while a part is running, and
+    /// `None` when the run's own plan ran out.
+    pub fn stopped_at(&self) -> Option<&'static str> {
+        self.stopped_at
+    }
+
+    /// The reference index of the frame [`frame`](Sequence::frame) holds, or
+    /// `None` before the run has drawn one: `new` leaves the cursor at the
+    /// run's start, so the frame beside it is an empty one that no index names.
+    pub fn frame_index(&self) -> Option<u32> {
+        if self.index > self.anchor.unwrap_or(0) {
+            Some(self.index - 1)
+        } else {
+            None
+        }
+    }
+
+    /// The exit flag, from the keyboard: ask the running part to quit
+    /// (`DIS/DISINT.ASM:151-153`).
+    ///
+    /// `checkkeys` sets `exitflag` on ESC and `exit_2` (`:186-190`, "returns 1
+    /// if part should exit") hands it to the part's own loop, so the part
+    /// returns *itself* and the shell goes on to the next part. The port's part
+    /// sees the flag in the next [`PartCtx`] it is handed, and the run retires
+    /// it at the end of that tick.
+    ///
+    /// Returns whether there was a part to ask: false when none is live —
+    /// between two parts, or with the plan exhausted and the screen being held,
+    /// which is where the original's shell has already reached `@@partsdone`
+    /// (`MAIN/U2.ASM:935`).
+    pub fn request_exit(&mut self) -> bool {
+        if self.holding || self.live.is_none() {
+            return false;
+        }
+        self.engine.request_exit();
+        true
+    }
+
+    /// Ctrl: skip the running part (`MAIN/U2.ASM:205-207` — `partexecute` calls
+    /// `ctrldown` and returns before `execute` when the key is down, so the part
+    /// is not run at all).
+    ///
+    /// The port is in the middle of a part rather than in front of one, so "not
+    /// run" is "not run again": the part is dropped where it stands, and the
+    /// next tick starts the next part of the plan. The numbering is the run's,
+    /// so it keeps counting across the seam — the next part's first frame is the
+    /// index the skipped one would have drawn at.
+    ///
+    /// **One part, not all of them.** The original's `ctrldown` (`:185-203`)
+    /// holds its carry from the first time it sees the key down, so *every*
+    /// later `partexecute` skips its part as well and the demo runs to its end
+    /// in a single jump. The port skips the part the key interrupted and goes on
+    /// with the next, which is what the window's Ctrl is for; a run-wide skip is
+    /// the window's close button's job.
+    ///
+    /// Returns whether there was a part to skip.
+    pub fn skip_part(&mut self) -> bool {
+        if self.holding || self.live.is_none() {
+            return false;
+        }
+        self.live = None;
+        true
     }
 }
 
@@ -589,6 +671,7 @@ pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     #[test]
     fn a_block_entry_anchor_is_the_boots_first_graphics_frame() {
@@ -875,6 +958,163 @@ mod tests {
             ctx.request_exit();
             PartStatus::Continuing
         }
+    }
+
+    // --- the keyboard (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`) ------
+
+    /// What a watching part has recorded: the frames it has drawn, and whether
+    /// any of them was handed the exit flag in its `PartCtx`.
+    struct Watched {
+        frames: AtomicU32,
+        asked_to_quit: AtomicBool,
+    }
+
+    // One per part. A `static` because [`PartSource`] is a plain `fn` — the
+    // parts it builds cannot capture anything — and one *each* because these
+    // tests run in parallel: a shared one would let a test's key press answer
+    // another's assertion.
+    static BY_ESCAPE: Watched =
+        Watched { frames: AtomicU32::new(0), asked_to_quit: AtomicBool::new(false) };
+    static BY_CTRL: Watched =
+        Watched { frames: AtomicU32::new(0), asked_to_quit: AtomicBool::new(false) };
+
+    /// Draws nothing, never retires, and says what it was asked — the part's
+    /// own view of the two keys, rather than the shell's.
+    struct Keyed {
+        watched: &'static Watched,
+    }
+
+    impl Part for Keyed {
+        fn name(&self) -> &'static str { "keyed" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            self.watched.frames.fetch_add(1, Ordering::SeqCst);
+            if ctx.exit_requested {
+                self.watched.asked_to_quit.store(true, Ordering::SeqCst);
+            }
+            PartStatus::Continuing
+        }
+    }
+
+    /// A run of `first` — a part that watches and never retires — and then a
+    /// stub that does, so that what a key does to the run *after* the part it
+    /// was pressed in is visible.
+    fn keyed_run(first: &'static str) -> Sequence {
+        Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec![first, "b"],
+            |name| match name {
+                "asked" => Some(Box::new(Keyed { watched: &BY_ESCAPE })),
+                "unasked" => Some(Box::new(Keyed { watched: &BY_CTRL })),
+                other => stub_source(other),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_exit_flag_asks_the_running_part_to_quit_and_the_run_goes_on() {
+        // `DIS/DISINT.ASM:151-153`: ESC sets `exitflag`; `exit_2` (`:186-190`,
+        // "returns 1 if part should exit") hands it to the part's own loop, the
+        // part returns, and the shell runs the *next* part. ESC ends a part; it
+        // does not end the demo.
+        let mut run = keyed_run("asked");
+        run_out(&mut run, 2);
+        assert_eq!(run.part(), "asked");
+        let frames = || BY_ESCAPE.frames.load(Ordering::SeqCst);
+        assert_eq!(frames(), 2, "the part has drawn two frames");
+        assert!(!BY_ESCAPE.asked_to_quit.load(Ordering::SeqCst), "and been asked nothing yet");
+
+        assert!(run.request_exit(), "there is a running part to ask");
+        run.tick();
+        assert_eq!(frames(), 3, "the part runs once more...");
+        assert!(
+            BY_ESCAPE.asked_to_quit.load(Ordering::SeqCst),
+            "...and is handed the flag as it does"
+        );
+        run.tick();
+        assert_eq!(run.part(), "b", "and the run goes on to the next part");
+        assert_eq!(run.index(), 4, "on the run's own numbering, one tick at a time");
+        assert_eq!(frames(), 3, "the retired part is not run again");
+    }
+
+    #[test]
+    fn ctrl_skips_the_running_part_without_running_it_again() {
+        // `MAIN/U2.ASM:205-207`: `partexecute` calls `ctrldown` and returns
+        // before `execute` when the key is down — the part is not run. The port
+        // is inside the part rather than in front of it, so the part it
+        // interrupted gets no further frame at all, and the next part starts at
+        // the index the skipped one would have drawn: the numbering is the
+        // run's and a key does not re-anchor it. That is the difference from
+        // ESC, whose part draws once more and is handed the flag.
+        let mut run = keyed_run("unasked");
+        run_out(&mut run, 3);
+        assert_eq!(run.index(), 3);
+        let frames = || BY_CTRL.frames.load(Ordering::SeqCst);
+        assert_eq!(frames(), 3);
+
+        assert!(run.skip_part(), "there is a running part to skip");
+        run.tick();
+        assert_eq!(frames(), 3, "a skipped part draws nothing more");
+        assert_eq!(run.part(), "b", "the next part starts where the skipped one would have");
+        assert_eq!(
+            run.frame_index(),
+            Some(3),
+            "and its first frame is the index the skipped part would have drawn"
+        );
+    }
+
+    #[test]
+    fn neither_key_has_anything_to_act_on_once_the_run_is_holding() {
+        // `BEG/BEG.C:87` ends BEGLOGO's `main()`, and the run holds that screen
+        // (Task 1's hold, which is what answers BEGLOGO's 900). There is no part
+        // left to ask or to skip: the original's shell is at `@@partsdone`
+        // (`MAIN/U2.ASM:935`), and ESC is the window's way out from there.
+        let mut run = for_part("a").unwrap();
+        run_out(&mut run, 8);
+        assert!(run.holding());
+        assert!(!run.request_exit(), "no part is running to ask");
+        assert!(!run.skip_part(), "and none to skip");
+        assert_eq!(run.part(), "a", "the held screen is still a's");
+    }
+
+    #[test]
+    fn a_run_that_stopped_says_which_part_it_stopped_at() {
+        // `SECOND 2` after BEGLOGO runs GLENZ, which the port has not written:
+        // the run holds BEGLOGO's screen and can name the part it could not go
+        // on to, which is what a window's status line has to say out loud.
+        let mut run = sequence_of(vec!["a", "glenz"]).unwrap();
+        assert_eq!(run.stopped_at(), None, "nothing has stopped yet");
+        run_out(&mut run, 8);
+        assert!(run.holding());
+        assert_eq!(run.stopped_at(), Some("glenz"));
+        assert_eq!(run.part(), "a", "and the held screen is still a's");
+    }
+
+    #[test]
+    fn a_run_that_exhausted_its_plan_stopped_at_no_part_in_particular() {
+        let mut run = for_part("a").unwrap();
+        run_out(&mut run, 8);
+        assert!(run.holding());
+        assert_eq!(run.stopped_at(), None, "the plan ran out; no part is to blame");
+    }
+
+    #[test]
+    fn the_frame_index_is_the_cursor_minus_one_and_none_before_the_first_tick() {
+        // The status line shows this number, and off by one is the whole
+        // difference between a reference index and a part's own.
+        let mut run = for_part("beglogo").unwrap();
+        assert_eq!(run.index(), 404);
+        assert_eq!(run.frame_index(), None, "no frame has been drawn yet");
+        run.tick();
+        assert_eq!(run.frame_index(), Some(404), "the anchored frame is the 404 the reference holds");
+
+        let mut run = for_part("a").unwrap();
+        assert_eq!(run.frame_index(), None);
+        run.tick();
+        assert_eq!(run.frame_index(), Some(0), "an unanchored run counts from zero");
     }
 
     #[test]

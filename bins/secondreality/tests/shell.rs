@@ -119,14 +119,18 @@ fn a_command_line_that_cannot_produce_a_dump_is_refused_before_it_runs() {
 }
 
 #[test]
-fn a_block_run_needs_the_window_the_phase_has_not_wired_yet() {
-    // The window drives one part; a block is several. Refusing is the honest
-    // answer until the window task drives the sequence — silently running the
-    // default part instead would look like a block run and not be one.
-    let out = run(&["--block", "2"]);
+fn a_block_the_port_cannot_start_at_is_a_command_line_error_in_either_mode() {
+    // The window drives the same `Sequence` a headless dump does, so `--block`
+    // is no longer refused outside `--headless` — and a block the port cannot
+    // start at is refused in both. `SECOND 3` begins at MNTSCRL, which is not
+    // ported; the window never opens, so this is answerable without a display.
+    //
+    // Checked as an exit code because nothing else here is: `--block 2` is
+    // accepted and would open a window, which a test must not do.
+    let out = run(&["--block", "3"]);
     assert_eq!(out.status.code(), Some(USAGE));
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("--headless"),
+        String::from_utf8_lossy(&out.stderr).contains("mntscrl is not ported yet"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );

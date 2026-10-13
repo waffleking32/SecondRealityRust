@@ -204,13 +204,13 @@ fn run_for(run: &mut Sequence, dir: &Path, seconds: f64) -> Result<FrameEntry, B
         Tick::HZ_MILLI as f64 / 1000.0,
     );
 
-    // A run too short to tick has drawn nothing, and `index() - 1` would name a
-    // frame that does not exist. `Sequence::new` puts the cursor at the run's
-    // start, so anything at or below it is a run that never drew.
-    if run.index() <= run.anchor().unwrap_or(0) {
+    // A run too short to tick has drawn nothing, and the frame's index would
+    // name a frame that does not exist. `Sequence::new` puts the cursor at the
+    // run's start, so anything at or below it is a run that never drew.
+    let Some(index) = run.frame_index() else {
         return Err(format!("--run-seconds {seconds} ended before the run drew a frame").into());
-    }
-    Ok(dump(dir, run.part(), run.index() - 1, run.frame())?)
+    };
+    Ok(dump(dir, run.part(), index, run.frame())?)
 }
 
 /// The manifest's word for a run's numbering: `boot` when its indices are the

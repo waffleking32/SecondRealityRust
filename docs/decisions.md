@@ -1390,9 +1390,32 @@ first part, and the engine exposed `surface_mut` and `view_mut` for exactly that
 palette counterpart. `Engine::start` deliberately does **not** reset the palette: the original's
 parts are separate EXEs that inherit the DAC the part before them left, and the port keeps that.
 
-**A block run is headless-only until the window drives a sequence.** The window still drives one
-`Runner`, so `--block` is refused there rather than silently running the default part instead. The
-phase's window task removes the rule.
+**The keyboard's exit flag needed a door into the engine, and this is it.** ESC is not the window's
+business: `checkkeys` sets the DIS's `exitflag` (`DIS/DISINT.ASM:112`, `:151-153`) and `exit_2`
+(`:186-190`, "returns 1 if part should exit") hands it to the part's own loop, so what ends the part
+is *the part*, and the shell's next act is the next part. The engine had `PartCtx::request_exit` —
+the door a part opens for itself — and Task 10 added the same door from outside,
+`Engine::request_exit` (`crates/sr-engine/src/engine.rs`), with each band's context now seeded from
+the engine's flag rather than a literal `false`. That is also what makes the flag **sticky**, which
+it already claimed to be: a request made from outside, or in an earlier band, is visible in every
+later context until the next `start` clears it. `Engine::palette_mut` was Task 1's one engine
+addition and this is Task 10's.
+
+**A block run was headless-only until the window drove a sequence.** Task 1's window still drove one
+`Runner`, so `--block` was refused there rather than silently running the default part instead. Task
+10 replaced that runner with the same `Sequence` a headless dump drives — one run, one counter, one
+plan — so the refusal is gone, and what is still refused in **either** mode is a block whose first
+part the port cannot start at (`--block 3` begins at MNTSCRL, and the command line says so before
+the window opens).
+
+**Ctrl skips one part in the port and every later one in the original.** `partexecute` tests
+`ctrldown` before running a part and returns without it when the key is down (`MAIN/U2.ASM:205-207`),
+and `ctrldown` (`:185-203`) *keeps* its carry from the first time it sees the key down: in the
+original a single Ctrl skips every part from then on, and the demo runs to its end in one jump. The
+port's window is inside a part rather than in front of one, so Ctrl there drops the part the key
+interrupted and the run goes on with the next one, one index later. It is a knowing difference, not a
+silence: the original's fast-forward is the window's close button, and the port's Ctrl is "skip this
+part" — which is also what the phase's Task 10 asked for.
 
 ## D22 — `dis_waitb` counts the overrun, and spec §6.2 said it discarded it (2026-10-13)
 

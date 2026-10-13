@@ -49,6 +49,40 @@ MIT (see `LICENSE`). The vendored original source and the media in `assets/` are
 public domain under the Unlicense, which imposes no conditions. Set `license = "MIT"`
 in any new crate manifest.
 
+## Running it
+
+`cargo run --bin secondreality` opens a window and plays a run. The port has six parts: the
+Phase 0 test card, and the demo's own **BEGLOGO**, **TUNNELI**, **ENDLOGO**, **CRED** and
+**ENDSCRL**. Any other part the demo runs is refused by name — `--part glenz` says "glenz is not
+ported yet" rather than starting something else.
+
+```bash
+cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> ENDSCRL
+cargo run --release --bin secondreality -- --block 2     # BEGLOGO, then it stops: GLENZ is unported
+cargo run --release --bin secondreality -- --part beglogo
+```
+
+A block plays the parts of that block the port has, in the demo's own order, and **stops at the
+first one it has not written** rather than skipping over it. `--block 5` ends with ENDSCRL, whose
+own loop is `while(!dis_exit())` (`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it
+does in the demo. The window's title bar is the run's status line: the part whose picture is up,
+that frame's index in the **reference's own numbering** (boot-relative emulator frames — the space
+everything under `reference/` is measured in), and the block it came from. A run that has stopped
+says why, and a run whose index is *not* the reference's — `--part tunneli` numbers its own frames
+from zero — says that instead.
+
+Two keys, and they are the original's (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`):
+
+- **ESC** sets the exit flag the running part's own loop reads: that part ends and the run goes on
+  to the next. With the parts over it closes the window, where the original's shell returns to DOS
+  (`MAIN/U2.ASM:935`).
+- **Ctrl** skips the running part — dropped where it stands, the next one starting one index on.
+  The original's `ctrldown` is sticky and skips every later part as well; the port skips the part
+  the key interrupted.
+
+Nothing waits on a key: a part runs to its own end. `--headless` runs the same sequence on a
+machine with no display, and is what the comparisons below use.
+
 ## Verification
 
 `dosbox-automation` is the preferred reference oracle, behind a trait — not a hard
