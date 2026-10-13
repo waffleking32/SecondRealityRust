@@ -325,8 +325,15 @@ where
 /// report and not only the distance. Every pair this tool makes is 0 or ±1 (the
 /// window), but it is computed as a difference rather than a pair of casts, so
 /// an index too large for `i32` cannot wrap into a plausible-looking offset.
-fn frame_offset(reference_index: u32, rendered_index: u32) -> i32 {
-    let distance = i32::try_from(reference_index.abs_diff(rendered_index)).unwrap_or(i32::MAX);
+///
+/// `rendered_index` is an `i64` because `--align` shifts it before the pairing;
+/// the offset it reports is therefore the *net* one, alignment included, which
+/// is what makes `offset 0` at `--align 3722` mean "on the reference's own
+/// tick" rather than "the two numberings agree by construction".
+fn frame_offset(reference_index: u32, rendered_index: i64) -> i32 {
+    let reference_index = i64::from(reference_index);
+    let distance = i32::try_from((rendered_index - reference_index).unsigned_abs())
+        .unwrap_or(i32::MAX);
     if rendered_index < reference_index {
         -distance
     } else {
@@ -608,10 +615,21 @@ fn paired_frames<'a>(
     // (`docs/fidelity/tunneli.md` §7.2). The frames' own indices stay what the
     // manifest says; only the pairing moves, and the reported offset is the
     // net one.
+    // Refused, not clamped: an alignment that pushes an index out of range is
+    // a mistake in the command (a sign, most likely), and clamping would both
+    // collide several rendered frames on one index and pair them silently.
     let rendered_indices: Vec<u32> = rendered_frames
         .iter()
-        .map(|f| shifted_index(f.index, align))
-        .collect();
+        .map(|frame| {
+            u32::try_from(i64::from(frame.index) + i64::from(align)).map_err(|_| {
+                CompareError::Io(format!(
+                    "--align {align:+} puts the rendered frame at index {} outside the index \
+                     range; an alignment is a numbering offset, not a window",
+                    frame.index
+                ))
+            })
+        })
+        .collect::<Result<_, _>>()?;
 
     let pairs = pair_indices(
         &reference_indices,
@@ -650,12 +668,6 @@ fn paired_frames<'a>(
         ));
     }
     Ok(paired)
-}
-
-/// A manifest index as the pairing reads it: `align` added, refusing a result
-/// that is not a frame index at all.
-fn shifted_index(index: u32, align: i32) -> u32 {
-    (i64::from(index) + i64::from(align)).clamp(0, i64::from(u32::MAX)) as u32
 }
 
 /// The first frame whose *shifted* index is `index` and that no earlier pair has
@@ -920,7 +932,10 @@ fn compare_capture(
             rendered_index: rendered_frame.index,
             // The net offset: the alignment in force is part of the answer, so
             // a report made with `--align` cannot be misread as one without it.
-            offset: frame_offset(reference_frame.index, shifted_index(rendered_frame.index, align)),
+            offset: frame_offset(
+                reference_frame.index,
+                i64::from(rendered_frame.index) + i64::from(align),
+            ),
             differing_pixels: diff.differing_pixels,
             total_pixels: diff.total_pixels,
             differing_percent: diff.differing_percent,
@@ -1169,7 +1184,8 @@ pub fn command(
         // an alignment is a measurement of the port at a declared offset, not
         // of the two numberings being the same.
         println!(
-            "alignment: the rendered side's indices are read {align:+} for pairing (--align), so              the offsets below are on top of that"
+            "alignment: the rendered side's indices are read {align:+} for pairing (--align); \
+             the offsets below are on top of that"
         );
     }
     let reference_captures = resolve_captures(reference)?;

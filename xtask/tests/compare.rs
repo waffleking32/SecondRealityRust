@@ -293,6 +293,13 @@ fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
     assert!(aligned.output().contains("read +300"), "{}", aligned.output());
     assert!(aligned.output().contains("frame 700: 0.0000%"), "{}", aligned.output());
 
+    // An alignment that underflows is a mistake in the command (a sign, most
+    // likely) and is refused rather than clamped: clamping would collide both
+    // rendered frames on index 0 and pair them without saying so.
+    let underflow = run("-500");
+    assert_eq!(underflow.code, 2, "{}", underflow.output());
+    assert!(underflow.output().contains("outside the index range"), "{}", underflow.output());
+
     // And the offset reported is the *net* one: one frame further off, the
     // pair is at +1 and the console says so on the frame's own line.
     let off_by_one = run("301");
