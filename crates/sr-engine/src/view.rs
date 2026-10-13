@@ -9,10 +9,20 @@ use crate::surface::Surface;
 /// steps per scanline, and how wide the displayed picture is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
-    pub width: u16,      // displayed width in pixels
-    pub height: u16,     // displayed height in scanlines
-    pub start_addr: u16, // CRTC display start (0x0C/0x0D), in pixels
-    pub x_offset: u16,   // planar byte-to-pixel offset; added to start_addr
+    pub width: u16,  // displayed width in pixels
+    pub height: u16, // displayed height in scanlines
+    /// CRTC display start (0x0C/0x0D), in pixels.
+    ///
+    /// `u32`, where the CRTC's register pair is 16 bits, because the register
+    /// counts *bytes within a plane* and this `View` counts pixels: a whole
+    /// 640×400 buffer is 256,000 of them, which 16 bits do not reach. CRED's
+    /// display start is 400 × 320 = 128,000 and ENDSCRL's ring walks up to
+    /// 256,000; both are here rather than in `x_offset`, whose 16 bits cannot
+    /// hold either. See `docs/decisions.md` D16.
+    pub start_addr: u32,
+    /// Extra pixel offset within a line, added to `start_addr`. A line is at
+    /// most as wide as the surface, so 16 bits are room enough for it.
+    pub x_offset: u16,
     /// Pixel stride between displayed scanlines (CRTC 0x13), or `None` — the
     /// default — for the surface's own row stride.
     ///
@@ -80,10 +90,11 @@ impl View {
         self.y_line_offset.unwrap_or(surface_stride)
     }
 
-    /// Sets `x_offset` and zeroes `start_addr`.
-    pub fn set_origin(&mut self, pixel: u16) {
-        self.start_addr = 0;
-        self.x_offset = pixel;
+    /// Sets `start_addr` and zeroes `x_offset`: the origin is a display start,
+    /// and `x_offset` is only an offset within a line on top of one.
+    pub fn set_origin(&mut self, pixel: u32) {
+        self.start_addr = pixel;
+        self.x_offset = 0;
     }
 
     /// The view in force at displayed scanline `y`, and the scanline number
@@ -192,6 +203,58 @@ mod tests {
         assert_eq!(v.source_index(&Surface::new(4, 2), 3, 0), 1);
     }
 
+    /// The origin is a pixel address into the surface, and the surface holds
+    /// more of them than a `u16` can name.
+    ///
+    /// ENDSCRL is the case that forces it: its display start walks a 400-line
+    /// ring of 640-pixel lines, so the last line of the ring starts at
+    /// 399 × 640 = 255,360 and the step past it lands on 256,000 — the
+    /// surface's own length, where the beam wraps to the top of the ring. An
+    /// origin that wrapped at 65,536 instead would read the middle of the ring
+    /// and paint a scroller several hundred lines out, with no error anywhere.
+    #[test]
+    fn an_origin_beyond_u16_is_not_wrapped_away() {
+        // ENDSCRL's ring: the beam starts at the 400th 640-pixel line.
+        let mut v = View::new(640, 400);
+        v.set_origin(256_000);
+        let s = Surface::new(640, 400);
+        // 256,000 % 256,000 == 0: the beam wraps to the top of the ring, which is
+        // what the surface of 400 ring lines means.
+        assert_eq!(v.source_index(&s, 0, 0), 0);
+        v.set_origin(255_360);
+        assert_eq!(v.source_index(&s, 0, 0), 255_360);
+    }
+
+    /// The second case that forces the widening: CRED's display start. The part
+    /// writes the surface at 320-pixel logical lines and shows 200 rows from
+    /// logical line 400 — pixel 400 × 320 = 128,000 — with each displayed row
+    /// stepping *two* logical lines, because CRTC 0x13 = `0x5013` is a
+    /// 160-planar-byte line offset, 640 chunky pixels (`CREDITS/TWEAK.ASM:43`).
+    #[test]
+    fn creds_origin_reads_every_other_logical_line() {
+        // CRED displays 200 rows from logical line 400 with a 160-byte line
+        // offset: row ly starts at line 400 + 2*ly of a 320-px logical line.
+        let mut v = View::new(320, 200);
+        v.set_origin(400 * 320);
+        v.y_line_offset = Some(640);
+        let s = Surface::new(640, 400);
+        assert_eq!(v.source_index(&s, 0, 1), 400 * 320 + 640);
+        assert_eq!(v.source_index(&s, 319, 199), 400 * 320 + 199 * 640 + 319);
+    }
+
+    /// `set_origin` names a display start, and the display start is the field
+    /// that carries one: the origin is where the beam begins reading, and
+    /// `x_offset` is a within-line offset on top of it, which a newly named
+    /// origin replaces.
+    #[test]
+    fn set_origin_writes_the_display_start_and_clears_the_offset() {
+        let mut v = View::new(320, 200);
+        v.x_offset = 7;
+        v.set_origin(128_000);
+        assert_eq!(v.start_addr, 128_000);
+        assert_eq!(v.x_offset, 0);
+    }
+
     #[rstest]
     fn pan_shifts_by_one_pixel_per_unit(mut v320: View) {
         v320.pan = 5;
@@ -242,8 +305,11 @@ mod tests {
             scanline: 120,
             view: lower,
         }));
-        assert_eq!(v320.effective(119).x_offset, 0);
-        assert_eq!(v320.effective(120).x_offset, 320 * 100);
+        // The origin a view shows is its `start_addr`, so that is what says
+        // which view is in force: the enclosing one above the split, the lower
+        // one from the split down.
+        assert_eq!(v320.effective(119).start_addr, 0);
+        assert_eq!(v320.effective(120).start_addr, 320 * 100);
     }
 
     #[rstest]
@@ -254,7 +320,7 @@ mod tests {
             scanline: 500,
             view: lower,
         }));
-        assert_eq!(v320.effective(199).x_offset, 0);
+        assert_eq!(v320.effective(199).start_addr, 0);
         assert_eq!(v320.source_index(&Surface::new(320, 200), 0, 199), 199 * 320);
     }
 
@@ -276,9 +342,9 @@ mod tests {
         // Each split's scanline is counted within the view it starts from: the
         // inner split is 150 lines after the outer one, so it begins at frame
         // scanline 200, not 150.
-        assert_eq!(top.effective(49).x_offset, 0);
-        assert_eq!(top.effective(50).x_offset, 1000);
-        assert_eq!(top.effective(199).x_offset, 1000);
-        assert_eq!(top.effective(200).x_offset, 2000);
+        assert_eq!(top.effective(49).start_addr, 0);
+        assert_eq!(top.effective(50).start_addr, 1000);
+        assert_eq!(top.effective(199).start_addr, 1000);
+        assert_eq!(top.effective(200).start_addr, 2000);
     }
 }

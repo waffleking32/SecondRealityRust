@@ -27,13 +27,20 @@ const HEIGHT: u16 = 200;
 /// The scanline the split picture starts on, and the surface row its lower half
 /// starts at.
 const SPLIT_ROW: u16 = 100;
-/// How many rows the split window walks down before the lower view's origin
-/// would overflow a `u16`: 64_000 (row 100) + 2 × 640 = 65_280 is the last that
-/// fits. `View::start_addr` and `View::x_offset` are `u16` — the open item
-/// already recorded against Phase 2 for ENDSCRL's 401-line buffer — so if those
-/// widen, this follows.
-const SPLIT_WALK_ROWS: u16 =
-    ((u16::MAX as usize - MAX_WIDTH * SPLIT_ROW as usize) / MAX_WIDTH) as u16 + 1;
+/// How many rows the split window walks down before the phase restarts, and so
+/// how many rows below the picture the phase fills.
+///
+/// The walk *was* bounded by the view's origin being `u16`: 64,000 (row 100) +
+/// 2 × 640 = 65,280 was the last origin that fitted, which is why the constant
+/// used to derive itself from `u16::MAX`. The origin is `u32` now (Phase 2,
+/// `docs/decisions.md` D16) and no longer bounds it — following that derivation
+/// through would ask for a walk of some 6.7 million rows, one surface row per
+/// step, which is a hang rather than a test. What bounds the walk is the
+/// surface: it only has to stay inside one, and three rows do — the window
+/// reads rows 100..=201 of a 400-row surface. Three is also all the card wants
+/// to exercise: a window that is demonstrably live, stepping a row per tick,
+/// over rows the tests can name.
+const SPLIT_WALK_ROWS: u16 = 3;
 /// Bars across the picture; one palette entry each.
 const BAR_COUNT: u8 = 16;
 /// A bar is this many pixels wide: sixteen of them fill a 320-pixel picture.
@@ -123,6 +130,9 @@ impl Part for TestCard {
         ctx.view.split = None;
         ctx.view.double_scan = false;
         ctx.view.border = None;
+        // `x_offset` is phase 1's pan. The split phase's origin needs no
+        // clearing here: it is set on the lower view, which `split` builds
+        // afresh every tick, so it is discarded with the view that held it.
         ctx.view.x_offset = 0;
         ctx.view.height = HEIGHT;
 
@@ -159,6 +169,12 @@ impl TestCard {
 
     /// Phase 1 — CRTC start address: a fixed 1-in-8 stripe pattern, panned one
     /// pixel per tick.
+    ///
+    /// The pan is the scrolling, and at one pixel per tick it stays inside one
+    /// 640-pixel line — so it rides in `x_offset`, which 16 bits are room
+    /// enough for, rather than in `start_addr`. Phase 2's window is what
+    /// exercises `start_addr`, and the card covering both fields is why this
+    /// one did not move when the origin widened.
     fn scroll(&self, ctx: &mut PartCtx) {
         if ctx.band == 0 {
             fill_surface(ctx.surface, |x, _| stripe_index(x));
@@ -185,7 +201,7 @@ impl TestCard {
         // 100 and the tests can name exact pixels.
         let row = SPLIT_ROW + (ctx.frame % SPLIT_WALK_ROWS as u32) as u16;
         let mut lower = View::new(WIDTH, HEIGHT);
-        lower.set_origin(MAX_WIDTH as u16 * row);
+        lower.set_origin(MAX_WIDTH as u32 * row as u32);
         ctx.view.split = Some(Box::new(Split {
             scanline: SPLIT_ROW,
             view: lower,

@@ -344,6 +344,63 @@ logo, same frames) → both frames 99.5609% differing, every offset 0, `verdict:
 exit 1. D18's table carries the same point on the moving part screen (14.8531% and 0.0063%,
 exit 1).
 
+#### Task 3 — the view origin widened to `u32`, and D16's open item closed
+
+`View::start_addr` and `View::x_offset` were both `u16` (spec §4.2), so the largest origin the beam
+could start from was 131,070 pixels — while the model's own surface is 256,000. Two parts in this
+phase need more than that: CRED displays 200 rows from logical line 400 of a 320-pixel logical line,
+`tw_setstart(160*200)` (`CREDITS/MAIN.C:167`, 160 planar bytes per row per CRTC 0x13 = `0x5013`),
+**128,000** pixels; and ENDSCRL's display start steps one 640-pixel line per written line, up to
+**256,000** (`ENDSCRL/MAIN.C:93-95`). Both would have wrapped *silently* — the failure is not a
+crash but a live-looking picture read from several hundred lines away.
+
+`start_addr` is `u32`; `set_origin(pixel: u32)` now writes `start_addr` and zeroes `x_offset`
+(`x_offset` stays `u16`: an offset within a displayed line, not an origin); `source_index` is
+unchanged in shape and sums in `usize`. Spec §4.2 is amended in place above its struct sketch, and
+D16's open item is closed with the arithmetic and with what the `u16` was ever protecting (nothing —
+the fields were copied from a register pair that counts bytes within a plane).
+
+**RED, before the change: the tests cannot even be written against the old type.**
+
+```
+$ cargo test -p sr-engine
+error: this arithmetic operation will overflow
+   --> crates/sr-engine/src/view.rs:227:22
+    |
+227 |         v.set_origin(400 * 320);
+    |                      ^^^^^^^^^ attempt to compute `400_u16 * 320_u16`, which would overflow
+error: literal out of range for `u16`
+   --> crates/sr-engine/src/view.rs:208:22
+    |
+208 |         v.set_origin(256_000);
+    |                      ^^^^^^^
+    = note: the literal `256_000` does not fit into the type `u16` whose range is `0..=65535`
+```
+
+**GREEN: 483 passed, 0 failed, 0 warnings** across the workspace (101 in `sr-engine`; the count was
+480 and the three new tests are the widening's). The suite did not shrink anywhere else, and
+`sr-engine`'s `[dependencies]` is still empty.
+
+**The test card's pictures are unchanged, and that was measured rather than assumed.** The card's
+`SPLIT_WALK_ROWS` derived itself from `u16::MAX` so it would follow a widening — and following it
+asks for a walk of ~6.7 million rows at one surface row per step, which is a hang. The constant is a
+plain `3` (the walking origin is 64,000..65,280 either way, unchanged), and the card's composed
+frames were dumped before and after the change, spanning all five phases, phase 2's walk and the
+phase wrap:
+
+```
+$ cargo run --bin secondreality -- --part testcard --headless \
+    --dump-frames 3,31,40,47,64,65,66,95,100,130,140,159,160,200,300 --dump-dir out/task3-after
+$ (cd out/task3-after  && sha256sum * | sha256sum)
+67b7e332e0907691e1077b0cc7283e56703682ef136c1e257c4b07cb176ee7c7  -
+$ # and the same command with the change stashed, into out/task3-before:
+67b7e332e0907691e1077b0cc7283e56703682ef136c1e257c4b07cb176ee7c7  -
+```
+
+Fifteen frames, byte for byte. The card still exercises both fields — its scroll phase pans within
+the line through `x_offset`, its split window walks `start_addr` — so the widening is covered
+end-to-end by the card as well as by the view's own unit tests.
+
 ## Phase log
 
 ### Phase 1 — Assets & references (done, tag `phase-1`)

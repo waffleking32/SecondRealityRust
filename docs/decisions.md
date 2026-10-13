@@ -754,28 +754,45 @@ sprung in `bins/secondreality/src/main.rs`, which worked only because `TestCard:
 view; no part had been ported, so nothing downstream was wrong. `TestCard` no longer sets a stride at
 all, which makes the card a live test of the default.
 
-### Open item — `View`'s origin is `u16` and the surface is not
+### Open item — `View`'s origin is `u16` and the surface is not — **closed in Phase 2**
 
-**Unresolved. Phase 2 must settle it when ENDSCRL lands.**
+**Closed in Phase 2, Task 3 (2026-10-13). The origin widened to `u32`.** `View::start_addr` is
+`u32`; `View::set_origin` takes a `u32` pixel and writes it there — the field with room for it —
+zeroing `x_offset`; and `source_index` is unchanged in shape, summing the origin in `usize`.
+`x_offset` stays `u16`: it is an offset *within* a displayed line, bounded by the widest line rather
+than by the buffer. Spec §4.2 is amended in place, above the struct sketch.
 
-`start_addr` and `x_offset` are `u16` (spec §4.2), so an origin sums to at most 131,070. The
-mandated surface is 640 × 400 = **256,000** pixels.
+**The arithmetic that forced it.** CRED's display start is `tw_setstart(160*200)`
+(`CREDITS/MAIN.C:167`): 32,000 planar bytes, which at 80 bytes per 320-pixel logical line is
+logical line 400 — **128,000** pixels. Its displayed row stride is 160 planar bytes (CRTC 0x13 =
+`0x5013`, `CREDITS/TWEAK.ASM:43`), 640 pixels, so each displayed row steps two logical lines, which
+is the geometry the port states as `y_line_offset = Some(640)`. ENDSCRL's display start is
+`yscrl*80 + 80` (`ENDSCRL/MAIN.C:93-95`), one 640-pixel line per written line: **256,640** at the
+end of the original's 401-line ring, and **256,000** in the port's 400-line one, whose surface is
+exactly that wide. The most two `u16`s can sum to is 131,070, so both are out of reach — and out of
+reach *silently*, because an origin that wraps paints a live-looking picture several hundred lines
+from where it belongs. Neither part can be diffed until the field can name its own display start.
 
-Every Phase 0 use stays well inside that — the test card's largest origin is 64,000 — so nothing in
-Phase 0 is wrong. But ENDSCRL's **401-line circular buffer** at 640 pixels wide needs display
-origins up to ~256,000:
+**The `u16` was protecting against nothing.** The two fields were as wide as they were because they
+were copied from the CRTC's 16-bit register pair — and that pair counts *bytes within a plane*, not
+pixels. A 16-colour planar scanline is 80 bytes, so 16 bits spans a 400-line buffer in the
+original's own layout, which is why the original never notices. The port's `View` counts pixels and
+sums the two fields into one origin, so the copied width buys it nothing and can name an origin no
+higher than 131,070 — 124,929 pixels short of its own 256,000-pixel surface's last one. The
+alternative — modelling the CRTC's per-plane byte counter — would put planar addressing into an
+engine that deliberately does not have it (spec §4.2: "The Mode X plane arithmetic disappears"), so
+the field widened instead.
 
-- On real hardware this is fine, because the CRTC address counter counts *bytes*, and a 16-colour
-  planar scanline is 80 bytes. 401 × 80 = 32,080, comfortably inside 16 bits.
-- In the port's chunky-pixel model the same buffer is 256,640 *pixels*, which needs 18 bits.
-
-Phase 0 deliberately did **not** widen the fields: the spec declares `u16`, and widening mid-phase
-would be a unilateral deviation from an approved document. Phase 2 either widens the fields or
-models the CRTC's byte countering, and either way amends §4.2 and records the choice here.
-
-Independently corroborated: Task 8's implementer hit the same ceiling and had to clamp the test
-card's split walk to 3 rows, with `SPLIT_WALK_ROWS` derived from `u16::MAX` so it follows if the
-fields widen.
+**The test card's walk was the other thing the ceiling held, and it stays three rows.** It was
+corroborated when the card was written: Task 8's implementer hit the same ceiling and clamped the
+card's split walk to 3 rows, with `SPLIT_WALK_ROWS` derived from `u16::MAX` so it would follow if the
+fields widened. Following that derivation through after the widening asks for a walk of some 6.7
+million rows, one surface row per step — a hang, not a test. The constant is a plain `3` now: the
+field no longer bounds the walk, the *surface* does (the window need only stay inside one, and rows
+100..=201 of a 400-row surface are all it reads), and three rows are what the card wants to exercise
+— a window visibly live, stepping a row per tick. The card's pictures are unchanged, measured rather
+than assumed: fifteen dumped frames spanning all five phases and the walk, taken before and after
+the widening, are the same bytes.
 
 ### Deferred minor findings
 

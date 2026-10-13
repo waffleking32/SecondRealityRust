@@ -143,8 +143,10 @@ A part is done when its frames match. Record the evidence in `PROGRESS.md`.
   view's origin and pan alone. And `Split::scanline` is the first line *below* the split,
   while the assembly's line-compare register names the last line above it: add one. See
   `Split`'s doc comment and D16.
-- **`View`'s origin is `u16` and the surface is 256,000 pixels** — see the open item in
-  `docs/decisions.md` D16. It will need settling when ENDSCRL lands.
+- **`View`'s origin is a `u32` pixel address in `start_addr`**, not the CRTC's 16-bit register: the
+  surface is 256,000 pixels and CRED reads from 128,000 (D16, closed in Phase 2). `set_origin`
+  writes `start_addr` and zeroes `x_offset`, which stays `u16` — an offset *within* a displayed
+  line, on top of the origin.
 - **Below a split, the scanline count restarts.** Line compare resets the CRTC's counters,
   so `View::effective_at` returns the scanline *within* the view.
 - **SDL names packed pixel formats by bit significance, not memory order.** For a byte
