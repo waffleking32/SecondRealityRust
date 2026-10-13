@@ -56,24 +56,28 @@
 //! the line compare down, where the address counter restarts at 0: every other
 //! glyph row shows, and a caption is 16 displayed rows tall.
 //!
-//! # The display state a hold shows, and what is left for Task 8
+//! # The iris: three registers, stepped once a vertical blank
 //!
 //! The parked state (`:165-167`) is `tw_setsplit(400)` — line compare 400, below
 //! the bottom of a 200-row display, so inert — `tw_clrscr`, and
 //! `tw_setstart(160*200)`: 32,000 bytes = 400 logical lines = 128,000 pixels.
 //!
-//! The **iris** is three registers stepped once a vertical blank — the line
-//! compare (`tw_setsplit`), the display start (`tw_setstart`) and the AC's pan.
-//! This task implements the two loops' *sequences* ([`open_ramp`],
-//! [`close_ramp`]) and so their lengths, because the reference's keyframes are
-//! holds at fixed indices and their positions are what those lengths put there;
-//! and it implements the state the open loop's **last** step leaves
-//! ([`HOLD_ORIGIN`], [`HOLD_LINE_COMPARE`], [`HOLD_PAN`]), which is the state
-//! every frame of a hold shows. **The per-step register writes — and so every
-//! frame of the two wipes, and the pan at any frame but the hold's — are
-//! Task 8's**: in this commit the display sits at the parked state through the
-//! open loop and at the hold's state from the loop's last step on. Nothing else
-//! is deferred.
+//! Each step of either wipe is the same three writes ([`Display`]), and the two
+//! loops are their `y` sequences ([`open_ramp`], [`close_ramp`]). The open
+//! loop's first step writes **the parked state** (`y = 200*128` → line compare
+//! 400, `yy = 0` → start 32,000, pan 0) and its last writes the **hold's**
+//! (`y = 1` → 200, `yy = 320` → 32,080 bytes, pan 0); the close loop's first
+//! step is the hold's too, and its last is the state the next screen's tick 0
+//! overwrites. A hold is the 200 ticks between the loops, and writes nothing
+//! (`:194` only waits).
+//!
+//! One tick is one frame — one `dis_waitb` — so a screen is 363 ticks: the
+//! parked one, the one the palette and the picture land on, the 102 open steps,
+//! the 200 hold ticks and the 59 close steps. The `for(a=0;a<10000;a++)` delay
+//! between each step's `tw_setsplit` and its `tw_setstart`
+//! (`MAIN.C:182`, `:202`) is a hardware-timing artefact and is **not modelled**:
+//! it exists to keep the writes inside the vertical retrace, and the port's tick
+//! is already the frame boundary it protects.
 //!
 //! # The three things worth knowing before changing anything here
 //!
@@ -207,11 +211,26 @@ const PARKED_LINE_COMPARE: u16 = 400;
 /// port's screen 1 and screen 18 are `reference/parts/cred`'s frames at 1440
 /// and 7640 byte for byte. At the parked origin those frames differ in every
 /// picture pixel; one logical line is the whole difference.
+///
+/// **The part's own code no longer names these three**: the open loop's last
+/// step is what writes them, and [`Display::opening`] reads that step's own
+/// `y`. They are the tests' copies of the arithmetic, so that a ramp which
+/// stopped producing them fails in a place that says which number moved.
+#[cfg(test)]
 const HOLD_ORIGIN: u32 = PARKED_ORIGIN + LINE_LEN as u32;
 /// The hold's line compare (`MAIN.C:179`: `y/128 + 200` with `y = 1`): 200.
+#[cfg(test)]
 const HOLD_LINE_COMPARE: u16 = 200;
-/// The pan the hold shows (`:183-191` with `yy = 320`): `(320 & 3) * 2 = 0`.
+/// The pan the hold shows (`:183-191` with `yy = 320`): `(320 & 3) * 2 = 0`
+/// register counts, and so 0 pixels ([`pan`]).
+#[cfg(test)]
 const HOLD_PAN: u8 = 0;
+
+/// Where `tw_setstart`'s argument starts counting from (`MAIN.C:167`, `:182`,
+/// `:202`): `160*200` bytes, the parked start.
+const DISPLAY_START_BIAS: u16 = 160 * 200;
+/// `tw_setsplit`'s (`:179`, `:199`): `y/128 + 200`.
+const LINE_COMPARE_BIAS: u16 = 200;
 
 /// The port's split for a line-compare value: the first row *below* the split.
 ///
@@ -228,6 +247,78 @@ const HOLD_PAN: u8 = 0;
 /// first row below a 200-row display: inert, which is what "parked" means.
 const fn split_scanline(line_compare: u16) -> u16 {
     line_compare.div_ceil(2)
+}
+
+/// One iris step's three register writes, in the port's own units.
+///
+/// `MAIN.C:179-191` (the open loop) and `:199-211` (the close) are the same
+/// three writes, from the step's `y` and the `yy` it makes of it:
+///
+/// ```text
+/// tw_setsplit(y/128 + 200)          the line compare
+/// yy = 320 - y/80     (opening)     and the two registers below
+/// yy = 320 + y/80     (closing)
+/// tw_setstart(160*200 + yy/4)       the display start, in bytes
+/// AC 0x13 = (yy & 3) * 2            the pan
+/// ```
+///
+/// `tw_setstart` names a **byte** address (CRTC 0x17 = `0xE3` has its byte-mode
+/// bit set, `TWEAK.ASM:40-41`) and a byte address of this mode is four pixels —
+/// one per plane, [`LINE_LEN`]'s own arithmetic — so the start is the byte
+/// address times four in the port's pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Display {
+    /// The display start, in the port's pixels.
+    origin: u32,
+    /// The line-compare register, as `tw_setsplit` is given it.
+    line_compare: u16,
+    /// The pan in the port's pixels — *not* the AC 0x13 value; see [`pan`].
+    pan: u8,
+}
+
+impl Display {
+    /// `MAIN.C:165-167`: `tw_setsplit(400)`, `tw_setstart(160*200)`, no pan.
+    const PARKED: Display = Display {
+        origin: PARKED_ORIGIN,
+        line_compare: PARKED_LINE_COMPARE,
+        pan: 0,
+    };
+
+    /// One step of the open loop (`:179-191`), whose `yy` rises from 0 to 320
+    /// as `y` falls from 200*128 to 1.
+    const fn opening(y: u16) -> Display {
+        Display::from_y(y, 320 - y / 80)
+    }
+
+    /// One step of the close loop (`:199-211`), whose `yy` rises from 320 to
+    /// 629 as `y` rises from 0 to 24,795.
+    const fn closing(y: u16) -> Display {
+        Display::from_y(y, 320 + y / 80)
+    }
+
+    /// The three registers both loops write from one step's `(y, yy)`.
+    const fn from_y(y: u16, yy: u16) -> Display {
+        Display {
+            origin: (DISPLAY_START_BIAS + yy / 4) as u32 * 4,
+            line_compare: y / 128 + LINE_COMPARE_BIAS,
+            pan: pan(yy),
+        }
+    }
+}
+
+/// AC 0x13's effect, in the port's pixels.
+///
+/// `MAIN.C:183-191` writes `(yy & 3) * 2` to the register. The register and the
+/// shift are two different numbers: the emulator's `case M_VGA: case M_LIN8:`
+/// arm is `vga.config.pel_panning = (val & 0x7) / 2` (`vga_attr.cpp:225-227`),
+/// so a 256-colour mode shifts half of what the register says. And the unit it
+/// is half of is the display start's own: `vga_draw.cpp:1648-1651` builds a
+/// 256-colour line's address as the CRTC's start times four, **plus** the pan,
+/// so a pan of `n` reads `n` pixels further along — what [`View::pan`] does.
+/// A step's pan is therefore `yy & 3` pixels, and writing the register value
+/// here would move the display twice as far as the machine did.
+const fn pan(yy: u16) -> u8 {
+    (yy & 3) as u8
 }
 
 // ------------------------------------------------------------- the timing --
@@ -493,14 +584,9 @@ impl Cred {
         }
     }
 
-    /// The display, as the view the port holds: `MAIN.C:165-167`'s parked state
-    /// and `:176-182`'s last open step.
-    fn set_display(ctx: &mut PartCtx, parked: bool) {
-        let (origin, line_compare, pan) = if parked {
-            (PARKED_ORIGIN, PARKED_LINE_COMPARE, 0)
-        } else {
-            (HOLD_ORIGIN, HOLD_LINE_COMPARE, HOLD_PAN)
-        };
+    /// The display, as the view the port holds: one step's three register
+    /// writes (`MAIN.C:179-191`), or the parked state (`:165-167`).
+    fn set_display(ctx: &mut PartCtx, display: Display) {
         // `TWEAK.ASM:18-60`: 320 pixels a row, 200 rows, a 160-byte line offset
         // and no separate scan doubling — the doubling the CRTC asks for is
         // what the 160-byte offset already folds in, which is the arithmetic
@@ -509,17 +595,36 @@ impl Cred {
         ctx.view.height = VIEW_HEIGHT;
         ctx.view.y_line_offset = Some(DISPLAY_LINE_STRIDE);
         ctx.view.double_scan = false;
-        ctx.view.pan = pan;
-        ctx.view.set_origin(origin);
+        ctx.view.pan = display.pan;
+        ctx.view.set_origin(display.origin);
         // The lower view reads from origin 0 with the surface's own stride
         // (`VGA_ProcessSplit`, `vga_draw.cpp:1139-1158`): the hardware sets the
         // address counter to 0 and clears panning at the split, and the line
         // offset register is unchanged — 160 bytes, the same 640 pixels the
         // surface's own rows are.
         ctx.view.split = Some(Box::new(Split {
-            scanline: split_scanline(line_compare),
+            scanline: split_scanline(display.line_compare),
             view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
         }));
+    }
+
+    /// The three registers the iris writes at tick `tick` of a screen, or
+    /// `None` at a tick that writes none — the hold (`MAIN.C:194`, which only
+    /// waits).
+    ///
+    /// The ticks a screen's wipes occupy, from the source's own structure: the
+    /// `dis_waitb` at `:168` ends the tick the palette and the picture land on
+    /// ([`SHOW_TICK`]), so the open loop's first step is the next tick and its
+    /// 102nd is tick `SHOW_TICK + 102` — the frame the hold's state is first
+    /// displayed on, and why the hold's own 200 frames start one tick later.
+    /// The close loop's 59 steps follow it.
+    fn iris_display(&self, tick: u32) -> Option<Display> {
+        let step = tick.checked_sub(SHOW_TICK + 1)? as usize;
+        if step < self.open.len() {
+            return Some(Display::opening(self.open[step]));
+        }
+        let close = step.checked_sub(self.open.len() + HOLD_FRAMES as usize)?;
+        self.close.get(close).map(|(y, _)| Display::closing(*y))
     }
 }
 
@@ -573,7 +678,7 @@ impl Part for Cred {
         // machine has, and so the whole surface. Nothing a previous part left
         // can show through a credit screen.
         ctx.surface.clear(0);
-        Cred::set_display(ctx, true);
+        Cred::set_display(ctx, Display::PARKED);
         Ok(())
     }
 
@@ -583,22 +688,19 @@ impl Part for Cred {
     /// - tick 0 (`:165-168`) — the parked split, `tw_clrscr`, the parked start,
     ///   then the blank.
     /// - tick 1 (`:169-174`) — the palette, the caption, the picture.
-    /// - the next [`OPEN_STEPS`] ticks (`:176-192`) — the iris opening. The
-    ///   loop's *length* is this task's; its register writes are Task 8's, so
-    ///   the display stays parked until the loop's last step, whose state is
-    ///   then the one every hold frame shows.
+    /// - the next 102 ticks — one per step of [`open_ramp`] (`:176-192`) — the
+    ///   iris opening, one step's three registers each.
     /// - then [`HOLD_FRAMES`] ticks (`:194`) — the hold, with nothing written.
-    /// - then [`CLOSE_STEPS`] ticks (`:196-212`) — the iris closing, after
-    ///   which the next screen's tick 0 re-parks the display.
+    /// - then 59 ticks — one per step of [`close_ramp`] (`:196-212`) — the iris
+    ///   closing, after which the next screen's tick 0 re-parks the display.
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         let tick = self.tick;
-        let open = self.open.len() as u32;
         if tick >= self.screen_ticks() {
             return PartStatus::Finished;
         }
         match tick {
             PARKED_TICK => {
-                Cred::set_display(ctx, true);
+                Cred::set_display(ctx, Display::PARKED);
                 // `TWEAK.ASM:62-75`: 1,000h dwords = 65,536 pixels, *not* the
                 // whole surface — the picture band is past the clear and is
                 // overwritten by this screen's own picture.
@@ -607,15 +709,15 @@ impl Part for Cred {
                 }
             }
             SHOW_TICK => self.show_screen(ctx),
-            tick if tick == SHOW_TICK + open => {
-                // The open loop's last step (`:176`'s last iteration, whose
-                // `dis_waitb` is what shows it): tick 2 is the first step's and
-                // tick `SHOW_TICK + open` = 103 the last's, so the hold's state
-                // is displayed from 103 — the first of the hold's 200 frames is
-                // 104, and the close's first is 304.
-                Cred::set_display(ctx, false);
+            _ => {
+                // The open loop's steps, then nothing through the hold, then
+                // the close loop's: [`Cred::iris_display`] is where each step
+                // of each loop lands, and the three registers it writes are the
+                // step's own.
+                if let Some(display) = self.iris_display(tick) {
+                    Cred::set_display(ctx, display);
+                }
             }
-            _ => {}
         }
 
         self.tick += 1;
@@ -1246,7 +1348,7 @@ mod tests {
         // The parked state is not the hold's: the same frame drawn from the
         // parked origin is a different picture.
         let hold_view = rig.view.clone();
-        Cred::set_display(&mut rig.ctx(hold_first), true);
+        Cred::set_display(&mut rig.ctx(hold_first), Display::PARKED);
         let parked = rendered(&rig);
         let parked_differing = parked.iter().zip(&at_1440).filter(|(a, b)| a != b).count();
         assert_eq!(
@@ -1327,6 +1429,514 @@ mod tests {
         for at in (0..mine.len()).step_by(3) {
             let rgb = [mine[at], mine[at + 1], mine[at + 2]];
             assert!(palette.contains(&rgb), "{rgb:?} is not in the screen's palette");
+        }
+    }
+
+    #[test]
+    fn the_split_register_is_one_more_than_the_line_compare_odd_or_even() {
+        // `tw_setsplit`'s register names the last line *above* the split, so
+        // the first row below it is that line plus one; the mode is
+        // double-scanned and the port renders it single-scanned, so a displayed
+        // row is two scanlines: `(line_compare + 1) / 2`. Even and odd values
+        // are both arithmetic here — a register of 205 lands on row 103, not
+        // 102 — and both are measured against a capture, not assumed:
+        //
+        // - **even, 200** — the hold: `reference/parts/cred`'s 1440 and 7640
+        //   are reproduced byte for byte at row 100
+        //   (`the_holds_display_state_reproduces_the_references_own_frames`);
+        // - **odd, 205** — the close wipe's step 10: the record's own
+        //   `out/b5-s5-cred-map/frame_001540.rgb` is reproduced byte for byte at
+        //   row 103 (`the_records_transition_frames_are_the_states_this_part_writes`).
+        assert_eq!(split_scanline(200), 100);
+        assert_eq!(split_scanline(205), 103);
+        assert_eq!(split_scanline(204), 102);
+        assert_eq!(split_scanline(206), 103);
+        assert_eq!(split_scanline(201), 101);
+        // And the ramp's own values: `tw_setsplit(400)` is the first row below
+        // a 200-row display (inert), and the close's last step is 393.
+        assert_eq!(split_scanline(400), 200);
+        assert_eq!(split_scanline(393), 197);
+        assert_eq!(split_scanline(384), 192);
+        assert_eq!(split_scanline(0), 0);
+    }
+
+    #[test]
+    fn the_pan_register_is_the_low_two_bits_of_yy_doubled() {
+        // `MAIN.C:183-191`: the register is written with `(yy & 3) * 2`. That is
+        // the *register*, and the pixels it moves the display by are half of
+        // it: the emulator's 256-colour arm is `pel_panning = (val & 0x7) / 2`
+        // (`vga_attr.cpp:225-227`), in the unit the display start itself is
+        // counted in (`vga_draw.cpp:1648-1651`). So a step's pan is `yy & 3`
+        // pixels, and the register is `2 * that`.
+        //
+        // Both numbers are pinned against the record below: the eleven
+        // transition frames whose `yy` is not a multiple of 4 are reproduced
+        // only by the halved reading, and the register-value reading misses
+        // them by thousands of bytes.
+        for (yy, register) in [(0u16, 0u8), (1, 2), (2, 4), (3, 6), (4, 0), (5, 2), (6, 4)] {
+            assert_eq!(pan(yy) * 2, register, "yy {yy}: AC 0x13");
+            assert_eq!(pan(yy), register / 2, "yy {yy}: the pixel shift");
+        }
+        // The states the record's transition frames are, whose pan is not 0.
+        for (yy, register, pixels) in [
+            (25u16, 2u8, 1u8),   // screen 1, open step 1
+            (69, 2, 1),          // screen 1, open step 3
+            (321, 2, 1),         // screen 5, close step 45
+            (328, 0, 0),         // screen 1, close step 10 (1540)
+            (531, 6, 3),         // screen 14, close step 48 (6340)
+            (629, 2, 1),         // the close loop's last step
+            (320, 0, 0),         // the hold
+        ] {
+            assert_eq!(pan(yy), pixels, "yy {yy}");
+            assert_eq!(pan(yy) * 2, register, "yy {yy}");
+        }
+    }
+
+    #[test]
+    fn the_two_ramps_write_the_three_registers_the_source_writes() {
+        // `MAIN.C:179-191` (open) and `:199-211` (close), step by step, with
+        // the values the source's own integer arithmetic gives — not a curve
+        // that "matches" the loop. (step, `y`, line compare, display start in
+        // pixels, AC 0x13's register value).
+        let open = open_ramp();
+        for (step, y, line_compare, origin, register) in [
+            (0usize, 25_600u16, 400u16, 128_000u32, 0u8),
+            (1, 23_630, 384, 128_024, 2),
+            (2, 21_812, 370, 128_048, 0),
+            (3, 20_134, 357, 128_068, 2),
+            (4, 18_585, 345, 128_088, 0),
+            (101, 1, 200, 128_320, 0),
+        ] {
+            assert_eq!(open[step], y, "open step {step}: the loop's own `y`");
+            let display = Display::opening(open[step]);
+            assert_eq!(display.line_compare, line_compare, "open step {step}");
+            assert_eq!(display.origin, origin, "open step {step}");
+            assert_eq!(display.pan * 2, register, "open step {step}: AC 0x13");
+        }
+
+        let close = close_ramp();
+        for (step, y, line_compare, origin, register) in [
+            (0usize, 0u16, 200u16, 128_320u32, 0u8),
+            (1, 0, 200, 128_320, 0),
+            (2, 15, 200, 128_320, 0),
+            (4, 90, 200, 128_320, 2),
+            (10, 675, 205, 128_328, 0),
+            (11, 825, 206, 128_328, 4),
+            (58, 24_795, 393, 128_628, 2),
+        ] {
+            assert_eq!(close[step].0, y, "close step {step}: the loop's own `y`");
+            let display = Display::closing(close[step].0);
+            assert_eq!(display.line_compare, line_compare, "close step {step}");
+            assert_eq!(display.origin, origin, "close step {step}");
+            assert_eq!(display.pan * 2, register, "close step {step}: AC 0x13");
+        }
+
+        // The two ramps meet where the source says they do: the open loop's
+        // last step writes the parked state again — `y = 200*128` is `yy = 0`
+        // and a line compare of 400 — and the close loop's first three steps
+        // write the hold's state exactly, so the four states a screen passes
+        // through endpoint-to-endpoint are in the loops themselves.
+        assert_eq!(Display::opening(open[0]), Display::PARKED);
+        let hold = hold_state();
+        assert_eq!(Display::opening(*open.last().unwrap()), hold);
+        for (step, (y, _)) in close.iter().enumerate().take(4) {
+            assert_eq!(Display::closing(*y), hold, "close step {step}");
+        }
+    }
+
+    #[test]
+    fn the_three_registers_move_once_a_tick_through_both_wipes() {
+        // One tick is one `dis_waitb`, so the tick each step is *displayed* on
+        // is the step's own: tick 2 is the open loop's first (`MAIN.C:176`) and
+        // tick `SHOW_TICK + OPEN_STEPS` = 103 its last, the hold's 200 frames
+        // are 104-303 with nothing written (`:194`), and the close loop's 59
+        // steps are 304-362 (`:196`). The screen's last tick is 362 and the
+        // next screen's tick 0 re-parks the display.
+        let (mut rig, mut part) = started();
+        let open = part.open.clone();
+        let close = part.close.clone();
+        let open_first = SHOW_TICK + 1;
+        let hold_first = open_first + open.len() as u32;
+        let close_first = hold_first + HOLD_FRAMES;
+        assert_eq!((open_first, hold_first, close_first), (2, 104, 304));
+        assert_eq!(part.screen_ticks(), close_first + close.len() as u32);
+
+        // The literal states at named ticks: the display start, the split row
+        // and the pan in pixels, hand-computed from the two loops. The ticks
+        // either side of every boundary are in here, because a step landing one
+        // tick out is exactly what this checks.
+        let named: std::collections::HashMap<u32, (u32, u16, u8)> = [
+            (0, (128_000, 200, 0)),   // parked (`:165-167`), inert split
+            (1, (128_000, 200, 0)),   // the palette and the picture land here
+            (2, (128_000, 200, 0)),   // open step 0: `y = 200*128`, `yy = 0`
+            (3, (128_024, 192, 1)),   // open step 1: `y` 23,630, `yy` 25
+            (4, (128_048, 185, 0)),   // open step 2: `y` 21,812, `yy` 48
+            (5, (128_068, 179, 1)),   // open step 3: `y` 20,134, `yy` 69
+            (103, (128_320, 100, 0)), // the last open step: the hold's state
+            (104, (128_320, 100, 0)), // the hold's first frame
+            (303, (128_320, 100, 0)), // and its last
+            (304, (128_320, 100, 0)), // close step 0
+            (307, (128_320, 100, 0)), // close step 3: still `yy` 320
+            (308, (128_320, 100, 1)), // close step 4: `yy` 321
+            (314, (128_328, 103, 0)), // close step 10: `y` 675, `yy` 328
+            (315, (128_328, 103, 2)), // close step 11: `yy` 330
+            (362, (128_628, 197, 1)), // close step 58, the screen's last tick
+        ]
+        .into_iter()
+        .collect();
+        for tick in 0..part.screen_ticks() {
+            assert_eq!(part.frame(&mut rig.ctx(tick)), PartStatus::Continuing, "tick {tick}");
+            let expected = match tick {
+                PARKED_TICK | SHOW_TICK => Display::PARKED,
+                t if t < hold_first => Display::opening(open[(t - open_first) as usize]),
+                t if t < close_first => hold_state(),
+                t => Display::closing(close[(t - close_first) as usize].0),
+            };
+            let split = rig.view.split.as_ref().unwrap();
+            assert_eq!(rig.view.start_addr, expected.origin, "tick {tick}: the start");
+            assert_eq!(split.scanline, split_scanline(expected.line_compare), "tick {tick}");
+            assert_eq!(rig.view.pan, expected.pan, "tick {tick}: the pan");
+            if let Some((origin, row, pan)) = named.get(&tick) {
+                assert_eq!(
+                    (rig.view.start_addr, split.scanline, rig.view.pan),
+                    (*origin, *row, *pan),
+                    "tick {tick}"
+                );
+            }
+        }
+
+        // The split's own two conventions at a wipe step with a pan: above the
+        // split the display reads the step's start and pan, below it the
+        // hardware's address counter is 0 and the pan is cleared.
+        let (mut rig, mut part) = started();
+        // `run_ticks` counts frames, so 309 of them run ticks 0 to 308.
+        run_ticks(&mut rig, &mut part, 309);
+        let split = rig.view.split.as_ref().unwrap();
+        assert_eq!(split.scanline, 100);
+        assert_eq!(rig.view.effective(0).start_addr, 128_320);
+        assert_eq!(rig.view.effective(0).pan, 1);
+        assert_eq!(rig.view.effective(100).start_addr, 0);
+        assert_eq!(rig.view.effective(100).pan, 0);
+        assert_eq!(
+            rig.view.source_index(&rig.surface, 0, 0),
+            128_321,
+            "the first displayed pixel is one past the start: the pan"
+        );
+        assert_eq!(rig.view.source_index(&rig.surface, 0, 100), 0, "below the split");
+    }
+
+    /// The hold's state as the tests name it, from the constants.
+    fn hold_state() -> Display {
+        Display {
+            origin: HOLD_ORIGIN,
+            line_compare: HOLD_LINE_COMPARE,
+            pan: HOLD_PAN,
+        }
+    }
+
+    // ------------------------------------------- the record's own frames --
+    //
+    // `out/b5-s5-cred-map` is a **scratch capture**: a sweep of every 100th
+    // frame from 1240 to 8840 — 77 frames, the 78th index the command asked for
+    // (8940) refused because the screen there is ENDSCRL's — taken by the
+    // `cargo xtask reference capture` command in its `.log`, RGB only. It lives
+    // under the git-ignored `out/`,
+    // so the two tests below are `#[ignore]`d — they are a *record* of what
+    // the release's own frames show, not an input the suite leans on, and a
+    // fresh clone has no such directory. What they are evidence *of* is the one
+    // thing this part cannot otherwise measure: **the wipes**, which no
+    // keyframe covers (the reference's five CRED indices are all *held*
+    // screens). The run cannot be repeated index for index — a session's
+    // animation phase is not reproducible (D17) — so these frames are read as
+    // they are rather than re-captured.
+
+    /// The record's sweep of this part, by index, or `None` without the
+    /// scratch directory.
+    fn record_frames() -> Option<Vec<(u32, Vec<u8>)>> {
+        let dir = Path::new("../../out/b5-s5-cred-map");
+        if !dir.is_dir() {
+            eprintln!("{} is not here: nothing to read", dir.display());
+            return None;
+        }
+        let mut frames: Vec<(u32, Vec<u8>)> = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let Some(index) = name
+                .strip_prefix("frame_")
+                .and_then(|rest| rest.strip_suffix(".rgb"))
+                .and_then(|digits| digits.parse().ok())
+            else {
+                continue;
+            };
+            frames.push((index, std::fs::read(&path).unwrap()));
+        }
+        frames.sort();
+        assert_eq!(frames.len(), 77, "the sweep is 77 frames");
+        Some(frames)
+    }
+
+    /// The part on the tick screen `screen`'s palette, caption and picture land
+    /// on — the content every state of that screen is drawn over — and the rig
+    /// it was drawn through.
+    fn at_screen(screen: usize) -> (Rig, Cred) {
+        let mut rig = Rig::new();
+        let mut part = Cred::at(TEST_FONT, TEST_PICTURES);
+        part.init(&mut rig.ctx(0)).unwrap();
+        let target = screen as u32 * part.screen_ticks() + SHOW_TICK;
+        // `frame` advances the part, so the tick's own call is the last one.
+        while (part.screen as u32 * part.screen_ticks() + part.tick) <= target {
+            part.frame(&mut rig.ctx(0));
+        }
+        (rig, part)
+    }
+
+    /// The frame the part shows at `display` over that screen's surface.
+    fn render_at(rig: &mut Rig, display: Display) -> Vec<u8> {
+        Cred::set_display(&mut rig.ctx(0), display);
+        rendered(rig)
+    }
+
+    /// How many bytes of `frame` differ from `expected` over displayed rows
+    /// `first..last`.
+    fn differing_in(frame: &[u8], expected: &[u8], first: usize, last: usize) -> usize {
+        assert_eq!(frame.len(), expected.len());
+        assert_eq!(frame.len(), 320 * 200 * 3);
+        (first * 960..last * 960)
+            .filter(|at| frame[*at] != expected[*at])
+            .count()
+    }
+
+    #[test]
+    #[ignore = "reads the scratch capture out/b5-s5-cred-map; a record, not an input"]
+    fn the_records_transition_frames_are_the_states_this_part_writes() {
+        // **The wipes, against the record.** Every frame here is a *moving*
+        // frame — a state between two of the part's holds — and each one is
+        // exactly one state of one screen: `(index, screen (1-based), loop,
+        // step)`. The port writes that state at one tick of that screen, and
+        // the frame it shows there is the record's, **byte for byte over the
+        // whole 320x200 display**.
+        //
+        // It is the only check of the iris at all: `reference/parts/cred`'s
+        // five indices are held screens, and `reference-indices.md` §20 records
+        // that the reference "says nothing about the 590 frames a screen spends
+        // opening and closing".
+        let Some(frames) = record_frames() else { return };
+        let byte_for = |index: u32| frames.iter().find(|(at, _)| *at == index).unwrap().1.clone();
+
+        // The last column is the bytes by which the *doubled* pan reading — the
+        // register value taken as pixels — differs over the whole display:
+        // `None` where the step's pan is 0 (so both readings are the same
+        // frame), `Some(0)` for 6340, the one frame whose visible sliver is
+        // invariant under the shift, and the measured difference otherwise.
+        let transitions: [(u32, usize, &str, usize, Option<usize>); 16] = [
+            (1240, 1, "open", 12, Some(5_375)),
+            (1540, 1, "close", 10, None),
+            (2340, 4, "open", 13, None),
+            (2640, 4, "close", 11, Some(17_130)),
+            (2740, 5, "open", 46, Some(6_446)),
+            (3040, 5, "close", 45, Some(1_534)),
+            (3440, 7, "open", 15, None),
+            (3740, 7, "close", 13, Some(46_722)),
+            (3840, 8, "open", 48, Some(32_709)),
+            (4140, 8, "close", 47, Some(7_804)),
+            (5640, 13, "open", 16, None),
+            (5940, 13, "close", 14, Some(3_554)),
+            (6040, 14, "open", 50, Some(14_217)),
+            (6340, 14, "close", 48, Some(0)),
+            (6740, 16, "open", 17, Some(16_247)),
+            (7040, 16, "close", 15, Some(19_301)),
+        ];
+        let mut ruled_out = 0;
+        for (index, screen, kind, step, doubled) in transitions {
+            let (mut this_rig, part) = at_screen(screen - 1);
+            let display = if kind == "open" {
+                Display::opening(part.open[step])
+            } else {
+                Display::closing(part.close[step].0)
+            };
+            let frame = render_at(&mut this_rig, display);
+            let expected = byte_for(index);
+            let differs = differing_in(&frame, &expected, 0, 200);
+            assert_eq!(
+                differs, 0,
+                "{index} is not screen {screen}'s {kind} step {step}: {differs} bytes differ"
+            );
+            // And where the step's pan is not 0, the *register value* read as
+            // pixels — the other reading of `(yy & 3) * 2` — is **not** the
+            // frame: that is the measurement which fixes the pan's unit
+            // (`the_pan_register_is_the_low_two_bits_of_yy_doubled`). The one
+            // frame that does not discriminate (6340) is asserted to be exactly
+            // that rather than skipped silently: at close step 48 the display
+            // shows a sliver of the picture that is invariant under the
+            // three-pixel shift.
+            if let Some(doubled) = doubled {
+                let mut wrong = display;
+                wrong.pan *= 2;
+                assert_ne!(display.pan, 0, "{index}: the doubled reading is the same frame");
+                let differs = differing_in(&render_at(&mut this_rig, wrong), &expected, 0, 200);
+                assert_eq!(differs, doubled, "{index}: the doubled reading");
+                if doubled > 0 {
+                    ruled_out += 1;
+                }
+            } else {
+                assert_eq!(display.pan, 0, "{index}: a pan of 0 is the only case with one reading");
+            }
+        }
+        // Eleven of the twelve pan-carrying frames rule the doubled reading
+        // out; the twelfth is the invariant sliver.
+        assert_eq!(ruled_out, 11, "the frames that measure the pan's unit");
+
+        // **The sweep's 77 frames, accounted for.** §20.1's table names the hold
+        // samples of every screen, and this port's hold matches exactly the
+        // samples of the twelve screens whose data is the tree's — 28 frames —
+        // and none of the nine the release changed (21 frames). So 49 of the 77
+        // are §20.1's hold samples, the sixteen above are the tree's screens'
+        // wipe frames, and the other twelve are the divergent screens' own wipe
+        // frames — the four counts the note's §3 partitions the sweep by, each
+        // asserted here (and each of the sixteen shown to be no hold at all).
+        let holds: Vec<Vec<u8>> = (0..SCREENS.len())
+            .map(|screen| {
+                let (mut rig, _) = at_screen(screen);
+                render_at(&mut rig, hold_state())
+            })
+            .collect();
+        let matching = |screen: usize| frames.iter().filter(|(_, f)| f == &holds[screen]).count();
+        let samples: [(usize, usize); 12] = [
+            // (screen, the number of §20.1's hold samples for it)
+            (1, 2),
+            (3, 3),
+            (4, 2),
+            (5, 2),
+            (7, 2),
+            (8, 2),
+            (9, 3),
+            (13, 2),
+            (14, 2),
+            (15, 3),
+            (16, 2),
+            (18, 3),
+        ];
+        let mut tree_samples = 0usize;
+        for (screen, expected) in samples {
+            let matched = matching(screen - 1);
+            assert_eq!(matched, expected, "screen {screen}'s own hold samples");
+            tree_samples += matched;
+        }
+        assert_eq!(tree_samples, 28, "the sweep's hold samples on the tree's screens");
+        for screen in [2usize, 6, 10, 11, 12, 17, 19, 20, 21] {
+            assert_eq!(matching(screen - 1), 0, "screen {screen} matches the tree's hold nowhere");
+        }
+        for (index, screen, ..) in transitions {
+            assert_ne!(&byte_for(index), &holds[screen - 1], "{index} is screen {screen}'s hold");
+        }
+        // The other twelve frames that are not hold samples are the divergent
+        // screens' own wipe frames, and none of them is any screen's hold
+        // either. (That they are the divergent screens' wipes is the table's
+        // positional reading — each sits in a wipe-sized gap bounded by a
+        // divergent screen's hold group — and the port cannot draw them: those
+        // nine screens' data is not the tree's. What is *asserted* is the part
+        // the search can settle: no screen's hold is any of them.)
+        let divergent_wipes: [u32; 12] =
+            [1640, 1940, 4540, 4840, 4940, 5240, 7140, 7440, 7840, 8140, 8240, 8540];
+        for index in divergent_wipes {
+            let bytes = byte_for(index);
+            for (screen, hold) in holds.iter().enumerate() {
+                assert_ne!(&bytes, hold, "{index} is screen {}'s hold", screen + 1);
+            }
+        }
+        // And the partition closes: 28 + 21 + 16 + 12 = the sweep's 77 frames.
+        assert_eq!(tree_samples + 21 + transitions.len() + divergent_wipes.len(), frames.len());
+    }
+
+    #[test]
+    #[ignore = "reads the scratch capture out/b5-s5-cred-map; a record, not an input"]
+    fn the_records_other_holds_measure_which_else_the_release_changed() {
+        // `APPROXIMATIONS.md` A10 records this part's divergence from the
+        // *shipped* build for the three keyframes that differ. The sweep holds
+        // a hold sample for every screen, and comparing each one's own sample
+        // against the port's hold measures how far the divergence reaches —
+        // which is further than the three keyframes: nine of the 21 screens are
+        // not the tree's, and the other twelve are (0 of 192,000 bytes each,
+        // the first table below). The three A10 numbers are in the second table
+        // unchanged (screens 6, 12 and 21), which is what says the measurement
+        // is the same one.
+        //
+        // `(screen, the record's hold sample, band bytes, caption bytes)` —
+        // the band is displayed rows 0-99 (the picture), the caption rows
+        // 100-199 (the page below the split).
+        let Some(frames) = record_frames() else { return };
+        // The other twelve screens' own samples first: the claim is that those
+        // screens are the tree's *byte for byte*, and half a claim with no test
+        // behind it is what this file's rule is against.
+        let unchanged: [(usize, u32); 12] = [
+            (1, 1340),
+            (3, 2040),
+            (4, 2440),
+            (5, 2840),
+            (7, 3540),
+            (8, 3940),
+            (9, 4240),
+            (13, 5740),
+            (14, 6140),
+            (15, 6440),
+            (16, 6840),
+            (18, 7540),
+        ];
+        for (screen, index) in unchanged {
+            let (mut rig, _) = at_screen(screen - 1);
+            let hold = render_at(&mut rig, hold_state());
+            let expected = frames.iter().find(|(at, _)| *at == index).unwrap().1.clone();
+            assert_eq!(
+                differing_in(&hold, &expected, 0, 200),
+                0,
+                "screen {screen} is the tree's byte for byte at {index}"
+            );
+        }
+        // All **21** of §20.1's samples of those nine screens, not one a screen:
+        // the note's "nine of the 21 screens" is a claim about the screens, and
+        // the frames it rests on are these.
+        let changed: [(usize, u32, usize, usize); 21] = [
+            (2, 1740, 25_286, 3_297),
+            (2, 1840, 25_286, 3_297),
+            (6, 3140, 20_122, 0),
+            (6, 3240, 20_122, 0),
+            (6, 3340, 20_122, 0),
+            (10, 4640, 8_080, 0),
+            (10, 4740, 8_080, 0),
+            (11, 5040, 0, 18_264),
+            (11, 5140, 0, 18_264),
+            (12, 5340, 0, 18_264),
+            (12, 5440, 0, 18_264),
+            (12, 5540, 0, 18_264),
+            (17, 7240, 21_871, 0),
+            (17, 7340, 21_871, 0),
+            (19, 7940, 34_668, 8_832),
+            (19, 8040, 34_668, 8_832),
+            (20, 8340, 14_272, 11_343),
+            (20, 8440, 14_272, 11_343),
+            (21, 8640, 5_702, 5_520),
+            (21, 8740, 5_702, 5_520),
+            (21, 8840, 5_702, 5_520),
+        ];
+        let screens: std::collections::BTreeSet<usize> =
+            changed.iter().map(|(screen, ..)| *screen).collect();
+        assert_eq!(screens.len(), 9, "the nine screens whose data the release changed");
+        for (screen, index, band, caption) in changed {
+            let (mut rig, _) = at_screen(screen - 1);
+            let hold = render_at(&mut rig, hold_state());
+            let expected = frames.iter().find(|(at, _)| *at == index).unwrap().1.clone();
+            assert_eq!(
+                differing_in(&hold, &expected, 0, 100),
+                band,
+                "screen {screen}: the picture band at {index}"
+            );
+            assert_eq!(
+                differing_in(&hold, &expected, 100, 200),
+                caption,
+                "screen {screen}: the caption at {index}"
+            );
+            assert!(band + caption > 0, "screen {screen} is the tree's after all");
         }
     }
 

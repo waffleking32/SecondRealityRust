@@ -143,11 +143,12 @@ fn the_frames_the_shipped_build_and_the_tree_agree_on_are_byte_for_byte() {
 fn the_five_keyframes_are_inside_the_chains_own_holds() {
     // **The numbering lands.** A keyframe is answerable only if the port's tick
     // for it falls inside that screen's hold, and the chain is what decides
-    // where the ticks are: CRED's tick 0 is reference index 1211 (ENDLOGO's
-    // last frame is 1210) and a screen is 363 ticks, so the five holds are at
-    // 1315-1514, 3130-3329, 5308-5507, 7486-7685 and 8575-8774 — each
-    // containing its keyframe, the tightest (screen 21) with 34 frames to
-    // spare.
+    // where the ticks are: CRED's tick 0 is reference index **1212** —
+    // `--dump-frames 1211,1212` writes `endlogo_001211.rgb` and
+    // `cred_001212.rgb`, and the dump names the part that drew each frame — and
+    // a screen is 363 ticks, so the five holds are at 1315-1514, 3130-3329,
+    // 5308-5507, 7486-7685 and 8575-8774 — each containing its keyframe, the
+    // tightest (screen 21) with 34 frames to spare.
     //
     // This is the port's own version of §20.2's measurement: three frames
     // around each keyframe, byte-identical. It says both things at once — the
@@ -216,6 +217,90 @@ fn the_three_frames_that_differ_differ_where_the_records_own_text_does() {
             "frame {index}: the caption"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The indices this part's *motion* lives at, through the real binary: two
+/// blank early frames, two mid-wipe steps that are not, the open loop's last
+/// step beside the hold's first frame, and two close steps.
+const WIPE: &str = "1213,1214,1215,1220,1230,1315,1316,1525,1526";
+
+#[test]
+fn the_wipes_move_the_display_between_the_holds() {
+    // The part's whole visible motion, and the one thing `reference/parts/cred`
+    // cannot check: all five of its keyframes are *held* screens
+    // (`reference-indices.md` §20.2). CRED's tick 0 is reference index **1212**
+    // (`--dump-frames 1211,1212` writes `endlogo_001211.rgb` and
+    // `cred_001212.rgb`), so tick `t` of screen 1 is index `1212 + t`, and
+    // `MAIN.C:176-213`'s three parts fall at
+    //
+    //   1214..1315   the open loop's 102 steps, one a tick (`:176-192`)
+    //   1316..1515   the hold: `:194`'s 200 `dis_waitb`s, writing nothing
+    //   1516..1574   the close loop's 59 steps (`:196-212`)
+    //
+    // with ticks 0 and 1 (1212 and 1213) the parked state and the tick the
+    // palette and the picture land on. The state each step writes is
+    // `src/parts/cred.rs`'s
+    // `the_three_registers_move_once_a_tick_through_both_wipes`; what this test
+    // adds is that the three registers reach the dumped frame — that the shell
+    // composes what the part wrote — and the two one-frame continuities the
+    // dump can see.
+    let dir = std::env::temp_dir().join(format!("sr-cred-{}-wipe", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
+        .current_dir(repository_root())
+        .args(["--block", "5", "--headless", "--dump-frames", WIPE, "--dump-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+
+    // The screen's first four frames are **blank** — ticks 0 to 3, indices
+    // 1212 to 1215, and this dump holds the last three — and that is the
+    // geometry, not a stalled part: the display start is still inside the
+    // *even* logical line 400 (the picture is drawn into the odd lines,
+    // `MAIN.C:174`) and the row's other half is the blank sliver of line 401
+    // before the picture's column 80. The ink arrives at 1216 (tick 4, open
+    // step 2): 550 non-black pixels, rows 193-199 — the caption's first line
+    // coming in at the bottom right — and at 1220 there are 4,972.
+    assert_eq!(frame_file(&dir, 1214), frame_file(&dir, 1215));
+    assert_eq!(
+        frame_file(&dir, 1213),
+        frame_file(&dir, 1214),
+        "the parked tick, the picture's tick and the first two open steps are all blank"
+    );
+    // And the wipe is drawn: consecutive steps of the same loop show different
+    // frames.
+    assert_eq!(
+        differing_bytes(&frame_file(&dir, 1220), &frame_file(&dir, 1215), None),
+        10_635,
+        "open step 6 is not the blank frame of step 1"
+    );
+    assert_eq!(
+        differing_bytes(&frame_file(&dir, 1230), &frame_file(&dir, 1220), None),
+        29_659,
+        "the open wipe is still moving at step 16"
+    );
+    // The open loop's **last** step (1315, tick 103) and the hold's first frame
+    // (1316, tick 104) are the same frame, because the last step writes the
+    // hold's state exactly and the hold writes nothing. What that shows is the
+    // *seam*: the display the wipe ends on is the display every hold frame
+    // shows. It does **not** pin the ramp's length — its last four `y` values
+    // (4, 3, 2, 1) all give `yy = 320`, so a ramp ending a few steps early would
+    // end on the same state. The length is pinned by the unit test
+    // (`open.last() == 1` and 102 steps).
+    assert_eq!(
+        frame_file(&dir, 1315),
+        frame_file(&dir, 1316),
+        "the open loop's last step is not the hold's state"
+    );
+    // And the close loop moves the display back out: 1525 is its step 9 and
+    // 1526 its step 10 — the state the record's own `frame_001540.rgb` shows.
+    assert_eq!(
+        differing_bytes(&frame_file(&dir, 1526), &frame_file(&dir, 1525), None),
+        13_708,
+        "the close wipe is not moving between steps 9 and 10"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

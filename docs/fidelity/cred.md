@@ -143,23 +143,96 @@ picture. A split one row out moves the caption by one displayed
 row and is 320 pixels of difference; the same test renders the parked state to show the difference
 is the origin, not the split alone.
 
-### What Task 8 inherits — the whole of what this commit leaves out
+### The wipes, step by step
 
-This task implements the two loops' *sequences* and so their lengths, and the state their last step
-leaves; **it does not write the three registers per step.** In this commit:
+Both loops write the same three registers from the step's `y`, and the port writes them from the
+loops themselves ([`Display::opening`], [`Display::closing`]) rather than from a curve that
+"matches" them: the sequences are the source's own integer arithmetic
 
-- through the open loop's first 101 steps (ticks 2-102 of a screen) the display stays at the
-  **parked** state: the iris is not drawn, and those frames are not the reference's;
-- from the open loop's last step (tick 103, `SHOW_TICK + OPEN_STEPS`) the display is at the hold's
-  state, and it stays there through the hold *and through the 59 ticks of the close*, which the next
-  screen's tick 0 re-parks;
-- so every frame of a hold is the reference's (§7) and **every frame of either wipe is a
-  placeholder**.
+```c
+for(y=200*128;y>0;y=y*12L/13)      /* open,  102 steps */
+for(y=0,v=0;y<128*200;y=y+v,v+=15) /* close,  59 steps */
+```
 
-Task 8's three tests are its own to write, and the sequences it needs are already here:
-`open_ramp()` and `close_ramp()` are the source's loops, `close_ramp` carries `(y, v)` because
-`tw_setsplit` is given `y` and `tw_setstart` is given `yy = 320 + y/80`, and `split_scanline` and
-the pan's arithmetic are above. Nothing else in this note's scope is deferred.
+and a closed form a step out moves every hold after it. The values, `(step, y, yy, line compare,
+display start in pixels, AC 0x13)`:
+
+| step | `y` | `yy` | line compare | display start | AC 0x13 |
+|---|---|---|---|---|---|
+| open 0 | 25,600 | 0 | 400 | 128,000 | 0 |
+| open 1 | 23,630 | 25 | 384 | 128,024 | 2 |
+| open 2 | 21,812 | 48 | 370 | 128,048 | 0 |
+| open 5 | 17,155 | 106 | 334 | 128,104 | 4 |
+| open 101 (last) | 1 | 320 | 200 | 128,320 | 0 |
+| close 0-3 | 0 … 45 | 320 | 200 | 128,320 | 0 |
+| close 4 | 90 | 321 | 200 | 128,320 | 2 |
+| close 10 | 675 | 328 | 205 | 128,328 | 0 |
+| close 58 (last) | 24,795 | 629 | 393 | 128,628 | 2 |
+
+Two things in that table are load-bearing and neither is obvious:
+
+- **The display start is a byte address and the port counts pixels.** `tw_setstart` names a byte of
+  a plane (CRTC 0x17 = `0xE3` is byte mode, `TWEAK.ASM:40-41`) and a byte address of this mode is
+  four pixels — one per plane, `tw_putpixel`'s own arithmetic — so the start is the source's byte
+  address times four. `160*200 + yy/4` bytes is `128,000 + 4·(yy/4)` pixels.
+- **The pan is the register value halved.** The source writes `(yy & 3) * 2`; the emulator's
+  256-colour arm is `pel_panning = (val & 0x7) / 2` (`vga_attr.cpp:225-227`), i.e. one register
+  unit is **half a pixel**, in the same unit the display start is counted in (`vga_draw.cpp:1648-1651`
+  builds a line's address as the CRTC start times four *plus* the pan).
+  So a step's pan is `yy & 3` pixels and the effective start is **128,000 + `yy`** exactly — one
+  pixel of scroll per unit of `yy`, which is what makes the two runs meet at the hold's 128,320.
+
+The two loops meet where the source says: the open loop's **first** step writes the parked state
+again (line compare 400, `yy = 0` → 128,000, no pan) and its **last** writes the hold's, which the
+close loop's first four steps write too. So the state every hold frame shows is the loop's own last
+step rather than a constant set beside it.
+
+**One tick is one `dis_waitb`**, and the tick each step is *displayed* on is the step's own: tick 0
+is the parked state (`:165-167`), tick 1 the tick the palette and the picture land on (`:169-174`),
+ticks 2-103 the open loop's 102 steps, ticks 104-303 the hold (`:194`, which writes nothing), ticks
+304-362 the close loop's 59 steps. The next screen's tick 0 re-parks the display. A screen is
+therefore 363 ticks — 362 waits plus the frame already in force when `screenin` is entered — which is
+the same count the timing side of this note uses.
+
+**The `for(a=0;a<10000;a++)` delay loops (`MAIN.C:182`, `:202`) are not modelled.** They sit between
+each step's `tw_setsplit` and its `tw_setstart` to keep the writes inside the vertical retrace; the
+port's tick *is* the frame boundary they protect, and a spin count has no frame-visible effect that
+could be measured. Nothing else of the iris is left out.
+
+**The wipes are checked against the record, not only against themselves.** The five keyframes are
+all held screens, so `reference/parts/cred` cannot see the iris at all — but `out/b5-s5-cred-map`
+(a scratch capture of every 100th frame from 1240 to 8840, in the git-ignored `out/`; the 78th
+index its log asks for, 8940, is refused because the screen there is ENDSCRL's) holds frames that
+are, and the wipes are in them. The sweep's **77** frames divide four ways, and the test named
+below asserts the division frame by frame:
+
+| what the 77 frames are | count |
+|---|---|
+| the port's own holds — §20.1's samples on the twelve screens whose data is the tree's | 28 |
+| the nine changed screens' own samples, which the port's hold reproduces nowhere | 21 |
+| **wipe states of the tree's screens** — the table below, one state of one screen each | 16 |
+| wipe frames of the changed screens (no screen's hold is any of them) | 12 |
+
+The sixteen are the port's, byte for byte over all 192,000 bytes:
+
+| index | state | index | state |
+|---|---|---|---|
+| 1240 | screen 1, open 12 | 3840 | screen 8, open 48 |
+| 1540 | screen 1, close 10 | 4140 | screen 8, close 47 |
+| 2340 | screen 4, open 13 | 5640 | screen 13, open 16 |
+| 2640 | screen 4, close 11 | 5940 | screen 13, close 14 |
+| 2740 | screen 5, open 46 | 6040 | screen 14, open 50 |
+| 3040 | screen 5, close 45 | 6340 | screen 14, close 48 |
+| 3440 | screen 7, open 15 | 6740 | screen 16, open 17 |
+| 3740 | screen 7, close 13 | 7040 | screen 16, close 15 |
+
+Eleven of those frames also **rule out** the other reading of `(yy & 3) * 2` — the register value
+taken as pixels — by 1,534 to 46,722 bytes; the twelfth (6340) is invariant under the shift and
+carries no evidence either way. The test is
+`bins/secondreality/src/parts/cred.rs`'s
+`the_records_transition_frames_are_the_states_this_part_writes`, `#[ignore]`d because the directory
+is scratch: it is a *record* of what the release's own frames show, and a re-capture cannot land on
+the same indices (a session's phase is not reproducible, D17).
 
 ## 4. The palette repair, which is part of the screen
 
@@ -230,8 +303,8 @@ port translates all three literally, and the reference's caption regions are the
 
 ```bash
 cargo run --bin secondreality -- --block 5 --headless --dump-frames 1440,3240,5440,7640,8740 \
-    --dump-dir out/p2-cred
-cargo xtask compare --reference reference/parts/cred --rendered out/p2-cred --out out/p2-cred-diff
+    --dump-dir out/t8-cred
+cargo xtask compare --reference reference/parts/cred --rendered out/t8-cred --out out/t8-cred-diff
 ```
 
 ```
@@ -240,31 +313,40 @@ frame 3240: 11.2563% differing (7204/64000 px), max delta 255
 frame 5440: 9.5125% differing (6088/64000 px), max delta 255
 frame 7640: 0.0000% differing (0/64000 px), max delta 0
 frame 8740: 5.8453% differing (3741/64000 px), max delta 255
-report: out/p2-cred-diff/report.json
+report: out/t8-cred-diff/report.json
 captures: 1 measured
 verdict: different
 exit: 1
 ```
 
-`mode: rgb` on both sides, as `reference-indices.md` §20.2 predicts: all 82 of the reference's CRED
-frames were refused by the indexed read's coherence check, so **no `.idx` exists on either side**.
+Re-run from a deleted output directory in the commit that implemented the wipes, and **the same
+five numbers as the run before them** — which is what that run is for: a keyframe is a hold deep
+inside its screen's 200 held frames, so the only way a wipe could move one is by leaving the display
+in a state the hold does not expect.
+
+`mode: rgb`, as `reference-indices.md` §20.2 predicts: all 82 of the reference's CRED frames were
+refused by the indexed read's coherence check, so the **reference has no `.idx`** and the comparison
+falls back to RGB. (The port's dumps do write theirs — `cred_001440.idx` and the rest — but indexed
+comparison needs both sides.)
 
 **The chain is part of the test, and it lands.** The run is `--block 5` for that reason: 1440 is only
-reachable if ENDLOGO's duration was right. The port's CRED tick 0 is reference index **1211**
-(ENDLOGO's last frame is 1210) and a screen is **363** ticks, so the holds are at
+reachable if ENDLOGO's duration was right. The port's CRED tick 0 is reference index **1212** —
+`--dump-frames 1211,1212` writes `endlogo_001211.rgb` (384,000 bytes) and `cred_001212.rgb`
+(192,000), and the dump names the part that drew each frame — and a screen is **363** ticks, so the
+holds are at
 
 | screen | keyframe | the port's hold | frames into it |
 |---|---|---|---|
-| 1 | 1440 | 1314-1513 | 126 |
-| 6 | 3240 | 3129-3328 | 111 |
-| 12 | 5440 | 5307-5506 | 133 |
-| 18 | 7640 | 7485-7684 | 155 |
-| 21 | 8740 | 8574-8773 | 166 |
+| 1 | 1440 | 1315-1514 | 125 |
+| 6 | 3240 | 3130-3329 | 110 |
+| 12 | 5440 | 5308-5507 | 132 |
+| 18 | 7640 | 7486-7685 | 154 |
+| 21 | 8740 | 8575-8774 | 165 |
 
-— every keyframe inside its hold, the tightest (screen 21) with 33 frames to spare. The hold is
+— every keyframe inside its hold, the tightest (screen 21) with 34 frames to spare. The hold is
 ticks 104-303 of a screen (tick 103 is the open loop's last step, which is the tick that *writes*
 the hold's display state and so shows it too; the close's first tick is 304), so screen `k`'s hold is
-`1211 + (k-1)*363 + 103` to `+302`. That margin is
+`1212 + (k-1)*363 + 103` to `+302`. That margin is
 what makes the comparison a comparison: §20.2 measured all five keyframes as **held**, so the port's
 frames there are static screens and a two-frame phase difference cannot move a pixel.
 
@@ -292,6 +374,15 @@ difference is localised (`bins/secondreality/tests/cred.rs` prints both regions 
 - **8740 (screen 21).** §20.1 records its caption as "MUSIC - SKAVEN" where `MAIN.C:154` draws
   "MUSIC - PURPLE MOTION", and its picture band differs too.
 
+**The divergence is wider than the five keyframes, and that is measured.** The record's sweep holds
+a *hold sample* for every one of the 21 screens, and all **21** of the samples of the **nine**
+screens whose data is not the tree's are off it — the three above and six more (screens 2, 10, 11,
+17, 19 and 20; A10 carries the readings, and
+`the_records_other_holds_measure_which_else_the_release_changed` measures all 21 samples). The
+remaining twelve screens' holds are the tree's, byte for byte — asserted at one sample each, which
+is the other half of §3's evidence: the sweep's own frames of those screens are reproduced exactly,
+at holds *and* at wipes.
+
 **The port is faithful to the tree, and the tree is older than the shipped build.** The evidence
 that this is a data divergence and not a port's error: the *same* machinery reproduces 1440 and 7640
 byte for byte; the caption on 3240 matches the reference's exactly while the picture does not; and
@@ -308,9 +399,16 @@ is `(8840 - 1440) / 20 = 370`, and each end is a hold *sample* rather than a hol
 length is bracketed by ±100/20 = ±10: **360 to 380**, against the port's 363. The port's CRED
 therefore runs 2 to 12 frames *ahead* per screen, and by screen 21 its hold sits 40 to 240 frames
 before the reference's — well inside the 200-frame hold, which is why every keyframe is still
-answered, the tightest with 33 frames to spare (the table above). Task 11's boundary measurement should
+answered, the tightest with 34 frames to spare (the table above). Task 11's boundary measurement should
 expect the port's CRED-ENDSCRL boundary to fall short of the reference's by the same kind of margin,
 not at it.
+
+**And there is one measured bracket for that boundary.** The sweep's log refuses its 78th index —
+`error: the display changed geometry between frames: frame 8940 is 640x400` — so in that session
+the reference's CRED still holds at 8840 and is ENDSCRL's by 8940: its last CRED frame is in
+**[8840, 8939]** (8940 is the refused, 640×400 screen). The port's is **8834** (its CRED tick 0 is
+reference 1212 and its last tick is 7622), i.e. **6 to 105 frames early** — the same order as the
+per-screen drift above, and the number Task 11 can compare its own measurement against.
 
 ## 8. Tests
 
@@ -333,13 +431,27 @@ committed `reference/`):
 | `the_parked_split_is_below_the_display_and_the_holds_is_half_way` | the split convention at both ends, and the lower view's origin and stride |
 | `the_holds_display_state_reproduces_the_references_own_frames` | screens 1 and 18 against `reference/`'s frames, 0 differing bytes |
 | `the_references_sixth_screen_is_not_the_trees_picture_at_all` | §7's palette measurement for 3240: 14 colours in the band, 8 of them not in the screen's 256 entries, 3,524 pixels |
+| `the_split_register_is_one_more_than_the_line_compare_odd_or_even` | §3's split mapping at 200 (the hold, measured on 1440/7640) and at 205 (the close's step 10, measured on the record's 1540) |
+| `the_pan_register_is_the_low_two_bits_of_yy_doubled` | §3's pan: the register is `(yy & 3) * 2` and the pixels are `yy & 3`, the emulator's 256-colour mapping |
+| `the_two_ramps_write_the_three_registers_the_source_writes` | §3's per-step table, both loops, and that the loops' own ends write the parked and the hold states |
+| `the_three_registers_move_once_a_tick_through_both_wipes` | which tick each step is displayed on (2-103, 304-362), the hold writing nothing, and the lower view's cleared origin and pan at a panned step |
 
 Run in a commit with the strip's own asset and the reference's five frames; the unit tests read
 `assets/` and `reference/`, and nothing here reads `upstream/`.
 
-`bins/secondreality/tests/cred.rs` (5 tests, the real binary from the repository root): the
+Two more unit tests are **`#[ignore]`d**, because they read `out/b5-s5-cred-map` — the scratch
+capture of §3, under the git-ignored `out/`, which a fresh clone does not have:
+`the_records_transition_frames_are_the_states_this_part_writes` (the sixteen frames above, 0
+differing bytes each; the pan measurement's eleven exclusions with their byte counts; and §3's
+77-frame partition) and `the_records_other_holds_measure_which_else_the_release_changed` (§7's
+divergence over all 21 samples of the nine screens, and the twelve screens that are the tree's,
+0 of 192,000 bytes each). `cargo test -- --ignored` runs them where the directory is.
+
+`bins/secondreality/tests/cred.rs` (6 tests, the real binary from the repository root): the
 manifest's numbering and geometry; **the five keyframes inside the chain's own holds** — three
 frames around each keyframe, byte-identical, i.e. §20.2's measurement made of the port, which says
 at once that each keyframe is inside a hold and that the screen there is the one the reference
 holds; the two frames that agree with the reference byte for byte; the three that differ, with both
-regions' byte counts per frame; and the truncated-frame guard.
+regions' byte counts per frame; **the wipes moving the display between the holds** — two blank early
+open steps, two that differ, the open loop's last step identical to the hold's first frame, and two
+close steps that differ, all through the binary; and the truncated-frame guard.

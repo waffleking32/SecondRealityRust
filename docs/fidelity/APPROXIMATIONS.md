@@ -458,6 +458,33 @@ while §20.1's table — written from the shipped build's own sheet — reads sc
 captions as "SKETCH - SKAVEN / GRAPHICS - PIXEL / …" and describes screen 6 as "a dotted vortex".
 A port of this tree cannot produce either sentence's screen.
 
+**The divergence is not confined to those three screens, and that is measured too.** The record's
+own sweep of this part (`out/b5-s5-cred-map`, the source of §20.1's table) holds a *hold sample* for
+every one of the 21 screens, and each sample against the port's hold puts **nine** of the 21 off the
+tree's data — the three above and six more:
+
+| screen | sample | picture band | caption | reading |
+|---|---|---|---|---|
+| 2 | 1740 | 25,286 | 3,297 | both |
+| 6 | 3240 | 20,122 | 0 | the picture is not the tree's |
+| 10 | 4640 | 8,080 | 0 | the picture is not the tree's |
+| 11 | 5040 | 0 | 18,264 | the caption is not the tree's |
+| 12 | 5440 | 0 | 18,264 | the caption is not the tree's |
+| 17 | 7240 | 21,871 | 0 | the picture is not the tree's |
+| 19 | 7940 | 34,668 | 8,832 | both |
+| 20 | 8340 | 14,272 | 11,343 | both |
+| 21 | 8740 | 5,702 | 5,520 | both |
+
+Measured by `bins/secondreality/src/parts/cred.rs`'s
+`the_records_other_holds_measure_which_else_the_release_changed` (an `#[ignore]`d test, because it
+reads the scratch capture), over **all 21** of those screens' hold samples — the table above is one
+sample per screen, and the samples on any one screen agree. The three keyframes' rows are unchanged
+in it; screens 11 and 12's captions differ from the tree's by the same 18,264 bytes — §20.1 reads
+both as the one four-line caption — and §20.1's sheet text names the release's own caption lines on
+screens 2, 19 and 20 ("OBJECTS – WILDFIRE", "WORLD – TRUG", "MUSIC – SKAVEN") where
+`CREDITS/MAIN.C` has none. The remaining twelve screens' holds are the tree's, byte for byte
+(asserted at one sample each, 0 of 192,000 bytes).
+
 **Why the port does not follow the reference here.** Copying the shipped captions would be inventing
 text that is in no file in the tree, and nothing in the tree says which pictures they were paired
 with. The port translates `CREDITS/MAIN.C` as it stands, and this entry is what the register is for

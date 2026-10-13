@@ -33,7 +33,15 @@ pub struct View {
     /// where the surface is in hand, in [`View::source_index`], so a view built
     /// before the surface existed cannot get it wrong.
     pub y_line_offset: Option<u16>,
-    pub pan: u8,           // fine horizontal shift, 0..=7 (AC 0x13)
+    /// Fine horizontal shift, **in pixels**, 0..=7.
+    ///
+    /// This is AC 0x13's unit only in some modes: a 256-colour one shifts
+    /// `(value & 0x7) / 2` pixels (the emulator's `M_VGA`/`M_LIN8` arm is
+    /// `pel_panning = (val & 0x7) / 2`, `vga_attr.cpp:225-227`), so a part that
+    /// writes the register value straight into this field moves the display
+    /// twice as far as the machine did. CRED's part writes `yy & 3` for that
+    /// reason, with the measurement behind it in `docs/fidelity/cred.md` §3.
+    pub pan: u8,
     pub double_scan: bool, // CRTC reg 9 bit 7
     pub split: Option<Box<Split>>,
     pub border: Option<u8>, // overscan colour (AC 0x11)
