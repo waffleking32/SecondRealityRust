@@ -25,14 +25,20 @@ Phase status board. **Read this first if you are resuming work.**
 **Phase 0 is complete** (tag `phase-0`). The engine, the binary and the verification harness all
 work; no demo part has been ported yet.
 
-**Phase 1 is complete, and the `phase-1` tag is deliberately withheld.** Its exit criteria are met —
-the evidence is in the section below and in `docs/fidelity/reference-indices.md` — and its plan is
-`docs/plans/01-assets.md`; its ledger (the recovery map, git-ignored scratch) is
-`.superpowers/sdd/01-assets/progress.md`. The tag is withheld because the final whole-branch review
-comes after this close-out and may require fixes; a tag that has to be moved is worse than a tag
-applied a few commits later (B6's ruling, in the ledger). **The review has now run and its findings
-are applied** (the two fix dispatches are recorded at the end of the evidence section below);
-**the remaining action is `git tag phase-1`, and Phase 2 starts from there.**
+**Phase 1 is complete** — tag `phase-1` at `a17b1ab` — **and `master` holds it.** Its exit criteria
+are met (the evidence is in the section below and in `docs/fidelity/reference-indices.md`), its plan
+is `docs/plans/01-assets.md`, and its ledger (the recovery map, git-ignored scratch) is
+`.superpowers/sdd/01-assets/progress.md`. The tag was withheld until the final whole-branch review
+had run and its findings were applied (two fix dispatches, recorded at the end of the evidence
+section below), because a tag that has to be moved is worse than a tag applied a few commits later
+(B6's ruling, in the ledger).
+
+**The branches, as of 2026-10-13.** `phase-0-foundation` and `phase-1-assets` were merged into
+`master` at the user's instruction. The history was linear (`master` → `phase-0-foundation` →
+`phase-1-assets`, no divergence), so this was a single fast-forward: `master` *is* `a17b1ab`, no
+merge commit exists, and `master`'s tree hash equals `phase-1^{tree}` (`f5e2151b`) — what is tagged
+and what is on `master` are the same bytes. The two branches are kept rather than deleted. **Phase 2
+starts from `master`.**
 
 ### Phase 1's evidence (close-out, Task B6, 2026-10-12)
 
