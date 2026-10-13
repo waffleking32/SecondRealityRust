@@ -415,14 +415,17 @@ Each of these is something a later task must know before it writes a loader or a
    developer's `Lerto has coded this hilariously fantastic…` test text; the pack entry is
    6,141 bytes (`MAIN/PACKFINA.INC:51`) and is `MAIN/DATA/ENDSCROL.TXT`, the real credits
    text. Both are in `assets/`, both are cited, and the port must use the second.
-10. **Two builds of part 4 exist, and `assets/` holds neither `ENDPIC/`'s set nor a guess.**
-    `ENDPIC/MAKEFILE:22` stages `beg.exe` as `beglogo.exe`, the same target name as
-    `BEG/MAKEFILE:21`; part-sequence §1 says which one shipped is undetermined. `BEG/`'s files
-    are copied (they are what the floor list names); `ENDPIC/`'s are not, because its picture
-    files are `SRTITLE.U` (unique to it, 6,936 bytes, and the payload of its `_PIC.OBK`) plus
-    `PIC.UH`/`PIC.LBM`, which are byte-identical to `JPLOGO/`'s unused copies — copying the
-    directory as a set would put three duplicate files in the tree for no gain. Deciding which
-    build shipped is Phase 2's question and it can be answered from `upstream/`.
+10. **Two builds of part 4 exist, and `assets/` holds `BEG/`'s — which is the one that
+    shipped.** `ENDPIC/MAKEFILE:22` stages `beg.exe` as `beglogo.exe`, the same target name as
+    `BEG/MAKEFILE:21`, so which directory built part 4 was open here; Phase 2 settled it and it is
+    `BEG/` (`docs/fidelity/beglogo.md` §1, and part-sequence §1's build note): the reference's held
+    frame 900 probes palette entries that `BEG/SRTITLE.UP`'s palette matches and
+    `ENDPIC/SRTITLE.U`'s matches none of, and `SRTITLE.UP` decodes to that frame's indices exactly.
+    `BEG/`'s files are therefore the ones copied — and they are what the floor list names.
+    `ENDPIC/`'s are not, because its picture files are `SRTITLE.U` (unique to it, 6,936 bytes, and
+    the payload of its `_PIC.OBK`) plus `PIC.UH`/`PIC.LBM`, which are byte-identical to
+    `JPLOGO/`'s unused copies — copying the directory as a set would put three duplicate files in
+    the tree for a directory that did not ship.
 11. **`MAIN/DATA/U2END.BIN` (4,000 bytes) is a DOS text-mode screen, and the shell prints it.**
     `MAIN/U2.ASM:506` names it (`endansiname db 'U2END.BIN',0`); `printend`
     (`MAIN/U2.ASM:511-535`, called at `:974`) reads exactly 4,000 bytes into a `getmem` block

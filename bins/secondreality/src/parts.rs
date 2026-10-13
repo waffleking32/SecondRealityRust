@@ -1,20 +1,27 @@
 //! The part registry: the names `--part` accepts, and what they construct.
 //!
-//! The demo shell will grow a part per file once Phase 2 lands; until then the
-//! test card is the only thing there is to run. Adding a part means adding one
-//! entry here and nothing else: the registry is what the shell's run order is
-//! measured against (`shell::resolve`) and what a `--block` plan is stopped by.
+//! The shell grows a part per file as Phase 2 lands: the test card, and the
+//! demo's own parts in the order they were ported. Adding one means adding an
+//! entry here and a module beside this file — the registry is what the shell's
+//! run order is measured against (`shell::resolve`) and what a `--block` plan
+//! is stopped by.
 //!
 //! The names here are the port's own. Which of them the demo's run order
 //! (`shell::PART_ORDER`) has used, and which the port has therefore still to
 //! port, is the shell's table to say.
+
+pub mod beglogo;
 
 use sr_engine::part::Part;
 use sr_engine::testcard::TestCard;
 
 /// Every part this binary can run, as (name, constructor).
 pub fn registry() -> &'static [(&'static str, fn() -> Box<dyn Part>)] {
-    &[("testcard", || Box::new(TestCard::new()))]
+    &[
+        ("testcard", || Box::new(TestCard::new())),
+        // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).
+        ("beglogo", || Box::new(beglogo::Beglogo::new())),
+    ]
 }
 
 /// The registered name `name` names, or `None`.

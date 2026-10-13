@@ -633,6 +633,7 @@ dependencies = [
  "sdl2",
  "serde",
  "serde_json",
+ "sr-assets",
  "sr-engine",
 ]
 

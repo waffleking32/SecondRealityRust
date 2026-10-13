@@ -85,9 +85,22 @@ column entry should be read as such.
 Two build notes worth knowing:
 
 - `ENDPIC/MAKEFILE:22` also stages `beg.exe` as `beglogo.exe`, so **two** directories
-  contain a version of part 4. `ENDPIC/` holds `BEG.C` + `SRTITLE.LBM`/`PIC.LBM`; `BEG/`
-  holds the same picture plus the `_pic.obk` blob. Which one the 1993 release shipped is
-  not determined here — both build the same target name.
+  contain a version of part 4. `ENDPIC/` holds `BEG.C` + `SRTITLE.LBM`/`PIC.LBM`, whose
+  picture is linked in from `_PIC.OBK` (`:21`, and its payload is `SRTITLE.U` — every
+  16-byte window of that file is in the OBK); `BEG/` holds its own picture plus its own
+  `_pic.obk` blob. They are two different title pictures, not two packings of one: the two
+  decoded `.UP`/`.U` payloads differ in 126,261 of their 128,000 pixels and in 255 of
+  their 256 palette entries. Both build the same target name, and
+  **`BEG/` is the one the 1993 release shipped** — settled in `docs/fidelity/beglogo.md`
+  §1 by three measurements rather than by unpacking the binary: the reference's held frame
+  900 probes 57 palette entries that `BEG/SRTITLE.UP`'s palette matches entry for entry and
+  `ENDPIC/SRTITLE.U`'s matches none of; `SRTITLE.UP` decodes to that frame's 128,000
+  indices exactly while `ENDPIC/SRTITLE.U` decodes to a different picture (126,261 of
+  128,000 pixels apart); and the staged `MAIN/DATA/BEGLOGO.EXE` is 30,874 bytes, which a
+  packer can produce from `BEG/BEG.EXE`'s 50,830 and cannot from `ENDPIC/BEG.EXE`'s
+  13,286. The two builds are not interchangeable — `ENDPIC/BEG.C:18-20` sets its own video
+  mode and `:45-48` waits on the music, where `BEG/BEG.C` calls `dis_partstart`,
+  `dis_waitb` and nothing else — so part 4's port takes the `BEG/` reading throughout.
 - Every part EXE staged in `MAIN/DATA/` — all 20, plus `START.EXE` — carries the PKLITE
   signature, except `U2A.EXE` and `U2E.EXE`, whose staged bytes are identical to
   `VISU/C/U2A.EXE` and `VISU/C/U2E.EXE` (checked by hash). That difference is compression,
@@ -336,7 +349,7 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
   require unpacking it, which was not attempted. The pack manifest at
   `MAIN/PACKFINA.INC` does list exactly these 20 part EXEs plus the two helper programs,
   which corroborates the *set* of parts but not the ordering code.
-- **`_np_zplus` / `_np_zinfo` semantics** (§6) — tracked as D8.
-- **Which `BEGLOGO` build shipped** (`BEG/` or `ENDPIC/`, §1).
+- **`_np_zplus` / `_np_zinfo` semantics** (§6) — tracked as D8. Part 4 is no longer one of
+  its dependents: `BEG/` shipped (§1), so BEGLOGO calls no music service at all.
 - **The order-42 and order-25 correspondence** to where a full run's music actually is at
   those moments is the evident intent of the code (§3); it is not measured here.

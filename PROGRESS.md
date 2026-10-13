@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | not started | — | — |
+| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)** | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -411,6 +411,76 @@ ways — a plain line and a table were each caught, naming the line — and the 
 byte-identical to `ee63aa7`'s. The second thing was a word: the two places that said §4.2's
 amendment sits "above the struct sketch" now say below, which is where it is. 484 passed, 0 failed,
 0 warnings.
+
+#### Task 4 — BEGLOGO: the phase's exit criterion, met
+
+**The comparison is exit 0.** The two commands, verbatim:
+
+```
+$ cargo run --bin secondreality -- --headless --part beglogo --dump-frames 430,470,560,900 \
+      --dump-dir out/p2-beglogo
+$ cargo xtask compare --reference reference/parts/beglogo --rendered out/p2-beglogo \
+      --out out/p2-beglogo-diff
+frame 430: 0.0000% differing (0/128000 px), max delta 0
+frame 470: 0.0000% differing (0/128000 px), max delta 0
+frame 560: 0.0000% differing (0/128000 px), max delta 0
+frame 900: 0.0000% differing (0/128000 px), max delta 0
+verdict: identical
+exit: 0
+```
+
+`mode: mixed`, every offset 0 (`{0: 4}` in the report), 0 pixels of 128,000. 430 and 900 are the
+indexed pair and 470 and 560 the RGB pair, exactly as `reference-indices.md` §3.1 predicted — so the
+DAC's 6→8-bit widening was live on two of the four frames that judge the phase, and it agrees.
+
+**The part.** `bins/secondreality/src/parts/beglogo.rs`, registered as `beglogo`; `BEG/BEG.C`'s four
+acts translated act for act and tick for tick, with `sr_assets::load_path` reading
+`assets/BEG/SRTITLE.UP` in its original format. Nine tests: six beside the part (unit) and three
+through the real binary from the repository root (`tests/beglogo.rs`) — **493 passed, 0 failed, 0
+warnings** (was 484; the count went up, not down).
+
+Four things this task settled rather than assumed, and each changed what the code does:
+
+- **Which of part 4's two builds shipped: `BEG/`.** `ENDPIC/MAKEFILE:22` stages a second `beg.exe`
+  as `beglogo.exe`, and the two are not interchangeable — `ENDPIC/BEG.C:18-20` sets its own mode and
+  `:45-48` waits on `dis_muscode(0xf0)`. Settled by three measurements: the reference's held frame
+  900 probes 57 palette entries that `BEG/SRTITLE.UP`'s palette matches **57/57** and
+  `ENDPIC/SRTITLE.U`'s matches **0/57**; `SRTITLE.UP` decodes to that frame's indices exactly (0 of
+  128,000 pixels) while `ENDPIC/SRTITLE.U` decodes to a different picture (126,261 of 128,000 pixels
+  apart); and the staged `MAIN/DATA/BEGLOGO.EXE` is 30,874 bytes, which a packer produces from
+  `BEG/BEG.EXE`'s 50,830 and not from `ENDPIC/BEG.EXE`'s 13,286. **So BEGLOGO has no music gate**,
+  `_np_zinfo`'s exposure narrows to GRID, HARD and the vault, and spec §7.4, the risk table and D8
+  are amended in place.
+- **The fade's first index is 446, by exhaustive match and not by fit.** The scan — the source's own
+  ramp, run over every `c` in 0…128, widened and compared over all 320×400 pixels — gives 470 at
+  **c = 24** and 560 at **c = 114**, each *unique*, and 470 − 24 = 560 − 114 = 446. It is a permanent
+  test (`the_fade_constants_are_derived_by_matching_the_reference_bit_for_bit`), so the constant
+  cannot drift from its evidence. 900's scan gives c ∈ {126,127,128} — the ramp has converged, so it
+  pins the end and not the start — and 430 gives all 129 values: the frame is one index (15)
+  repeated, and entry 15 is white in the picture's own palette, so *no* `c` is distinguishable
+  there. The plan's note said 430 matched only at c = 0; the measurement says otherwise, and §1 of
+  the part's note records it. The fit over means (§3.3) gives ≈441 and remains wrong.
+- **The blit cannot be in `init`.** The plan's sketch put it there, and the keyframe refuses it:
+  `frame_000430.idx` is 128,000 bytes of 15, and `compare` prefers the *indexed* path when both
+  sides have indices. A port that had blitted before tick 0 would render 430 white in RGB while its
+  `.idx` held the picture's indices — a diff at a keyframe that is supposed to be trivially white.
+  `BEG/BEG.C:24`'s 32 `dis_waitb()`s come before `:73-78` in the source too, so the blit is the
+  tick after them (tick 32, index 436) and the DAC write of `:25-34` is on that same tick: the
+  white at 430 is entry 15 of the table the *shell* installed, untouched by the part.
+- **`setpalarea`'s byte-count bug is written, not fixed.** `BEG/ASM.ASM:106-108` computes
+  `2*count + start`, so `setpalarea(pal2,0,254)` uploads 508 bytes: entries 0-168 whole, the red
+  byte of 169, nothing of 170-254. Confirmed in the shipped binary — the routine is at `BEG.EXE`
+  file offset `0xcb7` and the arithmetic at `0xccb`-`0x0cd1`. It is **invisible on this art**
+  (measured: the same scan with a full 762-byte upload returns the same `c`), which is exactly why
+  it is a decision and a `docs/fidelity/bugs.md` entry (§4) rather than a coincidence — the next
+  part to paint into entries 170-254 will meet them still white.
+
+The plan's Step 6 file list is followed, plus `docs/fidelity/asset-inventory.md` (its item 10 asked
+Phase 2 to settle the build) and this file: `bins/secondreality/{Cargo.toml,src/parts.rs,
+src/parts/beglogo.rs,tests/beglogo.rs}`, `docs/fidelity/{beglogo.md,bugs.md,part-sequence.md,
+asset-inventory.md}`, `docs/spec/…-design.md`, `docs/decisions.md`. The full note — the derivation
+table, the tick map, the two Part B conventions and what is not modelled — is
+`docs/fidelity/beglogo.md`.
 
 ## Phase log
 

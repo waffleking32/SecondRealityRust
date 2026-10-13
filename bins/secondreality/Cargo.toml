@@ -11,6 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 sr-engine.workspace = true
+# A part reads its media in the original's format, through the port's own
+# decoders: BEGLOGO's picture is an Origin RLE PIC, and nothing in this tree
+# pre-converts it.
+sr-assets = { path = "../../crates/sr-assets" }
 # The window is the binary's business; sr-engine keeps zero runtime deps.
 # sdl2's default feature set is empty, so this links the system SDL2 rather
 # than vendoring and compiling one.

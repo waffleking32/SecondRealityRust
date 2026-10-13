@@ -94,7 +94,20 @@ required behaviour in `docs/fidelity/bugs.md` with reference frames.
 `dis_muscode()` returns STMIK's `_np_zinfo`, which is not present in the module data
 (all `S` commands are standard `SDx`; MUSIC0 has no cells outside channels 0–7;
 MUSIC1's only off-channel cells are five near-empty ones on channels 10–14). Exposure:
-BEGLOGO waits for `0xf0`, GRID for 1/2/3, HARD for 1 and 0xff.
+GRID for 1/2/3, HARD for 1 and 0xff.
+
+**Amended 2026-10-13 — BEGLOGO is not a dependent, and its exposure was a wrong-build artefact.**
+This entry (and spec §7.4) named BEGLOGO as waiting for `zinfo == 0xf0`. That line is
+`ENDPIC/BEG.C:48`, in the build of part 4 that **did not ship**: the 1993 release's part 4 is
+`BEG/`'s, which calls `dis_partstart`, `dis_waitb` and nothing else — no `dis_muscode`, no
+`dis_exit`, no copper. `docs/fidelity/beglogo.md` §1 settles which build shipped from three
+independent measurements (the reference's held frame 900 probes palette entries that
+`BEG/SRTITLE.UP` matches and `ENDPIC/SRTITLE.U` does not; `SRTITLE.UP` decodes to that frame's
+128,000 indices exactly; the staged `MAIN/DATA/BEGLOGO.EXE` is 30,874 bytes, which no packer
+produces from `ENDPIC/BEG.EXE`'s 13,286), and `docs/fidelity/part-sequence.md` §1 carries the
+build note. The exposure is therefore **GRID, HARD and the vault** (Phase 8) — none of them this
+phase's, and the phase that has to resolve `_np_zinfo` is Phase 3, whose ladder below is
+unchanged. BEGLOGO was ported against no music cue at all, and its comparison is exit 0.
 
 Resolution ladder: (1) parse `STMIK.300`'s OMF symbol records for `_np_zinfo` /
 `_np_zplus` offsets, then read them live from the emulated original via

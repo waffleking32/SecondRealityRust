@@ -578,8 +578,13 @@ every `S` command in both modules is standard `SDx`, MUSIC0 has no cells outside
 channels 0–7, and MUSIC1's only off-channel cells are five near-empty ones on
 channels 10–14. It is produced inside STMIK.
 
-Exposure: BEGLOGO waits for `zinfo == 0xf0`; GRID for 1/2/3; HARD for 1 and 0xff.
-The W32 port stubbed `dis_muscode()` to `return 0` and presumably patched those parts.
+Exposure: GRID for 1/2/3; HARD for 1 and 0xff. **BEGLOGO is not a dependent** — the line
+that waits for `zinfo == 0xf0` is `ENDPIC/BEG.C:48`, in the build of part 4 that did not
+ship; the shipped build is `BEG/`'s, which calls `dis_partstart`, `dis_waitb` and nothing
+else (amended 2026-10-13: `docs/fidelity/beglogo.md` §1 settles which build shipped, from
+the reference's held frame 900 and the staged EXE's size). The vault is the third
+dependent and is Phase 8's. The W32 port stubbed `dis_muscode()` to `return 0` and
+presumably patched the parts that call it.
 
 Resolution ladder, cheapest first:
 
@@ -715,7 +720,7 @@ The project is designed to be stopped and resumed at any phase boundary.
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | Bit-exactness not achievable | medium | high | answered in Phase 2 with a single part; approximations register as the fallback |
-| `_np_zinfo` unresolved | medium | low | three-route ladder (§7.4); only BEGLOGO and the vault depend on it; hard escalation trigger |
+| `_np_zinfo` unresolved | medium | low | three-route ladder (§7.4); GRID, HARD and the vault depend on it — not BEGLOGO, whose shipped build does not call `dis_muscode` (§7.4); hard escalation trigger |
 | `dis_getmframe` real rate not reproducible | medium | medium | measured empirically in Phase 3; affects GLENZ/PLZPART/TECHNO |
 | FOREST, WATER and PANIC shipped binaries have only prototype sources | high | medium | shipped EXEs exist in `MAIN/DATA/`; disassemble against reference frames |
 | Emulator reference itself wrong for Mode X/CRTC tricks | low | medium | cross-check against `demoscene-recomp`'s modelled-VGA notes |

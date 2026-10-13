@@ -142,6 +142,54 @@ exactly the ports that must show it in their captures: ALKU, whose cards are gat
 (`reference/parts/pam/`, 7710/7760/7830/7900, §6). A wrong off-by-one shows there as a timing
 difference; the check that pins it exactly is a unit test on the ported lookup against this table.
 
+## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO; ENDLOGO, JPLOGO and others behind it)
+
+**What it is.** The ranged palette upload moves **`2*count + start` bytes where it intends
+`3*count`**, so a fade that means to ramp 254 entries writes two-thirds of them: the last third of
+the entries keeps whatever the previous write left, and a part that follows it inherits a DAC that
+never faded. The error is one instruction: the routine reuses `ax`, which still holds `start`, as the
+second addend instead of `count`.
+
+**Where the source does it.** `BEG/ASM.ASM:93-115`. `:104-105` points the DAC's write index at
+`start` (`mov dx,3c8h` / `out dx,al`), `:106` loads `count` into `cx`, and then
+
+```
+:107	shl	cx,1        ; 2*count
+:108	add	cx,ax       ; + start, not + count
+```
+
+`REPOUTSB` (`:84-91`) then moves exactly `cx` bytes. The shipped binary carries it: disassembling
+`BEG/BEG.EXE`, `_setpalarea` begins at file offset `0xcb7` and the three instructions are at
+`0xccb`-`0x0cd1`, followed by the copy loop at `0xcd2`. The same routine, with the same two
+instructions, is in `END/ASM.ASM:107-108`, `JPLOGO/ASM.ASM:116-117`, `ENDPIC/ASM.ASM:98-99` and
+`TECHNO/KOEA.ASM:1054-1055`. The copies that are **correct** load `count` into `ax` before the
+doubling — `LENS/ASM.ASM:253-255`, `START/ASM.ASM:192-194`, `COMAN/ASM.ASM:93-95`,
+`TWIST/ASM.ASM:85-87` — so this is a mistake that was fixed in later copies of one routine, not a
+convention of the tree.
+
+**What the port must do.** Copy the arithmetic as written: `bytes = 2*count + start` from the DAC's
+write index. `setpalarea(ramp, 0, 254)` in BEGLOGO and ENDLOGO therefore writes **508** bytes —
+entries 0-168 whole and the **red byte of entry 169** — and leaves entries 170-254 holding whatever
+the previous write left, plus entry 255 untouched. Neither a partial entry nor a skipped range may be
+tidied: the DAC is a byte stream with an auto-incrementing index, and the bug is a byte count.
+
+**Evidence, and what makes this entry unusual: on BEGLOGO's art the bug is invisible.** The screen
+indexes 1, 2, 3, 14-58 and 71-79 (the picture, and the white field is 15), all inside the written
+range, so a port that uploaded the full 762 bytes matches all four keyframes — measured, not assumed:
+`the_fade_constants_are_derived_by_matching_the_reference_bit_for_bit` in
+`bins/secondreality/src/parts/beglogo.rs` reruns the fade scan with a 762-byte upload and gets the
+same `c` for 470, 560 and 900. `reference/parts/beglogo/` (430, 470, 560, 900) is therefore evidence
+that the port *did not* fix it only in the sense that the comparison is exit 0 either way; the
+deciding evidence is the disassembly above, and the code writes 508.
+
+**What it will cost someone.** This is a bug with a *deferred* consequence, and it is the first entry
+here with one: the DAC state the part leaves is part of its output. BEGLOGO leaves entries 170-254
+**white** (they were filled at `BEG/BEG.C:25-31` and the upload never reached them), which is the
+state GLENZ starts from — and GLENZ's `zoomer2()` (`GLENZ/ZOOMER.C:59-68`) writes palette index 255
+into its bands and fades entries 0-127, a range that does not overlap them either. The first part to
+paint a fade into entries 170-254 will meet a region that has been white since BEGLOGO, and the
+difference will show as colour that does not move. Whoever ports that part should start here.
+
 ---
 
 ## Adding an entry
