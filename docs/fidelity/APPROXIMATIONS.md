@@ -341,3 +341,136 @@ and this entry does not claim the blit costs ten frames — only that a later ph
 part whose lead-in has no decode-and-blit at all would test the hypothesis in one measurement, where
 rediscovering the coincidence would cost it a session.
 
+
+## A8 — CRED: the font strip the routine reads is not the strip the file is
+
+**Part:** CRED (`CREDITS/MAIN.C` over `CREDITS/FONA.INC`), Phase 2. This is the
+first entry of the part's own, and it is a *data* divergence rather than a
+substitution: what the routine states and what the file holds do not agree, and
+neither can be changed.
+
+**The original.** `#define FONAY 32` (`CREDITS/MAIN.C:29`) with
+`extern char far font[FONAY][1500]` (`:31`): the routine reads **32 rows** of a
+raster that has **40** (60,000 `db` values, the 1,500×40 raster the inventory's
+§E.8 and §E.20 measure). It also states a **32-column cell** —
+`fonap[32]=1500-32; fonaw[32]=8;` (`:270-271`), the routine's blank — on a strip
+1,500 columns wide: `1500/32 = 46.875`, so the cell does not divide the raster.
+The strip's real structure is 47 ink runs, one per character of `fonaorder`
+(`:32`), which the routine *scans* (`:250-269`) rather than indexes by cell.
+
+**Port.** The part reads the raster itself, from the file's own values, and
+translates `:250-269`'s scan. It does **not** load the strip through
+`sr_assets::font::Font`: `Font::from_image` refuses this strip, because the
+routine's 32-column cell is not a whole number of cells across the 1,500-column
+raster, and passing a cell that *does* divide would state a geometry no line of
+the source states — the guess the loader's own refusal exists to prevent
+(`crates/sr-assets/src/font.rs:156-187`, and A7's ruling that the glyphs are the
+scan's, never the cell's).
+
+**Why.** Both mismatches are properties of the shipped art, not of the port: the
+raster is 40 rows tall and the routine's window is 32, and the cell is an
+arithmetic convenience for the blank. Reading only the first 32 rows is what the
+original draws, and it is what the reference's own frames show.
+
+**Measured difference: the pixels of the eight unread rows, and nothing else.**
+Those rows hold **92** ink pixels, and **no column is inked in them that rows
+0-31 leave blank** — so all 47 runs, every `fonap` and every `fonaw` are
+identical whether the scan reads 32 rows or 40
+(`parts::cred::tests::the_eight_rows_the_routine_never_reads_do_not_move_a_run`,
+which measures both). The drawn difference is those 92 pixels, and the display
+shows every other logical line, so **46** of them fall on rows a caption shows.
+Where they do, a build that read 40 rows would differ from this one and this one
+agrees with the reference: on the five keyframes the caption region (rows
+100-199) is byte-identical to the reference's on 1440, 3240 and 7640, and on
+5440 and 8740 it differs for a *different* reason entirely — the shipped build's
+caption text, which the source tree does not hold. That is **A10**, not this
+entry; it is only mentioned here because it is the other thing a caption region
+can differ by (`bins/secondreality/tests/cred.rs`,
+`the_three_frames_that_differ_differ_where_the_records_own_text_does`, which
+prints both numbers per frame).
+
+## A9 — ALKU: two rows of the font strip the routine reads are not in the file
+
+**Part:** ALKU (`ALKU/MAIN.C` over `ALKU/FONA.UH`), Phase 5 — carried into the
+register here because this is where a font strip is next touched: Phase 1's task
+A7 found it (`docs/plans/01-assets.md`, A7's Interfaces block) and its ledger
+says Phase 2 owns the entry.
+
+**The original.** `ALKU/MAIN.C:169` with `:218` and `:225` scan **32** rows, and
+`y2w=y+32` (`:274`, `:429`) draws 32 — of a strip that is **1,500×30**: the
+header and the 45,000-byte payload of `ALKU/FONA.UH`. The array ALKU's routine
+indexes is however longer than the strip: `ALKU/INCLUDE.ASM:17` includes the
+`fona.inc` fragment and `:19` follows it with `dw 1500*5 dup(?)` — 7,500 words,
+15,000 bytes, of **uninitialised** padding that the linker filled with whatever
+was there. The routine's last two rows (rows 30 and 31, 2 × 1,500 = 3,000 bytes)
+are part of that padding, not of the strip.
+
+**Port.** The port reads the strip the file has — 30 rows — exactly as
+`sr_assets::font::Font` requires: a cell taller than the strip is refused
+(`crates/sr-assets/src/font.rs:170-180`), and A7 recorded that refusal as the
+honest reading of a routine that scans rows the data does not contain.
+
+**Why.** No file in either tree records those 3,000 bytes: they are whatever the
+linker left, and a port that picked a value — black, white, a repeat of row 29 —
+would be drawing pixels no evidence supports. The refusal is therefore
+plan-mandated, and the pixels it costs are the finding.
+
+**Measured difference: unmeasured, and where it can be measured is named here.** Half of the
+answer is already in the tree: ALKU's own captures hold the held font cards
+(`reference/parts/alku/frame_001719.rgb` and `frame_002719.rgb`, `reference-indices.md` §4.3), and
+those cards are drawn by `prt`'s 32-row loop — `ALKU/MAIN.C:429`'s `font[y2-y][sx]` — so the cell's
+rows 30-31 *are on screen* in them. Read as pixels, each card's three cells are inked only in their
+first 14 of 16 displayed rows (the bands at 1719 are rows 120-133, 160-173 and 200-213, and the
+cell's last two rows — the strip's 30 and 31 — are blank in those columns), i.e. the shipped build
+drew no *visible* ink from the padding there. What no screen can show is the other half: padding
+bits a black palette hides. Those are recorded in the linked image — `MAIN/DATA/ALKU.EXE`, PKLITE-
+packed like every part EXE in that directory — so the honest state is **"not measured here", not
+"unmeasurable"**, and Phase 5 (ALKU) is the task that owns settling it.
+
+## A10 — CRED: three of the five keyframes are the shipped build's credits, not the tree's
+
+**Part:** CRED (`CREDITS/MAIN.C` over `CREDITS/PICS/*.LBM`), Phase 2. A **data** divergence of the
+same kind A6 records for TUNNELI, and the one that decides this part's acceptance comparison: the
+port below the register *is* this tree's source, and the reference is the **released demo**, whose
+CRED was not built from the source this tree holds.
+
+**The original.** What the shipped `CRED.EXE` draws — `MAIN/DATA/CRED.EXE`, 148,711 bytes,
+PKLITE-packed, its pack entry at `MAIN/PACKFINA.INC:70` — is recorded screen by screen, read off
+its own sheet, in `reference-indices.md` §20.1.
+
+**The tree.** `CREDITS/MAIN.C:41-156` calls `screenin(pic, text)` 21 times with the captions this
+port draws, and `CREDITS/INCLUDE.ASM`/`INCLUD2.ASM` link the 21 `PIC*.LBM` files into it.
+
+**Where they differ, measured.** The brief's acceptance command exits 1, and each difference is
+localised (`bins/secondreality/tests/cred.rs` asserts both regions' byte counts per frame):
+
+| index (screen) | picture band, rows 0-99 | caption, rows 100-199 | reading |
+|---|---|---|---|
+| 3240 (6) | 20,122 bytes differ | 0 | the caption is the tree's; the picture is not |
+| 5440 (12) | 0 | 18,264 bytes differ | the picture is the tree's; the caption is not |
+| 8740 (21) | 5,702 bytes differ | 5,520 bytes differ | both |
+
+At 3240 the picture difference is not a palette the tree could upload: **8 of the band's 14 colours
+— 3,524 of its 16,000 pixels — are in none of the screen's 256 palette entries**
+(`the_references_sixth_screen_is_not_the_trees_picture_at_all`). And the captions are strings the
+tree cannot draw: `grep -rn SKETCH upstream/SecondReality` returns **no hits in any letter case**,
+while §20.1's table — written from the shipped build's own sheet — reads screens 11 and 12's
+captions as "SKETCH - SKAVEN / GRAPHICS - PIXEL / …" and describes screen 6 as "a dotted vortex".
+A port of this tree cannot produce either sentence's screen.
+
+**Why the port does not follow the reference here.** Copying the shipped captions would be inventing
+text that is in no file in the tree, and nothing in the tree says which pictures they were paired
+with. The port translates `CREDITS/MAIN.C` as it stands, and this entry is what the register is for
+— the same call A6 made for TUNNELI's second ramp.
+
+**Measured difference: 11.2563 % / 9.5125 % / 5.8453 % of one frame at 3240 / 5440 / 8740, and
+0.0000 % at 1440 and 7640.** The two frames that agree are byte-identical, 0 of 192,000 bytes each,
+which is what says the residue is the *data* and not the port: the same machinery, the same tick
+map, the same palette repair and the same geometry reproduce them exactly.
+
+**For whoever unpacks it.** `MAIN/DATA/CRED.EXE` is PKLITE-compressed, so its captions and its 21
+pictures are recorded but unread. Unpacking it yields 21 `FC FC` blobs (16,784 bytes each: a 16-byte
+header, a 768-byte palette at offset 16, 16,000 pixels at offset 784 — the layout `CREDITS/
+INCLUDE.OBJ`'s own blobs have) and the caption strings, which is what would turn "the shipped
+window differs" into "here is what it says". Phase 9 compares every frame; these three are where
+that phase will first look.

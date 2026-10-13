@@ -168,6 +168,7 @@ setup menu); a later task's `recovered assets` table uses paths under the same t
 | `MAIN/MUSIC0.S3M` | `upstream/SecondReality/MAIN/MUSIC0.S3M` | `071a82e` | 391312 | `aacdb968ae9ebf07bfa02af129fb43f1b15101ab3a94c95b7f5fe69840d28fe1` | Unlicense / public domain | MAIN |
 | `MAIN/MUSIC1.S3M` | `upstream/SecondReality/MAIN/MUSIC1.S3M` | `071a82e` | 600860 | `3393f848a4840b53aa247c4158e414bad848879e7f6059e214631c310e8dde54` | Unlicense / public domain | MAIN |
 | `MAIN/DATA/U2END.BIN` | `upstream/SecondReality/MAIN/DATA/U2END.BIN` | `071a82e` | 4000 | `4c2ae2970efe756d3fcceeb9a1012c4e04fd9eb85308e890fb8690042be99cf4` | Unlicense / public domain | MAIN |
+| `CREDITS/FONA.INC` | `upstream/SecondReality/CREDITS/FONA.INC` | `071a82e` | 157510 | `8c8ade599983041b02baf16bf6109bd87f14ef3fba17efff52bc69cb1c593979` | Unlicense / public domain | CRED |
 | `START/HZPIC.P` | `upstream/SecondReality/START/HZPIC.P` | `071a82e` | 60706 | `c284e2af320e61b04de73e7e0f943217caae0c3d1bca419bd9bfb9bd7d9f347b` | Unlicense / public domain | START |
 | `START/HZPIC.PAL` | `upstream/SecondReality/START/HZPIC.PAL` | `071a82e` | 768 | `9654e10d4d024f944b8146b3ebe907140dc418f251c833882d5202d200c200d9` | Unlicense / public domain | START |
 | `START/HZPIC.LBM` | `upstream/SecondReality/START/HZPIC.LBM` | `071a82e` | 59352 | `ec3d65b55103fea4570561d7bac04291f2888098c226047db2122e7dc0e38ffb` | Unlicense / public domain | START |

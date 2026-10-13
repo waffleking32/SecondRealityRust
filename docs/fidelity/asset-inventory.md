@@ -170,6 +170,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | CRED | `CREDITS/PICS/PIC16.LBM` | 5512 | FORM | IFF ILBM (FORM .... ILBM) | standalone | linked: CREDITS/UNPACK.BAT:1-22 INCBIN.EXE PICS\PIC16.UH pic16.inc, included by CREDITS/INCLUDE.ASM and INCLUD2.ASM |
 | CRED | `CREDITS/PICS/PIC17.LBM` | 9182 | FORM | IFF ILBM (FORM .... ILBM) | standalone | linked: CREDITS/UNPACK.BAT:1-22 INCBIN.EXE PICS\PIC17.UH pic17.inc, included by CREDITS/INCLUDE.ASM and INCLUD2.ASM |
 | CRED | `CREDITS/PICS/PIC18.LBM` | 4684 | FORM | IFF ILBM (FORM .... ILBM) | standalone | linked: CREDITS/UNPACK.BAT:1-22 INCBIN.EXE PICS\PIC18.UH pic18.inc, included by CREDITS/INCLUDE.ASM and INCLUD2.ASM |
+| CRED | `CREDITS/FONA.INC` | 157510 | 09 09 64 62 | assembler source: 3,751 `db` lines, 60,000 values, a 1,500x40 raster of 0..9 shades (the `font[FONAY][1500]` of CREDITS/MAIN.C:31) | standalone | linked: CREDITS/INCLUDE.ASM's `asdf` segment `INCLUDE 'fona.inc'`, and byte for byte the raster `decode(CREDITS/INCLUDE.OBJ)` carries (§E.20) |
 | ENDSCRL | `ENDSCRL/FONA.UH` | 45784 | FC FC | Origin raw PIC: 1500x30, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: ENDSCRL/ASMYT.ASM:73 INCLUDE 'fona.inc' |
 | ENDSCRL | `ENDSCRL/FONA.LBM` | 9730 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ENDSCRL/FONA.UH (floor list) |
 | ENDSCRL | `ENDSCRL/ENDSCROL.TXT` | 1007 | 4C 65 72 74 | ASCII text | standalone | the scroller text as it sat in the build directory: ENDSCRL/MAIN.C:101 open("endscrol.txt") |

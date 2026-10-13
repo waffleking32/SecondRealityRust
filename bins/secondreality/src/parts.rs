@@ -11,6 +11,7 @@
 //! port, is the shell's table to say.
 
 pub mod beglogo;
+pub mod cred;
 pub mod endlogo;
 pub mod tunneli;
 
@@ -27,6 +28,8 @@ pub fn registry() -> &'static [(&'static str, fn() -> Box<dyn Part>)] {
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
         // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
         ("endlogo", || Box::new(endlogo::Endlogo::new())),
+        // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).
+        ("cred", || Box::new(cred::Cred::new())),
     ]
 }
 

@@ -307,7 +307,7 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     ] {
         tiles.extend(sheet_tiles(&output, &format!("{part}.png")));
     }
-    assert_eq!(tiles.len(), 150, "one tile per curated file");
+    assert_eq!(tiles.len(), 151, "one tile per curated file");
     assert!(
         !output.contains("names no part for this file"),
         "every recorded file has a part: {output}"
