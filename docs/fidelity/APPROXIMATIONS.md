@@ -324,7 +324,20 @@ is the hold, all three far outside the window. Ticks 441-450 are frames the refe
 all, and the port draws white through them, which is what the DAC makes of that window either way.
 **What a later phase should watch:** the same thing A5 says — Phase 9 compares every frame, and these
 ten are where a difference would appear, in the *index plane* rather than the RGB (the picture is
-already in video memory from tick 36, and every entry it indexes is white until `c` moves). A count
-of the original's `dis_waitb()`s read from live memory would settle it; the tree holds no frame
-inside the window.
+already in video memory from tick 36, and every entry it indexes is white until `c` moves). **A
+capture of 441-450 would settle it, as it would A5's 436-444.** A count of the original's
+`dis_waitb()`s read from live memory — A5's other remedy — would settle only the half of the question
+it can see: it would say whether the part waits more often than the source shows, but not whether
+frames are consumed by code that does not wait at all, and the only such code in this part is the 400
+`readp` rows and 400 `lineblit`s of `END.C:95-99`, which sit exactly between `:99` and `:101`. Both
+remedies are named here because they answer different halves.
+
+**And the two residuals are the same size for the same work, which is worth recording now.** BEGLOGO's
+is **nine** frames and this part's is **ten**, and both sit between a 400-row Origin decode-and-blit
+and a palette fade — the same two routines, linked into both EXEs from the same two source files
+(`BEG/ASM.ASM` and `END/ASM.ASM` are identical apart from one comment character). That is a *common
+candidate*, not a cause: neither residual has been measured against a frame that could attribute it,
+and this entry does not claim the blit costs ten frames — only that a later phase comparing, say, a
+part whose lead-in has no decode-and-blit at all would test the hypothesis in one measurement, where
+rediscovering the coincidence would cost it a session.
 

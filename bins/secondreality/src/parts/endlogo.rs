@@ -288,10 +288,10 @@ impl Part for Endlogo {
 
         // `:94`'s `readp(palette,-1,pic)` copies the palette out of the
         // container and `:95-99` decodes 400 rows through it. The port decodes
-        // the whole container in one call, which is the same bytes — and
-        // `docs/fidelity/endlogo.md` §2 records that the decode is
+        // the whole container in one call, which is the same bytes — and the
+        // derivation test below is where that is measured: the decode is
         // byte-identical to the reference's held frame at 900, 0 of 128,000
-        // pixels apart.
+        // pixels apart (`docs/fidelity/endlogo.md` §8).
         let image = load_path(Path::new(self.picture_path)).map_err(|error| PartError {
             part: NAME,
             message: format!("{}: {error}", self.picture_path),
@@ -638,8 +638,29 @@ mod tests {
         // The blit is the source's `lineblit` at the surface's own stride: the
         // 320-wide view reads the left half of each 640-wide row back.
         assert!(rig.surface.row(0)[PICTURE_WIDTH..].iter().all(|pixel| *pixel == 0));
-        // Tick 440 is the reference index the blit lands on.
+
+        // The lead-in's shape, in the port's own numbering, so that the counts
+        // the note and A7 quote are arithmetic on asserted numbers rather than
+        // prose of their own: four tick numbers, and the gap between the blit
+        // and the fade.
+        //
+        // 34 vertical blanks — `:61` (tick 0), `:89` (tick 2) and `:92`'s 32
+        // from tick 4 — and three ticks the code between them runs on: `:62-63`
+        // with `:67-88` (tick 1), `:90-91` (tick 3) and `:94-99` (tick 36).
+        assert_eq!([FIRST_WAIT_TICK, SECOND_WAIT_TICK, BLANKS_FIRST_TICK], [0, 2, 4]);
+        assert_eq!(BLANKS_TICKS, 32);
+        assert_eq!(2 + BLANKS_TICKS, 34, "vertical blanks before the fade");
+        assert_eq!(BLIT_TICK, BLANKS_FIRST_TICK + BLANKS_TICKS, "the blit is the tick after the last blank");
+        assert_eq!(BLIT_TICK, 36, "the tick `:94-99` runs on");
+        assert_eq!(2 + BLANKS_TICKS + 3, 37, "ticks the source's own code accounts for");
+        // And the rest, through to the fade's first displayed step (tick 47,
+        // index 451): the blit's own tick and the ten the port does not model.
+        // Written as additions, so that a BLIT_TICK past the fade's own is a
+        // failed assertion rather than a subtraction that overflows the build.
+        assert_eq!(BLIT_TICK + 1, FADE_IN_FIRST_TICK - 10);
+        assert_eq!(BLIT_TICK + 11, FADE_IN_FIRST_TICK, "the blit's tick and ten unmodelled ones");
         assert_eq!(FIRST_INDEX + BLIT_TICK, 440);
+        assert_eq!(FIRST_INDEX + FADE_IN_FIRST_TICK, FADE_IN_FIRST_INDEX);
     }
 
     #[test]

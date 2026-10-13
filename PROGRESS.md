@@ -555,15 +555,17 @@ inside the 32 blanks and video memory there is the shell's zeroed surface.
 
 **The sheet, and the look.** `cargo xtask frames sheet --dir out/p2-endlogo --out
 out/p2-endlogo-sheet.png` (4 tiles, 2 columns, 650×810) sits beside the reference's own
-`out/endlogo.png`, and the two sheets' tiles are the same four screens — which is what the byte-exact
-comparison already says. **The human look is deferred to the phase boundary**: nothing here claims a
-person has judged the picture.
+`out/endlogo.png`, and **the two PNGs are byte-identical** — `sha256sum` gives `4a3afb5c…` for both,
+281,156 bytes each, from two different tools a day apart — which is what four byte-identical frames
+and a shared sheet layout have to produce. **The human look is deferred to the phase boundary**:
+nothing here claims a person has judged the picture.
 
 `cargo test --workspace`: **536 passed, 0 failed, 1 ignored, 0 warnings** (was 521; +10 unit and +5
-integration). Mutation checks — each turning exactly the test that pins it red — are in the note's §8:
-the two plan brackets, the white over all 256 entries, `setpalarea` with the intended `3*count`, the
-blit moved onto the fade's first tick, and the fadeout's first step taken at the picture instead of
-one step below it.
+integration). Mutation checks — seven of them, each reddening the test that pins it, the two bracket
+mutations taking the sweep, hold and blit tests as well — are in the note's §8: the two plan brackets,
+the white over all 256 entries, `setpalarea` with the intended `3*count`, the blit moved onto the
+fade's first tick, the fadeout's first step taken at the picture instead of one step below it, and the
+lead-in one blank short.
 
 #### Task 4 — BEGLOGO: the phase's exit criterion, met
 

@@ -118,13 +118,13 @@ cannot tell a whole step from the truncation inside one. The same applies to the
    (`reference-indices.md` §20; §19.1's own sweep: 1200 is "the fadeout's tail, 30 colours, mean
    4.29", and 1240 is refused as `320x200 where the capture started at 320x400`). 1210 is inside it.
 
-**The record's own samples, reproduced.** Every state `reference-indices.md` §19.1's table names
-separately is checked against the arithmetic: the colour count and the mean, to two decimals, of 430,
-460, 500, 540, 580, 900, 1120, 1160 and 1200 —
-`the_sweeps_own_samples_are_the_ramps_frames` asserts them, and that 580, 900 and 1120 are one frame
-byte for byte. That is what a sweep run for another purpose is worth here: the means were recorded
-before this task, they are a prediction of the two constants rather than a fit to them, and a
-constant one frame out moves every sample inside the ramp it belongs to and breaks the hold's
+**The record's own numbers, reproduced.** The test re-derives nine of the record's own values —
+colour count and mean, to two decimals over 384,000 bytes — from the two constants: **430, 460, 500,
+540, 1160 and 1200**, which §19.1's table lists separately, and **580, 900 and 1120**, three samples
+of its grouped `580 … 1120` row (900 is also §19.2's held keyframe). It also asserts that those three
+are one frame byte for byte. That is what a sweep run for another purpose is worth here: the numbers
+were recorded before this task, they are a prediction of the two constants rather than a fit to them,
+and a constant one frame out moves every sample inside the ramp it belongs to and breaks the hold's
 arithmetic besides.
 
 **The residual, stated rather than smoothed over.** 900 does not pin the constant: `c = 126, 127 and
@@ -145,10 +145,17 @@ CRTC 9 (`view.height = 400`, `double_scan = false`); `:86-87`'s AC 0x11 = 0, the
 `readp(palette,-1,pic)` plus the 400-row decode, in one `sr_assets::load_path` call, refused if the
 geometry is not 320×400.
 
-**The surface is not cleared, and the DAC's entry 255 is not written.** Both are the source's own
-silences (§2, §6), and both are visible in the reference: 430's `.idx` is index 0 everywhere — which
-`the_opening_screen_is_the_shells_surface_through_the_shells_dac` and
-`the_white_leaves_entry_255_unwritten` pin — and its pixels are white through entry 0.
+**The surface is not cleared, and the DAC's entry 255 is not written** — the source's own two
+silences. **The first is visible in a reference frame.** `frame_000430.idx` is index 0 in all 128,000
+pixels, which is `inittwk`'s cleared memory and nothing this part writes, and
+`the_opening_screen_is_the_shells_surface_through_the_shells_dac` pins it. **The second is not:**
+entry 255 is written by no path of this part, and it is *displayed* by none either — the screen at 430
+is index 0 and the picture indexes 0-71 — so the artefact that pins it is the marker value
+`the_white_leaves_entry_255_unwritten` leaves at 255 in the rig's palette, not a frame. That is
+Review Focus 3's contrast with BEGLOGO, which fills entries 0-254 with the same white and then writes
+**black** into 255 (`BEG/BEG.C:25-34`, `docs/fidelity/beglogo.md` §6): the two DACs differ in exactly
+the entry neither part displays, which is why the two screens are the one `sha256` and why the
+difference is a *state* the next part inherits rather than anything either part shows.
 
 **`frame` follows the source's vertical blanks one for one.** `dis_waitb()` is one tick in the port,
 and the acts that cost no blank fall on the tick after the blank that precedes them:
@@ -261,9 +268,12 @@ and bypassed on the outer pair, exactly as §3.1 of BEGLOGO's note predicted for
 The port's own sheet, `out/p2-endlogo-sheet.png` (`cargo xtask frames sheet --dir out/p2-endlogo
 --out out/p2-endlogo-sheet.png`: 4 tiles, 2 columns, 650×810), is the visual evidence, and it is
 beside the reference's own sheet, `out/endlogo.png`, written by the capture that produced this
-reference. **The human look at these pictures is deferred to the phase boundary** — this task
-recorded that the two sheets' tiles are the same four screens, which is what a byte-exact comparison
-already says.
+reference. **The two are byte-identical** — `sha256sum out/endlogo.png out/p2-endlogo-sheet.png`
+returns `4a3afb5c…` for both, 281,156 bytes each, from two different tools run a day apart — which is
+what four byte-identical frames of the same geometry and the same sheet layout have to produce.
+`out/` is git-ignored scratch, so the durable form of the claim is the keyframe comparison above; the
+two PNGs are the readable face of it. **The human look at these pictures is deferred to the phase
+boundary**: nothing here claims a person has judged them.
 
 ## 8. Tests
 
@@ -289,19 +299,27 @@ the shell installed, and the frames the dump wrote to disk and read back. **The 
 and 1180 — the two frames who would show a wrong `c` at their own index — and it is the derivation
 test that compares those bytes, against the part's own arithmetic rather than against a session.
 
-**Mutation checks (the tests' discriminating power, measured).** Each mutation turns exactly the test
-that pins it red and no other, and each is one edit to a constant in
-`bins/secondreality/src/parts/endlogo.rs` followed by
-`cargo test -p secondreality --bin secondreality parts::endlogo`:
+**Mutation checks (the tests' discriminating power, measured).** Each mutation is one edit to a
+constant in `bins/secondreality/src/parts/endlogo.rs` followed by
+`cargo test -p secondreality --bin secondreality parts::endlogo`, and the table records which tests go
+red — the two bracket mutations take more than the derivation test, because a wrong first index moves
+the sweep and the hold's arithmetic too:
 
 | mutation | red | message |
 |---|---|---|
-| `FADE_IN_FIRST_INDEX` 451 → 450 (the plan's bracket) | the derivation test, plus the hold and the sweep | `the fade-in's step 0 is displayed at 451 / left: 451 / right: 450` |
+| `FADE_IN_FIRST_INDEX` 451 → 450 (the plan's bracket) | the derivation test, the hold, the blit and the sweep | `the fade-in's step 0 is displayed at 451 / left: 451 / right: 450` |
 | `FADE_OUT_FIRST_INDEX` 1147 → 1145 (the plan's bracket) | the derivation test, the hold, the retire and the sweep | `the fade-out's step 63 is displayed at 1147 / left: 1147 / right: 1145` |
 | the white written over entries 0-255 | `the_white_leaves_entry_255_unwritten` | `:63's 765 bytes stop short / left: [63,63,63] / right: [1,2,3]` |
 | `setpalarea` with the intended `3*count` | `the_upload_is_the_originals_two_count_plus_start_bytes` | `the 511th byte is never written / left: [42,5,6] / right: [1,2,3]` |
-| the blit moved to the fade's first tick | `the_picture_is_blitted_after_the_vertical_blanks` | — |
-| the fadeout's first step at the picture (`c = 64`) | `the_hold_is_the_measured_length_and_not_five_thousand` | — |
+| the blit moved onto the fade's first tick | `the_picture_is_blitted_after_the_vertical_blanks` | `the blit is the tick after the last blank / left: 47 / right: 36` |
+| the fadeout's first step taken at the picture (`c = 64`) | `the_hold_is_the_measured_length_and_not_five_thousand` | `left: [48,45,42] / right: [47,44,41]` — entry 1 one step up |
+| `BLANKS_TICKS` 32 → 31 (the lead-in one tick short) | `the_picture_is_blitted_after_the_vertical_blanks` | `left: 31 / right: 32` |
+
+The two bracket mutations are the ones that take more than one test, and the two rows that share
+`the_picture_is_blitted_after_the_vertical_blanks` are the two ways its own map can be wrong: the blit
+on the wrong tick, and the lead-in one blank short — which is why that test also pins the lead-in's
+counts (34 blanks, 37 ticks the source's code accounts for, ten not modelled, `BLIT_TICK` 36) rather
+than leaving them to the note's prose.
 
 The first four are the traps this task was written around; the last two are the two ways a port that
 "looks right" fails a keyframe on this part.

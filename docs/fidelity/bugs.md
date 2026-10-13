@@ -142,7 +142,7 @@ exactly the ports that must show it in their captures: ALKU, whose cards are gat
 (`reference/parts/pam/`, 7710/7760/7830/7900, §6). A wrong off-by-one shows there as a timing
 difference; the check that pins it exactly is a unit test on the ported lookup against this table.
 
-## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO; ENDLOGO, JPLOGO and others behind it)
+## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO and ENDLOGO ported; JPLOGO and others behind them)
 
 **What it is.** The ranged palette upload moves **`2*count + start` bytes where it intends
 `3*count`**, so a fade that means to ramp 254 entries writes two-thirds of them: the last third of
@@ -168,10 +168,14 @@ doubling — `LENS/ASM.ASM:253-255`, `START/ASM.ASM:192-194`, `COMAN/ASM.ASM:93-
 convention of the tree.
 
 **What the port must do.** Copy the arithmetic as written: `bytes = 2*count + start` from the DAC's
-write index. `setpalarea(ramp, 0, 254)` in BEGLOGO and ENDLOGO therefore writes **508** bytes —
-entries 0-168 whole and the **red byte of entry 169** — and leaves entries 170-254 holding whatever
-the previous write left, plus entry 255 untouched. Neither a partial entry nor a skipped range may be
-tidied: the DAC is a byte stream with an auto-incrementing index, and the bug is a byte count.
+write index. **The length is the call's, and the tree's two callers differ**: `BEG/BEG.C:84` passes
+254, so `setpalarea(ramp, 0, 254)` writes **508** bytes — entries 0-168 whole and the **red byte of
+entry 169** — while `END.C:105` and `:116` pass 255, so `setpalarea(pal2, 0, 255)` writes **510**,
+entries 0-169 whole and nothing of 170-254. (Task 6 measured the second; this entry said 508 for both
+until then, which is BEGLOGO's call read across to a part whose source says 255.) In both parts
+entries 170-254 keep whatever the previous write left, and entry 255 is untouched. Neither a partial
+entry nor a skipped range may be tidied: the DAC is a byte stream with an auto-incrementing index, and
+the bug is a byte count.
 
 **Evidence, and what makes this entry unusual: on BEGLOGO's art the bug is invisible.** The screen
 indexes 1, 2, 3, 14-58 and 71-79 (the picture, and the white field is 15), all inside the written
@@ -186,9 +190,13 @@ deciding evidence is the disassembly above, and the code writes 508.
 here with one: the DAC state the part leaves is part of its output. BEGLOGO leaves entries 170-254
 **white** (they were filled at `BEG/BEG.C:25-31` and the upload never reached them), which is the
 state GLENZ starts from — and GLENZ's `zoomer2()` (`GLENZ/ZOOMER.C:59-68`) writes palette index 255
-into its bands and fades entries 0-127, a range that does not overlap them either. The first part to
-paint a fade into entries 170-254 will meet a region that has been white since BEGLOGO, and the
-difference will show as colour that does not move. Whoever ports that part should start here.
+into its bands and fades entries 0-127, a range that does not overlap them either. ENDLOGO leaves them
+white too, from its own `END.C:90-91`, with 510 bytes a step where BEGLOGO moves 508 — and on ENDLOGO
+the entry-169/170 boundary the two calls straddle is invisible for the same reason this whole entry
+is: `assets/END/PIC.UH` indexes 0-71 and the screen before its blit is index 0. The first part to
+paint a fade into entries 170-254 will meet a region that has been white since BEGLOGO (or since
+ENDLOGO, on `SECOND 5`), and the difference will show as colour that does not move. Whoever ports that
+part should start here.
 
 ---
 
