@@ -257,3 +257,74 @@ pictures *and* a longer run to see where the two trajectories diverge — the re
 (`reference-indices.md` §1.8) is what would say whether the picture the port draws is a picture no
 session drew.
 
+## A7 — ENDLOGO: the music gate is its measured length, and ten lead-in frames are not modelled
+
+**Part:** ENDLOGO (`END/END.C`), Phase 2. Two entries in one, following A5's shape: the one gate in
+this phase that a faithful-looking port would have had to *wait on* something that does not exist,
+and the small residual either side of it.
+
+**The original — the gate.** `END.C:107-111` is
+
+```c
+for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }
+```
+
+— a loop that waits one vertical blank per iteration until the music player's position passes −16, or
+until five thousand blanks have gone by. Nothing in it is a duration: how long the hold lasts is a
+property of the music, of where `SECOND 5` restarted it (`MAIN/U2.ASM:905` puts MUSIC0 at order 25
+before the part starts) and of the machine's speed. **The port decodes, mixes and plays no audio in
+this phase**, so the cue cannot be evaluated at all — this is not a routine that could be stubbed and
+called later, it is the loop's exit condition.
+
+**Port:** the gate is replaced by the length the reference shows it having — **567 ticks**, one
+`dis_waitb()` each — derived in `docs/fidelity/endlogo.md` §3 from the part's two measured fade
+constants, which come from two different keyframes: the fade-in's last step is *displayed* at
+reference index 579 (from 500 at the ramp's `c = 49`, uniquely) and the fadeout's first step at 1147
+(from 1180 at `c = 30`, uniquely), so the settled picture is displayed for 1147 − 580 = 567 frames.
+The record corroborates it from the other side without being asked: `reference-indices.md` §19.1's
+sweep has the picture byte-identical at **twelve** consecutive samples, **580**, 620, 660, 700, 740,
+780, 840, 900, 960, 1020, 1080 and 1120 — one `sha256` — and 580 is exactly the hold's first frame
+under the two constants. The derivation test reproduces all nine of the states that table names
+separately — 430, 460, 500, 540, 580, 900, 1120, 1160 and 1200, colour count and mean — from the two
+constants (`the_sweeps_own_samples_are_the_ramps_frames`).
+
+**Measured difference: zero against this reference, and unknown against any other.** All four
+keyframes compare at exit 0 (`docs/fidelity/endlogo.md` §7), and 900 sits inside the hold, so the
+substitution is invisible to the comparison — but only because the reference was captured on this
+recipe's music, from this boot. A run whose music started elsewhere, or a machine whose frames are
+not the emulator's, would reach `dis_musplus() > -16` at a different frame and the hold would be a
+different length; the port's constant would be wrong there and nothing in the port could say so. That
+is the sense in which this entry is an approximation rather than a translation, and it is why the
+number is written down as a measurement rather than as a port constant.
+
+**What Phase 3 replaces it with.** The real cue: the music player's position, sampled once per tick
+by the port's own mixer, with `dis_musplus()`'s −16 threshold (`END.C:110`) as the condition. The
+constant disappears entirely when that lands — it is not a threshold to tune, it is a stand-in for a
+value that does not exist yet.
+
+**The second half — the lead-in's ten unmodelled ticks.** The port's ticks follow the source's
+vertical blanks one for one: tick 0 is `:61`, tick 1 is `:62-63`'s white and `:67-88`'s CRTC and AC,
+tick 2 is `:89`, tick 3 is `:90-91`, ticks 4-35 are `:92`'s 32 blanks, and tick 36 is `:94-99`'s
+`readp` and 400-row blit. The fade's first step is then displayed at tick 47 — measured, from 451 —
+and the source's own code accounts for 37 of those ticks: 34 vertical blanks and the three ticks the
+code between them runs on. **The ten ticks between the blit and the fade are frames the port does not
+model, and their cause is unidentified**, exactly as A5's nine are between BEGLOGO's `:24` and its fade
+— counted the same way, with the fade's own `:104` blank part of the iteration that displays step 0
+rather than a tick of its own. The same two candidates are ruled out for both. It is not the EXE
+load: the part's own white is up by **415**, fifteen frames before the first sweep sample
+(`reference-indices.md` §19) — `inittwk`'s own palette clear is commented out (`END/ASM.ASM:14-20`),
+so that white can only be `END.C:62-63`'s — and its picture is in video memory from tick 36, index
+440, both before the window. And it is not `dis_partstart()`: `END.C:50` calls it, and it is a
+**version check, not a synchronisation cue** (`DIS/DISC.ASM:51-64`: `_dis_version`, a message and
+exit 3 if the server is absent, and otherwise a return). It costs no frame.
+
+**Measured difference: zero on every frame the reference holds.** 430 (tick 26) is inside the 32
+blanks and is index 0 in the reference and in the port; 500 and 1180 are the two fade frames and 900
+is the hold, all three far outside the window. Ticks 441-450 are frames the reference does not hold at
+all, and the port draws white through them, which is what the DAC makes of that window either way.
+**What a later phase should watch:** the same thing A5 says — Phase 9 compares every frame, and these
+ten are where a difference would appear, in the *index plane* rather than the RGB (the picture is
+already in video memory from tick 36, and every entry it indexes is white until `c` moves). A count
+of the original's `dis_waitb()`s read from live memory would settle it; the tree holds no frame
+inside the window.
+

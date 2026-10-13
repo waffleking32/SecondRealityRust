@@ -11,6 +11,7 @@
 //! port, is the shell's table to say.
 
 pub mod beglogo;
+pub mod endlogo;
 pub mod tunneli;
 
 use sr_engine::part::Part;
@@ -24,6 +25,8 @@ pub fn registry() -> &'static [(&'static str, fn() -> Box<dyn Part>)] {
         ("beglogo", || Box::new(beglogo::Beglogo::new())),
         // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
+        // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
+        ("endlogo", || Box::new(endlogo::Endlogo::new())),
     ]
 }
 

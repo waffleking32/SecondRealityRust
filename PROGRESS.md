@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; TUNNELI ported and measured at the reference's own alignment (0.28–0.68 %, A6) | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; ENDLOGO likewise (exit 0, 430/500/900/1180); TUNNELI ported and measured at the reference's own alignment (0.28–0.68 %, A6) | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -482,6 +482,88 @@ way a part the port cannot anchor can be measured at all (TUNNELI, CRED and ENDS
 `cargo xtask frames sheet --dir <DIR> --out <PNG>` sheets any directory of dumped frames, because
 the plan's Step 3 named `xtask reference capture --sheet` for that and `--sheet` is wired into
 `assets verify` and `reference capture`, neither of which reads an arbitrary directory.
+
+#### Task 6 — ENDLOGO: the end picture, and the first part the shell's own mode belongs to
+
+`bins/secondreality/src/parts/endlogo.rs`, registered as `endlogo`; `END/END.C` translated act for
+act over `END/ASM.ASM`'s `lineblit` and `setpalarea` and `END/READP.C`, with the picture read as
+`assets/END/PIC.UH` through `sr_assets::load_path`. **Ten unit tests** beside the part and five
+through the real binary.
+
+**The comparison is exit 0.** The two commands, verbatim:
+
+```
+$ cargo run --bin secondreality -- --headless --part endlogo --dump-frames 430,500,900,1180 \
+      --dump-dir out/p2-endlogo
+$ cargo xtask compare --reference reference/parts/endlogo --rendered out/p2-endlogo \
+      --out out/p2-endlogo-diff
+frame 430: 0.0000% differing (0/128000 px), max delta 0
+frame 500: 0.0000% differing (0/128000 px), max delta 0
+frame 900: 0.0000% differing (0/128000 px), max delta 0
+frame 1180: 0.0000% differing (0/128000 px), max delta 0
+verdict: identical
+exit: 0
+```
+
+`mode: mixed`, offsets `{"0": 4}`. 430 and 900 go through the **indexed** path (the reference files
+an `.idx` for both) and 500 and 1180 through RGB, so the DAC widening is load-bearing on the two
+fade frames and bypassed on the two held ones — the same reading BEGLOGO's note predicted for the
+same mechanism.
+
+**The two fade constants are derived, not fitted, and the plan's brackets were 1 and 2 frames out.**
+`the_fade_constants_are_derived_by_matching_the_reference_bit_for_bit` runs each ramp over its whole
+range — the source's arithmetic, the engine's `(c*259+33)>>6` widening, all 320×400 pixels — and asks
+which `c` reproduces the reference's frame **exactly**: 500 is the fade-in at `c = 49` uniquely, 1180
+the fadeout at `c = 30` uniquely, so the fade-in's step 0 is displayed at **451** and the fadeout's
+`c = 63` at **1147**. The plan's Step 1 brackets ("near 450", "near 1145", both from a fit over
+§19.1's sweep means) are 450 and 1145, and the mutation check shows the test failing on each with
+`the fade-in's step 0 is displayed at 451 / left: 451 / right: 450`. The two facts the plan asked to
+be checked against both hold: the settled picture's first frame is 451 + 129 = **580**, which is the
+first byte-identical sample in §19.1's own sweep, so the hold is 1147 − 580 = **567** frames; and the
+64-step fadeout ends at **1210**, inside the (1200, 1240] window where `SECOND 5` changes geometry to
+CRED. The derivation reproduces every state §19.1's table names separately — colour count and mean, to
+two decimals, for 430, 460, 500, 540, 580, 900, 1120, 1160 and 1200 — which is a sweep recorded
+before this task and a prediction of the two constants rather than a fit to them.
+
+**The brief's byte count for `setpalarea` is wrong, and the correction is the source's.**
+`END.C:105`/`:116` pass **255** where `BEG/BEG.C:84` passes 254, and `END/ASM.ASM:107-108`'s
+`2*count + start` then moves **510** bytes for this part, not 508 — entries 0-169 whole, entries
+170-255 untouched. The brief and the plan's Step 3 both said 508, which is BEGLOGO's number; both
+call sites of this part's source read `setpalarea(pal2,0,255)`. The port writes 510 and
+`the_upload_is_the_originals_two_count_plus_start_bytes` pins the entry-169/170 boundary. It is
+invisible on this art either way — the picture indexes 0-71, and the scan returns the same `c` with
+254 — which is why `bugs.md` §4 is unchanged and the number is in this part's note (§6).
+
+**The music gate is a measured length, in the register.** `END.C:107-111` waits on
+`dis_musplus() > -16`, which no part of this phase can evaluate, so the hold is its measured 567
+ticks — `APPROXIMATIONS.md` **A7**, which carries the measurement, "zero against this reference and
+unknown against any other music position or machine speed", and Phase 3's replacement (the real cue,
+sampled once a tick, with `END.C:110`'s threshold). A7 also registers the **ten lead-in ticks the
+port does not model** — the source's blanks and acts account for 37 of the 47 — the same class as
+A5's nine for BEGLOGO, with the same two candidates ruled out (not the EXE load: the part's own
+white is up by 415, `inittwk`'s palette clear being commented out at `END/ASM.ASM:14-20`; not
+`dis_partstart()`, a version check).
+
+**Three traps the part does not fall into, each pinned by a test.** It does not set its own video
+mode (`END.C:64-66`'s is commented out; the shell's `MAIN/U2.ASM:906-908` did it, and `inittwk`'s
+byte-mode CRTC write has no analogue in a chunky model — note §2); **it does not clear the surface**,
+which is why 430's `.idx` is index 0 in all 128,000 pixels and the indexed comparison there passes;
+and **it does not write DAC entry 255** — the 765 bytes of `:62-63` fill entries 0-254 and stop one
+entry short, the opposite of BEGLOGO's black entry 255, and both screens are the one `sha256`. The
+hold's 567 ticks rest on the picture itself: the blit lands on tick 36 (**index 440**), so 430 is
+inside the 32 blanks and video memory there is the shell's zeroed surface.
+
+**The sheet, and the look.** `cargo xtask frames sheet --dir out/p2-endlogo --out
+out/p2-endlogo-sheet.png` (4 tiles, 2 columns, 650×810) sits beside the reference's own
+`out/endlogo.png`, and the two sheets' tiles are the same four screens — which is what the byte-exact
+comparison already says. **The human look is deferred to the phase boundary**: nothing here claims a
+person has judged the picture.
+
+`cargo test --workspace`: **536 passed, 0 failed, 1 ignored, 0 warnings** (was 521; +10 unit and +5
+integration). Mutation checks — each turning exactly the test that pins it red — are in the note's §8:
+the two plan brackets, the white over all 256 entries, `setpalarea` with the intended `3*count`, the
+blit moved onto the fade's first tick, and the fadeout's first step taken at the picture instead of
+one step below it.
 
 #### Task 4 — BEGLOGO: the phase's exit criterion, met
 
