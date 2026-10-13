@@ -223,6 +223,82 @@ The reference oracle's input is `reference/original/` — the 1993 retail distri
 `reference/original/PROVENANCE.md`. Do not modify those files: every frame diff in the
 project is measured against those exact bytes.
 
+### Phase 2's evidence, appended task by task
+
+#### Task 2 — the reference record is machine-readable, and the tree is verified against it
+
+The reference tree's bytes were pinned by `docs/fidelity/reference-indices.md` alone, which the
+close-out above says is the gap: no test read `reference/`, and `compare` of the tree against itself
+caught a *missing or truncated* file but never **a byte changed in place**. `reference capture` now
+writes each frame file's digest into the manifest beside it — `sha256` for the RGB frame,
+`idx_sha256` for the index plane, which `compare` prefers and an RGB-only digest would leave
+unwatched — and `cargo xtask reference verify --tree reference` walks the tree with `compare`'s own
+all-the-way-down walk, checking every capture against its own manifest: every file it names is there
+at the length its geometry implies, every `frame_*` file beside it is one it names, and every digest
+matches the bytes.
+
+**The backfill, and the three conditions the plan put on writing inside `reference/`.**
+
+```
+$ cargo xtask reference backfill --tree reference
+backfill: 24 capture(s), 105 digest(s) recorded into 24 manifest(s)
+```
+
+- **Hashed out of band, before and after.** `find reference -name 'frame_*' -exec sha256sum {} + |
+  sort` before the backfill and after it: both lists 105 lines, `diff` empty, the two files hashing
+  to the same `465b5eb036dc0fbce15039bc4abee54be8d3855eec5c04cd1376ff961ab29ea9`. `git status
+  --short reference` lists 24 files, every one a `manifest.json`; no frame file is touched.
+- **Idempotent.** A second run prints `every digest already recorded and matching — nothing written`,
+  and a `sha256sum` of all 133 files under `reference/` is identical before and after it.
+- **Checked against the pre-change list, not against the tool's own work.** All 105 digests in the
+  manifests were compared with the out-of-band list taken *before* the backfill: 105 checked, 0 wrong.
+
+**The verifier passes on the tree** — `cargo xtask reference verify --tree reference`, exit 0:
+
+```
+ok   check_a/part: 2 frame(s), 4 file(s)
+ok   check_a/title: 2 frame(s), 4 file(s)
+ok   parts/3dsinfld: 4 frame(s), 4 file(s)
+ok   parts/alku: 4 frame(s), 4 file(s)
+ok   parts/beglogo: 4 frame(s), 6 file(s)
+ok   parts/cred: 5 frame(s), 5 file(s)
+ok   parts/ddstars: 4 frame(s), 4 file(s)
+ok   parts/endlogo: 4 frame(s), 6 file(s)
+ok   parts/endscrl: 4 frame(s), 4 file(s)
+ok   parts/glenz: 4 frame(s), 5 file(s)
+ok   parts/jplogo: 3 frame(s), 3 file(s)
+ok   parts/lnszoom: 5 frame(s), 7 file(s)
+ok   parts/minvball: 4 frame(s), 4 file(s)
+ok   parts/mntscrl: 4 frame(s), 5 file(s)
+ok   parts/pam: 4 frame(s), 5 file(s)
+ok   parts/panicend: 3 frame(s), 4 file(s)
+ok   parts/plzpart/cube: 2 frame(s), 2 file(s)
+ok   parts/plzpart/plasma: 3 frame(s), 3 file(s)
+ok   parts/rayscrl: 4 frame(s), 5 file(s)
+ok   parts/techno/interference: 4 frame(s), 4 file(s)
+ok   parts/techno/troll: 3 frame(s), 4 file(s)
+ok   parts/tunneli: 4 frame(s), 4 file(s)
+ok   parts/u2a: 3 frame(s), 5 file(s)
+ok   parts/u2e: 4 frame(s), 4 file(s)
+verdict: ok — 24 capture(s), 105 frame file(s), 25792000 bytes
+```
+
+**And it fails when it should.** A copy of `reference/parts/beglogo` under `out/` with one byte of
+`frame_000560.rgb` changed (offset 1234), exit 1:
+
+```
+$ cp -r reference/parts/beglogo out/verify-flip/ && printf '\x2a' | dd of=out/verify-flip/beglogo/frame_000560.rgb bs=1 seek=1234 conv=notrunc
+$ cargo xtask reference verify --tree out/verify-flip
+FAIL beglogo/frame_000560.rgb: the manifest records sha256 05a130da7b95c3527ed5699a72ebfb389f4b74881d9c7a079b8159908af8e76a and the file is 0d434ffebcc038ab1999359f11c58e7a20aac82ef56a29ff84be2215e3623aa3
+verdict: 1 finding(s) — 1 capture(s), 6 frame file(s) checked
+```
+
+`reference backfill` is the one command in the project allowed to write inside `reference/` — the
+phase plan's single, evidenced exception (`docs/plans/02-shell.md`, Task 2). It writes manifest
+metadata and no frame file, refuses a tree it cannot read without writing anything, and refuses to
+write over a digest that disagrees with the file: a backfill run after a frame changed would
+otherwise record the change as the truth, which is worse than no digest at all.
+
 ## Harness evidence (Task 13)
 
 `cargo xtask compare` was verified both ways against the Task 12 captures, with the

@@ -12,6 +12,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use std::time::Duration;
 
@@ -51,7 +52,11 @@ pub const AUTOTYPE_WAIT_SECONDS: f64 = 5.0;
 /// has to outlast the boot plus a little — it is the failure case that waits.
 pub const SETUP_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
-const MANIFEST_VERSION: u32 = 1;
+/// What a manifest this tool writes may say it is; `compare` refuses to read
+/// any other version, and so does `reference verify`. `sha256` was added to
+/// the frame entries without changing it: the field is additive and `serde`
+/// defaults it, so a reader that predates it still reads the manifest.
+pub(crate) const MANIFEST_VERSION: u32 = 1;
 
 /// How long one frame's indexed read costs, in rendered frames — the distance
 /// within which two requested indices are taken before either of them is read.
@@ -394,6 +399,21 @@ pub fn frame_file_name(index: u64) -> String {
     format!("frame_{index:06}")
 }
 
+/// A digest in the form `sha256sum` prints and `reference-indices.md` records:
+/// lowercase hex, 64 digits.
+///
+/// The hashing is in-process (`sha2`, the crate `assets verify --tree` already
+/// digests with) rather than a `sha256sum` child: a capture must produce its
+/// manifest on a machine without coreutils, and a digest written by a different
+/// program than the one the record was measured with is a digest that can
+/// disagree with it.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// One captured frame on disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FrameRef {
@@ -412,6 +432,26 @@ pub struct FrameRef {
     /// against the RGB frame).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub palette: Option<BTreeMap<u8, [u8; 3]>>,
+    /// The `sha256` of the bytes of `rgb`, written where the file is written.
+    ///
+    /// The digest is recorded here rather than in `docs/fidelity/reference-indices.md`
+    /// because the document cannot be checked mechanically (Phase 1's close-out
+    /// measured it: two naming shapes, and 24 of the tree's 105 `frame_*` files
+    /// with no row by name), while a manifest sits in the capture directory and
+    /// says which file its digest is of. `Option` because a manifest filed
+    /// before the field existed has none — [`crate::verify::backfill`] fills
+    /// those in once, and [`crate::verify::command`] reports a frame that still
+    /// has none rather than passing over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// The `sha256` of the bytes of `idx`, when the frame has indices.
+    ///
+    /// `compare` prefers the indexed side whenever both sides have it (it is
+    /// stricter than widened RGB), so an index plane whose bytes changed is a
+    /// change to what every diff is measured against — and the RGB digest
+    /// alone would not see it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idx_sha256: Option<String>,
 }
 
 /// `<DIR>/manifest.json`: what was captured, and what produced it.
@@ -680,23 +720,31 @@ fn write_frame(
         message: e.to_string(),
     })?;
 
-    let idx = match (&frame.indexed, &frame.palette) {
-        (Some(indexed), Some(palette)) => {
-            let file = format!("{name}.idx");
-            std::fs::write(out.join(&file), indexed).map_err(|e| CaptureError::Io {
-                path: out.join(&file),
-                message: e.to_string(),
-            })?;
-            Some((file, used_palette(indexed, palette)))
-        }
-        _ => None,
-    };
+    // The three fields the index plane contributes, so that a frame the
+    // coherence check refused them for has neither the file nor its digest:
+    // a digest must never name a file the manifest does not (`verify` reads
+    // `idx` as the list of the files a frame has).
+    let (mut idx, mut palette, mut idx_sha256) = (None, None, None);
+    if let (Some(indexed), Some(entries)) = (&frame.indexed, &frame.palette) {
+        let file = format!("{name}.idx");
+        std::fs::write(out.join(&file), indexed).map_err(|e| CaptureError::Io {
+            path: out.join(&file),
+            message: e.to_string(),
+        })?;
+        idx = Some(file);
+        palette = Some(used_palette(indexed, entries));
+        idx_sha256 = Some(sha256_hex(indexed));
+    }
 
     Ok(FrameRef {
         index,
-        idx: idx.as_ref().map(|(file, _)| file.clone()),
+        idx,
         rgb,
-        palette: idx.map(|(_, palette)| palette),
+        palette,
+        // Digested from the bytes that were just written, so the record and
+        // the file cannot be about different moments.
+        sha256: Some(sha256_hex(&frame.rgb)),
+        idx_sha256,
     })
 }
 
@@ -768,6 +816,14 @@ mod tests {
     const DAC_BIN: &[u8] = include_bytes!("../tests/fixtures/dac.bin");
     const MODEX_FRAME_BIN: &[u8] = include_bytes!("../tests/fixtures/modex_title_frame.bin");
 
+    /// `sha256sum` of the two files `write_frame` writes for the fixtures'
+    /// 320×200 indexed frame: `frame_000430.rgb` and `frame_000430.idx` (the
+    /// index plane is `fb.bin`). Taken with the shell command the reference
+    /// ledger was measured with, so the tool's digests are pinned to coreutils
+    /// rather than to each other.
+    const SAMPLE_RGB_SHA256: &str = "b7b9c97ef87d182265f9db77817f0ccdb6f6151a387d14b96f1edc6232a983c5";
+    const SAMPLE_IDX_SHA256: &str = "d3d93da2885e73108be903779c78d8ffcabd8843faa47807ada4331c61e8661b";
+
     fn recorded_palette() -> [[u8; 3]; 256] {
         let mut palette = [[0u8; 3]; 256];
         for (i, entry) in palette.iter_mut().enumerate() {
@@ -808,9 +864,12 @@ mod tests {
         path
     }
 
-    #[test]
-    fn the_manifest_round_trips() {
-        let m = CaptureManifest {
+    /// A manifest as `capture` writes one, for the tests that are about the
+    /// record rather than about an emulator. The frame's digests are
+    /// placeholders: what a real one is, [`write_frame`] decides, and
+    /// `a_captured_frame_carries_its_digest` is the test that says so.
+    fn sample_manifest() -> CaptureManifest {
+        CaptureManifest {
             version: 1,
             oracle: "dosbox-automation 0.85.1 (6d100)".into(),
             upstream_commit: "071a82e".into(),
@@ -828,10 +887,71 @@ mod tests {
                 idx: Some("frame_000100.idx".into()),
                 rgb: "frame_000100.rgb".into(),
                 palette: Some(BTreeMap::from([(1u8, [255, 255, 255]), (56, [243, 247, 255])])),
+                sha256: Some("0".repeat(64)),
+                idx_sha256: Some("1".repeat(64)),
             }],
-        };
+        }
+    }
+
+    #[test]
+    fn the_manifest_round_trips() {
+        let m = sample_manifest();
         let json = serde_json::to_string(&m).unwrap();
         assert_eq!(CaptureManifest::from_json(&json).unwrap(), m);
+    }
+
+    #[test]
+    fn a_captured_frame_carries_its_digest() {
+        // The digest is written where the file is, and of the bytes that were
+        // written — `write_frame`'s return value *is* the manifest entry — so
+        // a capture directory can be checked against its own record later
+        // without a second oracle run and without the prose ledger.
+        let out = scratch_dir("digest");
+        std::fs::create_dir_all(&out).unwrap();
+        let frame = indexed_frame();
+        let entry = write_frame(&out, 430, &frame).unwrap();
+
+        let rgb = std::fs::read(out.join(&entry.rgb)).unwrap();
+        let idx = std::fs::read(out.join(entry.idx.as_deref().unwrap())).unwrap();
+        assert_eq!(rgb, frame.rgb, "the rgb file is the frame that was written");
+        assert_eq!(idx, frame.indexed.clone().unwrap());
+
+        // The digests are `sha256sum`'s, checked against the command rather
+        // than against this module's own arithmetic: these two constants were
+        // taken with `sha256sum` on the files this test just produced.
+        assert_eq!(entry.sha256.as_deref(), Some(SAMPLE_RGB_SHA256));
+        assert_eq!(entry.idx_sha256.as_deref(), Some(SAMPLE_IDX_SHA256));
+        assert_eq!(sha256_hex(&rgb), SAMPLE_RGB_SHA256);
+        assert_eq!(sha256_hex(&idx), SAMPLE_IDX_SHA256);
+
+        // And the manifest's JSON carries them where a reader looks.
+        let manifest = CaptureManifest {
+            frames: vec![entry],
+            ..sample_manifest()
+        };
+        let value = serde_json::to_value(manifest).unwrap();
+        assert_eq!(value["frames"][0]["sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(value["frames"][0]["idx_sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(value["frames"][0]["sha256"], SAMPLE_RGB_SHA256);
+    }
+
+    #[test]
+    fn a_frame_the_coherence_check_refused_records_no_index_digest() {
+        // No `.idx` file is written, so no digest may name one: the manifest
+        // must not record a file it does not have.
+        let out = scratch_dir("digest-rgb-only");
+        std::fs::create_dir_all(&out).unwrap();
+        let frame = CapturedFrame {
+            indexed: None,
+            palette: None,
+            ..indexed_frame()
+        };
+        let entry = write_frame(&out, 900, &frame).unwrap();
+        assert!(entry.idx.is_none());
+        assert!(entry.idx_sha256.is_none());
+        assert!(entry.sha256.is_some());
+        let value = serde_json::to_value(&entry).unwrap();
+        assert!(value.get("idx_sha256").is_none(), "{value}");
     }
 
     #[test]
@@ -860,6 +980,8 @@ mod tests {
                 idx: None,
                 rgb: "frame_000100.rgb".into(),
                 palette: None,
+                sha256: None,
+                idx_sha256: None,
             }],
         })
         .unwrap();

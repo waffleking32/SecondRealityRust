@@ -9,6 +9,12 @@
 //! captures and reports the difference per frame, exiting non-zero when any
 //! frame differs so a phase's exit criteria can be checked by a script.
 //!
+//! `reference verify` is the guard on the tree every one of those diffs is
+//! measured against: it checks each capture against the digests its own
+//! manifest records, and `reference backfill` writes those digests into a tree
+//! filed before `capture` recorded them — see `verify.rs`, which is the one
+//! place in this repository allowed to write inside `reference/`.
+//!
 //! `assets verify` is the same idea one phase earlier: it checks the curated
 //! asset tree against its own record, decodes every asset, and writes a contact
 //! sheet per part — see `assets.rs`, which also carries the exit-code contract
@@ -19,6 +25,7 @@ mod compare;
 mod oracle;
 mod reference;
 mod sheet;
+mod verify;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -159,6 +166,36 @@ enum ReferenceCommand {
         #[arg(long)]
         sheet: Option<PathBuf>,
     },
+    /// Check the tree every frame diff is measured against, against the
+    /// digests its own manifests record.
+    ///
+    /// Exit code 0 when every capture checked out, 1 when any frame is
+    /// missing, is a length its geometry does not imply, is not named by the
+    /// manifest beside it, or does not hash as its entry records; 2 when the
+    /// tool could not check at all (nothing at the tree path, no manifest
+    /// below it, a manifest it cannot read or does not know, a file it cannot
+    /// read). A file that is merely absent is a finding and not exit 2: the
+    /// check that failed is "every file the manifest names exists".
+    Verify {
+        /// The tree to walk: every directory below it holding a
+        /// `manifest.json` is a capture, at any depth. Nothing is written.
+        #[arg(long)]
+        tree: PathBuf,
+    },
+    /// Write every frame file's digest into the manifest beside it, for a tree
+    /// filed before `capture` recorded them.
+    ///
+    /// Fills in a digest that is missing; refuses (exit 2) a tree it cannot
+    /// read, and refuses to write over a digest that disagrees with the file.
+    /// **The only command in this tool that writes inside `reference/`, and it
+    /// touches no frame file** — the phase plan allows this once, on the
+    /// condition that the frames are hashed out of band before and after.
+    Backfill {
+        /// The tree to walk, as `verify`'s. Only the manifests below it are
+        /// written, and only when a digest in them is missing.
+        #[arg(long)]
+        tree: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -241,6 +278,12 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Command::Reference {
+            command: ReferenceCommand::Verify { tree },
+        } => Ok(verify::command(&tree)?),
+        Command::Reference {
+            command: ReferenceCommand::Backfill { tree },
+        } => Ok(verify::backfill(&tree)?),
         Command::Compare {
             reference,
             rendered,

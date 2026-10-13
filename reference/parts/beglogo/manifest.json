@@ -27,15 +27,19 @@
           63,
           63
         ]
-      }
+      },
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561",
+      "idx_sha256": "283babe8ef08242dfe2917f4eb6e7e8f050cc70891ccbda5c79ba851c01e130d"
     },
     {
       "index": 470,
-      "rgb": "frame_000470.rgb"
+      "rgb": "frame_000470.rgb",
+      "sha256": "d0abd8cc06b5cfb4923d297effb54dfb4fcddd0a36950090f3a26875002f8e79"
     },
     {
       "index": 560,
-      "rgb": "frame_000560.rgb"
+      "rgb": "frame_000560.rgb",
+      "sha256": "05a130da7b95c3527ed5699a72ebfb389f4b74881d9c7a079b8159908af8e76a"
     },
     {
       "index": 900,
@@ -327,7 +331,9 @@
           49,
           54
         ]
-      }
+      },
+      "sha256": "cbdc67eba977d5a58f09e5e14cfd04f04acdee716304ec3f15b830142cae1abc",
+      "idx_sha256": "e10481c71b2ac341c8424a071e59c0a5c652c0517687f0c1f7d6817d5c004b08"
     }
   ]
 }

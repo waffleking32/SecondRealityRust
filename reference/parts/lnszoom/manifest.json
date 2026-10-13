@@ -342,19 +342,24 @@
           9,
           12
         ]
-      }
+      },
+      "sha256": "6a152a319d26f6c4f0c6cea6f9127f5a5b7b07c00da1d99a215446e1d4d21fd3",
+      "idx_sha256": "70175500011ef854281c7ff89a82b449269ec15081a89ff181da84de60c55509"
     },
     {
       "index": 3400,
-      "rgb": "frame_003400.rgb"
+      "rgb": "frame_003400.rgb",
+      "sha256": "6c81eadc9c9f119cb3cbcbc2baee37733e7feff0bb47a2d733d915a4d2cb4d63"
     },
     {
       "index": 4200,
-      "rgb": "frame_004200.rgb"
+      "rgb": "frame_004200.rgb",
+      "sha256": "19e5682fdaa94598ea87b8236286807069c95546f855e65455b4db38107c5430"
     },
     {
       "index": 4900,
-      "rgb": "frame_004900.rgb"
+      "rgb": "frame_004900.rgb",
+      "sha256": "248f6b830e146d0454dc2b8a15f46c6030f8a1704b22626150736d7edce3b93f"
     },
     {
       "index": 5650,
@@ -676,7 +681,9 @@
           63,
           63
         ]
-      }
+      },
+      "sha256": "20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8",
+      "idx_sha256": "f8636cd395797afa4aa9ecad7839711fc32df00209fb7163a2690e8901f1788e"
     }
   ]
 }

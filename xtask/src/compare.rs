@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 const MANIFEST_VERSION: u32 = 1;
 
 /// The file a capture directory is described by, on both sides.
-const MANIFEST_FILE: &str = "manifest.json";
+pub(crate) const MANIFEST_FILE: &str = "manifest.json";
 
 /// The report this tool writes next to the diff images.
 const REPORT_FILE: &str = "report.json";
@@ -389,12 +389,24 @@ impl FrameRef {
 /// One capture on disk: a manifest and the frame files it names.
 #[derive(Debug)]
 struct Capture {
-    /// Empty for a directory that holds `manifest.json` itself; otherwise the
-    /// capture directory's path below the tree's root, `/`-separated —
-    /// `title`, `plzpart/plasma`.
+    /// The capture directory's path below the tree's root, `/`-separated —
+    /// `title`, `plzpart/plasma` — and empty for the root itself.
     name: String,
     dir: PathBuf,
     manifest: Manifest,
+}
+
+/// A capture directory the walk found: where it is, and the name it goes by.
+///
+/// This is what the walk produces on its own, before either reader has parsed
+/// a manifest: `compare` reads the two sides through its own [`Manifest`],
+/// `reference verify` through `reference::CaptureManifest` (which is the same
+/// entry plus the digest fields only the capture side writes).
+pub(crate) struct CaptureDir {
+    /// The directory's path below the tree's root, `/`-separated; empty for
+    /// the root itself.
+    pub name: String,
+    pub dir: PathBuf,
 }
 
 /// Find every capture `dir` holds, at any depth.
@@ -417,7 +429,11 @@ struct Capture {
 /// rendered side laid out differently is refused by [`pair_captures`] (the
 /// names have to match) rather than reduced to whatever the two sides happen to
 /// share.
-fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
+///
+/// `reference verify` and `reference backfill` walk a tree with this same
+/// function, so the three tools cannot come to disagree about what a capture
+/// is — a shallower walk in one of them is exactly the green-run failure above.
+pub(crate) fn capture_directories(dir: &Path) -> Result<Vec<CaptureDir>, CompareError> {
     if !dir.is_dir() {
         return Err(CompareError::Io(format!(
             "{} is not a directory",
@@ -436,6 +452,20 @@ fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
     Ok(captures)
 }
 
+/// Find every capture `dir` holds, at any depth, and read its manifest.
+fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
+    let mut captures = Vec::new();
+    for found in capture_directories(dir)? {
+        let manifest = read_manifest(&found.dir)?;
+        captures.push(Capture {
+            name: found.name,
+            dir: found.dir,
+            manifest,
+        });
+    }
+    Ok(captures)
+}
+
 /// Every capture at or below `dir`, named by its path relative to `root`.
 ///
 /// The walk does **not** stop at a capture: a manifest inside a capture's own
@@ -445,13 +475,12 @@ fn resolve_captures(dir: &Path) -> Result<Vec<Capture>, CompareError> {
 fn collect_captures(
     root: &Path,
     dir: &Path,
-    captures: &mut Vec<Capture>,
+    captures: &mut Vec<CaptureDir>,
 ) -> Result<(), CompareError> {
     if dir.join(MANIFEST_FILE).is_file() {
-        captures.push(Capture {
+        captures.push(CaptureDir {
             name: capture_name(root, dir),
             dir: dir.to_path_buf(),
-            manifest: read_manifest(dir)?,
         });
     }
     let entries =

@@ -708,6 +708,18 @@ is handled, and the things this phase measured and could **not** settle. It was 
 of Phase 1 (B6) and it is the phase's own statement of its evidence — where an earlier section and
 this one disagree, this one is the current reading.
 
+**The digests in this document now live in the tree, and a command checks them there.** Since Phase 2's
+Task 2, `reference capture` writes every frame file's `sha256` into the manifest beside it (`sha256`
+for the RGB frame, `idx_sha256` for the index plane), and `cargo xtask reference verify --tree
+reference` walks `reference/` with `compare`'s all-the-way-down rule and checks each capture against
+its own manifest: a named file that is missing, a `frame_*` file the manifest does not name, a length
+its geometry does not imply, or a digest that does not match its bytes is a finding and exit 1, while
+a tree it cannot check at all is exit 2. The `sha256` values quoted throughout this document remain the
+record of what was captured and re-captured; what changed is that a machine reads the record now, so
+**a byte changed in place** — the one failure this document could not report — fails a command. The
+manifests were backfilled once, under out-of-band hashes taken before and after it; `docs/plans/02-shell.md`
+Task 2 carries that exception, and `PROGRESS.md` the evidence.
+
 **What a capture index means.** A keyframe index is a **boot-relative emulator frame counter**:
 frame 0 is the emulator's first rendered frame at process start (D14), the counter counts emulated
 frames (`GFX_EndUpdate`, D17), and the setup screen's text is up at 16 and the demo's first graphics

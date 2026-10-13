@@ -19,11 +19,13 @@
   "frames": [
     {
       "index": 8792,
-      "rgb": "frame_008792.rgb"
+      "rgb": "frame_008792.rgb",
+      "sha256": "c9bf5114b3e70b841884ae7a075684ee2757983760355a7d8a8aedb914ae9484"
     },
     {
       "index": 8800,
-      "rgb": "frame_008800.rgb"
+      "rgb": "frame_008800.rgb",
+      "sha256": "bb38c96bfd2d1da8ae99a5e1569d5c2e99431b3e005a8ca0b5db989a173a3665"
     },
     {
       "index": 9000,
@@ -40,7 +42,9 @@
           1,
           1
         ]
-      }
+      },
+      "sha256": "b412a26518f5e0281790d05c16ed0c7644b7382c5debb8f16a9437b7a6aa84e7",
+      "idx_sha256": "9d7106cabab6980fa3e0f574a5fe2de7a3f8370fd5f336fb2bdaebb48b842c06"
     }
   ]
 }

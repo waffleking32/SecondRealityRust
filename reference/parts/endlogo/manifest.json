@@ -27,11 +27,14 @@
           63,
           63
         ]
-      }
+      },
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561",
+      "idx_sha256": "eec19bc6af0b3b6dfb97a08782c65f4bb3c3203e789a015d2008b0d689ad08be"
     },
     {
       "index": 500,
-      "rgb": "frame_000500.rgb"
+      "rgb": "frame_000500.rgb",
+      "sha256": "fb8fbf2a4401b08668adcc0edf890a46bf30e559649ec46ccf1c9823ce0f3a21"
     },
     {
       "index": 900,
@@ -398,11 +401,14 @@
           7,
           11
         ]
-      }
+      },
+      "sha256": "f2514b291f572e3dbd028cadd7b2795be972740b5466f8520b5b8da468ace94d",
+      "idx_sha256": "c0e0e259e96dfffd984763818a7891c6af610bdcd8e282375a10336c6637b03c"
     },
     {
       "index": 1180,
-      "rgb": "frame_001180.rgb"
+      "rgb": "frame_001180.rgb",
+      "sha256": "755f474763bf19617724d92a227e7b04df4cbee908366571c53c3c7753c0d670"
     }
   ]
 }

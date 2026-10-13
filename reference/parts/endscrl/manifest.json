@@ -19,19 +19,23 @@
   "frames": [
     {
       "index": 9100,
-      "rgb": "frame_009100.rgb"
+      "rgb": "frame_009100.rgb",
+      "sha256": "b6beb9f0fbc9c4c3a0fe752e9a40e8289bbe2140429670dd531cda56f789cd50"
     },
     {
       "index": 10000,
-      "rgb": "frame_010000.rgb"
+      "rgb": "frame_010000.rgb",
+      "sha256": "26d55ae1cd1b3164e21ad75240fee89a3cfaec70b914acd7574e8053109394d7"
     },
     {
       "index": 12000,
-      "rgb": "frame_012000.rgb"
+      "rgb": "frame_012000.rgb",
+      "sha256": "c308d1b20f97798b2fe669706d130b313741bb35eb2efcdbe88a7d375d4d22ea"
     },
     {
       "index": 14000,
-      "rgb": "frame_014000.rgb"
+      "rgb": "frame_014000.rgb",
+      "sha256": "fb2d67a3c3da89ba6dfb31d768afa544ec66d3deee8c16ec6da127419ede7b6b"
     }
   ]
 }

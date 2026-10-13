@@ -557,19 +557,24 @@
           12,
           12
         ]
-      }
+      },
+      "sha256": "e68aa8870c98cbc4757f46dbea41ccb8dbbe68bbd2b5526c1d8eb05c9a5d7646",
+      "idx_sha256": "7be5af378a454a4d715e88bd5db721ef38e325c7060d618febaaaeb20a0ca5da"
     },
     {
       "index": 1100,
-      "rgb": "frame_001100.rgb"
+      "rgb": "frame_001100.rgb",
+      "sha256": "deb4d8fdd3b08538dcde01f82da7a6e3d462fb4d41de673c3e95fdf866e9413f"
     },
     {
       "index": 1700,
-      "rgb": "frame_001700.rgb"
+      "rgb": "frame_001700.rgb",
+      "sha256": "dc2052288fc3a2152df85fbf2d59bcf339edcf873a0a5f4f6a3bebab1511eba6"
     },
     {
       "index": 2300,
-      "rgb": "frame_002300.rgb"
+      "rgb": "frame_002300.rgb",
+      "sha256": "eb4598d4c64ecebb29adb226f5f7035f915679ed56acc8af9e1a63a68aa112f9"
     }
   ]
 }

@@ -307,7 +307,9 @@
           49,
           54
         ]
-      }
+      },
+      "sha256": "cbdc67eba977d5a58f09e5e14cfd04f04acdee716304ec3f15b830142cae1abc",
+      "idx_sha256": "e10481c71b2ac341c8424a071e59c0a5c652c0517687f0c1f7d6817d5c004b08"
     },
     {
       "index": 900,
@@ -599,7 +601,9 @@
           49,
           54
         ]
-      }
+      },
+      "sha256": "cbdc67eba977d5a58f09e5e14cfd04f04acdee716304ec3f15b830142cae1abc",
+      "idx_sha256": "e10481c71b2ac341c8424a071e59c0a5c652c0517687f0c1f7d6817d5c004b08"
     }
   ]
 }

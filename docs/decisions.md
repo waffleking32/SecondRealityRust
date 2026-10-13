@@ -1376,3 +1376,47 @@ what a part *does* need is to take one animation step per `frame()` call, becaus
 value is always 1" means. A part that assumes a different step count is not wrong about `dis_waitb`,
 it is wrong about how far its own animation moves each tick, and the keyframe diffs are where that
 shows.
+
+## D23 — The reference record is machine-readable, and a frame's digest covers both its files (2026-10-13)
+
+Phase 1's close-out left one failure unreported: the reference tree's bytes were pinned by
+`docs/fidelity/reference-indices.md`, a prose document, and no test read `reference/`. Comparing the
+tree with itself catches a *missing or truncated* file, never **a byte changed in place**. The
+document could not be the machine's record — its close-out measured 90 rows in two naming shapes
+against 105 `frame_*` files, 24 with no row by name and 10 carrying more than one digest — so the
+record moved to where the files are written.
+
+**What changed.** `reference capture` writes the digest into the frame entry of the manifest it writes
+beside the frame: `sha256` for the RGB frame, and `idx_sha256` for the index plane. `manifest.json`'s
+`version` stays 1 — the fields are additive and `serde` defaults them, so every existing reader
+(`compare`'s `Manifest` has no `deny_unknown_fields`) keeps working. `cargo xtask reference verify
+--tree <DIR>` walks a tree with `compare`'s all-the-way-down walk and checks each capture against its
+own manifest: every named file present at the length its geometry implies, every `frame_*` file named,
+every digest matching. Exit 0 clean, 1 any finding, 2 could not check. `reference backfill --tree <DIR>`
+is the one-shot that wrote the fields into the 24 manifests filed before `capture` recorded them.
+
+**Why `idx_sha256` and not just the RGB digest.** The plan's interface named one field, `sha256`. The
+indexed side is what `compare` measures with whenever both sides have it — it is stricter than widened
+RGB — so a byte changed in an `.idx` is a change to what every later diff is measured against, and a
+digest of the RGB frame alone would have reported the tree clean. The field is optional and is written
+only when the plane is (`write_frame` computes it inside the branch that writes the file), so a frame
+whose coherence check refused its indices records no digest of a file it does not have. *Cost if wrong:*
+one extra optional field on the capture side, which no reader is required to look at.
+
+**Why a frame with no recorded digest is a finding (exit 1), not a pass.** A manifest that records no
+digest is the state this tool exists to report; skipping it would print a green run over exactly the
+hole the record was built to close. *Cost if wrong:* a tree that predates the field is red until
+`backfill` is run once, which is the intended prompt.
+
+**Why `backfill` refuses a digest that disagrees with its file.** Filling in what is missing and
+writing over what disagrees are different acts: the second would let a backfill run *after* a frame
+changed record the change as the truth, making the record describe whatever the tree happens to be —
+worse than no record, which is the failure the plan's ruling on this exception names. *Cost if wrong:*
+a frame whose digest must genuinely change cannot be re-recorded by `backfill`; it needs a re-capture,
+which is what changed it in the first place.
+
+**The exception, and its evidence.** Writing inside `reference/` is the plan's single narrow exception
+(input-only exists to protect the *frames*; this writes metadata beside them). The evidence is
+`PROGRESS.md`'s Phase 2 section: the frames hashed out of band before and after the backfill with
+identical lists, the second run changing no byte, and all 105 digests checked against the pre-change
+list rather than against the tool's own work.
