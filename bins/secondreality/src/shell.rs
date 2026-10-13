@@ -201,12 +201,19 @@ pub struct Sequence {
     finished: bool,
 }
 
-/// The part a run holds with: it draws nothing and touches nothing, so every
-/// tick composes the surface and the DAC exactly as the last real part left
-/// them. That is what the original's loader does between two EXEs — BEGLOGO
-/// exits and GLENZ has not started, while the VGA keeps showing what is in
-/// video memory — and it is why a reference index past the end of the port's
-/// parts (BEGLOGO's 900) is answerable at all.
+/// The part a run holds with: it draws nothing, and touches nothing of the
+/// surface, the palette or the view, so every tick composes them exactly as the
+/// last real part left them. That is what the original's loader does between two
+/// EXEs — BEGLOGO exits and GLENZ has not started, while the VGA keeps showing
+/// what is in video memory — and it is why a reference index past the end of the
+/// port's parts (BEGLOGO's 900) is answerable at all.
+///
+/// The **copper** it does touch, indirectly: installing it goes through
+/// [`Engine::start`], which clears every copper slot the way each part start
+/// does. So a callback the retiring part registered stops cycling during the
+/// hold. The hold is a static screen and none of the port's parts keeps a
+/// callback running past its own end, so this costs nothing here; it is written
+/// down because it is the one thing the hold does not leave alone.
 struct Holding {
     /// The part whose screen is being held, for the error message a `Part`
     /// name ends up in. The run's own `part()` still names that part.
@@ -255,10 +262,9 @@ impl Sequence {
     ) -> Result<Sequence, ShellError> {
         // A run of nothing has no part to name and no frame to draw; the
         // binary never builds one, because every block has at least one part
-        // and every `--part` names one. The empty name is what says so — see
-        // `ShellError`'s `Display`.
+        // and every `--part` names one.
         let Some(&first) = plan.first() else {
-            return Err(ShellError::UnknownPart { name: String::new() });
+            return Err(ShellError::EmptyPlan);
         };
         let anchor = boot_anchor(first);
         let frame = IndexedFrame::new(view.width, view.height);
@@ -500,10 +506,17 @@ const VGA_DEFAULT_PALETTE: [[u8; 3]; 248] = [
 /// Why a run could not be built.
 #[derive(Debug)]
 pub enum ShellError {
-    /// The name is not the demo's at all.
+    /// The name is not the demo's at all. An empty name gets this too: an
+    /// empty `--part` is a name that matched nothing, and the message echoes it
+    /// so the caller can see which argument was empty.
     UnknownPart { name: String },
     /// The name is a demo part the port has not reached yet.
     NotPorted { name: &'static str },
+    /// The plan named no parts. Its own variant rather than an empty
+    /// [`UnknownPart`](ShellError::UnknownPart): a run with nothing in it has
+    /// no name to quote, and quoting one anyway is how `--part ""` came to be
+    /// told it had named no parts.
+    EmptyPlan,
     /// A part failed to start.
     Engine(EngineError),
 }
@@ -511,14 +524,8 @@ pub enum ShellError {
 impl fmt::Display for ShellError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // An empty name is the empty plan: `Sequence::new` builds a
-            // `Sequence` around a run's first part, so a plan with no parts has
-            // no name to report and says what is wrong instead of quoting
-            // nothing at the caller.
-            ShellError::UnknownPart { name } if name.is_empty() => {
-                write!(f, "a run needs at least one part")
-            }
             ShellError::UnknownPart { name } => write!(f, "unknown part {name:?}"),
+            ShellError::EmptyPlan => write!(f, "a run needs at least one part"),
             ShellError::NotPorted { name } => write!(f, "{name} is not ported yet"),
             ShellError::Engine(e) => write!(f, "{e}"),
         }
@@ -653,6 +660,11 @@ mod tests {
         assert_eq!(resolve("testcard").unwrap(), "testcard");
         assert!(matches!(resolve("glenz"), Err(ShellError::NotPorted { name: "glenz" })));
         assert!(matches!(resolve("nope"), Err(ShellError::UnknownPart { name }) if name == "nope"));
+        // An empty name is a name that matched nothing, and the message has to
+        // say *which* name was empty: `--part ""` is a shell variable that was
+        // never set, and "a run needs at least one part" would send its author
+        // looking at the wrong argument.
+        assert_eq!(resolve("").unwrap_err().to_string(), "unknown part \"\"");
     }
 
     // --- the sequence -----------------------------------------------------
@@ -871,8 +883,7 @@ mod tests {
             Err(error) => error,
             Ok(_) => panic!("a run with nothing in it has no part to name"),
         };
-        // The message is what a caller has to act on, and `unknown part ""` is
-        // not.
+        assert!(matches!(error, ShellError::EmptyPlan), "{error:?}");
         assert_eq!(error.to_string(), "a run needs at least one part");
     }
 

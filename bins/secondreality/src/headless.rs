@@ -290,8 +290,14 @@ fn write_manifest(dir: &Path, run: &Sequence, frames: &[FrameEntry]) -> Result<(
 #[derive(Debug, Serialize)]
 struct FrameEntry {
     index: u32,
-    /// The part that drew it: a block run's frames come from several, and each
-    /// one is named for its own.
+    /// The part the frame belongs to: a block run's frames come from several,
+    /// and each one is named for its own.
+    ///
+    /// **A frame drawn during a hold is named for the part whose screen it
+    /// is**, which is the last part that ran — the frame is that part's picture
+    /// held, and nothing here tells it apart from a frame the part drew (D21
+    /// says what that costs a comparison). It is not the name of a part that
+    /// drew it, because during a hold none did.
     part: String,
     /// This frame's own geometry. The frame is resized from the view every
     /// tick, so a run can legitimately dump frames of more than one size.
@@ -305,7 +311,8 @@ struct FrameEntry {
 #[derive(Debug, Serialize)]
 struct Manifest<'a> {
     version: u32,
-    /// The part that drew the run's first dumped frame.
+    /// The part the run's first dumped frame belongs to — which, for a frame
+    /// dumped during a hold, is the last part that ran (see `FrameEntry`).
     part: &'a str,
     width: u16,
     height: u16,

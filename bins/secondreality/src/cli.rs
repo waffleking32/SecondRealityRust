@@ -269,9 +269,11 @@ fn exactly_one_char(raw: &str) -> Result<char, String> {
 /// skipped item would dump a different set from the one the command names.
 ///
 /// **A repeated index is dropped, keeping the order the list was written in.**
-/// Not a sort: the run visits indices in their own order whatever the command
-/// says, so the list only has to be a set. A repeat would dump the same frame
-/// twice and file two manifest entries under one index.
+/// `--dump-frames` names a *set* of frames, so this is where it is normalised
+/// into one: a command line that says `5,5` twice asks for frame 5 twice, which
+/// is frame 5. Not a sort — the run visits indices in its own order whatever
+/// the command says, so only the set matters — and first occurrence wins so the
+/// list stays as it was written.
 fn indices(raw: &str) -> Result<Vec<u32>, String> {
     let items: Vec<&str> = raw.split(',').collect();
     if raw.is_empty() || items.iter().any(|item| item.is_empty()) {
@@ -339,6 +341,14 @@ mod tests {
     #[test]
     fn an_unknown_part_is_rejected() {
         assert!(parse(&["--part", "nope"]).is_err());
+    }
+
+    #[test]
+    fn an_empty_part_name_is_reported_as_the_empty_name_it_is() {
+        // `--part "$A"` with `A` unset. The message has to point at that
+        // argument, not at the run's plan: they are different mistakes.
+        let message = parse(&["--part", ""]).unwrap_err();
+        assert!(message.starts_with("unknown part \"\""), "{message}");
     }
 
     #[test]

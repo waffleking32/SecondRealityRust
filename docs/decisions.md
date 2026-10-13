@@ -1297,13 +1297,33 @@ phase's two block entries.
 
 **A run holds where its parts end, rather than stopping.** When a run's plan is done — or its next
 part is one the port has not written — the shell keeps ticking through an internal part that draws
-nothing and touches nothing, so every tick composes the surface and the DAC exactly as the last real
-part left them, and the index keeps counting. That is what the original's loader shows between two
-EXEs, and it is why `--part beglogo --dump-frames 430,470,560,900` is answerable: `BEG/BEG.C:87` ends
-`main()` when the fade has converged, and the reference's 900 is a *hold* belonging to the loader and
-the next part's music wait (§3.5), not a frame BEGLOGO draws. `SequenceStatus::Finished` is therefore
-reserved for a run that has *ended* — a part the port has that could not be started — and
-`--dump-frames` treats an index such a run never reached as a failure rather than a hole in the dump.
+nothing, and touches nothing of the surface, the palette or the view, so every tick composes them
+exactly as the last real part left them, and the index keeps counting. That is what the original's
+loader shows between two EXEs, and it is why `--part beglogo --dump-frames 430,470,560,900` is
+answerable: `BEG/BEG.C:87` ends `main()` when the fade has converged, and the reference's 900 is a
+*hold* belonging to the loader and the next part's music wait (§3.5), not a frame BEGLOGO draws.
+`SequenceStatus::Finished` is therefore reserved for a run that has *ended* — a part the port has that
+could not be started — and `--dump-frames` treats an index such a run never reached as a failure
+rather than a hole in the dump.
+
+**The one thing a hold does not leave alone is the copper.** Installing the hold part goes through
+`Engine::start`, which clears every copper slot (`crates/sr-engine/src/engine.rs:111-113`), the same
+way each part start does. A callback the retiring part registered therefore stops cycling during a
+hold. It costs nothing here — the hold is a static screen and no part in this phase leaves a callback
+running past its own end — but a later part that expects its copper to outlive it will find this, and
+the honest description of a hold is "draws nothing, and leaves the surface, the palette and the view
+alone", not "touches nothing".
+
+**A held frame is not distinguishable from a drawn one, and the manifest cannot say so.** A
+`FrameEntry`'s `part` names the part whose screen the frame is, which during a hold is the last part
+that ran, and the frame itself carries no mark saying nothing drew it. So
+`--part beglogo --dump-frames 1200` answers GLENZ's index with BEGLOGO's held screen, and `compare`
+reports exit 1 (they differ) where exit 2 ("could not compare") would be the truth. The design cannot
+do better *yet*: the port has no way to know where the reference's hold ends until GLENZ exists to
+end it, and inventing a boundary now would be a fitted constant of exactly the kind Review Focus 5
+forbids. Nothing in this phase is affected — 900, the index BEGLOGO's acceptance command asks for, is
+inside the hold and correct — and the part that will make the distinction meaningful is the one that
+ends it.
 
 **The DAC starts where the hardware starts.** BEGLOGO's keyframe 430 is index 15 over the DAC the
 machine already had — `BEG/BEG.C:20-21` fills A-space with 15 and only writes the DAC at `:25-34`,
