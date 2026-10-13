@@ -1,8 +1,9 @@
 # BEGLOGO — the Future Crew logo, the white, and the 129-step fade
 
-Slot 4 of `part-sequence.md` §1: `SECOND 2`'s first part, built from `BEG/`. 320×400 Mode X, 704
-lines of C and assembly in four files (`BEG/BEG.C` is 70 of them), 128,000 pixels of output. The
-reference is `reference/parts/beglogo/` — 430, 470, 560, 900 (`reference-indices.md` §3).
+Slot 4 of `part-sequence.md` §1: `SECOND 2`'s first part, built from `BEG/`. 320×400 Mode X,
+128,000 pixels of output, and **269 lines of source in three files** — `BEG/BEG.C` (87),
+`BEG/ASM.ASM` (118) and `BEG/READP.C` (64). The reference is `reference/parts/beglogo/` — 430, 470,
+560, 900 (`reference-indices.md` §3).
 
 **The acceptance comparison is exit 0**: `mode: mixed`, four frames at offset 0, 0.0000 % differing,
 0 pixels of 128,000, max channel delta 0 (§7). This is Phase 2's exit criterion.
@@ -57,9 +58,10 @@ and `docs/decisions.md` D8 are amended to say so.
 
 The screen never moves after `:78`; everything from 446 to 575 is the DAC. The code's own helpers:
 
-- **`lineblit`** (`BEG/ASM.ASM:63-76`) writes one row through the four planes: for each plane it
-  copies 80 bytes with `es:[di+zzz]` from `ds:[si+(zzz)*4+zpl]`, i.e. every fourth byte of the row
-  buffer into one plane. Four planes × 80 bytes = 320 pixels, at plane offset `y*80`.
+- **`lineblit`** (`BEG/ASM.ASM:53-82`, the four-plane loop at `:63-76`) writes one row through the
+  planes: for each plane it copies 80 bytes with `es:[di+zzz]` from `ds:[si+(zzz)*4+zpl]`, i.e.
+  every fourth byte of the row buffer into one plane. Four planes × 80 bytes = 320 pixels, at plane
+  offset `y*80`.
 - **`setpalarea`** (`:93-115`) is the ranged DAC upload, and it ships with a byte-count bug the port
   preserves: §6.
 - **`readp`** (`BEG/READP.C`) is the Origin RLE row reader: `row = -1` copies the palette, a row
@@ -106,11 +108,17 @@ constant's comment names the derivation rather than the number.
 
 `FADE_FIRST_TICK` = 446 − 404 = **42** is the same constant in the part's own tick numbering: a run
 starting at BEGLOGO is anchored at the demo's first graphics frame (`shell::FIRST_GRAPHICS_FRAME` =
-404 = `shell::boot_anchor("beglogo")`), and `PartCtx::frame` counts the part's ticks from there. The
-42 ticks are 32 vertical blanks (`:24`), the tick `:25-78` runs on, and the frames the loader spends
-on `BEGLOGO.EXE` — nine or ten of them, since the fade is at 446 and `404 + 33 = 437`. The port does
-not re-pay them: it decodes once, in `init`, and `dis_partstart()` (`:17`) is a cue it does not model
-(Global Constraints). Everything that fold hides is inside this constant.
+404 = `shell::boot_anchor("beglogo")`), and `PartCtx::frame` counts the part's ticks from there.
+**33 of those 42 ticks are the source's** — 32 vertical blanks (`:24`) and the tick `:25-78` runs on
+— and **the other nine are frames the port does not model, with their cause unidentified**
+(`docs/fidelity/APPROXIMATIONS.md` A5). The honest statement of the residual matters more here than
+a plausible one, and two plausible ones are ruled out by evidence already in the tree: it is **not**
+the EXE load (`reference-indices.md` §3.3 files 410, 429, 430 and 431 as one `sha256`, byte-identical
+white — and `:20-21`'s memsets are what make that screen white, so the part's own code was running by
+410), and it is **not** `dis_partstart()` (`:17`), which is a version check that returns immediately
+(`DIS/DISC.ASM:51-64`) and costs no frame at all. The port draws the white field through all 42
+ticks, which is what the reference shows at every index inside the window that it holds; 446 itself
+is measured from the frames and does not depend on the split.
 
 ## 4. What the port does, act by act
 
@@ -159,19 +167,25 @@ The tick map, in the reference's own numbering:
 |---|---|---|
 | 404-435 | 0-31 | the white field, through the shell's DAC (`:20-24`) |
 | 436 | 32 | the white DAC and the picture blitted (`:25-78`) — still white |
-| 437-445 | 33-41 | white; the loader's frames, folded (§3) |
+| 437-445 | 33-41 | white; nine frames the port does not model (§3, A5) |
 | 446-574 | 42-170 | the ramp, `c = index − 446` (`:80-85`) |
 | 575 | 171 | the picture's palette once more (`:86`), and the part ends |
 | 576-900 | — | the hold: the loader and GLENZ's wait (`:87`) |
 
-**What is not modelled, and why it cannot be.** The CRTC's horizontal registers, its timing
-registers, and AC 0x12's palette-address-source bit are not written by `BEG.C` and have no analogue in
-an engine that composes a rectangle rather than scanning one out. `:35-38` and `:54-60` write AC 0x11
-= 0 between two writes of 255 and AC 0x12 = 0x20; the last write of each wins, which is what the port
-states once (`border = Some(255)`). No entry in `APPROXIMATIONS.md` is owed for this part: its only
-fold is *timing* — nine or ten loader frames and `dis_partstart` — and where that is measurable it is
-zero, because the reference's own 410, 429, 430 and 431 are byte-identical white frames
-(`reference-indices.md` §3.3) and the port is white at all of them.
+**What is not modelled, and why it cannot be.** The CRTC's horizontal and timing registers are not
+written by `BEG.C` at all, and have no analogue in an engine that composes a rectangle rather than
+scanning one out. The other thing `BEG.C` writes that the port folds is the attribute controller's
+*index* register: each of `:36-38`, `:54-60` and `:64-70` ends by writing `0x20` to `0x3c0`
+(`outp(0x3c0,0x20)`, `:59-60` and `:69-70`), which is the index register set to 0 with bit 5 — the
+palette address source — set. PAS = 1 is the state in which the DAC's palette is displayed at all,
+and the port's engine always displays it, so there is nothing there to set. The overscan (AC 0x11,
+index 0x11) is written three times: 255 (`:37`), 0 (`:57`) and 255 again (`:67`), so the last
+write wins, and that is what the port states once (`border = Some(255)`). The only thing the port
+knowingly leaves out is *timing*, and it is registered rather than described away:
+**`APPROXIMATIONS.md` A5** carries the nine unmodelled frames of the lead-in, what is ruled out as
+their cause, and what a later phase should watch. Nothing else is owed: where the fold is
+measurable at all it is zero, because the reference's own 410, 429, 430 and 431 are byte-identical
+white frames (`reference-indices.md` §3.3) and the port is white at all of them.
 
 ## 5. The two conventions, stated for the next part
 
@@ -239,7 +253,10 @@ part leaves alone; the white DAC's 255 + 1 writes; the ramp's truncating divide 
 `c = 1, palette = 0` case where it lands on 62, one below a rounded ramp); the 508-byte upload's
 exact edges; the blit at tick 32 and the still-white first fade step; and the derivation scan of §3.
 
-`tests/beglogo.rs` (three, through the real binary from the repository root): the four keyframes in
+`tests/beglogo.rs` (four, through the real binary from the repository root): the four keyframes in
 the reference's own numbering (`index_origin: boot`, anchor 404, 320×400 each); 430 as 128,000 bytes
-of 15 and pure white RGB; and the held 900 equal to `assets/BEG/SRTITLE.UP` as decoded — the wiring
-the unit tests cannot reach (the registry, the asset path, the anchor).
+of 15 and pure white RGB; 470 and 560 byte-for-byte against `reference/parts/beglogo`'s own RGB
+frames — the pair the suite would otherwise pin only through `xtask compare`, and the pair that would
+show the DAC's 6→8-bit widening if it differed; and the held 900 equal to `assets/BEG/SRTITLE.UP` as
+decoded. Together those are the wiring the unit tests cannot reach: the registry, the asset path, the
+anchor, and the three reference frames the part's own arithmetic does not already pin.

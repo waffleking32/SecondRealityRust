@@ -435,8 +435,8 @@ DAC's 6→8-bit widening was live on two of the four frames that judge the phase
 
 **The part.** `bins/secondreality/src/parts/beglogo.rs`, registered as `beglogo`; `BEG/BEG.C`'s four
 acts translated act for act and tick for tick, with `sr_assets::load_path` reading
-`assets/BEG/SRTITLE.UP` in its original format. Nine tests: six beside the part (unit) and three
-through the real binary from the repository root (`tests/beglogo.rs`) — **493 passed, 0 failed, 0
+`assets/BEG/SRTITLE.UP` in its original format. Ten tests: six beside the part (unit) and four
+through the real binary from the repository root (`tests/beglogo.rs`) — **494 passed, 0 failed, 0
 warnings** (was 484; the count went up, not down).
 
 Four things this task settled rather than assumed, and each changed what the code does:
@@ -476,11 +476,48 @@ Four things this task settled rather than assumed, and each changed what the cod
   part to paint into entries 170-254 will meet them still white.
 
 The plan's Step 6 file list is followed, plus `docs/fidelity/asset-inventory.md` (its item 10 asked
-Phase 2 to settle the build) and this file: `bins/secondreality/{Cargo.toml,src/parts.rs,
-src/parts/beglogo.rs,tests/beglogo.rs}`, `docs/fidelity/{beglogo.md,bugs.md,part-sequence.md,
-asset-inventory.md}`, `docs/spec/…-design.md`, `docs/decisions.md`. The full note — the derivation
-table, the tick map, the two Part B conventions and what is not modelled — is
-`docs/fidelity/beglogo.md`.
+Phase 2 to settle the build), `docs/fidelity/APPROXIMATIONS.md` (A5, §below) and this file:
+`bins/secondreality/{Cargo.toml,src/parts.rs,src/parts/beglogo.rs,tests/beglogo.rs}`,
+`docs/fidelity/{beglogo.md,bugs.md,part-sequence.md,asset-inventory.md,APPROXIMATIONS.md}`,
+`docs/spec/…-design.md`, `docs/decisions.md`. The full note — the derivation table, the tick map, the
+two Part B conventions and what is not modelled — is `docs/fidelity/beglogo.md`.
+
+**Fix round 1 (review).** The review approved the task and **re-derived the headline result with its
+own decoder**, from the source and the artefacts, so the phase's central risk is answered
+independently of this report. Seven findings, all applied:
+
+- **Three false numbers in the note's opening line** ("704 lines of C and assembly in four files,
+  `BEG/BEG.C` 70 of them"): `BEG/` holds **three** source files, **269** lines — `BEG.C` 87,
+  `ASM.ASM` 118, `READP.C` 64. It is the same error the module doc had already been fixed for, so
+  the two files contradicted each other in one commit.
+- **The nine-frame residual was attributed to the loader as a fact, and the evidence does not
+  support it.** `reference-indices.md` §3.3's 410 sample is byte-identical white — `BEG/BEG.C:20-21`'s
+  memsets had already run — so the loader cannot occupy 437-445; and `dis_partstart()` is a *version
+  check* that returns immediately (`DIS/DISC.ASM:51-64`), costing no frame, so "the frames it stands
+  for are inside `FADE_FIRST_TICK`" was empty. The part's comments and the note now say only what is
+  measured: **nine frames of the 42 are frames the port does not model, and the cause is
+  unidentified**.
+- **`APPROXIMATIONS.md` A5** registers it: the magnitude (9 of 42), both candidates ruled out with
+  their sources, and what a later phase should watch — Phase 9 compares every frame, and 436-444 is
+  where the port's *index plane* holds the picture while a later start would still hold the white
+  field, both RGBs white either way. The register's bar is not "non-zero difference": A2 and A4
+  already record zero.
+- **`lineblit`'s citation was the inner loop.** The procedure is `BEG/ASM.ASM:53-82`; `:63-76` is the
+  four-plane loop inside it.
+- **The origin comment contradicted the code.** `set_origin(0)` zeroes `x_offset` as well as
+  `start_addr` — CRTC 0x0c/0x0d is one 16-bit display start, and both halves of the port's origin are
+  what those two writes set — so the comment now says that, and keeps the registers `BEG.C` does not
+  write as the ones left alone.
+- **The border claim.** The test comment justified `:32-34`'s entry 255 by "the *border* does [check
+  it]", but no comparison carries a border (`headless.rs` dumps with `border: false`). The comment now
+  says what the write is for: the next part, where entry 255 black is why GLENZ's `zoomer2` bands are
+  black over a greying picture (`reference-indices.md` §3.5).
+- **470 and 560 are pinned by the suite, not only by the tool**: `tests/beglogo.rs` byte-compares the
+  dumped RGB of both against `reference/parts/beglogo`'s own — the pair that would show the DAC
+  widening if it differed.
+
+The comparison was not re-run for the round: nothing changed in the part's tick mapping, its
+arithmetic or its palette path, so exit 0 is untouched by these edits.
 
 ## Phase log
 

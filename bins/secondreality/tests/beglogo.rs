@@ -45,6 +45,19 @@ fn frame_file(dir: &Path, index: u32, extension: &str) -> Vec<u8> {
     std::fs::read(dir.join(format!("beglogo_{index:06}.{extension}"))).unwrap()
 }
 
+/// The reference's own frame, read from the tree it is committed in.
+///
+/// `reference/` is input-only, and reading it from a test is established
+/// practice here (`xtask`'s verify tests, and the part's own derivation test):
+/// it is what lets the suite, and not only `xtask compare`, say that a frame
+/// is the reference's.
+fn reference_frame(index: u32, extension: &str) -> Vec<u8> {
+    std::fs::read(
+        repository_root().join(format!("reference/parts/beglogo/frame_{index:06}.{extension}")),
+    )
+    .unwrap()
+}
+
 #[test]
 fn the_four_keyframes_dump_in_the_references_own_numbering() {
     let (dir, manifest) = dump("numbering");
@@ -77,6 +90,29 @@ fn the_opening_white_is_index_15_through_the_dac_the_shell_installed() {
     assert!(indices.iter().all(|index| *index == 15), "430 is not the white field");
     let rgb = frame_file(&dir, 430, "rgb");
     assert!(rgb.iter().all(|channel| *channel == 255), "430 is not white");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_two_fade_frames_are_the_references_own_bytes() {
+    // The two frames the suite would otherwise pin only through `xtask
+    // compare`. They are RGB-only in the reference (`reference-indices.md`
+    // §3.1: the indexed read is late by about twenty fade steps, D15), so this
+    // is the same comparison the tool makes of them — the DAC's 6→8-bit
+    // widening included, which is why they are the pair that would show a
+    // widening that differed. 430 and 900 are pinned above and in the part's
+    // own unit tests (the white field; the decode against `frame_000900.idx`).
+    let (dir, _) = dump("fade");
+    for index in [470, 560] {
+        let dumped = frame_file(&dir, index, "rgb");
+        let expected = reference_frame(index, "rgb");
+        let differing = dumped.iter().zip(&expected).filter(|(a, b)| a != b).count();
+        assert_eq!(
+            differing, 0,
+            "frame {index} differs from the reference in {differing} of {} channels",
+            expected.len()
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -137,3 +137,50 @@ entries — measured by reading the chunk's two big-endian words at its body (`0
 150) and by the palette test's equality with `PAM/PAL.PAL` entry for entry. And the file's header
 declares 320×200 at offsets 8 and 10, so the header geometry and the hardcoded one are the same
 numbers; the tree holds exactly one FLI, so no other shape exists to differ on.
+
+## A5 — BEGLOGO's lead-in: nine frames of the original's 42 are not modelled
+
+**Part:** BEGLOGO (`BEG/BEG.C`), Phase 2 — the part that answers the phase's exit criterion, so this
+entry is the one place that says what that criterion cannot see.
+
+**Original:** the fade's first *displayed* step is reference index **446** (`docs/fidelity/
+beglogo.md` §3: 470 is the ramp at `c = 24` and 560 at `c = 114`, each uniquely, and both give
+`446`), and a run that starts at BEGLOGO begins drawing at **404** (`shell::FIRST_GRAPHICS_FRAME`,
+`reference-indices.md` §1.12). Between them are **42 frames, of which the source accounts for 33**:
+the 32 vertical blanks of `BEG/BEG.C:24` and the tick `:25-78` runs on. **The remaining nine are
+unaccounted for, and the cause is unidentified.** What is ruled out is the two obvious candidates:
+
+- **Not the EXE load.** `reference-indices.md` §3.3 files 410, 429, 430 and 431 as one `sha256` and
+  byte-identical white — and `BEG/BEG.C:20-21`'s memsets are what makes that screen white, so the
+  loader had finished and the part's own code was running by 410, six frames after 404.
+- **Not `dis_partstart()`.** `BEG/BEG.C:17` calls it, and it is a **version check, not a
+  synchronisation cue**: `DIS/DISC.ASM:51-64` calls `_dis_version`, prints
+  `ERROR: DIS not loaded.` and exits 3 if the server is absent, and otherwise returns. It costs no
+  frame, so there is nothing of it to fold into a constant.
+
+What is left is 42 = 33 + 9 with the nine's cause unknown. Recording it as unknown is this entry's
+point: an earlier draft of the part's own comments attributed them to "the frames the loader spends
+on the EXE", which the 410 sample rules out, and then to `dis_partstart`, which costs nothing. A
+measured-looking sentence that outruns its evidence is exactly what the phase's Review Focus 5 is
+about, and it is not confined to constants.
+
+**Port:** the port draws the white field for the whole 42 ticks and blits at tick 32 (reference index
+436), and it has no model of anything in between. The port's split of the 42 is therefore 33 modelled
++ 9 not, not 42 modelled. The measurement that fixes 446 is unaffected: 446 is where the ramp is
+*displayed*, and that is measured from the frames, not inferred from the lead-in's internal split.
+
+**Why:** the port decodes the picture once, in `init` (`sr_assets` reads the whole container in one
+call), and cannot re-pay a cost whose shape it does not know. Moving the blit so that the nine
+frames "land where the original's must have" would be a fit of exactly the kind Task 4 Step 1
+forbids for the fade's constant, and it would put the picture's indices into 436-444 against no
+evidence at all.
+
+**Measured difference:** **zero on every frame the reference holds.** 430 is the white field in both
+(128,000 bytes of index 15), the four keyframes compare at exit 0, and 436-444 fall between two
+keyframes the reference does not hold at all. **What a later phase should watch:** Phase 9 compares
+every frame, and these nine are the frames a difference would show in — with the port's map the
+*index plane* at 436-444 holds the picture where any reading in which the original's code starts
+later holds the white field, while the two RGBs stay white (the DAC `:25-31` leaves every entry the
+picture indexes white until `c` moves). A capture of 436-444, or a count of the original's
+`dis_waitb()`s read from live memory, would settle it; neither was taken here, because no index in
+`reference/` falls inside the window.

@@ -66,19 +66,24 @@ const FIRST_INDEX: u32 = crate::shell::FIRST_GRAPHICS_FRAME;
 /// bit for bit: 470 is the ramp at c = 24 and 560 at c = 114, uniquely, which
 /// puts c = 0 at 446.
 ///
-/// The part spends 32 vertical blanks (`BEG/BEG.C:24`) and a 400-row RLE
-/// decode and plane blit (`:73-78`) before the fade, and the loader spends
-/// frames loading the EXE. The port decodes once, in one call, so all of that
-/// is inside this constant rather than a cost the port re-pays:
-/// `dis_partstart()` (`:17`) is a cue the port does not model (Global
-/// Constraints) and lands here too.
+/// A run that starts here begins drawing at [`FIRST_INDEX`] (404) and the
+/// source accounts for 33 of the 42 frames between there and 446: the 32
+/// vertical blanks of `BEG/BEG.C:24` and the tick `:25-78` runs on. **The other
+/// nine are frames the port does not model, and their cause is unidentified** —
+/// `docs/fidelity/APPROXIMATIONS.md` A5 records what is ruled out and what a
+/// later phase should watch. The port draws the white field throughout, which
+/// is what the reference shows at every index inside the window it holds.
+///
+/// 446 itself is measured, not derived from that split: it is where the ramp
+/// is *displayed*, and 470 and 560 answer it uniquely
+/// (`docs/fidelity/beglogo.md` §3).
 const FADE_FIRST_INDEX: u32 = 446;
 
 /// The part tick the fade's step `c = 0` is displayed on: `FADE_FIRST_INDEX`
-/// less this part's own first index. The 42 ticks it counts are `:24`'s 32
-/// vertical blanks, the tick `:25-78` runs on, and the frames the loader spends
-/// on the EXE before any of that — which the port does not re-pay, and which
-/// are therefore inside the constant above rather than a cost here.
+/// less this part's own first index. 33 of its 42 ticks are `:24`'s 32 vertical
+/// blanks and the tick `:25-78` runs on; the other nine are the frames the port
+/// does not model ([`FADE_FIRST_INDEX`], A5), which the port holds the white
+/// field through instead of re-paying.
 const FADE_FIRST_TICK: u32 = FADE_FIRST_INDEX - FIRST_INDEX;
 
 /// `BEG/BEG.C:24`'s `for(a=0;a<32;a++) dis_waitb()`: one vertical blank per
@@ -143,18 +148,21 @@ impl Part for Beglogo {
         // original filled: video memory is 64 KB a plane either way.
         ctx.surface.clear(WHITE_FIELD);
         // `:42-46`: CRTC 0x0c/0x0d = 0, so the display starts at the top of
-        // video memory whatever the part before this one left.
+        // video memory whatever the part before this one left. That register
+        // pair is one 16-bit display start, which is why `set_origin(0)` zeroes
+        // `start_addr` **and** `x_offset` rather than leaving the offset alone:
+        // both halves of the port's origin are what those two writes set.
+        //
+        // The registers `BEG.C` does not write — AC 0x13's pan, CRTC 0x18's
+        // line compare, CRTC 0x13's line offset — are deliberately left as the
+        // run left them, which is what the original inherits from the mode set
+        // before it. In a run that starts here they are the shell's:
+        // `y_line_offset` unset (the port's beam reads the surface's own rows,
+        // Part B's first convention), no split, no pan.
         ctx.view.set_origin(0);
         // `:47-53` and `:62-71`: CRTC 9 with bit 7 and the low five bits
         // cleared — a 400-line screen, one scanline a row — and AC 0x11 = 255,
         // the overscan colour, which `:32-34` makes black.
-        //
-        // The registers `BEG.C` does not write — AC 0x13's pan, CRTC 0x18's
-        // line compare, CRTC 0x13's line offset — are left as the run left
-        // them, which is what the original inherits from the mode set before
-        // it. In a run that starts here they are the shell's: `y_line_offset`
-        // unset (the port's beam reads the surface's own rows, Part B's first
-        // convention), no split, no pan.
         ctx.view.height = PICTURE_HEIGHT as u16;
         ctx.view.double_scan = false;
         ctx.view.border = Some(OVERSCAN_ENTRY);
@@ -182,9 +190,11 @@ impl Part for Beglogo {
         self.picture = image.pixels().to_vec();
         self.picture_palette = image.palette;
 
-        // `:17`'s `dis_partstart()` is a cue the port does not model: the shell
-        // starts a part when it starts it (Global Constraints), and the frames
-        // it stands for are inside `FADE_FIRST_TICK`.
+        // `:17`'s `dis_partstart()` needs no modelling of its own: it is a
+        // *version check* on the resident demo server — `DIS/DISC.ASM:51-64`
+        // calls `_dis_version`, prints `ERROR: DIS not loaded.` and exits 3 if
+        // it is absent, and returns immediately otherwise. It costs no frame,
+        // so nothing of it belongs in `FADE_FIRST_TICK`.
         Ok(())
     }
 
@@ -198,9 +208,11 @@ impl Part for Beglogo {
                 self.blit(ctx);
                 PartStatus::Continuing
             }
-            // The loader's frames between `:78` and the fade's first vertical
-            // blank. The screen is still white, and not only because the DAC
-            // is: `:25-31` left every entry the picture indexes white.
+            // The nine ticks between `:78` and the fade's first vertical blank:
+            // frames the port does not model ([`FADE_FIRST_INDEX`],
+            // `docs/fidelity/APPROXIMATIONS.md` A5). The screen is white
+            // through them either way, and not only because the DAC is:
+            // `:25-31` left every entry the picture indexes white.
             tick if tick < FADE_FIRST_TICK => PartStatus::Continuing,
             tick => {
                 let step = tick - FADE_FIRST_TICK;
@@ -244,8 +256,9 @@ impl Beglogo {
     /// `BEG/BEG.C:74-78`: `readp(rowbuf,y,pic)` and `lineblit(vram+y*80,rowbuf)`,
     /// one row per video row.
     ///
-    /// `lineblit` (`BEG/ASM.ASM:63-76`) is a *plane* routine: for each of the
-    /// four planes it writes 80 bytes to `es:[di+zzz]`, which is 320 pixels of
+    /// `lineblit` (`BEG/ASM.ASM:53-82`, the four-plane loop at `:63-76`) is a
+    /// *plane* routine: for each of the four planes it writes 80 bytes to
+    /// `es:[di+zzz]`, which is 320 pixels of
     /// one video row, and `vram + y*80` is that row's plane offset. The port
     /// writes the same 320 pixels through [`Surface::set`] at the surface's own
     /// row stride, with `y_line_offset` unset (Part B's first convention): the
@@ -416,9 +429,14 @@ mod tests {
 
     #[test]
     fn the_fades_white_is_written_into_entries_0_to_254_and_255_is_black() {
-        // `:25-34`: 255 iterations of (63,63,63) then one of (0,0,0). The
-        // reference's 430 does not constrain entry 255 (nothing on screen uses
-        // it); the *border* does, and the ramp does from the first step on.
+        // `:25-34`: 255 iterations of (63,63,63) then one of (0,0,0). **No
+        // reference frame reaches entry 255**: the picture indexes 1-79, the
+        // white field is 15, the ramp's upload stops inside entry 169, and the
+        // frame the overscan would show it in carries no border — the dump sets
+        // `border: false` (`headless.rs`). This write is ported because the
+        // source performs it, and what it is for is the *next* part: entry 255
+        // black is why GLENZ's `zoomer2` bands are black over a greying picture
+        // (`reference-indices.md` §3.5).
         let (mut rig, mut part) = started();
         assert_ne!(rig.palette.entry(0), [63, 63, 63], "the shell's entry 0 is not white");
         // The 32 blanks, then the tick `:25-34` runs on — the DAC is written
