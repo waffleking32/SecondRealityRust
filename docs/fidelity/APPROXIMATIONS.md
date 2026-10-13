@@ -185,37 +185,69 @@ picture indexes white until `c` moves). A capture of 436-444, or a count of the 
 `dis_waitb()`s read from live memory, would settle it; neither was taken here, because no index in
 `reference/` falls inside the window.
 
-## A6 — TUNNELI: a residual against the reference that its own instability cannot yet attribute
+## A6 — TUNNELI: the shipped build's second palette ramp, and the residual left over it
 
-**Part:** TUNNELI (`TUNNELI/TUN10.PAS`), Phase 2. TUNNELI is the one part of the phase whose
-reference **cannot be a verdict** (`docs/fidelity/reference-indices.md` §8.2, §1.8), so this entry
-records what was measured *before* any later phase reads the residual as a port error.
+**Part:** TUNNELI (`TUNNELI/TUN10.PAS`), Phase 2. Two entries in one, because they are the same
+story: a palette ramp the tree's source and the shipped build disagree about, and the small residual
+that is left once the shipped one is ported.
 
-**Original:** a run of this part is not in the reference's numbering at all — TUNNELI begins after
-GLENZ, `shell::boot_anchor("tunneli")` is `None`, and the part's index in `reference/` is boot-relative
-while the port's is its own ticks. Aligned by the one offset that fits all four keyframes
-(**3,722**: the port's ticks 78, 478, 778, 878 are the reference's 3800, 4200, 4500, 4600), the
-port's frames differ from the reference's by **1,270 / 2,125 / 1,214 / 1,965 pixels** of 64,000
-(1.98 / 3.32 / 1.90 / 3.07 %).
+**The original — the ramp.** `TUN10.PAS:122` writes `(64-x) *3 div 4` into DAC entries 128..192
+(a second grey ramp, three quarters of the first one's). The tree's own build of it, `TUN10.EXE`,
+compiles exactly that: `3*(64-x)` then `idiv 4`, three times over for r, g and b, with the entry
+pushed as `128+x` (image offsets `0x1d0`-`0x1e3`). **The build that shipped — the one every reference
+frame came from — is a later revision in this one expression: its second ramp is
+`(64 - x) * 3 div 5` at the same 65 entries.** Two measurements say so and neither is a fit to a
+shape: 25 of the ramp's entries are readable through the part's own dots (a dot's entry is
+`128 + round(x/1.3)`) and every one matches `3*(64-k) div 5` exactly, including the five where
+rounding rather than truncation would differ; and a search over 21 candidate ramps, each rendered
+over the four reference frames, puts the port's colour field 1,108 pixels from them at 3/5 and at
+least 4,200 at every other candidate — the source's own 3/4 is 6,376, and the runner-up (7/12) is
+4,200. With 3/5 the only differences left are pixels one side inks and the other leaves as
+background: never a wrong colour.
 
-**Port:** the port translates the source's loop as written — the chain copy of 100 records, the
-one-sided clip with the unchecked read past `rows`, the 77-ring / 64-dot pass, the colour wave and
-its 102-frame fade. Nothing in that is an approximation: the read past `rows` is *reproduced*, and
-the reference's own frames are what prove it (85, 146 and 90 pixels at 4200/4500/4600 are drawn only
-by a port that reads the data segment; a bounded port agrees on 0–4 of them). TUNNELI's note
-(`docs/fidelity/tunneli.md` §7.2) carries the measurements.
+**Port:** the *shipped* ramp, `3*(64-x) div 5`, with `TUN10.PAS:122` cited as the structure it
+reproduces and the derivation test
+(`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`) as the constant's evidence. This
+is D12's ruling applied — "the distributed release is the reference of record for every frame diff…
+the source tree remains the reference for *how* every effect works" — and it is the first data point
+on D12's own open item (whether the part EXEs in `MAIN/DATA/` are byte-identical to those packed
+inside `SECOND.EXE`): for TUNNELI they are not the same build as the tree's `TUN10.PAS`/`TUN10.EXE`.
+`docs/fidelity/tunneli.md` §5 carries the derivation and the disassembly.
 
-**Why it is registered:** 1.9–3.3 % is **less than one frame** of the part's own animation at three
-of the four keyframes (its adjacent-tick motion there is 7,000 / 4,063 / 6,536 pixels) and about one
-frame at 3800 (1,180–1,361). The reference's own re-capture differs by 8.07–10.18 % from two earlier
-sessions and five sessions hold three distinct pictures at 3800; 4500 and 4600 are recorded as having
-no settled content at all. A number of that size, on a reference of that stability, cannot be
-attributed to the port or to the oracle — which is exactly what must not be lost.
+**Why the ramp is an entry rather than silence:** the port deliberately does not transcribe a line of
+the tree's source. That is a decision, and a decision needs its measurement where the next reader
+looks — particularly because the tree's `.PAS` is the authority for every other part's porting.
 
-**Measured difference:** the four numbers above, against the reference in the tree, plus the ruled
-out: the colour wave's phase (a 16-step sweep puts 0 best by a factor of two), the shape (at 3800 the
-port inks a pixel everywhere the reference does and 179 more; at 4200 it inks 347 extra and misses
-26), the chain stride, the ring range, and the word offset of the wrapped read. **What a later phase
-should watch:** Phase 9 compares every frame; if this residual is still there when the reference has
-more sessions behind it, the census in `reference-indices.md` §1.8 — not a tolerance — is what says
-whether the picture the port draws is a picture no session drew.
+**The residual — what is left, and what may not be claimed about it.** With the shipped ramp the
+port differs from the four reference frames by **179 / 373 / 321 / 433 pixels of 64,000 (0.28 /
+0.58 / 0.50 / 0.68 %)** at the alignment the reference supplies (offset 3,722; port ticks 78/478/
+778/878), and the difference is *presence*, not colour — the largest channel delta at 3800 is 12,
+against ~235 at the other three, where a port dot meets the reference's black. **The four keyframes
+are not equally trustworthy and must not be averaged:**
+
+| keyframe | census (sessions that can present its picture, ±1) | the re-capture (§8.4) | what the residual can be |
+|---|---|---|---|
+| 3800 | 7/9 — **settled** | byte-identical | the port's, or a sub-frame difference in it |
+| 4200 | 3/6 — exactly half | byte-identical | probably the port's |
+| 4500 | 2/5 — **no settled content** | byte-identical | either |
+| 4600 | 1/6 — **no settled content** | 57 px away | either; the oracle cannot resolve better |
+
+So at 3800 — and largely at 4200 — the reference is reproducible and *was* reproduced byte for byte;
+a 179-pixel residual there is **not** "the oracle's spread", and the entry says so rather than
+hiding behind it. The pre-fix partners' 8.07–10.18 % is not a spread either: §8.4 itself reframes
+those numbers as "≈1 frame at 4200, 4500 and 4600 and ≈4 frames at 3800" — the history of a reference
+that has been replaced. At 4500 and 4600 nothing can attribute the residual, because no session
+reproduces those pictures at all.
+
+**What is ruled out, measured rather than argued.** The colour field is right (§5) and the alignment
+is whole: at 3800 tick 78 leaves 179 pixels where 77 leaves 1,122 and 79 leaves 1,311, so a
+whole-tick error would cost thousands. The remaining differences are a few hundred of the 2,400–3,900
+inked dots, in both directions (at 3800 the port inks 179 that the reference does not and the
+reference none that the port does not; at 4200, 347 and 26) — what two rings overlapping differently
+looks like, which is a *sub-frame* difference in the chain or an artefact of the erases' order.
+**What a later phase should watch:** Phase 9 compares every frame, and this residual is the number
+that will follow TUNNELI there. A fix would have to come from a session that reproduces one of these
+pictures *and* a longer run to see where the two trajectories diverge — the reference's own census
+(`reference-indices.md` §1.8) is what would say whether the picture the port draws is a picture no
+session drew.
+

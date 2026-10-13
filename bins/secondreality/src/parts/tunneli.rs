@@ -253,17 +253,26 @@ impl Tunneli {
     /// and the words *before* `aa1` are `pcalc` — this part's own 35,328-byte
     /// table, read backwards.
     ///
-    /// **Nothing here is guessed at the port's convenience: the reference's own
-    /// frames decide it.** On `frame_004200.rgb`, `frame_004500.rgb` and
-    /// `frame_004600.rgb`, 85, 146 and 90 pixels of the port's frame at the
-    /// aligned tick are *only* drawn if this read is the original's — a port
-    /// that treated an out-of-range y as 0, or that clipped it away, agrees
-    /// with the reference on 0–4 of them (`docs/fidelity/tunneli.md` §4).
+    /// **The read is preserved because the source has it, and it is invisible —
+    /// measured, not assumed.** The reachable range is `-680..=680` (the head's
+    /// y is `sinit[..] - cosit[..] ∈ [-222, 211]`, `by` is a difference of two
+    /// of those, and `pcalc`'s own y runs to ±247), so the words this can read
+    /// outside `rows` are `aa2`'s copy of `aa1` on one side and `aa1` itself on
+    /// the other — and **every one of them is 64,000** (`:99`'s value). A dot
+    /// that takes this branch therefore plots at `x + 64,000`, i.e. bytes
+    /// 64,002–64,319, past the 64,000 bytes a 200-line mode 13h screen reads
+    /// (`the_out_of_range_read_is_invisible_and_that_is_measured` checks every
+    /// reachable y for it). The artefact is real and off-screen in the original
+    /// *and* in the port: a bounded read draws byte-identical frames at all
+    /// four keyframes, so nothing in the reference can witness it either way.
     ///
-    /// The reachable range is `-680..=680` (the head's y is
-    /// `sinit[..] - cosit[..] ∈ [-222, 211]`, `by` is a difference of two of
-    /// those, and `pcalc`'s own y runs to ±247), so the windows this needs are
-    /// the first 680 words after `rows` and the first 680 before it.
+    /// What the reference *does* witness is that the read must not be replaced
+    /// by 0: `aa2`'s unwritten half *is* 0, so a port that substituted 0 would
+    /// plot at `x` — row 0 — and differ from the reference by 85, 142 and 88
+    /// extra pixels at 4200, 4500 and 4600 (`docs/fidelity/tunneli.md` §4).
+    ///
+    /// The windows this needs are the first 680 words after `rows` and the
+    /// first 680 before it.
     /// `the_unchecked_read_covers_everything_the_arithmetic_can_reach` measures
     /// that bound against the tables themselves.
     fn rows_word(&self, yy: u16) -> u16 {
@@ -402,10 +411,24 @@ impl Tunneli {
             let value = (64 - x) as u8;
             ctx.set_palette_entry(64 + x as u8, [value, value, value]);
         }
-        // `:122` `setrgb(128+x, (64-x) *3 div 4, …)`, the same ramp at three
-        // quarters, integer-truncated.
+        // `:122` `setrgb(128+x, (64-x) *3 div 4, …)`, the same ramp dimmed —
+        // **except that the build which shipped is not the tree's `TUN10.PAS`
+        // in this one expression.** The reference's frames are drawn with
+        // `(64 - x) * 3 div 5` at the same 65 entries: 25 of the ramp's entries
+        // are measurable through the part's own dots and every one of them
+        // matches `3*(64-x) div 5` exactly, including the five where rounding
+        // rather than truncation would differ; and the fit is *unique* — over
+        // 21 candidate ramps the port's colour field is 1,108 pixels away from
+        // the four reference frames at this ramp and at least 4,200 at every
+        // other (`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`).
+        // The tree's own `TUN10.EXE` compiles `:122` as written (`3*(64-x)` then
+        // `idiv 4`, image offsets 0x1d0-0x1e3), so the two builds differ; D12
+        // settles which one the port follows — the distributed release is the
+        // reference of record for what the demo looks like, the source tree is
+        // the reference for how the effect works. `docs/fidelity/tunneli.md` §5
+        // carries the derivation, and `APPROXIMATIONS.md` A6 what it costs.
         for x in 0..=64u32 {
-            let value = ((64 - x) * 3 / 4) as u8;
+            let value = second_ramp(64 - x);
             ctx.set_palette_entry(128 + x as u8, [value, value, value]);
         }
         // `:124-125` — the two dark rings inside the ramps, black.
@@ -538,6 +561,16 @@ impl Part for Tunneli {
             PartStatus::Continuing
         }
     }
+}
+
+/// The shipped build's second ramp: `(64 - x) * 3 div 5`, where `TUN10.PAS:122`
+/// has `(64 - x) * 3 div 4` — measured, uniquely, against the reference's own
+/// frames (see [`Tunneli::install_palette`] and `docs/fidelity/tunneli.md` §5).
+///
+/// Truncating division, not rounding: `64 - x = 38` is 22 here and 23 rounded,
+/// and the reference shows 22.
+fn second_ramp(value: u32) -> u8 {
+    (value * 3 / 5) as u8
 }
 
 /// `:158`'s `round(x / 1.3)`.
@@ -922,6 +955,58 @@ mod tests {
     }
 
     #[test]
+    fn the_out_of_range_read_is_invisible_and_that_is_measured() {
+        // The companion to the coverage test above, and the honest statement of
+        // what the unchecked read does on this art: walk the part's whole run,
+        // take every y the inner loop actually puts outside `rows`, and ask
+        // what `:186` reads for it. They all read 64,000 — `aa2`'s copy of
+        // `aa1` on the forward side (`:99-100`), `aa1` itself past the
+        // 65,536-byte wrap — so the plot lands at `x + 64,000`, in bytes
+        // 64,002..64,319 of a video memory whose screen is the first 64,000
+        // bytes (200 lines of 320). **Nothing witnesses the read**, in the
+        // original or here: a bounded read draws byte-identical frames.
+        //
+        // It is worth walking the run rather than trusting the arithmetic's
+        // widest possible y: the *bound* allows ±680, where the word read is
+        // `sinit`'s or `pcalc`'s and the plot would land on screen — but the
+        // sines never take `by` and `pcalc`'s y to their extremes together, and
+        // the values that occur are 201..248 and the wrapped side.
+        let (mut rig, mut part) = started();
+        let mut off_screen = 0usize;
+        let mut on_screen = 0usize;
+        for tick in 0..=VEKE {
+            part.frame(&mut rig.ctx(tick));
+            // `:155-158` and `:183-185`, read off the part's own state: the y
+            // the loop feeds to `rows[bx]`, for every dot of every ring that
+            // draws this tick.
+            for x in RING_BOTTOM..=RING_TOP {
+                let colour = part.putki[x].c.wrapping_add(ring_colour(x));
+                if colour < 64 {
+                    continue;
+                }
+                let by = part.putki[x].y.wrapping_sub(part.putki[5].y);
+                let base = part.sade[x] as usize * DOTS_PER_RING * 2;
+                for dot in 0..DOTS_PER_RING {
+                    let y = by.wrapping_add(part.pcalc[base + dot * 2 + 1]);
+                    if y <= 200 {
+                        continue;
+                    }
+                    if part.rows_word(y) == 64_000 {
+                        off_screen += 1;
+                    } else {
+                        on_screen += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            off_screen > 100_000,
+            "the run should read out of range often: {off_screen}"
+        );
+        assert_eq!(on_screen, 0, "an out-of-range read that a screen would show");
+    }
+
+    #[test]
     fn the_ring_colour_rounds_unambiguously() {
         // :158 `round(x / 1.3)` over the loop's range: the port divides in
         // floating point, so the test is that no `x` lands near a half.
@@ -945,8 +1030,11 @@ mod tests {
         assert_eq!(rig.palette.entry(64), [0, 0, 0], "64 six-bit-masked, as the DAC does");
         assert_eq!(rig.palette.entry(65), [63, 63, 63]);
         assert_eq!(rig.palette.entry(68), [0, 0, 0], "setrgb(68,0,0,0)");
-        assert_eq!(rig.palette.entry(128), [48, 48, 48], "64 * 3 div 4");
-        assert_eq!(rig.palette.entry(129), [47, 47, 47], "63 * 3 div 4");
+        // The shared ramp is `(64-x) *3 div 5` — the *shipped* build's, not the
+        // tree's `TUN10.PAS:122`; the derivation test below is what says so.
+        assert_eq!(rig.palette.entry(128), [38, 38, 38], "64 * 3 div 5");
+        assert_eq!(rig.palette.entry(129), [37, 37, 37], "63 * 3 div 5");
+        assert_eq!(rig.palette.entry(166), [15, 15, 15], "38 * 3 div 5, and 23 rounded");
         assert_eq!(rig.palette.entry(132), [0, 0, 0], "setrgb(132,0,0,0)");
         assert_eq!(rig.palette.entry(192), [0, 0, 0]);
         assert_eq!(rig.palette.entry(255), [0, 63, 0], "setrgb(255,0,63,0)");
@@ -980,6 +1068,136 @@ mod tests {
         assert_eq!(rig.view.border, Some(0), "AC 0x11 back to entry 0");
         assert!(rig.surface.pixels()[..VIDEO_BYTES].iter().all(|p| *p == 0));
         assert_eq!(rig.surface.pixels()[VIDEO_BYTES], 0xAA, "and no more than video memory");
+    }
+
+    /// The four reference keyframes, each with the part tick that answers it:
+    /// reference index = tick + 3,722 (`docs/fidelity/tunneli.md` §7.2).
+    const ALIGNED: [(u32, &str); 4] = [
+        (78, "003800"),
+        (478, "004200"),
+        (778, "004500"),
+        (878, "004600"),
+    ];
+
+    /// One keyframe as the port draws it: the part run to that tick, and the
+    /// reference's own RGB frame beside it.
+    fn aligned_frame(tick: u32, name: &str) -> (Vec<u8>, Vec<u8>) {
+        let (mut rig, mut part) = started();
+        for at in 0..=tick {
+            part.frame(&mut rig.ctx(at));
+        }
+        let memory = rig.surface.pixels();
+        let mut picture = Vec::with_capacity(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize);
+        for y in 0..SCREEN_HEIGHT as usize {
+            let row = y * LINE_LEN as usize;
+            picture.extend_from_slice(&memory[row..row + SCREEN_WIDTH as usize]);
+        }
+        let expected =
+            std::fs::read(format!("../../reference/parts/tunneli/frame_{name}.rgb")).unwrap();
+        assert_eq!(picture.len() * 3, expected.len(), "{name} is not 320x200");
+        (picture, expected)
+    }
+
+    /// The 256-entry DAC the part installs, with `second` standing in for
+    /// `TUN10.PAS:122`'s ramp so a candidate can be rendered.
+    fn dac_with(second: impl Fn(u32) -> u8) -> Palette {
+        let mut dac = Palette::new();
+        for x in 0..=64u32 {
+            dac.set_entry(64 + x as u8, [(64 - x) as u8; 3]);
+        }
+        for x in 0..=64u32 {
+            let value = second(64 - x);
+            dac.set_entry(128 + x as u8, [value; 3]);
+        }
+        dac.set_entry(68, [0, 0, 0]);
+        dac.set_entry(132, [0, 0, 0]);
+        dac.set_entry(255, [0, 63, 0]);
+        dac
+    }
+
+    /// How far a candidate ramp leaves the port's colour field from the frames:
+    /// the pixels the port inks whose colour no reference frame shows.
+    ///
+    /// Only pixels the port inks are counted, so this is a statement about the
+    /// *ramp*: the reference's own ink that the port does not draw (a few
+    /// hundred pixels, `docs/fidelity/tunneli.md` §7.2) is the same for every
+    /// candidate and would otherwise swamp the comparison.
+    fn colour_error(second: impl Fn(u32) -> u8, frames: &[(Vec<u8>, Vec<u8>)]) -> usize {
+        let dac = dac_with(second);
+        let mut wrong = 0;
+        for (picture, expected) in frames {
+            for (index, rgb) in picture.iter().zip(expected.chunks_exact(3)) {
+                let entry = dac.entry(*index);
+                if entry == [0, 0, 0] {
+                    continue;
+                }
+                let shown = [
+                    sr_engine::dac_expand(entry[0]),
+                    sr_engine::dac_expand(entry[1]),
+                    sr_engine::dac_expand(entry[2]),
+                ];
+                if shown != rgb {
+                    wrong += 1;
+                }
+            }
+        }
+        wrong
+    }
+
+    /// **The shipped build's second ramp is 3/5, and this is the search that
+    /// says so** — the method Task 4 derived BEGLOGO's fade constant with (plan
+    /// Review Focus 5): every candidate is rendered over the four keyframes and
+    /// compared with the reference bit for bit, and the answer has to be
+    /// *unique*, not merely good.
+    ///
+    /// `TUN10.PAS:122` writes `(64-x) *3 div 4` at entries 128..192, and the
+    /// tree's own `TUN10.EXE` compiles exactly that — `3*(64-x)` then `idiv 4`,
+    /// image offsets 0x1d0-0x1e3, read off the disassembly in
+    /// `docs/fidelity/tunneli.md` §5. **The build that shipped is a different
+    /// one.** At 3/4 the port's colour field is 6,376 pixels away from the four
+    /// frames; at 3/5 it is 1,108, and *every* one of those is a pixel the port
+    /// inks that the reference leaves as background — the ink-presence residual
+    /// of §7.2, which no ramp can fix. Of the kind a ramp *can* fix — both sides
+    /// inked, different colour — 3/5 leaves 0 at 3800, 4200 and 4600 and 17 at
+    /// 4500, where two rings overlap; every other candidate in the search
+    /// leaves at least 3,500 over the four.
+    #[test]
+    fn the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit() {
+        let frames: Vec<(Vec<u8>, Vec<u8>)> =
+            ALIGNED.iter().map(|(tick, name)| aligned_frame(*tick, name)).collect();
+
+        let best = colour_error(second_ramp, &frames);
+        assert!(
+            best <= 1_500,
+            "the port's own ramp leaves {best} pixels wrong; the search's answer should be ~1,108"
+        );
+
+        // `(64-x) * mul div div`, floor, over the reduced fractions a ramp of
+        // this shape could plausibly be. 3/5 is the unique minimum.
+        let mut worse = Vec::new();
+        for mul in 1..=7u32 {
+            for div in 1..=15u32 {
+                if mul * 5 == 3 * div {
+                    continue; // the shipped ramp itself, in another spelling
+                }
+                if div % mul == 0 && mul != 1 {
+                    continue; // a duplicate of a smaller pair
+                }
+                let error = colour_error(|n| (n * mul / div) as u8, &frames);
+                assert!(
+                    error >= 3_500,
+                    "{mul}/{div} is {error}, too close to the 3/5 ramp's {best}"
+                );
+                worse.push((error, mul, div));
+            }
+        }
+        worse.sort();
+        assert_eq!(
+            (worse[0].1, worse[0].2),
+            (7, 12),
+            "the runner-up should be 7/12, and it is {:?}",
+            worse[0]
+        );
     }
 
     #[test]

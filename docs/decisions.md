@@ -198,7 +198,22 @@ name: there is no chance the media in the source tree is a later or earlier revi
 those packed inside `SECOND.EXE`. If they differ, the port could match one reference and
 not the other. This is cheap to answer once BEGLOGO is diffable against real frames, and
 it does not block anything before then. If they *do* differ, the distributed release still
-wins and the difference gets recorded in `APPROXIMATIONS.md`.
+decides every frame diff — the ruling above — and the difference is recorded rather than
+resolved in favour of either build.
+
+**First data point, 2026-10-13 (Task 5, TUNNELI): the tree's `TUNNELI/TUN10.PAS` and its own
+`TUN10.EXE` are *not* the build that put the reference's frames on screen.** `TUN10.PAS:122`
+writes a second grey ramp of `(64-x) *3 div 4` at DAC entries 128..192 and `TUN10.EXE` compiles
+it as written (`idiv 4`, image offsets `0x1d0`-`0x1e3`), while every reference frame is drawn
+with `(64-x) *3 div 5` at those entries — exact at all 25 measurable entries, and the unique
+best of 21 candidate ramps rendered against the four frames (`APPROXIMATIONS.md` A6,
+`docs/fidelity/tunneli.md` §5). The tree's `MAIN/DATA/TUNNELI.EXE` is PKLITE-packed, so which
+of the two copies of it put that ramp on screen is not resolvable from here; what *is* settled
+is that the frames and the tree's source disagree, and D12's ruling above ("the distributed
+release is the reference of record for every frame diff") decides which of them the port
+follows: the frames. A part whose source and shipped build disagree is therefore not a
+contradiction to resolve but a measurement to take, and the difference is recorded — here and
+in `APPROXIMATIONS.md` — rather than the newer build being called the winner.
 
 ## D9 — Licence: MIT (2026-10-10)
 

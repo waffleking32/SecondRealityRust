@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; TUNNELI ported (its reference cannot be diffed — A6) | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; TUNNELI ported and measured at the reference's own alignment (0.28–0.68 %, A6) | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -412,45 +412,69 @@ byte-identical to `ee63aa7`'s. The second thing was a word: the two places that 
 amendment sits "above the struct sketch" now say below, which is where it is. 484 passed, 0 failed,
 0 warnings.
 
-#### Task 5 — TUNNELI: the dot tunnel, ported against its source rather than its oracle
+#### Task 5 — TUNNELI: the dot tunnel, and a palette the tree's source does not have
 
 `bins/secondreality/src/parts/tunneli.rs`, registered as `tunneli`; `TUNNELI/TUN10.PAS` translated
-act for act with `sr-assets`' own formats read for the two data blobs it links (`TUNNELI/TUNNEL.DAT`,
-`TUNNELI/SINIT.DAT` — neither of which is a picture, so neither goes through a decoder; the note's §2
-says so with the measurement). Twelve unit tests beside the part and two through the real binary.
-`docs/fidelity/tunneli.md` carries the full note, including the layout the *unchecked* read past
-`rows` lands in (`:179-190`) — which the reference's own frames prove is real — and the correction
-that the fade is the rings stopping, not dots drawn in entry 0.
+act for act with its two linked data blobs read in their original form (`TUNNELI/TUNNEL.DAT`,
+`TUNNELI/SINIT.DAT` — neither is a picture, so neither goes through a decoder; the note's §2 says so
+with the measurement). **Fifteen unit tests** beside the part and two through the real binary.
 
-**The comparison, run and recorded, and why it is not a verdict.** The plan's Step 3 command
-(`--dump-frames 900,1060,2000`) compared against `reference/parts/tunneli` is **refused, exit 2**:
-`reference frame 3800 has no rendered frame within ±1 of it ... the nearest rendered index is 2000,
-1800 frames away`. Run at the reference's own indices instead (`--dump-frames 3800,4200,4500,4600`,
-a 4,600-tick run) it is **exit 1** — `3800: 3.7812 % (2420/64000 px), 4200: 5.6312 % (3604), 4500:
-3.1422 % (2011), 4600: 4.9344 % (3158)` — and **every differing pixel is a reference dot**, because a
-`--part tunneli` run numbers its frames from its own tick 0 and is holding the black screen at
-3,800 while the reference is holding the tunnel's. That number is the numbering's gap, not the port's.
+**The one place the port does not follow the tree's source, and the measurement that says why.**
+`TUN10.PAS:122` writes a second grey ramp of `(64-x) *3 div 4` at DAC entries 128..192, and the
+tree's own `TUN10.EXE` compiles exactly that (`3*(64-x)` then `idiv 4`, image offsets `0x1d0`-0x1e3).
+**The build that shipped is a later revision of that one expression: its ramp is `(64-x) *3 div 5`.**
+25 of the ramp's entries are readable through the part's own dots and every one matches, exactly
+(including the five where truncation and rounding differ); and a search over 21 candidate ramps
+rendered against the four reference frames puts the port's colour field 1,108 pixels from them at 3/5
+and at least 4,200 at every other (the source's own 3/4 is 6,376). The port takes the shipped ramp —
+D12: "the distributed release is the reference of record for every frame diff… the source tree
+remains the reference for *how* every effect works" — with the derivation in
+`docs/fidelity/tunneli.md` §5, the entry in `APPROXIMATIONS.md` A6, and D12's own open item
+(are the tree's part EXEs the packed ones?) gained as its first data point in `docs/decisions.md`.
 
-What the port does look like is measured at the alignment the reference itself supplies: the offset
-**3,722** fits all four keyframes (the port's ticks 78/478/778/878 are the reference's
-3800/4200/4500/4600), and there the port differs by **1,270 / 2,125 / 1,214 / 1,965 pixels of 64,000
-(1.98 / 3.32 / 1.90 / 3.07 %)** — less than one frame of the part's own motion at three of the four
-(the reference's own re-capture spread is 8.07–10.18 %, its five sessions hold three different
-pictures at 3800, and 4500/4600 have no settled content). Registered as `APPROXIMATIONS.md` A6.
+**The comparison, run and recorded.** The plan's Step 3 command (`--dump-frames 900,1060,2000`) is
+**refused, exit 2** — `reference frame 3800 has no rendered frame within ±1 of it … the nearest
+rendered index is 2000, 1800 frames away`. Run at the reference's own indices
+(`--dump-frames 3800,4200,4500,4600`) it is **exit 1**: `3800: 3.7812 % (2420/64000 px), 4200:
+5.6312 % (3604), 4500: 3.1422 % (2011), 4600: 4.9344 % (3158)` — and every differing pixel is a
+reference dot, because a `--part tunneli` run draws its own ticks from zero and is holding the black
+screen at 3,800 while the reference holds the tunnel. That number is the numbering's gap, not the
+port's.
 
-**The sheet, which is the evidence a person reads.** `out/p2-tunneli-aligned-sheet.png` (the port's
-four aligned frames) beside `out/p2-tunneli-reference-sheet.png` (the reference's own four) — the
-mouth, the full tunnel, the off-centre tunnel and the thinner one, the same four shapes on both.
-The reference's sheet is byte-identical to `out/tunneli.png`, the one Phase 1's capture wrote. **The
-look itself is deferred to the phase boundary**: nothing here claims a person has judged them.
+At the alignment the reference itself supplies — offset **3,722**, the port's ticks 78/478/778/878
+answering 3800/4200/4500/4600 — the port differs by **179 / 373 / 321 / 433 pixels of 64,000 (0.28 /
+0.58 / 0.50 / 0.68 %)**, and the difference is *presence*, not colour (the largest channel delta at
+3800 is 12, against ~235 at the other three, where a port dot meets the reference's black). The
+residual is attributed honestly rather than excused by the oracle: at 3800 the reference is
+**settled** (7 of 9 sessions, and the re-capture reproduced it byte for byte), so 179 pixels there
+are the port's or a sub-frame effect in it; at 4200 the census is exactly half; and at 4500 and 4600
+— **no settled content** — nothing can attribute them. `APPROXIMATIONS.md` A6 carries the table and
+what is ruled out (the ramp; a whole-tick error, which would cost thousands; and the pre-fix
+partners' 8.07-10.18 %, which §8.4 itself reframes as "≈1 frame … ≈4 frames" — the history of a
+reference that has been replaced).
 
-**And the phase has a tool it did not have.** The plan's Step 3 named
-`xtask reference capture --sheet` as able to sheet any frame directory; it cannot — `--sheet` is
-wired into `assets verify` and `reference capture`, and neither can read an arbitrary directory. So
-`cargo xtask frames sheet --dir <DIR> --out <PNG>` exists now (`xtask/src/frames.rs`, five tests):
-it walks `--dir` through `compare`'s own `capture_directories`, reads each capture's manifest, and
-lays the frames out with `sheet`'s `Tile`/`contact_sheet`/`columns_for`/`write_png`, printing each
-tile's position and index. Nothing is scaled. Tasks 6–9 and the phase-end human look are its users.
+**The unchecked read past `rows` (`:179-190`) is preserved because the source has it, and it is
+invisible.** Every y the part's own run puts outside `rows` reads a word of 64,000 — `aa2`'s copy of
+`aa1` (`:99-100`) on one side, `aa1` past the wrap on the other — so the dot plots at `x + 64,000`,
+past the 64,000 bytes a 200-line mode 13h screen reads: more than 100,000 such reads in a full run,
+**not one** of them on screen, and a bounded read gives byte-identical frames. The path that *is*
+visible is substituting 0 (the value of `aa2`'s unwritten half): that plots at row 0 and costs 85,
+142 and 88 extra differing pixels at 4200, 4500 and 4600, which is why the read is modelled rather
+than zeroed.
+
+**The sheets, which are the evidence a person reads.** `out/p2-tunneli-aligned-sheet.png` (the
+port's four aligned frames) beside `out/p2-tunneli-reference-sheet.png` (the reference's own four):
+the mouth, the full tunnel, the off-centre tunnel and the thinner one, the same four shapes on both.
+**The look itself is deferred to the phase boundary**: nothing here claims a person has judged them.
+
+**And the phase has two tools it did not have.** `cargo xtask compare --align <N>` reads the rendered
+side's frame indices `N` higher when pairing them — the frames' own indices are not rewritten, the
+alignment is printed before the frames, and every reported offset is the net one — which is the only
+way a part the port cannot anchor can be measured at all (TUNNELI, CRED and ENDSCRL all have
+`boot_anchor == None`); it is pinned both ways in `xtask/tests/compare.rs`. And
+`cargo xtask frames sheet --dir <DIR> --out <PNG>` sheets any directory of dumped frames, because
+the plan's Step 3 named `xtask reference capture --sheet` for that and `--sheet` is wired into
+`assets verify` and `reference capture`, neither of which reads an arbitrary directory.
 
 #### Task 4 — BEGLOGO: the phase's exit criterion, met
 
