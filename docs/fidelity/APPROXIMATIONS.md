@@ -184,3 +184,38 @@ later holds the white field, while the two RGBs stay white (the DAC `:25-31` lea
 picture indexes white until `c` moves). A capture of 436-444, or a count of the original's
 `dis_waitb()`s read from live memory, would settle it; neither was taken here, because no index in
 `reference/` falls inside the window.
+
+## A6 — TUNNELI: a residual against the reference that its own instability cannot yet attribute
+
+**Part:** TUNNELI (`TUNNELI/TUN10.PAS`), Phase 2. TUNNELI is the one part of the phase whose
+reference **cannot be a verdict** (`docs/fidelity/reference-indices.md` §8.2, §1.8), so this entry
+records what was measured *before* any later phase reads the residual as a port error.
+
+**Original:** a run of this part is not in the reference's numbering at all — TUNNELI begins after
+GLENZ, `shell::boot_anchor("tunneli")` is `None`, and the part's index in `reference/` is boot-relative
+while the port's is its own ticks. Aligned by the one offset that fits all four keyframes
+(**3,722**: the port's ticks 78, 478, 778, 878 are the reference's 3800, 4200, 4500, 4600), the
+port's frames differ from the reference's by **1,270 / 2,125 / 1,214 / 1,965 pixels** of 64,000
+(1.98 / 3.32 / 1.90 / 3.07 %).
+
+**Port:** the port translates the source's loop as written — the chain copy of 100 records, the
+one-sided clip with the unchecked read past `rows`, the 77-ring / 64-dot pass, the colour wave and
+its 102-frame fade. Nothing in that is an approximation: the read past `rows` is *reproduced*, and
+the reference's own frames are what prove it (85, 146 and 90 pixels at 4200/4500/4600 are drawn only
+by a port that reads the data segment; a bounded port agrees on 0–4 of them). TUNNELI's note
+(`docs/fidelity/tunneli.md` §7.2) carries the measurements.
+
+**Why it is registered:** 1.9–3.3 % is **less than one frame** of the part's own animation at three
+of the four keyframes (its adjacent-tick motion there is 7,000 / 4,063 / 6,536 pixels) and about one
+frame at 3800 (1,180–1,361). The reference's own re-capture differs by 8.07–10.18 % from two earlier
+sessions and five sessions hold three distinct pictures at 3800; 4500 and 4600 are recorded as having
+no settled content at all. A number of that size, on a reference of that stability, cannot be
+attributed to the port or to the oracle — which is exactly what must not be lost.
+
+**Measured difference:** the four numbers above, against the reference in the tree, plus the ruled
+out: the colour wave's phase (a 16-step sweep puts 0 best by a factor of two), the shape (at 3800 the
+port inks a pixel everywhere the reference does and 179 more; at 4200 it inks 347 extra and misses
+26), the chain stride, the ring range, and the word offset of the wrapped read. **What a later phase
+should watch:** Phase 9 compares every frame; if this residual is still there when the reference has
+more sessions behind it, the census in `reference-indices.md` §1.8 — not a tolerance — is what says
+whether the picture the port draws is a picture no session drew.

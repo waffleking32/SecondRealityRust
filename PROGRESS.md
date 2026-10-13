@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)** | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | in progress — **BEGLOGO is frame-diff-identical (exit 0)**; TUNNELI ported (its reference cannot be diffed — A6) | [02-shell.md](docs/plans/02-shell.md) | — |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -411,6 +411,46 @@ ways — a plain line and a table were each caught, naming the line — and the 
 byte-identical to `ee63aa7`'s. The second thing was a word: the two places that said §4.2's
 amendment sits "above the struct sketch" now say below, which is where it is. 484 passed, 0 failed,
 0 warnings.
+
+#### Task 5 — TUNNELI: the dot tunnel, ported against its source rather than its oracle
+
+`bins/secondreality/src/parts/tunneli.rs`, registered as `tunneli`; `TUNNELI/TUN10.PAS` translated
+act for act with `sr-assets`' own formats read for the two data blobs it links (`TUNNELI/TUNNEL.DAT`,
+`TUNNELI/SINIT.DAT` — neither of which is a picture, so neither goes through a decoder; the note's §2
+says so with the measurement). Twelve unit tests beside the part and two through the real binary.
+`docs/fidelity/tunneli.md` carries the full note, including the layout the *unchecked* read past
+`rows` lands in (`:179-190`) — which the reference's own frames prove is real — and the correction
+that the fade is the rings stopping, not dots drawn in entry 0.
+
+**The comparison, run and recorded, and why it is not a verdict.** The plan's Step 3 command
+(`--dump-frames 900,1060,2000`) compared against `reference/parts/tunneli` is **refused, exit 2**:
+`reference frame 3800 has no rendered frame within ±1 of it ... the nearest rendered index is 2000,
+1800 frames away`. Run at the reference's own indices instead (`--dump-frames 3800,4200,4500,4600`,
+a 4,600-tick run) it is **exit 1** — `3800: 3.7812 % (2420/64000 px), 4200: 5.6312 % (3604), 4500:
+3.1422 % (2011), 4600: 4.9344 % (3158)` — and **every differing pixel is a reference dot**, because a
+`--part tunneli` run numbers its frames from its own tick 0 and is holding the black screen at
+3,800 while the reference is holding the tunnel's. That number is the numbering's gap, not the port's.
+
+What the port does look like is measured at the alignment the reference itself supplies: the offset
+**3,722** fits all four keyframes (the port's ticks 78/478/778/878 are the reference's
+3800/4200/4500/4600), and there the port differs by **1,270 / 2,125 / 1,214 / 1,965 pixels of 64,000
+(1.98 / 3.32 / 1.90 / 3.07 %)** — less than one frame of the part's own motion at three of the four
+(the reference's own re-capture spread is 8.07–10.18 %, its five sessions hold three different
+pictures at 3800, and 4500/4600 have no settled content). Registered as `APPROXIMATIONS.md` A6.
+
+**The sheet, which is the evidence a person reads.** `out/p2-tunneli-aligned-sheet.png` (the port's
+four aligned frames) beside `out/p2-tunneli-reference-sheet.png` (the reference's own four) — the
+mouth, the full tunnel, the off-centre tunnel and the thinner one, the same four shapes on both.
+The reference's sheet is byte-identical to `out/tunneli.png`, the one Phase 1's capture wrote. **The
+look itself is deferred to the phase boundary**: nothing here claims a person has judged them.
+
+**And the phase has a tool it did not have.** The plan's Step 3 named
+`xtask reference capture --sheet` as able to sheet any frame directory; it cannot — `--sheet` is
+wired into `assets verify` and `reference capture`, and neither can read an arbitrary directory. So
+`cargo xtask frames sheet --dir <DIR> --out <PNG>` exists now (`xtask/src/frames.rs`, five tests):
+it walks `--dir` through `compare`'s own `capture_directories`, reads each capture's manifest, and
+lays the frames out with `sheet`'s `Tile`/`contact_sheet`/`columns_for`/`write_png`, printing each
+tile's position and index. Nothing is scaled. Tasks 6–9 and the phase-end human look are its users.
 
 #### Task 4 — BEGLOGO: the phase's exit criterion, met
 
