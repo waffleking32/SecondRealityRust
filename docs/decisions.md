@@ -1262,3 +1262,81 @@ substitution, or an unrecorded re-roll.
 the final whole-branch review comes after B6 and may require fixes, and a tag that has to be moved is
 worse than a tag applied a few commits later. The phase's exit criteria are met and its evidence is
 recorded; the tag goes on when that review is clean.
+
+## D21 — The shell's frame numbering, and the DAC a run starts from (2026-10-13)
+
+Phase 2's first task. Two things it settles that a reader of the plan would otherwise have to
+re-derive, and one API change it needed.
+
+**A run's index is the reference's own, and it is one number for the whole run.** Every index under
+`reference/` is a boot-relative emulator frame counter (§1.12, D20) — the demo's first graphics
+frame is 404 and BEGLOGO's keyframes are 430/470/560/900 in that space — while `sr-engine` numbers
+each part's own frames from zero. `shell::Sequence` therefore owns one `u32` beside the engine and
+advances it by exactly one per tick, whoever drew the frame: `shell::boot_anchor` supplies the start
+(404 for `beglogo` and `endlogo`, the phase's two block entries, and `None` for everything else,
+whose starts the evidence gives only as windows) and the index is *continuous across a part
+boundary*, which is what makes CRED's 1440 reachable only through ENDLOGO's measured length.
+
+**`Sequence::index()` is the run's cursor, not the frame's label.** The plan's interface list calls
+it "the reference index of the frame just produced"; its own test asserts that a run anchored at 404
+reads 404 before any tick and 405 after one, and the two cannot both be true. The port follows the
+test: `index()` is the index the *next* tick draws at, the frame `frame()` holds was drawn at
+`index() - 1`, and `--dump-frames` compares against `index() - 1`. `headless.rs` already worked this
+way with `Runner::part_frame() - 1`, so this is the existing idiom rather than a new one.
+
+**A run that does not begin at a measured anchor says so.** Its frames are numbered from zero and
+`index_is_reference()` is false; the dump's manifest carries `index_origin` (`boot` or `part`) and
+`anchor` (`u32` or `null`) so that two captures whose indices look comparable and are not cannot be
+diffed as if they were. `compare` ignores both fields.
+
+**The DAC starts where the hardware starts.** BEGLOGO's keyframe 430 is index 15 over the DAC the
+machine already had — `BEG/BEG.C:20-21` fills A-space with 15 and only writes the DAC at `:25-34`,
+after the 32 vertical blanks — so a shell that began from a black palette would render 430 black.
+The shell installs the table an emulator mode set leaves, read out of the oracle's own source:
+`INT10_SetVideoMode`'s `M_VGA` case hands `palette.vga` to `write_palette_dac_data`
+(`src/ints/int10_modes.cpp:1977-1987`, `:1152-1159`), entries 0-15 of it are `cga_colors_default`
+(`:404-412`, `cga_colors` defaults to `default`, `src/gui/render/render.cpp:1917`), and it is **248
+entries, not 256** — the last eight are left at whatever the DAC held, which is black. Note where
+the table lives: the task brief said `vga_memory.cpp`, and it is `int10_modes.cpp`. The reference's
+own probe agrees with the table at the one entry it constrains: `reference/parts/beglogo/
+manifest.json` records frame 430's entry 15 as `(63, 63, 63)`, which is `br_white`.
+
+**`sr-engine` gained `Engine::palette_mut()`** — not a structural change but a file the task's plan
+did not list, so it is recorded here. The shell has to install the DAC before it starts the run's
+first part, and the engine exposed `surface_mut` and `view_mut` for exactly that purpose and no
+palette counterpart. `Engine::start` deliberately does **not** reset the palette: the original's
+parts are separate EXEs that inherit the DAC the part before them left, and the port keeps that.
+
+**A block run is headless-only until the window drives a sequence.** The window still drives one
+`Runner`, so `--block` is refused there rather than silently running the default part instead. The
+phase's window task removes the rule.
+
+## D22 — `dis_waitb` counts the overrun, and spec §6.2 said it discarded it (2026-10-13)
+
+Phase 2 read the source before porting the parts that pace themselves with it, and §6.2 was wrong in
+a way that would have made the port *look* faithful and pace wrong.
+
+**What the source does.** `waitb_1` (`DIS/DISINT.ASM:161-170`, the `INDEMO` arm at `:165-169`) is
+four instructions: `mov ax,cs:copperframecount`; spin `cmp`/`je` until the counter differs; `mov
+ax,cs:copperframecount` again; `mov cs:copperframecount,0`; `ret`. So the function **reads the new
+value, returns it, and zeroes the counter after the read**. A part whose work overran *k* frames
+while it drew gets *k+1* — the overrun is counted, not discarded.
+
+**Spec §6.2 said the opposite** ("the counter reset discards the overrun... a part that overruns its
+frame budget gets '1 frame', not 2"), which is a reset-before-the-read reading of the same four
+instructions. It is amended in place, with a pointer here.
+
+**Why it matters to the parts.** Two call sites make the return value load-bearing:
+
+- `TUNNELI/TUN10.PAS:200` is `for sync := 1 to frames`, where `frames` is the value `waitr`
+  (`:52`, function 1) got from `waitb_1` — the loop takes *that many* animation steps.
+- `ENDSCRL/MAIN.C:47` is `if(dis_waitb()==1) dis_waitb();` — "if exactly one frame passed, wait for
+  another", which is its own comment on the semantics: a return of 1 is the normal case, and
+  anything else means the part is behind and must not wait again.
+
+**The port's model.** One tick is one frame and a part's `frame()` is called exactly once per tick,
+so the value is always 1 and the overrun case cannot arise. Nothing in the port needs to compute it;
+what a part *does* need is to take one animation step per `frame()` call, because that is what "the
+value is always 1" means. A part that assumes a different step count is not wrong about `dis_waitb`,
+it is wrong about how far its own animation moves each tick, and the keyframe diffs are where that
+shows.

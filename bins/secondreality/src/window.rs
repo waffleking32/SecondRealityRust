@@ -53,7 +53,9 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         scale: cli.scale,
         border: cli.border,
     };
-    let mut runner = crate::new_runner(&cli.part)?;
+    // One part: a block run needs the window to drive a `Sequence`, which the
+    // command line refuses in this mode (`Cli::validate`).
+    let mut runner = crate::new_runner(cli.part_name())?;
 
     let sdl = sdl2::init()?;
     let video = sdl.video()?;

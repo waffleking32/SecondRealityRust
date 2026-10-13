@@ -456,11 +456,21 @@ The engine's tick sequence is the copper ordering in §4.2.
 
 ### 6.2 `dis_waitb` semantics
 
-In-demo, `dis_waitb()` does **not** poll the retrace port. It spins on the copper's
-frame counter and then **resets that counter to zero**, returning the number of frames
-elapsed since the previous call. Consequence: a part that overruns its frame budget
-gets "1 frame", not 2 — the counter reset discards the overrun. The port must mirror
-this, because parts use the return value to pace animation.
+> **Corrected in Phase 2** — the two paragraphs below said the opposite of the source.
+> The reading in `docs/decisions.md` **D22** is the one the port follows: the counter is
+> read, returned and *then* zeroed, so a part whose work overran *k* frames gets *k+1*.
+
+In-demo, `dis_waitb()` does **not** poll the retrace port. It waits for the copper's
+frame counter to change, then **reads the new value, returns it and zeroes the counter**
+— the reset happens *after* the read (`DIS/DISINT.ASM:165-169`). Consequence: a part
+whose work overran *k* frames gets *k+1*, not 1 — the overrun is **counted**, not
+discarded. Parts use the return value to pace animation: `TUNNELI/TUN10.PAS:200` is
+`for sync := 1 to frames` and `ENDSCRL/MAIN.C:47` is `if(dis_waitb()==1) dis_waitb();`,
+so "how many frames did I miss" is the number they are written against.
+
+One tick is one frame and the port calls a part's `frame()` once per tick, so the value
+is always 1 and the overrun case cannot arise. A part that guesses wrong about it takes
+the wrong number of animation steps per tick; that is the whole of its pacing (D22).
 
 The `0x3DA` retrace poll only applies when a part runs standalone from DOS, outside
 the demo.

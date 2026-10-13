@@ -89,6 +89,16 @@ impl Engine {
         &self.palette
     }
 
+    /// The live palette, for a client that has to set up the machine before a
+    /// part runs. The symmetry with [`surface_mut`](Engine::surface_mut) and
+    /// [`view_mut`](Engine::view_mut) is the point: the shell installs the DAC
+    /// a mode set leaves before it starts the run's first part, and `start`
+    /// deliberately does not touch the palette — the original's parts are
+    /// separate EXEs that inherit the DAC the part before them left.
+    pub fn palette_mut(&mut self) -> &mut Palette {
+        &mut self.palette
+    }
+
     /// Whether a part or copper callback has asked to quit (`dis_exit()`), by
     /// calling [`PartCtx::request_exit`]. Sticky until the next `start`.
     pub fn exit_requested(&self) -> bool {
