@@ -462,7 +462,26 @@ one-frame-sized detail of exactly the kind a cue lands on.
 - [ ] **Step 2: The order advance, from the trace**
 
 Implement `play_song`/`goto_song` and the order advance to match the counter sequence Task 1
-measured, including whatever the player does at `254`/`255`. The port must be able to play a module
+measured, including whatever the player does at `254`/`255`.
+
+**This step owns the three effects that move the timeline — `A` (set speed), `B` (pattern jump) and
+`C` (pattern break) — because the traces' own windows exercise two of them, and a comparison that
+matches the row changes cannot be written without them** (measured while writing this plan, from
+the modules' own cells):
+
+- `A`: MUSIC0's pattern 70 row 0 sets speed 6, pattern 71 row 0 sets 1 and row 36 sets 6 again;
+  MUSIC1's pattern 30 row 0 sets 6 (which is why the trace's speed word reads 6 where MUSIC1's
+  header byte says 3). `reference/music/second5`'s speed-1 window (frames 979…1021) is the first
+  effect's doing, and its return to 6 is the second's.
+- `C`: MUSIC0's pattern 71 row 61 breaks — and the trace shows it: `second5` and `hiddenu` both go
+  from ord 26 row 61 to **ord 28 row 0** (`second5` frame 1251 → 1260), stepping over the `254` at
+  order 27 on the way. MUSIC1 has four `C` cells (patterns 13, 21, 41, 73).
+- `B`: MUSIC0 has three (patterns 26, 62 and 69, played at orders 63, 66 and 77) and MUSIC1 none.
+  No filed window reaches one, so `B` is implemented and unit-tested here but **not** exercised by
+  the comparison — and `music.md` says so rather than implying the trace checked it.
+
+The channel effects are Task 4's; the split is by what the timeline needs, not by what the data
+contains. The port must be able to play a module
 **end to end** (the exit criterion): MUSIC0 through its 80 orders and MUSIC1 through its 100, with
 the order counter's stops, skips or repeats matching the trace's. Where the trace and stock ST3
 semantics disagree, the trace wins (D12: the release is the reference of record) and the disagreement
@@ -552,12 +571,13 @@ by the data. `I`, `M`, `N`, `P`, `R`, `U` and `V` are absent too. The tests, one
   arithmetic that maps a period to a playback step (`(8363 × 2^octave × 16) / period`, integer
   division, as ST3 does). One test per octave against the table's own values.
 
-- [ ] **Step 2: The two effects that touch the timeline**
+- [ ] **Step 2: What Task 3 already owns**
 
-`C` (pattern break) and the pattern-end/`B` handling advance the order in ways the trace can see, so
-they are tested *both* as state changes and through Task 3's trace comparison — if the port's
-`C`/order advance is wrong, the whole-capture test in Task 3 fails on the frames around it, which is
-the point of keeping that test unconditional.
+`A`, `B` and `C` move the timeline, so Task 3 implements them (with their tests) to satisfy its own
+comparison — the trace's own order change at `second5` frame 1260 is a `C` firing. This task's job
+is the **channel** effects; nothing here should re-implement the timeline's. A defect in `C` shows
+up as a frame-by-frame mismatch in Task 3's unconditional test, which is why that test is written
+before this step and kept.
 
 - [ ] **Step 3: Commit**
 
