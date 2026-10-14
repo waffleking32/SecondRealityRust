@@ -120,14 +120,14 @@ substitute cue and record the difference. Do not let it block the phase.
 **Amended 2026-10-14 — route 1 is performed, it does not resolve the word, and the substitute
 cue is named.** Phase 3's Task 1 walked `STMIK.300`'s `PUBDEF` records (45 symbols, one
 segment) and read the words live: `_np_zinfo` is at segment offset `0x08F7`, `_np_zplus` at
-`0x08F9`, and **`_np_zinfo` is 0 in all 10,256 samples of the three traces filed under
-`reference/music/`** — covering MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's orders 0
+`0x08F9`, and **`_np_zinfo` is 0 in every sample of every trace filed under `reference/music/`** (11,408 of
+them across the four) — covering MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's orders 0
 and 42…48 — while `_np_zplus` takes 1 and 2 in both modules (`docs/fidelity/music-clock.md`
 §6; `cargo xtask music analyse --trace reference/music/second5`). So the values GRID, HARD
 and the vault wait on (`0xf0`, `1`/`2`/`3`, `0xff`) **are not produced by the reference in
 any window this phase measured**, and the escalation trigger's condition is met. What the
 phase does instead is in `music-clock.md` §6: **`_np_zplus` is the word the port computes**
-— the rule there, verified over every sample of all three filed traces — and, for
+— the rule there, verified over every sample of every filed trace — and, for
 `dis_muscode`, **the port returns `_np_zinfo` as 0**, which is what the reference's own word
 holds for as long as this phase measured it. A part that waits on `dis_muscode(1)` — HARD's
 `HARD/B.C:138`, or GRID's `GRID/MAIN.C:72`/`:160` waiting on 2 or 3 — therefore **waits for
@@ -1642,24 +1642,27 @@ Phase 3 has no audio reference — the emulator runs silent (D17) — so its ora
 **per-frame trace of the original's own player state**. `MAIN/STMIK.300`'s `PUBDEF` records
 give the offsets of `MAIN/STMIK.H:125-131`'s position words, the segment is located in guest
 memory by two 32-byte runs taken from the object's own `LEDATA`, and the words are read out
-of one request per frame, keyed by the guest's own frame counter. Three traces are filed
+of one request per frame, keyed by the guest's own frame counter. The traces are filed
 under `reference/music/` and every number below is printed by
 `cargo xtask music {symbols,trace,analyse,probe}` — see `docs/fidelity/music-clock.md`, which
 names the command for each.
 
-**The measured clock.** The music starts at **frame 409**: `_np_zframe` reads 0 at frame 408
-and 1 at 410 in the block-5 trace, 0 → 1 at 409 in the hidden-part trace, and 0 → 2 at 411 in
-the block-3 trace (which holds 409 and 410 too, both reading 0); **which index the boot's mode
-change falls on is session-dependent** —
-the three traces lose 409, 417 and 410 — so the anchor is the frame between the last zero and
-the first one, and the note says so rather than naming a cause it did not measure. A tick is
+**The measured clock.** The music starts at **frame 408**, measured and not hedged:
+back-extrapolating the first row change by the tick counter's own value there (frame 427 with
+`_np_zframe` 13, at the tick clock's measured 1.4622 frames a tick) puts the first tick at
+frame **408.0**, and the same derivation gives 408.0 in the fresh session of the same recipe
+(`second5b`) and 408.1 in each of the other two captures — a spread of **0.1 frames** over
+four sessions. The `zframe` column's first non-zero frame is 409/410/411, one whole-frame
+sample later: that is the same tick *seen*. (Which index the boot's mode change falls on — the
+frame one trace loses and another keeps — is session-dependent, and the note records it as the
+sampling it is.) A tick is
 `2.5/tempo` seconds and a row `speed` ticks: the longest window, 296 row intervals over 3,455
 frames of the hidden part, is predicted from the player's own speed and tempo words to
 **−2.6 frames (0.08 %)**, and **every steady run's residual is under one row** — the two that
 are not steady are the post-speed-change transients below (second5 −35.6, hiddenu −37.4, one
 row 8.76 each). `_np_zframe` counts ticks: 0.6839 a frame (47.93 a second) at tempo 120 in
 `second5`, 0.6854 (48.04) at the same tempo in `hiddenu`, and 0.7422 (52.01) at tempo 130 in
-`second3` — three traces, two tempos, the tick rate each time. It is **reset mid-song** in
+`second3` — two tempos, the tick rate each time. It is **reset mid-song** in
 `second3` (1516 → 0 at frame 2452, with the same pattern still playing, so the writer is
 `_dis_setmframe(0)` — which parts call at their own start — and not a song restart), so the
 rate is measured over the longest run that never goes backwards.
@@ -1682,13 +1685,14 @@ file's byte 0x31 is 3 (row interval 8.09 frames, where speed 3 would be 4.04), a
 word. (2) A speed change is followed by a transient: after the module's speed-1 row, the next
 speed-6 run advances 35 rows in 271 frames where the rule predicts 306.6. (3) `_np_zplus`
 takes 1 and 2 in both modules, at order starts straddling each module's `254`; `_np_zinfo` is
-**0 for all 10,256 samples of all three traces**, so that question is not resolved by them.
+**0 in every sample of every filed trace**, so that question is not resolved by them.
 
 **D8's route 1 is performed and does not close it.** The symbols were read, the words traced
 live, and `zinfo` stayed 0 over MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's 0 and
 42…48. `D8`'s escalation stands and **D8 gains the outcome and the substitute**: the port
-computes `_np_zplus` by the rule in `music-clock.md` §6 — verified over all 10,256 samples of
-the three filed traces, with the crossings and the restart case covered and the `2 → 0`
+computes `_np_zplus` by the rule in `music-clock.md` §6 — verified over every sample of every
+filed trace (11,408 across the four) (`music analyse` re-derives it for each, walked from the tree), with the
+crossings and the restart case covered and the `2 → 0`
 advance named as extrapolation — and `dis_muscode` returns `_np_zinfo`'s measured 0, so a part
 that waits on a `1`/`2`/`3`/`0xf0`/`0xff` cue waits for ever against the port exactly as it
 does against the reference.
@@ -1726,11 +1730,13 @@ file's own frames rather than believing the manifest, and a `kind` it does not k
 **refused by name**, not walked past. A flipped byte of a trace fails the verifier (exit 1,
 both digests named).
 
-**What a trace does not hold.** Each trace misses exactly three frames of its window — a
-boundary run of one or two, and one or two in the middle — and says so (`per_frame: false`)
-with what the guest's own counter did around each: `second5` loses 409 (the counter read 408
-then 410, with no reading of 409 between) and 1220 (a read opened on the frame was still open
-when the guest moved on), `second3` loses 417, `hiddenu` loses 410. The manifest names the boundary run as such
+**What a trace does not hold.** Every trace misses a boundary run and a frame in the middle,
+and says so (`per_frame: false`) with what the guest's own counter did around each: `second5`
+and `second5b` lose 409 (the counter read 408 then 410, with no reading of 409 between) and
+1220 (a read opened on the frame was still open when the guest moved on), `second3` loses
+417, `hiddenu` loses 410 — and the count is the manifest's own line rather than this
+sentence's (`reference/music/*/manifest.json`'s `coverage`, which `cargo xtask music analyse`
+recomputes from the trace file). The manifest names the boundary run as such
 (`coverage.before_sampling`: the locate costs frames), and `reference verify` recomputes the
 whole coverage from the file **field by field** rather than believing it. Why a middle frame
 is lost is a **hypothesis** (a video-mode change publishes no frame for a moment, D17) and is

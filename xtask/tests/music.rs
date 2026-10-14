@@ -477,8 +477,26 @@ fn the_analysis_prints_the_notes_numbers() {
 /// rather than copied from a reading of the original.
 #[test]
 fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
+    // The walk is the tree's, not a list: a trace filed later is covered without
+    // anyone remembering to edit this test — a test whose name claims every
+    // filed trace and covers three of four is a test reporting coverage it does
+    // not have.
+    let mut names: Vec<String> = fs::read_dir(repo_root().join("reference/music"))
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            entry
+                .path()
+                .join("manifest.json")
+                .is_file()
+                .then(|| entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect();
+    names.sort();
+    assert!(names.len() >= 4, "the filed traces: {names:?}");
+
     let mut samples = 0usize;
-    for trace in ["second5", "second3", "hiddenu"] {
+    for trace in &names {
         let path = format!("reference/music/{trace}");
         let run = xtask(&["music", "analyse", "--trace", &path]);
         assert_eq!(run.code, 0, "{trace}: {}", run.output());
@@ -499,7 +517,10 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         );
         samples += count;
     }
-    assert_eq!(samples, 10_256, "the three traces' samples, all checked");
+    assert!(
+        samples > 11_000,
+        "every filed trace's samples are checked, and there are {samples} of them"
+    );
 }
 
 /// **The anchor is a property of the boot, not of a session** (Task 1's Step 7):
@@ -509,8 +530,24 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
 /// is within a tick of it. Four sessions, one recipe, no free parameter.
 #[test]
 fn the_anchor_is_the_same_in_every_filed_session() {
+    // Walked from the tree, like the zplus check: a trace filed later is covered
+    // without anyone remembering to edit this test.
+    let mut names: Vec<String> = fs::read_dir(repo_root().join("reference/music"))
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            entry
+                .path()
+                .join("manifest.json")
+                .is_file()
+                .then(|| entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect();
+    names.sort();
+    assert!(names.len() >= 4, "the filed traces: {names:?}");
+
     let mut anchors = Vec::new();
-    for trace in ["second5", "second5b", "second3", "hiddenu"] {
+    for trace in &names {
         let path = format!("reference/music/{trace}");
         let run = xtask(&["music", "analyse", "--trace", &path]);
         assert_eq!(run.code, 0, "{trace}: {}", run.output());
@@ -534,9 +571,11 @@ fn the_anchor_is_the_same_in_every_filed_session() {
             .and_then(|rest| rest.split(' ').next())
             .and_then(|number| number.parse().ok())
             .unwrap_or_else(|| panic!("cannot read the zframe anchor from {trace}"));
-        // The two readings are one tick apart at most (1.35-1.46 frames), and
-        // each is quantised to a whole frame — so anything under two ticks is
-        // agreement, and under one tick is what the traces actually show.
+        // The two readings are one frame plus the tick a row boundary is seen
+        // within apart — 0.9 to 2.9 frames in the traces at hand, i.e. up to
+        // about two ticks (a tick is 1.35-1.46 frames here) — so that is the
+        // bound, and it is a bound on one tick plus one frame, not a claim that
+        // the two agree to within a tick.
         assert!(
             (direct - anchor).abs() <= 2.9,
             "{trace}: the two readings are {} frames apart ({anchor} and {direct}), which is more \

@@ -1058,13 +1058,15 @@ pub struct TraceManifest {
     pub object: SymbolMap,
     pub locate: LocateRecord,
     /// The machine's own words, read from the guest when the segment was found.
-    /// A **setting** here is one the machine held all run (a disagreement is
-    /// refused); a volume word may have moved, and its end reading is in
-    /// [`TraceManifest::machine_moved`].
+    /// A word the machine held all run appears here once; a word that moved has
+    /// its other reading in [`TraceManifest::machine_moved`].
     pub machine: BTreeMap<String, i64>,
     /// The words whose reading at the end of the trace differs from the one
-    /// above — the player's volume words, which `fademusic` walks
-    /// (`MAIN/U2.ASM:333-346`).
+    /// above. Which words move is not assumed: the mixing rate moves
+    /// (`_zmixspeed` 20000 → 40000 in `second5`'s session), `_zpollmix` moves
+    /// (0 → 1, the demo switching to the polled mode), the player's volume words
+    /// move under `fademusic` (`MAIN/U2.ASM:333-346`), and a word that did not
+    /// move is simply absent here.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub machine_moved: BTreeMap<String, i64>,
     pub check: Behaviour,
@@ -1685,14 +1687,13 @@ fn read_words(
 }
 
 /// The machine's words as the manifest records them: the reading taken when the
-/// segment was located, checked against the reading taken at the end.
+/// segment was located, and the reading taken at the end.
 ///
-/// A word that moved between the two is refused rather than recorded once: the
-/// manifest carries **one** number per word, and silently keeping the first of
-/// two disagreeing readings is how a record comes to describe a machine that
-/// was never in one state. These words are the card, its mixing rate and the
-/// buffer size — they are set once, at start-up, and a run in which they change
-/// is not a run whose single reading means anything.
+/// A word the two readings agree about is recorded once; a word that moved is
+/// recorded **twice**, in the second map, and never merged: silently keeping one
+/// of two disagreeing readings is how a record comes to describe a machine that
+/// was never in one state. Nothing here is assumed constant — the mixing rate
+/// and `_zpollmix` both move during a run (see [`TraceManifest::machine_moved`]).
 fn merge_machine_words(
     start: BTreeMap<String, i64>,
     end: BTreeMap<String, i64>,
@@ -2597,6 +2598,20 @@ impl Analysis {
         runs
     }
 
+    /// A machine word as it is printed: 16-bit, and both ways when it is above
+    /// 32767. `MAIN/STMIK.H` declares some of these `unsigned` (`_zmixspeed`,
+    /// `_zbufsize`) and some `int`, so 40000 — the mixing rate the music runs at
+    /// — would otherwise print as -25536 and read as a negative rate.
+    fn show_word(value: i64) -> String {
+        match i16::try_from(value) {
+            Ok(signed) if signed < 0 => format!(
+                "{signed} ({} unsigned)",
+                u16::from_le_bytes(signed.to_le_bytes())
+            ),
+            _ => value.to_string(),
+        }
+    }
+
     /// The first row change in the trace: its frame, the pattern's row after it,
     /// and the `zframe` value there. `None` when no row ever advanced.
     fn first_row_change(&self) -> Option<(u64, u8, i16)> {
@@ -2898,7 +2913,8 @@ impl Analysis {
             println!(
                 "  the anchor the rows imply: the first row change is at frame {} with \\
                  `_np_zframe` {}, and {} ticks at the measured {frames_per_tick:.4} frames a tick \\
-                 is {:.1} frames — so that row began at frame {:.1} (within one tick)",
+                 is {:.1} frames — so that row began at frame {:.1} (± the tick the row \
+                 boundary is within and the frame the change is seen on)",
                 first_change.0,
                 first_change.2,
                 first_change.2,
@@ -2910,8 +2926,10 @@ impl Analysis {
                 println!(
                     "  the anchor the `zframe` column shows: frame {direct} is the first frame \
                      whose `zframe` is not 0 — {apart:.1} frame(s), or {:.1} tick(s), from the \
-                     rows' reading: the same tick, seen at the next whole-frame sample (both \
-                     readings are quantised to a frame, so under one tick apart is agreement)",
+                     rows' reading: the same tick, seen at the next whole-frame sample. Both \
+                     readings are quantised to a whole frame, so the gap is one frame plus the \
+                     tick the row change is seen within; it is not a claim that they agree to \
+                     within a tick, and the two numbers above say how big it is.",
                     apart / frames_per_tick
                 );
             }
@@ -3066,13 +3084,14 @@ impl Analysis {
                 ("_znoborders", 1) => " (no border colours)",
                 _ => "",
             };
-            println!("  {name:<16} {value}{meaning}");
+            println!("  {name:<16} {}{meaning}", Self::show_word(*value));
         }
         for (name, value) in &self.manifest.machine_moved {
             println!(
-                "  {name:<16} moved during the trace: {} at the locate, {value} at the end (a \
-                 volume word the player writes, so both readings are recorded)",
-                self.manifest.machine.get(name).copied().unwrap_or(0)
+                "  {name:<16} moved during the trace: {} at the locate, {} at the end — a word \
+                 whose two readings differ is recorded as both, not merged",
+                Self::show_word(self.manifest.machine.get(name).copied().unwrap_or(0)),
+                Self::show_word(*value)
             );
         }
         println!(
@@ -3736,7 +3755,7 @@ mod tests {
     /// silently merged: the manifest carries one number per word, and keeping
     /// the first of two is how a record describes a machine that never was.
     #[test]
-    fn machine_readings_that_disagree_are_refused() {
+    fn machine_readings_that_disagree_are_both_recorded() {
         let start = BTreeMap::from([
             ("_zoutputmode".to_string(), 5),
             ("_zmixspeed".to_string(), 20000),
