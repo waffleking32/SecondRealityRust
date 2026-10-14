@@ -348,6 +348,42 @@ fn a_capture_of_an_unknown_kind_is_refused_by_name() {
     assert!(text.contains("does not know") || text.contains("refused"), "{text}");
 }
 
+/// A **crafted** window is a finding and never a crash: `[0, u64::MAX]` has no
+/// span a `u64` can hold, so the recomputed coverage is the empty one and the
+/// manifest's claim is reported — the verifier keeps doing its job on a
+/// manifest that is lying to it.
+#[test]
+fn a_window_whose_span_overflows_is_a_finding_not_a_panic() {
+    let tree = scratch("overflow-window");
+    let capture = tree.join("second5");
+    fs::create_dir_all(&capture).unwrap();
+    fs::copy(
+        repo_root().join("reference/music/second5/trace.csv"),
+        capture.join("trace.csv"),
+    )
+    .unwrap();
+    let mut manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("reference/music/second5/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    manifest["coverage"]["window"] = serde_json::json!([0, u64::MAX]);
+    fs::write(
+        capture.join("manifest.json"),
+        format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
+    )
+    .unwrap();
+
+    let run = xtask(&["reference", "verify", "--tree", tree.to_str().unwrap()]);
+    assert_eq!(run.code, 1, "a finding, not a crash: {}", run.output());
+    let text = run.output();
+    // The finding names the fields the window cannot support — the manifest and
+    // the file agree about the *window*, so what disagrees is what the window
+    // was claimed to imply.
+    assert!(text.contains("does not match the file"), "{text}");
+    assert!(text.contains("requested:"), "the field is named: {text}");
+    assert!(text.contains("missing:"), "the other field is named: {text}");
+}
+
 /// A trace whose rows do not match the coverage its manifest claims is a
 /// finding: the coverage is recomputed from the file's own frames rather than
 /// believed.

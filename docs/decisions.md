@@ -1648,8 +1648,9 @@ under `reference/music/` and every number below is printed by
 names the command for each.
 
 **The measured clock.** The music starts at **frame 409**: `_np_zframe` reads 0 at frame 408
-and 1 at 410 in the block-5 trace, 0 → 1 at 409 in the hidden-part trace, and 1 → 2 at 411 in
-the block-3 trace; **which index the boot's mode change falls on is session-dependent** —
+and 1 at 410 in the block-5 trace, 0 → 1 at 409 in the hidden-part trace, and 0 → 2 at 411 in
+the block-3 trace (which holds 409 and 410 too, both reading 0); **which index the boot's mode
+change falls on is session-dependent** —
 the three traces lose 409, 417 and 410 — so the anchor is the frame between the last zero and
 the first one, and the note says so rather than naming a cause it did not measure. A tick is
 `2.5/tempo` seconds and a row `speed` ticks: the longest window, 296 row intervals over 3,455
@@ -1658,7 +1659,10 @@ frames of the hidden part, is predicted from the player's own speed and tempo wo
 are not steady are the post-speed-change transients below (second5 −35.6, hiddenu −37.4, one
 row 8.76 each). `_np_zframe` counts ticks: 0.6839 a frame (47.93 a second) at tempo 120 in
 `second5`, 0.6854 (48.04) at the same tempo in `hiddenu`, and 0.7422 (52.01) at tempo 130 in
-`second3` — three traces, two tempos, the tick rate each time.
+`second3` — three traces, two tempos, the tick rate each time. It is **reset mid-song** in
+`second3` (1516 → 0 at frame 2452, with the same pattern still playing, so the writer is
+`_dis_setmframe(0)` — which parts call at their own start — and not a song restart), so the
+rate is measured over the longest run that never goes backwards.
 
 **Three things the files do not say, which the traces do.** (1) The row rate follows the
 player's `_np_speed` word, not the module's header byte, **and the word's initial value after
@@ -1713,11 +1717,11 @@ file's own frames rather than believing the manifest, and a `kind` it does not k
 **refused by name**, not walked past. A flipped byte of a trace fails the verifier (exit 1,
 both digests named).
 
-**What a trace does not hold.** Each trace holds every frame of its window except a boundary
-run and one frame in the middle, and says so (`per_frame: false`) with what the guest's own
-counter did around it: `second5` loses 409 (the counter read 408 then 410, with no reading of
-409 between) and 1220 (a read opened on the frame was still open when the guest moved on),
-`second3` loses 417, `hiddenu` loses 410. The manifest names the boundary run as such
+**What a trace does not hold.** Each trace misses exactly three frames of its window — a
+boundary run of one or two, and one or two in the middle — and says so (`per_frame: false`)
+with what the guest's own counter did around each: `second5` loses 409 (the counter read 408
+then 410, with no reading of 409 between) and 1220 (a read opened on the frame was still open
+when the guest moved on), `second3` loses 417, `hiddenu` loses 410. The manifest names the boundary run as such
 (`coverage.before_sampling`: the locate costs frames), and `reference verify` recomputes the
 whole coverage from the file **field by field** rather than believing it. Why a middle frame
 is lost is a **hypothesis** (a video-mode change publishes no frame for a moment, D17) and is

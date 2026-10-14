@@ -81,9 +81,10 @@ Three things the trace guarantees, and why they matter:
 **The port's music boot anchor is frame 409** — the frame between the last sample that shows
 `zframe 0` (408) and the first that shows it advancing (410) — and this trace does not hold
 frame 409 itself (§7). `hiddenu` holds 409 and the same analysis says
-`first advancing frame: 409`, `zframe 0 -> 1`; `second3` holds neither 409 nor 410 and its
-first advance is 411, where `zframe` goes `0 -> 2` (§7 says why the index moves between
-sessions) — so the anchor is read off `hiddenu`, which holds the frame the tick lands on.
+`first advancing frame: 409`, `zframe 0 -> 1`; `second3` holds **both** 409 and 410, but
+both read `zframe 0` — no advance — and its first advance is 411, where `zframe` goes
+`0 -> 2`, one tick having been counted in each of the two frames before it. So the anchor is
+read off `hiddenu`, which holds the frame the tick lands on.
 
 Everything is still before it: `ord`, `row` and `pat` are 0, `zframe` is 0, and `speed` 6 /
 `tempo` 125 are the object's own initial values (`cargo xtask music symbols` prints the
@@ -157,11 +158,28 @@ gap histogram per run:
 | `second3` | frames 427..2472, speed 6 tempo 130 | 8 ×232, 9 ×21 |
 | `second3` | frames 2488..2896, speed 3 tempo 130 | 3 ×1, 4 ×95, 5 ×5 |
 
-Two gap sizes carry every steady run — the intervals take two neighbouring whole-frame values
-and alternate between them — and a third size appears only at a run's own edges (`second5`'s
-speed-6 run: one 10-frame gap; `second3`'s speed-3 run: one 3-frame and five 5-frame gaps, at
-the run's first and last rows). So the row rate is **periodic on the frame clock**, and the
-frames the rows land on are reproducible from the run's start. That is what Task 3's player has to reproduce
+Two gap sizes carry every steady run — the intervals take two neighbouring whole-frame
+values and alternate between them — and the sizes outside the two the run's own row length
+brackets are **few and scattered through the run, not gathered at its edges**. `music
+analyse` prints them with their positions:
+
+```
+  frames 427..961 at speed 6 tempo 120: 61 gap(s) — 8 frame(s) x16, 9 frame(s) x44, 10 frame(s) x1
+    the 1 gap(s) outside the 8..9 the run's own row length (8.76 frames) brackets, by their
+      position in the run: 18 of 61 (575 -> 585, 10)
+  frames 2488..2896 at speed 3 tempo 130: 101 gap(s) — 3 frame(s) x1, 4 frame(s) x95, 5 frame(s) x5
+    the 1 gap(s) outside the 4..5 the run's own row length (4.04 frames) brackets, by their
+      position in the run: 48 of 101 (2678 -> 2681, 3)
+```
+
+`second5`'s 10-frame gap is the 18th of that run's 61 intervals, and `second3`'s 3-frame gap
+the 48th of 101: both about a third to a half of the way in, with ordinary intervals on
+either side. **Why they happen is not measured here** — this phase does not have an
+explanation for them, and Task 3 must not read §4 as "only the ends are special": the trace's
+own row-change frames are the acceptance test, not any rule stated over them. (The one run
+whose odd gaps *are* at its start is `second5`'s third, frames 1024…1295, where the six
+outliers sit at positions 1…5 and 27 — that run is §3's post-speed-change transient, and its
+shape there is the transient's.) That is what Task 3's player has to reproduce
 tick for tick.
 
 ## 5. Which soundcard and mixer rate the reference runs at
@@ -229,13 +247,17 @@ So, **as the port's rule**:
   counter came from to be the one before the skipped entry, which is why `SECOND 3`'s restart
   at order 42 — whose list predecessor is a `254` the player never played — reads 0.
 
-**What is extrapolation, said plainly.** No filed trace holds an order two steps past a
-marker (`MUSIC0` from order 29 on, `MUSIC1` from order 49 on: `second5` stops at order 28,
-`hiddenu` restarts at 25 before it gets there, `second3` stops at order 48), so **`2`
-returning to `0` on the next natural advance is not measured** — it is what the rule says and
+**What is extrapolation, said plainly.** One case the rule distinguishes is measured
+nowhere: an order two steps past a marker **whose own successor is not a marker**, where the
+value should fall from the crossing's `2` back to `0`. `MUSIC0`'s crossing is measured
+(`second5` and `hiddenu` both hold order 28) but neither holds order 29; `MUSIC1`'s crossing
+is measured too (`second3` holds order 47) and it holds order **48**, two past the marker at
+46 — but that order reads **1**, not `0`, because the entry after it (order 49) is itself a
+`254`, so the rule's "unless the next entry is also a `254`" case is what it tests. So **`2`
+returning to `0` on the next natural advance is not measured**; it is what the rule says and
 what the three traces' surviving cases are consistent with, and the first trace that plays
-past order 28 will test it. Nor does any trace play a `255` (§10), so nothing here says what
-`zplus` does there.
+past a marker without another one behind it will test it. Nor does any trace play a `255`
+(§10), so nothing here says what `zplus` does there.
 
 `muscode_6` (`DIS/DISINT.ASM:242-282`) shows how the *parts* use the value — a row offset
 computed from `zplus` 0/1/2 for `dis_muscode` — and that is a reading of the source, not a
@@ -251,8 +273,8 @@ not show.
 
 ## 7. What a trace does not hold, and why it moves between sessions
 
-Every trace holds a run of frames and misses three or four, and `music analyse` names the
-boundary run:
+Every trace holds a run of frames and misses exactly three — a boundary run of one or two
+frames and one frame in the middle — and `music analyse` names the boundary run:
 
 ```
   frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing
@@ -293,9 +315,13 @@ by `reference verify`, field by field, rather than believed.
 
 `_np_zframe` advances one per **tick**, not per frame: it is the word the parts set and wait
 on (`DIS/DISC.ASM:138-159`, `DIS/DISINT.ASM:412-425`), it starts from 0 when the music does
-(0 at frame 408, 1 at 410 in `second5`), and **it is reset** when the song is restarted —
-`second3` goes 1516 → 0 at frame 2452. `cargo xtask music analyse` therefore measures it over
-the longest run in which it never went backwards, and counts the resets:
+(0 at frame 408, 1 at 410 in `second5`), and **it is reset mid-song**: `second3` goes
+1516 → 0 at frame 2452 with the same pattern still playing (`ord 45`, `pat 33`, the row going
+59 → 60 across the reset), so no song restart is visible there — what fits is
+`_dis_setmframe(0)` (`DIS/DISC.ASM:138-148`), which the parts call at their own start
+(`LENS/MAIN.C:106`, `GLENZ/MAIN.C:291`, `TECHNO/KOE.C:214`, `PLZPART/PLZ.C:69`).
+`cargo xtask music analyse` therefore measures it over the longest run in which it never went
+backwards, and counts the resets:
 
 | trace | longest run | ticks | frames | per frame | per second | the tempo's rule |
 |---|---|---|---|---|---|---|
@@ -360,6 +386,18 @@ player moved). The trace reads through the **lowest** view, and the manifest rec
 view, the proof, and the frame it was measured at. `music analyse --at` tries every view, so
 §1.7's address is placed in the view it was measured in.
 
+**The three filed manifests are older than the tool that reads them, in two ways, and they
+are left as they were.** They carry no `coverage.before_sampling` (§7: the field that names
+the boundary run) and their `locate.aliasing` sentence still contains a doubled `0x` that the
+tool no longer writes. Neither is repaired here: `reference/` is input-only, a *new* directory
+under `reference/music/` is the only thing `music trace` may write inside it, and hand-editing
+a filed manifest is what Phase 2's `reference backfill` exists to avoid being done by a
+person. What keeps the filed records checkable is the reading side: `reference verify`
+recomputes each trace's coverage from the trace file itself and compares it **field by field**
+— and only compares `before_sampling` when a manifest records one — while `music analyse`
+recomputes the coverage too, so the boundary is named for these traces as well (§7's block is
+that output). A field a manifest predates is D23's additive case, not a defect.
+
 ## 10. The order list: what the player does at `254` and `255`
 
 `cargo xtask music analyse`, section 6, reads this off the order counter's own sequence:
@@ -385,7 +423,8 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | the seven position words as contiguous two-byte slots, the frame/tempo/speed offsets, and the object's own tempo/master-volume initialisers | same |
 | the needles: 32 bytes, different records, one occurrence in the object | `xtask/src/music.rs`'s own tests |
 | the locator: a unique match, a second one refused, a needle across a 64 KiB boundary, a short needle | same |
-| the window (`A..B` half-open), the row round trip, the coverage's gaps | same |
+| the window (`A..B` half-open), the row round trip, the coverage's gaps and its boundary run | same |
+| a window that is back to front, and one whose span overflows a `u64`: findings, never crashes | same + `xtask/tests/music.rs` |
 | `music symbols` prints the map | `xtask/tests/music.rs` |
 | the trace refusals (where it may be written, the window, the keys, `--force`) | same |
 | the traces as references: rows, columns, the manifest's coverage and skipped frames | same |

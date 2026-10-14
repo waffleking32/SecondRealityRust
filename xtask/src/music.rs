@@ -769,7 +769,18 @@ impl Coverage {
     /// then disagrees with whatever the manifest claimed, and the disagreement
     /// is a finding rather than a crash.
     pub(crate) fn of(window: [u64; 2], frames: &[u64]) -> Coverage {
-        if window[1] < window[0] {
+        // The number of frames the window holds, or `None` when there is no such
+        // number: a window whose last frame is before its first, or whose span
+        // does not fit a `u64`. Both are windows a manifest can claim and a
+        // trace cannot cover, so both come back as an empty coverage — zero
+        // requested, nothing missing, **not** per-frame — which then disagrees
+        // with what the manifest says and is reported as a finding naming the
+        // field. Nothing here may panic on manifest data: a verifier that a
+        // crafted window can kill is a verifier that cannot do its job.
+        let requested = window[1]
+            .checked_sub(window[0])
+            .and_then(|span| span.checked_add(1));
+        let Some(requested) = requested else {
             return Coverage {
                 window,
                 requested: 0,
@@ -780,8 +791,7 @@ impl Coverage {
                 missing: Vec::new(),
                 before_sampling: None,
             };
-        }
-        let requested = window[1] - window[0] + 1;
+        };
         let mut missing = Vec::new();
         let mut cursor = window[0];
         for frame in frames {
@@ -791,6 +801,8 @@ impl Coverage {
             cursor = frame.saturating_add(1);
         }
         if cursor <= window[1] {
+            // `cursor` is one past a sampled frame, so it cannot be past the
+            // window's end without the comparison above being false.
             missing.push([cursor, window[1]]);
         }
         // The first run, when it is the one before the first sample, is the
@@ -813,12 +825,13 @@ impl Coverage {
         }
     }
 
-    /// How many frames of the window are missing.
+    /// How many frames of the window are missing. Saturating rather than
+    /// panicking: the runs come out of a manifest as often as out of a file.
     fn gaps(&self) -> u64 {
         self.missing
             .iter()
-            .map(|[first, last]| last - first + 1)
-            .sum()
+            .map(|[first, last]| last.saturating_sub(*first).saturating_add(1))
+            .fold(0u64, u64::saturating_add)
     }
 
     /// Every field of this coverage that disagrees with `recorded`, with both
@@ -2906,6 +2919,52 @@ impl Analysis {
                 gaps.len(),
                 run.row_frames()
             );
+            // The gaps outside the two dominant sizes, **where they are**: a
+            // reader (and Task 3) needs to know that they are scattered through
+            // the run rather than sitting at its edges, because "only the ends
+            // are special" is exactly the lesson this data does not teach.
+            // The gaps that are neither the commonest size nor one less than
+            // it — the two sizes a rule that lands a whole number of frames per
+            // row would produce — with **where they are** in the run. A reader
+            // (and Task 3) needs that: a gap the rule does not predict sitting
+            // at a run's edge is a boundary, and the same gap in the middle is a
+            // fact about the player that is not explained here.
+            // The two sizes the run's own row length brackets — `floor` and
+            // `ceil` of `row_frames()` — are what a row that lasts a whole
+            // number of frames must produce. Everything else is a gap the
+            // prediction does not make, and its *place* in the run is what tells
+            // a boundary apart from a fact about the player.
+            let exact = run.row_frames();
+            let (below, above) = (exact.floor() as u64, exact.ceil() as u64);
+            let outliers: Vec<String> = inside
+                .windows(2)
+                .enumerate()
+                .filter(|(_, pair)| {
+                    let gap = pair[1] - pair[0];
+                    gap < below || gap > above
+                })
+                .map(|(at, pair)| {
+                    format!("{} of {} ({} -> {}, {})", at + 1, inside.len() - 1, pair[0], pair[1], pair[1] - pair[0])
+                })
+                .collect();
+            if !outliers.is_empty() {
+                let shown: Vec<&String> = outliers.iter().take(8).collect();
+                println!(
+                    "    the {} gap(s) outside the {below}..{above} the run's own row length \
+                     ({exact:.2} frames) brackets, by their position in the run: {}{}",
+                    outliers.len(),
+                    shown
+                        .iter()
+                        .map(|entry| entry.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    if outliers.len() > shown.len() {
+                        format!(", and {} more", outliers.len() - shown.len())
+                    } else {
+                        String::new()
+                    }
+                );
+            }
         }
     }
 
@@ -3662,6 +3721,50 @@ mod tests {
         // And the frames are still reported as what the file holds.
         assert_eq!(inverted.first, 50);
         assert_eq!(inverted.samples, 2);
+    }
+
+    /// An **absurd** window is the same case and must not be a crash either: a
+    /// span that does not fit a `u64` has no frame count, so the coverage is
+    /// the empty one and the manifest's claim is a finding. (This panicked —
+    /// `attempt to add with overflow` — until the arithmetic was made checked;
+    /// a manifest is data the verifier exists to disbelieve.)
+    #[test]
+    fn a_window_whose_span_overflows_is_not_a_panic() {
+        // A span that does not fit a `u64`: there is no frame count to give.
+        let overflowing = Coverage::of([0, u64::MAX], &[10, 11, 12]);
+        assert_eq!(overflowing.requested, 0);
+        assert!(overflowing.missing.is_empty());
+        let _ = overflowing.describe();
+        assert_eq!(overflowing.gaps(), 0);
+        // The same window moved one frame in **does** fit (its span is
+        // `u64::MAX - 1`), so it is an absurd claim rather than an impossible
+        // one — and it must not panic either.
+        let absurd = Coverage::of([1, u64::MAX], &[10, 11, 12]);
+        assert_eq!(absurd.requested, u64::MAX);
+        let _ = absurd.describe();
+        assert_eq!(absurd.gaps(), u64::MAX - 3, "two runs: 1..9 and 13..u64::MAX");
+        for window in [[u64::MAX, u64::MAX - 1], [u64::MAX, 0], [7, 6]] {
+            let coverage = Coverage::of(window, &[10, 11, 12]);
+            assert_eq!(coverage.requested, 0, "{window:?}");
+            assert!(!coverage.per_frame, "{window:?}");
+            assert!(coverage.missing.is_empty(), "{window:?}");
+            let _ = coverage.describe();
+            assert_eq!(coverage.gaps(), 0, "{window:?}");
+        }
+        // And `gaps()` itself is saturating on a run that came out of a
+        // manifest, not a file.
+        let absurd = Coverage {
+            window: [0, u64::MAX],
+            requested: u64::MAX,
+            first: 0,
+            last: u64::MAX,
+            samples: 3,
+            per_frame: false,
+            missing: vec![[0, u64::MAX]],
+            before_sampling: Some([0, u64::MAX]),
+        };
+        assert_eq!(absurd.gaps(), u64::MAX);
+        let _ = absurd.describe();
     }
 
     /// `parse_sample` reads the words out of one whole-segment read, and refuses
