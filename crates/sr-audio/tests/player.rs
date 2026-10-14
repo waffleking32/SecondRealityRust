@@ -150,6 +150,22 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             ],
             "mov %cs:_zmixspeed,%ax; mov $0x7d,%cx; mul %cx; div %bx; mov %ax,%cs:0x8e1",
         ),
+        // The seek's own routine (`_zplaysong` calls it at `+0x258e`): the tick-in-row
+        // counter, the note-delay pair, the row counter, `_np_loop`, the pattern, the published
+        // row and the pending row, all zeroed before the order advance runs. This is the run
+        // the note's two unreachable `255` paths are read off.
+        (
+            0x56EC,
+            &[
+                0xC7, 0x06, 0x00, 0x20, 0x00, 0x00, 0xC6, 0x06, 0x08, 0x20, 0x00, 0xC7, 0x06,
+                0x0A, 0x20, 0x00, 0x00, 0xC6, 0x06, 0x09, 0x20, 0x00, 0xA3, 0x48, 0x09, 0xA3,
+                0x03, 0x09, 0xA3, 0x4C, 0x09, 0xC7, 0x06, 0xFD, 0x08, 0x00, 0x00, 0xC6, 0x06,
+                0x3B, 0x09, 0x00,
+            ],
+            "movw $0,0x2000; movb $0,0x2008; movw $0,0x200a; ...; mov %ax,0x948 (row); \
+             mov %ax,0x903 (loop); mov %ax,0x94c (pattern); movw $0,0x8fd (published row); \
+             movb $0,0x93b (pending row)",
+        ),
         // The tick counter: `_np_zframe` is incremented by the tick routine, so a tick *is*
         // what the parts' counter counts.
         (0x4357, &[0xFF, 0x06, 0xFB, 0x08], "incw _np_zframe"),
@@ -670,9 +686,10 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
         "a seek onto a 255 runs the scan off the list"
     );
     // ...and the original then sets `[0x938] = 1` anyway (`+0x259a`), so the player is left
-    // *ticking* with no new order entered: the mixing, the row counter and the pattern were
-    // all zeroed by the seek's own routine (`+0x5702`, `+0x5708`, `+0x5711`) and the scan only
-    // gives up, so the engine sits at row 0 of pattern 0 — while the ring, fed `[0x940] - 1`,
+    // *ticking* with no new order entered: the row counter (`+0x5702`), the pattern
+    // (`+0x5708`) and the published row (`+0x570b`) were each zeroed by the seek's own routine
+    // and the scan only gives up, so the engine sits at row 0 of pattern 0 — while the ring,
+    // fed `[0x940] - 1`,
     // hands the parts the index of the `255` itself. That is the limbo the port reproduces,
     // not a stop, and neither module can reach it (neither has a `255` at its first order), so
     // the bytes are all there is to follow.

@@ -381,7 +381,7 @@ Task 3 makes the port's player reproduce the traces. **The original's player has
 source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is read out of its
 own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
 from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
-`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 23 load-bearing
+`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 24 load-bearing
 instructions at their own offsets (the count the test itself prints)). Offsets below are that object's segment offsets, and the
 listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
 it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
@@ -519,8 +519,9 @@ choosing:
 
 - A `_zplaysong` seek onto a `255` is *not* a stop. The scan's stop path clears `[0x938]`
   (`+0x4476`) and the seek sets it back to 1 four instructions later (`+0x259a`), so the player is
-  left ticking; the row counter, the pattern and the published row were zeroed by the seek's own
-  routine (`+0x5702`, `+0x5708`, `+0x5711`) and nothing entered an order, so the engine sits at
+  left ticking; the row counter (`+0x5702`), the pattern (`+0x5708`) and the published row
+  (`+0x570b`) were each zeroed by the seek's own routine and nothing entered an order, so the
+  engine sits at
   row 0 of pattern 0 — while the ring, fed `[0x940] - 1`, hands the parts the index of the `255`
   itself. `crates/sr-audio/tests/player.rs`'s
   `a_255_ends_the_order_list_and_loops_when_the_song_was_already_running` asserts exactly that
@@ -529,6 +530,14 @@ choosing:
   stopped, so the fed order is the last index looked at rather than an order that was entered —
   which is what `entry_now` computes (`next_order - 1`, `+0x43e6`..`+0x43ef`) and not the order the
   engine reports.
+- The same routine zeroes **the tick-in-row counter** (`+0x56ec`, `movw $0x0,0x2000`), and
+  `player.rs`'s `play_song` does **not** mirror that today: nothing in the tree seeks mid-song
+  (every test, and every filed trace, seeks on a fresh player, whose counter is already 0), so the
+  difference is unobservable. It stops being unobservable the moment something restarts the music
+  mid-run — the shell's `restartmus` (`MAIN/U2.ASM:348-397`, the restart path Task 7 owns) does
+  exactly that — and a seek that leaves a *stale* counter begins the new row's first tick with the
+  counter non-zero, so that row's cells are not processed at all. Whoever puts the shell's restart
+  into the engine has to decide it there, against `+0x56ec`'s bytes.
 
 **`music-clock.md` §10 says the trace cannot show what the player does at a `255`. This is that
 question's answer, and it is a reading of the object rather than a measurement**: the note records

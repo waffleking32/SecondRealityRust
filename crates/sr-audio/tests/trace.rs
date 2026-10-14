@@ -382,8 +382,9 @@ fn the_port_reproduces_every_filed_trace() {
         //
         //    **Every word the trace records is asserted here, not just counted**: the fault
         //    this test exists to catch is one word going wrong in a way that leaves the other
-        //    five right — an order index published as the pattern, a frozen `_np_loop`, a
-        //    `zplus` that never sets its second bit. Each key is a sequence of *values* rather
+        //    six right — an order index published as the pattern, a `zplus` that never sets its
+        //    second bit, a `T` applied where an `A` belongs. Each key is a sequence of *values*
+        //    rather
         //    than of frames, so a one-frame displacement of a row boundary passes and a
         //    skipped row, an invented row, a lost `A`/`T`, a wrong pattern for an order or a
         //    wrong `zplus` does not.

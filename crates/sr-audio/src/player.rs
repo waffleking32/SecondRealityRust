@@ -305,9 +305,10 @@ impl Player {
     /// bits into `[0x940]`, sets `[0x939] = 2` ("started, no row played yet"), calls the
     /// order-advance routine **directly** — which is why a seek publishes no position: the
     /// ring is fed only by a row advance (this module's header, point 3) — and only then sets
-    /// `[0x938] = 1` (`+0x259a`). The routine it calls at `+0x258e` clears `[0x93b]`, the row
-    /// counter (`+0x5702`), the pattern (`+0x5708`), the loop counter and **`[0x8fd]`**, the
-    /// published row (`+0x5711`, `+0x570b`).
+    /// `[0x938] = 1` (`+0x259a`). The routine it calls at `+0x258e` clears the pending row
+    /// (`+0x5711`, `[0x93b]`), the row counter (`+0x5702`, `[0x948]`), the pattern (`+0x5708`,
+    /// `[0x94c]`), the loop counter, the tick-in-row counter (`+0x56ec`, `[0x2000]`) and the
+    /// published row (`+0x570b`, `[0x8fd]`).
     ///
     /// The order of those two is load-bearing: a seek that lands on a `255` takes the
     /// scan's stop path (`+0x4476` clears `[0x938]`) and is then put back to running by
