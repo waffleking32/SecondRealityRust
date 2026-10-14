@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn a_finished_band_still_lets_the_tick_finish_its_bands() {
         let log = Log::default();
-        let mut part = ProbePart { log: log.clone(), bands: 3, finish_after: Some(0), ..Default::default() };
+        let mut part = ProbePart { log: log.clone(), bands: 3, finish_after: Some(0) };
         let (mut e, mut f) = engine_with(&mut part);
         assert_eq!(e.tick(&mut part, &mut f), PartStatus::Finished);
         assert_eq!(log.0.borrow().len(), 3);

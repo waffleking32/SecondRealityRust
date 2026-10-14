@@ -82,6 +82,13 @@ pub struct TestCard {
     tick: u32,
 }
 
+impl Default for TestCard {
+    /// Starts at phase 0, tick 0 — what [`TestCard::new`] produces.
+    fn default() -> Self {
+        TestCard::new()
+    }
+}
+
 impl TestCard {
     /// How many logic ticks each phase lasts.
     pub const PHASE_TICKS: u32 = 32;

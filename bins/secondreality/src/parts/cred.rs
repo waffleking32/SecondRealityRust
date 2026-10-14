@@ -955,6 +955,24 @@ mod tests {
         line.bytes().map(|ch| usize::from(part.width(ch)) + 2).sum()
     }
 
+    /// How many bytes of `rendered` differ from `expected`.
+    ///
+    /// **The lengths are asserted first**, because `zip` stops at the shorter
+    /// side: a comparison that counted over whatever the two frames had in
+    /// common would report zero differences for a *truncated* frame and pass,
+    /// which is the failure this phase's reviews found four times over. A short
+    /// read is not a comparison, and it panics as one.
+    fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
+        assert_eq!(
+            rendered.len(),
+            expected.len(),
+            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
+            rendered.len(),
+            expected.len()
+        );
+        rendered.iter().zip(expected).filter(|(a, b)| a != b).count()
+    }
+
     #[test]
     fn the_strip_parses_to_the_raster_the_source_declares() {
         // `MAIN.C:31`: `char far font[FONAY][1500]` — 60,000 `db` values, 40
@@ -1341,8 +1359,7 @@ mod tests {
         run_ticks(&mut rig, &mut part, hold_first);
         let first = rendered(&rig);
         let at_1440 = reference("frame_001440.rgb");
-        assert_eq!(first.len(), at_1440.len());
-        let differing = first.iter().zip(&at_1440).filter(|(a, b)| a != b).count();
+        let differing = differing_bytes(&first, &at_1440);
         assert_eq!(differing, 0, "screen 1 differs from the reference in {differing} bytes");
 
         // The parked state is not the hold's: the same frame drawn from the
@@ -1350,7 +1367,7 @@ mod tests {
         let hold_view = rig.view.clone();
         Cred::set_display(&mut rig.ctx(hold_first), Display::PARKED);
         let parked = rendered(&rig);
-        let parked_differing = parked.iter().zip(&at_1440).filter(|(a, b)| a != b).count();
+        let parked_differing = differing_bytes(&parked, &at_1440);
         assert_eq!(
             parked_differing, 29_523,
             "the parked display reads the even logical lines, which hold no picture; it differs \
@@ -1363,7 +1380,7 @@ mod tests {
         run_ticks(&mut rig, &mut part, ticks);
         let eighteenth = rendered(&rig);
         let at_7640 = reference("frame_007640.rgb");
-        let differing = eighteenth.iter().zip(&at_7640).filter(|(a, b)| a != b).count();
+        let differing = differing_bytes(&eighteenth, &at_7640);
         assert_eq!(differing, 0, "screen 18 differs from the reference in {differing} bytes");
     }
 

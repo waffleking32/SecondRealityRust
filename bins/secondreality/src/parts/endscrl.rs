@@ -1012,7 +1012,7 @@ mod tests {
             match lines.last_mut() {
                 // A line's ink is 18 rows tall at most, so two bands whose span
                 // is no taller than that cannot be two lines.
-                Some(last) if bottom - last.0 + 1 <= STRIP_INK_ROWS => last.1 = bottom,
+                Some(last) if bottom - last.0 < STRIP_INK_ROWS => last.1 = bottom,
                 _ => lines.push((top, bottom)),
             }
         }
@@ -1381,11 +1381,11 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_order_names_seven_characters_the_trees_does_not() {
+    fn the_shipped_order_names_six_characters_the_trees_does_not() {
         // The other half of the font difference, and the bigger half on the
         // frames that show it. This tree's `fonaorder` (`MAIN.C:13`) is 74
-        // characters; the shipped build's is **81** — the packed
-        // `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail followed by the seven
+        // characters; the shipped build's is **80** — the packed
+        // `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail followed by the six
         // it adds:
         //
         //     $ xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE
@@ -1398,12 +1398,26 @@ mod tests {
         // `/` 83 times, `&` 26, `Z` 12 times, `Y` once, and `\x84` (`ä`,
         // "Leppänen") twice. `fonaw` is 0 for every one of them here, so the
         // port draws a two-column gap and the reference draws a glyph.
+        // The three counts the note and A11 quote, pinned here so they cannot
+        // drift from the dump above: the tree's 74, the six the packed run
+        // adds, and the 80 they make. (`0x94` is the one the shipped text never
+        // asks for, which is why 'the text uses five' and 'the run is six' are
+        // both true.)
+        const ADDED: [u8; 6] = [b'Z', 0x84, 0x94, b'Y', b'/', b'&'];
+        assert_eq!(FONT_ORDER.len(), 74, "the tree's own order");
+        assert_eq!(FONT_ORDER.len() + ADDED.len(), 80, "the shipped build's order");
+
         let (mut _rig, mut part) = started();
         let text = part.text.clone();
-        for absent in [b'Y', b'Z', b'/', b'&', 0x84, 0x94] {
+        for absent in ADDED {
             let strip = part.strip.as_ref().unwrap();
             assert_eq!(strip.fonaw[usize::from(absent)], 0, "{absent} is in the tree's order");
         }
+        assert_eq!(
+            ADDED.iter().filter(|byte| text.contains(byte)).count(),
+            5,
+            "the shipped text asks for five of the six; 0x94 is unused"
+        );
         let counts = |byte: u8| text.iter().filter(|ch| **ch == byte).count();
         assert_eq!(
             (counts(b'/'), counts(b'&'), counts(b'Z'), counts(b'Y'), counts(0x84)),

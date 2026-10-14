@@ -23,6 +23,13 @@ pub struct Palette {
     entries: [[u8; 3]; 256],
 }
 
+impl Default for Palette {
+    /// Every entry black — what [`Palette::new`] produces.
+    fn default() -> Self {
+        Palette::BLACK
+    }
+}
+
 impl Palette {
     /// Every entry black.
     pub const BLACK: Palette = Palette {

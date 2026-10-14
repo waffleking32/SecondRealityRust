@@ -24,6 +24,13 @@ pub struct CopperRegistry {
     slots: [Option<CopperFn>; COPPER_SLOTS],
 }
 
+impl Default for CopperRegistry {
+    /// All three slots empty — what [`CopperRegistry::new`] produces.
+    fn default() -> Self {
+        CopperRegistry::new()
+    }
+}
+
 impl CopperRegistry {
     /// All three slots empty.
     pub fn new() -> CopperRegistry {

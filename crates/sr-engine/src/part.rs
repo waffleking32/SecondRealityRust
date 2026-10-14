@@ -76,6 +76,15 @@ impl PartCtx<'_> {
     /// Deliberately takes the fields one by one rather than `&mut Engine`:
     /// the engine builds one of these inside its band loop while its other
     /// fields are still in use, which only compiles for a disjoint borrow.
+    ///
+    /// The arity is the point, so clippy's `too_many_arguments` is allowed
+    /// rather than worked around: bundling these into a struct would have to
+    /// hold the same `&mut` fields and be built at the same call site, which
+    /// changes nothing about the borrow (and a `&mut Engine` parameter — the
+    /// shape the lint is steering towards — is exactly what does not compile
+    /// here). Five of the ten are the engine's own fields in the order
+    /// `Engine::tick` splits them.
+    #[allow(clippy::too_many_arguments)]
     pub fn new<'a>(
         surface: &'a mut Surface,
         view: &'a mut View,

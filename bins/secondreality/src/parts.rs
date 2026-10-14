@@ -19,8 +19,11 @@ pub mod tunneli;
 use sr_engine::part::Part;
 use sr_engine::testcard::TestCard;
 
+/// One registry row: a part's name and the constructor that builds it.
+pub type PartEntry = (&'static str, fn() -> Box<dyn Part>);
+
 /// Every part this binary can run, as (name, constructor).
-pub fn registry() -> &'static [(&'static str, fn() -> Box<dyn Part>)] {
+pub fn registry() -> &'static [PartEntry] {
     &[
         ("testcard", || Box::new(TestCard::new())),
         // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).

@@ -670,9 +670,9 @@ mod tests {
         // third.
         let mut pal = Palette::new();
         pal.set_entry(0, [63, 40, 1]);
-        assert_eq!(fade_in_step(&pal, 1).entry(0)[0], ((127 * 63 + 63 * 1) / 128) as u8);
+        assert_eq!(fade_in_step(&pal, 1).entry(0)[0], ((127 * 63 + 63) / 128) as u8);
         assert_eq!(fade_in_step(&pal, 64).entry(0)[0], ((64 * 63 + 63 * 64) / 128) as u8);
-        assert_eq!(fade_in_step(&pal, 1).entry(0)[1], ((127 * 63 + 40 * 1) / 128) as u8);
+        assert_eq!(fade_in_step(&pal, 1).entry(0)[1], ((127 * 63 + 40) / 128) as u8);
         assert_eq!(fade_in_step(&pal, 128).entry(0), [63, 40, 1], "c = 128 is the picture");
         assert_eq!(fade_in_step(&pal, 0).entry(0), [63, 63, 63], "c = 0 is white");
         // The first step, where truncation is already visible: entry 0's blue
@@ -692,7 +692,7 @@ mod tests {
         pal.set_entry(0, [63, 40, 1]);
         assert_eq!(fade_out_step(&pal, 0).entry(0), [0, 0, 0], "c = 0 is black");
         assert_eq!(fade_out_step(&pal, 64).entry(0), [63, 40, 1], "c = 64 is the picture");
-        assert_eq!(fade_out_step(&pal, 63).entry(0)[2], (1 * 63) / 64);
+        assert_eq!(fade_out_step(&pal, 63).entry(0)[2], 63 / 64);
         // The loop starts at 63, so the first displayed step is one below the
         // picture: the fade-in's c = 128 is the palette itself and the
         // fade-out's c = 63 is not.
@@ -969,7 +969,7 @@ mod tests {
         assert_eq!(HOLD_FIRST_INDEX, fade_in_first + FADE_IN_STEPS);
         assert_eq!(HOLD_TICKS, fade_out_first - HOLD_FIRST_INDEX);
         assert_eq!(PART_LAST_INDEX, fade_out_first + FADE_OUT_STEPS - 1);
-        assert!(PART_LAST_INDEX > 1200 && PART_LAST_INDEX <= 1240);
+        const { assert!(PART_LAST_INDEX > 1200 && PART_LAST_INDEX <= 1240); }
         // And the port's own tick map lands on the two indices the reference's
         // frames fixed: the tick the source's fade-out loop starts on is the
         // tick 1147 is drawn on, and its last step is 1210's.
@@ -996,7 +996,7 @@ mod tests {
     fn the_sweeps_own_samples_are_the_ramps_frames() {
         let image = picture();
         let settled = |index: u32| -> Vec<u8> {
-            if index >= HOLD_FIRST_INDEX && index < FADE_OUT_FIRST_INDEX {
+            if (HOLD_FIRST_INDEX..FADE_OUT_FIRST_INDEX).contains(&index) {
                 // The hold: the picture through its own palette, the fade-in's
                 // last step.
                 rendered(image.pixels(), &dac_after_fade_in(&image.palette, FADE_IN_STEPS - 1))

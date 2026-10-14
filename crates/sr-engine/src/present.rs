@@ -275,7 +275,7 @@ mod tests {
     fn the_border_pads_the_picture_by_eight_source_pixels_scaled() {
         let mut f = two_row_frame();
         f.border = Some(9);
-        let mut pal = f.palettes.base().clone();
+        let mut pal = *f.palettes.base();
         pal.set_entry(9, [63, 63, 0]);
         f.palettes.reset(pal);
         let mut out = FrameBuffer::new(0, 0);

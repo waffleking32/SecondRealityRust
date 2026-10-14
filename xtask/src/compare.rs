@@ -955,7 +955,7 @@ fn compare_capture(
 
     let mode = match (
         modes.iter().all(|mode| *mode == "indexed"),
-        modes.iter().any(|mode| *mode == "indexed"),
+        modes.contains(&"indexed"),
     ) {
         (true, _) => "indexed",
         (false, true) => "mixed",

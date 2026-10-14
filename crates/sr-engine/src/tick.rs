@@ -15,6 +15,13 @@ pub struct Tick {
     total: u64,
 }
 
+impl Default for Tick {
+    /// Zeroed accumulator — what [`Tick::new`] produces.
+    fn default() -> Self {
+        Tick::new()
+    }
+}
+
 impl Tick {
     /// VGA vertical refresh, in ticks per second × 1000.
     pub const HZ_MILLI: u64 = 70_086;

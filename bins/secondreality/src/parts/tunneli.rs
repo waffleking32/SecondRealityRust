@@ -1059,7 +1059,7 @@ mod tests {
             let (picture, expected) = aligned_frame(tick, name);
             for column in 0..SCREEN_WIDTH as usize {
                 port_ink += usize::from(picture[column] != 0);
-                reference_ink += usize::from(&expected[column * 3..column * 3 + 3] != [0, 0, 0]);
+                reference_ink += usize::from(expected[column * 3..column * 3 + 3] != [0, 0, 0]);
             }
         }
         assert_eq!(reference_ink, 34, "the reference's ink in row 0, four frames");

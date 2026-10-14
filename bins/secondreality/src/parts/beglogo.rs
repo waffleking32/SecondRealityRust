@@ -457,9 +457,9 @@ mod tests {
         // version agrees on c=0 and c=128 and disagrees in the last third.
         let mut pal = Palette::new();
         pal.set_entry(0, [63, 40, 1]);
-        assert_eq!(fade_step(&pal, 1).entry(0)[0], ((127 * 63 + 63 * 1) / 128) as u8);
+        assert_eq!(fade_step(&pal, 1).entry(0)[0], ((127 * 63 + 63) / 128) as u8);
         assert_eq!(fade_step(&pal, 64).entry(0)[0], ((64 * 63 + 63 * 64) / 128) as u8);
-        assert_eq!(fade_step(&pal, 1).entry(0)[1], ((127 * 63 + 40 * 1) / 128) as u8);
+        assert_eq!(fade_step(&pal, 1).entry(0)[1], ((127 * 63 + 40) / 128) as u8);
         assert_eq!(fade_step(&pal, 128).entry(0), [63, 40, 1], "c = 128 is the picture");
         assert_eq!(fade_step(&pal, 0).entry(0), [63, 63, 63], "c = 0 is white");
         // The first step, where truncation is already visible: entry 0's blue
