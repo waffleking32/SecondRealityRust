@@ -611,8 +611,9 @@ emulator's host timing, which D17 measured as a term the API and `--set` do not 
 
 **Port:** `Player::poll` adds exactly `mix_rate/70.086` samples per logic tick and advances a whole
 tick whenever `mix_rate × 2.5/tempo` samples have accumulated — integer arithmetic, no float, no
-drift by construction. The port's ratio at tempo 120 is 48 ticks a second; the reference's,
-measured from the traces' own `zframe` column, is 48.00 ± 0.05 (0.1 %).
+drift by construction. The port's ratio is 48 ticks a second at tempo 120; the reference's, measured
+from the traces' own `zframe` column, is 47.93 (`second5`), 48.04 (`hiddenu`) and 52.01
+(`second3`, tempo 130) — the same clock to 0.15 %, and not the same clock to the frame.
 
 **Why this is registered rather than fixed:** it cannot be fixed. The two sessions of *one recipe*
 — `second5` and `second5b`, the same command against the same emulator at the same pinned cycles —

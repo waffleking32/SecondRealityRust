@@ -449,10 +449,11 @@ and the ring is primed **ten entries deep** by the module initialiser:
 ```
 
 Ten entries at one `zpollme` a copper frame (`MAIN/COPPER.ASM:466`) is a ten-frame delay, and
-that is the phase the traces show: `second5`'s first row advance is at tick 7 and the trace
-publishes it at frame 427. `_np_speed`, `_np_tempo` and `_np_loop` are written straight through
-(`+0x3dd8`, `+0x3d7b`, `+0x52c5`) and are not delayed, which is the same fact seen from the other
-side.
+that is the phase the traces show: the port publishes `second5`'s first row change at frame 426
+where the trace has it at 427 — one frame, which is the drift the residual below measures — and a
+player that published the engine's own row instead would publish it at 416, ten frames early.
+`_np_speed`, `_np_tempo` and `_np_loop` are written straight through (`+0x3dd8`, `+0x3d7b`,
+`+0x52c5`) and are not delayed, which is the same fact seen from the other side.
 
 What the ring is *fed* from — `[0x905]` (row), `[0x907]` (pattern), `[0x909]` (order), `[0x90d]`
 (zplus) — is written **only** on the tick routine's row-advance path:
@@ -548,11 +549,13 @@ row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and 
     43AB: 48                    dec    %ax             ; one tick off the row
   ```
 
-  The addend lives in a word the object's image carries as `0x0101`, i.e. an uninitialised slot
-  the loader zeroes,
-  and the traces agree that it contributes nothing: the published row changes of `second5`'s
-  speed-6 run are **exactly** six ticks apart (`cargo xtask music analyse --trace
-  reference/music/second5` prints 61 gaps in 534 frames where the rule says 534.4, residual −0.4).
+  The addend lives in a word the object's image carries as `0x0101` — the filler these objects
+  use for slots the program clears before it runs: the segment's other BSS-like words read the
+  same way, `_np_zframe` among them, and every filed trace reads `_np_zframe` as 0 before the
+  music's first tick, so those slots do not survive into the running program. And the traces
+  agree the adjuster contributes nothing here: the published row changes of `second5`'s speed-6
+  run are **exactly** six ticks apart (`cargo xtask music analyse --trace reference/music/second5`
+  prints 61 gaps in 534 frames where the rule says 534.4, residual −0.4).
 
 ### 254 and the pattern break, as the trace has them
 
