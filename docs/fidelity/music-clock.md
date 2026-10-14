@@ -328,9 +328,9 @@ not show.
 
 ## 7. What a trace does not hold, and why it moves between sessions
 
-`music analyse` prints each trace's coverage, recomputed from the trace file's own frames —
-so the note quotes the tool for what each trace holds rather than counting in prose (each trace's own line below says how many frames it holds and how many it
-does not):
+`music analyse` prints each trace's coverage, recomputed from the trace file's own frames, and
+the note quotes it rather than counting in prose — one `second5` line the long way, then every
+trace's line as the tool prints it:
 
 ```
   frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing
@@ -346,19 +346,15 @@ does not):
 | `second3` | `frames 144..2899 of the requested 142..2899: 2755 sample(s), 3 frame(s) missing (142..143, 417) (frames 142..143 of them are the boundary: …)` |
 | `hiddenu` | `frames 148..6499 of the requested 146..6499: 6351 sample(s), 3 frame(s) missing (146..147, 410) (frames 146..147 of them are the boundary: …)` |
 
-The runs of absent frames are the tool's own: the first is the boundary the locate leaves (the
-segment is found one frame late), and the middle one is a frame the guest's counter moved
-across. **A count of them belongs to the line above, not to this sentence** — `second5b` misses
-four where the other three miss three, and a sentence that said "three" would be wrong about
-the trace filed beside it.
-
-Each middle gap is a frame the guest's own counter moved across without the trace being able
-to read it, and the manifest carries what the counter did around it: for `second5`, `skipped`
-records `409..409 (the counter went 408 -> 410)` and `1220..1220 (the read that was opened on
-frame 1220 was still open when the guest moved to 1221)`. **Which index falls in the gap is
-session-dependent** — the traces lose 409 (`second5`, `second5b`), 417 (`second3`) and 410
-(`hiddenu`) — and all of them sit at the same point in the demo, the boot's first graphics
-frame (the reference's own captures put that at 404, D17).
+**A count of the absent frames belongs to that line and not to this sentence** — `second5b`
+misses four where the other three miss three. Its two kinds are the tool's own: the first run
+is the boundary the locate leaves (the segment is found a frame late), and the middle one is a
+frame the guest's counter moved across, with the manifest carrying what the counter did around
+it — for `second5`, `skipped` records `409..409 (the counter went 408 -> 410)` and
+`1220..1220 (the read that was opened on frame 1220 was still open when the guest moved to
+1221)`. **Which index falls at that point is session-dependent** — 409 (`second5`,
+`second5b`), 417 (`second3`), 410 (`hiddenu`) — and all of them sit at the same point in the
+demo, the boot's first graphics frame (the reference's own captures put that at 404, D17).
 
 **Why is a hypothesis.** What is measured is the counter's own readings, and they say only
 that it went from one value to another with the frame between never current. The explanation
