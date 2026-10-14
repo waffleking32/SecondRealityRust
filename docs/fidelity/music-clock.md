@@ -216,8 +216,7 @@ by `reference verify` rather than believed.
 
 `_np_zframe` advances one per **tick**, not per frame. `cargo xtask music analyse --trace
 reference/music/second5`, section 2, prints it as a rate of its own: it goes from 1 at frame
-410 to 609 at frame 1299 — **608 ticks in 889 frames, 0.684 a frame, 47.93 a second** — where
-tempo 120's rule gives 48.00. It is the word the parts set and wait on
+410 to 609 at frame 1299 — **608 ticks in 889 frames, 0.6839 a frame, 47.93 a second** — where tempo 120's rule gives 48.00. It is the word the parts set and wait on
 (`DIS/DISC.ASM:138-159`, `DIS/DISINT.ASM:412-425`), and it starts from 0 when the music does
 (0 at frame 408, 1 at 410).
 
