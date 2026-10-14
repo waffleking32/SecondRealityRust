@@ -236,10 +236,13 @@ sample, or `128` filler, `:148-173`), are what the original did to its in-memory
 Task 5 reproduces them against these same numbers; the loader slices the file's bytes and stops.
 
 One more difference between the loader and `STARTEMS.C:367`, recorded because it is a difference
-even though it is inert: the original's sample-loading loop *overwrites* the header's `memseg` with
-the segment it allocated, so its "is there a sample" test is about memory, not about the file. The
-loader's `sample_bytes` is about the file — the bytes are there or they are not — and the mixer is
-what will need the original's allocated-and-padded form.
+even though it is inert: the original's sample-loading loop guards on `(ins+a)->memseg` — a
+paragraph pointer **as the header itself carries it**, read from the file at `:338-339`
+(`lseek(h,filebase+((long)parains[a]<<4L),SEEK_SET); read(h,ins+a,0x50);`) — while its own
+overwrite of that field with the segment it allocated happens *later*, inside the loop body
+(`:389`, `(ins+a)->memseg=seg;`). So the guard is a test about the file, not about memory that has
+already been moved. The loader's `sample_bytes` is about the file too — the bytes are there or
+they are not — and the mixer is what will need the original's allocated-and-padded form.
 
 ### `SCRS` and `SCRM`
 
@@ -362,10 +365,270 @@ checks that the two notions agree cell by cell.
 Recorded so that "not yet decided" is not read as "assumed":
 
 - **Order list 254 and 255.** Kept as data (§4), and the shell's `_zplaysong` calls are named there
-  too. What the player does at them is Task 3's, decided by the reference's own order counter
-  (`music-clock.md` §10) — no reading of ST3 semantics is used here.
+  too. What the player does at them is **§8's**: `254` is stepped over (measured in the traces and
+  read out of the object), and `255` ends the order list or loops the song, which is the object's
+  reading because no trace reaches one (`music-clock.md` §10). No reading of stock ST3 semantics
+  is used anywhere.
 - **Note 0xFE and 0xFF, instrument 0 and command 0.** Counted and located (§6), not interpreted.
 - **The samples' in-memory form** — the clamps and the 512-byte pad of `checkins`
   (`STARTEMS.C:129-177`) — is Task 5's; the loader slices the file.
 - **Whether the modules' `S` commands are all `SDx`** (spec §7.2's scope claim, and D8's `_np_zinfo`
   question) is a reading of `Cell::info` on those cells and belongs with the effects in Task 4.
+
+## 8. The player — Task 3
+
+Task 3 makes the port's player reproduce the traces. **The original's player has no assembly
+source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is read out of its
+own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
+from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
+`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 22 load-bearing
+instructions at their own offsets). Offsets below are that object's segment offsets, and the
+listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
+it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
+the object cannot settle — which *frame* a row change lands on — is measured against the traces,
+and where the two disagree the trace wins (D12).
+
+### The tick, the row, and the effect that moves them
+
+```
+  3D92: b8 32 00              mov    $0x32,%ax
+  3D95: f7 e1                 mul    %cx        ; × the tempo
+  3D97: 8b d8                 mov    %ax,%bx
+  3D99: 2e a1 d5 08           mov    %cs:0x8d5,%ax   ; _zmixspeed
+  3D9D: b9 7d 00              mov    $0x7d,%cx       ; 125
+  3DA0: f7 e1                 mul    %cx
+  3DA2: f7 f3                 div    %bx
+  3DA4: 2e a3 e1 08           mov    %ax,%cs:0x8e1   ; [0x8e1] = mixspeed × 125/(50 × tempo)
+```
+
+A tick is that many samples — `40000 × 125/(50 × 120)` = 833 at tempo 120, 769 at 130 — and it is
+computed by the tempo setter and nowhere else. A row ends when a counter of ticks reaches the
+**published** speed:
+
+```
+  4397: ff 06 00 20           incw   0x2000
+  439B: 2e a1 02 20           mov    %cs:0x2002,%ax   ; _np_speed
+  (…)
+  43AC: 39 06 00 20           cmp    %ax,0x2000
+  43B0: 7d 01                 jge    0x43b3            ; → the row advance
+```
+
+so an `A` command lands on the tick it is processed on, *mid-row*, which is the whole of §3's
+post-speed-change transient. The row's cells are read on the row's first tick
+(`+0x4371: cmpw $0x0,[0x2000]`), which is where `A` writes `_np_speed` (`+0x3dd8`) — the trace's
+`speed` word therefore leads its `row` column, and the plan's third implementation detail is this
+instruction and not a convention.
+
+A poll's samples are fractional (`40000/70.086` = 570.733…), and `player.rs` carries the fraction
+in a `1/70_086`-sample accumulator rather than rounding per poll. The original carries the
+remainder the same way, in the mixing countdown that a tick tops up
+(`+0x50f0: sub %ax,0xbe0` … `+0x5157: add %ax,0xbe0`).
+
+### The published position is a ten-poll-old copy, and a seek does not refresh it
+
+`_np_row`, `_np_pat`, `_np_ord` and `_np_zplus` are not written where the player is: they are
+**popped from a ring**.
+
+```
+  52C9: 2e 8b 36 4e 21        mov    %cs:0x214e,%si        ; the write pointer
+  52CE: a1 05 09              mov    0x905,%ax
+  52D1: 2e 89 84 50 21        mov    %ax,%cs:0x2150(%si)   ; followed by 0x907, 0x909, 0x90d
+  (…)
+  52FA: 2e 8b 36 4c 21        mov    %cs:0x214c,%si        ; the read pointer
+  52FF: 2e 8b 84 50 21        mov    %cs:0x2150(%si),%ax
+  5304: a3 fd 08              mov    %ax,0x8fd             ; → _np_row
+  (…)
+  5326: 2e 89 36 4c 21        mov    %si,%cs:0x214c
+```
+
+and the ring is primed **ten entries deep** by the module initialiser:
+
+```
+  2AC1: 2e c7 06 4e 21 50 00  movw   $0x50,%cs:0x214e   ; 10 × 8 bytes ahead
+  2AC8: 2e c7 06 4c 21 00 00  movw   $0x0,%cs:0x214c
+```
+
+Ten entries at one `zpollme` a copper frame (`MAIN/COPPER.ASM:466`) is a ten-frame delay, and
+that is the phase the traces show: `second5`'s first row advance is at tick 7 and the trace
+publishes it at frame 427. `_np_speed`, `_np_tempo` and `_np_loop` are written straight through
+(`+0x3dd8`, `+0x3d7b`, `+0x52c5`) and are not delayed, which is the same fact seen from the other
+side.
+
+What the ring is *fed* from — `[0x905]` (row), `[0x907]` (pattern), `[0x909]` (order), `[0x90d]`
+(zplus) — is written **only** on the tick routine's row-advance path:
+
+```
+  43E6: a1 40 09              mov    0x940,%ax
+  43E9: 3d ff ff              cmp    $0xffff,%ax
+  43EC: 74 01                 je     0x43ef
+  43EE: 48                    dec    %ax
+  43EF: a3 09 09              mov    %ax,0x909
+  43F2: a1 48 09              mov    0x948,%ax
+  43F5: a3 05 09              mov    %ax,0x905
+  43F8: a1 4c 09              mov    0x94c,%ax
+  43FB: a3 07 09              mov    %ax,0x907
+```
+
+`_zplaysong` calls the order-advance routine *directly* instead (`+0x2597: call 0x442d`), and that
+routine returns at `+0x44ee` — so a seek never touches those four words, and the ring keeps
+publishing the previous rows until the first row advance works its way out ten polls later. That
+is exactly `second5`: frames 408…426 read `ord 0 row 0 pat 0` and the first published row is 427,
+which is the same ten polls.
+
+### `zplus`, `254` and `255`
+
+The order-advance routine is `+0x442d`, and the note's §6 rule is this code, not an inference from
+the trace's columns:
+
+```
+  442D: 2e c7 06 0d 09 00 00  movw   $0x0,%cs:0x90d
+  4435: 2e a1 40 09           mov    %cs:0x940,%ax       ; the order to try next
+  4439: 40                    inc    %ax
+  443A: 2e a3 40 09           mov    %ax,%cs:0x940
+  443E: 48                    dec    %ax
+  (…)
+  444B: 8a 27                 mov    (%bx),%ah           ; orders[o]
+  444D: 8a 47 01              mov    0x1(%bx),%al        ; orders[o + 1]
+  4450: 8a dc                 mov    %ah,%bl
+  4452: 3c fe                 cmp    $0xfe,%al
+  4454: 75 06                 jne    0x445c
+  4456: 2e 83 0e 0d 09 01     orw    $0x1,%cs:0x90d      ; the next entry is a 254 → bit 0
+  445C: 80 fb fe              cmp    $0xfe,%bl
+  445F: 75 08                 jne    0x4469
+  4461: 2e 83 0e 0d 09 02     orw    $0x2,%cs:0x90d      ; this one is → bit 1
+  4467: eb cc                 jmp    0x4435              ; … and it is stepped over
+  4469: 80 fb ff              cmp    $0xff,%bl
+  (…)
+  4481: 2e ff 06 0b 09        incw   %cs:0x90b           ; _np_loop's source: the loop path
+```
+
+`254` is stepped over — measured in the traces (§10) *and* read here — and a `255` leaves the scan:
+if the player has not yet played a row (`[0x939] == 2`, which `_zplaysong` sets) the song ends at
+`+0x4476`…`0x4480`; otherwise `_np_loop` increments, the scan restarts at the loop order
+`_zplaysong` recorded (0, for every plain order the shell hands it — `+0x256b` clears it), and the
+song ends if that entry is itself a `255` (`+0x4486`…`0x4499`).
+
+**`music-clock.md` §10 says the trace cannot show what the player does at a `255`. This is that
+question's answer, and it is a reading of the object rather than a measurement**: the note records
+it as the port's behaviour, with the trace's silence stated beside it. The same goes for `B`
+(`+0x3de2`: the advance flag goes up and the order to try next is overwritten, so the jump lands at
+the row's *end*; `BFF` at `+0x3df1` ends the song) — no filed window reaches a `B`, and MUSIC0's
+three are at orders 63, 66 and 77, past every trace. What the traces *do* exercise is `A` and `C`:
+MUSIC0's pattern 70 row 0 sets speed 6, pattern 71 row 0 sets 1 and row 36 sets 6, and pattern 71
+row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and is stored unclamped
+(`+0x3dfe`: `mov %al,%ah; shr $0x4,%ah; and $0xf,%al; aad $0xa`).
+
+### Two readings that are in the object but contribute nothing here
+
+- `A` and `T` are one handler told apart by the *parameter*:
+
+  ```
+    3D73: 32 e4                 xor    %ah,%ah
+    3D75: 3d 20 00              cmp    $0x20,%ax
+    3D78: 76 54                 jbe    0x3dce           ; 32 and under: a speed
+    3D7A: 50                    push   %ax
+    3D7B: 2e a2 0f 09           mov    %al,%cs:0x90f    ; _np_tempo
+    (…)
+    3DD2: 3c 00                 cmp    $0x0,%al
+    3DD4: 74 f8                 je     0x3dce
+    3DD6: 32 e4                 xor    %ah,%ah
+    3DD8: 2e a3 02 20           mov    %ax,%cs:0x2002   ; _np_speed
+  ```
+
+  Neither module carries a `T`
+  (`crates/sr-audio/tests/player.rs`'s `the_timeline_effects_the_modules_carry` counts MUSIC0's
+  A×63, B×3, C×8 and MUSIC1's A×54, C×4, and no `T` in either).
+- The row timer has a fractional adjuster — the three lines between the `_np_speed` load and the
+  comparison above:
+
+  ```
+    439F: 2e 8b 16 cd 08        mov    %cs:0x8cd,%dx
+    43A4: 2e 01 16 cf 08        add    %dx,%cs:0x8cf
+    43A9: 73 01                 jae    0x43ac
+    43AB: 48                    dec    %ax             ; one tick off the row
+  ```
+
+  The addend lives in a word the object's image carries as `0x0101`, i.e. an uninitialised slot
+  the loader zeroes,
+  and the traces agree that it contributes nothing: the published row changes of `second5`'s
+  speed-6 run are **exactly** six ticks apart (`cargo xtask music analyse --trace
+  reference/music/second5` prints 61 gaps in 534 frames where the rule says 534.4, residual −0.4).
+
+### 254 and the pattern break, as the trace has them
+
+```
+reference/music/second5: frames 1251 → 1260  ord 26 row 61 → ord 28 row 0   (the C00, over the 254 at order 27)
+reference/music/second5: frames 970 → 979    ord 25 row 63 → ord 26 row 0   (pattern 71's A01 at speed 1)
+```
+
+Both are in `crates/sr-audio/tests/trace.rs`, which walks `reference/music/`, drives a `Player`
+from the boot's own music start (frame 408, derived from each trace's own columns and checked
+against §2's anchor), and compares **every frame the trace holds** — never skipping a frame the
+trace shows no change on, and never renumbering around a gap: the coverage each comparison runs
+over is recomputed from the trace file and checked against the manifest's window and gap list
+field by field.
+
+### What the comparison asserts, and the residual it measures
+
+The reference's tick clock and the port's are both uniform, but the reference's is sampled by an
+emulated machine whose frame counter carries D17's host-timing term — and **the two sessions of
+one recipe disagree with each other**:
+
+`cargo test -p sr-audio --test trace -- --nocapture the_two_sessions`:
+
+```
+second5 against second5b: 131 row change(s) each, 8 of them on a different frame:
+  ord 25 row 18: frame 575 against 576
+  ord 25 row 24: frame 629 against 628
+  ord 25 row 53: frame 883 against 882
+  ord 25 row 61: frame 953 against 952
+  ord 26 row 6: frame 988 against 987
+  ord 26 row 8: frame 991 against 990
+  ord 26 row 19: frame 1007 against 1006
+  ord 26 row 56: frame 1207 against 1206
+```
+
+so no player can be frame-identical to both, and the plan's four anomalies (rows 18, 28, 49, 57
+in `second5`) are this jitter and not a rule the port is missing. A test that listed them would be
+fitting; one that demanded exactness would be demanding the impossible. So the comparison asserts
+what a port can be held to —
+
+1. **content**: the (order, row) sequence the port publishes over the trace's frames is the
+   trace's, and so is the (speed, tempo) sequence — no row skipped or invented, no order advance
+   early or late, no effect lost;
+2. **placement**: every published value is one the trace publishes at that frame or within
+   3 frames of it;
+
+— and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints:
+
+```
+4 filed trace(s)
+  hiddenu (MUSIC0): 5687 of 6088 frames agree (93.413 %); worst displacement 3 frame(s)
+  second3 (MUSIC1): 2144 of 2488 frames agree (86.174 %); worst displacement 2 frame(s)
+  second5 (MUSIC0): 771 of 887 frames agree (86.922 %); worst displacement 2 frame(s)
+  second5b (MUSIC0): 777 of 887 frames agree (87.599 %); worst displacement 2 frame(s)
+```
+
+The frames that disagree are the ±1-frame placement of a row boundary — one per row change —
+because the port's clock is exact and the reference's is not; the port sits *between* the two
+sessions (a frame early in `second5`, a frame late in `hiddenu`) which is the best a fixed clock
+can do. `docs/fidelity/APPROXIMATIONS.md` records the measurement and its cause.
+
+### The end-to-end play, shown
+
+`cargo test -p sr-audio --test player -- --nocapture each_module_plays`:
+
+```
+  MUSIC0: wrapped after 8732 polls (124.6 seconds of logic ticks) at order 0 pattern 0 row 0, loop counter 1
+  MUSIC0: 80 order(s), 77 pattern(s), ended at order 0 (1 loops)
+  MUSIC1: wrapped after 25769 polls (367.7 seconds of logic ticks) at order 0 pattern 73 row 0, loop counter 1
+  MUSIC1: 100 order(s), 77 pattern(s), ended at order 0 (1 loops)
+```
+
+Each module is played from order 0 — the order the demo's own boot starts it at
+(`MAIN/U2.ASM:786` pushes 0) — through its order list to the first `255`, where it loops back
+(the shell's own restarts are what the demo hears; the module's own list ends where the `255`s
+are). `playing_past_the_end_neither_panics_nor_runs_off_the_orders` then plays each module a
+further 100,000 polls and asserts that every published order, pattern, row, speed and tempo stays
+inside the module's own tables — a player that loops for ever is fine, one that reads past its
+orders is not.

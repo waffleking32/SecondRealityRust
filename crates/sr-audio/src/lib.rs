@@ -10,17 +10,19 @@
 //! | module | what it holds |
 //! |---|---|
 //! | [`module`] | the S3M container: patterns, cells, sample headers, the order list, D5's descrambling |
-//! | `player` | the tracker: position, order advance, `A`/`B`/`C`, effects (Task 3) |
+//! | [`player`] | the tracker: the tick clock, the position, the order advance and `A`/`B`/`C` (Task 3) |
 //! | the mixer | the mixing engine and its output (Task 5) |
 //!
 //! Nothing here reads the clock, sleeps, or looks at how fast the machine is; the player
-//! advances because the engine ticked.
+//! advances because the engine ticked — [`Player::poll`] is one video frame and nothing else.
 
 pub mod module;
+pub mod player;
 
 pub use module::{
     descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, CHANNELS, ROWS,
 };
+pub use player::{MixRate, Player, PlayerOptions, Position};
 
 #[cfg(test)]
 mod tests {

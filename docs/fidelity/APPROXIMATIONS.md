@@ -598,3 +598,52 @@ touch any of it.
 shipped one's control-line rule, its `FONAY`, its 80-character order and its raster are all inside
 that packed image. **The mechanism of the control-line rule is unknown, as the CR's is: what is
 measured is the behaviour** — a `[NN` line advances the ring NN rows and draws nothing.
+
+## A12 — The music clock: the port's tick clock is exact, the reference's frame counter is not
+
+**Part:** the music, under every part that plays it (Task 3; the traces are
+`reference/music/{second5,second5b,second3,hiddenu}`).
+
+**Original:** the player's tick is `2.5/tempo` seconds of *the emulated machine's* time, and the
+traces are sampled once per frame of the emulator's own frame counter
+(`docs/fidelity/music-clock.md` §1). The ratio between the two is therefore a property of the
+emulator's host timing, which D17 measured as a term the API and `--set` do not reach.
+
+**Port:** `Player::poll` adds exactly `mix_rate/70.086` samples per logic tick and advances a whole
+tick whenever `mix_rate × 2.5/tempo` samples have accumulated — integer arithmetic, no float, no
+drift by construction. The port's ratio at tempo 120 is 48 ticks a second; the reference's,
+measured from the traces' own `zframe` column, is 48.00 ± 0.05 (0.1 %).
+
+**Why this is registered rather than fixed:** it cannot be fixed. The two sessions of *one recipe*
+— `second5` and `second5b`, the same command against the same emulator at the same pinned cycles —
+disagree with **each other** about which frame eight of their 131 row changes land on, by one frame
+each (`cargo test -p sr-audio --test trace -- --nocapture the_two_sessions`, whose output is pasted
+into `music.md` §8). A clock that matched one session would be a fit to that session; the port's
+exact clock sits *between* them, and that is the best a fixed clock can do.
+
+**Measured difference.** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
+prints, for every trace in `reference/music/`, the share of the trace's frames whose published
+position matches the port's, and the worst displacement:
+
+```
+4 filed trace(s)
+  hiddenu (MUSIC0): 5687 of 6088 frames agree (93.413 %); worst displacement 3 frame(s)
+  second3 (MUSIC1): 2144 of 2488 frames agree (86.174 %); worst displacement 2 frame(s)
+  second5 (MUSIC0): 771 of 887 frames agree (86.922 %); worst displacement 2 frame(s)
+  second5b (MUSIC0): 777 of 887 frames agree (87.599 %); worst displacement 2 frame(s)
+```
+
+The frames that disagree are one per row change — the ±1-frame placement of a row boundary — and
+the *content* is not in doubt: the comparison test asserts that the port publishes exactly the
+trace's sequence of `(order, row)` pairs and exactly its sequence of `(speed, tempo)` pairs, and
+that every published value is one the trace publishes within 3 frames of that frame.
+
+**What is not an approximation here:** the ten-poll publication delay (`_np_*` is a ring buffer ten
+entries deep — `STMIK.300` + `0x2ac1`), the tick and row arithmetic (`+0x3d99`, `+0x4397`), the
+`254`/`255` reading and `zplus` (`+0x4452`, `+0x4469`), and the timeline effects are all the
+original's own, cited in `music.md` §8 and asserted byte for byte by
+`the_objects_own_bytes_say_what_the_player_says`. This entry covers the *frame the row changes on*
+and nothing else.
+
+**If it is ever closed:** it would take a trace of the reference's own frame clock beside a trace
+of the guest's, which is a measurement `music probe`-style and not a code change.
