@@ -353,8 +353,14 @@ D5's verification is the specification and every number in it is re-derived here
   and that the cap is above it.
 - The effect histogram, counted from the decoded cells, is asserted **per module**: the counts are
   the phase's scope evidence (Review Focus 3) and `music.md` reproduces them. D5 records the
-  cross-module histogram it verified (D:7348, F:1051, E:827, G:802, O:755, H:212) — reproduce it or
-  explain the difference in the note; do not copy it.
+  histogram it verified — `D:7348, F:1051, E:827, G:802, O:755, H:212` — and those six are
+  **MUSIC0's own counts**, measured while writing this plan by decoding both modules with the D5
+  keystream and the S3M cell flags (bit 5 = note *and* instrument, two bytes; bit 6 = volume; bit 7 =
+  command and info): MUSIC0 `A:63, B:3, C:8, D:7348, E:827, F:1051, G:802, H:212, J:137, K:105,
+  O:755, Q:84, S:140`, MUSIC1 `A:54, C:4, D:3340, E:217, F:180, G:2607, H:365, K:62, O:2417, Q:38,
+  S:48` plus **one cell whose command byte is 0** — which is D5's recorded MUSIC1 exception, and the
+  decoder must treat 0 as no command. The test counts them itself; the numbers above are what it
+  should find, and a disagreement is a finding in the note either way.
 - Each module's header, asserted as measured: `ordNum/insNum/patNum` 80/44/77 and 100/54/77, global
   volume 64, initial speed 6 and 3, initial tempo **125** (before the patch) and 130, master volume
   176 (stereo bit set), and the pan table's 32 bytes. The patch is applied in a test and the tempo
@@ -433,6 +439,13 @@ therefore load-bearing and must be pinned by tests of their own: the *rounding* 
 round per frame, or the rate drifts by construction) and the *order* of the row-limit checks at a
 tick boundary.
 
+A third is the **row column's phase against effect processing**, and Task 1's trace already shows
+it: MUSIC0's pattern 71 sets speed 1 in its row-0 cell and the trace's `speed` word is 1 while its
+`row` column still reads the last row of the *previous* pattern, one row earlier than the cell that
+sets it. Whether the player applies a row's effects before or after it publishes the row is
+therefore visible in the trace and must be reproduced rather than smoothed over — this is a
+one-frame-sized detail of exactly the kind a cue lands on.
+
 - [ ] **Step 2: The order advance, from the trace**
 
 Implement `play_song`/`goto_song` and the order advance to match the counter sequence Task 1
@@ -457,10 +470,14 @@ for the same number of polls, starting at the trace's own music-start frame, and
 it. This is the phase's exit criterion in executable form. It is *unconditional* (the trace is
 committed, not scratch), so a fresh clone runs it.
 
-Two things the test must not do: skip frames where the trace shows no change (a player that never
-advances would pass), and start from a hand-picked order
-(`play_song(trace.first_order)` hides the start-index question — the test starts the player at the
-boot's own frame and lets it run to the trace's first sample).
+Three things the test must not do: skip frames where the trace shows no change (a player that never
+advances would pass), start from a hand-picked order (`play_song(trace.first_order)` hides the
+start-index question — the test starts the player at the boot's own frame and lets it run to the
+trace's first sample), or paper over the trace's **gaps**. Task 1's traces are keyed by the guest's
+counter and carry a handful of frames the emulator never published (a mode change swallows an index:
+147, 409 and 1220 in the three filed traces, each named in its manifest). The comparison runs over
+the frames the trace *has*, and the gaps stay gaps — a comparison that quietly renumbers around them
+is comparing a different timeline, and the manifest is where the honest statement of coverage lives.
 
 - [ ] **Step 4: `zplus`, and `zframe`**
 
@@ -494,13 +511,25 @@ the count*, not implemented on spec's say-so (and not silently missing either �
 For each effect that does occur, the test drives the module's own cells through the player and
 asserts the state after each tick against the effect's specification:
 
+The set, measured while writing this plan by decoding both modules (Task 2's own count is the
+authority), is **A, B, C, D, E, F, G, H, J, K, O, Q, S** — note that **`J` (arpeggio, 137 cells in
+MUSIC0) and `B` (pattern jump, 3 cells) are present** and spec §7.2's list omits them, while **`T`
+(tempo) occurs nowhere in either module**: the tempo is the header's, patched once, and never moved
+by the data. `I`, `M`, `N`, `P`, `R`, `U` and `V` are absent too. The tests, one per effect:
+
+- **A** set speed (and its effect on the row rate — the trace shows MUSIC0's pattern 70 setting 6,
+  pattern 71 setting 1 and then 6 at row 36, and MUSIC1's pattern 30 setting 6), **B** pattern jump
+  (order and row together, and the row it takes effect on), **C** pattern break (the next order, row
+  0).
 - **D** volume slide (up/down nibbles, fine variants), **E**/**F** porta down/up (with the fine and
   extra-fine subcommands), **G** tone porta, **H** vibrato (speed/depth nibbles, the waveform and
   the position counter's update), **K** vibrato + volume slide (the shared memory with `H` and `D`
-  is the classic trap: `K` and `D` share one "last effect" byte in ST3), **O` sample offset (in
-  *samples*, not bytes, and the 256-multiple form), **Q** retrigger, **A** set speed, **C** pattern
-  break, **S** subcommand `SDx` note delay only (D5: every `S` in both modules is `SDx`; the test
-  asserts that too).
+  is the classic trap: `K` and `D` share one "last effect" byte in ST3), **J** arpeggio (the
+  tick-rotating base/+4/+7 semitone cycle and the period table it reads), **O** sample offset (in
+  *samples*, not bytes, and the 256-multiple form), **Q** retrigger, **S** subcommand `SDx` note
+  delay only — and the measured subcommands are **MUSIC0 `D3` 77 cells and `D6` 63, MUSIC1 `D2`
+  48**, so the delay is by 2, 3 and 6 ticks and nothing else: the test asserts that set, not the
+  general form.
 - Each test is written against the *data*: it names the order, row and channel it drives, and the
   expected values come from the effect's own arithmetic (the S3M/ST3 rules), never from the port's
   current output. A test that asks the port what it does and then asserts that is the phase's
