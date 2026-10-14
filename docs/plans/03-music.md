@@ -477,17 +477,23 @@ over the whole capture window, not a plausible-looking rate.
 written** (the controller's own simulation of exactly the sentence above, against `second5`'s
 speed-6 run, frames 427…961): starting the music at frame 409 it reproduces **none** of the 61 row
 intervals, starting at **410** it reproduces 57, and **four intervals are a frame late at any
-initial phase** — the trace changes rows at 576, 664, 848 and 918 where the model changes them at
-575, 663, 847 and 917. Three of those four are inside ENDLOGO's hold window, which is the phase's
-spine. So this step is not "implement the sentence above": it is **derive the rule that reproduces
-every one of the trace's row changes**, with the sentence above as the starting model and the four
-named intervals as the evidence that something else is in it (the surviving candidate, by
-measurement: a *mixing-chunk quantisation* the model does not carry — the player mixes in DMA-buffer
-units, `_zbufsize` 4096 — because Task 1's later probes showed the reference **is** in the polled
-mode the port models, `_zpollmix` going 0 → 1 as the shell sets it, `MAIN/U2.ASM:783`, with the
-copper calling `zpollme` once a frame, `MAIN/COPPER.ASM:466`; a delayed timer interrupt is therefore
-*not* the explanation, and the note records the two readings that ruled it out). The 410-vs-409
-half of the measurement is the session offset Task 8 will meet from the other side. Two implementation details are
+initial phase** — there the **model** changes rows at 576, 664, 848 and 918 where the **trace**
+changes them at 575, 663, 847 and 917 (the numbers were written the wrong way round in this plan
+until Task 3's review caught it; the corrected reading is the one the model's own output gives, and
+it is the reason the plan asks for a rule rather than a phase: the trace is *early* at those four
+points, which a uniform clock cannot be). Three of those four are inside ENDLOGO's hold window,
+which is the phase's spine. So this step is not "implement the sentence above": it is **derive the
+rule that reproduces every one of the trace's row changes**, with the sentence above as the starting
+model and the four named intervals as the evidence that something else is in it. **What Task 3 found
+is that the "something else" is the oracle's own jitter** — the two sessions of one recipe disagree
+with each other at 8 of their 131 row changes — so the honest end is a faithful rule plus a measured
+residual, not a rule bent to four frames.
+
+The candidates the plan offered for that "something else" are settled: the delayed-timer-interrupt one
+is dead (Task 1's probes showed the reference **is** in the polled mode the port models — `_zpollmix`
+goes 0 → 1 as the shell sets it, `MAIN/U2.ASM:783`, and the copper calls `zpollme` once a frame,
+`MAIN/COPPER.ASM:466`), and the jitter is the answer. The 410-vs-409 half of the measurement is the
+session offset Task 8 will meet from the other side. Two implementation details are
 therefore load-bearing and must be pinned by tests of their own: the *rounding* of samples per frame
 (`mix_rate / 70.086` is not an integer — the accumulator must carry fractional samples rather than
 round per frame, or the rate drifts by construction) and the *order* of the row-limit checks at a
