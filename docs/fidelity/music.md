@@ -125,9 +125,9 @@ MUSIC1.S3M: 77 of 77 patterns decode as exactly 64 rows consuming exactly their 
 
 "Consuming exactly their data" is the strong part, and the loader enforces it: 64 rows must end on
 the block's last byte, no earlier and no later. D5 reported MUSIC1 as 76 of 77 because of one cell
-whose command byte is 0; §6 shows that cell, and with 0 read as *no command* — the reading D5 records
-and the one this loader takes, leaving what a player makes of the cell to Task 3 — MUSIC1 is 77 of 77
-as well.
+whose command byte is 0, and records that 0 means *no command*; **where** that cell is, is this
+task's find (§6). With 0 read that way — the reading D5 records and the one this loader takes,
+leaving what a player makes of the cell to Task 3 — MUSIC1 is 77 of 77 as well.
 
 The counts above are the loader's cells; the same test walks both modules a second time with its own
 keystream, its own pointer arithmetic and its own cell reader (`Walk`, in the test file) and compares
@@ -165,7 +165,7 @@ makes of it, and MUSIC1's 130 is never touched.
 
 The order list is read as the bytes it is: **nothing is normalised, and 254 and 255 are kept.** A
 loader that "fixed" them here would hide what the demo actually asks its player to do, and that
-question is Task 3's, answered by the reference's own order counter (`music-clock.md` §1, §6). The
+question is Task 3's, answered by the reference's own order counter (`music-clock.md` §1, §10). The
 exact sequences are asserted byte for byte in `the_order_list_is_preserved_byte_for_byte`; what the
 test prints about them:
 
@@ -177,11 +177,23 @@ MUSIC1.S3M: 100 orders; 255 at [99]; 254 at [3, 14, 19, 25, 27, 38, 41, 46, 49, 
 Six `255`s and one `254` in MUSIC0; fifteen `254`s and one `255`, last, in MUSIC1. Every other entry
 is a pattern number inside the 77 both files carry.
 
+**How the song starts, and who starts it.** The shell hands the list to the player through
+`_zplaysong(order)`, which `MAIN/STMIK.H:43-44` declares with exactly that meaning ("this routine
+starts playing the module at order [order]"). The call has two sites in `MAIN/U2.ASM`: the
+**initial start** at `:785-786` — `push 0`, `call _zplaysong`, just after `mov es:_zpollmix,1` at
+`:783`, which is the 0 → 1 transition `music-clock.md` §5 measures — and `restartmus`
+(`:348-397`), which pushes the order its caller left in `bx` (`:393`) and calls at `:394`. The three
+callers `music-clock.md` §10 names pass 18 (`:883`), 70 (`:892`) and 25 (`:903`). (The tree's other
+two copies of the source, `MAIN/U2.BBK` and `MAIN/U2ASM.BBK`, carry the same two calls at `:394` and
+`:783`, and `:393` and `:785`.) That is why the trace never sees a `255` played: the shell restarts
+past them (§10, read off the order counter's own sequence), and what the player itself would do at
+one is measured by nothing in the tree. Modelling `_zplaysong` is Task 3's.
+
 ## 5. The instruments and their samples
 
 ```
-MUSIC0.S3M: 44 instruments, type census {0: 22, 1: 22}; 12 of them loop; 329186 sample bytes in all
-MUSIC1.S3M: 54 instruments, type census {0: 13, 1: 41}; 9 of them loop; 520396 sample bytes in all
+MUSIC0.S3M: 44 instruments, type census {0: 22, 1: 22}; 12 of them loop; 329186 sample bytes in all; 0 PCM headers with a zero paragraph pointer
+MUSIC1.S3M: 54 instruments, type census {0: 13, 1: 41}; 9 of them loop; 520396 sample bytes in all; 0 PCM headers with a zero paragraph pointer
 ```
 
 The type byte is `struct ds_smp`'s `type` (`STARTEMS.C:29`): **0 = empty and 1 = PCM, and no third
@@ -189,7 +201,11 @@ type occurs in either file.** Type 0 is a normal case, not a malformed file — 
 zero-length sample the same way (`:135-139`) — and a type-2 (adlib) instrument would have meant OPL
 in this phase (`:175-176` puts types 2..7 on the adlib path). **Neither module has one**, which is
 why Phase 3 models no OPL: that is a measurement over both files' 44 and 54 instruments, printed by
-`the_instrument_census_is_the_files_own`.
+`the_instrument_census_is_the_files_own`. **Nor does either file have a PCM header with a zero
+paragraph pointer** — the `0 PCM headers with a zero paragraph pointer` at the end of the two lines
+above is that count — which is what makes the loader's own slicing condition agree with the
+original's: the loader slices when `type == 1 && length != 0`, `STARTEMS.C:367` loads when
+`type == 1 && memseg`, and the two can only disagree on a header that names no sample memory.
 
 An empty instrument still has a header with values in it. The first of MUSIC0's 22:
 
@@ -218,6 +234,12 @@ container accounted for: header, tables, blocks, filler, samples, end of file.
 clamps, and the 512 bytes it writes after every sample (either the loop's own bytes, for a looping
 sample, or `128` filler, `:148-173`), are what the original did to its in-memory copy for the mixer.
 Task 5 reproduces them against these same numbers; the loader slices the file's bytes and stops.
+
+One more difference between the loader and `STARTEMS.C:367`, recorded because it is a difference
+even though it is inert: the original's sample-loading loop *overwrites* the header's `memseg` with
+the segment it allocated, so its "is there a sample" test is about memory, not about the file. The
+loader's `sample_bytes` is about the file — the bytes are there or they are not — and the mixer is
+what will need the original's allocated-and-padded form.
 
 ### `SCRS` and `SCRM`
 
@@ -274,8 +296,8 @@ MUSIC1.S3M: a command byte of 0 on [(13, 19, 5)]; of 255 on 0; invalid commands:
   digits, 255 = none). No cell in either file carries a digit command, and none carries 255 — the
   "none" spelling simply does not appear, because a cell with no effect carries no command field at
   all.
-- **One cell carries a command byte of 0**, in MUSIC1, at pattern 13 row 19 channel 5 — D5's recorded
-  exception. It is a real cell, not an error:
+- **One cell carries a command byte of 0**, in MUSIC1, at pattern 13 row 19 channel 5 — the cell D5
+  records as its exception, located by this task. It is a real cell, not an error:
 
 ```
 MUSIC1 pattern 13 row 19 channel 5: present 0x80 (a command field follows), command 0, info 64
@@ -339,8 +361,9 @@ checks that the two notions agree cell by cell.
 
 Recorded so that "not yet decided" is not read as "assumed":
 
-- **Order list 254 and 255.** Kept as data (§4). What the player does at them is Task 3's, decided by
-  the reference's own order counter (`music-clock.md` §6) — no reading of ST3 semantics is used here.
+- **Order list 254 and 255.** Kept as data (§4), and the shell's `_zplaysong` calls are named there
+  too. What the player does at them is Task 3's, decided by the reference's own order counter
+  (`music-clock.md` §10) — no reading of ST3 semantics is used here.
 - **Note 0xFE and 0xFF, instrument 0 and command 0.** Counted and located (§6), not interpreted.
 - **The samples' in-memory form** — the clamps and the 512-byte pad of `checkins`
   (`STARTEMS.C:129-177`) — is Task 5's; the loader slices the file.

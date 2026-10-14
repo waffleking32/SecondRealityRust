@@ -29,8 +29,15 @@ mod tests {
     /// added for convenience is how a player stops being reproducible.
     ///
     /// The manifest is read as text, not through a TOML crate, because the guard must not
-    /// itself be the first dependency it forbids — and because it has to catch a dependency
-    /// *table*, `[dependencies.foo]`, which is an offender whatever it holds.
+    /// itself be the first dependency it forbids.
+    ///
+    /// **Any table whose name mentions `dependencies` is an offender** except
+    /// `[dev-dependencies]` and `[build-dependencies]`. The earlier shape — `[dependencies]`
+    /// plus `[dependencies.x]` — let two spellings through: `[target.'cfg(unix)'.dependencies]`
+    /// (a target-specific dependency, which is still a runtime dependency) and
+    /// `[ dependencies ]` (whitespace inside the brackets, which TOML allows and the old
+    /// equality test missed). Both are now caught, and both were seen to fail — see the
+    /// review notes in `.superpowers/sdd/03-music/task-2-report.md`.
     #[test]
     fn the_player_has_no_runtime_dependencies() {
         const MANIFEST: &str = include_str!("../Cargo.toml");
@@ -43,11 +50,16 @@ mod tests {
             let line_number = index + 1;
             let trimmed = line.trim();
             if trimmed.starts_with('[') {
-                // A section header. `[dev-dependencies]` and `[build-dependencies]` do not
-                // start with `[dependencies`.
-                in_dependencies = trimmed == "[dependencies]";
+                // A table header. TOML allows whitespace inside the brackets, so the name is
+                // what is between them, trimmed.
+                let name = trimmed.trim_start_matches('[').trim_end_matches(']').trim();
+                in_dependencies = name == "dependencies";
                 found_the_section |= in_dependencies;
-                if !in_dependencies && trimmed.starts_with("[dependencies") {
+                if name.contains("dependencies")
+                    && !in_dependencies
+                    && name != "dev-dependencies"
+                    && name != "build-dependencies"
+                {
                     offenders.push(format!("line {line_number}: {trimmed}"));
                 }
                 continue;

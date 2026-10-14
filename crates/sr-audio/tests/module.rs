@@ -785,7 +785,8 @@ fn the_effect_histogram_is_the_modules_own() {
         "and no other letter occurs"
     );
 
-    // MUSIC1's, plus the one cell D5 recorded as its exception.
+    // MUSIC1's, plus the one cell whose command byte is 0 — D5 records that the cell
+    // exists and that 0 means no command; where it is, is this test's find.
     let music1 = music1();
     let histogram = histogram_of(&music1);
     let measured: Vec<(&str, usize)> = vec![
@@ -819,7 +820,7 @@ fn the_effect_histogram_is_the_modules_own() {
     assert_eq!(
         histogram.get(&0).copied(),
         Some(1),
-        "D5's one command-0 cell"
+        "one command-0 cell, at pattern 13 row 19 channel 5"
     );
     assert_eq!(
         histogram.values().sum::<usize>(),
@@ -844,7 +845,8 @@ fn the_effect_histogram_is_the_modules_own() {
     assert!(!cell.is_empty());
 
     // Its flag byte, from this file's own walker: bit 7 (command and info) with the low five
-    // bits naming channel 5 — 0x85. That is D5's exception in the file's own terms.
+    // bits naming channel 5 — 0x85, the cell D5 records as MUSIC1's exception and that this
+    // test locates.
     let walk = walks(&music1);
     let raw = walk[13].rows[19]
         .iter()
@@ -939,17 +941,22 @@ fn the_instrument_census_is_the_files_own() {
         let mut census: BTreeMap<u8, usize> = BTreeMap::new();
         let mut looped = 0usize;
         let mut sample_bytes = 0usize;
+        let mut pcm_without_a_pointer = 0usize;
         for index in 0..loaded.module.instrument_count() {
             let instrument = loaded.module.instrument(index).expect("an instrument");
             *census.entry(instrument.sample_type).or_insert(0) += 1;
             if instrument.loops() {
                 looped += 1;
             }
+            if instrument.is_pcm() && instrument.memseg == 0 {
+                pcm_without_a_pointer += 1;
+            }
             sample_bytes += loaded.module.sample_bytes(index).map_or(0, <[u8]>::len);
         }
         println!(
             "{}: {} instruments, type census {census:?}; {looped} of them loop; {sample_bytes} \
-             sample bytes in all",
+             sample bytes in all; {pcm_without_a_pointer} PCM headers with a zero paragraph \
+             pointer",
             loaded.name,
             loaded.module.instrument_count(),
         );
@@ -970,6 +977,15 @@ fn the_instrument_census_is_the_files_own() {
             census.values().sum::<usize>(),
             loaded.module.instrument_count(),
             "and no other type occurs"
+        );
+        // `STARTEMS.C:367` loads a sample only when `type == 1 && memseg`; the loader here
+        // slices when the type is PCM and the length is non-zero. The conditions differ only
+        // for a PCM header with a zero paragraph pointer, and there is no such header in
+        // either file — which is what makes the difference inert rather than a divergence.
+        assert_eq!(
+            pcm_without_a_pointer, 0,
+            "{}: every PCM header has a paragraph pointer, so the two conditions agree",
+            loaded.name
         );
     }
 }

@@ -109,8 +109,10 @@ pub struct Cell {
     /// The volume column, 0..64. Zero is a real value, not "absent" — see [`Cell::present`].
     pub volume: u8,
     /// The effect, in ST3's numeric alphabet (1..=26 = `A`..`Z`, 0x30..=0x39 = digits, 255 =
-    /// none, spec §7.1). 0 is the second spelling of "no command" and D5 records exactly one
-    /// such cell (MUSIC1's pattern 13, row 19, channel 5).
+    /// none, spec §7.1). 0 is the second spelling of "no command": D5 records that MUSIC1 has
+    /// one cell whose command byte is 0, and that 0 means *no command* — and **this crate's
+    /// tests** are what locate it (MUSIC1's pattern 13, row 19, channel 5, flag byte 0x85,
+    /// info 0x40; D5 records the cell, not where it is).
     pub command: u8,
     /// The effect's parameter byte.
     pub info: u8,
@@ -358,8 +360,15 @@ impl Module {
                 name: block[0x30..0x4C].try_into().expect("twenty-eight bytes"),
             };
 
-            // `STARTEMS.C:367`: only `type == 1` instruments carry a sample, and only those
-            // are sliced. A length of zero is `checkins`'s "no sample" (`:135-139`).
+            // The port's condition here is `is_pcm() && length != 0`; the original's is
+            // `type == 1 && memseg` (`STARTEMS.C:367`, the guard on its sample-loading loop).
+            // The two differ only for a type-1 header with `memseg == 0` and a non-zero
+            // length, and neither module has one — the test counts every PCM instrument's
+            // `memseg` and asserts none is zero — so nothing here is built on the
+            // difference. This is the condition the port wants: the bytes a sample has are
+            // the file's `length` of them at the header's paragraph pointer, and a header
+            // whose length is zero has none (`checkins`'s no-sample case, `:135-139`),
+            // whatever its pointer says.
             let sample = if instrument.is_pcm() && instrument.length != 0 {
                 let at = instrument.sample_offset();
                 let end = at + instrument.length as usize;
@@ -433,8 +442,10 @@ impl Module {
 
     /// The order list, **as the file wrote it**: 254 and 255 are kept, not normalised and
     /// not filtered. What the player does with them is the player's business, decided by the
-    /// reference's own order counter (`docs/fidelity/music-clock.md` §6) and implemented in
-    /// `player.rs` — not by this loader and not by a reading of ST3 semantics.
+    /// reference's own order counter (`docs/fidelity/music-clock.md` §10) and implemented in
+    /// `player.rs` — not by this loader and not by a reading of ST3 semantics. The shell is
+    /// what hands the list over: `_zplaysong(order)` (`MAIN/U2.ASM:786` for the initial
+    /// start, and `restartmus`'s call at `:393-394`).
     pub fn orders(&self) -> &[u8] {
         &self.orders
     }
