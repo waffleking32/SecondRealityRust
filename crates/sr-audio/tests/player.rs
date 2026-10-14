@@ -797,6 +797,11 @@ fn each_module_plays_to_the_end_of_its_order_list() {
     // and the tick counts — and the printed line is what `PROGRESS.md` may quote.
     for name in ["MUSIC0", "MUSIC1"] {
         let (polls, position, loops, finished) = play_through(name);
+        // A second, independent count of the same run: the ticks it spent, against the rows it
+        // spent them on.
+        let (ticks, rows) = count_ticks(name);
+        assert!(rows > 0, "{name}: no rows played");
+        println!("  {name}: {polls} poll(s), {ticks} tick(s) over {rows} row(s)");
         let module = module(name);
         assert!(
             usize::from(position.order) < module.order_count(),
@@ -823,6 +828,47 @@ fn each_module_plays_to_the_end_of_its_order_list() {
             "{name}: expected a loop or an end"
         );
     }
+}
+
+/// Play the module again, counting the ticks it spends and the rows it spends them on.
+///
+/// The tick count is the player's own (`Player::zframe`); the row count is the engine's position
+/// changing. Every row must get at least one tick and no more than 32 — the range the format's
+/// speed byte allows — so the two agreeing is a statement about the row timer rather than about
+/// the counter reading itself. Returns (ticks, rows).
+fn count_ticks(name: &'static str) -> (i64, u32) {
+    let mut player = player(name);
+    player.play_song(0);
+    let mut ticks = 0i64;
+    let mut rows = 0u32;
+    let mut last_row = None;
+    let cap = 400_000u32;
+    let mut previous = player.state().order;
+    let mut started = false;
+    for _ in 0..cap {
+        let before = player.zframe();
+        let position = player.engine_position();
+        player.poll();
+        let now = player.zframe();
+        ticks += i64::from(now - before);
+        if last_row != Some((position.order, position.row)) {
+            rows += 1;
+            last_row = Some((position.order, position.row));
+        }
+        let published = player.state();
+        if !started && published.order != 0 {
+            started = true;
+        }
+        if (started && published.order < previous) || player.finished() {
+            break;
+        }
+        previous = published.order;
+    }
+    assert!(
+        ticks >= i64::from(rows) && ticks <= i64::from(rows) * 32,
+        "{name}: {ticks} tick(s) over {rows} row(s) is outside every row getting 1..32"
+    );
+    (ticks, rows)
 }
 
 fn looped_or_finished(loops: u8, finished: bool) -> bool {
