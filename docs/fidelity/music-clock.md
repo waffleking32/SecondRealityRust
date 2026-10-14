@@ -187,15 +187,19 @@ gap histogram per run:
 Two gap sizes carry every steady run — the intervals take two neighbouring whole-frame
 values and alternate between them — and the sizes outside the two the run's own row length
 brackets are **few and scattered through the run, not gathered at its edges**. `music
-analyse` prints them with their positions:
+analyse` prints them with their positions; the two runs below are `second5`'s first
+(`cargo xtask music analyse --trace reference/music/second5`) and `second3`'s second
+(`cargo xtask music analyse --trace reference/music/second3`), and `(…)` marks the lines
+between them that are not shown:
 
 ```
   frames 427..961 at speed 6 tempo 120: 61 gap(s) — 8 frame(s) x16, 9 frame(s) x44, 10 frame(s) x1
-    the 1 gap(s) outside the 8..9 the run's own row length (8.76 frames) brackets, by their
-      position in the run: 18 of 61 (575 -> 585, 10)
+    distinct gap sizes: 3 (one row is 8.8 frame(s) at this speed/tempo)
+    the 1 gap(s) outside the 8..9 the run's own row length (8.76 frames) brackets, by their position in the run: 18 of 61 (575 -> 585, 10)
+(…)
   frames 2488..2896 at speed 3 tempo 130: 101 gap(s) — 3 frame(s) x1, 4 frame(s) x95, 5 frame(s) x5
-    the 1 gap(s) outside the 4..5 the run's own row length (4.04 frames) brackets, by their
-      position in the run: 48 of 101 (2678 -> 2681, 3)
+    distinct gap sizes: 3 (one row is 4.0 frame(s) at this speed/tempo)
+    the 1 gap(s) outside the 4..5 the run's own row length (4.04 frames) brackets, by their position in the run: 48 of 101 (2678 -> 2681, 3)
 ```
 
 `second5`'s 10-frame gap is the 18th of that run's 61 intervals and `second3`'s 3-frame gap
@@ -231,7 +235,7 @@ locate reading:
 | `_zoutputmode` | **5** | 5 | Sound Blaster Pro (`MAIN/STMIK.H:67-74`) |
 | `_zmixspeed` | 20000 | **40000** | the mixing rate: 20 kHz before the demo's music engine starts, **40 kHz** from the music's start on (`cargo xtask music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5` reads 40000 at both ends of that window) |
 | `_zbufsize` | **4096** | 4096 | the DMA buffer, the largest `MAIN/STMIK.H:88-95` lists |
-| `_zpollmix` | 0 | **1** | **the caller polls the player** (`MAIN/STMIK.H:152-176`): `1` means the program must call `zpollme`, which is what `MAIN/COPPER.ASM:466` does once per copper frame — and the same probe reads 1 at both ends of the music window |
+| `_zpollmix` | 0 | **1** | **the caller polls the player** (`MAIN/STMIK.H:152-176`): `1` means the program must call `zpollme`, which is what `MAIN/COPPER.ASM:466` does once per copper frame — `second5b`'s manifest records the move (0 at the locate, 1 at the end), and `music analyse` prints that pair on the word's own moved line |
 | `_zspeedadjust` | **0** | 0 | |
 | `_zspeedadjust2` | **0** | 0 | `MAIN/U2.ASM:389` writes it only for outputmode 7 or 2, and the card is 5 |
 | `_np_mastervol` | 192 | **64** | the object's own initialiser is 0xC0 = 192 (`STMIK.300`'s static byte at segment offset 0x0911; `crates/sr-assets/tests/omf_symbols.rs` asserts it), and `fademusic` (`MAIN/U2.ASM:333-346`) walks it down as a part ends — 64 at the end of the window |
@@ -445,18 +449,19 @@ player moved). The trace reads through the **lowest** view, and the manifest rec
 view, the proof, and the frame it was measured at. `music analyse --at` tries every view, so
 §1.7's address is placed in the view it was measured in.
 
-**The filed manifests are older than the tool that reads them, in three ways, and they are left
-as they were.** They carry no `coverage.before_sampling` (§7: the field that names
-the boundary run); their `locate.aliasing` sentence still contains a doubled `0x` that the
-tool no longer writes; and three of the four — `second5`, `second3`, `hiddenu` — carry no
-`machine_moved`, the field being newer than they are, so their `machine` map holds the reading
-at the locate and whatever the machine did later is not in their record. `second5b`, the same
-recipe as `second5` and the one manifest that carries the field, records four moved words, and
-`music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5` reads the mixing rate at
-40000 in that recipe. None is repaired here: `reference/` is input-only, a *new* directory
-under `reference/music/` is the only thing `music trace` may write inside it, and hand-editing
-a filed manifest is what Phase 2's `reference backfill` exists to avoid being done by a
-person. What keeps the filed records checkable is the reading side: `reference verify`
+**Three of the four filed manifests are older than the tool that reads them, in three ways, and
+they are left as they were: `second5`, `second3` and `hiddenu`** — the three taken before those
+fields existed (`second5b`, filed last, carries `coverage.before_sampling` and a
+`locate.aliasing` sentence with one `0x`). They carry no `coverage.before_sampling` (§7: the
+field that names the boundary run); their `locate.aliasing` sentence still contains a doubled
+`0x` that the tool no longer writes; and they carry no `machine_moved` either, so their
+`machine` map holds the reading at the locate and whatever the machine did later is not in
+their record. `second5b` — the same recipe as `second5` — is the one manifest that carries the
+moved words (four of them); `music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5`
+reads the mixing rate at 40000 in that recipe. None is repaired here: `reference/` is input-only,
+a *new* directory under `reference/music/` is the only thing `music trace` may write inside it,
+and hand-editing a filed manifest is what Phase 2's `reference backfill` exists to avoid being
+done by a person. What keeps the filed records checkable is the reading side: `reference verify`
 recomputes each trace's coverage from the trace file itself and compares it **field by field**
 — and only compares `before_sampling` when a manifest records one — while `music analyse`
 recomputes the coverage too, so the boundary is named for these traces as well (§7's block is
