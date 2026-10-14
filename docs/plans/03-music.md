@@ -433,7 +433,20 @@ whole tick whenever the accumulated total reaches one tick's worth (`mix_rate ×
 samples), carrying the remainder; the row advances one per `speed` ticks; at a row past the
 pattern's last (64), the order advances. The observable consequence — **which frame a row change
 lands on** — is in Task 1's trace, and this task's acceptance is a byte-for-byte agreement with it
-over the whole capture window, not a plausible-looking rate. Two implementation details are
+over the whole capture window, not a plausible-looking rate.
+
+**That rule is a first approximation, and it was measured to be one while this plan was being
+written** (the controller's own simulation of exactly the sentence above, against `second5`'s
+speed-6 run, frames 427…961): starting the music at frame 409 it reproduces **none** of the 61 row
+intervals, starting at **410** it reproduces 57, and **four intervals are a frame late at any
+initial phase** — the trace changes rows at 576, 664, 848 and 918 where the model changes them at
+575, 663, 847 and 917. Three of those four are inside ENDLOGO's hold window, which is the phase's
+spine. So this step is not "implement the sentence above": it is **derive the rule that reproduces
+every one of the trace's row changes**, with the sentence above as the starting model and the four
+named intervals as the evidence that something else is in it (candidates to rule in or out, by
+measurement: the player mixes from its own timer — Task 1 measured `_zpollmix = 0` — so a delayed
+interrupt is one; a mixing-chunk quantisation the model does not carry is another). The 410-vs-409
+half of the measurement is the session offset Task 8 will meet from the other side. Two implementation details are
 therefore load-bearing and must be pinned by tests of their own: the *rounding* of samples per frame
 (`mix_rate / 70.086` is not an integer — the accumulator must carry fractional samples rather than
 round per frame, or the rate drifts by construction) and the *order* of the row-limit checks at a
