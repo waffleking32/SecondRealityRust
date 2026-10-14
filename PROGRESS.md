@@ -11,7 +11,7 @@ Phase status board. **Read this first if you are resuming work.**
 |---|---|---|---|---|
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
-| 2 | Shell + easy tier | **complete — untagged** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below; tag withheld for the whole-branch review | [02-shell.md](docs/plans/02-shell.md) | — |
+| 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | not started | — | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
@@ -22,16 +22,24 @@ Phase status board. **Read this first if you are resuming work.**
 
 ## Where to pick up
 
-**Phase 2 is complete — its exit criteria are met and its evidence is recorded below — and the
-`phase-2` tag is deliberately withheld.** The work is on branch **`phase-2-shell`**, not yet merged to
-`master`: the close-out commit is `339f4bd`, the comparisons below were re-run at `0c78cd3`, and the
-commits after that point are the close-out's own record and the whole-branch review's fix round
+**Phase 2 is complete** — its exit criteria are met, its evidence is recorded below, and **the
+`phase-2` tag is applied at this commit.** The work is on branch **`phase-2-shell`**, not yet merged
+to `master`: the close-out commit is `339f4bd`, the comparisons below were re-run at `0c78cd3`, and
+the commits after that point are the close-out's own record and the whole-branch review's fix round
 (§ "The whole-branch review, and its fix round"). Its plan is `docs/plans/02-shell.md` and its ledger
 (the rulings and the per-task results, git-ignored scratch) is
-`.superpowers/sdd/02-shell/progress.md`. The tag is withheld because the final whole-branch review
-runs after the close-out and may require fixes: a tag that has to be moved is worse than a tag
-applied a few commits later (Phase 1's ruling, B6). When the review is clean — it has been: *needs
-fixes*, fixed, and a scoped re-review is the next step — `git tag phase-2` goes on the tip.
+`.superpowers/sdd/02-shell/progress.md`.
+
+The tag was withheld until the final whole-branch review had run, on Phase 1's ruling that a tag
+which has to be moved is worse than a tag applied a few commits later. That review came back *needs
+fixes* with no Critical — thirteen findings, all records plus one clippy item, **nothing that changes
+what any part draws** — and it re-derived the exit criteria itself rather than reading them: it
+rebuilt the release binary, re-dumped and re-compared four parts, re-hashed every frame the reference
+files, and flipped a byte in both planes of `reference verify` to watch it fail. The fix round
+addressed all thirteen and a scoped re-review confirmed each one, verifying the clippy arithmetic by
+staged runs in a scratch tree (5 → 6 → 7 under the plan's command, 11 more under `--all-targets`: 18
+in all) and checking every code change for behaviour-neutrality. Its words: "claims that do not
+reproduce are the exception here, not the rule".
 
 **Phase 3 (music) is next.** It is not started: no plan exists yet, and a phase's plan is written
 just in time (`CLAUDE.md`). What Phase 3 inherits from this one:
@@ -1117,7 +1125,7 @@ phase boundary**: nothing here claims a person has judged the frames.
 
 ## Phase log
 
-### Phase 2 — Shell + easy tier (exit criteria met, tag withheld)
+### Phase 2 — Shell + easy tier (done, tag `phase-2`)
 
 Eleven tasks on branch `phase-2-shell`, from `5cf3e88` to `0c78cd3`. **590 tests pass, zero
 failures, three ignored, zero warnings** (Phase 1 closed at 405, one ignored). Every comparison in
