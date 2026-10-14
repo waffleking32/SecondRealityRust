@@ -265,16 +265,35 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             &[0x2E, 0xFF, 0x06, 0x0B, 0x09],
             "incw %cs:0x90b — _np_loop's source, on the loop path",
         ),
-        // A and T are one handler told apart by the parameter: 32 and under is a speed.
+        // **`A` and `T` are two handlers, not one told apart by the parameter** — the
+        // reading Task 4 corrected. `T` is the first-tick table's entry 20 and its body is
+        // this entry: `cmp $0x20,%ax; jbe 0x3dce` sends 32 and under to the *driver* call,
+        // never to the speed, so a `T` with a small parameter changes nothing.
         (
             0x3D73,
             &[0x32, 0xE4, 0x3D, 0x20, 0x00, 0x76],
-            "xor %ah,%ah; cmp $0x20,%ax; jbe (→ the speed path)",
+            "T: xor %ah,%ah; cmp $0x20,%ax; jbe (+0x3dce, the driver call) — the split that is this handler's alone",
+        ),
+        // `A` is the first-tick table's entry 1 and its whole body is this: **no upper
+        // bound**, so `A7F` sets a speed of 127 (MUSIC1 has such a cell). The correction in
+        // `player.rs` and the note's §9.13 rest on these eleven bytes.
+        (
+            0x3DD2,
+            &[0x3C, 0x00, 0x74, 0xF8, 0x32, 0xE4, 0x2E, 0xA3, 0x02, 0x20, 0xC3],
+            "A: cmp $0x0,%al; je (+0x3dce); xor %ah,%ah; mov %ax,%cs:0x2002 (_np_speed); ret",
+        ),
+        // ...and the object's own *header watch* is the second witness: it calls `+0x3dd2`
+        // for the module's speed byte (offset 49) and `+0x3d73` for its tempo byte (offset
+        // 50), so the two handlers are distinct by construction and not by parameter.
+        (
+            0x53D8,
+            &[0xE8, 0xF7, 0xE9],
+            "the header watch calls +0x3dd2 for the initial *speed* byte (offset 49, read at +0x53ca)",
         ),
         (
-            0x3DD8,
-            &[0x2E, 0xA3, 0x02, 0x20, 0xC3],
-            "mov %ax,%cs:0x2002 (_np_speed); ret",
+            0x53C7,
+            &[0xE8, 0xA9, 0xE9],
+            "and +0x3d73 for the initial *tempo* byte (offset 50, read at +0x53b9)",
         ),
         (
             0x3D7B,
@@ -299,12 +318,12 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         (
             0x3BD8,
             &[0x72, 0x3D, 0xD2, 0x3D, 0xDD, 0x3D, 0xFE, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x72, 0x3D, 0x72, 0x3D, 0x48, 0x41, 0x90, 0x41, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0x72, 0x3D, 0x4E, 0x42, 0x73, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x4A, 0x42, 0x72, 0x3D],
-            "the first-tick dispatch table (`+0x3bd8`), command by command: 1 = 0x3dd2 (A), 2 = 0x3ddd (B), 3 = 0x3dfe (C), 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 and 8 = the bare ret at 0x3d72, 10 = 0x4190, 17 = 0x41ec, 19 = 0x424e, 20 = 0x3d73 (T)",
+            "the first-tick dispatch table (`+0x3bd8`), entry by entry: 0 = the bare ret at 0x3d72, 1 = 0x3dd2 (A), 2 = 0x3ddd (B), 3 = 0x3dfe (C), 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 and 8 = the bare ret, 9 = 0x4148 (I), 10 = 0x4190 (J), 11..16 = the bare ret, 17 = 0x41ec (Q), 18 = the bare ret, 19 = 0x424e (S), 20 = 0x3d73 (T), 21..25 = the bare ret, 26 = 0x424a (Z), 27 = the bare ret",
         ),
         (
             0x3C0E,
             &[0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x94, 0x3F, 0x05, 0x40, 0x48, 0x41, 0x90, 0x41, 0x00, 0x3F, 0x05, 0x3F, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0xD0, 0x40, 0x61, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0xC8, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D],
-            "the later-tick dispatch table (`+0x3c0e`): 1, 2 and 3 are the bare ret; 4 = 0x3f08, 5 = 0x3e4f, 6 = 0x3e10, 7 = 0x3f94 (G), 8 = 0x4005 (H), 10 = 0x4190, 11 = 0x3f00 (K), 12 = 0x3f05 (L), 17 = 0x41ec, 19 = 0x4261",
+            "the later-tick dispatch table (`+0x3c0e`), entry by entry: 1, 2 and 3 are the bare ret where the first table has A, B and C; 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 = 0x3f94 (G), 8 = 0x4005 (H), 9 = 0x4148 (I), 10 = 0x4190 (J), 11 = 0x3f00 (K), 12 = 0x3f05 (L), 17 = 0x41ec (Q), 18 = 0x40d0 (R), 19 = 0x4261 (S), 22 = 0x42c8 (V) — I, R and V have handlers here, so the letters this task records as absent are absent from the *data*, not from the object",
         ),
         (
             0x3B98,

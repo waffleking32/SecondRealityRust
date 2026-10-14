@@ -155,9 +155,19 @@ pub struct Channel {
 }
 
 impl Channel {
-    /// A channel as the module initialiser leaves one (`+0x5614`, which `_zplaysong` calls at
-    /// `+0x258e`): every field zero and `achannelused` = `0x80` — the channel exists and has
-    /// nothing to say, so it is not [`Channel::used`].
+    /// A channel, left the way the port starts one: every field zero and [`Channel::used`]
+    /// false — the part of the module initialiser (`+0x5614`, which `_zplaysong` calls at
+    /// `+0x258e`) that any Task 4 assertion can observe.
+    ///
+    /// **The object's own writes are wider than that, and Task 5's mixer will meet them.** It
+    /// zeroes the channel number (`+0x5625`), the cell fields, the volume and the period words,
+    /// but it writes the **`0x01010101`** markers into the position and the base (`+0x5628`,
+    /// `+0x5630`), sets `lastadlins` to `0x65` (`+0x5681`), and leaves `a0volcut` and the effect
+    /// counters as they were; the silence pass that follows (`+0x569a`) then writes `0xff` into
+    /// `+0x04` and `+0x3f` and 0 into `+0x41`. None of those is reachable by a Task 4
+    /// assertion — the position a note start writes replaces the marker — so the port carries
+    /// none of them, and the mixer decides for itself what to make of a channel that has never
+    /// played a note.
     pub(crate) fn reset(&mut self) {
         *self = Channel::default();
     }
@@ -769,8 +779,11 @@ const NOTE_PERIODS: [u16; 12] = [
 /// up because the object does not check the index.
 const NOTE_SHIFTS: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 5, 11, 17, 27, 32, 42, 47];
 
-/// The `Q` volume-variation addends at `+0x95c`, signed.
-const RETRIGGER_ADD: [i8; 16] = [0, -1, -2, -4, -8, -16, 0, 0, 0, 1, 2, 4, 8, 16, 1, 1];
+/// The `Q` volume-variation addends at `+0x95c`, signed — with the same reading of the image
+/// applied as the multipliers below: the bytes at 6, 7, 8 and 14, 15 are the codes that take
+/// the *multiply* path, and where the image holds `0x0101` there the running program holds 0.
+/// (The slots the code actually reaches are 0…5 and 9…13, all of them real bytes.)
+const RETRIGGER_ADD: [i8; 16] = [0, -1, -2, -4, -8, -16, 0, 0, 0, 1, 2, 4, 8, 16, 0, 0];
 
 /// The `Q` volume-variation multipliers at `+0x96c`, in sixteenths — with the object image's
 /// `0x0101` filler slots read as the runtime zeroes they are.

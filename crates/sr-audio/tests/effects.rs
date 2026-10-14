@@ -1682,3 +1682,82 @@ impl Song {
         Module::load(&bytes).expect("the built module loads")
     }
 }
+
+#[test]
+fn the_volume_zero_optimisation_stops_a_pattern_break_from_running() {
+    // The one place this task's work touches the *timeline*, and it is MUSIC1's own order 0.
+    // Pattern 73's row 0 plays eight note-offs (`0xfe`, which takes the volume to 0 and
+    // `aorgspd` to `0xffff`) and sets the speed to 3; its row 3 carries a `C00` on channel 2 —
+    // a pattern break to the next order's row 0.
+    //
+    // Channel 2 is not named on rows 1 and 2, and its volume is 0, so the first-tick pass's
+    // "volume 0" test (`+0x3c77`...`0x3cad`, on because both modules' flags word is 8) counts
+    // it down and **frees the channel on row 3** (`+0x3ca9`, `achannelused = 0`) — before the
+    // dispatch table is reached. The `C00` therefore never runs and the pattern plays its 64
+    // rows out. Task 3's player had no such path and dispatched the freed channel's command,
+    // which broke to order 1 at row 3; when this path arrived, MUSIC1's end-to-end play gained
+    // sixty rows and §8's four numbers moved again — by a different amount from the `A`/`T`
+    // correction's, which is why the note separates them.
+    let m1 = module("MUSIC1");
+    assert_eq!(
+        m1.orders()[0],
+        73,
+        "the order the demo's own boot starts MUSIC1 at"
+    );
+    let break_cell = cell(&m1, 73, 3, 2);
+    assert_eq!(
+        (break_cell.command, break_cell.info),
+        (3, 0),
+        "C00 on channel 2, row 3"
+    );
+    let note_off = cell(&m1, 73, 0, 2);
+    assert_eq!(
+        note_off.note, 0xfe,
+        "and the note off that zeroes its volume"
+    );
+
+    let mut player = Player::new(m1, PlayerOptions::default());
+    player.play_song(0);
+    run_to_row(&mut player, 73, 1);
+    assert!(
+        player.channel(2).expect("channel").used,
+        "row 1: three silent rows have not passed yet"
+    );
+    run_to_row(&mut player, 73, 2);
+    assert!(player.channel(2).expect("channel").used, "row 2: nor yet");
+    // Row 3's own first tick is where the countdown empties — the *third* silent row, its
+    // cell installed first and the free landing before the dispatch — so the tick is stepped
+    // and the channel read after it.
+    run_to_row(&mut player, 73, 3);
+    tick(&mut player);
+    let freed = *player.channel(2).expect("channel");
+    assert!(!freed.used, "row 3: the channel is freed before its C00");
+    assert_eq!(freed.volume, 0, "on a volume of 0 and no new data");
+    assert_eq!(
+        player.engine_position().row,
+        3,
+        "and the row is still row 3"
+    );
+
+    // The pattern therefore plays out: the order is still 0 at row 63, and advances normally
+    // after it.
+    run_to_row(&mut player, 73, 63);
+    assert_eq!(player.engine_position().order, 0, "no break ran");
+    assert!(
+        !player.channel(2).expect("channel").used,
+        "and stays freed: nothing names it again"
+    );
+    assert_eq!(player.state().speed, 3, "the speed row 0 set");
+    for _ in 0..64 {
+        tick(&mut player);
+        if player.engine_position().order == 1 {
+            break;
+        }
+    }
+    assert_eq!(
+        player.engine_position().order,
+        1,
+        "and the order advances when the pattern ends"
+    );
+    assert_eq!(player.engine_position().row, 0);
+}

@@ -331,7 +331,7 @@ impl Module {
         let initial_tempo = header[50];
         let master_volume = header[51];
 
-        // `ds_fileheader.flags` (`STARTEMS.C:58`), the file's offset 38 — the word the
+        // `ds_fileheader.flags` (`STARTEMS.C:59`), the file's offset 38 — the word the
         // player watches as `_np_masterflags` (`+0x53ef`…`+0x5401`) and whose bit 0 becomes
         // its amiga-compatibility byte (`+0x5424`). Both modules carry 8.
         let flags = u16_at(bytes, 38);
@@ -502,7 +502,7 @@ impl Module {
         self.master_volume & 0x80 != 0
     }
 
-    /// The header's `flags` word (`STARTEMS.C:58`'s `unsigned flags`, the file's offset 38).
+    /// The header's `flags` word (`STARTEMS.C:59`'s `unsigned flags`, the file's offset 38).
     ///
     /// The player reads it as `_np_masterflags` — the word the STMIK documentation's flag
     /// list belongs to (`MAIN/STMIK.H:104-107`: bit 3 "vol 0 optimizations", bit 4 "full
