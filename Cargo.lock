@@ -718,6 +718,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sr-audio"
+version = "0.1.0"
+dependencies = [
+ "rstest",
+]
+
+[[package]]
 name = "sr-engine"
 version = "0.1.0"
 dependencies = [

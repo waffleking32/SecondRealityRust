@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["bins/secondreality", "crates/sr-assets", "crates/sr-engine", "xtask"]
+members = [
+    "bins/secondreality",
+    "crates/sr-assets",
+    "crates/sr-audio",
+    "crates/sr-engine",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +15,7 @@ license = "MIT"
 rust-version = "1.85"
 
 [workspace.dependencies]
+sr-audio = { path = "crates/sr-audio" }
 sr-engine = { path = "crates/sr-engine" }
 sdl2 = "0.38"
 serde = { version = "1", features = ["derive"] }
