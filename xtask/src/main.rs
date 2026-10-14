@@ -23,6 +23,7 @@
 mod assets;
 mod compare;
 mod frames;
+mod music;
 mod oracle;
 mod reference;
 mod sheet;
@@ -101,6 +102,18 @@ enum Command {
         #[command(subcommand)]
         command: AssetsCommand,
     },
+    /// The music player's own state, read out of the emulated original.
+    ///
+    /// There is no audio reference and the modules' timing is invisible from
+    /// outside, so Phase 3's oracle is a per-frame trace of the words
+    /// `MAIN/STMIK.H:125-131` publishes — located in guest memory through
+    /// `MAIN/STMIK.300`'s own OMF public symbols. `symbols` prints that map;
+    /// `trace` writes one trace under `reference/music/`; `analyse` derives the
+    /// phase's numbers from one.
+    Music {
+        #[command(subcommand)]
+        command: MusicCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -156,6 +169,143 @@ enum AssetsCommand {
         #[arg(long)]
         sheet: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum MusicCommand {
+    /// Print `MAIN/STMIK.300`'s public symbols: the record census, the segments,
+    /// every `PUBDEF` name with its offset inside the segment, the words the
+    /// trace reads, and the two runs of the object's own `LEDATA` data the
+    /// locator searches guest memory for.
+    ///
+    /// Every address the trace reads comes from here, so this is the command
+    /// behind the numbers in `docs/fidelity/music-clock.md`.
+    Symbols {
+        /// The OMF object to walk. The default is the tree's own music player,
+        /// the object STMIK was linked from.
+        #[arg(long, default_value = music::DEFAULT_OBJECT)]
+        object: PathBuf,
+    },
+    /// Trace the emulated original's own music-player state, one row per
+    /// reference frame, into `--out`.
+    ///
+    /// The trace is keyed by the guest's own frame counter, never by a
+    /// hoped-for index: each sample is bracketed by two counter reads and
+    /// re-taken when the counter moved between them, and the manifest states
+    /// the coverage actually achieved. A trace with gaps **says so** and does
+    /// not describe itself as per-frame.
+    ///
+    /// `--out` is refused inside a frame capture's directory, and inside
+    /// `reference/` the only place it may point is a new directory under
+    /// `reference/music/` — the rest of the tree is the reference, and a file
+    /// written among it is a file every later diff is measured against.
+    Trace {
+        /// The OMF object whose `PUBDEF` records give the words' offsets.
+        #[arg(long, default_value = music::DEFAULT_OBJECT)]
+        object: PathBuf,
+        /// The program to run in the guest.
+        #[arg(long, default_value = "reference/original/SECOND.EXE")]
+        exe: PathBuf,
+        /// Mounted read-only as C: and the guest's working directory;
+        /// SECOND.EXE loads REALITY.FC from it and the two cannot be separated.
+        #[arg(long, default_value = "reference/original")]
+        cwd: PathBuf,
+        /// An argument for the program, e.g. the demo block. Repeatable.
+        #[arg(long = "arg")]
+        arguments: Vec<String>,
+        /// CPU cycles per millisecond to pin (50..2000000). Required: an
+        /// unpinned trace is not reproducible and is refused.
+        #[arg(long)]
+        cycles: u32,
+        /// The frames to sample: `A..B` (A up to but not including B, the Rust
+        /// range), `A..=B` (both ends included), a comma-separated list, or a
+        /// list of ranges — `0..1300` and `0..1299,2000` both work. Indices are
+        /// boot-relative, the same space every capture's are, and every frame
+        /// in the window is sampled.
+        #[arg(long)]
+        frames: String,
+        /// Where `trace.csv` and `manifest.json` are written.
+        #[arg(long)]
+        out: PathBuf,
+        /// Key names sent once the setup screen appears, whitespace separated,
+        /// e.g. "KBD_left KBD_enter". Under `--boot autoexec` they are the
+        /// buttons AUTOTYPE presses instead. The soundcard these keys select is
+        /// part of the measurement: the trace reads the card's own words.
+        #[arg(long, default_value = "KBD_left KBD_enter")]
+        keys: String,
+        /// How the guest reaches the demo, as `reference capture`'s. The
+        /// default is D17's recipe, the one every capture's indices are in.
+        #[arg(long, value_enum, default_value_t = BootRecipe::Autoexec)]
+        boot: BootRecipe,
+        /// Replace a trace the output directory already holds.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Measure one 16-bit word of the STMIK segment live, over a frame window,
+    /// and place it against the object's symbols.
+    ///
+    /// This is how an address that is *not* one of the published words is
+    /// measured — `docs/fidelity/music-clock.md` §8 uses it for
+    /// `reference-indices.md` §1.7's `0x105B0E`, which no trace column carries.
+    Probe {
+        /// The OMF object whose `PUBDEF` records give the words' offsets.
+        #[arg(long, default_value = music::DEFAULT_OBJECT)]
+        object: PathBuf,
+        /// The program to run in the guest.
+        #[arg(long, default_value = "reference/original/SECOND.EXE")]
+        exe: PathBuf,
+        /// Mounted read-only as C: and the guest's working directory.
+        #[arg(long, default_value = "reference/original")]
+        cwd: PathBuf,
+        /// An argument for the program, e.g. the demo block. Repeatable.
+        #[arg(long = "arg")]
+        arguments: Vec<String>,
+        /// CPU cycles per millisecond to pin. Required.
+        #[arg(long)]
+        cycles: u32,
+        /// The window to measure over, as `music trace --frames`.
+        #[arg(long)]
+        frames: String,
+        /// The address to read, in decimal or with an `0x` prefix. It has to
+        /// fall inside the located segment; the view it falls in is reported.
+        #[arg(long, value_parser = parse_address)]
+        at: u32,
+        /// Key names sent once the setup screen appears, as `music trace`'s.
+        #[arg(long, default_value = "KBD_left KBD_enter")]
+        keys: String,
+        /// How the guest reaches the demo, as `music trace`'s.
+        #[arg(long, value_enum, default_value_t = BootRecipe::Autoexec)]
+        boot: BootRecipe,
+    },
+    /// Read a trace back and print the measurements the phase's note records:
+    /// where the music starts, the tick rate and its residual against the
+    /// module's own header, the frame-to-frame quantisation of the row changes,
+    /// the guest's soundcard and mixer words, `zplus`/`zinfo`, and what the
+    /// player does at the order list's `254`/`255` entries.
+    Analyse {
+        /// The trace directory: the one `music trace --out` wrote, holding
+        /// `trace.csv` and `manifest.json`. The trace file is checked against
+        /// the digest its manifest records before anything is read out of it.
+        #[arg(long)]
+        trace: PathBuf,
+        /// A physical address to place against the object's symbols, e.g.
+        /// `0x105B0E` — the word `docs/fidelity/reference-indices.md` §1.7
+        /// measured. Reports the symbol it lands on, and the traced word's rate
+        /// per frame at that address when it is one of them.
+        #[arg(long, value_parser = parse_address)]
+        at: Option<u32>,
+    },
+}
+
+/// A physical address, in decimal or with an `0x` prefix.
+fn parse_address(text: &str) -> Result<u32, String> {
+    let trimmed = text.trim();
+    let (digits, radix) = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+        Some(hex) => (hex, 16),
+        None => (trimmed, 10),
+    };
+    u32::from_str_radix(digits.replace('_', "").as_str(), radix)
+        .map_err(|e| format!("{text:?} is not an address: {e}"))
 }
 
 #[derive(Subcommand)]
@@ -364,5 +514,70 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 sheet,
             },
         )?),
+        Command::Music {
+            command: MusicCommand::Symbols { object },
+        } => Ok(music::symbols_command(&object)?),
+        Command::Music {
+            command:
+                MusicCommand::Trace {
+                    object,
+                    exe,
+                    cwd,
+                    arguments,
+                    cycles,
+                    frames,
+                    out,
+                    keys,
+                    boot,
+                    force,
+                },
+        } => {
+            let window = music::parse_window(&frames)?;
+            let options = music::TraceOptions {
+                object,
+                exe,
+                cwd,
+                arguments,
+                cycles,
+                window,
+                out,
+                keys: music::keys(&keys),
+                boot,
+                force,
+            };
+            Ok(music::trace_command(&options)?)
+        }
+        Command::Music {
+            command: MusicCommand::Analyse { trace, at },
+        } => Ok(music::analyse_command(&trace, at)?),
+        Command::Music {
+            command:
+                MusicCommand::Probe {
+                    object,
+                    exe,
+                    cwd,
+                    arguments,
+                    cycles,
+                    frames,
+                    at,
+                    keys,
+                    boot,
+                },
+        } => {
+            let window = music::parse_window(&frames)?;
+            let options = music::TraceOptions {
+                object,
+                exe,
+                cwd,
+                arguments,
+                cycles,
+                window,
+                out: PathBuf::from("out/probe"),
+                keys: music::keys(&keys),
+                boot,
+                force: true,
+            };
+            Ok(music::probe_command(&options, at)?)
+        }
     }
 }

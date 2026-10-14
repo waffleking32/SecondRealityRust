@@ -1615,3 +1615,72 @@ frames early because that is where the chain puts it, and moving it would be a f
 in the record that no command at the committed state reproduces is a defect of the same class as a
 wrong constant. Where the re-run disagrees with what a note or a ledger says, `PROGRESS.md` says which
 was measured when, and the note is corrected in the same commit rather than left standing.
+
+## D26 — The music clock, measured from the reference's own player state (2026-10-14)
+
+Phase 3 has no audio reference — the emulator runs silent (D17) — so its oracle is a
+**per-frame trace of the original's own player state**. `MAIN/STMIK.300`'s `PUBDEF` records
+give the offsets of `MAIN/STMIK.H:125-131`'s position words, the segment is located in guest
+memory by two 32-byte runs taken from the object's own `LEDATA`, and the words are read out
+of one request per frame, keyed by the guest's own frame counter. Three traces are filed
+under `reference/music/` and every number below is printed by
+`cargo xtask music {symbols,trace,analyse,probe}` — see `docs/fidelity/music-clock.md`, which
+names the command for each.
+
+**The measured clock.** The music starts at **frame 409**: `_np_zframe` reads 0 at frame 408
+and 1 at 410 in the block-5 trace, and 0 → 1 at 409 in the hidden-part trace (the block-5
+trace does not hold 409 — see below). A tick is `2.5/tempo` seconds and a row `speed` ticks:
+the longest window, 296 row intervals over 3,455 frames of the hidden part, is predicted from
+the player's own speed and tempo words to **−2.6 frames (0.08 %)**, and every run's residual
+is under one row. `_np_zframe` itself counts ticks — 608 in 889 frames, 47.93 a second at
+tempo 120.
+
+**Three things the files do not say, which the trace does.** (1) The row rate follows the
+player's `_np_speed` word, not the module's header byte: with `--arg 3` the reference plays
+MUSIC1 (its `(ord, pat)` pairs match that file's order list) at speed **6** where the file's
+byte 0x31 is 3, and the measured row interval is 8.09 frames — speed 6 at tempo 130, where
+speed 3 would be 4.04. (2) A speed change is followed by a transient: after the module's
+speed-1 row, the next speed-6 run advances 35 rows in 271 frames where the rule predicts
+306.6. (3) `_np_zplus` takes 1 and 2 in both modules, at order starts straddling each
+module's `254`; `_np_zinfo` is **0 for all 10,256 samples of all three traces**, so that
+question is not resolved by them.
+
+**D8's route 1 is performed and does not close it.** The symbols were read, the words traced
+live, and `zinfo` stayed 0 over MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's 0 and
+42…48. `D8`'s escalation stands: GRID, HARD and the vault are implemented against a
+substitute cue, with the trace's zero recorded as the evidence.
+
+**The order list, from the counter's own sequence.** `254` is **stepped over**: MUSIC0's at
+order 27 takes the counter from 26 to 28, and MUSIC1's at order 46 from 45 to 47, each with
+both neighbours played. A `255` is **never played at all**: the shell's restarts
+(`MAIN/U2.ASM:875-905`, orders 18, 25, 70) jump past the early ones and pre-empt the two at
+orders 78/79, so the reference measures nothing about a `255` — Task 3 must say so rather
+than read it off stock ST3 semantics.
+
+**`reference-indices.md` §1.7's counter is not `_np_zframe`.** The word at physical
+`0x105B0E` is the STMIK segment's *higher view* base (0x1051F0) + **0x091E** — an unnamed
+word two bytes past `_zmixercount`, not the tick counter at 0x08FB. Its rate reproduces
+exactly: **+0.7418 per frame** (51.99 a second) against §1.7's 0.742016/0.742012/0.741909,
+and it reads 370 at frame 900 where §1.7 read 371/373/374. §1.7's address is right and its
+name is not; the phase's clock is `_np_zframe`.
+
+**The DOS extender maps the segment twice.** The needles are found at 0x0051F0 and
+0x1051F0, exactly 1 MB apart, and the whole 29,607 bytes read through each are byte-identical
+at the start and the end of a trace (the emulator's memory read goes through the page tables:
+`dosbox-automation`'s `hardware/memory.cpp:199` → `cpu/paging.h:293`). `music trace` accepts
+several views only when that equality is proved and refuses a second copy that differs; it
+reads through the lowest.
+
+**A trace is a new kind of reference, and the verifier sees it.** The manifest declares
+`"kind": "music-trace"`; a manifest with no `kind` is a frame capture (the 24 filed before
+this phase still check out), `reference verify` recomputes the trace's coverage from the
+file's own frames rather than believing the manifest, and a `kind` it does not know is
+**refused by name**, not walked past. A flipped byte of a trace fails the verifier (exit 1,
+both digests named).
+
+**What a trace does not hold.** The block-5 trace holds every frame from 148 to 1299 except
+**409** and **1220**, and says so (`per_frame: false`) with what the guest's own counter did
+around each: at 409 the counter was read as 408 and then 410 with no reading of 409 between —
+the boot's first graphics frame, which the emulator never published — and at 1220 a read that
+was opened on the frame was still open when the guest moved on. The tool does not describe
+such a trace as per-frame, and `reference verify` recomputes that claim from the file.

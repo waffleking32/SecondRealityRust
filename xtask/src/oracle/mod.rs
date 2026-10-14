@@ -404,6 +404,12 @@ pub trait Oracle {
     /// names, and the frames are handed over in the order they were waited
     /// for.
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError>;
+    /// Read `len` bytes of the guest's memory at `segment:offset`, which is the
+    /// addressing the emulator's own API takes: `segment * 16 + offset`, with a
+    /// **32-bit** offset, so any address in the emulated memory can be named by
+    /// `(0, address)`. Used by `xtask music trace`, which reads the player's
+    /// own state rather than the screen.
+    fn read_memory(&self, segment: u16, offset: u32, len: usize) -> Result<Vec<u8>, OracleError>;
 }
 
 /// Sleep for the part of a wait that does not need polling: the frame counter

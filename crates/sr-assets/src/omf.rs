@@ -52,28 +52,36 @@
 
 use crate::{AssetError, Format};
 
-/// The concatenated data of every `LEDATA` record in `bytes`, in record order — the
-/// segment as the original's linker received it.
+pub mod symbols;
+
+/// One `LEDATA` record's data, at the segment offset the record gives it.
 ///
-/// A `.OBK`/`.OBJ` is a build container, not an asset format: for 35 of the tree's blobs the
-/// returned bytes are exactly the standalone file the blob shipped inside (the inventory's
-/// §D), and callers compare them with a file in the tree (the tests do) or write them out
-/// once, as `assets/TECHNO/CIRCLE2.EGA` was written.
+/// The offset is the record's own field, not its position in the file: a code object may
+/// place several blocks in one segment with gaps between them, so the blocks are *not*
+/// contiguous in the segment and the concatenation [`extract_ledata`] returns is not a
+/// segment image. A caller that needs the data where it will be in memory — the phase 3
+/// trace's needles are located that way — reads it from here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataBlock {
+    /// The byte offset inside the segment the record declares.
+    pub offset: u32,
+    /// The data, without the record's header or its checksum byte.
+    pub data: Vec<u8>,
+}
+
+/// Every `LEDATA` record's data with its segment offset, in record order.
+///
+/// The framing, the refusals and the checksum byte are [`extract_ledata`]'s; this is the
+/// same walk keeping the offsets it discards.
 ///
 /// # Errors
 ///
-/// - [`AssetError::Truncated`] — a record header or body runs past the end of the input,
-///   or a `LEDATA` body is too short to hold its own header. The fields are file offsets
-///   into `bytes`, as [`AssetError`] documents.
-/// - [`AssetError::Unsupported`] — a `0xA1` record, which this tree never contains and
-///   whose body this reader will not guess at (see the module docs).
-/// - [`AssetError::UnknownFormat`] — no `LEDATA` record at all, so nothing is being
-///   extracted: an object of code (`VISU/AMAIN.OBJ` is one in this tree), or an empty
-///   input.
-pub fn extract_ledata(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+/// The same as [`extract_ledata`], except that an object with no `LEDATA` record is not an
+/// error here: an empty list is the answer, because "which runs of data does this object
+/// carry" has the answer "none" for a code object.
+pub fn data_blocks(bytes: &[u8]) -> Result<Vec<DataBlock>, AssetError> {
     let format = Format::Omf;
     let mut out = Vec::new();
-    let mut records = 0usize;
     let mut pos = 0usize;
 
     while pos < bytes.len() {
@@ -110,8 +118,10 @@ pub fn extract_ledata(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
                         had: end,
                     });
                 }
-                out.extend_from_slice(&body[3..body.len() - 1]);
-                records += 1;
+                out.push(DataBlock {
+                    offset: u32::from(u16::from_le_bytes([body[1], body[2]])),
+                    data: body[3..body.len() - 1].to_vec(),
+                });
             }
             0xA1 => {
                 return Err(AssetError::Unsupported {
@@ -129,8 +139,38 @@ pub fn extract_ledata(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
         pos = end;
     }
 
-    if records == 0 {
+    Ok(out)
+}
+
+/// The concatenated data of every `LEDATA` record in `bytes`, in record order — the
+/// segment as the original's linker received it.
+///
+/// A `.OBK`/`.OBJ` is a build container, not an asset format: for 35 of the tree's blobs the
+/// returned bytes are exactly the standalone file the blob shipped inside (the inventory's
+/// §D), and callers compare them with a file in the tree (the tests do) or write them out
+/// once, as `assets/TECHNO/CIRCLE2.EGA` was written.
+///
+/// The concatenation is **not** a segment image: the blocks carry their own offsets and a
+/// code object may leave gaps between them, which is why [`data_blocks`] keeps them.
+///
+/// # Errors
+///
+/// - [`AssetError::Truncated`] — a record header or body runs past the end of the input,
+///   or a `LEDATA` body is too short to hold its own header. The fields are file offsets
+///   into `bytes`, as [`AssetError`] documents.
+/// - [`AssetError::Unsupported`] — a `0xA1` record, which this tree never contains and
+///   whose body this reader will not guess at (see the module docs).
+/// - [`AssetError::UnknownFormat`] — no `LEDATA` record at all, so nothing is being
+///   extracted: an object of code (`VISU/AMAIN.OBJ` is one in this tree), or an empty
+///   input.
+pub fn extract_ledata(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    let blocks = data_blocks(bytes)?;
+    if blocks.is_empty() {
         return Err(AssetError::UnknownFormat);
+    }
+    let mut out = Vec::with_capacity(blocks.iter().map(|block| block.data.len()).sum());
+    for block in blocks {
+        out.extend_from_slice(&block.data);
     }
     Ok(out)
 }

@@ -558,12 +558,6 @@ impl DosboxOracle {
         Ok(())
     }
 
-    fn read_memory(&self, segment: u16, offset: u32, len: usize) -> Result<Vec<u8>, OracleError> {
-        self.get_bytes(&format!(
-            "/api/v1/memory/{segment}/{offset}/{len}"
-        ))
-    }
-
     fn port_write(&self, port: u16, value: u8) -> Result<(), OracleError> {
         let answer = self.put_json("/api/v1/io/port", &port_write_body(port, value))?;
         let answer: serde_json::Value = serde_json::from_slice(&answer)
@@ -866,6 +860,12 @@ impl Oracle for DosboxOracle {
             }
             sleep_until_close(target - now);
         }
+    }
+
+    fn read_memory(&self, segment: u16, offset: u32, len: usize) -> Result<Vec<u8>, OracleError> {
+        self.get_bytes(&format!(
+            "/api/v1/memory/{segment}/{offset}/{len}"
+        ))
     }
 
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError> {

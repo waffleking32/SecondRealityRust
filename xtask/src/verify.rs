@@ -173,7 +173,207 @@ struct Inspection {
     /// actually checked, not what was asked for).
     files: usize,
     bytes: u64,
+    /// How many rows a trace holds — zero for a frame capture, which has no
+    /// rows; the summary prints it for a trace.
+    rows: u64,
     findings: Vec<Finding>,
+}
+
+/// What a manifest says it is — the key `reference verify` dispatches on.
+///
+/// A frame capture filed before this key existed carries none and is a frame
+/// capture (D23's additive-field rule, the same one `sha256` follows). A
+/// **kind this tool does not know is a failure, not a skip**: a verifier that
+/// walked past it would report a green run over a capture it never read, which
+/// is the phase's signature defect.
+enum Kind {
+    Frames,
+    MusicTrace,
+}
+
+/// The kind a manifest declares, or a refusal naming it.
+fn manifest_kind(path: &Path, text: &str) -> Result<Kind, VerifyError> {
+    let value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| VerifyError::Malformed(format!("{}: {e}", path.display())))?;
+    match value.get("kind") {
+        None => Ok(Kind::Frames),
+        Some(serde_json::Value::String(kind)) if kind == crate::music::TRACE_KIND => {
+            Ok(Kind::MusicTrace)
+        }
+        Some(serde_json::Value::String(kind)) if kind == "frames" => Ok(Kind::Frames),
+        Some(other) => Err(VerifyError::Malformed(format!(
+            "{} says it is a {other} capture; this tool reads frame captures (which declare no \
+             `kind`, or \"frames\") and {} traces. A kind it does not know is refused rather than \
+             skipped: a check that reports nothing is indistinguishable from one that passed",
+            path.display(),
+            crate::music::TRACE_KIND,
+        ))),
+    }
+}
+
+/// The checks a **music trace** has to pass, which are the frame capture's
+/// checks carried onto a different kind of record:
+///
+/// 1. the file the manifest names is there;
+/// 2. its bytes hash as the manifest's `sha256` records, and its length is the
+///    `bytes` the manifest records;
+/// 3. every row parses into the columns the manifest declares, and there are
+///    exactly `rows` of them;
+/// 4. the frames are strictly increasing — the manifest's own claim, recomputed
+///    from the file;
+/// 5. the coverage the manifest states is the coverage the file has: recomputed
+///    from the file's own frames, run by run, and compared with what the
+///    manifest says was sampled and missing. A trace that quietly sampled every
+///    other frame is the phase's signature defect with a data file around it,
+///    so the claim is checked rather than believed.
+fn inspect_trace(capture: &CaptureDir, text: &str) -> Result<Inspection, VerifyError> {
+    let mut inspection = Inspection::default();
+    let path = capture.dir.join(MANIFEST_FILE);
+    let manifest: crate::music::TraceManifest = serde_json::from_str(text)
+        .map_err(|e| VerifyError::Malformed(format!("{}: {e}", path.display())))?;
+    if manifest.version != MANIFEST_VERSION {
+        return Err(VerifyError::Malformed(format!(
+            "{} says version {}; this tool reads version {MANIFEST_VERSION}",
+            path.display(),
+            manifest.version
+        )));
+    }
+
+    let trace_path = capture.dir.join(&manifest.trace.file);
+    let bytes = match fs::read(&trace_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            inspection.findings.push(Finding {
+                path: under(capture, &manifest.trace.file),
+                what: "the manifest names it as this trace's rows and there is no such file"
+                    .to_string(),
+            });
+            return Ok(inspection);
+        }
+        Err(error) => {
+            return Err(VerifyError::Io(format!(
+                "cannot read {}: {error}",
+                trace_path.display()
+            )))
+        }
+    };
+    inspection.files = 1;
+    inspection.bytes = bytes.len() as u64;
+
+    let actual = sha256_hex(&bytes);
+    if actual != manifest.trace.sha256 {
+        inspection.findings.push(Finding {
+            path: under(capture, &manifest.trace.file),
+            what: format!(
+                "the manifest records sha256 {} and the file is {actual}",
+                manifest.trace.sha256
+            ),
+        });
+    }
+    if bytes.len() as u64 != manifest.trace.bytes {
+        inspection.findings.push(Finding {
+            path: under(capture, &manifest.trace.file),
+            what: format!(
+                "the file is {} bytes where the manifest records {}",
+                bytes.len(),
+                manifest.trace.bytes
+            ),
+        });
+    }
+
+    // A file that is not text is not a trace, and that is a **finding** about
+    // this file and not a failure to check the tree: the manifest named it, and
+    // what it names is not what the manifest describes. (The digest finding
+    // above has already been recorded in that case.)
+    let expected_header = crate::music::PlayerState::header();
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) => {
+            inspection.findings.push(Finding {
+                path: under(capture, &manifest.trace.file),
+                what: format!(
+                    "it is not UTF-8 text, so it is not a trace of rows: {error} (the file is \
+                     {} bytes)",
+                    inspection.bytes
+                ),
+            });
+            return Ok(inspection);
+        }
+    };
+    let mut frames: Vec<u64> = Vec::new();
+    let mut rows = 0u64;
+    for (number, line) in text.lines().enumerate() {
+        if number == 0 {
+            let header = line.trim_start_matches('\u{feff}');
+            if header != expected_header {
+                inspection.findings.push(Finding {
+                    path: under(capture, &manifest.trace.file),
+                    what: format!(
+                        "its first line is {header:?} where the manifest's columns are \
+                         {expected_header:?}"
+                    ),
+                });
+            }
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        match crate::music::PlayerState::parse(line) {
+            Ok(state) => {
+                rows += 1;
+                if let Some(previous) = frames.last() {
+                    if state.frame <= *previous {
+                        inspection.findings.push(Finding {
+                            path: under(capture, &manifest.trace.file),
+                            what: format!(
+                                "row {number} is frame {} after frame {previous}: a trace's frames \
+                                 are strictly increasing",
+                                state.frame
+                            ),
+                        });
+                    }
+                }
+                frames.push(state.frame);
+            }
+            Err(error) => inspection.findings.push(Finding {
+                path: under(capture, &manifest.trace.file),
+                what: format!("row {number} does not read as a trace row: {error}"),
+            }),
+        }
+    }
+    inspection.rows = rows;
+    if rows != manifest.trace.rows {
+        inspection.findings.push(Finding {
+            path: under(capture, &manifest.trace.file),
+            what: format!(
+                "the file holds {rows} row(s) and the manifest records {}",
+                manifest.trace.rows
+            ),
+        });
+    }
+    if rows == 0 {
+        inspection.findings.push(Finding {
+            path: under(capture, &manifest.trace.file),
+            what: "it holds no rows at all, so there is nothing to check".to_string(),
+        });
+    }
+
+    // The coverage claim, recomputed from the file's own frames.
+    if !frames.is_empty() {
+        let recomputed = crate::music::Coverage::of(manifest.coverage.window, &frames);
+        if recomputed != manifest.coverage {
+            inspection.findings.push(Finding {
+                path: under(capture, MANIFEST_FILE),
+                what: format!(
+                    "the manifest says its coverage is {} and the file's own frames make it {}",
+                    manifest.coverage.describe(),
+                    recomputed.describe()
+                ),
+            });
+        }
+    }
+    Ok(inspection)
 }
 
 /// `cargo xtask reference verify`: walk the tree and check every capture
@@ -190,29 +390,52 @@ pub fn command(tree: &Path) -> Result<ExitCode, VerifyError> {
     let mut bytes = 0u64;
 
     for capture in &captures {
-        let manifest = read_manifest(&capture.dir)?;
-        // A capture with no frames has nothing to check, and "nothing to
-        // check" must not read as "checked out": there is no finding here,
-        // only an answer this tool cannot give, which is exit 2.
-        if manifest.frames.is_empty() {
-            return Err(VerifyError::Malformed(format!(
-                "{}: the manifest names no frames, so there is nothing to check against it — a \
-                 capture that holds nothing checkable is not a capture that checked out",
-                capture.dir.join(MANIFEST_FILE).display()
-            )));
-        }
-        let inspection = inspect(capture, &manifest, tree)?;
+        let (path, text) = read_manifest_text(&capture.dir)?;
+        // What the manifest says it is decides how it is checked, and a kind
+        // this tool does not know is **refused by name**: skipping it would be
+        // a check that reports nothing, which is indistinguishable from one
+        // that passed (the phase's Review Focus 5).
+        let inspection = match manifest_kind(&path, &text)? {
+            Kind::Frames => {
+                let manifest = parse_manifest(&path, &text)?;
+                // A capture with no frames has nothing to check, and "nothing
+                // to check" must not read as "checked out": there is no finding
+                // here, only an answer this tool cannot give, which is exit 2.
+                if manifest.frames.is_empty() {
+                    return Err(VerifyError::Malformed(format!(
+                        "{}: the manifest names no frames, so there is nothing to check against \
+                         it — a capture that holds nothing checkable is not a capture that \
+                         checked out",
+                        capture.dir.join(MANIFEST_FILE).display()
+                    )));
+                }
+                let inspection = inspect(capture, &manifest, tree)?;
+                if inspection.findings.is_empty() {
+                    println!(
+                        "ok   {}: {} frame(s), {} file(s)",
+                        name_of(capture),
+                        manifest.frames.len(),
+                        inspection.files
+                    );
+                }
+                inspection
+            }
+            Kind::MusicTrace => {
+                let inspection = inspect_trace(capture, &text)?;
+                if inspection.findings.is_empty() {
+                    println!(
+                        "ok   {}: music trace, {} row(s), {} file(s)",
+                        name_of(capture),
+                        inspection.rows,
+                        inspection.files
+                    );
+                }
+                inspection
+            }
+        };
         files += inspection.files;
         bytes += inspection.bytes;
         findings += inspection.findings.len();
-        if inspection.findings.is_empty() {
-            println!(
-                "ok   {}: {} frame(s), {} file(s)",
-                name_of(capture),
-                manifest.frames.len(),
-                inspection.files
-            );
-        }
         for finding in &inspection.findings {
             println!("FAIL {}: {}", finding.path, finding.what);
         }
@@ -220,13 +443,13 @@ pub fn command(tree: &Path) -> Result<ExitCode, VerifyError> {
 
     if findings == 0 {
         println!(
-            "verdict: ok — {} capture(s), {files} frame file(s), {bytes} bytes",
+            "verdict: ok — {} capture(s), {files} file(s), {bytes} bytes",
             captures.len()
         );
         return Ok(ExitCode::SUCCESS);
     }
     println!(
-        "verdict: {findings} finding(s) — {} capture(s), {files} frame file(s) checked",
+        "verdict: {findings} finding(s) — {} capture(s), {files} file(s) checked",
         captures.len()
     );
     Ok(ExitCode::from(1))
@@ -267,6 +490,13 @@ pub fn backfill(tree: &Path) -> Result<ExitCode, VerifyError> {
 
     for capture in &captures {
         let (path, text) = read_manifest_text(&capture.dir)?;
+        // A trace records its digests as it is written — the manifest and the
+        // file are produced by one command — so there is nothing here for a
+        // backfill to add, and re-serialising one could only lose keys. It is
+        // walked past, deliberately and by name.
+        if let Kind::MusicTrace = manifest_kind(&path, &text)? {
+            continue;
+        }
         let mut manifest = parse_manifest(&path, &text)?;
         let mut recorded_here = 0usize;
 
@@ -413,6 +643,7 @@ fn captures_in(tree: &Path) -> Result<Vec<CaptureDir>, VerifyError> {
 
 /// Read a capture's manifest, refusing one this tool does not know the shape
 /// or the version of rather than checking it against the wrong rules.
+#[cfg(test)]
 fn read_manifest(dir: &Path) -> Result<CaptureManifest, VerifyError> {
     let (path, text) = read_manifest_text(dir)?;
     parse_manifest(&path, &text)
@@ -441,8 +672,7 @@ fn parse_manifest(path: &Path, text: &str) -> Result<CaptureManifest, VerifyErro
     }
     Ok(manifest)
 }
-
-/// The three checks, on one capture.
+/// The three checks, on one frame capture.
 fn inspect(
     capture: &CaptureDir,
     manifest: &CaptureManifest,

@@ -105,7 +105,7 @@ fn a_capture_that_hashes_as_recorded_checks_out() {
     );
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
-        run.stdout.contains("verdict: ok — 1 capture(s), 3 frame file(s)"),
+        run.stdout.contains("verdict: ok — 1 capture(s), 3 file(s)"),
         "{}",
         run.output()
     );
@@ -198,18 +198,29 @@ fn a_manifest_this_tool_does_not_read_cannot_be_checked_and_exits_two() {
 #[test]
 fn the_reference_tree_the_repository_ships_checks_out() {
     // The sentence Phase 1's close-out could not write: **a test reads
-    // `reference/`**. 24 captures, 105 frame files, every digest against the
-    // file beside it.
+    // `reference/`**. 24 frame captures and 105 frame files, every digest
+    // against the file beside it — and, since Phase 3, the three music traces
+    // under `music/`, which are a second *kind* of capture the verifier reads
+    // through its own checks (a flipped byte of one is
+    // `xtask/tests/music.rs`'s finding, not this file's).
     let reference = repo_root().join("reference");
     let run = xtask(&repo_root(), &reference, "verify");
 
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 24 capture(s), 105 frame file(s)"),
+            .contains("verdict: ok — 27 capture(s), 108 file(s)"),
         "{}",
         run.output()
     );
+    for trace in ["music/second5", "music/second3", "music/hiddenu"] {
+        assert!(
+            run.stdout
+                .contains(&format!("ok   {trace}: music trace")),
+            "{trace} is checked as itself:\n{}",
+            run.output()
+        );
+    }
 }
 
 #[test]

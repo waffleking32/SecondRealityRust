@@ -491,9 +491,13 @@ impl CaptureManifest {
 
 /// Refuse a capture that cannot be reproduced, before touching the emulator.
 pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
-    if options.cycles == 0 {
-        return Err(CaptureError::Oracle(OracleError::UnpinnedCycles));
-    }
+    validate_recipe(
+        &options.exe,
+        &options.cwd,
+        options.cycles,
+        &options.keys,
+        options.boot,
+    )?;
     if options.frames.is_empty() {
         return Err(CaptureError::Options(
             "at least one frame index is required (--frames I,J,K)".into(),
@@ -507,18 +511,6 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             )));
         }
     }
-    // Every key is checked here, before anything starts, in both recipes: a
-    // name AUTOTYPE does not know is not an error it reports — it logs and
-    // presses nothing — so a capture would answer the setup screen with
-    // nothing and write the wrong screen at exit 0 (D17).
-    for key in &options.keys {
-        if !is_sequence_key(key) {
-            return Err(unknown_key(key, false));
-        }
-        if options.boot == BootRecipe::Autoexec && autotype_button(key).is_none() {
-            return Err(unknown_key(key, true));
-        }
-    }
     if let Some(&first) = options.frames.first() {
         if first < options.skip_boot_frames {
             return Err(CaptureError::Options(format!(
@@ -527,21 +519,6 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
                 options.skip_boot_frames
             )));
         }
-    }
-    if !options.cwd.is_dir() {
-        return Err(CaptureError::Options(format!(
-            "{} is not a directory to mount",
-            options.cwd.display()
-        )));
-    }
-    let exe_parent = options.exe.parent();
-    if exe_parent != Some(options.cwd.as_path()) {
-        return Err(CaptureError::Options(format!(
-            "--exe {} must live in --cwd {}: the guest runs it from the mounted directory, \
-             because it loads its data files from the working directory",
-            options.exe.display(),
-            options.cwd.display()
-        )));
     }
     // `reference/` is input-only: the mounted distribution and every capture
     // live there, `compare` refuses an `--out` inside one of them, and this
@@ -578,6 +555,50 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             "Pass --sheet outside the capture directory, e.g. out/<name>-sheet.png",
         )
         .map_err(CaptureError::Options)?;
+    }
+    Ok(())
+}
+
+/// The checks every command that drives the emulated original makes before it
+/// starts one: the recipe half of [`validate_options`], shared with
+/// `xtask music trace`, whose trace's indices mean what a capture's indices
+/// mean only under the same recipe (D17).
+///
+/// Every key is checked here, before anything starts, in both recipes: a name
+/// `AUTOTYPE` does not know is not an error it reports — it logs and presses
+/// nothing — so a command would answer the setup screen with nothing and write
+/// the wrong screen at exit 0 (D17).
+pub fn validate_recipe(
+    exe: &Path,
+    cwd: &Path,
+    cycles: u32,
+    keys: &[String],
+    boot: BootRecipe,
+) -> Result<(), CaptureError> {
+    if cycles == 0 {
+        return Err(CaptureError::Oracle(OracleError::UnpinnedCycles));
+    }
+    for key in keys {
+        if !is_sequence_key(key) {
+            return Err(unknown_key(key, false));
+        }
+        if boot == BootRecipe::Autoexec && autotype_button(key).is_none() {
+            return Err(unknown_key(key, true));
+        }
+    }
+    if !cwd.is_dir() {
+        return Err(CaptureError::Options(format!(
+            "{} is not a directory to mount",
+            cwd.display()
+        )));
+    }
+    if exe.parent() != Some(cwd) {
+        return Err(CaptureError::Options(format!(
+            "--exe {} must live in --cwd {}: the guest runs it from the mounted directory, \
+             because it loads its data files from the working directory",
+            exe.display(),
+            cwd.display()
+        )));
     }
     Ok(())
 }
@@ -1514,6 +1535,16 @@ mod tests {
     }
 
     impl Oracle for FakeOracle {
+        fn read_memory(
+            &self,
+            _segment: u16,
+            _offset: u32,
+            _len: usize,
+        ) -> Result<Vec<u8>, OracleError> {
+            Err(OracleError::Transport(
+                "the fake oracle holds no guest memory".into(),
+            ))
+        }
         fn describe(&self) -> Result<String, OracleError> {
             Ok("dosbox-automation test build".into())
         }
