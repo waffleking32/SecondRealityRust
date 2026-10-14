@@ -62,6 +62,12 @@ recipe), **D25** (every number reproducible), **D24** (tree vs release).
   and **when a measurement disagrees with a faithful port, D24's procedure decides** what to do.
   The vendored tree is a development snapshot; the shipped release is the reference of record for
   every comparison, including this phase's trace.
+- **A number in prose is quoted, not remembered.** Where a note states a count, an index, a
+  percentage or a duration, the sentence quotes the line the command prints (or the test asserts
+  it), and the value comes from the same run the note was written from. Task 1's review history is
+  the reason this is a constraint and not advice: three separate rounds found sentences — "under one
+  row in every run", "misses three or four", "exactly three" — that the data beside them falsified,
+  and every one of them was written by hand rather than copied from output.
 
 ## Review Focus
 
