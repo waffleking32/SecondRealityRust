@@ -68,6 +68,12 @@ recipe), **D25** (every number reproducible), **D24** (tree vs release).
   the reason this is a constraint and not advice: three separate rounds found sentences — "under one
   row in every run", "misses three or four", "exactly three" — that the data beside them falsified,
   and every one of them was written by hand rather than copied from output.
+- **A quoted block is a paste or a marked elision, never a reconstruction.** When a note shows a
+  command's output, the block is either byte-identical to a fresh run (verify it with `diff`, and
+  say in the note where the run came from) or it marks every omission (`…` for a truncated line,
+  `(…)` for dropped lines). The two are not interchangeable and a block that is neither is a splice:
+  Task 1's §4 elided a line between two quoted ones without a mark for three rounds before a
+  reviewer caught it, which is the same defect as a remembered number wearing a quotation's clothes.
 
 ## Review Focus
 
