@@ -259,7 +259,7 @@ of 15 and pure white RGB; 470 and 560 byte-for-byte against `reference/parts/beg
 frames, the pair that would show the DAC's 6→8-bit widening if it differed; the held 900 equal to
 `assets/BEG/SRTITLE.UP` as decoded; and the guard that makes those comparisons able to fail at all.
 
-What the four add over the unit tests is **the path a run really takes**, end to end: the registry,
+What the five add over the unit tests is **the path a run really takes**, end to end: the registry,
 the shell's anchor and numbering, the asset read at `assets/BEG/SRTITLE.UP` from the repository root,
 the DAC the shell installed, and the frames the dump wrote to disk and read back — where the unit
 tests drive the part's arithmetic and its screen directly. The one reference *file* the suite does

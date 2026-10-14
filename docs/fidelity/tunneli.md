@@ -417,9 +417,18 @@ command renders what `reference capture --sheet` renders.
 **The look itself is deferred to the phase boundary**: this note records what the two sheets
 contain, not that a person has judged them.
 
+### 7.3 The tool this part added to the phase's toolkit
+
+`cargo xtask compare --align <N>` (§7.2) and `cargo xtask frames sheet --dir <DIR> --out <PNG>`
+(§7.2's sheets) were both written by this task because neither capability existed: `compare` pairs by
+manifest index, so a run with no boot anchor had no way to be measured at all, and `--sheet` is
+wired into `assets verify` and `reference capture`, neither of which reads an arbitrary directory of
+frames. Both are tested (`xtask/tests/compare.rs` for the alignment; `xtask/src/frames.rs` for the
+sheet), and both are what Tasks 6-9 will use on parts with the same shape of problem.
+
 ## 8. Tests
 
-`src/parts/tunneli.rs` (fifteen, beside the part):
+`src/parts/tunneli.rs` (seventeen, beside the part):
 
 - `the_tunnel_draws_seventy_seven_rings_of_sixty_four_dots` — the witness is `ry`, the inner loop's
   byte offset into `oldpos`: 77 × 64 × 2 after one tick of a formed tunnel. The ring count, the
@@ -469,15 +478,6 @@ and the retirement — tick 1,040 has dots, tick 1,060 is black, and the run **h
 1,061 and 1,200, byte for byte. What the two add over the unit tests is the wiring: the registry,
 the two asset paths as a run resolves them, the mode geometry reaching the dumped frame, and the
 hold.
-
-### 7.3 The tool this part added to the phase's toolkit
-
-`cargo xtask compare --align <N>` (§7.2) and `cargo xtask frames sheet --dir <DIR> --out <PNG>`
-(§7.2's sheets) were both written by this task because neither capability existed: `compare` pairs by
-manifest index, so a run with no boot anchor had no way to be measured at all, and `--sheet` is
-wired into `assets verify` and `reference capture`, neither of which reads an arbitrary directory of
-frames. Both are tested (`xtask/tests/compare.rs` for the alignment; `xtask/src/frames.rs` for the
-sheet), and both are what Tasks 6-9 will use on parts with the same shape of problem.
 
 ## 9. What is not modelled, and why it costs nothing here
 

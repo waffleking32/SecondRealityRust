@@ -23,12 +23,15 @@ Phase status board. **Read this first if you are resuming work.**
 ## Where to pick up
 
 **Phase 2 is complete — its exit criteria are met and its evidence is recorded below — and the
-`phase-2` tag is deliberately withheld.** The work is on branch **`phase-2-shell`**, HEAD `0c78cd3`
-(not yet merged to `master`); its plan is `docs/plans/02-shell.md` and its ledger (the rulings and
-the per-task results, git-ignored scratch) is `.superpowers/sdd/02-shell/progress.md`. The tag is
-withheld because the final whole-branch review runs after this close-out and may require fixes: a tag
-that has to be moved is worse than a tag applied a few commits later (Phase 1's ruling, B6). When the
-review is clean, `git tag phase-2` goes on wherever the branch then ends.
+`phase-2` tag is deliberately withheld.** The work is on branch **`phase-2-shell`**, not yet merged to
+`master`: the close-out commit is `339f4bd`, the comparisons below were re-run at `0c78cd3`, and the
+commits after that point are the close-out's own record and the whole-branch review's fix round
+(§ "The whole-branch review, and its fix round"). Its plan is `docs/plans/02-shell.md` and its ledger
+(the rulings and the per-task results, git-ignored scratch) is
+`.superpowers/sdd/02-shell/progress.md`. The tag is withheld because the final whole-branch review
+runs after the close-out and may require fixes: a tag that has to be moved is worse than a tag
+applied a few commits later (Phase 1's ruling, B6). When the review is clean — it has been: *needs
+fixes*, fixed, and a scoped re-review is the next step — `git tag phase-2` goes on the tip.
 
 **Phase 3 (music) is next.** It is not started: no plan exists yet, and a phase's plan is written
 just in time (`CLAUDE.md`). What Phase 3 inherits from this one:
@@ -365,7 +368,7 @@ verdict: different     exit: 1
 Two residuals in one number, and they are separated: **the chain's 82 frames** (next section) and
 **A11** — the shipped build's text pitch of 25 rows a line where `MAIN.C:6` says `FONAY 30`, its
 `[NN` control lines (163 in the shipped text) that advance the ring and draw nothing, its
-`fonaorder` naming seven characters the tree's does not, its raster's 53 px of the header band, and
+`fonaorder` naming six characters the tree's does not, its raster's 53 px of the header band, and
 its renderer's text having no carriage returns. **A single alignment cannot absorb them** — the
 pitch moves the content 5 rows per line apart and the control lines skip blocks the port renders — and
 the shifted run shows both directions: `--align 82` on a dump of the shifted indices improves 9100
@@ -461,8 +464,11 @@ $ cargo test --workspace
 test result: ok. 590 passed; 0 failed; 3 ignored; 0 warnings; exit 0
 
 $ cargo clippy --workspace -- -D warnings
-exit: 101 — NOT clean, see below
+exit: 101 at this state — five findings, and two more hidden behind them, see below
 ```
+
+(That last line is the close-out's own re-run, at `0c78cd3`. The review made the gate an exit item
+and the fix round fixed all of it: **both clippy commands exit 0 at the tip**.)
 
 The 590 is the sum of the run's per-target `test result:` lines — 146 in `secondreality` (119 + 5 +
 6 + 5 + 2 + 2 + 5 + 2), 161 in `sr-assets` (30 + 18 + 37 + 17 + 25 + 14 + 20, plus its empty lib
@@ -476,27 +482,35 @@ The asset tree is **151 assets plus `PROVENANCE.md`** (152 files): Phase 2 curat
 `CREDITS/FONA.INC` (Task 7), which is why the decode summary's headerless count is 88 where Phase 1's
 was 87.
 
-**`cargo clippy --workspace -- -D warnings` is not clean, and the plan's Step 4 asks it to be.** Five
-lints, all in `sr-engine` and all in files Phase 0 wrote (`copper.rs:29`, `palette.rs:33`,
-`part.rs:79`, `testcard.rs:92`, `tick.rs:25`): four `new_without_default`s and one
-`too_many_arguments` (`part.rs`'s 10-argument constructor). None is in a file this phase's own
-commits changed except `testcard.rs`, whose one Phase 2 commit touched a constant and its comment.
-This is recorded as an **open item for the whole-branch review** rather than fixed here: it is
-pre-existing, it is not one of spec §10's exit criteria, `CLAUDE.md`'s phase-completion list does not
-name clippy, and the four `Default` impls plus a decision about the ten-argument constructor are a
-code change the close-out should not make unreviewed. (The phase's tasks treated clippy as "no *new*
-warnings in the files I touched" — Task 1's report records the pre-existing `parts.rs:16` warning,
-Task 2's fixed the one warning its own change introduced — and no task's report records a run with
-`-D warnings`.)
+**`cargo clippy --workspace -- -D warnings` was not clean at the close-out, and the review made it
+an exit item rather than polish.** The close-out measured five lints and stopped there, because
+`sr-engine`'s failure stops the dependents from being checked at all — the true count was **seven
+under the plan's command**, the five in `sr-engine` (`copper.rs:29`, `palette.rs:33`, `part.rs:79`'s
+ten-argument `PartCtx::new`, `testcard.rs:92`, `tick.rs:25`: four `new_without_default`s and one
+`too_many_arguments`) plus `secondreality/src/parts.rs`'s `type_complexity` and
+`xtask/src/compare.rs`'s `manual_contains`, and **eleven more under `--all-targets`**, all in test
+code (`sr-engine`'s `engine.rs:507`/`present.rs:278`, and nine in the parts' own test modules). All
+eighteen are fixed in the fix round below — every one pre-existing, none a behaviour change: four
+`impl Default` blocks beside the `new()`s they mirror, an `#[allow(clippy::too_many_arguments)]` on
+`PartCtx::new` carrying the disjoint-borrow reason (the arity *is* the design: the constructor exists
+because `&mut Engine` cannot be split), a `PartEntry` type alias for the registry's row,
+`contains` for `iter().any()`, and eleven mechanical test-code reductions (two in `sr-engine`'s test
+modules, nine in the parts'). Both commands exit **0** now, and the tests are re-run after them.
 
 #### What could not be confirmed — the phase's own negatives
 
 - **Nobody has looked at the screen.** The plan's Task 10 Step 3 is the human look —
   `cargo run --release --bin secondreality -- --block 5` (and `--block 2`) watched by the user — and
-  it is **not done**: the window was verified mechanically (its title bar read back with `xwininfo`,
-  the tick rate, the two hand-overs), and nobody has judged the picture. That is the phase's one
-  unverified claim, it is the user's step, and it is named here rather than implied: Phase 0's single
-  human look found a bug no test could see (the SDL texture-format misread).
+  it is **not done**. What the tree can reproduce is mechanical only: the status line's text and the
+  key handling are unit tests in `window.rs`, the two hand-overs are the `--block 5` end-to-end test,
+  and the rate is the headless run's own printed line
+  (`cargo run --bin secondreality -- --block 5 --headless --run-seconds 60` printed
+  `cred: 4205 ticks in 60.008 s = 70.074 Hz` in Task 10 — the window's title was read back with
+  `xwininfo` in that task too, and that reading lives in its report,
+  `.superpowers/sdd/02-shell/task-10-report.md`, which is git-ignored scratch). No command in the tree
+  says what the picture *looks like*. That is the phase's one unverified claim, it is the user's step,
+  and it is named here rather than implied: Phase 0's single human look found a bug no test could see
+  (the SDL texture-format misread).
 - **Music is deferred, not stubbed.** No audio is decoded, mixed or played in this phase; the one
   gate a faithful port would wait on (ENDLOGO's `dis_musplus()` loop) is its measured 567 ticks
   (**A7**), and Phase 3 replaces it with the real cue. Nothing else ported here touches music.
@@ -520,6 +534,48 @@ Task 2's fixed the one warning its own change introduced — and no task's repor
   whether CRED's shipped build, the port's translation, or both produce them.
 - **One CRED record test's couplings are `#[ignore]`d** (the wipe states against the scratch
   capture), disclosed in `cred.md` §3 and judged acceptable as disclosed by Task 8's review.
+
+#### The whole-branch review, and its fix round (2026-10-13)
+
+**No Critical, no behaviour defect, all three exit criteria met on evidence the reviewer re-derived
+itself** — it rebuilt the binary at the tip, re-dumped and re-compared four parts, re-hashed every
+frame, and flipped a byte in **both** planes of a copy of `reference verify`'s tree (exit 1, with the
+file and both digests named). Thirteen findings — twelve in the record and one in a test — with no
+behaviour defect; every headline number it re-checked reproduced to the digit (the parts'
+percentages, the aligned sets, the block-5 boundaries, the chain's windows, the 163 control lines,
+`FONA.UH`'s digest, 593 tests = 590 + 3 ignored, the two byte-identical sheets).
+
+**The three Importants, all fixed.**
+
+1. **"Seven characters" was six.** The count appeared in `endscrl.md` §6.2, A11, D24, this file (twice)
+   and as a test's name, and the register contradicted itself four lines apart (the same paragraph
+   said "`fonaw` is 0 for all six"). The packed EXE's appended run is the six bytes `5a 84 94 59 2f 26`
+   — `Z \x84 \x94 Y / &` — so the shipped order is **80**, the text uses five of the six, and `0x94`
+   is the one it never asks for. Corrected everywhere, and the test (`the_shipped_order_names_six_
+   characters_the_trees_does_not`) now **asserts** the three counts it sits beside: `FONT_ORDER.len()`
+   is 74, the appended run six, their sum 80, and five of the six appear in the shipped text.
+2. **D24's step 3 had no tiebreaker.** Read literally, "a single expression or constant the release
+   changed → port the release's value" covered TUNNELI's `div 5` (adopted) and ENDSCRL's `FONAY 25`
+   (not adopted) equally. It now states the discriminator: **adopt only when the difference is one
+   value the tree's algorithm can carry *and nothing else in that part differs*; register when the
+   build differs in data, art, text or behaviour elsewhere** — and A11's closing paragraph records
+   the pitch's deliberate non-adoption and the reason, so it does not read as a weaker measurement.
+3. **Clippy was an exit item, not polish, and the count in the close-out was incomplete** (see the
+   verification section above: seven under the plan's command — five of them had been hiding the
+   other two — and eleven more under `--all-targets`). All eighteen fixed, both commands exit 0, and
+   the tests re-run after them.
+
+**The ten Minors, all fixed**: `cred.rs`'s screen-18 comparison now goes through a length-asserting
+`differing_bytes` (the `zip` that cannot fail, in its fifth appearance); three stale counts
+(`tunneli.md`'s "fifteen" is 17, `cred.md`'s "14 unit tests" is 20 — 18 unconditional and 2
+`#[ignore]`d — and `beglogo.md`'s "the four" is five); this file's HEAD line; spec §4.2's sketch line
+(`y_line_offset` is `Option<u16>` counting pixels, stale since Phase 0's review and parked onto this
+pass, which had done the other two fields and not this one); `tunneli.md`'s §7.3 moved back under §7
+where it belongs; A8's "A7's ruling" disambiguated as **Phase 1's task** A7; A10's "Unpacking it
+yields" reduced to what is measured (the count is `INCLUDE.OBJ`'s 12 plus `INCLUD2.OBJ`'s 9 at a
+16,784-byte stride, and the layout is those objects' blobs — nothing here has been unpacked); and the
+human-look bullet's `xwininfo` reading replaced by what the tree reproduces, with the reading filed
+to Task 10's report.
 
 ### Phase 2's evidence, appended task by task
 
@@ -1040,10 +1096,13 @@ which is the dominant one:
   The `[10`/`[8` steps are not visible in any of the four frames — recorded as **unmeasured**.
 - **The pitch**: **25 rows a line where `MAIN.C:6` says `FONAY 30`** (frame 12000's twelve whole
   lines: every gap a multiple of 25, the smallest 25).
-- **The shipped `fonaorder` names seven characters the tree's does not** (`Z Y / & \x84 \x94`; the
-  packed `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail plus those seven — `xxd -s 9286 -l 40`),
-  and the text uses five of them: on frame 14000 the lines naming one are **14–15 columns wider**
-  than the port's rendering, the lines naming none within 1.
+- **The shipped `fonaorder` names six characters the tree's does not** (`Z Y / & \x84 \x94`; the
+  packed `MAIN/DATA/ENDSCRL.EXE` carries the tree's tail plus those six — the appended run is the six
+  bytes `5a 84 94 59 2f 26` in `xxd -s 9286 -l 40` — so its order is 80, not 81), and the text uses
+  five of them: on frame 14000 the lines naming one are **14–15 columns wider** than the port's
+  rendering, the lines naming none within 1. *(The count was recorded as seven at Task 9 and
+  corrected at the close-out: the note's own dump shows six, and its own next sentence says `fonaw`
+  is 0 "for all six".)*
 - **The raster** differs from `FONA.UH` in **53 of the header band's 11,520 pixels** (geometry
   identical: the same 13 ink-column runs).
 - **The text has no carriage returns** (the centring is one column further left than the tree's CRLF
@@ -1090,7 +1149,7 @@ tree is a **development snapshot, not the released build**, in three independent
 second palette ramp is one expression different (and the tree's own `.PAS` and `.EXE` agree with each
 other and disagree with the release), CRED's shipped credits are different *data* (captions the
 source cannot draw), and ENDSCRL's shipped scroller is a different build again (a 25-row pitch where
-the source says 30, control lines the source has no notion of, seven more characters in its font
+the source says 30, control lines the source has no notion of, six more characters in its font
 order, and no carriage returns). D12's rule already decided which artifact wins — the release, because
 the release is what the reference frames measure — and **D24 now records the procedure** for the
 next phase that meets it: measure what the release does, check whether the tree can produce it at
@@ -1110,9 +1169,10 @@ deferred and is the user's step). No music is decoded or played, and ENDLOGO's h
 frame standing in for a cue (A7). Nine and ten frames of the two parts' lead-ins are not modelled and
 their cause is unidentified (A5, A7). Three parts' references are other builds (A6, A10, A11).
 TUNNELI's residual is the oracle's or the port's and cannot be resolved further with what is
-captured. `cargo clippy --workspace -- -D warnings` is not clean (five pre-existing `sr-engine`
-lints), and the plan's Step 4 asked for it to be; it is recorded as an open item for the review
-rather than fixed unreviewed.
+captured. `cargo clippy --workspace -- -D warnings` was dirty at the close-out — the review made it
+an exit item, and the fix round below closes it (seven findings under the plan's command, eleven more
+under `--all-targets`, all pre-existing and all fixed without a behaviour change; both commands exit
+0).
 
 ### Phase 1 — Assets & references (done, tag `phase-1`)
 

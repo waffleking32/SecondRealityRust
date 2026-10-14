@@ -364,8 +364,9 @@ translates `:250-269`'s scan. It does **not** load the strip through
 routine's 32-column cell is not a whole number of cells across the 1,500-column
 raster, and passing a cell that *does* divide would state a geometry no line of
 the source states — the guess the loader's own refusal exists to prevent
-(`crates/sr-assets/src/font.rs:156-187`, and A7's ruling that the glyphs are the
-scan's, never the cell's).
+(`crates/sr-assets/src/font.rs:156-187`, and **Phase 1's task A7**'s ruling that
+the glyphs are the scan's, never the cell's — a *task* A7, not this register's
+A7, which is ENDLOGO's letter above).
 
 **Why.** Both mismatches are properties of the shipped art, not of the port: the
 raster is 40 rows tall and the routine's window is 32, and the cell is an
@@ -501,12 +502,16 @@ with. The port translates `CREDITS/MAIN.C` as it stands, and this entry is what 
 which is what says the residue is the *data* and not the port: the same machinery, the same tick
 map, the same palette repair and the same geometry reproduce them exactly.
 
-**For whoever unpacks it.** `MAIN/DATA/CRED.EXE` is PKLITE-compressed, so its captions and its 21
-pictures are recorded but unread. Unpacking it yields 21 `FC FC` blobs (16,784 bytes each: a 16-byte
-header, a 768-byte palette at offset 16, 16,000 pixels at offset 784 — the layout `CREDITS/
-INCLUDE.OBJ`'s own blobs have) and the caption strings, which is what would turn "the shipped
-window differs" into "here is what it says". Phase 9 compares every frame; these three are where
-that phase will first look.
+**For whoever unpacks it.** `MAIN/DATA/CRED.EXE` is PKLITE-compressed, so its captions and its
+pictures are recorded but unread. Unpacking it **would** yield the 21 pictures the credits draw as
+`FC FC` blobs plus the caption strings, which is what would turn "the shipped window differs" into
+"here is what it says". The count and the layout are **inferred, not read**: the 21 is
+`CREDITS/INCLUDE.OBJ`'s 12 plus `INCLUD2.OBJ`'s 9 `FC FC` pictures, at a 16,784-byte stride
+(`docs/fidelity/asset-inventory.md` §E.20, the row for those two objects) — the tree's own linked
+objects, which is what the credits were built from — and the internal layout (a 16-byte header, a
+768-byte palette at offset 16, pixels at offset 784) is the one those objects' blobs have, not one
+read out of the packed EXE. Nothing here has been unpacked; what the markers inside `CRED.EXE` are
+is unmeasured. Phase 9 compares every frame; these three are where that phase will first look.
 
 ## A11 — ENDSCRL: the shipped build's control lines, pitch, order and carriage returns are not the tree's
 
@@ -537,10 +542,11 @@ frames by `bins/secondreality/src/parts/endscrl.rs`'s reference tests, in the or
 2. **The line pitch is 25 rows, not `FONAY 30`.** Frame 12000's twelve whole text lines have gaps of
    25, 100, 50, 25, 25, 25, 25, 25, 25 rows: every gap a multiple of 25, the smallest 25. The port's
    own frame under the same measurement has gaps that are multiples of 30 and never 25.
-3. **The shipped `fonaorder` names seven characters the tree's does not** — `Z`, `Y`, `/`, `&`, and
+3. **The shipped `fonaorder` names six characters the tree's does not** — `Z`, `Y`, `/`, `&`, and
    the high bytes `\x84` (`ä`) and `\x94`. The tree's order is 74 characters; the shipped build's is
-   **81**, and the packed EXE carries the tree's own tail followed by the seven
-   (`xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE`). The text uses five of them:
+   **80**, and the packed EXE carries the tree's own tail followed by the six
+   (`xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE`, whose appended run is the six
+   bytes `5a 84 94 59 2f 26`). The text uses five of them:
    `/` 83 times, `&` 26, `Z` 12, `Y` once, `ä` twice. `fonaw` is 0 for all six here, so the port
    draws a two-column gap where the reference draws a glyph: on frame 14000 the lines naming one are
    **14–15 columns wider** than the port's rendering, and the lines naming none are within **1**.
@@ -564,6 +570,18 @@ Bending either to make the comparison pass would be a fit rather than a translat
 records for CRED, where the port likewise keeps the tree's captions and pictures and the register
 carries the difference.
 
+**And the pitch is measured but deliberately *not* adopted, which is D24's second branch.**
+Difference 2 above is a single value — 25 rows where the source says 30 — and it is derived by
+exact measurement, so D24's first branch ("a single expression or constant the release changed")
+would reach for it. It is not taken, because that branch requires the release's difference to be
+*one value the tree's algorithm can carry and nothing else in the part to differ*: this same part
+differs in the control-line rule (a behaviour in the text), in its font order and raster (art) and
+in its carriage returns (the demo's file service), and bending `FONAY` to 25 would leave every one
+of those still off while making the port's own constant a fit to a screen it cannot reproduce. The
+pitch is therefore registered here with its measurement, and the port keeps the source's 30. **The
+measurement is not weaker than TUNNELI's** — both are exact and both are unique — the *decision*
+differs, and this paragraph is the discriminator D24's step 3 now states.
+
 **Measured difference.** `cargo xtask compare` exits **1** on all four keyframes: 9100
 **2.8473 %**, 10000 **11.0676 %**, 12000 **9.9617 %**, 14000 **6.6828 %**, max channel delta 243,
 every frame paired at offset 0 (`docs/fidelity/endscrl.md` §6). Of that, the **chain's own
@@ -577,6 +595,6 @@ touch any of it.
 
 **Replaces:** nothing. **Leads for whoever takes it:** the two builds of this part are
 `ENDSCRL/ENDSCRL.EXE` (14,113 bytes) and `MAIN/DATA/ENDSCRL.EXE` (9,965, PKLITE-packed) — the
-shipped one's control-line rule, its `FONAY`, its 81-character order and its raster are all inside
+shipped one's control-line rule, its `FONAY`, its 80-character order and its raster are all inside
 that packed image. **The mechanism of the control-line rule is unknown, as the CR's is: what is
 measured is the behaviour** — a `[NN` line advances the ring NN rows and draws nothing.

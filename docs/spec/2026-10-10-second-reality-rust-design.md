@@ -267,9 +267,11 @@ pixels were written, only how fast.
 ```rust
 struct View {
     x_offset: u16,        // pixel offset within a line, added to start_addr
-    y_line_offset: u16,   // bytes per displayed scanline (CRTC line offset 0x13)
+    y_line_offset: Option<u16>,  // pixels per displayed scanline (CRTC line offset 0x13);
+                                 // None = the surface's own row stride
     start_addr: u32,      // display start, in pixels (CRTC 0x0C/0x0D)
-    pan: u8,              // fine horizontal pan, 0..7 (AC 0x13)
+    pan: u8,              // fine pan in *pixels*, 0..=7 (AC 0x13's value is halved
+                          // in a 256-colour mode; see view.rs's `pan`)
     double_scan: bool,    // CRTC reg 9 bit 7 / max scanline 0
     split: Option<Split>, // line compare: scanline + second View
     border: Option<u8>,   // overscan colour (AC 0x11)
@@ -286,6 +288,14 @@ walks a 400-line ring up to **256,000**. `x_offset` stays `u16`: it is an offset
 line, bounded by the widest line rather than by the buffer, and the origin now lives in
 `start_addr`, which is what `View::set_origin` writes (zeroing `x_offset`). See `docs/decisions.md`
 D16, whose open item this closes.
+
+**And two more sketch lines were stale, and are corrected here (Phase 2's close-out).**
+`y_line_offset` is `Option<u16>` counting *pixels* — amended in Phase 0's closing review, which
+caught the trap this line set: a default of the view's own width shears a 320-wide picture drawn on
+the 640-wide surface, and `None` — read the surface's own rows — is what a part drawing through
+`Surface` wants (D16, `CLAUDE.md`'s caveats). And `pan` is a **pixel** count 0..=7: Task 8 measured
+that a 256-colour mode shifts `(value & 0x7) / 2` pixels (`vga_attr.cpp:225-227`), so it is AC
+0x13's unit only in some modes, and `View::pan`'s own doc carries the measurement.
 
 This single struct replaces the CRTC. It is fully testable in isolation, which is
 where most of the hardware-trick risk is retired.

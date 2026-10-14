@@ -412,8 +412,8 @@ per-screen drift above, and the number Task 11 can compare its own measurement a
 
 ## 8. Tests
 
-`bins/secondreality/src/parts/cred.rs` (14 unit tests, reading the curated `assets/` and the
-committed `reference/`):
+`bins/secondreality/src/parts/cred.rs` (20 unit tests — 18 of them unconditional and 2 `#[ignore]`d
+on the scratch capture they read — reading the curated `assets/` and the committed `reference/`):
 
 | test | what it pins |
 |---|---|

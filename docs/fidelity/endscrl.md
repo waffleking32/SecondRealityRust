@@ -237,9 +237,9 @@ the smallest 25, which cannot be one line's fragments because a line's ink is 18
 list, and the same measurement on the port's own frame gives gaps that are multiples of 30
 and never 25.
 
-**3. The shipped `fonaorder` names seven characters the tree's does not.** The tree's order
-(`MAIN.C:13`) is 74 characters; the shipped build's is **81** — the packed
-`MAIN/DATA/ENDSCRL.EXE` carries the tree's own tail followed by the seven it adds:
+**3. The shipped `fonaorder` names six characters the tree's does not.** The tree's order
+(`MAIN.C:13`) is 74 characters; the shipped build's is **80** — the packed
+`MAIN/DATA/ENDSCRL.EXE` carries the tree's own tail followed by the six it adds:
 
 ```
 $ xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE
@@ -255,7 +255,10 @@ draws a glyph. Measured on frame 14000's own lines, where the port's rendered ex
 the reference's band: `Daryl / Sun Projects` **15** columns wider, `Tran & White Shadow`
 **14**, `Dr.Weird / DanTe` **15**, `Jussi Leppänen` **14**, `Emphii, Mace & Shaft` **14** —
 and `Martti Palonen`, `Jussi Markula`, `Mikko Vierula` and `Wildfire:`, which name none of
-the seven, within **1** column, which is the raster below.
+the six, within **1** column, which is the raster below.
+The appended run is **six** bytes — `Z \x84 \x94 Y / &`, the `xxd` dump above — so the
+shipped order is 74 + 6 = **80**; a count of seven contradicted this note's own dump and its
+own "`fonaw` is 0 for all six", and was corrected at the close-out.
 
 **4. The raster is not `ENDSCRL/FONA.UH`'s either.** At the tick whose header sits on the
 reference's own rows, the port's header band differs from the reference's in **53 pixels of
@@ -306,7 +309,7 @@ the committed `reference/`):
 | `the_references_text_runs_at_twenty_five_rows_a_line_where_the_source_says_thirty` | §6.2's pitch, on the reference's frame and on the port's |
 | `the_references_own_header_pins_the_chains_offset` | §6.1's tick, start and residual, and §6.2's 53-pixel raster difference |
 | `the_references_control_lines_advance_the_ring_and_draw_nothing` | §6.2's `[NN` rule: the 163 control lines and their four sizes, and every band of frames 10000 and 14000 predicted from the tree's own text and found in the reference |
-| `the_shipped_order_names_seven_characters_the_trees_does_not` | §6.2's seven extra characters: `fonaw` 0 for each, the text's own counts, and the 14/15-column width of the lines that name them against ≤ 1 for the rest |
+| `the_shipped_order_names_six_characters_the_trees_does_not` | §6.2's six extra characters: `fonaw` 0 for each, the text's own counts, and the 14/15-column width of the lines that name them against ≤ 1 for the rest |
 
 `bins/secondreality/tests/endscrl.rs` (2 tests through the real binary, and **two** runs of
 it — a far one is 13,596 ticks, so the checks are grouped by the dump they need): the four

@@ -1535,9 +1535,11 @@ every one of them diffs a part whose shipped build may not be the tree's.
 3. **ENDSCRL — a build's behaviour and its art.** The shipped scroller's text pitch is **25 rows a
    line** where `MAIN.C:6` says `FONAY 30`; its `[NN` control lines — **163** in the shipped text —
    advance the ring by the number in the marker and draw nothing, where the tree's renderer draws the
-   two digits; its `fonaorder` names **seven** characters the tree's 74 do not; its raster differs
+   two digits; its `fonaorder` names **six** characters the tree's 74 do not (the packed EXE's
+   appended run is six bytes — `Z \x84 \x94 Y / &` — so its order is 80, not 81); its raster differs
    from `FONA.UH` in 53 px of the header band's 11,520; and its text has **no carriage returns**
-   (`endscrl.md` §6.2, A11). *Decided:* the port stays the tree's, as for CRED.
+   (`endscrl.md` §6.2, A11). *Decided:* the port stays the tree's, as for CRED — including the
+   **pitch**, which is measured exactly and deliberately not adopted; step 3 below says why.
 
 **The procedure.** Three steps, in this order, before anything is changed:
 
@@ -1552,13 +1554,25 @@ every one of them diffs a part whose shipped build may not be the tree's.
    *cannot* produce the release's frame, no port of the tree will ever match it and the difference is
    the release's data, not a bug to chase. If the tree *can* produce it, the port has a bug and the
    divergence is not the explanation.
-3. **Decide and register.** A single expression or constant the release changed → port the release's
-   value, with the derivation as a permanent test (TUNNELI). Data, art or behaviour the tree does not
-   hold → keep the tree's translation — the alternative is inventing bytes no file in the tree
-   supports — and register the difference as an `APPROXIMATIONS.md` entry with its per-frame numbers,
-   the evidence for the attribution, and **a lead**: name the packed EXE and the pack table
-   (`MAIN/PACKFINA.INC`) where the release's own bytes are, so a later phase can turn "the shipped one
-   differs" into "here is what it says". A divergence with no entry is the failure this procedure
+3. **Decide, and the first question is how much differs — not how well the measurement is made.**
+   **Adopt the release's value only when the difference is one expression or constant that the
+   tree's own algorithm can carry *and every other difference in that part is accounted for*** — in
+   TUNNELI, one divisor (1,108 px against ≥4,200 for every other candidate), with the part's residual
+   afterwards a few hundred pixels of *ink presence* (179/373/321/433 over the four aligned frames,
+   A6) rather than any second value the tree got wrong. Then port the release's value with the
+   derivation as a permanent test. **Register, and keep the tree's translation, when the part differs
+   in more than that — data, art, text or behaviour the tree does not hold** — the
+   alternative is inventing bytes no file in the tree supports, and bending one visible constant
+   while the rest of the build still differs leaves the port fitted to a screen it cannot reproduce
+   (CRED's captions and pictures; ENDSCRL's pitch, which is a single value measured exactly as
+   TUNNELI's is, but its part also differs in the control-line rule, its font order, its raster and
+   its carriage returns — A11's own closing paragraph records the non-adoption and the reason, so it
+   does not read as a weaker measurement). A *single constant measured to the release's value in a
+   part that otherwise matches* is TUNNELI's case and is adopted; the same measurement in a part that
+   differs elsewhere is registered. Registering means an `APPROXIMATIONS.md` entry with the per-frame
+   numbers, the evidence for the attribution, and **a lead**: name the packed EXE and the pack table
+   (`MAIN/PACKFINA.INC`) where the release's own bytes are, so a later phase can turn "the shipped
+   one differs" into "here is what it says". A divergence with no entry is the failure this procedure
    exists to prevent.
 
 **What is not established, and must not be implied.** The direction. Nothing in the tree dates the
