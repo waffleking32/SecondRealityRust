@@ -359,17 +359,15 @@ fn inspect_trace(capture: &CaptureDir, text: &str) -> Result<Inspection, VerifyE
         });
     }
 
-    // The coverage claim, recomputed from the file's own frames.
+    // The coverage claim, recomputed from the file's own frames and compared
+    // **field by field**, so a finding names what moved rather than printing two
+    // sentences that look alike.
     if !frames.is_empty() {
         let recomputed = crate::music::Coverage::of(manifest.coverage.window, &frames);
-        if recomputed != manifest.coverage {
+        for disagreement in recomputed.disagreements(&manifest.coverage) {
             inspection.findings.push(Finding {
                 path: under(capture, MANIFEST_FILE),
-                what: format!(
-                    "the manifest says its coverage is {} and the file's own frames make it {}",
-                    manifest.coverage.describe(),
-                    recomputed.describe()
-                ),
+                what: format!("the coverage the manifest records does not match the file — {disagreement}"),
             });
         }
     }

@@ -390,6 +390,22 @@ fn a_coverage_claim_the_file_does_not_support_is_a_finding() {
 // The analysis, which is where the note's numbers come from
 // -------------------------------------------------------------------------------------
 
+/// The pre-sampling boundary is **named**, not just missing: the analysis says
+/// which run of absent frames is the boundary the locate left behind, so a
+/// reader of a trace filed before the manifest carried `before_sampling` still
+/// gets the boundary called by its name.
+#[test]
+fn the_analysis_names_the_pre_sampling_boundary() {
+    let run = xtask(&["music", "analyse", "--trace", "reference/music/second5"]);
+    assert_eq!(run.code, 0, "{}", run.output());
+    let text = run.output();
+    assert!(
+        text.contains("147")
+            && text.contains("the boundary: the segment was located after they had gone"),
+        "the boundary is named:\n{text}"
+    );
+}
+
 /// `music analyse` reads a filed trace back and prints the measurements the
 /// note records, including the ones that can only be read off the trial: where
 /// the music starts, the rate against the module's own header, the
@@ -416,6 +432,38 @@ fn the_analysis_prints_the_notes_numbers() {
         text.contains("order 27 (254): never held — the counter went from ord 26 to ord 28"),
         "{text}"
     );
+}
+
+/// **The port's `zplus` rule reproduces every filed trace**: `music analyse`
+/// re-derives the value from each trace's own order sequence and prints the
+/// count of samples it had to be right about. Three traces, 10,256 samples, and
+/// no mismatch — the rule is the port's to implement, so it is checked here
+/// rather than copied from a reading of the original.
+#[test]
+fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
+    let mut samples = 0usize;
+    for trace in ["second5", "second3", "hiddenu"] {
+        let path = format!("reference/music/{trace}");
+        let run = xtask(&["music", "analyse", "--trace", &path]);
+        assert_eq!(run.code, 0, "{trace}: {}", run.output());
+        let text = run.output();
+        let line = text
+            .lines()
+            .find(|line| line.contains("the port's zplus rule, re-derived"))
+            .unwrap_or_else(|| panic!("{trace}: no rule line in\n{text}"));
+        let count: usize = line
+            .split(": ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|count| count.parse().ok())
+            .unwrap_or_else(|| panic!("cannot read the sample count from {line:?}"));
+        assert!(
+            line.contains("0 mismatch(es)"),
+            "{trace}: the rule does not reproduce it: {line}"
+        );
+        samples += count;
+    }
+    assert_eq!(samples, 10_256, "the three traces' samples, all checked");
 }
 
 /// The analysis checks the trace against the digest its manifest records before

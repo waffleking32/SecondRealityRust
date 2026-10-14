@@ -236,8 +236,9 @@ pub enum LocateError {
     NotFound { scanned: usize },
     /// More than one place holds the needle, so no base is *the* base: the
     /// locator refuses rather than picking one, and reports every base the
-    /// needle's own offset solves (up to [`AMBIGUOUS_LIMIT`] of them).
-    Ambiguous { bases: Vec<u32> },
+    /// needle's own offset solves (up to [`AMBIGUOUS_LIMIT`] of them) with how
+    /// many matches the whole scan saw.
+    Ambiguous { bases: Vec<u32>, found: usize },
     /// The oracle could not read anything at all — the first address it asked
     /// for failed — so there was no memory to search.
     Read(String),
@@ -254,10 +255,10 @@ impl fmt::Display for LocateError {
                 "the segment was not found in the last {scanned} bytes of guest memory that were \
                  scanned"
             ),
-            LocateError::Ambiguous { bases } => write!(
+            LocateError::Ambiguous { bases, found } => write!(
                 f,
-                "the needle occurs in {} place(s), so no base is the base: it solves {}",
-                bases.len(),
+                "the needle occurs in {found} place(s), so no base is the base: it solves {}",
+                
                 bases
                     .iter()
                     .map(|base| format!("0x{base:06X}"))
@@ -321,6 +322,7 @@ pub fn locate(
     }
     let overlap = (needle.len() - 1).min(SCAN_CHUNK - 1);
     let mut matches: Vec<u32> = Vec::new();
+    let mut found = 0usize;
     let mut tail: Vec<u8> = Vec::new();
     let mut address: u32 = 0;
     let mut scanned = 0usize;
@@ -339,33 +341,38 @@ pub fn locate(
         // that starts in the tail and ends in this chunk was not.
         let mut haystack = tail.clone();
         haystack.extend_from_slice(&bytes);
-        for start in 0..=haystack.len() - needle.len() {
-            if &haystack[start..start + needle.len()] != needle {
-                continue;
-            }
-            if start + needle.len() <= tail.len() {
-                continue;
-            }
-            let found = address - tail.len() as u32 + start as u32;
-            matches.push(found);
-            if matches.len() > AMBIGUOUS_LIMIT {
-                // The scan stops at the limit: nobody needs to know the tenth
-                // address as well, and the refusal names the ones it has.
-                break;
+        if haystack.len() >= needle.len() {
+            for start in 0..=haystack.len() - needle.len() {
+                if &haystack[start..start + needle.len()] != needle {
+                    continue;
+                }
+                if start + needle.len() <= tail.len() {
+                    continue;
+                }
+                if matches.len() < AMBIGUOUS_LIMIT {
+                    matches.push(address - tail.len() as u32 + start as u32);
+                }
+                found += 1;
             }
         }
 
+        // A chunk shorter than a full request is the end of the emulated
+        // memory: nothing above it will answer, and `bytes.len() - overlap`
+        // would not even be a valid slice for a chunk shorter than the needle.
+        if bytes.len() < SCAN_CHUNK {
+            break;
+        }
         tail = bytes[bytes.len() - overlap..].to_vec();
         address += bytes.len() as u32;
     }
 
-    match matches.len() {
+    match found {
         0 => Err(LocateError::NotFound { scanned }),
         1 => {
-            let found = matches[0];
-            let base = found.checked_sub(u32::from(target)).ok_or_else(|| {
+            let at = matches[0];
+            let base = at.checked_sub(u32::from(target)).ok_or_else(|| {
                 LocateError::BadNeedle(format!(
-                    "the needle was found at 0x{found:06X}, below the 0x{target:04X} offset it is \
+                    "the needle was found at 0x{at:06X}, below the 0x{target:04X} offset it is \
                      supposed to sit at — the match is not this segment"
                 ))
             })?;
@@ -374,11 +381,11 @@ pub fn locate(
         _ => {
             let mut bases: Vec<u32> = matches
                 .iter()
-                .filter_map(|found| found.checked_sub(u32::from(target)))
+                .filter_map(|at| at.checked_sub(u32::from(target)))
                 .collect();
             bases.sort_unstable();
             bases.dedup();
-            Err(LocateError::Ambiguous { bases })
+            Err(LocateError::Ambiguous { bases, found })
         }
     }
 }
@@ -741,25 +748,59 @@ pub struct Coverage {
     /// inclusive `[first, last]` pairs. Recomputable from the trace's own
     /// frames, and recomputed by `reference verify`.
     pub missing: Vec<[u64; 2]>,
+    /// The frames of the window that were already gone when sampling began —
+    /// the locate's own cost — or `None` when the window's first frame was
+    /// sampled. It is the first run of [`Coverage::missing`] when it is there,
+    /// named on its own so the boundary explains itself in the manifest instead
+    /// of only in prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_sampling: Option<[u64; 2]>,
 }
 
 impl Coverage {
     /// The coverage a window and a list of sampled frames make. `reference
     /// verify` calls this on a trace file's own frames and compares the answer
     /// with the manifest's claim: the claim is recomputed, not believed.
+    ///
+    /// Nothing here can panic on a window it is handed, however malformed: the
+    /// window comes out of a manifest, and a manifest is what a verifier exists
+    /// to disbelieve. A window whose last frame is before its first is an empty
+    /// one — zero requested, nothing missing, and **not** per-frame — which
+    /// then disagrees with whatever the manifest claimed, and the disagreement
+    /// is a finding rather than a crash.
     pub(crate) fn of(window: [u64; 2], frames: &[u64]) -> Coverage {
-        let requested = window[1] + 1 - window[0];
+        if window[1] < window[0] {
+            return Coverage {
+                window,
+                requested: 0,
+                first: frames.first().copied().unwrap_or(window[0]),
+                last: frames.last().copied().unwrap_or(window[1]),
+                samples: frames.len() as u64,
+                per_frame: false,
+                missing: Vec::new(),
+                before_sampling: None,
+            };
+        }
+        let requested = window[1] - window[0] + 1;
         let mut missing = Vec::new();
         let mut cursor = window[0];
         for frame in frames {
             if *frame > cursor {
                 missing.push([cursor, *frame - 1]);
             }
-            cursor = frame + 1;
+            cursor = frame.saturating_add(1);
         }
         if cursor <= window[1] {
             missing.push([cursor, window[1]]);
         }
+        // The first run, when it is the one before the first sample, is the
+        // boundary rather than a gap: it is named as such.
+        let before_sampling = match (missing.first(), frames.first()) {
+            (Some([from, to]), Some(first)) if *to < *first && *from == window[0] => {
+                Some([*from, *to])
+            }
+            _ => None,
+        };
         Coverage {
             window,
             requested,
@@ -768,6 +809,7 @@ impl Coverage {
             samples: frames.len() as u64,
             per_frame: missing.is_empty(),
             missing,
+            before_sampling,
         }
     }
 
@@ -777,6 +819,64 @@ impl Coverage {
             .iter()
             .map(|[first, last]| last - first + 1)
             .sum()
+    }
+
+    /// Every field of this coverage that disagrees with `recorded`, with both
+    /// values, as the sentences a finding is made of.
+    ///
+    /// `reference verify` recomputes a trace's coverage from the trace file's
+    /// own frames and compares it with the manifest's claim through this, so a
+    /// disagreement **names the field** rather than printing two sentences that
+    /// look alike. `before_sampling` is compared only when the manifest records
+    /// one: it is a naming of the first missing run rather than an independent
+    /// claim, and a manifest filed before the field existed (D23's additive
+    /// rule) is not wrong for lacking it — the recomputed coverage names the
+    /// boundary in [`Coverage::describe`] either way.
+    pub(crate) fn disagreements(&self, recorded: &Coverage) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut field = |name: &str, mine: String, theirs: String| {
+            if mine != theirs {
+                out.push(format!("{name}: the file makes it {mine}, the manifest says {theirs}"));
+            }
+        };
+        field(
+            "window",
+            format!("{}..{}", self.window[0], self.window[1]),
+            format!("{}..{}", recorded.window[0], recorded.window[1]),
+        );
+        field(
+            "requested",
+            self.requested.to_string(),
+            recorded.requested.to_string(),
+        );
+        field(
+            "first/last",
+            format!("{}..{}", self.first, self.last),
+            format!("{}..{}", recorded.first, recorded.last),
+        );
+        field(
+            "samples",
+            self.samples.to_string(),
+            recorded.samples.to_string(),
+        );
+        field(
+            "per_frame",
+            self.per_frame.to_string(),
+            recorded.per_frame.to_string(),
+        );
+        field(
+            "missing",
+            format!("{:?}", self.missing),
+            format!("{:?}", recorded.missing),
+        );
+        if let Some(theirs) = recorded.before_sampling {
+            field(
+                "before_sampling",
+                format!("{:?}", self.before_sampling),
+                format!("{:?}", Some(theirs)),
+            );
+        }
+        out
     }
 
     /// The sentence the tool prints, and the one the note may quote.
@@ -798,9 +898,18 @@ impl Coverage {
                     }
                 })
                 .collect();
+            let boundary = self
+                .before_sampling
+                .map(|[from, to]| {
+                    format!(
+                        " (frames {from}..{to} of them are the boundary: the segment was located \
+                         after they had gone)"
+                    )
+                })
+                .unwrap_or_default();
             format!(
                 "frames {}..{} of the requested {}..{}: {} sample(s), {} frame(s) missing \
-                 ({}) — this trace is NOT per-frame",
+                 ({}){boundary} — this trace is NOT per-frame",
                 self.first,
                 self.last,
                 self.window[0],
@@ -1318,10 +1427,7 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         bytes: text.len() as u64,
         sha256: sha256_hex(text.as_bytes()),
     };
-    let mut machine = machine_at_start;
-    for (name, value) in machine_at_end {
-        machine.entry(name).or_insert(value);
-    }
+    let machine = merge_machine_words(machine_at_start, machine_at_end)?;
 
     let manifest = TraceManifest {
         version: MANIFEST_VERSION,
@@ -1339,7 +1445,7 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         skip_boot_frames: 0,
         boot: options.boot,
         keys: options.keys.clone(),
-        coverage: Coverage::of(window, &samples.iter().map(|s| s.frame).collect::<Vec<_>>()),
+        coverage: Coverage::of(window, &frames_in(&samples)),
         trace: trace_file,
         object: map,
         locate: locate_record,
@@ -1426,7 +1532,10 @@ fn find_segment(
                     frame,
                 });
             }
-            (Err(LocateError::Ambiguous { bases: one }), Err(LocateError::Ambiguous { bases: two })) => {
+            (
+                Err(LocateError::Ambiguous { bases: one, .. }),
+                Err(LocateError::Ambiguous { bases: two, .. }),
+            ) => {
                 if one != two {
                     return Err(MusicError::Locate(LocateError::BadNeedle(format!(
                         "the two needles do not agree about where the segment is: the run at \
@@ -1504,7 +1613,7 @@ fn prove_views(
     }
     Ok(format!(
         "the needle's bytes are in {} places and they are one memory: the whole {} bytes of the \
-         segment read through each base (0x{}) are byte-identical at frame {frame} — the demo's \
+         segment read through each base ({}) are byte-identical at frame {frame} — the demo's \
          DOS extender maps one physical page at several linear addresses, and the emulator's \
          memory read goes through the page tables. The trace reads through the lowest, \
          0x{:06X}.",
@@ -1549,6 +1658,38 @@ fn read_words(
         );
     }
     Ok(out)
+}
+
+/// The machine's words as the manifest records them: the reading taken when the
+/// segment was located, checked against the reading taken at the end.
+///
+/// A word that moved between the two is refused rather than recorded once: the
+/// manifest carries **one** number per word, and silently keeping the first of
+/// two disagreeing readings is how a record comes to describe a machine that
+/// was never in one state. These words are the card, its mixing rate and the
+/// buffer size — they are set once, at start-up, and a run in which they change
+/// is not a run whose single reading means anything.
+fn merge_machine_words(
+    start: BTreeMap<String, i64>,
+    end: BTreeMap<String, i64>,
+) -> Result<BTreeMap<String, i64>, MusicError> {
+    let mut machine = start;
+    for (name, value) in end {
+        match machine.get(&name) {
+            Some(first) if *first != value => {
+                return Err(MusicError::Coherence(format!(
+                    "the machine's own word {name} read {first} when the segment was located and \
+                     {value} at the end of the trace: the manifest records one number per word, \
+                     and two readings that disagree are not one"
+                )))
+            }
+            Some(_) => {}
+            None => {
+                machine.insert(name, value);
+            }
+        }
+    }
+    Ok(machine)
 }
 
 /// The player's words, taken out of one read of the whole segment.
@@ -1882,7 +2023,12 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
     }
 
     // Read the word at the window's first and last frames, and say the rate.
-    let mut samples: Vec<(u64, i16)> = Vec::new();
+    // The word asked for **and** `_np_zframe`, read in the same bracketed
+    // sample: the two are only comparable if they are measured over the same
+    // frames of the same session, and that is what tells a counter running at
+    // the playing tempo's tick rate from one running at something else.
+    let zframe_at = view + map.offset("_np_zframe")?;
+    let mut samples: Vec<(u64, i16, i16)> = Vec::new();
     // From the window's own first frame, not from wherever the locate left the
     // guest: a rate measured from the segment's arrival would include the boot.
     let mut next = oracle.frame_counter()?.max(options.window[0]) + 1;
@@ -1895,15 +2041,20 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
             continue;
         }
         let bytes = oracle.read_memory(0, at, 2)?;
+        let zframe = oracle.read_memory(0, zframe_at, 2)?;
         let after = oracle.frame_counter()?;
         if now == after && after >= next {
-            samples.push((after, i16::from_le_bytes([bytes[0], bytes[1]])));
+            samples.push((
+                after,
+                i16::from_le_bytes([bytes[0], bytes[1]]),
+                i16::from_le_bytes([zframe[0], zframe[1]]),
+            ));
             next = after + 1;
         } else {
             next = after;
         }
     }
-    if let (Some((first_frame, first)), Some((last_frame, last))) =
+    if let (Some((first_frame, first, _)), Some((last_frame, last, _))) =
         (samples.first(), samples.last())
     {
         let rate = (f64::from(*last) - f64::from(*first)) / (*last_frame - *first_frame) as f64;
@@ -1913,6 +2064,44 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
             rate * FRAME_RATE_HZ
         );
         println!("  {} sample(s) between them", samples.len());
+        // The same measure for `_np_zframe`, split at its resets when it has
+        // any: the two counters are what §8 of the note is about.
+        let resets = samples
+            .windows(2)
+            .filter(|pair| pair[1].2 < pair[0].2)
+            .count();
+        let longest = samples
+            .split(|sample| sample.2 == 0)
+            .max_by_key(|run| run.len())
+            .filter(|run| run.len() > 1);
+        if let Some(run) = longest {
+            let (first_frame, _, zfirst) = run[0];
+            let (last_frame, _, zlast) = run[run.len() - 1];
+            let zrate =
+                (f64::from(zlast) - f64::from(zfirst)) / (last_frame - first_frame) as f64;
+            println!(
+                "  _np_zframe over the same window: {zfirst} at frame {first_frame} to {zlast} at \
+                 frame {last_frame} — {zrate:+.4} per frame, {:+.2} per second ({resets} \
+                 reset(s))",
+                zrate * FRAME_RATE_HZ
+            );
+        }
+        // The player's own clock at the same moment, so the measured word can
+        // be compared with the tempo that is playing: a word running at the
+        // tick rate of a tempo the demo is not playing is a different counter,
+        // and that is only sayable with both numbers in one output.
+        let clock = read_words(
+            &mut oracle,
+            view,
+            &map,
+            &["_np_tempo", "_np_speed", "_np_zframe", "_np_ord", "_np_row"],
+        )?;
+        println!(
+            "  the player's own words at frame {last_frame}: tempo {}, speed {}, zframe {}, ord \
+             {}, row {}",
+            clock["_np_tempo"], clock["_np_speed"], clock["_np_zframe"], clock["_np_ord"],
+            clock["_np_row"]
+        );
     } else {
         println!("  no frame in the window was sampled");
     }
@@ -2073,6 +2262,70 @@ pub struct Analysis {
     pub samples: Vec<PlayerState>,
     /// The module whose header speed matches the trace's, when one does.
     pub module: Option<Module>,
+    /// The coverage **recomputed from the trace file's own frames**, which is
+    /// what §7 of the note is about: the manifest's claim is checked against it
+    /// by `reference verify`, and printing the recomputed one means the
+    /// pre-sampling boundary is named even for a trace filed before the
+    /// manifest carried `before_sampling`.
+    pub coverage: Coverage,
+}
+
+/// How many samples the `zplus` rule was checked against, and how many it got
+/// wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZplusCheck {
+    pub samples: usize,
+    pub mismatches: usize,
+    /// The first few disagreements: frame, order, row, measured, expected.
+    pub examples: Vec<(u64, u8, u8, i16, i16)>,
+    /// The orders the trace held, in the order the counter first held them.
+    pub held: Vec<u8>,
+}
+
+/// **The port's `zplus` rule**, re-derived over a trace's own order sequence.
+///
+/// `zplus` is what `muscode_6` (`DIS/DISINT.ASM:242-282`) turns into a row
+/// offset for `dis_muscode`, so the port has to compute it rather than copy it.
+/// The rule below is the one that reproduces the three filed traces over every
+/// sample of all of them, and the note states it as **the port's rule, verified
+/// over the filed traces** — not as a reading of the original's source:
+///
+/// - **1** while the counter is playing an order whose *next* entry in the
+///   module's order list is `254` — the marker is coming;
+/// - **2** on a marker crossing: the counter moved from `o` to `o + 2` with
+///   `orders[o + 1] == 254`, **unless** the entry after the one being entered is
+///   itself `254`, in which case it is **1**;
+/// - **0** otherwise;
+/// - and a seek or a restart credits **no** marker behind it: a crossing needs
+///   the order the counter came from to be the one before the skipped entry,
+///   which is why `SECOND 3`'s restart at order 42 — whose list predecessor is
+///   a `254` the player never played — reads 0.
+///
+/// What the traces do **not** show, and the note says so: no trace holds an
+/// order two steps past a marker (`MUSIC0` order 29 onwards, `MUSIC1` order 49
+/// onwards), so `2` returning to `0` on the next natural advance is
+/// extrapolation, and so is anything about a `255`.
+pub fn zplus_rule(orders: &[u8], held: &[u8]) -> Vec<i16> {
+    let mut expected = Vec::with_capacity(held.len());
+    for (position, order) in held.iter().enumerate() {
+        let order = usize::from(*order);
+        let next_is_marker = orders.get(order + 1) == Some(&254);
+        let crossing = position
+            .checked_sub(1)
+            .filter(|_| order > 0)
+            .map(|earlier| {
+                usize::from(held[earlier]) + 2 == order && orders.get(order - 1) == Some(&254)
+            })
+            .unwrap_or(false);
+        expected.push(if next_is_marker {
+            1
+        } else if crossing {
+            2
+        } else {
+            0
+        });
+    }
+    expected
 }
 
 /// One run of constant `(speed, tempo)` in which rows advanced: what the tick
@@ -2212,6 +2465,7 @@ impl Analysis {
         // tempo words, which do not always agree with the file's header (the
         // block 3 trace plays MUSIC1's patterns while its speed word reads 6,
         // where that file says 3).
+        let coverage = Coverage::of(manifest.coverage.window, &frames_in(&samples));
         let module = MODULES
             .iter()
             .filter_map(|(path, patched)| read_module(path, *patched).ok())
@@ -2236,6 +2490,7 @@ impl Analysis {
             manifest,
             samples,
             module,
+            coverage,
         })
     }
 
@@ -2299,6 +2554,79 @@ impl Analysis {
         runs
     }
 
+    /// The runs of `_np_zframe` between its resets, as
+    /// `(first frame, last frame, first value, last value)`.
+    ///
+    /// The word is written by two hands — the player counts ticks into it and
+    /// `_dis_setmframe` (`DIS/DISC.ASM:138-148`) puts a value in it — and it is
+    /// reset when the song is restarted, so a rate measured end to end over a
+    /// trace with a restart in it says nothing about the tick rate.
+    pub fn zframe_runs(&self) -> Vec<(u64, u64, i16, i16)> {
+        let mut runs: Vec<(u64, u64, i16, i16)> = Vec::new();
+        for state in &self.samples {
+            // The leading zeros, before the music starts, are not a run: the
+            // first run begins where the word first moves.
+            if runs.is_empty() && state.zframe == 0 {
+                continue;
+            }
+            match runs.last_mut() {
+                Some(run) if state.zframe >= run.3 => {
+                    run.1 = state.frame;
+                    run.3 = state.zframe;
+                }
+                Some(_) | None => {
+                    runs.push((state.frame, state.frame, state.zframe, state.zframe))
+                }
+            }
+        }
+        runs.retain(|run| run.1 > run.0);
+        runs
+    }
+
+    /// The `zplus` rule ([`zplus_rule`]) re-derived over this trace's own order
+    /// sequence, with every sample compared against it.
+    ///
+    /// The sequence of orders the counter held is built from the samples
+    /// themselves, and each order's expected value is computed when the counter
+    /// first holds it — from the transition that entered it. That is what makes
+    /// "*a seek or a restart credits no marker behind it*" fall out of the
+    /// trace rather than out of this function having to know which transition
+    /// was a restart: a crossing is only a crossing when the counter came from
+    /// the order before the skipped entry.
+    pub fn zplus_check(&self) -> Option<ZplusCheck> {
+        let module = self.module.as_ref()?;
+        let mut held: Vec<u8> = Vec::new();
+        for state in &self.samples {
+            if held.last() != Some(&state.ord) {
+                held.push(state.ord);
+            }
+        }
+        let expected = zplus_rule(&module.orders, &held);
+        let value_of = |order: u8| -> i16 {
+            held.iter()
+                .position(|held| *held == order)
+                .map(|at| expected[at])
+                .unwrap_or(0)
+        };
+        let mut check = ZplusCheck {
+            samples: self.samples.len(),
+            mismatches: 0,
+            examples: Vec::new(),
+            held: held.clone(),
+        };
+        for state in &self.samples {
+            let want = value_of(state.ord);
+            if state.zplus != want {
+                check.mismatches += 1;
+                if check.examples.len() < 6 {
+                    check.examples
+                        .push((state.frame, state.ord, state.row, state.zplus, want));
+                }
+            }
+        }
+        Some(check)
+    }
+
     /// The frames at which the order advanced, in order.
     fn order_changes(&self) -> Vec<(u64, u8, u8)> {
         self.samples
@@ -2310,7 +2638,10 @@ impl Analysis {
 
     fn print(&self, at: Option<u32>) -> Result<(), MusicError> {
         println!("trace: {}", self.dir.display());
-        println!("  {}", self.manifest.coverage.describe());
+        println!(
+            "  {} (recomputed from the trace file's own frames)",
+            self.coverage.describe()
+        );
         println!(
             "  oracle {}, boot {:?}, cycles {}, keys {:?}",
             self.manifest.oracle,
@@ -2490,20 +2821,29 @@ impl Analysis {
         );
         // `_np_zframe` is the word the parts wait on (`DIS/DISINT.ASM:412-425`):
         // it counts ticks, so its own rate is the tick rate said a second way.
-        if let (Some(first), Some(last)) = (
-            self.samples.iter().find(|state| state.zframe != 0),
-            self.samples.last(),
-        ) {
-            let ticks = i64::from(last.zframe) - i64::from(first.zframe);
-            let frames = last.frame - first.frame;
+        // It is **reset** — `_dis_setmframe(0)` is one writer and a song restart
+        // is another — so the rate is measured over the longest run of samples
+        // in which it never went backwards, and the resets are counted rather
+        // than averaged across.
+        let runs = self.zframe_runs();
+        if !runs.is_empty() {
+            let resets: usize = runs.len() - 1;
+            let longest = runs
+                .iter()
+                .max_by_key(|run| run.1 - run.0)
+                .expect("checked not empty");
+            let (first_frame, last_frame, first, last) = *longest;
+            let ticks = i64::from(last) - i64::from(first);
+            let frames = last_frame - first_frame;
             if frames > 0 {
                 println!(
                     "  _np_zframe: {} at frame {} to {} at frame {} — {ticks} tick(s) in {frames} \
-                     frames = {:.4} per frame = {:.2} per second",
-                    first.zframe,
-                    first.frame,
-                    last.zframe,
-                    last.frame,
+                     frames = {:.4} per frame = {:.2} per second, over the longest run without a \
+                     reset ({resets} reset(s) in the trace)",
+                    first,
+                    first_frame,
+                    last,
+                    last_frame,
                     ticks as f64 / frames as f64,
                     ticks as f64 / frames as f64 * FRAME_RATE_HZ
                 );
@@ -2654,6 +2994,43 @@ impl Analysis {
             transitions.len(),
             &transitions[..transitions.len().min(12)]
         );
+
+        // The port's rule, re-derived from this trace's own order sequence and
+        // checked against every sample of it: a rule that says what the trace
+        // does, with the count of the samples it had to be right about.
+        match self.zplus_check() {
+            Some(check) => {
+                println!(
+                    "  the port's zplus rule, re-derived from this trace's own order sequence: {} \
+                     sample(s) checked, {} mismatch(es)",
+                    check.samples, check.mismatches
+                );
+                println!(
+                    "    rule: 1 while playing an order whose next entry in the module's order \
+                     list is 254; 2 on a crossing (the counter moved from o to o+2 with \
+                     orders[o+1] == 254) unless the entry after the one entered is itself 254, in \
+                     which case 1; 0 otherwise; a seek or a restart credits no marker behind it"
+                );
+                println!("    the orders the counter held, in order: {:?}", check.held);
+                for (frame, order, row, measured, expected) in &check.examples {
+                    println!(
+                        "    frame {frame}: ord {order} row {row} reads {measured}, the rule says \
+                         {expected}"
+                    );
+                }
+                if check.mismatches == 0 {
+                    println!(
+                        "    (what the traces cannot show: none of them holds an order two steps \
+                         past a marker, so \"2 goes back to 0 on the next natural advance\" is \
+                         extrapolation — and so is anything about a 255)"
+                    );
+                }
+            }
+            None => println!(
+                "  no module matched the trace's order sequence, so the zplus rule cannot be \
+                 re-derived from it"
+            ),
+        }
 
         // zinfo: the frames each value covers, as runs.
         let mut runs: Vec<(i16, u64, u64)> = Vec::new();
@@ -2952,6 +3329,11 @@ impl Analysis {
 
 /// Read an S3M's header, as much of it as the tick rate needs: the order list,
 /// the pattern count and the speed and tempo bytes (`0x31`, `0x32`).
+/// The frames of a sample list, for a coverage recomputed from them.
+fn frames_in(samples: &[PlayerState]) -> Vec<u64> {
+    samples.iter().map(|state| state.frame).collect()
+}
+
 fn read_module(path: &str, patched_tempo: Option<u8>) -> Result<Module, MusicError> {
     let bytes = std::fs::read(path).map_err(|e| MusicError::Io {
         path: PathBuf::from(path),
@@ -3054,8 +3436,9 @@ mod tests {
         let bits = needle(9);
         let mut read = memory(0x200000, &[(0x51F0, bits.clone()), (0x10_51F0, bits.clone())]);
         match locate(0x982, &bits, &mut read) {
-            Err(LocateError::Ambiguous { bases }) => {
+            Err(LocateError::Ambiguous { bases, found }) => {
                 assert_eq!(bases, vec![0x51F0 - 0x982, 0x10_51F0 - 0x982]);
+                assert_eq!(found, 2);
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -3091,6 +3474,28 @@ mod tests {
             Err(LocateError::BadNeedle(message)) => assert!(message.contains("8-byte"), "{message}"),
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    /// A scan whose last request comes back shorter than the needle **ends**:
+    /// nothing above the emulated memory will answer, and a chunk shorter than
+    /// the needle has no tail to carry. It used to underflow and panic — a
+    /// verifier that panics on a well-formed guest is worse than one that
+    /// refuses.
+    #[test]
+    fn a_short_last_chunk_ends_the_scan_without_panicking() {
+        // Eight bytes past a full chunk: the second request is short, and
+        // shorter than the 32-byte needle.
+        let mut read = memory(SCAN_CHUNK + 8, &[]);
+        assert!(matches!(
+            locate(0, &needle(4), &mut read),
+            Err(LocateError::NotFound { .. })
+        ));
+        // And a needle that lives entirely inside the last short chunk is still
+        // found when it fits.
+        let short = needle(5);
+        let at = 8_000u32;
+        let mut read = memory(at as usize + short.len(), &[(at, short.clone())]);
+        assert_eq!(locate(0, &short, &mut read).unwrap().1, at);
     }
 
     /// The needles come from the object's own `LEDATA` data, are 32 bytes, come
@@ -3163,10 +3568,100 @@ mod tests {
         assert!(holed.describe().contains("NOT per-frame"), "{}", holed.describe());
         assert_eq!(holed.gaps(), 5);
 
-        // The frames before sampling could begin are missing too, and said so.
+        // The frames before sampling could begin are missing too, and said so —
+        // and the run of them is named on its own, so the first gap explains
+        // itself in the manifest rather than only in prose.
         let late = Coverage::of([0, 19], &[10, 11, 12]);
         assert!(!late.per_frame);
         assert_eq!(late.missing, vec![[0, 9], [13, 19]]);
+        assert_eq!(late.before_sampling, Some([0, 9]));
+        assert!(late.describe().contains("the boundary"), "{}", late.describe());
+        // A trace that begins at its window's first frame has no boundary.
+        assert_eq!(every.before_sampling, None);
+        // And a hole in the middle is not a boundary.
+        assert_eq!(holed.before_sampling, None);
+    }
+
+    /// Two readings of a machine word that disagree are refused rather than
+    /// silently merged: the manifest carries one number per word, and keeping
+    /// the first of two is how a record describes a machine that never was.
+    #[test]
+    fn machine_readings_that_disagree_are_refused() {
+        let start = BTreeMap::from([
+            ("_zoutputmode".to_string(), 5),
+            ("_zmixspeed".to_string(), 20000),
+            ("_zbufsize".to_string(), 4096),
+        ]);
+        let same = BTreeMap::from([
+            ("_zoutputmode".to_string(), 5),
+            ("_zmixspeed".to_string(), 20000),
+            ("_zbufsize".to_string(), 4096),
+        ]);
+        assert_eq!(merge_machine_words(start.clone(), same).unwrap(), start);
+        // A word only the second reading has is added, and the words the two
+        // readings agree on keep their value; a word that moved is not merged.
+        let grown = BTreeMap::from([
+            ("_zoutputmode".to_string(), 5),
+            ("_zspeedadjust".to_string(), 0),
+        ]);
+        let merged = merge_machine_words(start.clone(), grown).unwrap();
+        assert_eq!(merged.get("_zoutputmode"), Some(&5));
+        assert_eq!(merged.get("_zspeedadjust"), Some(&0));
+        match merge_machine_words(
+            BTreeMap::from([("_zmixspeed".to_string(), 20000)]),
+            BTreeMap::from([("_zmixspeed".to_string(), 40000)]),
+        ) {
+            Err(MusicError::Coherence(message)) => {
+                assert!(message.contains("_zmixspeed"), "{message}");
+                assert!(message.contains("20000") && message.contains("40000"), "{message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// The `zplus` rule against both modules' order lists: the marker-coming
+    /// case, the crossing case, the crossed-into-another-marker case, and the
+    /// restart case `SECOND 3` measures.
+    #[test]
+    fn the_zplus_rule_reproduces_the_traces_own_order_sequences() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let music0 = read_module(
+            root.join("assets/MAIN/MUSIC0.S3M").to_str().unwrap(),
+            Some(120),
+        )
+        .unwrap();
+        let music1 = read_module(root.join("assets/MAIN/MUSIC1.S3M").to_str().unwrap(), None)
+            .unwrap();
+
+        // MUSIC0: order 27 is the 254. Order 26 has it next (1), order 28 is a
+        // crossing into it (2) — unless the entry after 28 were itself a 254.
+        assert_eq!(zplus_rule(&music0.orders, &[0, 25, 26, 28]), vec![0, 0, 1, 2]);
+        // MUSIC1: order 46 is the 254. Same shape, and order 48 has the 254 at
+        // 49 next to it, so it reads 1 rather than 0 — the 2 → 1 the trace
+        // shows.
+        assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47]), vec![0, 0, 0, 1, 2]);
+        assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47, 48]), vec![0, 0, 0, 1, 2, 1]);
+        // A restart credits no marker behind it: entered at 42, whose list
+        // predecessor is a 254 the player never played.
+        assert_eq!(zplus_rule(&music1.orders, &[0, 42]), vec![0, 0]);
+        // And the marker-coming case holds for a single order with no history.
+        assert_eq!(zplus_rule(&music0.orders, &[26]), vec![1]);
+    }
+
+    /// A window out of a manifest is data a verifier has to disbelieve, so
+    /// `Coverage::of` cannot panic on one: a window whose last frame is before
+    /// its first is an empty one, which then disagrees with whatever the
+    /// manifest claimed and is reported as a finding.
+    #[test]
+    fn a_window_that_is_back_to_front_is_not_a_panic() {
+        let inverted = Coverage::of([100, 10], &[50, 51]);
+        assert_eq!(inverted.requested, 0);
+        assert!(!inverted.per_frame);
+        assert!(inverted.missing.is_empty());
+        assert_eq!(inverted.before_sampling, None);
+        // And the frames are still reported as what the file holds.
+        assert_eq!(inverted.first, 50);
+        assert_eq!(inverted.samples, 2);
     }
 
     /// `parse_sample` reads the words out of one whole-segment read, and refuses

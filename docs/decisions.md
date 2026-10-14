@@ -117,6 +117,26 @@ source for the semantics of "plus flags"; (3) disassemble the STMIK segment.
 Escalation trigger: if route 1 fails within Phase 3, implement affected parts against a
 substitute cue and record the difference. Do not let it block the phase.
 
+**Amended 2026-10-14 — route 1 is performed, it does not resolve the word, and the substitute
+cue is named.** Phase 3's Task 1 walked `STMIK.300`'s `PUBDEF` records (45 symbols, one
+segment) and read the words live: `_np_zinfo` is at segment offset `0x08F7`, `_np_zplus` at
+`0x08F9`, and **`_np_zinfo` is 0 in all 10,256 samples of the three traces filed under
+`reference/music/`** — covering MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's orders 0
+and 42…48 — while `_np_zplus` takes 1 and 2 in both modules (`docs/fidelity/music-clock.md`
+§6; `cargo xtask music analyse --trace reference/music/second5`). So the values GRID, HARD
+and the vault wait on (`0xf0`, `1`/`2`/`3`, `0xff`) **are not produced by the reference in
+any window this phase measured**, and the escalation trigger's condition is met. What the
+phase does instead is in `music-clock.md` §6: **`_np_zplus` is the word the port computes**
+— the rule there, verified over every sample of all three filed traces — and, for
+`dis_muscode`, **the port returns `_np_zinfo` as 0**, which is what the reference's own word
+holds for as long as this phase measured it. A part that waits on `dis_muscode(1)` — HARD's
+`HARD/B.C:138`, or GRID's `GRID/MAIN.C:72`/`:160` waiting on 2 or 3 — therefore **waits for
+ever** against the port's 0, exactly as it does against the reference's 0, and the parts that
+wait on it are Phase 8's to write against a cue this phase has measured rather than against
+one it inferred. Route 2 (`st3play`'s "plus flags") and route 3 (disassembly) are **not**
+taken: route 1 did not fail, it answered — the answer is that the word stays 0 in every
+window the phase has, and a mechanism for its other values is not measured by any of them.
+
 ## D11 — The reference oracle is verified end-to-end (2026-10-10)
 
 Supersedes the "still unverified" caveat in D10. The emulator's REST API was exercised
@@ -1628,27 +1648,37 @@ under `reference/music/` and every number below is printed by
 names the command for each.
 
 **The measured clock.** The music starts at **frame 409**: `_np_zframe` reads 0 at frame 408
-and 1 at 410 in the block-5 trace, and 0 → 1 at 409 in the hidden-part trace (the block-5
-trace does not hold 409 — see below). A tick is `2.5/tempo` seconds and a row `speed` ticks:
-the longest window, 296 row intervals over 3,455 frames of the hidden part, is predicted from
-the player's own speed and tempo words to **−2.6 frames (0.08 %)**, and every run's residual
-is under one row. `_np_zframe` itself counts ticks — 608 in 889 frames, 47.93 a second at
-tempo 120.
+and 1 at 410 in the block-5 trace, 0 → 1 at 409 in the hidden-part trace, and 1 → 2 at 411 in
+the block-3 trace; **which index the boot's mode change falls on is session-dependent** —
+the three traces lose 409, 417 and 410 — so the anchor is the frame between the last zero and
+the first one, and the note says so rather than naming a cause it did not measure. A tick is
+`2.5/tempo` seconds and a row `speed` ticks: the longest window, 296 row intervals over 3,455
+frames of the hidden part, is predicted from the player's own speed and tempo words to
+**−2.6 frames (0.08 %)**, and **every steady run's residual is under one row** — the two that
+are not steady are the post-speed-change transients below (second5 −35.6, hiddenu −37.4, one
+row 8.76 each). `_np_zframe` counts ticks: 0.6839 a frame (47.93 a second) at tempo 120 in
+`second5`, 0.6854 (48.04) at the same tempo in `hiddenu`, and 0.7422 (52.01) at tempo 130 in
+`second3` — three traces, two tempos, the tick rate each time.
 
-**Three things the files do not say, which the trace does.** (1) The row rate follows the
-player's `_np_speed` word, not the module's header byte: with `--arg 3` the reference plays
-MUSIC1 (its `(ord, pat)` pairs match that file's order list) at speed **6** where the file's
-byte 0x31 is 3, and the measured row interval is 8.09 frames — speed 6 at tempo 130, where
-speed 3 would be 4.04. (2) A speed change is followed by a transient: after the module's
-speed-1 row, the next speed-6 run advances 35 rows in 271 frames where the rule predicts
-306.6. (3) `_np_zplus` takes 1 and 2 in both modules, at order starts straddling each
-module's `254`; `_np_zinfo` is **0 for all 10,256 samples of all three traces**, so that
-question is not resolved by them.
+**Three things the files do not say, which the traces do.** (1) The row rate follows the
+player's `_np_speed` word, not the module's header byte, **and the word's initial value after
+a restart is not the file's byte**: with `--arg 3` the reference plays MUSIC1 (its
+`(ord, pat)` pairs match that file's order list) at speed **6** for frames 427…2472 where the
+file's byte 0x31 is 3 (row interval 8.09 frames, where speed 3 would be 4.04), and then at
+**3** from frame 2488 (interval 4.04) — the same session, both halves matching the trace's own
+word. (2) A speed change is followed by a transient: after the module's speed-1 row, the next
+speed-6 run advances 35 rows in 271 frames where the rule predicts 306.6. (3) `_np_zplus`
+takes 1 and 2 in both modules, at order starts straddling each module's `254`; `_np_zinfo` is
+**0 for all 10,256 samples of all three traces**, so that question is not resolved by them.
 
 **D8's route 1 is performed and does not close it.** The symbols were read, the words traced
 live, and `zinfo` stayed 0 over MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's 0 and
-42…48. `D8`'s escalation stands: GRID, HARD and the vault are implemented against a
-substitute cue, with the trace's zero recorded as the evidence.
+42…48. `D8`'s escalation stands and **D8 gains the outcome and the substitute**: the port
+computes `_np_zplus` by the rule in `music-clock.md` §6 — verified over all 10,256 samples of
+the three filed traces, with the crossings and the restart case covered and the `2 → 0`
+advance named as extrapolation — and `dis_muscode` returns `_np_zinfo`'s measured 0, so a part
+that waits on a `1`/`2`/`3`/`0xf0`/`0xff` cue waits for ever against the port exactly as it
+does against the reference.
 
 **The order list, from the counter's own sequence.** `254` is **stepped over**: MUSIC0's at
 order 27 takes the counter from 26 to 28, and MUSIC1's at order 46 from 45 to 47, each with
@@ -1657,12 +1687,17 @@ both neighbours played. A `255` is **never played at all**: the shell's restarts
 orders 78/79, so the reference measures nothing about a `255` — Task 3 must say so rather
 than read it off stock ST3 semantics.
 
-**`reference-indices.md` §1.7's counter is not `_np_zframe`.** The word at physical
-`0x105B0E` is the STMIK segment's *higher view* base (0x1051F0) + **0x091E** — an unnamed
-word two bytes past `_zmixercount`, not the tick counter at 0x08FB. Its rate reproduces
-exactly: **+0.7418 per frame** (51.99 a second) against §1.7's 0.742016/0.742012/0.741909,
-and it reads 370 at frame 900 where §1.7 read 371/373/374. §1.7's address is right and its
-name is not; the phase's clock is `_np_zframe`.
+**`reference-indices.md` §1.7's counter is not `_np_zframe`, and it is not a different
+clock.** The word at physical `0x105B0E` is the STMIK segment's *higher view* base (0x1051F0)
++ **0x091E** — an unnamed word two bytes past `_zmixercount`, not `_np_zframe` at 0x08FB.
+Measured in one command against `_np_zframe` itself (`cargo xtask music probe --arg 2
+--cycles 30000 --frames 899..3000 --at 0x105B0E`), the two advance at the same rate over the
+same 2,099 frames — **+0.7418 and +0.7419 per frame, 51.99 and 52.00 a second**, which is
+tempo 130's `2.5/tempo`, the tempo the same output reports — and the 0x091E word reads 370 at
+frame 900 where §1.7 read 371/373/374. What separates them is a **reset**: `_np_zframe` is
+zeroed by `_dis_setmframe(0)` (`DIS/DISC.ASM:138-148`) and 0x091E is not, so the two differ
+by exactly the ticks a reset cost (526 in that window). §1.7's address is right, its name is
+not; the phase's clock is the published `_np_zframe`, which `dis_getmframe` hands the parts.
 
 **The DOS extender maps the segment twice.** The needles are found at 0x0051F0 and
 0x1051F0, exactly 1 MB apart, and the whole 29,607 bytes read through each are byte-identical
@@ -1678,9 +1713,13 @@ file's own frames rather than believing the manifest, and a `kind` it does not k
 **refused by name**, not walked past. A flipped byte of a trace fails the verifier (exit 1,
 both digests named).
 
-**What a trace does not hold.** The block-5 trace holds every frame from 148 to 1299 except
-**409** and **1220**, and says so (`per_frame: false`) with what the guest's own counter did
-around each: at 409 the counter was read as 408 and then 410 with no reading of 409 between —
-the boot's first graphics frame, which the emulator never published — and at 1220 a read that
-was opened on the frame was still open when the guest moved on. The tool does not describe
-such a trace as per-frame, and `reference verify` recomputes that claim from the file.
+**What a trace does not hold.** Each trace holds every frame of its window except a boundary
+run and one frame in the middle, and says so (`per_frame: false`) with what the guest's own
+counter did around it: `second5` loses 409 (the counter read 408 then 410, with no reading of
+409 between) and 1220 (a read opened on the frame was still open when the guest moved on),
+`second3` loses 417, `hiddenu` loses 410. The manifest names the boundary run as such
+(`coverage.before_sampling`: the locate costs frames), and `reference verify` recomputes the
+whole coverage from the file **field by field** rather than believing it. Why a middle frame
+is lost is a **hypothesis** (a video-mode change publishes no frame for a moment, D17) and is
+recorded as one — the measurement is the counter's own readings, and they say only that the
+frame was never current.

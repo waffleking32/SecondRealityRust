@@ -75,25 +75,31 @@ Three things the trace guarantees, and why they matter:
     frame   408  ord   0 row   0 pat   0  zframe      0
     frame   410  ord   0 row   0 pat   0  zframe      1
     frame   411  ord   0 row   0 pat   0  zframe      2   <- zframe 1 -> 2
+    frame   412  ord   0 row   0 pat   0  zframe      2
 ```
 
 **The port's music boot anchor is frame 409** — the frame between the last sample that shows
-`zframe 0` (408) and the first that shows it advancing (410) — and the trace does not hold
-frame 409 itself (see §7). The same analysis on `hiddenu` shows the same thing with 409 in
-the trace: `first advancing frame: 409`, `zframe 0 -> 1`.
+`zframe 0` (408) and the first that shows it advancing (410) — and this trace does not hold
+frame 409 itself (§7). `hiddenu` holds 409 and the same analysis says
+`first advancing frame: 409`, `zframe 0 -> 1`; `second3` holds neither 409 nor 410 and its
+first advance is 411, where `zframe` goes `0 -> 2` (§7 says why the index moves between
+sessions) — so the anchor is read off `hiddenu`, which holds the frame the tick lands on.
 
 Everything is still before it: `ord`, `row` and `pat` are 0, `zframe` is 0, and `speed` 6 /
 `tempo` 125 are the object's own initial values (`cargo xtask music symbols` prints the
-object; `np_tempo`'s static byte is 0x7D = 125, ST3's default). The first *row* advances at
-frame 427, when the shell has restarted the song at order 25 (`MAIN/U2.ASM:890-894`,
-`restartmus(0, 25, 45000)`).
+object; `np_tempo`'s static byte is 0x7D = 125, ST3's default —
+`crates/sr-assets/tests/omf_symbols.rs`'s `the_objects_own_initialisers_are_the_notes_values`). The first *row* advances at
+frame 427, when the shell has restarted the song at order 25 (`MAIN/U2.ASM:902-905` is the
+order-25 restart, `mov bx,25` at `:903`; `restartmus(0, 25, 45000)`).
 
 ## 3. The tick rate, and the rule behind it
 
 A tick is `2.5/tempo` seconds and a row lasts `speed` ticks, so the row rate is
-`speed × tempo/2.5` rows a second — **a prediction from the module's own header and from the
-player's own speed and tempo words, not a fit to the trace**. MUSIC0's header carries speed 6
-and tempo 125, and `MAIN/STARTMUS.C:257` patches its tempo byte to 0x78 = 120 before playing
+`speed × tempo/2.5` rows a second — **a prediction from the player's own `_np_speed` and
+`_np_tempo` words, not a fit to the trace**, and the words are what the trace reads rather
+than what a file says (for MUSIC1 the two disagree, and the trace's word is the one the rate
+follows — the first bullet below). The module headers are the context: MUSIC0's carries speed
+6 and tempo 125, and `MAIN/STARTMUS.C:257` patches its tempo byte to 0x78 = 120 before playing
 it; MUSIC1's carries speed 3 and tempo 130.
 
 `cargo xtask music analyse` measures each run of constant speed and tempo separately (the
@@ -105,21 +111,28 @@ change so that the part-row at each end does not enter the residual:
 | `hiddenu` | frames 430…3885, speed 8 tempo 120 | 296 | 3455 | 3457.6 | **−2.6** | 11.68 |
 | `hiddenu` | frames 3897…6119, speed 6 tempo 120 | 254 | 2222 | 2225.2 | **−3.2** | 8.76 |
 | `second5` | frames 427…961, speed 6 tempo 120 | 61 | 534 | 534.4 | **−0.4** | 8.76 |
-| `second3` | frames 427…992, speed 6 tempo 130 | 70 | 565 | 566.1 | **−1.1** | 8.09 |
+| `second3` | frames 427…2472, speed 6 tempo 130 | 253 | 2045 | 2046.0 | **−1.0** | 8.09 |
+| `second3` | frames 2488…2896, speed 3 tempo 130 | 101 | 408 | 408.4 | **−0.4** | 4.04 |
 
 The longest window available — 296 row intervals over 3455 frames, 49 seconds of music — is
-reproduced to **−2.6 frames, 0.08 %**, and the residual is under one row (11.7 frames) in
-every run. The rate is the module's own rule and nothing else.
+reproduced to **−2.6 frames, 0.08 %**, and **every steady run's residual is under one row**.
+The two runs that are not steady are the two that follow a module-driven speed change, and
+they are the third bullet below: `second5` frames 1024…1295 (−35.6, one row 8.76) and
+`hiddenu` frames 6182…6495 (−37.4). The rate is the module's own rule and nothing else.
 
-**Two things the trace says that the files do not.**
+**Two things the traces say that the files do not.**
 
-- **The player's speed word, not the module's header byte, is what the row rate follows.**
-  `second3` is MUSIC1 — its `(ord, pat)` pairs match `assets/MAIN/MUSIC1.S3M`'s order list at
-  every order the counter held (`analyse` identifies the module that way, not by speed) — and
-  the trace's own `_np_speed` reads **6** while that file's header byte 0x31 is **3**. The
-  measured row interval is 8.09 frames: speed 6 at tempo 130, where speed 3 would be 4.04.
-  What writes 6 is not measured here; the *rate* is, and it is the trace's word that predicts
-  it.
+- **The player's speed word, not the module's header byte, is what the row rate follows, and
+  the word's initial value after a restart is not the file's byte.** `second3` is MUSIC1 — its
+  `(ord, pat)` pairs match `assets/MAIN/MUSIC1.S3M`'s order list at every order the counter
+  held (`analyse` identifies the module that way, not by speed) — and for the orders 42…45 it
+  holds after the `SECOND 3` restart (frames 427…2472) the trace's own `_np_speed` reads
+  **6**, where that file's header byte 0x31 is **3**: the measured row interval is 8.09
+  frames, speed 6 at tempo 130, where speed 3 would be 4.04. From frame 2488 — the crossing
+  into order 47 — the word is **3** and the interval follows it (4.04 frames a row, residual
+  −0.4, the table's last line). So the row rate follows the trace's own word in both halves
+  of the same session, and what writes the initial 6 — rather than the header's 3 — is not
+  measured here.
 - **A speed change is followed by a transient.** `second5` at order 25 row 63 sets speed 1
   (the module's own cell): 29 row intervals in 42 frames over frames 979…1021 (residual −0.3
   — one row per tick, exactly as the rule says). When the speed returns to 6 at frame 1023
@@ -137,15 +150,18 @@ gap histogram per run:
 
 | trace | run | gaps |
 |---|---|---|
-| `hiddenu` | speed 8 tempo 120 | 11 frames ×97, 12 frames ×199 |
-| `hiddenu` | speed 6 tempo 120 | 8 ×64, 9 ×190 |
-| `second5` | speed 6 tempo 120 | 8 ×16, 9 ×44, 10 ×1 |
-| `second5` | speed 1 tempo 120 | 1 ×16, 2 ×13 |
-| `second3` | speed 6 tempo 130 | 8 ×44, 9 ×26 |
+| `hiddenu` | frames 430..3885, speed 8 tempo 120 | 11 frames ×97, 12 ×199 |
+| `hiddenu` | frames 3897..6119, speed 6 tempo 120 | 8 ×64, 9 ×190 |
+| `second5` | frames 427..961, speed 6 tempo 120 | 8 ×16, 9 ×44, 10 ×1 |
+| `second5` | frames 979..1021, speed 1 tempo 120 | 1 ×16, 2 ×13 |
+| `second3` | frames 427..2472, speed 6 tempo 130 | 8 ×232, 9 ×21 |
+| `second3` | frames 2488..2896, speed 3 tempo 130 | 3 ×1, 4 ×95, 5 ×5 |
 
-Two gap sizes per run is the whole of it (a third appears once, at the transient of §3): the
-row rate is **periodic on the frame clock with a two-frame period**, and the frames the rows
-land on are reproducible from the run's start. That is what Task 3's player has to reproduce
+Two gap sizes carry every steady run — the intervals take two neighbouring whole-frame values
+and alternate between them — and a third size appears only at a run's own edges (`second5`'s
+speed-6 run: one 10-frame gap; `second3`'s speed-3 run: one 3-frame and five 5-frame gaps, at
+the run's first and last rows). So the row rate is **periodic on the frame clock**, and the
+frames the rows land on are reproducible from the run's start. That is what Task 3's player has to reproduce
 tick for tick.
 
 ## 5. Which soundcard and mixer rate the reference runs at
@@ -161,7 +177,7 @@ located (`second5`: frame 147) and again after the re-locate (frame 1422):
 | `_zpollmix` | **0** | the player mixes from its own timer interrupt, not from `zpollme` |
 | `_zspeedadjust` | **0** | |
 | `_zspeedadjust2` | **0** | `MAIN/U2.ASM:389` writes it only for outputmode 7 or 2, and the card is 5 |
-| `_np_mastervol` | **192** | the module's own global volume (0xC0) |
+| `_np_mastervol` | **192** | the object's own initialiser: `STMIK.300`'s static byte at segment offset 0x0911 is 0xC0 = 192 (`cargo xtask music symbols` prints the object; `crates/sr-assets/tests/omf_symbols.rs` asserts that byte and this one), and the manifest records one reading per word, taken when the segment was located and re-checked at the end — a word that moved between the two readings is refused rather than averaged. (It is *not* the module's global volume: `assets/MAIN/MUSIC0.S3M`'s header byte 0x30 is 64.) |
 | `_np_mastermul` | **0** | |
 
 **This settles spec §7.2's default from the machine rather than from `MENU.C`'s menu order:
@@ -184,48 +200,117 @@ entries:
 | `hiddenu` | the same two |
 | `second3` | (45, 0, 0→1), (47, 0, 1→2), (48, 0, 2→1) — MUSIC1's `254` is at order 46 |
 
-**What the value counts is not measured by these traces** — the increments sit either side of
-a `254` but they do not count them (MUSIC1's goes 0→1→2→**1**), and `muscode_6`
-(`DIS/DISINT.ASM:242-282`) only shows how the *parts* use it: a row offset computed from
-`zplus` 0/1/2 for `dis_muscode`. That is a hypothesis and is recorded as one.
+### The rule the port computes, and the command that checks it
+
+The trace is the port's evidence, not its rule: the port has to **compute** `zplus`, and the
+rule it computes is the one that reproduces every sample of all three filed traces.
+`cargo xtask music analyse` re-derives it from each trace's own order sequence and prints the
+count of samples it had to be right about — **0 mismatch(es) over 10,256 samples** (1,150 +
+2,755 + 6,351):
+
+```
+  the port's zplus rule, re-derived from this trace's own order sequence: 2755 sample(s)
+    checked, 0 mismatch(es)
+    rule: 1 while playing an order whose next entry in the module's order list is 254; 2 on a
+      crossing (the counter moved from o to o+2 with orders[o+1] == 254) unless the entry
+      after the one entered is itself 254, in which case 1; 0 otherwise; a seek or a restart
+      credits no marker behind it
+    the orders the counter held, in order: [0, 42, 43, 44, 45, 47, 48]
+```
+
+So, **as the port's rule**:
+
+- **1** while playing an order whose next entry in the module's order list is `254`;
+- **2** on a marker crossing — the counter moved from `o` to `o + 2` with `orders[o + 1] ==
+  254` — **unless** the entry after the one entered is itself `254`, in which case **1**
+  (this is MUSIC1's `2 → 1` at order 48, whose successor at order 49 is a `254`);
+- **0** otherwise;
+- and a seek or a restart **credits no marker behind it**: a crossing needs the order the
+  counter came from to be the one before the skipped entry, which is why `SECOND 3`'s restart
+  at order 42 — whose list predecessor is a `254` the player never played — reads 0.
+
+**What is extrapolation, said plainly.** No filed trace holds an order two steps past a
+marker (`MUSIC0` from order 29 on, `MUSIC1` from order 49 on: `second5` stops at order 28,
+`hiddenu` restarts at 25 before it gets there, `second3` stops at order 48), so **`2`
+returning to `0` on the next natural advance is not measured** — it is what the rule says and
+what the three traces' surviving cases are consistent with, and the first trace that plays
+past order 28 will test it. Nor does any trace play a `255` (§10), so nothing here says what
+`zplus` does there.
+
+`muscode_6` (`DIS/DISINT.ASM:242-282`) shows how the *parts* use the value — a row offset
+computed from `zplus` 0/1/2 for `dis_muscode` — and that is a reading of the source, not a
+measurement of this rule; the rule above is a measurement of the traces.
 
 `zinfo` is **0 in all three traces** — 10,256 samples over the 1,300 + 6,500 + 2,900-frame
 windows, covering MUSIC0's orders 0 and 25…28 and 70…77 and MUSIC1's orders 0 and 42…48.
-**This capture therefore does not measure what its other values are**, and `D8`'s ladder is
+**These captures therefore do not measure what its other values are**, and `D8`'s ladder is
 answered only in its first step: route 1 (read the object's symbols, then the words live) was
-performed and produced a map and a trace, and the word it watches stayed 0. `D8` records the
-substitute cue for GRID, HARD and the vault; this note does not guess at a rule the trace
-does not show.
+performed and produced a map and a trace, and the word it watches stayed 0. `D8` now records
+the outcome and the substitute the port uses; this note does not guess at a rule the traces do
+not show.
 
-## 7. What the trace does not hold
+## 7. What a trace does not hold, and why it moves between sessions
 
-`second5` holds every frame from 148 to 1299 except three, and the manifest's `coverage` says
-so (`"per_frame": false`):
+Every trace holds a run of frames and misses three or four, and `music analyse` names the
+boundary run:
 
-| frame(s) | what the guest's own counter did |
-|---|---|
-| 147 | the frame the segment was located on: locating costs frames, and this one was already gone |
-| 409 | the counter was read as 408 and then as 410 with no reading of 409 between: the emulator published no such frame (it is the boot's first graphics frame — the reference's own captures put the demo's first graphics frame at 404, D17) |
-| 1220 | the read opened on frame 1220 was still open when the guest moved to 1221, so its bytes belong to neither frame with certainty and were dropped; the reference's own index table puts the ENDLOGO → CRED change in (1180, 1440] (`reference/parts/endlogo/manifest.json`, `reference/parts/cred/manifest.json`, both `--arg 5`) |
+```
+  frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing
+    (147, 409, 1220) (frames 147..147 of them are the boundary: the segment was located
+    after they had gone) — this trace is NOT per-frame (recomputed from the trace file's
+    own frames)
+```
+
+| trace | sampled | not in it |
+|---|---|---|
+| `second5` | 148…1299 | 147 (the boundary — the frame the segment was located on: locating costs frames, and that one was already gone), **409**, 1220 |
+| `second3` | 144…2899 | 142…143 (the boundary), **417** |
+| `hiddenu` | 148…6499 | 146…147 (the boundary), **410** |
+
+Each middle gap is a frame the guest's own counter moved across without the trace being able
+to read it, and the manifest carries what the counter did around it: for `second5`, `skipped`
+records `409..409 (the counter went 408 -> 410)` and `1220..1220 (the read that was opened on
+frame 1220 was still open when the guest moved to 1221)`. **Which index falls in the gap is
+session-dependent** — the three traces lose 409, 417 and 410 respectively — and all three sit
+at the same point in the demo, the boot's first graphics frame (the reference's own captures
+put that at 404, D17).
+
+**Why is a hypothesis.** What is measured is the counter's own readings, and they say only
+that it went from one value to another with the frame between never current. The explanation
+— that a video-mode change publishes no frame for a moment, so the emulator's counter steps
+over one (D17 measured the same behaviour: "a video-mode stop or reset calls `GFX_EndUpdate`
+without publishing") — is consistent with all three traces and with where they all sit, and
+is **not** measured here. `second5`'s 1220 has the same shape at the point the reference's own
+index table puts the ENDLOGO → CRED change in (1180, 1440]
+(`reference/parts/endlogo/manifest.json`, `reference/parts/cred/manifest.json`, both
+`--arg 5`), and is not measured either.
 
 The tool does not call such a trace per-frame, and a trace that quietly sampled every other
 frame is refused the same description — the check is recomputed from the trace's own frames
-by `reference verify` rather than believed.
+by `reference verify`, field by field, rather than believed.
 
 ## 8. `_np_zframe`, and the word `reference-indices.md` §1.7 measured
 
-`_np_zframe` advances one per **tick**, not per frame. `cargo xtask music analyse --trace
-reference/music/second5`, section 2, prints it as a rate of its own: it goes from 1 at frame
-410 to 609 at frame 1299 — **608 ticks in 889 frames, 0.6839 a frame, 47.93 a second** — where tempo 120's rule gives 48.00. It is the word the parts set and wait on
-(`DIS/DISC.ASM:138-159`, `DIS/DISINT.ASM:412-425`), and it starts from 0 when the music does
-(0 at frame 408, 1 at 410).
+`_np_zframe` advances one per **tick**, not per frame: it is the word the parts set and wait
+on (`DIS/DISC.ASM:138-159`, `DIS/DISINT.ASM:412-425`), it starts from 0 when the music does
+(0 at frame 408, 1 at 410 in `second5`), and **it is reset** when the song is restarted —
+`second3` goes 1516 → 0 at frame 2452. `cargo xtask music analyse` therefore measures it over
+the longest run in which it never went backwards, and counts the resets:
+
+| trace | longest run | ticks | frames | per frame | per second | the tempo's rule |
+|---|---|---|---|---|---|---|
+| `second5` | frame 410 (1) → 1299 (609) | 608 | 889 | 0.6839 | **47.93** | 48.00 (tempo 120) |
+| `hiddenu` | frame 409 (1) → 6499 (4175) | 4174 | 6090 | 0.6854 | **48.04** | 48.00 (tempo 120) |
+| `second3` | frame 411 (2) → 2451 (1516) | 1514 | 2040 | 0.7422 | **52.01** | 52.00 (tempo 130) |
+
+Three traces, two tempos, and the tick rate each time: `_np_zframe` is the tick clock, and
+its rate is a second, independent way of measuring what §3 measures through the row rate.
 
 `docs/fidelity/reference-indices.md` §1.7 records a different word: a 16-bit word at physical
 address **`0x105B0E`** advancing **0.7424 times a video frame**, reading 371/373/374 at video
-frame 900. Two commands place it:
-
-`cargo xtask music probe --arg 2 --cycles 30000 --frames 899..3000 --at 0x105B0E`, run twice
-in two sessions, prints the same answer both times:
+frame 900. `cargo xtask music probe --arg 2 --cycles 30000 --frames 899..3000 --at 0x105B0E`
+measures it — **and `_np_zframe` beside it, in the same bracketed samples**, so the two are
+comparable frame for frame — and run twice in two sessions it gives the same answer:
 
 ```
 address 0x105B0E: the segment's base(s) are 0x0051F0, 0x1051F0 (of 29607 byte(s))
@@ -233,30 +318,31 @@ address 0x105B0E: the segment's base(s) are 0x0051F0, 0x1051F0 (of 29607 byte(s)
   the last published symbol at or below it is _zmixercount (base + 0x091C, 2 byte(s) below);
     the next above is _zchn at base + 0x0DA0
   frame 900: 370; frame 2999: 1927 — +0.7418 per frame, +51.99 per second at 70.086 Hz
+  2099 sample(s) between them
+  _np_zframe over the same window: 1 at frame 1112 to 1401 at frame 2999 — +0.7419 per frame,
+    +52.00 per second (1 reset(s))
+  the player's own words at frame 2999: tempo 130, speed 3, zframe 1401, ord 10, row 63
 ```
 
-`cargo xtask music analyse --trace reference/music/second5 --at 0x105B0E` places the same
-address against the *filed* trace's symbols.
-
-So:
-
-- **It is not `_np_zframe`**, which is at base + `0x08FB`. Offset `0x091E` is an **unnamed
-  word of the player's own data area**, two bytes past `_zmixercount` (base + `0x091C`, whose
-  two-byte word ends at `0x091D`), and some thousand bytes below the next published symbol,
-  `_zchn`.
-- **The rate reproduces.** Two sessions of this task's own probe give **+0.7418 per frame**
-  (51.99 a second at the demo's 70.086 Hz) against §1.7's 0.742016/0.742012/0.741909 — the
-  same counter, at the same base, within **3 parts in ten thousand**.
-- **The value at frame 900 reproduces**: this probe reads **370** where §1.7's three sessions
-  read 371/373/374 — a spread of four ticks, which is the one-to-two frames §1.7 itself
-  measured between sessions (D17).
-
-So §1.7's address is right and its name is not: the word is a player counter at **52.0 a
-second**, which is the tick rate of tempo **130** — not the rate of the tempo the module in
-the same window plays at (120, whose ticks `_np_zframe` counts at 47.93 a second — the very
-next table). What drives it is **not measured here**, and this note does not guess. **The
-phase's clock is `_np_zframe`**, the word the parts set and wait on and the one `np_row` and
-`np_ord` travel with.
+- **It is not `_np_zframe`** (`0x08FB`), and it is not a different *clock* either: over the
+  same 2,099 frames the two advance at the same rate to four places — **51.99 a second and
+  52.00 a second**, which is what `2.5/tempo` gives at the tempo the same output reports,
+  **130**. §1.7's name for the word was right about what it is (a counter on the player's
+  tick clock) and wrong about which word it is: offset `0x091E` is an **unnamed word** two
+  bytes past `_zmixercount` (base + `0x091C`, whose two-byte word ends at `0x091D`), and a
+  thousand bytes below the next published symbol, `_zchn`.
+- **What tells the two apart is a reset, not a rate.** `_np_zframe` is zeroed by whoever calls
+  `_dis_setmframe(0)` (`DIS/DISC.ASM:138-148`), which parts do at their own start; the 0x091E
+  word is not. In that window `_np_zframe` is reset once (its longest run starts at frame
+  1112) and ends at 1401, while the 0x091E word runs 370 → 1927 without a break — and the
+  difference, 1927 − 1401 = **526**, is the ticks the reset cost: the 709 frames from the
+  music's start (≈403, §2) to the reset (≈1112) at 0.7418 a frame is 526. So `_np_zframe` is
+  the parts' copy of the player's tick count and 0x091E is the count itself; which one a port
+  needs is Task 3's business, and §8's table above is `_np_zframe`, the word the parts read
+  through `dis_getmframe`.
+- **§1.7's numbers reproduce at that address**: the rate to three parts in ten thousand
+  (0.7418 against 0.742016/0.742012/0.741909) and the value at frame 900 (**370** against
+  371/373/374, which is §1.7's own one-to-two-frame spread between sessions, D17).
 
 ## 9. The segment's two views
 
@@ -283,7 +369,7 @@ view, the proof, and the frame it was measured at. `music analyse --at` tries ev
 | MUSIC0 `254` at order 27 | **stepped over**: the counter went ord 26 → ord 28 without resting on 27, having played each of them (`second5`, frame 1260; the same in `hiddenu`) |
 | MUSIC1 `254` at order 46 | **stepped over**: ord 45 → ord 47 without resting on 46 (`second3`, frame 2488) |
 | MUSIC0's six `255`s (orders 16, 17, 64, 69, 78, 79) | **not played**: the shell's restarts jump over 16 and 17 (ord 0 → ord 25 at frame 427) and order 70 (ord 28 → 70 in `hiddenu`), and `hiddenu` shows the shell restarting at order 25 again after order 77 — so the two `255`s at 78 and 79 are pre-empted |
-| MUSIC1's one `255` (order 99) | **not reached** in a 2,900-frame capture that stops at ord 48 |
+| MUSIC1's one `255` (order 99) | **not reached** in the 2,900-frame capture, which stops at ord 48 |
 
 So the two questions the plan asks have one answer each, and the second is a negative:
 **`254` is stepped over, and the reference never plays a `255` at all** — the shell's own
@@ -296,7 +382,7 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | what | where |
 |---|---|
 | the census, counted by the test itself, and the 278 records | `crates/sr-assets/tests/omf_symbols.rs` |
-| the seven position words as contiguous two-byte slots, and the frame/tempo/speed offsets | same |
+| the seven position words as contiguous two-byte slots, the frame/tempo/speed offsets, and the object's own tempo/master-volume initialisers | same |
 | the needles: 32 bytes, different records, one occurrence in the object | `xtask/src/music.rs`'s own tests |
 | the locator: a unique match, a second one refused, a needle across a 64 KiB boundary, a short needle | same |
 | the window (`A..B` half-open), the row round trip, the coverage's gaps | same |
@@ -306,5 +392,10 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | `reference verify --tree reference` passes with the traces in it | same |
 | **a flipped byte of a trace fails it** (exit 1, both digests named) | same |
 | an unknown `kind` is refused by name, a coverage claim the file does not support is a finding | same |
-| `music analyse`'s numbers, and `--at 0x105B0E` | same |
+| `music analyse`'s numbers, `--at 0x105B0E`, and the boundary named | same |
 | the locator's views: several bases accepted only when the bytes are one memory | `xtask/src/music.rs`'s own tests |
+| the locator on a short last chunk (it used to underflow) | same |
+| a window out of a manifest that is back to front does not panic the verifier | same |
+| two machine readings that disagree are refused, not silently merged | same |
+| the `zplus` rule against both modules' order lists, restart case included | same |
+| **the `zplus` rule re-derived over all three filed traces: 0 mismatches, 10,256 samples** | `xtask/tests/music.rs` |

@@ -351,6 +351,37 @@ fn a_symbol_in_a_segment_the_object_does_not_define_is_refused() {
 }
 
 // -------------------------------------------------------------------------------------
+// The object's own initialisers
+// -------------------------------------------------------------------------------------
+
+/// The two static values `docs/fidelity/music-clock.md` names, read out of the
+/// object's own `LEDATA` image at the offsets its symbols give them: the
+/// player's default tempo (125, ST3's own default) and its master volume (192).
+///
+/// They are the values a reader sees *before* the module is loaded — the note's
+/// §2 and §5 — and they are here rather than in the note's prose because a
+/// number in a note is reproducible by a command or produced by a test in the
+/// same commit (D25).
+#[test]
+fn the_objects_own_initialisers_are_the_notes_values() {
+    let object = stmik();
+    let symbols = symbols::public_symbols(&object).unwrap();
+    let mut image: Vec<Option<u8>> = vec![None; 29_607];
+    for block in data_blocks(&object).unwrap() {
+        for (at, byte) in block.data.iter().enumerate() {
+            image[block.offset as usize + at] = Some(*byte);
+        }
+    }
+    let byte_at = |name: &str| {
+        let at = symbol(&symbols, name).offset as usize;
+        image[at].unwrap_or_else(|| panic!("{name} at 0x{at:04X} is not in any LEDATA record"))
+    };
+    assert_eq!(byte_at("_np_tempo"), 0x7D, "the player's default tempo, 125");
+    assert_eq!(byte_at("_np_mastervol"), 0xC0, "the player's default master volume, 192");
+    assert_eq!(byte_at("_np_speed"), 6, "the player's default speed");
+}
+
+// -------------------------------------------------------------------------------------
 // The blocks the locator's needles come from
 // -------------------------------------------------------------------------------------
 
