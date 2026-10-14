@@ -542,7 +542,12 @@ advances would pass), start from a hand-picked order (`play_song(trace.first_ord
 start-index question — the test starts the player at the boot's own frame and lets it run to the
 trace's first sample), or paper over the trace's **gaps**. Task 1's traces are keyed by the guest's
 counter and carry a handful of frames the emulator never published (a mode change swallows an index:
-147, 409 and 1220 in the three filed traces, each named in its manifest). The comparison runs over
+144, 409 and 1220 among the frames the first filed traces are missing, each named in its manifest —
+and the set differs per trace, which is the point: `second5b` misses `144..145`, `second3` misses
+`142..143`, `hiddenu` misses `146..147`, and all three lose a middle frame the boot's mode change
+swallows, though *which* index that is differs (**417** in `second3`, **409** in `second5` and
+`second5b`, **410** in `hiddenu`). Never carry a gap list forward by memory; read it off the
+manifest of the trace in hand). The comparison runs over
 the frames the trace *has*, and the gaps stay gaps — a comparison that quietly renumbers around them
 is comparing a different timeline, and the manifest is where the honest statement of coverage lives.
 
