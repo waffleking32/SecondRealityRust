@@ -478,8 +478,10 @@ which is the same ten polls.
 
 ### `zplus`, `254` and `255`
 
-The order-advance routine is `+0x442d`, and the note's §6 rule is this code, not an inference from
-the trace's columns:
+The order-advance routine is `+0x442d`, and §6's rule is this code, not an inference from the
+trace's columns — **the §6 that this task amended**: its original "unless the entry after the one
+entered is itself a `254`, in which case 1" had no cause in the object, whose two `orw`s cannot
+produce a 1 there. The listing below is the two bits themselves.
 
 ```
   442D: 2e c7 06 0d 09 00 00  movw   $0x0,%cs:0x90d
@@ -505,9 +507,13 @@ the trace's columns:
 
 `254` is stepped over — measured in the traces (§10) *and* read here — and a `255` leaves the scan:
 if the player has not yet played a row (`[0x939] == 2`, which `_zplaysong` sets) the song ends at
-`+0x4476`…`0x4480`; otherwise `_np_loop` increments, the scan restarts at the loop order
-`_zplaysong` recorded (0, for every plain order the shell hands it — `+0x256b` clears it), and the
-song ends if that entry is itself a `255` (`+0x4486`…`0x4499`).
+`+0x4476`…`0x4480`; otherwise `_np_loop` increments (`+0x4481`) and the scan restarts at the loop
+order `_zplaysong` recorded (0, for every plain order the shell hands it — `+0x256b` clears it).
+If *that* entry is itself a `255`, `+0x4499`'s `je` jumps to `+0x447f` — which is **past** the
+stop at `+0x4476` — so it returns with the loop order in `ax` and the pattern, the order and the
+mixing flag untouched: the scan gives up and the player keeps playing what it was playing. (Neither
+module has a `255` at its first order, so this branch is unreachable in both, and no trace can
+measure it; the port follows the bytes.)
 
 **`music-clock.md` §10 says the trace cannot show what the player does at a `255`. This is that
 question's answer, and it is a reading of the object rather than a measurement**: the note records

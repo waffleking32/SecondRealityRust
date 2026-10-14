@@ -274,48 +274,71 @@ entries:
 ### The rule the port computes, and the command that checks it
 
 The trace is the port's evidence, not its rule: the port has to **compute** `zplus`, and the
-rule it computes is the one that reproduces every sample of every filed trace.
-`cargo xtask music analyse` re-derives it from each trace's own order sequence and prints the
-count of samples it had to be right about — **0 mismatch(es) in every filed trace**, 11,408
-samples across the four of them (`1150`, `1152`, `2755`, `6351`), each trace's own line
-carrying its own count:
+rule it computes is the original player's own arithmetic. This note first stated that rule as a
+*function of the order sequence the trace shows* — "2 on a crossing … **unless** the entry after
+the one entered is itself a `254`, in which case 1" — and that "unless" clause has **no cause in
+the code**: the player ORs two bits and clears neither. Task 3 read the routine out of the object
+and the clause is withdrawn.
+
+The order advance is `STMIK.300` + `0x442d`. It clears `zplus` (`+0x442d`), then walks the order
+list one entry at a time, and per entry examined:
 
 ```
-  the port's zplus rule, re-derived from this trace's own order sequence: 2755 sample(s)
-    checked, 0 mismatch(es)
-    rule: 1 while playing an order whose next entry in the module's order list is 254; 2 on a
-      crossing (the counter moved from o to o+2 with orders[o+1] == 254) unless the entry
-      after the one entered is itself 254, in which case 1; 0 otherwise; a seek or a restart
-      credits no marker behind it
-    the orders the counter held, in order: [0, 42, 43, 44, 45, 47, 48]
+  4452: 3c fe                 cmp    $0xfe,%al
+  4454: 75 06                 jne    0x445c
+  4456: 2e 83 0e 0d 09 01     orw    $0x1,%cs:0x90d      ; the *next* entry is a 254
+  445c: 80 fb fe              cmp    $0xfe,%bl
+  445f: 75 08                 jne    0x4469
+  4461: 2e 83 0e 0d 09 02     orw    $0x2,%cs:0x90d      ; this entry is a 254 …
+  4467: eb cc                 jmp    0x4435              ; … and is stepped over
 ```
 
 So, **as the port's rule**:
 
-- **1** while playing an order whose next entry in the module's order list is `254`;
-- **2** on a marker crossing — the counter moved from `o` to `o + 2` with `orders[o + 1] ==
-  254` — **unless** the entry after the one entered is itself `254`, in which case **1**
-  (this is MUSIC1's `2 → 1` at order 48, whose successor at order 49 is a `254`);
-- **0** otherwise;
-- and a seek or a restart **credits no marker behind it**: a crossing needs the order the
-  counter came from to be the one before the skipped entry, which is why `SECOND 3`'s restart
-  at order 42 — whose list predecessor is a `254` the player never played — reads 0.
+- **bit 0** is set while the order being played has a `254` as its *next* entry in the module's
+  order list — the marker is coming;
+- **bit 1** is set when the order played was reached by stepping over a `254`;
+- so a plain advance reads **0** or **1**, a marker crossing reads **2**, and a crossing into an
+  order whose own successor is a `254` reads **3** — both bits, because nothing clears one;
+- and a seek or a restart **credits no marker behind it**: the scan starts at the order it was
+  given and looks only forward, which is why `SECOND 3`'s restart at order 42 — whose list
+  predecessor is a `254` the player never played — reads 0.
 
-**What is extrapolation, said plainly.** One case the rule distinguishes is measured
-nowhere: an order two steps past a marker **whose own successor is not a marker**, where the
-value should fall from the crossing's `2` back to `0`. `MUSIC0`'s crossing is measured
-(`second5` and `hiddenu` both hold order 28) but neither holds order 29; `MUSIC1`'s crossing
-is measured too (`second3` holds order 47) and it holds order **48**, two past the marker at
-46 — but that order reads **1**, not `0`, because the entry after it (order 49) is itself a
-`254`, so the rule's "unless the next entry is also a `254`" case is what it tests. So **`2`
-returning to `0` on the next natural advance is not measured**; it is what the rule says and
-what the filed traces' surviving cases are consistent with, and the first trace that plays
-past a marker without another one behind it will test it. Nor does any trace play a `255`
-(§10), so nothing here says what `zplus` does there.
+`cargo xtask music analyse` re-derives it from each trace's own order sequence and prints the
+count of samples it had to be right about — **0 mismatch(es) in every filed trace**, 11,408
+samples across the four of them (`1150`, `1152`, `2755`, `6351`), each trace's own line carrying
+its own count:
+
+```
+  the port's zplus rule, re-derived from this trace's own order sequence: 2755 sample(s) checked, 0 mismatch(es)
+    rule: bit 0 set while playing an order whose next entry in the module's order list is 254; bit 1 set when the order played was reached by stepping over a 254 (so a plain advance reads 0 or 1, a marker crossing 2, and a crossing into an order whose own successor is a 254 reads 3, because the object ORs the two bits and clears neither); a seek or a restart credits no marker behind it
+    the orders the counter held, in order: [0, 42, 43, 44, 45, 47, 48]
+```
+
+**The `2 → 1` the note used to explain with the "unless" clause is a plain advance.** `second3`
+goes from order 47 to order 48, and 48's successor at 49 is a `254`, so bit 0 is set on the way
+in: **1**, with no exception needed. The shape the clause *would* have mattered for is
+`MUSIC1`'s orders 25 (`254`), 26 (pattern 13) and 27 (`254`): the crossing into 26 sets bit 1
+and 26's own successor sets bit 0, so the object reads **3** there. **No filed trace holds that
+order**, so the old reading and the object's both satisfy "0 mismatches" — which is exactly why
+the object, and not the count, is what decides it (`xtask/src/music.rs`'s
+`the_zplus_rule_reproduces_the_traces_own_order_sequences` now pins `3` for that shape, on
+`MUSIC1`'s own order list).
+
+**What is extrapolation, said plainly.** No trace holds an order two steps past a marker
+**whose own successor is not a marker**, where the bit must fall from the crossing's `2` back to
+`0`: `MUSIC0`'s crossing is measured (`second5` and `hiddenu` both hold order 28) but neither
+holds order 29, and `MUSIC1`'s is measured (`second3` holds order 47) with order **48** two past
+the marker at 46 — but 48's successor is a `254`, so it tests bit 0, not the clearing. So **`2`
+returning to `0` on the next natural advance is not measured**; it is what the code does — the
+advance clears `zplus` at `+0x442d` and rebuilds it — and the first trace that plays past a
+marker without another one behind it will test it. Nor does any trace play a `255` (§10), so
+nothing here says what `zplus` does there.
 
 `muscode_6` (`DIS/DISINT.ASM:242-282`) shows how the *parts* use the value — a row offset
 computed from `zplus` 0/1/2 for `dis_muscode` — and that is a reading of the source, not a
-measurement of this rule; the rule above is a measurement of the traces.
+measurement of this rule; the rule above is the object's, checked against every sample of every
+filed trace.
 
 `zinfo` is **0 in every filed trace** — the four manifests record the same word the trace
 does, and `cargo xtask music analyse`, section 5, prints each trace's own range: one line per

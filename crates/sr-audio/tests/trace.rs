@@ -14,22 +14,25 @@
 //! both uniform, but the reference's is sampled by an emulated machine whose frame counter
 //! carries the host-timing term D17 measured: the two sessions of one recipe (`second5` and
 //! `second5b` — the same command, the same emulator, the same cycles) disagree with **each
-//! other** about which frame four of their row changes land on. No player can be
+//! other** about which frame eight of their row changes land on. No player can be
 //! frame-identical to both, and a test that listed the exceptions would be fitting, so this
 //! test asserts the two things a port *can* be held to —
 //!
-//! 1. **Content**: the sequence of distinct positions the port publishes over the trace's
-//!    frames is exactly the trace's sequence of distinct positions, field for field
-//!    (`order`, `row`, `pattern`, `speed`, `tempo`, `loop`, `zplus`). No row missed, none
-//!    invented, no order advance early or late, no speed change lost, no `254` mishandled.
-//!    A player that never advances fails here, and so does one that skips.
+//! 1. **Content, one word at a time**: for each of `order`, `pattern`, `row`, `speed`,
+//!    `tempo`, `loop` and `zplus`, the sequence of values the port publishes over the trace's
+//!    frames is exactly the trace's. Values rather than frames, so a one-frame displacement of
+//!    a row boundary passes and a skipped row, an invented row, a lost `A`/`T`, a pattern
+//!    published for the wrong order or a `zplus` bit left unset does not. Each word is a key
+//!    of its own, because the fault this catches is one word going wrong while the other six
+//!    stay right — which a combined tuple compared only for equality would report as a whole
+//!    position differing and a print-only count would not report at all.
 //!
 //! 2. **Placement**: every published position must be one the trace itself publishes at that
-//!    frame or within [`JITTER_FRAMES`] of it — the inter-session spread, measured in
-//!    `docs/fidelity/APPROXIMATIONS.md`.
+//!    frame or within [`JITTER_FRAMES`] of it — the displacement the two filed sessions of one
+//!    recipe measure on each other, recorded in `docs/fidelity/APPROXIMATIONS.md` A12.
 //!
-//! — and *measures* the rest: how many frames disagree, printed per trace, against the
-//! residual the phase recorded ([`MAX_DISAGREEING_FRAMES`]).
+//! — and *measures* the rest: how many frames agree exactly and the worst displacement, both
+//! printed per trace.
 
 use sr_audio::{Module, Player, PlayerOptions, Position};
 use std::collections::BTreeMap;
@@ -49,11 +52,12 @@ const MUSIC_START_FRAME: i64 = 408;
 const FRAME_HZ_MILLI: i64 = 70_086;
 const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of millihertz
 
-/// How far a published position may be displaced from the frame the trace publishes it at
-/// before this test calls it a disagreement. **Measured, not chosen**: the two sessions of
-/// one recipe (`second5` and `second5b`) differ by one frame at eight of their row changes,
-/// and the port — whose clock is exact — sits between the sessions, never more than two
-/// frames from either. `docs/fidelity/APPROXIMATIONS.md` records the measurement.
+/// How far a published value may be displaced from the frame the trace publishes it at
+/// before this test calls it a disagreement. **Measured, not chosen**: the two sessions of one
+/// recipe (`second5` and `second5b`) differ by one frame at eight of their row changes, and the
+/// port — whose clock is exact — sits between the sessions; the worst displacement any filed
+/// trace shows against the port is **3 frames**, in `hiddenu`'s 6,088 compared frames, which is
+/// the number this constant is. `docs/fidelity/APPROXIMATIONS.md` A12 records the measurement.
 const JITTER_FRAMES: i64 = 3;
 
 /// One trace, its manifest and its module.
@@ -89,7 +93,7 @@ impl Row {
 
 /// The compared unit: the six published words plus `zplus`, which the trace records and the
 /// port computes.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Published {
     position: Position,
     zplus: i32,
@@ -372,43 +376,53 @@ fn the_port_reproduces_every_filed_trace() {
             .filter(|row| row.frame <= horizon)
             .collect();
 
-        // 1. Content, in two halves so that a one-frame displacement cannot invent a tuple.
+        // 1. Content, key by key, so that a one-frame displacement cannot invent a tuple.
         //
-        //    The port must visit exactly the (order, row) pairs the trace visits, in the same
-        //    order — no row skipped, none invented, the order advance and the `254` step-over
-        //    right in both directions — and go through the same speeds and tempos in the same
-        //    order, so an `A`/`T` command cannot be lost, doubled or applied at the wrong row.
+        //    **Every word the trace records is asserted here, not just counted**: the fault
+        //    this test exists to catch is one word going wrong in a way that leaves the other
+        //    five right — an order index published as the pattern, a frozen `_np_loop`, a
+        //    `zplus` that never sets its second bit. Each key is a sequence of *values* rather
+        //    than of frames, so a one-frame displacement of a row boundary passes and a
+        //    skipped row, an invented row, a lost `A`/`T`, a wrong pattern for an order or a
+        //    wrong `zplus` does not.
         //
         //    The comparison is over the trace's interior (all but its last [`JITTER_FRAMES`]
         //    frames): at the window's very edge a one-frame displacement can leave the port a
         //    row short of, or a row past, the trace's last datum — a placement fact, which the
         //    placement check below owns. One leftover entry is tolerated there; two would be a
-        //    row the port invented or lost.
-        let content = |key: fn(&Row) -> (u8, u8)| {
-            let trace_sequence = distinct(interior.iter().map(|row| key(row)));
-            let port_sequence = distinct(
-                interior
-                    .iter()
-                    .map(|row| key(&Row { position: port[&row.frame].position, ..**row })),
-            );
+        //    value the port invented or lost.
+        let content = |name: &str, key: fn(&Published, &Row) -> u8| {
+            let trace_sequence = distinct(interior.iter().map(|row| key(&row.published(), row)));
+            let port_sequence =
+                distinct(interior.iter().map(|row| key(&port[&row.frame], row)));
             assert!(
                 trace_sequence.len().abs_diff(port_sequence.len()) <= 1,
-                "{}: the {key:?} sequences differ in length — {} against {}",
+                "{}: the {name} sequences differ in length — {} against {}",
                 trace.name,
                 trace_sequence.len(),
                 port_sequence.len()
             );
             let common = trace_sequence.len().min(port_sequence.len());
+            let first = trace_sequence[..common]
+                .iter()
+                .zip(&port_sequence[..common])
+                .position(|(left, right)| left != right);
             assert_eq!(
-                trace_sequence[..common],
-                port_sequence[..common],
-                "{}: the {key:?} sequence differs",
-                trace.name
+                first, None,
+                "{}: the {name} sequence differs at index {:?}: trace {}, port {}",
+                trace.name,
+                first,
+                first.map_or_else(String::new, |at| format!("{}", trace_sequence[at])),
+                first.map_or_else(String::new, |at| format!("{}", port_sequence[at])),
             );
-            (trace_sequence, port_sequence)
         };
-        let _ = content(|row| (row.position.order, row.position.row));
-        let _ = content(|row| (row.position.speed, row.position.tempo));
+        content("order", |published, _| published.position.order);
+        content("pattern", |published, _| published.position.pattern);
+        content("row", |published, _| published.position.row);
+        content("speed", |published, _| published.position.speed);
+        content("tempo", |published, _| published.position.tempo);
+        content("loop", |published, _| published.position.r#loop);
+        content("zplus", |published, _| published.zplus as u8);
 
         // 2. Placement, per column and within [`JITTER_FRAMES`]: the port's (order, row)
         //    must be a pair the trace publishes around that frame, and its (speed, tempo) a

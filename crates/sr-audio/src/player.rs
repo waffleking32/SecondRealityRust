@@ -157,7 +157,7 @@ impl Default for PlayerOptions {
 ///
 /// All six are the *published* words, so the three position ones come through the ten-deep
 /// ring and lag the player's own state by ten polls — see [`Player::state`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Position {
     /// `_np_ord`: the order the counter holds.
     pub order: u8,
@@ -301,39 +301,43 @@ impl Player {
     /// `restartmus`'s call at `:393-394`): play from `order` now.
     ///
     /// The original's routine (`+0x2555`) clears the loop order, masks the argument to nine
-    /// bits into `[0x940]`, clears the channel state, sets `[0x939] = 2` ("started, no row
-    /// played yet") and calls the order-advance routine **directly** — which is why a seek
-    /// publishes no position: the ring is fed only by a row advance (this module's header,
-    /// point 3). `[0x93b]` and `[0x8fd]` (the published row) are cleared too, by the routine
-    /// it calls at `+0x258e` (`+0x5711`, `+0x570b`).
+    /// bits into `[0x940]`, sets `[0x939] = 2` ("started, no row played yet"), calls the
+    /// order-advance routine **directly** — which is why a seek publishes no position: the
+    /// ring is fed only by a row advance (this module's header, point 3) — and only then sets
+    /// `[0x938] = 1` (`+0x259a`). The routine it calls at `+0x258e` clears `[0x93b]`, the row
+    /// counter, the pattern, the loop counter and **`[0x8fd]`**, the published row
+    /// (`+0x5711`, `+0x570b`).
+    ///
+    /// The order of those two is load-bearing: a seek that lands on a `255` takes the
+    /// scan's stop path (`+0x4476` clears `[0x938]`) and is then put back to running by
+    /// `+0x259a`, so the player ends up *ticking with no new order entered* — the old pattern
+    /// still playing, the position where it was. That is what the port does too.
     pub fn play_song(&mut self, order: u8) {
         self.loop_order = 0;
         self.next_order = u16::from(order);
         self.pending_row = 0;
         self.loops = 0;
         self.pub_loop = 0;
+        self.published.row = 0;
         self.advance_flag = ADVANCE_NONE;
         self.state = STATE_STARTED;
         self.at_end = false;
-        self.running = true;
-        // The order advance is called from here, so a seek that lands on a `255` ends the
-        // song before this returns — which is why `running` is set first, where the original
-        // sets `[0x938]` after its own `call 0x442d` and relies on that call's return to
-        // leave the player stopped.
         self.enter_order();
+        self.running = true;
     }
 
     /// `_zgotosong(order, row)` (`MAIN/STMIK.H:46`): seek to `order`, `row`.
     ///
     /// The original (`+0x2513`) writes the row into `[0x93b]`, the order into `[0x940]`,
     /// raises the order-advance flag, sets `[0x2000] = np_speed` so the very next tick enters
-    /// the row, sets `[0x939] = 2`, and clears the published row (`+0x570b`).
+    /// the row, and sets `[0x939] = 2`. It clears **nothing** else — in particular not the
+    /// published row, which only `_zplaysong`'s own path reaches (`+0x570b`, inside the
+    /// routine called at `+0x258e`), because `_zgotosong` does not call it.
     pub fn goto_song(&mut self, order: u8, row: u8) {
         self.pending_row = row;
         self.next_order = u16::from(order);
         self.advance_flag = ADVANCE_ORDER;
         self.tick_in_row = u16::from(self.pub_speed);
-        self.published.row = 0;
         self.running = true;
         self.state = STATE_STARTED;
         self.at_end = false;
@@ -424,9 +428,19 @@ impl Player {
     }
 
     /// `_np_zplus`: the marker value the order list's `254` entries produce. Computed by the
-    /// order advance and delayed with the position (this module's header, point 4).
+    /// order advance and delayed with the position, through the same ring the position travels
+    /// (this module's header, point 4) — so this is the value the *parts* read, ten polls after
+    /// the engine computed it.
     pub fn zplus(&self) -> i32 {
         i32::from(self.published.zplus)
+    }
+
+    /// The `zplus` the engine computed for the order it is playing now — the value the ring
+    /// will hand out [`FIFO_DEPTH`] polls from now. The object's own word is `[0x90d]`, written
+    /// by the order advance's two `orw`s (`+0x4452`, `+0x4461`), and the port's tests read it
+    /// here to pin the arithmetic rather than the delay.
+    pub fn engine_zplus(&self) -> i32 {
+        i32::from(self.zplus)
     }
 
     /// `_np_zinfo`. Zero, and D8 says why (see [`ZINFO`]).
@@ -456,11 +470,6 @@ impl Player {
     /// not be called again.
     pub fn finished(&self) -> bool {
         self.at_end
-    }
-
-    /// How many times the order scan has restarted from the loop order.
-    pub fn loops(&self) -> u8 {
-        self.pub_loop
     }
 
     /// The player's own position, before the ring — what the next row advance would feed.
@@ -648,7 +657,13 @@ impl Player {
                 self.loops = self.loops.wrapping_add(1);
                 self.pub_loop = self.loops as u8;
                 if orders.get(usize::from(self.loop_order)).copied().unwrap_or(255) == 255 {
-                    self.end_song();
+                    // `+0x4499`'s `je 0x447f` — and `0x447f` is *past* the stop at
+                    // `+0x4476`, so this returns to the caller with the loop order in `ax`
+                    // (the caller's `mov %ax,0x948` makes the row the loop order) and the
+                    // pattern, the order and the mixing flag all untouched: the scan gives
+                    // up, the player keeps playing what it was playing. Unreachable in both
+                    // modules (neither has a `255` at its first order) and unmeasured.
+                    self.row = self.loop_order;
                     return;
                 }
                 at = usize::from(self.loop_order);

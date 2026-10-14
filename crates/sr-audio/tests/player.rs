@@ -140,6 +140,16 @@ fn the_objects_own_bytes_say_what_the_player_says() {
     // image; the sentence beside each one is the claim `player.rs` makes, and this is where it
     // can be checked without an 8086 in the room.
     let claims: &[(usize, &[u8], &str)] = &[
+        // The tick's sample count: `_zmixspeed × 125/(50 × tempo)`, an integer division, and
+        // the only place a tick's length is computed.
+        (
+            0x3D99,
+            &[
+                0x2E, 0xA1, 0xD5, 0x08, 0xB9, 0x7D, 0x00, 0xF7, 0xE1, 0xF7, 0xF3, 0x2E, 0xA3,
+                0xE1, 0x08,
+            ],
+            "mov %cs:_zmixspeed,%ax; mov $0x7d,%cx; mul %cx; div %bx; mov %ax,%cs:0x8e1",
+        ),
         // The tick counter: `_np_zframe` is incremented by the tick routine, so a tick *is*
         // what the parts' counter counts.
         (0x4357, &[0xFF, 0x06, 0xFB, 0x08], "incw _np_zframe"),
@@ -606,22 +616,28 @@ fn a_b_command_jumps_at_the_end_of_its_own_row() {
 
 #[test]
 fn a_254_is_stepped_over_and_zplus_records_the_crossing() {
-    // `music-clock.md` §10 and §6: 254 is stepped over, and `zplus` is 1 while playing an
-    // order whose next entry is 254 and 2 on the crossing the step-over made.
-    let module = Builder::new(
-        &[0, 254, 1, 254],
-        &[vec![], vec![]],
-    )
-    .build();
-    let mut player = Player::new(module, PlayerOptions::default());
+    // `music-clock.md` §10 and §6: 254 is stepped over, and `zplus` is the object's own two
+    // bits —`orw $0x1` while the next entry is a 254 (`+0x4452`, `+0x4456`), `orw $0x2` when
+    // this one is and is stepped over (`+0x445c`, `+0x4461`).
+    //
+    // The module below is the shape the two bits differ over: `[0, 254, 1, 254]`. Playing
+    // order 0 sets bit 0 (its next entry, order 1, is the 254) and nothing else — **1**. The
+    // step over it to order 2 sets bit 1 for the entry stepped over *and* bit 0 for order 2's
+    // own successor at order 3 — **3**, which is what the object's arithmetic produces and
+    // what `music-clock.md` §6's original wording ("unless the entry after the one entered is
+    // itself 254, in which case 1") could not.
+    let mut player = Player::new(
+        Builder::new(&[0, 254, 1, 254], &[vec![], vec![]]).build(),
+        PlayerOptions::default(),
+    );
     player.play_song(0);
-    // Order 0's next entry is 254: zplus is 1 while it plays, once the ring publishes it.
-    poll_until(&mut player, 200, |player, _| player.zplus() != 0 || player.state().order != 0);
-    let _ = player;
+    assert_eq!(
+        player.engine_zplus(),
+        1,
+        "the order being played has the 254 next: bit 0 alone"
+    );
+    assert_eq!(player.engine_position().order, 0);
 
-    let module = Builder::new(&[0, 254, 1, 254], &[vec![], vec![]]).build();
-    let mut player = Player::new(module, PlayerOptions::default());
-    player.play_song(0);
     poll_until(&mut player, 1_000_000, |player, _| {
         player.engine_position().order == 2
     });
@@ -631,13 +647,13 @@ fn a_254_is_stepped_over_and_zplus_records_the_crossing() {
         "order 1 is the 254, and the scan stepped over it"
     );
     assert_eq!(player.engine_position().row, 0);
-    assert_eq!(
-        player.engine_position().speed,
-        6,
-        "and it is playing order 2's pattern"
-    );
-    // zplus for order 2: the entry after it is a 254 again, so bit 0 and bit 1 both set.
-    println!("after the step-over the engine's zplus is {}", player.zplus());
+    assert_eq!(player.engine_zplus(), 3, "both bits: stepped over, and a 254 next");
+    // And what the parts see is the same value, ten polls later: `second5`'s own zplus column
+    // turns 1 at order 26 (the order whose successor at 27 is the 254), which is the ring
+    // publishing what this word held.
+    let published = poll_until(&mut player, 100, |player, _| player.zplus() != 0);
+    println!("the step-over's zplus 3 reaches the parts {published} poll(s) later");
+    let _ = published;
 }
 
 #[test]
@@ -649,9 +665,24 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
 
     let mut player = Player::new(module.clone(), PlayerOptions::default());
     player.play_song(2);
-    player.poll();
-    assert!(player.finished(), "a seek onto a 255 ends there");
-    assert_eq!(player.state().order, 0, "and publishes no new order");
+    assert!(
+        player.finished(),
+        "a seek onto a 255 runs the scan off the list"
+    );
+    // ...and the original then sets `[0x938] = 1` anyway (`+0x259a`), so the player is left
+    // *ticking* with no new order entered: the position is where it was and `_np_zframe`
+    // keeps counting. That is the limbo the port reproduces, not a stop.
+    let before = player.state();
+    for _ in 0..200 {
+        player.poll();
+    }
+    assert_eq!(player.state().order, 0, "no new order was entered");
+    assert_eq!(player.state().pattern, 0);
+    assert!(
+        player.zframe() > 0,
+        "the ticks ran: the mixing flag was put back by the seek itself"
+    );
+    let _ = before;
 
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
@@ -659,7 +690,7 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
     let mut looped_at = None;
     for poll in 0..polls {
         player.poll();
-        if player.loops() > 0 {
+        if player.state().r#loop > 0 {
             looped_at = Some(poll);
             break;
         }
@@ -717,6 +748,36 @@ fn stop_keeps_the_position_and_shut_up_only_silences() {
         !player.is_silenced(),
         "a new row starts voices again — which is Task 5's to make audible"
     );
+}
+
+#[test]
+fn the_polls_samples_are_the_frames_share_and_carry_their_fraction() {
+    // 40000/70.086 = 570.733… samples a poll. The port hands Task 5 whole samples and carries
+    // the fraction, rather than rounding per poll (which would drift by 0.13 %): the fives are
+    // 570, 571, 571, 570, 571 — the fraction showing up as the odd 571, never lost.
+    let mut player = player("MUSIC0");
+    player.play_song(0);
+    let mut run = Vec::new();
+    for _ in 0..5 {
+        player.poll();
+        run.push(player.samples_this_poll());
+    }
+    assert_eq!(run, vec![570, 571, 571, 570, 571]);
+
+    // And the sum over a stretch of polls is the rate: `polls × mix_rate / 70.086`, to the
+    // sample, however the fraction falls.
+    let polls = 1_000u32;
+    let mut total = 0u64;
+    for _ in 0..polls {
+        player.poll();
+        total += u64::from(player.samples_this_poll());
+    }
+    let expected = u64::from(polls) * 40_000 * 1000 / 70_086;
+    assert!(
+        total.abs_diff(expected) <= 1,
+        "{polls} polls gave {total} samples where {expected} is the rate"
+    );
+    println!("{polls} polls: {total} samples against a rate of {expected}");
 }
 
 #[test]
@@ -780,9 +841,9 @@ fn play_through(name: &'static str) -> (u32, Position, u8, bool) {
                 position.order,
                 position.pattern,
                 position.row,
-                player.loops(),
+                player.state().r#loop,
             );
-            return (poll, position, player.loops(), player.finished());
+            return (poll, position, player.state().r#loop, player.finished());
         }
         previous = position.order;
     }
@@ -833,15 +894,17 @@ fn each_module_plays_to_the_end_of_its_order_list() {
 /// Play the module again, counting the ticks it spends and the rows it spends them on.
 ///
 /// The tick count is the player's own (`Player::zframe`); the row count is the engine's position
-/// changing. Every row must get at least one tick and no more than 32 — the range the format's
-/// speed byte allows — so the two agreeing is a statement about the row timer rather than about
-/// the counter reading itself. Returns (ticks, rows).
+/// changing. The row timer is what is really being asked: every row the engine enters must be
+/// given between 1 and 32 of those ticks — the range the format's speed byte allows — so the
+/// two numbers agreeing is a statement about the row timer and not about the counter reading
+/// itself. Returns (ticks, rows).
 fn count_ticks(name: &'static str) -> (i64, u32) {
     let mut player = player(name);
     player.play_song(0);
     let mut ticks = 0i64;
     let mut rows = 0u32;
     let mut last_row = None;
+    let mut ticks_this_row = 0u32;
     let cap = 400_000u32;
     let mut previous = player.state().order;
     let mut started = false;
@@ -850,11 +913,20 @@ fn count_ticks(name: &'static str) -> (i64, u32) {
         let position = player.engine_position();
         player.poll();
         let now = player.zframe();
-        ticks += i64::from(now - before);
+        let spent = u32::try_from(now - before).expect("a few ticks a poll");
+        ticks += i64::from(spent);
         if last_row != Some((position.order, position.row)) {
+            if rows > 0 {
+                assert!(
+                    (1..=32).contains(&ticks_this_row),
+                    "{name}: the row at {last_row:?} was given {ticks_this_row} ticks"
+                );
+            }
             rows += 1;
+            ticks_this_row = 0;
             last_row = Some((position.order, position.row));
         }
+        ticks_this_row += spent;
         let published = player.state();
         if !started && published.order != 0 {
             started = true;
@@ -864,10 +936,6 @@ fn count_ticks(name: &'static str) -> (i64, u32) {
         }
         previous = published.order;
     }
-    assert!(
-        ticks >= i64::from(rows) && ticks <= i64::from(rows) * 32,
-        "{name}: {ticks} tick(s) over {rows} row(s) is outside every row getting 1..32"
-    );
     (ticks, rows)
 }
 

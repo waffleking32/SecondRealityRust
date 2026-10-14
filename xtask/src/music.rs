@@ -2325,26 +2325,37 @@ pub struct ZplusCheck {
 ///
 /// `zplus` is what `muscode_6` (`DIS/DISINT.ASM:242-282`) turns into a row
 /// offset for `dis_muscode`, so the port has to compute it rather than copy it.
-/// The rule below is the one that reproduces every trace filed under
-/// `reference/music/` over every sample of all of them, and the note states it
-/// as **the port's rule, verified over the filed traces** — not as a reading of
-/// the original's source:
+/// The rule below is the original player's own arithmetic — `STMIK.300`'s order
+/// advance, `+0x442d`, whose two `orw`s are `orw $0x1,%cs:0x90d` when the
+/// *next* order-list entry is a `254` (`+0x4452`..`+0x4456`) and
+/// `orw $0x2,%cs:0x90d` when the entry just examined is a `254` and is stepped
+/// over (`+0x445c`..`+0x4467`) — and it is checked against every sample of
+/// every trace filed under `reference/music/`:
 ///
-/// - **1** while the counter is playing an order whose *next* entry in the
-///   module's order list is `254` — the marker is coming;
-/// - **2** on a marker crossing: the counter moved from `o` to `o + 2` with
-///   `orders[o + 1] == 254`, **unless** the entry after the one being entered is
-///   itself `254`, in which case it is **1**;
-/// - **0** otherwise;
-/// - and a seek or a restart credits **no** marker behind it: a crossing needs
-///   the order the counter came from to be the one before the skipped entry,
-///   which is why `SECOND 3`'s restart at order 42 — whose list predecessor is
-///   a `254` the player never played — reads 0.
+/// - the low bit is set while the counter is playing an order whose *next*
+///   entry in the module's order list is `254` — the marker is coming;
+/// - the second bit is set when the order played was reached by stepping over
+///   a `254`;
+/// - so a plain advance reads **0** or **1**, a marker crossing reads **2**,
+///   and a crossing into an order whose own successor is a `254` reads **3**
+///   — bit 0 and bit 1 both set, because the object ORs them and nothing
+///   clears one;
+/// - and a seek or a restart credits **no** marker behind it: the scan starts
+///   at the order it was given and looks only forward, which is why `SECOND 3`'s
+///   restart at order 42 — whose list predecessor is a `254` the player never
+///   played — reads 0.
 ///
-/// What the traces do **not** show, and the note says so: no trace holds an
-/// order two steps past a marker (`MUSIC0` order 29 onwards, `MUSIC1` order 49
-/// onwards), so `2` returning to `0` on the next natural advance is
-/// extrapolation, and so is anything about a `255`.
+/// **`3` is the form the object has and the form the earlier note did not.**
+/// `music-clock.md` §6 first stated the crossing case as "2, *unless* the entry
+/// after the one entered is itself a `254`, in which case 1" — a reading with no
+/// cause in the code, which ORs and cannot produce 1 there. No filed trace holds
+/// such an order, which is why both readings survive the "0 mismatches" check;
+/// this one is the object's, and the note now says so.
+///
+/// What the traces do **not** show: no trace holds an order two steps past a
+/// marker (`MUSIC0` order 29 onwards, `MUSIC1` order 49 onwards), so `2` or `3`
+/// returning to `0` on the next natural advance is extrapolation, and so is
+/// anything about a `255`.
 pub fn zplus_rule(orders: &[u8], held: &[u8]) -> Vec<i16> {
     let mut expected = Vec::with_capacity(held.len());
     for (position, order) in held.iter().enumerate() {
@@ -2357,13 +2368,14 @@ pub fn zplus_rule(orders: &[u8], held: &[u8]) -> Vec<i16> {
                 usize::from(held[earlier]) + 2 == order && orders.get(order - 1) == Some(&254)
             })
             .unwrap_or(false);
-        expected.push(if next_is_marker {
-            1
-        } else if crossing {
-            2
-        } else {
-            0
-        });
+        let mut zplus = 0;
+        if next_is_marker {
+            zplus |= 1;
+        }
+        if crossing {
+            zplus |= 2;
+        }
+        expected.push(zplus);
     }
     expected
 }
@@ -3171,10 +3183,12 @@ impl Analysis {
                     check.samples, check.mismatches
                 );
                 println!(
-                    "    rule: 1 while playing an order whose next entry in the module's order \
-                     list is 254; 2 on a crossing (the counter moved from o to o+2 with \
-                     orders[o+1] == 254) unless the entry after the one entered is itself 254, in \
-                     which case 1; 0 otherwise; a seek or a restart credits no marker behind it"
+                    "    rule: bit 0 set while playing an order whose next entry in the module's \
+                     order list is 254; bit 1 set when the order played was reached by stepping \
+                     over a 254 (so a plain advance reads 0 or 1, a marker crossing 2, and a \
+                     crossing into an order whose own successor is a 254 reads 3, because the \
+                     object ORs the two bits and clears neither); a seek or a restart credits no \
+                     marker behind it"
                 );
                 println!("    the orders the counter held, in order: {:?}", check.held);
                 for (frame, order, row, measured, expected) in &check.examples {
@@ -3835,11 +3849,18 @@ mod tests {
         // MUSIC0: order 27 is the 254. Order 26 has it next (1), order 28 is a
         // crossing into it (2) — unless the entry after 28 were itself a 254.
         assert_eq!(zplus_rule(&music0.orders, &[0, 25, 26, 28]), vec![0, 0, 1, 2]);
-        // MUSIC1: order 46 is the 254. Same shape, and order 48 has the 254 at
-        // 49 next to it, so it reads 1 rather than 0 — the 2 → 1 the trace
-        // shows.
+        // MUSIC1: order 46 is the 254. Same shape, and order 48 is a *plain*
+        // advance (47 → 48) whose own successor at 49 is a 254, so its 1 needs
+        // no exception: the trace's 2 → 1 is bit 0 being set on the way in.
         assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47]), vec![0, 0, 0, 1, 2]);
         assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47, 48]), vec![0, 0, 0, 1, 2, 1]);
+        // MUSIC1 orders 25/26/27 are `254, 13, 254`: the crossing from 24 to 26
+        // sets bit 1, and 26's own successor at 27 is a 254, so bit 0 is set
+        // too — **3**, which is what the object's `orw`s produce and what the
+        // earlier "unless … in which case 1" reading could not.
+        // (order 24's own successor at 25 is that 254, so bit 0 is set there
+        // too, which is why it reads 1 on the way in.)
+        assert_eq!(zplus_rule(&music1.orders, &[24, 26]), vec![1, 3]);
         // A restart credits no marker behind it: entered at 42, whose list
         // predecessor is a 254 the player never played.
         assert_eq!(zplus_rule(&music1.orders, &[0, 42]), vec![0, 0]);
