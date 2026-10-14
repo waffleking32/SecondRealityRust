@@ -469,9 +469,12 @@ initial phase** — the trace changes rows at 576, 664, 848 and 918 where the mo
 575, 663, 847 and 917. Three of those four are inside ENDLOGO's hold window, which is the phase's
 spine. So this step is not "implement the sentence above": it is **derive the rule that reproduces
 every one of the trace's row changes**, with the sentence above as the starting model and the four
-named intervals as the evidence that something else is in it (candidates to rule in or out, by
-measurement: the player mixes from its own timer — Task 1 measured `_zpollmix = 0` — so a delayed
-interrupt is one; a mixing-chunk quantisation the model does not carry is another). The 410-vs-409
+named intervals as the evidence that something else is in it (the surviving candidate, by
+measurement: a *mixing-chunk quantisation* the model does not carry — the player mixes in DMA-buffer
+units, `_zbufsize` 4096 — because Task 1's later probes showed the reference **is** in the polled
+mode the port models, `_zpollmix` going 0 → 1 as the shell sets it, `MAIN/U2.ASM:783`, with the
+copper calling `zpollme` once a frame, `MAIN/COPPER.ASM:466`; a delayed timer interrupt is therefore
+*not* the explanation, and the note records the two readings that ruled it out). The 410-vs-409
 half of the measurement is the session offset Task 8 will meet from the other side. Two implementation details are
 therefore load-bearing and must be pinned by tests of their own: the *rounding* of samples per frame
 (`mix_rate / 70.086` is not an integer — the accumulator must carry fractional samples rather than
