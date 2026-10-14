@@ -209,11 +209,11 @@ fn the_reference_tree_the_repository_ships_checks_out() {
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 27 capture(s), 108 file(s)"),
+            .contains("verdict: ok — 28 capture(s), 109 file(s)"),
         "{}",
         run.output()
     );
-    for trace in ["music/second5", "music/second3", "music/hiddenu"] {
+    for trace in ["music/second5", "music/second5b", "music/second3", "music/hiddenu"] {
         assert!(
             run.stdout
                 .contains(&format!("ok   {trace}: music trace")),

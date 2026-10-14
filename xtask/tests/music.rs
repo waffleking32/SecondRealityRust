@@ -284,7 +284,7 @@ fn the_reference_tree_passes_with_the_traces_in_it() {
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("27 capture(s)"), "{text}");
+    assert!(text.contains("28 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a
@@ -500,6 +500,66 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         samples += count;
     }
     assert_eq!(samples, 10_256, "the three traces' samples, all checked");
+}
+
+/// **The anchor is a property of the boot, not of a session** (Task 1's Step 7):
+/// the row-implied anchor — the first row change, back-extrapolated by the tick
+/// counter's own value there at the tick clock's measured frames a tick — is the
+/// same in every filed session, and the `zframe` column's first non-zero frame
+/// is within a tick of it. Four sessions, one recipe, no free parameter.
+#[test]
+fn the_anchor_is_the_same_in_every_filed_session() {
+    let mut anchors = Vec::new();
+    for trace in ["second5", "second5b", "second3", "hiddenu"] {
+        let path = format!("reference/music/{trace}");
+        let run = xtask(&["music", "analyse", "--trace", &path]);
+        assert_eq!(run.code, 0, "{trace}: {}", run.output());
+        let text = run.output();
+        let line = text
+            .lines()
+            .find(|line| line.contains("so that row began at frame"))
+            .unwrap_or_else(|| panic!("{trace}: no anchor line in\n{text}"));
+        let anchor: f64 = line
+            .split("so that row began at frame ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|number| number.parse().ok())
+            .unwrap_or_else(|| panic!("cannot read the anchor from {line:?}"));
+        // The other reading: the frame the `zframe` column itself first moves
+        // on, which is `shows: frame N is the first frame whose zframe is 0`.
+        let direct: f64 = text
+            .lines()
+            .find(|line| line.contains("the `zframe` column shows: frame"))
+            .and_then(|line| line.split("shows: frame ").nth(1))
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|number| number.parse().ok())
+            .unwrap_or_else(|| panic!("cannot read the zframe anchor from {trace}"));
+        // The two readings are one tick apart at most (1.35-1.46 frames), and
+        // each is quantised to a whole frame — so anything under two ticks is
+        // agreement, and under one tick is what the traces actually show.
+        assert!(
+            (direct - anchor).abs() <= 2.9,
+            "{trace}: the two readings are {} frames apart ({anchor} and {direct}), which is more \
+             than one tick plus the frame each reading is quantised to",
+            (direct - anchor).abs()
+        );
+        anchors.push(anchor);
+    }
+    let spread = anchors
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max)
+        - anchors.iter().cloned().fold(f64::INFINITY, f64::min);
+    assert!(
+        spread <= 0.5,
+        "the four sessions' anchors are {anchors:?} — spread {spread:.2} frames"
+    );
+    for anchor in &anchors {
+        assert!(
+            (407.5..408.5).contains(anchor),
+            "the recipe's anchor is 408, and {anchor} is not it: {anchors:?}"
+        );
+    }
 }
 
 /// The analysis checks the trace against the digest its manifest records before

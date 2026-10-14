@@ -15,6 +15,7 @@ traces are committed under `reference/music/`:
 | `reference/music/second5` | `cargo xtask music trace --arg 5 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 0..1300 --out reference/music/second5` | the phase's oracle: the boot, the music's start, the first graphics frame, ENDLOGO's gate window |
 | `reference/music/second3` | `cargo xtask music trace --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 0..2900 --out out/b3` | MUSIC1: its order list, and one of its `254`s |
 | `reference/music/hiddenu` | `cargo xtask music trace --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 0..6500 --out out/u` | the longest rate window, and MUSIC0's orders 70…77 |
+| `reference/music/second5b` | the same command as `second5`, into a fresh directory | **a second session of the same recipe**: the anchor's reproducibility (§2), and the machine's own words moving into their playing values (§5) |
 
 The other command this note's numbers come from measures a word that no trace column carries
 (§8):
@@ -78,13 +79,38 @@ Three things the trace guarantees, and why they matter:
     frame   412  ord   0 row   0 pat   0  zframe      2
 ```
 
-**The port's music boot anchor is frame 409** — the frame between the last sample that shows
-`zframe 0` (408) and the first that shows it advancing (410) — and this trace does not hold
-frame 409 itself (§7). `hiddenu` holds 409 and the same analysis says
-`first advancing frame: 409`, `zframe 0 -> 1`; `second3` holds **both** 409 and 410, but
-both read `zframe 0` — no advance — and its first advance is 411, where `zframe` goes
-`0 -> 2`, one tick having been counted in each of the two frames before it. So the anchor is
-read off `hiddenu`, which holds the frame the tick lands on.
+**The port's music boot anchor is frame 408**, measured two ways in four sessions.
+`music analyse` derives it from the trace's own columns and prints both readings — the
+`second5` session:
+
+```
+  the anchor the rows imply: the first row change is at frame 427 with `_np_zframe` 13, and
+    13 ticks at the measured 1.4622 frames a tick is 19.0 frames — so that row began at
+    frame 408.0 (within one tick)
+  the anchor the `zframe` column shows: frame 410 is the first frame whose `zframe` is not 0 —
+    2.0 frame(s), or 1.4 tick(s), from the rows' reading: the same tick, seen at the next
+    whole-frame sample
+```
+
+The derivation uses no simulation and no free parameter: the first row change is at frame
+427 with the *tick counter's own value* (13) there, and back-extrapolating 13 ticks at the
+tick clock's measured 1.4622 frames a tick puts the first tick at **408.0**. (A row change is
+seen on a frame, so both the frame and the tick label are quantised — that is the ±1 tick.)
+
+That reading is the same in every session this phase took:
+
+| trace | session | the rows imply | `zframe`'s first non-zero frame |
+|---|---|---|---|
+| `second5` | 1 | **408.0** | 410 |
+| `second5b` | 2 (the same recipe) | **408.0** | 410 |
+| `second3` | 3 | **408.1** | 411 |
+| `hiddenu` | 4 | **408.1** | 409 |
+
+**So the anchor is a property of the boot and not of a session** — the spread is 0.1 frames —
+and the `zframe` column's own reading (409/410/411) is the same tick seen at the *next*
+whole-frame sample, which is why it moves by a frame between sessions while the row-derived
+value does not. The recipe's anchor is **408**; the note no longer hedges it, and §7's table
+is why the traces disagree about the frame the tick is first *visible* on.
 
 Everything is still before it: `ord`, `row` and `pat` are 0, `zframe` is 0, and `speed` 6 /
 `tempo` 125 are the object's own initial values (`cargo xtask music symbols` prints the
@@ -184,26 +210,36 @@ tick for tick.
 
 ## 5. Which soundcard and mixer rate the reference runs at
 
-`cargo xtask music analyse`, section 4 — read from the guest at the frame the segment was
-located (`second5`: frame 147) and again after the re-locate (frame 1422):
+`cargo xtask music analyse`, section 4, records each word **twice** — read when the segment
+was located (`second5`: frame 147, before the music) and again at the end of the trace:
 
-| word | value | what it is |
-|---|---|---|
-| `_zoutputmode` | **5** | Sound Blaster Pro (`MAIN/STMIK.H:67-74`) |
-| `_zmixspeed` | **20000** | the mixing rate, 20 kHz |
-| `_zbufsize` | **4096** | the DMA buffer, the largest `MAIN/STMIK.H:88-95` lists |
-| `_zpollmix` | **0** | the player mixes from its own timer interrupt, not from `zpollme` |
-| `_zspeedadjust` | **0** | |
-| `_zspeedadjust2` | **0** | `MAIN/U2.ASM:389` writes it only for outputmode 7 or 2, and the card is 5 |
-| `_np_mastervol` | **192** | the object's own initialiser: `STMIK.300`'s static byte at segment offset 0x0911 is 0xC0 = 192 (`cargo xtask music symbols` prints the object; `crates/sr-assets/tests/omf_symbols.rs` asserts that byte and this one), and the manifest records one reading per word, taken when the segment was located and re-checked at the end — a word that moved between the two readings is refused rather than averaged. (It is *not* the module's global volume: `assets/MAIN/MUSIC0.S3M`'s header byte 0x30 is 64.) |
-| `_np_mastermul` | **0** | |
+| word | at the locate | when the music plays | what it is |
+|---|---|---|---|
+| `_zoutputmode` | **5** | 5 | Sound Blaster Pro (`MAIN/STMIK.H:67-74`) |
+| `_zmixspeed` | 20000 | **40000** | the mixing rate: 20 kHz before the demo's music engine starts, **40 kHz** from the music's start on (`cargo xtask music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5` reads 40000 at both ends of that window) |
+| `_zbufsize` | **4096** | 4096 | the DMA buffer, the largest `MAIN/STMIK.H:88-95` lists |
+| `_zpollmix` | 0 | **1** | **the caller polls the player** (`MAIN/STMIK.H:152-176`): `1` means the program must call `zpollme`, which is what `MAIN/COPPER.ASM:466` does once per copper frame — and the same probe reads 1 at both ends of the music window |
+| `_zspeedadjust` | **0** | 0 | |
+| `_zspeedadjust2` | **0** | 0 | `MAIN/U2.ASM:389` writes it only for outputmode 7 or 2, and the card is 5 |
+| `_np_mastervol` | 192 | **64** | the object's own initialiser is 0xC0 = 192 (`STMIK.300`'s static byte at segment offset 0x0911; `crates/sr-assets/tests/omf_symbols.rs` asserts it), and `fademusic` (`MAIN/U2.ASM:333-346`) walks it down as a part ends — 64 at the end of the window |
+| `_np_mastermul` | 0 | **2240** | 0 before the module is loaded, then `0x8C0` = bit 11 (stereo) with a 192 multiplier once it plays |
 
-**This settles spec §7.2's default from the machine rather than from `MENU.C`'s menu order:
-one of the four rates the shell offers is 20000 Hz (`MAIN/U2.ASM:737-743`), and that is what
-the reference holds** — not 40000, and not a rate derived from the card. And
-`_zpollmix = 0` says the reference is *not* the "call `zpollme` once a frame" mode: mixing
-runs from the player's own timer, which is why `_np_zframe`'s rate (§8) is the tick rate and
-not the frame rate.
+**This settles spec §7.2's default from the machine rather than from `MENU.C`'s menu order:**
+one of the four rates the shell offers is 20000 Hz and another is 40000 Hz
+(`MAIN/U2.ASM:737-743`), the demo holds 20000 when its music engine is initialised, and the
+**quarter of a megabyte per second is what the music itself runs at**. The tick clock does not
+depend on it — a tick is `2.5/tempo` seconds of samples at *whatever* rate the mixer runs, so
+the rate cancels (§3's residuals are 0.06-0.08%) — but the port's `MixRate` default is this one.
+
+**And `_zpollmix = 1` is the port's own model confirmed from the machine**: the reference is
+the *polled* mode, not the timer-interrupt mode, so the tick clock advances once per copper
+frame's `zpollme` call — which is why `_np_zframe`'s rate (§8) quantises onto the frame clock
+the way §4 measures, and why the port's `poll()` per logic tick is the right shape.
+
+Nothing here is assumed constant. A word whose two readings differ is recorded **twice**, in
+`machine` and `machine_moved` — `second5b`'s manifest carries both — because which words move
+is not a rule this tool gets to assume: the mixing rate moves, `zpollmix` moves, and the
+volume words move.
 
 ## 6. `zplus` and `zinfo`
 
@@ -288,14 +324,15 @@ frames and one frame in the middle — and `music analyse` names the boundary ru
 | `second5` | 148…1299 | 147 (the boundary — the frame the segment was located on: locating costs frames, and that one was already gone), **409**, 1220 |
 | `second3` | 144…2899 | 142…143 (the boundary), **417** |
 | `hiddenu` | 148…6499 | 146…147 (the boundary), **410** |
+| `second5b` | 146…1299 | 144…145 (the boundary), **409**, 1220 |
 
 Each middle gap is a frame the guest's own counter moved across without the trace being able
 to read it, and the manifest carries what the counter did around it: for `second5`, `skipped`
 records `409..409 (the counter went 408 -> 410)` and `1220..1220 (the read that was opened on
 frame 1220 was still open when the guest moved to 1221)`. **Which index falls in the gap is
-session-dependent** — the three traces lose 409, 417 and 410 respectively — and all three sit
-at the same point in the demo, the boot's first graphics frame (the reference's own captures
-put that at 404, D17).
+session-dependent** — the traces lose 409 (`second5`, `second5b`), 417 (`second3`) and 410
+(`hiddenu`) — and all of them sit at the same point in the demo, the boot's first graphics
+frame (the reference's own captures put that at 404, D17).
 
 **Why is a hypothesis.** What is measured is the counter's own readings, and they say only
 that it went from one value to another with the frame between never current. The explanation
@@ -437,4 +474,6 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | a window out of a manifest that is back to front does not panic the verifier | same |
 | two machine readings that disagree are refused, not silently merged | same |
 | the `zplus` rule against both modules' order lists, restart case included | same |
+| **the anchor is 408 in all four filed sessions**, and the two readings are within one tick | `xtask/tests/music.rs` |
+| the machine's words recorded twice when they move, once when they do not | `xtask/src/music.rs`'s own tests |
 | **the `zplus` rule re-derived over all three filed traces: 0 mismatches, 10,256 samples** | `xtask/tests/music.rs` |

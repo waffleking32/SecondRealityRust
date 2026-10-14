@@ -88,8 +88,11 @@ pub const POSITION_WORDS: &[&str] = &[
 pub const CLOCK_WORDS: &[&str] = &["_np_speed", "_np_tempo"];
 
 /// The machine's own words: which card the reference runs, at what mixing rate,
-/// and what the shell put in them (Step 4.4). They do not change during a run,
-/// so they are recorded once in the manifest rather than as trace columns.
+/// and what the shell put in them (Step 4.4). They are read when the segment is
+/// located and again at the end of the trace: a word the two readings agree
+/// about is recorded once, and a word that **moved** is recorded twice, in
+/// [`TraceManifest::machine_moved`]. Nothing here is assumed constant — the
+/// mixing rate itself moves later in a run.
 pub const MACHINE_WORDS: &[&str] = &[
     "_zoutputmode",
     "_zmixspeed",
@@ -1054,9 +1057,16 @@ pub struct TraceManifest {
     pub trace: TraceFile,
     pub object: SymbolMap,
     pub locate: LocateRecord,
-    /// The machine's own words, read from the guest when the segment was found
-    /// and again when the re-locate confirmed it had not moved.
+    /// The machine's own words, read from the guest when the segment was found.
+    /// A **setting** here is one the machine held all run (a disagreement is
+    /// refused); a volume word may have moved, and its end reading is in
+    /// [`TraceManifest::machine_moved`].
     pub machine: BTreeMap<String, i64>,
+    /// The words whose reading at the end of the trace differs from the one
+    /// above — the player's volume words, which `fademusic` walks
+    /// (`MAIN/U2.ASM:333-346`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub machine_moved: BTreeMap<String, i64>,
     pub check: Behaviour,
     /// The gaps, with what the guest's counter did around each: the sampler's
     /// own observation of why they are not in the file.
@@ -1440,7 +1450,7 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         bytes: text.len() as u64,
         sha256: sha256_hex(text.as_bytes()),
     };
-    let machine = merge_machine_words(machine_at_start, machine_at_end)?;
+    let (machine, machine_moved) = merge_machine_words(machine_at_start, machine_at_end);
 
     let manifest = TraceManifest {
         version: MANIFEST_VERSION,
@@ -1463,6 +1473,7 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         object: map,
         locate: locate_record,
         machine,
+        machine_moved,
         check,
         skipped,
     };
@@ -1685,16 +1696,22 @@ fn read_words(
 fn merge_machine_words(
     start: BTreeMap<String, i64>,
     end: BTreeMap<String, i64>,
-) -> Result<BTreeMap<String, i64>, MusicError> {
+) -> (BTreeMap<String, i64>, BTreeMap<String, i64>) {
     let mut machine = start;
+    let mut moved = BTreeMap::new();
     for (name, value) in end {
         match machine.get(&name) {
+            // A word whose two readings differ is **recorded twice**, not
+            // merged and not refused: the manifest says what it read at the
+            // locate and what it read at the end, and a reader can see that the
+            // machine changed. Which words change is not a rule this tool gets
+            // to assume — `_np_mastermul` moves because the module is loaded
+            // and `fademusic` walks the volume (`MAIN/U2.ASM:333-346`), and
+            // `_zmixspeed` moves because the mixing rate is set again later in
+            // the run (20000 → 40000 in `second5`'s session) — so nothing is
+            // assumed constant.
             Some(first) if *first != value => {
-                return Err(MusicError::Coherence(format!(
-                    "the machine's own word {name} read {first} when the segment was located and \
-                     {value} at the end of the trace: the manifest records one number per word, \
-                     and two readings that disagree are not one"
-                )))
+                moved.insert(name, value);
             }
             Some(_) => {}
             None => {
@@ -1702,7 +1719,7 @@ fn merge_machine_words(
             }
         }
     }
-    Ok(machine)
+    (machine, moved)
 }
 
 /// The player's words, taken out of one read of the whole segment.
@@ -2071,9 +2088,22 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
         (samples.first(), samples.last())
     {
         let rate = (f64::from(*last) - f64::from(*first)) / (*last_frame - *first_frame) as f64;
+        // The words in this segment are a mix of `int` and `unsigned`
+        // (`MAIN/STMIK.H`), so a value above 32767 is printed both ways: 40000
+        // as a signed 16-bit word is -25536, and a reader who sees only that
+        // would think the mixing rate had gone negative.
+        let show = |value: i16| -> String {
+            if value < 0 {
+                format!("{value} ({} unsigned)", u16::from_le_bytes(value.to_le_bytes()))
+            } else {
+                value.to_string()
+            }
+        };
         println!(
-            "  frame {first_frame}: {first}; frame {last_frame}: {last} — {rate:+.4} per frame, \
-             {:+.2} per second at {FRAME_RATE_HZ} Hz",
+            "  frame {first_frame}: {}; frame {last_frame}: {} — {rate:+.4} per frame, {:+.2} per \
+             second at {FRAME_RATE_HZ} Hz",
+            show(*first),
+            show(*last),
             rate * FRAME_RATE_HZ
         );
         println!("  {} sample(s) between them", samples.len());
@@ -2567,6 +2597,15 @@ impl Analysis {
         runs
     }
 
+    /// The first row change in the trace: its frame, the pattern's row after it,
+    /// and the `zframe` value there. `None` when no row ever advanced.
+    fn first_row_change(&self) -> Option<(u64, u8, i16)> {
+        self.samples
+            .windows(2)
+            .find(|pair| pair[1].row != pair[0].row)
+            .map(|pair| (pair[1].frame, pair[1].row, pair[1].zframe))
+    }
+
     /// The runs of `_np_zframe` between its resets, as
     /// `(first frame, last frame, first value, last value)`.
     ///
@@ -2832,13 +2871,58 @@ impl Analysis {
             "  the player's own words: speed {:?}, tempo {:?} (both straight out of the trace)",
             self.manifest.check.speeds, self.manifest.check.tempos
         );
+        // `_np_zframe`'s own rate over its longest run without a reset, which
+        // the anchor's derivation needs as well as the print below.
+        let runs = self.zframe_runs();
+        let longest_zframe_run = runs
+            .iter()
+            .map(|run| (run.1 - run.0, i64::from(run.3) - i64::from(run.2)))
+            .filter(|(frames, ticks)| *frames > 0 && *ticks > 0)
+            .max_by_key(|(frames, _)| *frames);
+
+        // The anchor the *rows* imply, from two measured numbers and no
+        // simulation: the first row change and the trace's own `zframe` value
+        // there, at the tick clock's measured frames a tick. A row is `speed`
+        // ticks, so the row change is seen on a frame that is within one tick of
+        // the boundary — which is the resolution of both readings.
+        if let (Some(first_change), Some(longest)) = (self.first_row_change(), longest_zframe_run)
+        {
+            let frames_per_tick = longest.0 as f64 / longest.1 as f64;
+            let ticks = f64::from(first_change.2);
+            let implied = first_change.0 as f64 - ticks * frames_per_tick;
+            let direct = self
+                .samples
+                .iter()
+                .find(|state| state.zframe != 0)
+                .map(|state| state.frame);
+            println!(
+                "  the anchor the rows imply: the first row change is at frame {} with \\
+                 `_np_zframe` {}, and {} ticks at the measured {frames_per_tick:.4} frames a tick \\
+                 is {:.1} frames — so that row began at frame {:.1} (within one tick)",
+                first_change.0,
+                first_change.2,
+                first_change.2,
+                ticks * frames_per_tick,
+                implied
+            );
+            if let Some(direct) = direct {
+                let apart = (direct as f64 - implied).abs();
+                println!(
+                    "  the anchor the `zframe` column shows: frame {direct} is the first frame \
+                     whose `zframe` is not 0 — {apart:.1} frame(s), or {:.1} tick(s), from the \
+                     rows' reading: the same tick, seen at the next whole-frame sample (both \
+                     readings are quantised to a frame, so under one tick apart is agreement)",
+                    apart / frames_per_tick
+                );
+            }
+        }
+
         // `_np_zframe` is the word the parts wait on (`DIS/DISINT.ASM:412-425`):
         // it counts ticks, so its own rate is the tick rate said a second way.
         // It is **reset** — `_dis_setmframe(0)` is one writer and a song restart
         // is another — so the rate is measured over the longest run of samples
         // in which it never went backwards, and the resets are counted rather
         // than averaged across.
-        let runs = self.zframe_runs();
         if !runs.is_empty() {
             let resets: usize = runs.len() - 1;
             let longest = runs
@@ -2983,6 +3067,13 @@ impl Analysis {
                 _ => "",
             };
             println!("  {name:<16} {value}{meaning}");
+        }
+        for (name, value) in &self.manifest.machine_moved {
+            println!(
+                "  {name:<16} moved during the trace: {} at the locate, {value} at the end (a \
+                 volume word the player writes, so both readings are recorded)",
+                self.manifest.machine.get(name).copied().unwrap_or(0)
+            );
         }
         println!(
             "  addresses: {}",
@@ -3656,26 +3747,43 @@ mod tests {
             ("_zmixspeed".to_string(), 20000),
             ("_zbufsize".to_string(), 4096),
         ]);
-        assert_eq!(merge_machine_words(start.clone(), same).unwrap(), start);
+        assert_eq!(
+            merge_machine_words(start.clone(), same.clone()).0,
+            start
+        );
         // A word only the second reading has is added, and the words the two
         // readings agree on keep their value; a word that moved is not merged.
         let grown = BTreeMap::from([
             ("_zoutputmode".to_string(), 5),
             ("_zspeedadjust".to_string(), 0),
         ]);
-        let merged = merge_machine_words(start.clone(), grown).unwrap();
+        let (merged, moved) = merge_machine_words(start.clone(), grown);
         assert_eq!(merged.get("_zoutputmode"), Some(&5));
         assert_eq!(merged.get("_zspeedadjust"), Some(&0));
-        match merge_machine_words(
+        assert!(moved.is_empty());
+        assert_eq!(merge_machine_words(start.clone(), same), (start.clone(), BTreeMap::new()));
+
+        // A word that moved is recorded **twice**, and a word that did not is
+        // recorded once: `_zmixspeed` moves in a real session (20000 → 40000),
+        // `_np_mastermul` is 0 before the module is loaded and 2240 (stereo,
+        // multiplier 192) once it is, and neither is a word this tool may
+        // assume constant.
+        let (machine, moved) = merge_machine_words(
             BTreeMap::from([("_zmixspeed".to_string(), 20000)]),
             BTreeMap::from([("_zmixspeed".to_string(), 40000)]),
-        ) {
-            Err(MusicError::Coherence(message)) => {
-                assert!(message.contains("_zmixspeed"), "{message}");
-                assert!(message.contains("20000") && message.contains("40000"), "{message}");
-            }
-            other => panic!("expected a refusal, got {other:?}"),
-        }
+        );
+        assert_eq!(machine.get("_zmixspeed"), Some(&20000));
+        assert_eq!(moved.get("_zmixspeed"), Some(&40000));
+        let (machine, moved) = merge_machine_words(
+            BTreeMap::from([("_np_mastermul".to_string(), 0), ("_np_mastervol".to_string(), 192)]),
+            BTreeMap::from([
+                ("_np_mastermul".to_string(), 2240),
+                ("_np_mastervol".to_string(), 192),
+            ]),
+        );
+        assert_eq!(machine.get("_np_mastermul"), Some(&0), "the reading at the locate");
+        assert_eq!(moved.get("_np_mastermul"), Some(&2240), "and the reading at the end");
+        assert!(!moved.contains_key("_np_mastervol"), "it did not move");
     }
 
     /// The `zplus` rule against both modules' order lists: the marker-coming

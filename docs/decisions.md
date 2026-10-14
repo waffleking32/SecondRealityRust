@@ -1664,6 +1664,15 @@ row 8.76 each). `_np_zframe` counts ticks: 0.6839 a frame (47.93 a second) at te
 `_dis_setmframe(0)` — which parts call at their own start — and not a song restart), so the
 rate is measured over the longest run that never goes backwards.
 
+**The machine's words are recorded twice, and three of them move.** STMIK's settings are not
+constant over a run: `_zmixspeed` is 20000 when the segment is located and **40000** from the
+music's start (`cargo xtask music probe --arg 5 --frames 408..1300 --at 0x5AC5`), `_zpollmix`
+goes 0 → **1** — the demo switches to the *polled* mode, which is `MAIN/COPPER.ASM:466`
+calling `zpollme` once a copper frame, and is exactly the shape the port's `poll()` per logic
+tick has — and the volume words walk under `fademusic` (`MAIN/U2.ASM:333-346`). The manifest
+records the reading at the locate and the reading at the end, per word
+(`machine`/`machine_moved`), rather than one number the machine never held still.
+
 **Three things the files do not say, which the traces do.** (1) The row rate follows the
 player's `_np_speed` word, not the module's header byte, **and the word's initial value after
 a restart is not the file's byte**: with `--arg 3` the reference plays MUSIC1 (its
