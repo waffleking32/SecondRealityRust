@@ -152,8 +152,11 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         ),
         // The seek's own routine (`_zplaysong` calls it at `+0x258e`): the tick-in-row
         // counter, the note-delay pair, the row counter, `_np_loop`, the pattern, the published
-        // row and the pending row, all zeroed before the order advance runs. This is the run
-        // the note's two unreachable `255` paths are read off.
+        // row and the pending row, all zeroed before the order advance runs. **This run is the
+        // zeroing half of the note's unreachable `255` paths and not the whole of them**: it is
+        // why a seek onto a `255` leaves the engine at row 0 of pattern 0 with the published
+        // row cleared, while the other half — that the scan *gives up* rather than stopping,
+        // `+0x4499`'s `je` landing past `+0x4476`'s stop — is read at that offset and not here.
         (
             0x56EC,
             &[
@@ -283,6 +286,470 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             0x3DFE,
             &[0x8A, 0xE0, 0xC0, 0xEC, 0x04, 0x24, 0x0F, 0xD5, 0x0A, 0xA2, 0x3B, 0x09],
             "mov %al,%ah; shr $0x4,%ah; and $0xf,%al; aad $0xa; mov %al,0x93b",
+        ),
+
+        // ----------------------------------------------------------------------------------
+        // Task 4's: the channel effects, and the two tick passes that reach them.
+        //
+        // These are the bytes `crates/sr-audio/src/effects.rs` and the second half of
+        // `player.rs` were read out of — the handlers, the two dispatch tables, the S
+        // subcommand tables, the four waveform entries, and the tables every one of them
+        // is measured in (the note table, the shifts, the sine, the two `Q` tables).
+        // ----------------------------------------------------------------------------------
+        (
+            0x3BD8,
+            &[0x72, 0x3D, 0xD2, 0x3D, 0xDD, 0x3D, 0xFE, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x72, 0x3D, 0x72, 0x3D, 0x48, 0x41, 0x90, 0x41, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0x72, 0x3D, 0x4E, 0x42, 0x73, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x4A, 0x42, 0x72, 0x3D],
+            "the first-tick dispatch table (`+0x3bd8`), command by command: 1 = 0x3dd2 (A), 2 = 0x3ddd (B), 3 = 0x3dfe (C), 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 and 8 = the bare ret at 0x3d72, 10 = 0x4190, 17 = 0x41ec, 19 = 0x424e, 20 = 0x3d73 (T)",
+        ),
+        (
+            0x3C0E,
+            &[0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x94, 0x3F, 0x05, 0x40, 0x48, 0x41, 0x90, 0x41, 0x00, 0x3F, 0x05, 0x3F, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0xD0, 0x40, 0x61, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0xC8, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D],
+            "the later-tick dispatch table (`+0x3c0e`): 1, 2 and 3 are the bare ret; 4 = 0x3f08, 5 = 0x3e4f, 6 = 0x3e10, 7 = 0x3f94 (G), 8 = 0x4005 (H), 10 = 0x4190, 11 = 0x3f00 (K), 12 = 0x3f05 (L), 17 = 0x41ec, 19 = 0x4261",
+        ),
+        (
+            0x3B98,
+            &[0xA9, 0x42, 0x4E, 0x43, 0xD0, 0x42, 0xF1, 0x42, 0x03, 0x43, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x15, 0x43, 0x1E, 0x43, 0x7F, 0x42, 0x96, 0x42, 0x74, 0x42, 0x72, 0x3D],
+            "the S subcommand table on the row's first tick: 12 = 0x427f, 13 = 0x4296 (SDx), 14 = 0x4274, 3 and 4 the waveform setters",
+        ),
+        (
+            0x3BB8,
+            &[0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x83, 0x42, 0x9A, 0x42, 0x72, 0x3D, 0x72, 0x3D],
+            "the S subcommand table on the later ticks: only 12 = 0x4283 and 13 = 0x429a have handlers",
+        ),
+        (
+            0x4068,
+            &[0x7B, 0x40, 0x8E, 0x40, 0xA1, 0x40, 0xB4, 0x40, 0x78, 0x40, 0x8B, 0x40, 0x9E, 0x40, 0xB1, 0x40],
+            "the vibrato waveform table: 0 = 0x407b (the sine), 2 = 0x408e, 4 = 0x40a1, 6 = 0x40b4, then the four no-restart variants",
+        ),
+        (
+            0x0A24,
+            &[0x00, 0x6B, 0x00, 0x65, 0x40, 0x5F, 0x00, 0x5A, 0xC0, 0x54, 0x00, 0x50, 0x80, 0x4B, 0x40, 0x47, 0x40, 0x43, 0x80, 0x3F, 0x00, 0x3C, 0xB0, 0x38],
+            "the note table at `+0xa24`, four octaves up: C is 27392, so octave 4's C is the format's 1712",
+        ),
+        (
+            0x097C,
+            &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x05, 0x0B, 0x11, 0x1B, 0x20, 0x2A, 0x2F],
+            "the octave shifts at `+0x97c`: eight real entries and the eight bytes after them, which octaves 8…15 read",
+        ),
+        (
+            0x0A50,
+            &[0x00, 0x00, 0x18, 0x00, 0x31, 0x00, 0x4A, 0x00, 0x61, 0x00, 0x78, 0x00, 0x8D, 0x00, 0xA1, 0x00],
+            "the sine's first eight words at `+0xa50`: 0, 24, 49, 74, 97, 120, 141, 161",
+        ),
+        (
+            0x095C,
+            &[0x00, 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x01, 0x01],
+            "the Q volume addends at `+0x95c`",
+        ),
+        (
+            0x096C,
+            &[0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x0A, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x18, 0x20],
+            "the Q volume multipliers at `+0x96c` — `0x0101` filler but for 6, 7, 14 and 15",
+        ),
+        (
+            0x1FA0,
+            &[0xA0, 0x0D, 0x00, 0x0E, 0x60, 0x0E, 0xC0, 0x0E],
+            "the S3M channel to `_zchn` map is the identity",
+        ),
+        (
+            0x5448,
+            &[0xA1, 0x26, 0x00, 0xA9, 0x01, 0x00, 0x74, 0x06, 0x2E, 0xC6],
+            "the amiga byte: mov 0x26,%ax; test $0x1,%ax; je; movb $0x1,%cs:0x915",
+        ),
+        (
+            0x5401,
+            &[0x2E, 0xA3, 0x17, 0x09, 0xB9],
+            "masterflags: mov %ax,%cs:0x917 — the module's own flags word",
+        ),
+        (
+            0x3F08,
+            &[0x2E, 0xC6, 0x44, 0x3C, 0x01],
+            "D: movb $0x1,%cs:0x3c(%si) — the slide begins (and `K`/`L` enter here)",
+        ),
+        (
+            0x3F22,
+            &[0x80, 0xFA, 0x0F, 0x74, 0x4C, 0x80],
+            "D: cmp $0xf,%dl; je (+0x3f73) — a low nibble of f is the fine marker",
+        ),
+        (
+            0x3F27,
+            &[0x80, 0xFE, 0x0F, 0x74, 0x55, 0x80],
+            "D: cmp $0xf,%dh; je (+0x3f81) — a high nibble of f is the other one",
+        ),
+        (
+            0x3F31,
+            &[0x32, 0xF6, 0x28, 0x54, 0x1A],
+            "D: xor %dh,%dh; sub %dl,0x1a(%si) — slide down by the low nibble",
+        ),
+        (
+            0x3F51,
+            &[0x8A, 0xC6, 0x32, 0xE4, 0x00, 0x44, 0x1A],
+            "D: add %al,0x1a(%si) — slide up by the high nibble",
+        ),
+        (
+            0x3F5E,
+            &[0xC6, 0x44, 0x1A, 0x3F],
+            "D: movb $0x3f,0x1a(%si) — the volume clamps at 63, not the file's 64",
+        ),
+        (
+            0x3F73,
+            &[0x80, 0xFE, 0x00, 0x74, 0xB9, 0x83, 0x3E, 0x00, 0x20, 0x00, 0x75],
+            "D: the fine-up path — a zero high nibble falls back to the ordinary slide",
+        ),
+        (
+            0x3F81,
+            &[0x80, 0xFA, 0x00, 0x74, 0xCB, 0x83],
+            "D: and the fine-down path's own test: cmp $0x0,%dl; je (+0x3f51)",
+        ),
+        (
+            0x3E4F,
+            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0xE5],
+            "E: cmpw $0x0,0x24(%si); je (ret) — nothing without a note's period",
+        ),
+        (
+            0x3E59,
+            &[0x8A, 0x44, 0x39, 0x88, 0x44, 0x36, 0x32],
+            "E: mov 0x39(%si),%al; mov %al,0x36(%si) — a zero info reuses alastnfo",
+        ),
+        (
+            0x3E68,
+            &[0x3C, 0xE0, 0x73, 0xCE, 0xD1, 0xE0],
+            "E: cmp $0xe0,%al; jae (ret) — the ordinary slide stops at 0xe0",
+        ),
+        (
+            0x3E6C,
+            &[0xD1, 0xE0, 0xD1, 0xE0, 0x01, 0x44, 0x12, 0x01, 0x44, 0x24],
+            "E: shl $1,%ax twice; add %ax,0x12(%si); add %ax,0x24(%si) — four times the parameter, a tick, on both periods",
+        ),
+        (
+            0x3E10,
+            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x24],
+            "F: the same handler with the other sign, cmpw $0x0,0x24(%si)",
+        ),
+        (
+            0x3E2D,
+            &[0xD1, 0xE0, 0xD1, 0xE0, 0x29, 0x44, 0x12, 0x29, 0x44, 0x24],
+            "F: shl $1,%ax twice; sub %ax,0x12(%si); sub %ax,0x24(%si)",
+        ),
+        (
+            0x3E3B,
+            &[0x3C, 0xE0, 0x76, 0xFB, 0x3C, 0xF0],
+            "E/F's first-tick split: cmp $0xe0,%al; jbe (ret)",
+        ),
+        (
+            0x3E43,
+            &[0x24, 0x0F, 0xD1, 0xE0, 0xD1, 0xE0, 0xEB, 0xE6],
+            "E/F: above 0xf0 is the extra-fine form — the low nibble times four",
+        ),
+        (
+            0x3F94,
+            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x17],
+            "G: cmpw $0x0,0x24(%si); je (ret)",
+        ),
+        (
+            0x3FA1,
+            &[0x88, 0x44, 0x2C, 0x88, 0x44, 0x36],
+            "G: mov %al,0x2c(%si); mov %al,0x36(%si) — alasteff2 and the cell's info",
+        ),
+        (
+            0x3FA9,
+            &[0x8B, 0x44, 0x12, 0x3B, 0x44, 0x20],
+            "G: mov 0x12(%si),%ax; cmp 0x20(%si),%ax — the live period against asldspd",
+        ),
+        (
+            0x3FB6,
+            &[0xD1, 0xE2, 0xD1, 0xE2, 0x03, 0xC2, 0x3B, 0x44, 0x20],
+            "G: shl $1,%dx twice; add %dx,%ax — four times the parameter, a tick",
+        ),
+        (
+            0x3FC4,
+            &[0x89, 0x44, 0x24],
+            "G: mov %ax,0x24(%si) — the glide's base moves with it",
+        ),
+        (
+            0x3FD2,
+            &[0x89, 0x44, 0x12],
+            "G: mov %ax,0x12(%si) — and then the live period",
+        ),
+        (
+            0x4005,
+            &[0x3C, 0x00, 0x75, 0x03, 0x8A, 0x44, 0x2B, 0xA8],
+            "H: cmp $0x0,%al; jne; mov 0x2b(%si),%al — the parameter is alasteff1",
+        ),
+        (
+            0x4010,
+            &[0x8A, 0x64, 0x2B, 0x24, 0x0F, 0x80, 0xE4, 0xF0, 0x0A],
+            "H: the merge — a zero high nibble keeps the previous parameter's",
+        ),
+        (
+            0x402D,
+            &[0x8B, 0x44, 0x26, 0x8B, 0x5C, 0x3D],
+            "H: mov 0x26(%si),%ax; mov 0x3d(%si),%bx — the position and vibtretype",
+        ),
+        (
+            0x4036,
+            &[0x2E, 0xFF, 0x97, 0x68, 0x40],
+            "H: call *%cs:0x4068(%bx) — the waveform table",
+        ),
+        (
+            0x404D,
+            &[0xD3, 0xF8, 0x03, 0x44, 0x24],
+            "H: sar %cl,%ax; add 0x24(%si),%ax — the level, and the note's own period",
+        ),
+        (
+            0x4060,
+            &[0x80, 0xE3, 0x7E, 0x89, 0x5C, 0x26],
+            "H: and $0x7e,%bl; mov %bx,0x26(%si) — the phase, masked to the even low seven bits",
+        ),
+        (
+            0x407B,
+            &[0xA9, 0x80, 0x00, 0x74, 0x03, 0xB8, 0x00, 0x00, 0x8B, 0xD8, 0x2E, 0x8B, 0x87, 0x50, 0x0A, 0xC3],
+            "the sine waveform: test $0x80,%ax; mov %ax,%bx; mov %cs:0xa50(%bx),%ax; ret",
+        ),
+        (
+            0x4190,
+            &[0x3C, 0x00, 0x75, 0x06, 0x8A, 0x44],
+            "J: cmp $0x0,%al; jne; mov 0x39(%si),%al — alastnfo",
+        ),
+        (
+            0x419A,
+            &[0xA1, 0x00, 0x20, 0xB1, 0x03, 0xF6, 0xF1, 0x32],
+            "J: mov 0x2000,%ax; mov $0x3,%cl; div %cl — the engine's tick, modulo three",
+        ),
+        (
+            0x41C8,
+            &[0x80, 0xFF, 0x0C, 0x72, 0x06, 0x80, 0xEF],
+            "J: cmp $0xc,%bh; jb — the semitone carries at B",
+        ),
+        (
+            0x3F00,
+            &[0xBD, 0x02, 0x00, 0xEB, 0x03, 0xBD],
+            "K and L share D's body: mov $0x2,%bp; jmp 0x3f08",
+        ),
+        (
+            0x3F05,
+            &[0xBD, 0x01, 0x00, 0x2E, 0xC6, 0x44],
+            "L: mov $0x1,%bp; jmp 0x3f08",
+        ),
+        (
+            0x4000,
+            &[0x8A, 0x44, 0x2B, 0xEB],
+            "K's vibrato half: mov 0x2b(%si),%al — H's byte, not the slide's",
+        ),
+        (
+            0x41EC,
+            &[0x3C, 0x00, 0x75, 0x06, 0x8A, 0x44],
+            "Q: cmp $0x0,%al; jne; mov 0x39(%si),%al",
+        ),
+        (
+            0x41F6,
+            &[0x8A, 0xD8, 0xB1, 0x04, 0xD2, 0xEB, 0x83, 0xE3, 0x0F, 0x24],
+            "Q: the volume code is the high nibble and the interval the low one",
+        ),
+        (
+            0x4205,
+            &[0x3A, 0x44, 0x2E, 0x77, 0x3C, 0x33],
+            "Q: cmp 0x2e(%si),%al; ja — it fires when the interval is reached",
+        ),
+        (
+            0x420F,
+            &[0x2E, 0x89, 0x44, 0x44, 0x66, 0x2E],
+            "Q: mov %ax,%cs:0x44(%si) — m_pos = 0, the retrigger itself",
+        ),
+        (
+            0x421F,
+            &[0x8A, 0xA7, 0x6C, 0x09, 0x80, 0xFC, 0x00, 0x74],
+            "Q: mov 0x96c(%bx),%ah; cmp $0x0,%ah; je — the multiplier table",
+        ),
+        (
+            0x4228,
+            &[0xF6, 0xE4, 0xB1, 0x04, 0xD3, 0xE8, 0xEB, 0x04],
+            "Q: mul %ah; mov $0x4,%cl; shr %cl,%ax — the multiply path",
+        ),
+        (
+            0x4230,
+            &[0x02, 0x87, 0x5C, 0x09, 0x3C, 0x00, 0x7D],
+            "Q: add 0x95c(%bx),%al — the addend path",
+        ),
+        (
+            0x4246,
+            &[0xFE, 0x44, 0x2E],
+            "Q and `SDx`: incb 0x2e(%si) — one counter for both",
+        ),
+        (
+            0x425C,
+            &[0xFF, 0x97, 0x98, 0x3B, 0xC3],
+            "S: the first-tick table's call: call *0x3b98(%bx)",
+        ),
+        (
+            0x426F,
+            &[0xFF, 0x97, 0xB8, 0x3B, 0xC3],
+            "S: the later-tick table's: call *0x3bb8(%bx)",
+        ),
+        (
+            0x4296,
+            &[0x88, 0x44, 0x2E, 0xC3, 0x80],
+            "SDx on the first tick: mov %al,0x2e(%si); ret",
+        ),
+        (
+            0x42A5,
+            &[0xE8, 0xB6, 0x04],
+            "SDx later: call 0x475e — where the deferred note begins",
+        ),
+        (
+            0x4751,
+            &[0x3C, 0x13, 0x75, 0x0D, 0x80, 0xE4, 0xF0, 0x80, 0xFC, 0xD0, 0x75, 0x05, 0xC3],
+            "the row parse's SDx gate: cmd == S and info & 0xf0 == 0xd0 returns early",
+        ),
+        (
+            0x475E,
+            &[0xC6, 0x44, 0x01, 0x81],
+            "the note the delay starts: movb $0x81,0x1(%si)",
+        ),
+        (
+            0x4762,
+            &[0x8B, 0x4C, 0x32, 0x8B, 0x54, 0x34, 0x80, 0xFD, 0x65, 0x76],
+            "the row parse's clamps: mov 0x32(%si),%cx; mov 0x34(%si),%dx; cmp $0x65,%ch",
+        ),
+        (
+            0x477B,
+            &[0xB2, 0x3F],
+            "and mov $0x3f,%dl — a volume column of 64 becomes 63",
+        ),
+        (
+            0x46A4,
+            &[0xB8, 0x00, 0xFF, 0xBE, 0xA0, 0x0D, 0xB9, 0x30, 0x00],
+            "the row reset: mov $0xff00,%ax; ...; mov $0x30,%cx — note 0xff, volume 0xff, the rest zero",
+        ),
+        (
+            0x490E,
+            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x0A, 0x80],
+            "the note start: cmpw $0x0,0x24(%si); je (+0x491e)",
+        ),
+        (
+            0x491A,
+            &[0xC6, 0x44, 0x02, 0xFF],
+            "aequ = 0xff, on the not-fresh path only",
+        ),
+        (
+            0x4922,
+            &[0x66, 0xC7, 0x44, 0x5C, 0x01, 0x01, 0x01, 0x01, 0x89, 0x44, 0x44, 0x33],
+            "movl $0x1010101,0x5c(%si); mov %ax,0x44(%si) — m_pos takes the O offset",
+        ),
+        (
+            0x4938,
+            &[0xE8, 0xFF, 0x0F, 0xE8, 0xD5, 0x0E],
+            "call 0x593a; call 0x5813 — the note to a period, scaled by the instrument's c2spd",
+        ),
+        (
+            0x4944,
+            &[0x80, 0x7C, 0x35, 0x07, 0x74, 0x0A, 0x89],
+            "cmpb $0x7,0x35(%si); je (+0x4954) — a note under a G does not set aspd",
+        ),
+        (
+            0x4954,
+            &[0x89, 0x44, 0x24, 0x89, 0x44, 0x20, 0x8A, 0x44],
+            "mov %ax,0x24(%si); mov %ax,0x20(%si) — aorgspd and asldspd both take it",
+        ),
+        (
+            0x496A,
+            &[0x80, 0x7C, 0x02, 0xFF, 0x75, 0x08, 0x8A, 0x44, 0x1A, 0x04, 0x10, 0x88],
+            "aequ: from 0xff to avol + 0x10",
+        ),
+        (
+            0x48D6,
+            &[0x80, 0x7C, 0x35, 0x0F, 0x75, 0x09, 0x8A, 0x64, 0x36, 0x32, 0xC0, 0x2E],
+            "O: cmpb $0xf,0x35(%si); mov 0x36(%si),%ah; xor %al,%al; mov %ax,%cs:0x6(%si) — info << 8",
+        ),
+        (
+            0x5813,
+            &[0xB9, 0xAB, 0x20, 0xF7, 0xE1, 0x8B, 0x4C, 0x22, 0x3B, 0xD1, 0x72, 0x04],
+            "the c2spd scale: mov $0x20ab,%cx; mul %cx; mov 0x22(%si),%cx; cmp %cx,%dx",
+        ),
+        (
+            0x5823,
+            &[0xF7, 0xF1, 0x3D, 0xFF, 0x7F, 0x77, 0xF5, 0xC3],
+            "div %cx; cmp $0x7fff,%ax; ja — the word-overflow guard",
+        ),
+        (
+            0x58B9,
+            &[0xBA, 0xDA, 0x00, 0xB8, 0x00, 0x76, 0xF7, 0xF1],
+            "the step's base frequency: mov $0xda,%dx; mov $0x7600,%ax; div %cx — 0x00da7600",
+        ),
+        (
+            0x593A,
+            &[0x3C, 0xFE, 0x75, 0x04, 0xB8, 0x00],
+            "the note to a period: cmp $0xfe,%al; jne; mov $0x0,%ax — the note off is 0",
+        ),
+        (
+            0x594A,
+            &[0x8A, 0x8F, 0x7C, 0x09, 0x8A, 0xD8, 0x80, 0xE3],
+            "mov 0x97c(%bx),%cl — the octave's shift, with no bound on the index",
+        ),
+        (
+            0x5955,
+            &[0x8B, 0x87, 0x24, 0x0A, 0xD3, 0xE8, 0xC3],
+            "mov 0xa24(%bx),%ax; shr %cl,%ax; ret — the table, shifted",
+        ),
+        (
+            0x3D0C,
+            &[0x33, 0xC0, 0x88, 0x44, 0x2E, 0x8B],
+            "the first-tick pass, a channel with no command: xor %ax,%ax; mov %al,0x2e(%si)",
+        ),
+        (
+            0x3D24,
+            &[0x88, 0x44, 0x2E, 0x8B, 0x44],
+            "and a D row: mov %al,0x2e(%si); mov 0x24(%si),%ax",
+        ),
+        (
+            0x3C97,
+            &[0xFE, 0x4C, 0x31, 0x75],
+            "the volume-0 optimisation: decb 0x31(%si); jne",
+        ),
+        (
+            0x3CA9,
+            &[0xC6, 0x44, 0x01, 0x00],
+            "and movb $0x0,0x1(%si) — three silent rows free the channel",
+        ),
+        (
+            0x3CB9,
+            &[0x3C, 0x00, 0x74, 0x03, 0x88, 0x44],
+            "alastnfo: cmp $0x0,%al; je; mov %al,0x39(%si)",
+        ),
+        (
+            0x3CEA,
+            &[0x80, 0x4C, 0x26, 0x80],
+            "the stale vibrato bit: orb $0x80,0x26(%si)",
+        ),
+        (
+            0x3D72,
+            &[0xC3],
+            "the bare ret every absent command shares",
+        ),
+        (
+            0x46C2,
+            &[0x8C, 0xC8, 0x8E, 0xD8],
+            "the row parse: mov %cs,%ax; mov %ax,%ds",
+        ),
+        (
+            0x4371,
+            &[0x83, 0x3E, 0x00, 0x20, 0x00, 0x75, 0x1C, 0x80],
+            "cmpw $0x0,0x2000; jne (+0x4394) — the first tick's own test",
+        ),
+        (
+            0x437F,
+            &[0xE8, 0x40, 0x03],
+            "and the row parse it calls: call 0x46c2",
+        ),
+        (
+            0x4382,
+            &[0xE8, 0xBF, 0xF8],
+            "then the first-tick dispatch: call 0x3c44",
+        ),
+        (
+            0x4394,
+            &[0xE8, 0xA1, 0xF9],
+            "and every later tick's: call 0x3d38",
         ),
         // B raises the same advance flag and writes the order to try next.
         (
@@ -523,30 +990,48 @@ fn an_a_command_changes_the_speed_where_the_effect_is_processed_not_where_it_is_
 }
 
 #[test]
-fn a_tempo_command_is_told_from_a_speed_by_its_parameter() {
-    // `+0x3d73`: one handler, `cmp $0x20,%ax; jbe` — 32 and under is a speed, above it a
-    // tempo. The tick's sample count is recomputed with the tempo and only there.
-    let module = Builder::new(
-        &[0],
-        &[cell(0, None, Some((1, 0x20)))], // A20: the boundary — a speed of 32
-    )
-    .build();
+fn a_speed_takes_its_parameter_whatever_it_is_and_a_tempo_is_split_at_32() {
+    // **Which command reached the handler, not which parameter it carries, is what picks
+    // the arithmetic** — and Task 4 read the tables and corrected this test, which had it
+    // the other way round.
+    //
+    // The first-tick table at `+0x3bd8` sends command 1 (`A`) to `+0x3dd2`, whose whole body
+    // is `cmp $0x0,%al; je; xor %ah,%ah; mov %ax,%cs:0x2002` — **there is no upper bound**,
+    // so an `A` with a parameter of 0x21 sets a speed of 33. Command 20 (`T`) goes to
+    // `+0x3d73` instead, whose `cmp $0x20,%ax; jbe 0x3dce` sends 32 and under to the driver
+    // call and never to the speed.
+    //
+    // This is not a corner: MUSIC1's `A` parameters are `{3: 30, 6: 23, **127: 1**}`, so one
+    // of its cells plays a row at speed 127 — see `tests/effects.rs` and the note.
+    let module = Builder::new(&[0], &[cell(0, None, Some((1, 0x20)))]).build();
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     poll_until(&mut player, 10, |player, _| player.state().speed != 6);
-    assert_eq!(player.state().speed, 0x20, "32 is still a speed");
+    assert_eq!(player.state().speed, 0x20, "A20 is a speed of 32");
     assert_eq!(player.state().tempo, 125);
 
-    let module = Builder::new(
-        &[0],
-        &[cell(0, None, Some((1, 0x21)))], // A21 — above it, so a tempo
-    )
-    .build();
+    let module = Builder::new(&[0], &[cell(0, None, Some((1, 0x21)))]).build();
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
-    poll_until(&mut player, 10, |player, _| player.state().tempo != 125);
-    assert_eq!(player.state().speed, 6, "the speed is untouched");
-    assert_eq!(player.state().tempo, 0x21, "and the tempo takes the value");
+    poll_until(&mut player, 10, |player, _| player.state().speed != 6);
+    assert_eq!(
+        player.state().speed,
+        0x21,
+        "A21 is a speed of 33, not a tempo"
+    );
+    assert_eq!(player.state().tempo, 125, "and the tempo is untouched");
+
+    // The `T` handler's own split, through its own table entry: 32 and under does nothing.
+    for (parameter, expected) in [(0x20, 125), (0x21, 0x21)] {
+        let module = Builder::new(&[0], &[cell(0, None, Some((20, parameter)))]).build();
+        let mut player = Player::new(module, PlayerOptions::default());
+        player.play_song(0);
+        for _ in 0..20 {
+            player.poll();
+        }
+        assert_eq!(player.state().tempo, expected, "T{parameter:02X}");
+        assert_eq!(player.state().speed, 6, "and the speed is the header's");
+    }
 }
 
 #[test]
@@ -950,8 +1435,13 @@ fn count_ticks(name: &'static str) -> (i64, u32) {
         ticks += i64::from(spent);
         if last_row != Some((position.order, position.row)) {
             if rows > 0 {
+                // The range is the *parameter's*, 1..=255, not the ST3 documentation's
+                // "1..32": the `A` handler is `mov %ax,0x2002` with no bound at all
+                // (`+0x3dd6`), and MUSIC1 carries one `A7F` cell (order 98, row 48), so a
+                // row legitimately spends 127 ticks — which is what this row-timer check
+                // exists to catch the *shape* of, not the size.
                 assert!(
-                    (1..=32).contains(&ticks_this_row),
+                    (1..=255).contains(&ticks_this_row),
                     "{name}: the row at {last_row:?} was given {ticks_this_row} ticks"
                 );
             }
@@ -1011,11 +1501,10 @@ fn playing_past_the_end_neither_panics_nor_runs_off_the_orders() {
                 "{name}: poll {poll} published tempo {}",
                 position.tempo
             );
-            assert!(
-                (1..=32).contains(&position.speed),
-                "{name}: poll {poll} published speed {}",
-                position.speed
-            );
+            // A speed is the `A` handler's parameter, 1..=255 — the speed is *not* bounds
+            // checked, and MUSIC1's `A7F` cell (order 98, row 48) publishes 127. Zero is the
+            // only value the handler refuses (`+0x3dd2`).
+            assert!(position.speed != 0, "{name}: poll {poll} published speed 0");
             if position.order < previous {
                 wrapped += 1;
             }

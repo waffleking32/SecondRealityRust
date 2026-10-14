@@ -61,10 +61,14 @@
 //!    and `C`'s parameter is **decimal** and unclamped (`+0x3dfe`: `mov %al,%ah; shr $0x4; and
 //!    $0xf; aad $0xa`).
 //!
-//! The channel effects (D, E, F, G, H, J, K, O, Q, S) are Task 4's: a cell carrying one is
-//! read and skipped here, and nothing else in this file depends on them.
+//! The channel effects (D, E, F, G, H, J, K, O, Q, S) live in [`crate::effects`], on the
+//! per-channel state this file owns and drives: a row's cells are read and installed first
+//! (`start_note`), and then the row's commands are dispatched channel by channel through the
+//! two tables the object keeps — the first-tick pass and the later-tick pass. Nothing here
+//! moves the timeline on a channel effect's behalf.
 
-use crate::{Module, ROWS};
+use crate::effects::{note_period, scaled_period, Channel, Portamento};
+use crate::{Module, CHANNELS, ROWS};
 
 /// The frame clock's denominator: the engine's logic tick is `70_086/1000` Hz
 /// (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). Samples are counted in `1/70_086` of a
@@ -246,6 +250,19 @@ pub struct Player {
     /// What the last pop published.
     published: Entry,
 
+    /// The channels the effects run on: the object's `_zchn` at `+0x0da0`, one 0x60-byte
+    /// entry per channel (the object's array is 48 long; a module can name 32, and the cell's
+    /// channel number *is* the array index — the pointer table at `+0x1fa0` is the identity).
+    channels: [Channel; CHANNELS],
+    /// `_np_masterflags` (`+0x917`): the module header's `flags` word, which the header watch
+    /// copies in (`+0x53ef`, `+0x5401`). Its bit 3 turns the "volume 0" optimisation on, and
+    /// **both modules carry 8**, so it is on.
+    master_flags: u16,
+    /// `[0x915]`: `flags & 1` (`+0x5448`, `+0x5450`), which the vibrato's level shift reads
+    /// (`+0x4043`): **4 when it is 1 and 5 when it is 0**. Both modules' flags word is 8, so
+    /// every filed channel vibratos at the shift of 5 — the quieter of the two forms.
+    vibrato_shift: u8,
+
     /// The module's global-volume byte, which the shell's `fademusic` walks down.
     global_volume: u8,
     /// `_zshutup` was called: the voices are silent. Task 5 owns the voices; this records the
@@ -265,7 +282,11 @@ impl Player {
         let speed = module.initial_speed();
         let tempo = module.initial_tempo();
         let global_volume = module.global_volume();
+        let master_flags = module.flags();
         Player {
+            channels: [Channel::default(); CHANNELS],
+            master_flags,
+            vibrato_shift: if master_flags & 1 == 1 { 4 } else { 5 },
             samples_per_tick: samples_per_tick(options.mix_rate, tempo),
             module,
             options,
@@ -314,7 +335,14 @@ impl Player {
     /// scan's stop path (`+0x4476` clears `[0x938]`) and is then put back to running by
     /// `+0x259a`, so the player ends up *ticking with no new order entered* — the old pattern
     /// still playing, the position where it was. That is what the port does too.
+    ///
+    /// That routine also **clears every channel** (`+0x5614`, called at `+0x5716`): the period,
+    /// the volume, the remembered parameters, the vibrato position and the cell fields all go
+    /// back to zero, so a seek is a fresh start for the effects too.
     pub fn play_song(&mut self, order: u8) {
+        for channel in &mut self.channels {
+            channel.reset();
+        }
         self.loop_order = 0;
         self.next_order = u16::from(order);
         self.pending_row = 0;
@@ -383,6 +411,17 @@ impl Player {
     /// The module's global-volume byte as the shell has left it.
     pub fn global_volume(&self) -> u8 {
         self.global_volume
+    }
+
+    /// The `index`th channel's state — the fields the notes and the effects own, in the
+    /// object's own terms (`crate::effects::Channel`). This is what a reader needs to see
+    /// what a row did: Task 4's tests assert it tick by tick, and Task 5's mixer reads it.
+    ///
+    /// The index is the S3M channel number: the object's channel-pointer table at `+0x1fa0`
+    /// maps each of the 32 numbers to its own structure and is the identity, so cell channel
+    /// 5 *is* `_zchn[5]`.
+    pub fn channel(&self, index: usize) -> Option<&Channel> {
+        self.channels.get(index)
     }
 
     /// One video frame has passed: mix this frame's samples and advance the tracker by
@@ -511,15 +550,21 @@ impl Player {
     /// One tick: `+0x4353`, called from the mixing loop's `call 0x4353` (`+0x5150`,
     /// `+0x51b1`).
     ///
-    /// The tick increments `_np_zframe` (`+0x4357`), processes the row's cells on the row's
-    /// *first* tick (`+0x4371`: `cmpw $0x0,[0x2000]` — zero means first, and that is where an
-    /// `A` command writes `_np_speed`), counts the tick, and advances the row when the
-    /// counter reaches the speed (`+0x4397`…`0x43b0`).
+    /// The tick increments `_np_zframe` (`+0x4357`), reads the row's cells and processes the
+    /// row's commands on the row's *first* tick (`+0x4371`: `cmpw $0x0,[0x2000]` — zero means
+    /// first), dispatches the row's *effects* on every later one (`+0x4394`), counts the tick,
+    /// and advances the row when the counter reaches the speed (`+0x4397`…`0x43b0`).
+    ///
+    /// The two dispatches are different tables in the object — `+0x3c44` reads the table at
+    /// `+0x3bd8` and `+0x3d38` the one at `+0x3c0e` — and the difference matters: `G` and `H`
+    /// have no first-tick handler at all, `K` and `L` none either.
     fn tick(&mut self) {
         self.zframe = self.zframe.wrapping_add(1);
 
         if self.tick_in_row == 0 {
             self.process_row();
+        } else {
+            self.tick_effects();
         }
 
         self.tick_in_row += 1;
@@ -529,69 +574,278 @@ impl Player {
         self.advance_row();
     }
 
-    /// The row's first tick: read the row's cells and apply what this file owns.
-    ///
-    /// The original's row-0 path (`+0x4378`…`0x4385`) walks the 32 channel structures and
-    /// dispatches each cell's command through the table at `+0x3c0e`.
+    /// The row's first tick, in three passes, which is the object's order (`+0x4378`…`0x4385`
+    /// then `+0x3c44`): wipe every channel's cell (`+0x46a4`), read the row's cells and start
+    /// their notes (`+0x46c2`, whose install path is `+0x4733` and whose note work is
+    /// `+0x4810`), and only then run the row's commands through the first-tick table.
     fn process_row(&mut self) {
         self.silenced = false;
-        let Some(pattern) = self.module.pattern(usize::from(self.pattern)) else {
-            return;
-        };
-        let Some(cells) = pattern.rows.get(usize::from(self.row)) else {
-            return;
-        };
-        // The channel structures are walked in channel order and every cell's command is
-        // dispatched as it is met; the commands are copied out so the borrow ends here.
-        let commands: [(u8, u8); crate::CHANNELS] = std::array::from_fn(|channel| {
-            let cell = cells[channel];
-            if cell.has_command() {
-                (cell.command, cell.info)
-            } else {
-                (0, 0)
-            }
-        });
-        for (command, info) in commands {
-            match command {
-                1 => self.set_speed_or_tempo(info),
-                2 => {
-                    // `B` (`+0x3de2`): the flag goes up now, so the jump lands at the row's
-                    // end and the row still plays out.
-                    self.advance_flag = ADVANCE_ORDER;
-                    if info == 0xff {
-                        // `BFF` (`+0x3df1`): the song ends at the next row advance, unless
-                        // the player is already stopped.
-                        if self.state != STATE_STOPPED {
-                            self.advance_flag = ADVANCE_STOP;
-                        }
-                    } else {
-                        self.next_order = u16::from(info);
+        for channel in &mut self.channels {
+            channel.clear_cell();
+        }
+        let cells = self
+            .module
+            .pattern(usize::from(self.pattern))
+            .and_then(|pattern| pattern.rows.get(usize::from(self.row)))
+            .copied();
+
+        if let Some(cells) = cells {
+            for (index, &cell) in cells.iter().enumerate() {
+                if cell.is_empty() {
+                    continue;
+                }
+                let defers = {
+                    let channel = &mut self.channels[index];
+                    channel.used = true;
+                    channel.install_cell(&cell);
+                    let defers = channel.defers_note();
+                    if !defers {
+                        channel.clamp_cell();
                     }
+                    defers
+                };
+                // `+0x4783`: the note and instrument work is for the mixer's own channels —
+                // anything above channel 15 takes the object's adlib path, which this build
+                // has no card for (`_zoutputladlib` is 0, `+0x47a6`).
+                if !defers && index <= 0x0f {
+                    self.start_note(index);
                 }
-                3 => {
-                    // `Cxy` (`+0x3dfe`): the row is **decimal** and is stored unclamped.
-                    self.pending_row = (info >> 4) * 10 + (info & 0x0f);
-                    self.advance_flag = ADVANCE_ORDER;
-                }
-                // Task 4's: `D`/`E`/`F`/`G`/`H`/`J`/`K`/`O`/`Q`/`S` never move the timeline.
-                _ => {}
+            }
+        }
+
+        for index in 0..CHANNELS {
+            if !self.channels[index].row_start(self.master_flags) {
+                continue;
+            }
+            self.dispatch(index, true);
+        }
+    }
+
+    /// Every tick after the row's first: `+0x3d38`, the channels walked in order and each
+    /// one's command dispatched through the second table.
+    fn tick_effects(&mut self) {
+        for index in 0..CHANNELS {
+            if self.channels[index].dispatches_on_tick() {
+                self.dispatch(index, false);
             }
         }
     }
 
-    /// `A`/`T`, one handler: `+0x3d73`, whose `cmp $0x20,%ax; jbe` sends 32 and under to the
-    /// speed and everything above it to the tempo.
-    fn set_speed_or_tempo(&mut self, value: u8) {
-        if value == 0 {
+    /// One channel's command, through the table that belongs to this tick: `first_tick` picks
+    /// between the object's `+0x3bd8` and its `+0x3c0e`.
+    ///
+    /// **Both tables matter to both kinds of command.** The timeline's `A` (`+0x3dd2`), `B`
+    /// (`+0x3de2`) and `C` (`+0x3dfe`) are the first-tick table's entries 1, 2 and 3 — the
+    /// later-tick table's are the bare `ret` — and among the channel effects only `D`, `E`, `F`,
+    /// `J` and `Q` are in both tables: `G`, `H` and `K` are the later ticks' alone, and `K`
+    /// has a second half the first tick never runs.
+    fn dispatch(&mut self, index: usize, first_tick: bool) {
+        let channel = &mut self.channels[index];
+        let command = channel.command;
+        let info = channel.info;
+        let tick = self.tick_in_row;
+        let c2spd = channel.c2spd;
+        let shift = self.vibrato_shift;
+        match (command, first_tick) {
+            // `A`, `B` and `C` are in the *first-tick* table only: the later-tick table's
+            // entries 1, 2 and 3 are the bare `ret` at `+0x3d72`.
+            (1, true) => self.set_speed(info),
+            (2, true) => {
+                // `B` (`+0x3de2`): the flag goes up now, so the jump lands at the row's end
+                // and the row still plays out.
+                self.advance_flag = ADVANCE_ORDER;
+                if info == 0xff {
+                    // `BFF` (`+0x3df1`): the song ends at the next row advance, unless the
+                    // player is already stopped.
+                    if self.state != STATE_STOPPED {
+                        self.advance_flag = ADVANCE_STOP;
+                    }
+                } else {
+                    self.next_order = u16::from(info);
+                }
+            }
+            (3, true) => {
+                // `Cxy` (`+0x3dfe`): the row is **decimal** and is stored unclamped.
+                self.pending_row = (info >> 4) * 10 + (info & 0x0f);
+                self.advance_flag = ADVANCE_ORDER;
+            }
+            // `T` (`+0x3d73`) — the first-tick table's entry 20, the same handler the header
+            // watch calls. Neither module carries one (`the_timeline_effects_the_modules_carry`
+            // counts 0 in both), so this branch is the object's table entry and not a
+            // behaviour the data reaches; the later ticks' entry is the bare ret.
+            (20, true) => self.set_tempo(info),
+            // `D` (`+0x3f08`) — the volume slide, on both ticks.
+            (4, _) => self.channels[index].volume_slide(info, tick),
+            // `E` (`+0x3e4f`) and `F` (`+0x3e10`) — the portamentos, on both ticks.
+            (5, _) => self.channels[index].portamento(info, tick, Portamento::Down),
+            (6, _) => self.channels[index].portamento(info, tick, Portamento::Up),
+            // `G` (`+0x3f94`) and `H` (`+0x4005`): second table only.
+            (7, false) => self.channels[index].tone_portamento(info),
+            (8, false) => self.channels[index].vibrato(info, shift),
+            // `J` (`+0x4190`) — the arpeggio, on both ticks.
+            (10, _) => self.channels[index].arpeggio(info, tick, c2spd),
+            // `K` (`+0x3f00`): second table only, and its second half is a *vibrato* whose
+            // parameter is `alasteff1` — the byte `H` remembers, not the one `D` does.
+            (11, false) => {
+                self.channels[index].volume_slide(info, tick);
+                self.channels[index].vibrato_last(shift);
+            }
+            // `Q` (`+0x41ec`) — the retrigger, on both ticks.
+            (17, _) => self.channels[index].retrigger(info),
+            // `S` (`+0x424e` on the first tick, `+0x4261` later), subcommand `d` only. Both
+            // modules' cells are `SDx` and nothing else — the subcommand set is asserted in
+            // `tests/effects.rs` — so the rest are refused rather than guessed at.
+            (19, true) if info >> 4 == 0x0d => self.channels[index].note_delay(info),
+            (19, false) if info >> 4 == 0x0d => self.note_delay_tick(index),
+            // `O` (the sample offset) has no handler in either table: it is applied where the
+            // row's cells are read (`+0x48d6`, in `start_note` below).
+            _ => {}
+        }
+    }
+
+    /// `SDx`'s later ticks (`+0x429a`): the countdown runs on every channel — it is the
+    /// channel's `atrigcnt`, and the object's handler is unconditional — and the tick that
+    /// empties it calls the install continuation at `+0x475e`, where the *note* begins: the
+    /// `0x81` channel flag, the clamps the row parse skipped and the note work itself. That
+    /// last part is the mixer channels' only (`+0x4783`), which is where the channel test
+    /// belongs: after the countdown, not before it.
+    fn note_delay_tick(&mut self, index: usize) {
+        if !self.channels[index].note_delay_tick() {
             return;
         }
-        if value <= 0x20 {
+        if index <= 0x0f {
+            self.channels[index].clamp_cell();
+            self.start_note(index);
+        }
+    }
+
+    /// The note and instrument work a row's cell does on a mixer channel: the object's
+    /// `+0x4810`, which loads an instrument a cell names (`+0x4815`…`0x48cb`) and then starts a
+    /// note (`+0x48e5`…`0x4975`).
+    ///
+    /// Four readings are worth naming here, because none of them is the obvious one:
+    ///
+    /// - An instrument of its own **clears the sample offset** (`+0x481d`) before the note it
+    ///   came with can set it, so an `O` on a cell with an instrument starts that note from the
+    ///   offset and an `O` without one leaves the last offset for the next note.
+    /// - A note played while a `G` is on the row is *not* started: the period stays where it
+    ///   is and only the target moves (`+0x4944`), which is the whole of the tone porta — the
+    ///   glide is what closes the gap, a tick at a time.
+    /// - The volume column, when the cell has one, replaces both the volume and `aorgvol`
+    ///   (`+0x495a`) — including a volume of 0, which is why `Cell::present` exists.
+    /// - `0xfe` is the note off: the position parks at 1, the volume goes to 0 and **the
+    ///   target and base periods become `0xffff`** (`+0x4906`…`0x4957`), the value the mixer
+    ///   reads as "no sample"; the live period is left where it was.
+    fn start_note(&mut self, index: usize) {
+        {
+            let channel = &mut self.channels[index];
+            if channel.instrument != 0 {
+                channel.sample_offset = 0;
+                channel.last_instrument = channel.instrument;
+                let instrument = usize::from(channel.instrument) - 1;
+                let loaded = self
+                    .module
+                    .instrument(instrument)
+                    .filter(|header| header.is_pcm())
+                    .map(|header| {
+                        // `checkins`'s clamp (`STARTEMS.C:139`) is what the object reads here:
+                        // the header's 32-bit `c2spd` goes into a word (`+0x4850`).
+                        header.c2spd.min(0xffff) as u16
+                    });
+                match loaded {
+                    Some(c2spd) => {
+                        channel.c2spd = c2spd;
+                        let header_volume = self
+                            .module
+                            .instrument(instrument)
+                            .map_or(0, |header| header.volume);
+                        // `+0x485b`…`0x4867`: the header's volume byte, clamped to 0…63.
+                        channel.volume = header_volume.min(0x3f);
+                        channel.org_volume = channel.volume;
+                        channel.dirty = true;
+                    }
+                    None => channel.last_instrument = 0,
+                }
+            }
+            // `+0x48ce`: nothing to play a note on until an instrument has loaded.
+            if channel.last_instrument == 0 {
+                return;
+            }
+            if channel.command == 0x0f {
+                channel.set_sample_offset();
+            }
+            if channel.note == 0xff {
+                // `+0x495a`: the volume column alone. (Nothing else about the cell is a note.)
+            } else if channel.note == 0xfe {
+                channel.position = 1;
+                channel.position_low = 0;
+                channel.volume = 0;
+                channel.org_period = 0xffff;
+                channel.target_period = 0xffff;
+                channel.dirty = true;
+            } else {
+                // `+0x490e`: a note on a channel with no period yet starts a sample, and a
+                // note with no `G` under it restarts the position — both take the offset the
+                // `O` command left (`+0x491e`). Only a `G` note on a playing channel leaves
+                // the position alone, which is what makes the glide a glide.
+                let fresh = channel.org_period == 0;
+                if fresh || channel.command != 0x07 {
+                    if !fresh {
+                        channel.aequ = 0xff;
+                    }
+                    channel.position = channel.sample_offset;
+                    channel.position_low = 0;
+                }
+                channel.last_note = channel.note;
+                let period = scaled_period(note_period(channel.note), channel.c2spd);
+                if fresh || channel.command != 0x07 {
+                    channel.period = period;
+                    channel.vibrato_position = 0;
+                    channel.dirty = true;
+                }
+                channel.org_period = period;
+                channel.target_period = period;
+            }
+            if channel.cell_volume != 0xff {
+                channel.volume = channel.cell_volume;
+                channel.org_volume = channel.cell_volume;
+                channel.dirty = true;
+            }
+            // `+0x496a`: a note start that has not been given a volume yet keeps `avol + 0x10`
+            // as its `aequ`, the value the mixer plays from.
+            if channel.aequ == 0xff {
+                channel.aequ = channel.volume.wrapping_add(0x10);
+            }
+        }
+    }
+
+    /// `A` (`+0x3dd2`, the first-tick table's entry 1): the speed takes the parameter, and
+    /// there is no upper bound on it — the object's handler is `cmp $0x0,%al; je; xor %ah,%ah;
+    /// mov %ax,0x2002`, so an `A` whose parameter is above 32 sets the *speed* just the same.
+    ///
+    /// **This is a correction to what this file did before Task 4 read the tables**: the
+    /// command, not the parameter, is what picks the handler, and one of MUSIC1's 54 `A` cells
+    /// carries `0x7f` as its parameter (its `A` infos are `{3: 30, 6: 23, 127: 1}`) — under the
+    /// old reading that cell set a tempo of 127 and left the speed alone, where the object
+    /// plays the row at speed 127. No filed trace window reaches that cell (MUSIC1's trace,
+    /// `second3`, covers orders 0 and 42…48), which is why the difference had not shown.
+    fn set_speed(&mut self, value: u8) {
+        if value != 0 {
             self.pub_speed = value;
-        } else {
+        }
+    }
+
+    /// `T` (`+0x3d73`, the first-tick table's entry 20): 32 and under is a *no-op* — the
+    /// parameter test is inside this handler and sends it to the driver call at `+0x3dce`,
+    /// never to the speed — and above it the tempo is set and the tick's sample count
+    /// recomputed (`+0x3d99`…`0x3da6`), which is the only place that arithmetic runs. The
+    /// accumulator's carried remainder is what lets a tempo change land mid-row without a jump.
+    ///
+    /// The header watch reaches this handler with the module's own initial-tempo byte
+    /// (`+0x53c7`), which is how the shell's patch at `STARTMUS.C:257` gets in.
+    fn set_tempo(&mut self, value: u8) {
+        if value > 0x20 {
             self.pub_tempo = value;
-            // The tick's sample count is recomputed by the tempo setter (`+0x3d99`…`+0x3da6`)
-            // and only there; the accumulator's carried remainder is what lets a tempo change
-            // land mid-row without a jump.
             self.samples_per_tick = samples_per_tick(self.options.mix_rate, value);
         }
     }
@@ -670,7 +924,12 @@ impl Player {
                 }
                 self.loops = self.loops.wrapping_add(1);
                 self.pub_loop = self.loops as u8;
-                if orders.get(usize::from(self.loop_order)).copied().unwrap_or(255) == 255 {
+                if orders
+                    .get(usize::from(self.loop_order))
+                    .copied()
+                    .unwrap_or(255)
+                    == 255
+                {
                     // `+0x4499`'s `je 0x447f` — and `0x447f` is *past* the stop at
                     // `+0x4476`, so this returns to the caller with the loop order in `ax`
                     // (the caller's `mov %ax,0x948` makes the row the loop order) and the

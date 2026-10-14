@@ -271,6 +271,7 @@ pub struct Module {
     initial_tempo: u8,
     global_volume: u8,
     master_volume: u8,
+    flags: u16,
 }
 
 impl Module {
@@ -329,6 +330,11 @@ impl Module {
         let initial_speed = header[49];
         let initial_tempo = header[50];
         let master_volume = header[51];
+
+        // `ds_fileheader.flags` (`STARTEMS.C:58`), the file's offset 38 — the word the
+        // player watches as `_np_masterflags` (`+0x53ef`…`+0x5401`) and whose bit 0 becomes
+        // its amiga-compatibility byte (`+0x5424`). Both modules carry 8.
+        let flags = u16_at(bytes, 38);
 
         // The instruments' sample bytes are sliced here, by paragraph pointer; the loader
         // does not pad or loop-extend them (`checkins`, `STARTEMS.C:129-177`).
@@ -437,6 +443,7 @@ impl Module {
             initial_tempo,
             global_volume,
             master_volume,
+            flags,
         })
     }
 
@@ -493,6 +500,18 @@ impl Module {
     /// True when the master volume byte's stereo bit is set.
     pub fn stereo(&self) -> bool {
         self.master_volume & 0x80 != 0
+    }
+
+    /// The header's `flags` word (`STARTEMS.C:58`'s `unsigned flags`, the file's offset 38).
+    ///
+    /// The player reads it as `_np_masterflags` — the word the STMIK documentation's flag
+    /// list belongs to (`MAIN/STMIK.H:104-107`: bit 3 "vol 0 optimizations", bit 4 "full
+    /// amiga compatibility") — through the header watch at `+0x53ef`/`+0x5401`, and takes
+    /// its **bit 0** as `[0x915]`, the byte that picks the vibrato's level shift
+    /// (`+0x5424`, `+0x5448`…`+0x5450`). Both modules carry **8**, so the shift is 5 and the
+    /// "volume 0" optimisation is on.
+    pub fn flags(&self) -> u16 {
+        self.flags
     }
 
     /// The file's 32-byte channel table (`STARTEMS.C:67`), as bytes. Both modules carry

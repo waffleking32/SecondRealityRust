@@ -381,8 +381,9 @@ Task 3 makes the port's player reproduce the traces. **The original's player has
 source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is read out of its
 own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
 from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
-`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 24 load-bearing
-instructions at their own offsets (the count the test itself prints)). Offsets below are that object's segment offsets, and the
+`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts the load-bearing
+instructions at their own offsets (24 of them when Task 3 wrote it, **115** after Task 4 added
+the effects' — the count the test itself prints)). Offsets below are that object's segment offsets, and the
 listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
 it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
 the object cannot settle — which *frame* a row change lands on — is measured against the traces,
@@ -513,9 +514,9 @@ If *that* entry is itself a `255`, `+0x4499`'s `je` jumps to `+0x447f` — which
 stop at `+0x4476` — so it returns with the loop order in `ax` and the pattern, the order and the
 mixing flag untouched: the scan gives up and the player keeps playing what it was playing.
 
-**Two things about those two `255` paths are worth stating because no trace can reach them** —
-neither module has a `255` at its first order — and the port follows the bytes in both rather than
-choosing:
+**Three things about the order scan are worth stating because no trace can reach them** — neither
+module has a `255` at its first order, and the third is not a `255` path at all — and the port
+follows the bytes in all three rather than choosing:
 
 - A `_zplaysong` seek onto a `255` is *not* a stop. The scan's stop path clears `[0x938]`
   (`+0x4476`) and the seek sets it back to 1 four instructions later (`+0x259a`), so the player is
@@ -642,8 +643,12 @@ the impossible. So the comparison asserts what a port can be held to —
    key can catch: `order` and `row` the order advance and the `254` step-over, `pattern` a wrong
    placement of an order, `speed`/`tempo` a lost, doubled or mis-rowed `A`, `zplus` the marker
    arithmetic. `loop` is **0 in every filed trace**, so a key that never moves can catch only a
-   wrong *value* — a port that published a loop count of its own would fail, while one that froze
-   the counter at zero matches what the traces do.
+   wrong *value* — and the comparison's own shape says which wrong values: the two value sequences
+   may differ in length by one and are compared over their common prefix, so a port whose counter
+   took a wrong value anywhere in the window would fail **at the first of them** (a loop count of
+   its own from the window's start fails; a counter that stayed 0 and then moved once, later, is
+   inside the one-entry slack and is invisible), while one that froze the counter at zero matches
+   what the traces do.
 2. **placement**: every published value is one the trace publishes at that frame or within
    3 frames of it;
 
@@ -670,13 +675,20 @@ can do. `docs/fidelity/APPROXIMATIONS.md` records the measurement and its cause.
   MUSIC0: wrapped after 8732 polls (124.6 seconds of logic ticks) at order 0 pattern 0 row 0, loop counter 1
   MUSIC0: 8732 poll(s), 5983 tick(s) over 998 row(s)
   MUSIC0: 80 order(s), 77 pattern(s), ended at order 0 (1 loops)
-  MUSIC1: wrapped after 25769 polls (367.7 seconds of logic ticks) at order 0 pattern 73 row 0, loop counter 1
-  MUSIC1: 25769 poll(s), 19123 tick(s) over 5223 row(s)
+  MUSIC1: wrapped after 28618 polls (408.3 seconds of logic ticks) at order 0 pattern 73 row 0, loop counter 1
+  MUSIC1: 28618 poll(s), 21240 tick(s) over 5283 row(s)
   MUSIC1: 100 order(s), 77 pattern(s), ended at order 0 (1 loops)
 ```
 
 (the second line of each pair is the same run counted a second way — the engine's row visits
-against its own tick counter, every row asserted to have had between 1 and 32 ticks.)
+against its own tick counter, every row asserted to have had between 1 and 255 ticks.)
+
+**MUSIC1's four numbers changed in Task 4, and the reason is a correction** (§9.14): the module
+carries one `A` cell whose parameter is `0x7f` (pattern 72, row 48, order 98 — the `A` parameters
+are `{3: 30, 6: 23, 127: 1}`), and Task 3's player read an `A` parameter above 32 as a *tempo*.
+The object's `A` handler has no such test (`+0x3dd2`), so that row plays at speed 127 and the
+rest of the module — its last order and the wrap — takes 127 ticks a row: 28618 polls against
+25769, 21240 ticks against 19123.
 
 Each module is played from order 0 — the order the demo's own boot starts it at
 (`MAIN/U2.ASM:786` pushes 0) — through its order list to the first `255`, where it loops back
@@ -685,3 +697,393 @@ are). `playing_past_the_end_neither_panics_nor_runs_off_the_orders` then plays e
 further 100,000 polls and asserts that every published order, pattern, row, speed and tempo stays
 inside the module's own tables — a player that loops for ever is fine, one that reads past its
 orders is not.
+
+## 9. The channel effects — Task 4
+
+The thirteen effect letters the two modules carry are `A`, `B`, `C`, `D`, `E`, `F`, `G`, `H`, `J`,
+`K`, `O`, `Q` and `S` (§6's histogram). Tasks 3 and 4 together implement them: `A`, `B` and `C`
+move the timeline and are Task 3's, `D`, `E`, `F`, `G`, `H`, `J`, `K`, `O`, `Q` and `S`'s `SDx`
+move a channel and are this section's. The code is `crates/sr-audio/src/effects.rs` (the channel
+state and every handler) and the second half of `crates/sr-audio/src/player.rs` (the row parse,
+the two tick passes and the dispatch), and the evidence is
+`crates/sr-audio/tests/effects.rs` — 20 tests, one per effect plus the scope and the period
+arithmetic — whose printed numbers this section quotes:
+
+```
+cargo test -p sr-audio --test effects -- --nocapture
+cargo test -p sr-audio --test player -- --nocapture the_objects_own_bytes
+```
+
+Every offset below is `MAIN/STMIK.300`'s segment offset, and every one of them is **asserted
+against the object's own bytes** by `tests/player.rs`'s claims table, which Task 4 grew from 24
+claims to **115**: the handlers, the two dispatch tables, the `S` subcommand tables, the waveform
+entries and every table the arithmetic is measured in. Where the object and the ST3 semantics one would expect disagree, the
+object wins and the disagreement is named here.
+
+### 9.1 Three dispatch paths, not one
+
+A command can be reached from three places, and which one decides *when* it runs:
+
+- the row's **first tick** (`+0x3c44`, table at `+0x3bd8`), after the row's cells are read;
+- every **later tick** of the row (`+0x3d38`, table at `+0x3c0e`);
+- the **row parse itself** (`+0x46c2`), for the two pieces of work no table dispatches: `O`'s
+  offset, taken as its cell is installed (`+0x48d6`), and the note start every cell's note gets
+  (`+0x4810`).
+
+The two tables are not the same table. Their entries 1, 2 and 3 differ (the `A` handler
+`+0x3dd2`, `B` and `C` are first-tick only; the later ticks' entries are the bare `ret` at
+`+0x3d72`), `G` (`+0x3f94`) and `H` (`+0x4005`) have **no first-tick handler at all**, and `K`
+(`+0x3f00`) and `L` (`+0x3f05`) have none either — they set `bp` and fall into `D`'s body
+(`+0x3f08`), whose tail continues into the vibrato for `K` (`+0x4000`) and the tone porta for `L`
+(`+0x3f8f`). The first-tick table's entry 20 (`T`) is the A/T handler at `+0x3d73`, which is the
+one place the parameter is looked at.
+
+What the first-tick pass does per channel *before* it dispatches anything is where the odd
+behaviour lives: a channel with **no command** has its period restored from
+`aorgspd` and its `atrigcnt` cleared (`+0x3d0c`), a `D` row does the same (`+0x3d24`), every
+non-zero parameter is remembered in `alastnfo` (`+0x3cb9`), and any command that is not `D`, `H`,
+`K`, `I` or `R` marks the vibrato position **stale** (`+0x3cea`, `orb $0x80,0x26(%si)`). A channel
+whose volume is 0, whose cell carries no note, instrument or volume column, and which has had
+three such rows in a row is **freed** (`+0x3c97`…`0x3ca9`, on because the module headers'
+`flags` word is 8 and its bit 3 is `_np_masterflags`'s "vol 0 optimizations" —
+`MAIN/STMIK.H:107`).
+
+The row parse is a separate pass with its own reset: `+0x46a4` writes `note = 0xff`,
+`volume = 0xff` and instrument, command and info 0 into all 48 of the object's channel
+structures, so a channel the row does not name has no command at all — which is what stops the
+previous row's `D` from running again. The named channels' cells are then installed
+(`+0x4677`…`0x469c`), clamped (`+0x4762`…`0x4780`: an instrument above `0x65` becomes 0 and **a
+volume column above `0x3f` becomes 63** — the file's own 64 is not a volume the player ever
+holds), and — for the first sixteen channels, the mixer's; above them is the adlib path this
+build has no card for — given their note (`+0x4810`).
+
+The channel index is the S3M channel number: the pointer table at `+0x1fa0` maps the 32 numbers
+to their structures and is the identity (`0x0da0`, `0x0e00`, `0x0e60`, …), so cell channel 5 *is*
+`_zchn[5]`. The panning the mixer will apply is the header's channel table, which is a different
+thing (§3).
+
+### 9.2 A note, and the four readings inside it
+
+`+0x4810` is the routine every note a channel plays comes through, and four of its readings are
+worth naming because none is the obvious one:
+
+- **An instrument of its own clears the sample offset** (`+0x481d`, `movw $0x0,0x6(%si)`) *before*
+  the note it came with can set it — so an `O` on a cell that names an instrument starts that note
+  from the offset, and an `O` without one leaves the last offset for the next note.
+- **A note under a `G` does not take the period.** `+0x490e` tests `aorgspd` and `+0x4944` tests
+  the command:
+  for a `G` on a channel that is already playing, `aspd` is *not* written (the live period stays
+  where the glide left it) while `aorgspd` **and** `asldspd` both take the new note's period
+  (`+0x4954`, `+0x4957`). The period the glide walks from is `aspd`; the one it walks towards, and
+  writes back to on the way, is `aorgspd` — the two only meet when the glide arrives.
+- **The volume column replaces both the volume and `aorgvol`** (`+0x495a`), including a volume of
+  0 — which is why `Cell::present` exists (§6).
+- **`0xfe` is the note off**: the position parks at 1, `m_poslow` at 0, the volume at 0, and
+  `aorgspd` and `asldspd` at **`0xffff`** (`+0x4906`…`0x4957`) — the value the mixer reads as "no
+  sample". The live period is left where it was, so a `D` row after a note off restores `0xffff`.
+
+And one that is not a reading but an absence: a note on a channel that was not already playing
+does **not** set `aequ` (`+0x491a` is on the far side of `+0x490e`'s test). Only a note that
+restarts a playing sample sets the `0xff` whose tail becomes `avol + 0x10` (`+0x496a`), so a
+first note leaves `aequ` at whatever the channel had — zero, on a fresh module.
+
+The note itself is `+0x593a`: `0xfe` is 0, otherwise the 12-TET table at `+0xa24` indexed by the
+note's semitone and shifted right by one byte per octave from `+0x97c`. That table is four
+octaves up from the S3M table the format documents — its C is 27392, so octave 4's C is the
+familiar 1712 — and the shift is why one table covers every octave. **The shift table is eight
+bytes long and the object indexes it with `note >> 4` without a range check**, so octave 8 reads
+the byte after it (0, the same shift as octave 0) and octaves 9…15 read further into the next
+table. That is not a formality: MUSIC1 plays note `0x80` — the highest note either file writes,
+§6 — and its shift is that ninth byte, so the file's highest-written note plays octave 0's
+period. The port keeps the sixteen bytes the lookup reads, in the object's own order, and
+`every_octave_of_the_note_table_is_the_objects_own` asserts the whole table one line an octave.
+
+The period is then scaled by the instrument: `+0x5813` is `period × 8363/c2spd`, one integer
+division with the two guards an 8086 `div` needs (`+0x581f`, `+0x5825`). A `c2spd` of 8363 — the
+file's own reference, MUSIC0's instrument 4 — leaves the period alone, so the note plays at the
+rate its header declares: over every PCM instrument of both files the `c2spd` field runs from
+**8163 to 27700** (63 of them — the range is asserted and printed by
+`a_notes_period_is_scaled_by_its_instruments_c2spd`), which is why the same note is a period on
+one channel and three and a half times it on another.
+
+### 9.3 D — the volume slide, and the fine markers are the other way round
+
+`+0x3f08`, in both tables, and `K` and `L` reach it through their two-instruction stubs. The low
+nibble slides **down** and the high nibble **up**, and the object tests them low first
+(`+0x3f22`). What the fine forms do is the surprise: `D?F` — a **low** nibble of `0xf` — adds the
+**high** nibble once, on the first tick (`+0x3f73` → `+0x3f51`), and `DF?` — a **high** nibble of
+`0xf` — subtracts the **low** nibble once (`+0x3f81` → `+0x3f31`). The two degenerate forms
+(`D0F`, `DF0`) have a zero in the other nibble and fall back through the same paths to the
+ordinary 15-a-tick slide.
+
+A zero parameter takes the channel's `alastnfo` and **writes it back into the cell's info byte**
+(`+0x3f11`, `+0x3f14`) — and `alastnfo` is not D's private byte: the first-tick pass writes it for
+*any* command with a non-zero parameter (`+0x3cb9`), so MUSIC0's 5,795 `D00` cells slide by the
+channel's last non-zero parameter whatever command carried it (and not at all when there is
+none).
+
+The volume clamps to **0…63** (`+0x3f3c`, `+0x3f5e`): a slide can never reach 64, and neither can
+a cell's volume column, which the row parse has already clamped to `0x3f` by the time the slide
+sees it.
+
+### 9.4 E and F — the portamentos
+
+`+0x3e4f` (`E`, the period grows) and `+0x3e10` (`F`, it shrinks) are one body with the sign of
+one instruction flipped, in both tables, and with no note playing (`aorgspd == 0`) they do
+nothing at all (`+0x3e53`). The steps:
+
+| tick | info | step |
+|---|---|---|
+| first | `≤ 0xe0` | nothing |
+| first | `0xe1`…`0xf0` | the low nibble, once |
+| first | `> 0xf0` | the low nibble **× 4**, once |
+| later | `≥ 0xe0` | nothing |
+| later | `< 0xe0` | the whole info byte **× 4**, every tick |
+
+(`+0x3e3b`, `+0x3e43`, `+0x3e6c`.) Both `aspd` and `aorgspd` move together (`+0x3e70`, `+0x3e73`),
+so a `D` row's restore keeps the slid period and a later vibrato measures from it. A zero info
+repeats `alastnfo`, written back into the cell (`+0x3e59`).
+
+Both fine paths share the ordinary step's tail, which is why a fine form moves the period exactly
+once: every later tick's guard sends an info at or above `0xe0` away before the step
+(`+0x3e6a`).
+
+### 9.5 G — the tone portamento
+
+`+0x3f94`, in the **later-tick table only**: a `G` row's first tick does nothing, because both
+tables' entry 7 is the bare `ret`. The period walks towards `asldspd` by `info × 4` a tick
+(`+0x3fb6`) and clamps exactly onto it, never past (`+0x3fbc`, `+0x3fe3`), and `aorgspd` moves
+with it (`+0x3fc4`) so the walk cannot slip. The parameter is remembered in `alasteff2`
+(`+0x3fa1`), which is `L`'s source and nothing else's, and a zero info reuses it. The object
+calls the interpolation handler at `+0x57b0` when `[0x919]` is set — the byte `S1x` writes, which
+neither module carries, so that byte stays 0 and the call never happens.
+
+`g_walks_the_period_to_the_notes_target_four_a_tick` drives MUSIC0's `G01` at pattern 8 row 16
+channel 1 and asserts the walk tick by tick: the channel enters the row at period 1301 with a
+target of 2603 (note `0x30` at instrument 7's `c2spd` 11000), the note sets the target and leaves
+the live period alone, and the glide then moves four a tick. Its volume column is `0x40` and the
+port holds **63** — §9.1's clamp, asserted there.
+
+### 9.6 H — the vibrato, the stale bit, and which shift the demo runs
+
+`+0x4005`, later-tick only. The parameter is the channel's `alasteff1` (`+0x2b`), and a missing
+high nibble is **merged** into the previous parameter rather than replacing it (`+0x4010`), so
+`H08` after `H81` is `H88`. The waveform is the sine at `+0xa50` — 64 signed words, ±255 — read
+at the position's **byte** offset, and the position steps by `speed × 2` through the even low
+seven bits, so the low byte is a phase in table entries and the high byte is never written (the
+waveform functions put the *position* in `bx` before the table read leaves the value in `ax`).
+
+The level is `value × depth` arithmetic-shifted by **5** — because `[0x915]`, the byte the shift
+selects, is the **module header's flags word's bit 0** (`+0x5424`, `+0x5448`…`+0x5450`) and both
+files' flags word is 8. So the demo runs the quieter of the object's two forms: the amplitude tops
+out at ±119 rather than ±239.
+
+Bit 7 of the position is a **stale flag**: the first-tick pass sets it for every command that is
+not `D`, `H`, `K`, `I` or `R` (`+0x3cea`), and each waveform function tests it
+(`+0x407b`'s `test $0x80,%ax`) — a stale position plays **0** and restarts the phase at
+`speed × 2` instead of continuing it. A channel with no command does *not* set it (its pass takes
+the no-command branch), and a `D` row does not either. In MUSIC0 the `H81` at pattern 47 row 6
+follows an `A06` on row 0 and five rows with no command, so **the vibrato restarts there** —
+which `h_vibratos_on_the_objects_sine_table` asserts, position and period both, against the sine
+table written out in the test.
+
+`K`'s vibrato half reads the same byte (`+0x4000`) and `L`'s tone-porta half reads `alasteff2`
+(`+0x3f8f`) — while both their volume halves are `D`'s body and fall back on `alastnfo`. That is
+the classic trap and it is three bytes, not one:
+`k_reads_h_s_parameter_for_the_vibrato_and_alastnfo_for_the_slide` builds a module with `H81`,
+then a `D10` row (which overwrites `alastnfo` with `0x10`), then `K01`, and asserts that the
+slide follows the `D`'s byte while the vibrato follows `H`'s — a port that used one byte for both
+would vibrate with a depth of 0 and never move the period.
+
+### 9.7 J — the arpeggio
+
+`+0x4190`, in both tables. `+0x419a` divides the engine's **own tick counter** by three and uses
+the remainder: the first tick is the note, the second adds the high nibble's semitones and the
+third the low nibble's. The transposition starts from `lastnote` and carries **one** octave when
+the semitone passes B (`+0x41c8`), and the period is rebuilt from scratch — `aspd` only, so
+`aorgspd` stays at the note's own and a row with no command restores the note exactly.
+
+MUSIC0's `J7C` — 137 cells, all of them on channel 7 of patterns 42, 43 and 44 — is driven by
+`j_transposes_the_note_by_the_tick_modulo_three` at instrument 4, the file's one instrument at the
+8363 reference, so the periods are the table's own: **1712, 1140, 856**, cycling. The row runs
+twelve ticks and the test asserts every one of them.
+
+### 9.8 O — the sample offset, in bytes and in multiples of 256
+
+`O` is in **neither** dispatch table. `+0x48d6` is inside the note work and runs while the row's
+cells are read: `cmd == 0xf` writes `info << 8` into the channel's address field, so `Oxy` is
+`y × 256` bytes — samples, for these modules' 8-bit samples. The offset is **persistent**: only a
+cell that names an instrument clears it (`+0x481d`), and the offset applies to the *next* note to
+start (`+0x491e`), which may be rows later. Neither module has an `O` without an instrument — the
+count is asserted in `o_without_an_instrument_leaves_the_last_offset_in_place`, which drives that
+form from a module written for the test:
+
+```
+cargo test -p sr-audio --test effects -- --nocapture o_without_an_instrument
+  MUSIC0: 755 O cell(s), 0 without an instrument
+  MUSIC1: 2417 O cell(s), 0 without an instrument
+```
+
+so the form the port implements for completeness is one no shipped cell reaches, and the
+persistence it exists for (an `O` that leaves the offset for a later note) is not measured on
+these files either.
+
+### 9.9 Q — the retrigger, and what the object's `0x0101` filler means in a table
+
+`+0x41ec`, in both tables. The interval is the **low** nibble and the volume code the **high** one
+(`+0x41f6`), and the object's own test is `interval <= atrigcnt` (`+0x4205`): `y = 0` never
+retriggers, and `y > 0` retriggers once the counter has reached `y`, after which the counter goes
+to 0 and counts up again — so the fires land on the ticks congruent to 0 mod `y`. The counter is
+the channel's `atrigcnt`, the same field `SDx` counts down in, and only a `D` row or a row with no
+command clears it, so the phase runs **across rows**: the two `Q` tests here assert the fires at
+their ticks over four and five consecutive rows. The retrigger itself is `m_pos = 0` (`+0x420f`)
+plus the volume variation.
+
+The variation is the pair of tables at `+0x95c` (signed addends) and `+0x96c` (multipliers in
+sixteenths): `x`'s multiplier when it has one and its addend otherwise. **The multiplier table's
+zeros are the object image's `0x0101` filler** — the same filler `_np_zframe` and `_zspeedadjust`
+read as, §8 — and that is what the rule looks like applied to a *table* rather than a variable: the
+image holds real bytes at 6, 7, 14 and 15 (10, 8, 24 and 32) and `0x0101` everywhere else, and at
+runtime those slots are 0. Read the image literally and every code but those four would take a
+multiplier of 257 — a sixteenth of which is the ×16 the code's shift makes of it — instead of the
+addend they are meant to take; read it as the running program does and the two paths are the ST3
+tables they look like.
+`q_multiplies_when_its_code_has_a_multiplier` drives MUSIC0's `QF4` (code 15) and asserts the
+doubling: 1 → 2 → 4 → 8 → 16 → 32 → 63 (the clamp), four ticks apart.
+
+### 9.10 S — `SDx`, the note deferral
+
+`S` is dispatched through a second pair of tables (`+0x424e` for the first tick, `+0x4261` for the
+later ones, each indexing 16 subcommand entries at `+0x3b98` and `+0x3bb8`). **Both modules'
+cells are `SDx` (subcommand 13) and nothing else** — the test asserts the subcommand set is
+`{0x0d}` for each file and refuses any other — so the port carries `SDx` and records the rest as
+absent rather than guessing at them.
+
+`SDx` is not a delay in the sense of holding a note back: it is a *deferral*. The row parse sees
+`cmd == S` with an info of `0xd0`…`0xdf` and **returns before it starts the note** (`+0x4751`…
+`+0x475d`) while still installing the cell's fields and marking the channel used. The note then
+begins wherever the countdown reaches zero: tick 0 puts the low nibble into `atrigcnt`
+(`+0x4296`), every later tick decrements it (`+0x429a`) and the tick that empties it calls the
+install continuation at `+0x475e` — the `0x81`-flagged channel, the clamps the row parse skipped,
+and the note. So the note starts on tick `x`, with the cell's own volume column and instrument.
+
+The three delays the files carry are **2, 3 and 6** (MUSIC1's `D2` 48 cells, MUSIC0's `D3` 77 and
+`D6` 63), and each fires on the tick its low nibble names:
+
+```
+cargo test -p sr-audio --test effects -- --nocapture sdx_delays_the_note_to_its_own_tick
+  MUSIC0 order 45: SD3 on pattern 41 row 0 channel 5, note 0x40 wants 977, speed 12
+    it fired on tick 3
+  MUSIC0 order 44: SD6 on pattern 40 row 1 channel 5, note 0x40 wants 977, speed 12
+    it fired on tick 6
+  MUSIC1 order 42: SD2 on pattern 30 row 2 channel 3, note 0x41 wants 922, speed 6
+    it fired on tick 2
+```
+
+The speed matters, and the test reads it from the player rather than assuming it: a delay larger
+than the row is long would never fire, and the port's own countdown is what makes that visible
+(tick `x` is the `x`th tick after the row's first, and a row that ends before it has no tick `x`).
+At these three cells the rows are long enough for all three — MUSIC0's two sit at speed 12 and
+MUSIC1's at 6 — and the test asserts the tick, the period the note finally takes, and the cell's
+own volume column arriving with it.
+
+### 9.11 The period's step, and a constant 400 short of the product
+
+Every pitch effect above is measured in periods; what turns a period back into playback is
+`+0x582b`, and Task 5's mixer will consume it. Its base frequency is the object's own literal:
+`mov $0xda,%dx; mov $0x7600,%ax; div period` (`+0x58b9`), i.e. **`0x00da7600` = 14,317,056** as a
+16.16 value over the period. That is **not** `8363 × 1712` = 14,317,456: the object's constant is
+400 short of the product of the format's two reference numbers, so C-4 at the 8363 reference
+(period 1712) is stepped at **8362** and the octave above at **16,725** rather than twice 8362.
+The port uses the object's number, and `a_period_s_step_is_the_base_frequency_over_it` asserts
+the table's own periods against it. A period of 0 zeroes the mixer's speed and returns
+(`+0x5876`).
+
+### 9.12 What the modules do not carry
+
+Recorded as absent **with the count**, so that "not implemented" is not read as "assumed zero":
+
+- **The letters `I`, `L`, `M`, `N`, `P`, `R`, `U`, `V`, `W`, `X`, `Y` and `Z`: 0 cells in each
+  file.** (`R` is tremolo and `L` is `D` + `G`, both of which the object implements in full — the
+  port keeps the fields they would write, `atreon`, `atremor` and `alasteff2`, and has no dispatch
+  for either; a `K`'s vibrato half is `H`'s and is carried.)
+- **`T`: 0 cells**, as the phase plan's amendment says. The first-tick table's entry 20 still
+  points at the A/T handler and the port dispatches it there, because that is what the object
+  would do — it is the object's table and not a behaviour the data reaches.
+- **`S` subcommands other than `d`**: 0 cells. `SAx` (panning), `SBx`, `SCx`, `SEx`, `S0x`…`S4x`
+  all have handlers in the object's two tables; the port has none, and would need the bytes of the
+  subcommand it was asked for before it wrote one.
+- **The other three vibrato waveforms**: the selector `vibtretype` is written only by `S3x`/`S4x`
+  (0 cells), so every channel in both modules runs selector 0 — the sine at `+0xa50`. The ramp
+  (`+0xb50`), the square (`+0xad0`) and the sine-plus-random (`+0x40b4`) are in the object and
+  unreachable from this data, and the port implements the sine.
+- **`aequ`'s other values**: the mixer's, for Task 5. The port carries the byte and the four
+  writes to it that these effects make.
+
+### 9.13 What Task 4 corrected in Task 3's reading
+
+Three places where the object and the earlier reading disagreed. All three are in the object's
+bytes, all three are asserted by tests in this commit, and the first two changed a number the
+note quotes:
+
+1. **`A` and `T` are *not* one handler told apart by the parameter** — the *command* picks the
+   handler and the tables say which. Command 1 is the first-tick table's entry 1, `+0x3dd2`,
+   whose whole body is `cmp $0x0,%al; je; xor %ah,%ah; mov %ax,0x2002` — **no upper bound**, so
+   `A7F` sets a speed of 127. Command 20 is entry 20, `+0x3d73`, the only handler with the
+   `cmp $0x20,%ax; jbe` split, and its ≤ 32 branch goes to the driver call at `+0x3dce`, never to
+   the speed. Task 3's player had the split in the handler both commands shared; MUSIC1's `A`
+   parameters are `{3: 30, 6: 23, 127: 1}` and its one `A7F` (pattern 72, row 48, order 98) set a
+   *tempo*, which no filed trace reaches (MUSIC1's trace covers orders 0 and 42…48) and which
+   the end-to-end play does: §8's four MUSIC1 numbers are this correction's.
+2. **A note on a channel that is not playing starts at the sample offset too.** `+0x491e` is
+   reached from *both* of `+0x490e`'s branches — the fresh one jumps straight to it — so the
+   `m_pos` the `O` command left is taken whether or not a sample was already playing. Task 3's
+   port had the assignment inside the not-fresh branch, which would have left the first note of
+   an `O` row at position 0; `o_starts_the_next_note_at_the_offset_in_bytes` asserts the position
+   and the offset both, on MUSIC0's own `O05` cell.
+3. **A seek clears every channel** (`+0x5614`, which `_zplaysong` reaches at `+0x258e`), so the
+   effects start from zero after a `play_song` — the period, the volume, the remembered
+   parameters and the vibrato position. Task 3's port did not, which no trace could show (every
+   filed trace seeks on a fresh player) but which a test that seeks mid-song can: the `K` test
+   above finds `alasteff1` at zero because the seek cleared it.
+
+### 9.14 The tests, and the numbers they print
+
+One test per effect, each driving the **modules' own cells** and asserting the channel state tick
+by tick; where the shipped data does not reach a form (the fine volume slides' isolated starting
+volume, `O` without an instrument, `K`'s shared parameter, the stale vibrato bit) the test builds
+a module of its own and says so. Every expected value is the object's arithmetic written out
+again in the test file — the note table, the shifts, the sine and the `Q` tables are pasted there
+as the object's own bytes, and `tests/player.rs`'s claims assert those same bytes in the image.
+
+```
+  MUSIC0: A:63 B:3 C:8 D:7348 E:827 F:1051 G:802 H:212 J:137 K:105 O:755 Q:84 S:140
+  MUSIC1: 0x00:1 A:54 C:4 D:3340 E:217 F:180 G:2607 H:365 K:62 O:2417 Q:38 S:48
+  MUSIC0: S subcommands {13: 140}, delays {3: 77, 6: 63}
+  MUSIC1: S subcommands {13: 48}, delays {2: 48}
+  MUSIC0: 27 fine-up (0x?f) and 144 fine-down (0xf?) D cells
+```
+
+The per-effect tests and their cells:
+
+| effect | cell the test drives | what it asserts |
+|---|---|---|
+| `D` | MUSIC0 order 0, pattern 0, row 0, channel 0 (`D10`, then `D00`) | 2, 3, 4, 5, 6, 7 then 8…13, and that the `D00` reused row 0's parameter |
+| `D0F` | MUSIC0 order 2, pattern 9, row 60, channel 7 | fifteen a tick from the volume the row found, clamped at 0 |
+| `D`'s fine forms | MUSIC0 order 1, pattern 1, rows 8 (`D1F`) and 15 (`DF1`), channel 5 | ±1 once, on the first tick only |
+| `E`, `F` | MUSIC0 order 0, pattern 0, rows 11–13, channel 3 | `E02`/`E00`/`F02` at 8 a tick from the note's own 3579, and the fine path doing nothing |
+| `F` extra-fine | MUSIC0 order 11 pattern 8 row 32, and order 45 pattern 41 row 47 | 4 × the low nibble once |
+| `G` | MUSIC0 order 11, pattern 8, row 16, channel 1 (`G01`) | the target from the note, the period gliding 4 a tick, and the volume column clamped to 63 |
+| `H` | MUSIC0 order 24, pattern 47, row 6, channel 6 (`H81`) | the phase and the period, tick by tick, from the sine table — stale at the row's first tick |
+| `H` stale bit | a module written for the test (`E00` then `H82`) | the phase restarts at 0 instead of continuing |
+| `J` | MUSIC0 order 46, pattern 42, row 8, channel 7 (`J7C`) | 1712, 1140, 856 cycling over the row's twelve ticks |
+| `K` | a module written for the test (`H81`, `D10`, `K01`) | the slide from `alastnfo`, the vibrato from `alasteff1` |
+| `O` | MUSIC0 order 1, pattern 1, row 0, channel 2 (`O05`) | 1280 in the offset and the position |
+| `Q` | MUSIC0 order 36, pattern 23, row 58, channel 7 (`QC4`) | the fires every fourth tick over four rows, +8 each |
+| `Q`'s multiplier | MUSIC0 order 24, pattern 47, row 56, channel 2 (`QF4`) | the doubling and the clamp at 63 |
+| `SD2`, `SD3`, `SD6` | MUSIC1 order 42, MUSIC0 orders 45 and 44 | the tick each fires on — and the one that never does |
+| the periods | the tables themselves | every octave of the note table, the c2spd scale and the step |
+
+The trace comparison cannot judge any of this (a wrong `D` does not move the timeline), which is
+why the tables in this section are asserted twice: once here, as numbers, and once against the
+object's image in `tests/player.rs`.
