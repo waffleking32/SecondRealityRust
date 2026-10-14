@@ -392,7 +392,13 @@ D5's verification is the specification and every number in it is re-derived here
   belongs in the note as a measurement.
 - The pattern pointer table's location (`0x60 + ordNum + insNum*2`, paragraph units) and the
   observation D5 relied on — the blocks tile contiguously on 16-byte boundaries — are both asserted,
-  because they are the evidence that the pointer table was read correctly at all.
+  because they are the evidence that the pointer table was read correctly at all. Measured while
+  writing this plan so the assertion is precise: **all 76 consecutive pairs in each module are
+  contiguous**, with the next block starting `0…15` bytes after `ptr*16 + ln` (every padding size
+  from 0 to 15 occurs). The arithmetic hangs on **`ln` including its own two-byte header**: the
+  block is `ln` bytes from `ptr*16` and the descrambled data is `ln − 2`. Reading it the other way
+  turns 8 of MUSIC0's pairs and 11 of MUSIC1's into "anomalies", which is how the mistake announces
+  itself.
 - `SCRS` at the sample header's tail, `SCRM` at the file's offset 44: named checks, not magic
   numbers in prose.
 
