@@ -507,18 +507,20 @@ modules, nine in the parts'). Both commands exit **0** now, and the tests are re
 
 #### What could not be confirmed — the phase's own negatives
 
-- **Nobody has looked at the screen.** The plan's Task 10 Step 3 is the human look —
-  `cargo run --release --bin secondreality -- --block 5` (and `--block 2`) watched by the user — and
-  it is **not done**. What the tree can reproduce is mechanical only: the status line's text and the
-  key handling are unit tests in `window.rs`, the two hand-overs are the `--block 5` end-to-end test,
+- **The human look: done, and it passed.** The plan's Task 10 Step 3 was
+  `cargo run --release --bin secondreality -- --block 5` (and `--block 2`) watched by the user. **The
+  user ran it and reports that it looks good** — the phase's only claim no test could reach, and
+  deliberately left to a person, because Phase 0's single human look found a bug no test in the
+  repository could see (the SDL texture-format misread, `03a3b11`). It is recorded as the user's own
+  report and not interpreted: it says the picture is right, not that any particular frame was
+  measured. What the tree reproduces mechanically stays named beside it — the status line's text and
+  the key handling are unit tests in `window.rs`, the two hand-overs are the `--block 5` end-to-end test,
   and the rate is the headless run's own printed line
   (`cargo run --bin secondreality -- --block 5 --headless --run-seconds 60` printed
   `cred: 4205 ticks in 60.008 s = 70.074 Hz` in Task 10 — the window's title was read back with
   `xwininfo` in that task too, and that reading lives in its report,
   `.superpowers/sdd/02-shell/task-10-report.md`, which is git-ignored scratch). No command in the tree
-  says what the picture *looks like*. That is the phase's one unverified claim, it is the user's step,
-  and it is named here rather than implied: Phase 0's single human look found a bug no test could see
-  (the SDL texture-format misread).
+  says what the picture *looks like* — that part is the user's, and it has now been given.
 - **Music is deferred, not stubbed.** No audio is decoded, mixed or played in this phase; the one
   gate a faithful port would wait on (ENDLOGO's `dis_musplus()` loop) is its measured 567 ticks
   (**A7**), and Phase 3 replaces it with the real cue. Nothing else ported here touches music.
@@ -1172,8 +1174,9 @@ test in the same commit; absolutes need a measurement over their whole space; an
 is stated as one; measured constants are derived by exhaustive match required to be unique, never by
 a fit; and nothing is re-anchored to make a diff pass.
 
-**What it could not confirm, in one place.** Nobody has watched the window (the human look is
-deferred and is the user's step). No music is decoded or played, and ENDLOGO's hold is a measured
+**What it could not confirm, in one place.** The window has since been watched: the user ran
+`--block 5` and reports that it looks good (the human look, recorded under the negatives above — the
+one item on this list that is now closed). No music is decoded or played, and ENDLOGO's hold is a measured
 frame standing in for a cue (A7). Nine and ten frames of the two parts' lead-ins are not modelled and
 their cause is unidentified (A5, A7). Three parts' references are other builds (A6, A10, A11).
 TUNNELI's residual is the oracle's or the port's and cannot be resolved further with what is
