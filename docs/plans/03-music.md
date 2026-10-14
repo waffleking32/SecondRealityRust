@@ -647,6 +647,16 @@ model, with tests that compute expected sample values *by hand from the module's
 single channel, one note, one tick, the first N output samples checked against values derived from
 the sample data and the period, so the mixer's arithmetic is pinned independently of the player.
 
+**What the two modules' own sample headers say, measured while writing this plan** (Task 2's tests
+count it themselves): `SCRS` is present in all 63 PCM headers; **no sample is stereo and none is
+16-bit** — the flags byte is only 0 or 1, where bit 0 is the loop flag (MUSIC0: 12 looping, 10
+one-shot; MUSIC1: 9 and 32) — so the mixer is **mono per voice**, with the module's pan table and
+the master volume's stereo bit doing the stereo, and `MixRate::Hz40000` meaning 20000 a side. And
+**`c2spd` differs per sample** — 8363…27700 in MUSIC0, 8163…22140 in MUSIC1 — so the playback step
+is each sample's own rate over the note's period, never a constant. Both are why this step is
+"compute the expected samples by hand from the module's bytes" and not "run the port and record
+what it did".
+
 - [ ] **Step 2: Determinism, and the property that matters**
 
 Two runs of the same window are byte-identical (asserted). The output is not silent (asserted — a
