@@ -623,10 +623,15 @@ can do. `docs/fidelity/APPROXIMATIONS.md` records the measurement and its cause.
 
 ```
   MUSIC0: wrapped after 8732 polls (124.6 seconds of logic ticks) at order 0 pattern 0 row 0, loop counter 1
+  MUSIC0: 8732 poll(s), 5983 tick(s) over 998 row(s)
   MUSIC0: 80 order(s), 77 pattern(s), ended at order 0 (1 loops)
   MUSIC1: wrapped after 25769 polls (367.7 seconds of logic ticks) at order 0 pattern 73 row 0, loop counter 1
+  MUSIC1: 25769 poll(s), 19123 tick(s) over 5223 row(s)
   MUSIC1: 100 order(s), 77 pattern(s), ended at order 0 (1 loops)
 ```
+
+(the second line of each pair is the same run counted a second way — the engine's row visits
+against its own tick counter, every row asserted to have had between 1 and 32 ticks.)
 
 Each module is played from order 0 — the order the demo's own boot starts it at
 (`MAIN/U2.ASM:786` pushes 0) — through its order list to the first `255`, where it loops back
