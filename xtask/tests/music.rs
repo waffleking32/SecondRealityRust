@@ -470,11 +470,14 @@ fn the_analysis_prints_the_notes_numbers() {
     );
 }
 
-/// **The port's `zplus` rule reproduces every filed trace**: `music analyse`
-/// re-derives the value from each trace's own order sequence and prints the
-/// count of samples it had to be right about. Three traces, 10,256 samples, and
-/// no mismatch — the rule is the port's to implement, so it is checked here
-/// rather than copied from a reading of the original.
+/// **The port's `zplus` rule reproduces every trace filed under
+/// `reference/music/`**: `music analyse` re-derives the value from each trace's
+/// own order sequence and prints, on that trace's own line, how many samples it
+/// had to be right about — every filed trace's line says `0 mismatch(es)`, and
+/// the counts are summed here. The walk is the tree's rather than a list of
+/// names, so a trace filed later is covered without an edit; the rule is the
+/// port's to implement, so it is checked here rather than copied from a reading
+/// of the original.
 #[test]
 fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
     // The walk is the tree's, not a list: a trace filed later is covered without
@@ -526,8 +529,11 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
 /// **The anchor is a property of the boot, not of a session** (Task 1's Step 7):
 /// the row-implied anchor — the first row change, back-extrapolated by the tick
 /// counter's own value there at the tick clock's measured frames a tick — is the
-/// same in every filed session, and the `zframe` column's first non-zero frame
-/// is within a tick of it. Four sessions, one recipe, no free parameter.
+/// same in every session filed under `reference/music/`, and the `zframe`
+/// column's first non-zero frame is one frame plus the tick a row boundary is
+/// seen within apart from it (0.9 to 2.9 frames in the traces at hand — up to
+/// about two ticks, not the one tick the readings were once claimed to agree
+/// to). One recipe, no free parameter.
 #[test]
 fn the_anchor_is_the_same_in_every_filed_session() {
     // Walked from the tree, like the zplus check: a trace filed later is covered

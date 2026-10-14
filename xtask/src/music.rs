@@ -1063,7 +1063,7 @@ pub struct TraceManifest {
     pub machine: BTreeMap<String, i64>,
     /// The words whose reading at the end of the trace differs from the one
     /// above. Which words move is not assumed: the mixing rate moves
-    /// (`_zmixspeed` 20000 → 40000 in `second5`'s session), `_zpollmix` moves
+    /// (`_zmixspeed` 20000 → 40000 in `second5b`'s session), `_zpollmix` moves
     /// (0 → 1, the demo switching to the polled mode), the player's volume words
     /// move under `fademusic` (`MAIN/U2.ASM:333-346`), and a word that did not
     /// move is simply absent here.
@@ -1709,7 +1709,7 @@ fn merge_machine_words(
             // to assume — `_np_mastermul` moves because the module is loaded
             // and `fademusic` walks the volume (`MAIN/U2.ASM:333-346`), and
             // `_zmixspeed` moves because the mixing rate is set again later in
-            // the run (20000 → 40000 in `second5`'s session) — so nothing is
+            // the run (20000 → 40000 in `second5b`'s session) — so nothing is
             // assumed constant.
             Some(first) if *first != value => {
                 moved.insert(name, value);
@@ -2092,14 +2092,9 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
         // The words in this segment are a mix of `int` and `unsigned`
         // (`MAIN/STMIK.H`), so a value above 32767 is printed both ways: 40000
         // as a signed 16-bit word is -25536, and a reader who sees only that
-        // would think the mixing rate had gone negative.
-        let show = |value: i16| -> String {
-            if value < 0 {
-                format!("{value} ({} unsigned)", u16::from_le_bytes(value.to_le_bytes()))
-            } else {
-                value.to_string()
-            }
-        };
+        // would think the mixing rate had gone negative. The analysis prints
+        // through the same function, so both commands read alike.
+        let show = |value: i16| Analysis::show_word(i64::from(value));
         println!(
             "  frame {first_frame}: {}; frame {last_frame}: {} — {rate:+.4} per frame, {:+.2} per \
              second at {FRAME_RATE_HZ} Hz",
@@ -2330,9 +2325,10 @@ pub struct ZplusCheck {
 ///
 /// `zplus` is what `muscode_6` (`DIS/DISINT.ASM:242-282`) turns into a row
 /// offset for `dis_muscode`, so the port has to compute it rather than copy it.
-/// The rule below is the one that reproduces the three filed traces over every
-/// sample of all of them, and the note states it as **the port's rule, verified
-/// over the filed traces** — not as a reading of the original's source:
+/// The rule below is the one that reproduces every trace filed under
+/// `reference/music/` over every sample of all of them, and the note states it
+/// as **the port's rule, verified over the filed traces** — not as a reading of
+/// the original's source:
 ///
 /// - **1** while the counter is playing an order whose *next* entry in the
 ///   module's order list is `254` — the marker is coming;
@@ -2911,8 +2907,8 @@ impl Analysis {
                 .find(|state| state.zframe != 0)
                 .map(|state| state.frame);
             println!(
-                "  the anchor the rows imply: the first row change is at frame {} with \\
-                 `_np_zframe` {}, and {} ticks at the measured {frames_per_tick:.4} frames a tick \\
+                "  the anchor the rows imply: the first row change is at frame {} with \
+                 `_np_zframe` {}, and {} ticks at the measured {frames_per_tick:.4} frames a tick \
                  is {:.1} frames — so that row began at frame {:.1} (± the tick the row \
                  boundary is within and the frame the change is seen on)",
                 first_change.0,
@@ -3751,9 +3747,10 @@ mod tests {
         assert_eq!(holed.before_sampling, None);
     }
 
-    /// Two readings of a machine word that disagree are refused rather than
-    /// silently merged: the manifest carries one number per word, and keeping
-    /// the first of two is how a record describes a machine that never was.
+    /// Two readings of a machine word that disagree are **both recorded** rather
+    /// than silently merged: the manifest carries the reading at the locate and
+    /// the reading at the end, and keeping the first of two is how a record
+    /// describes a machine that never was.
     #[test]
     fn machine_readings_that_disagree_are_both_recorded() {
         let start = BTreeMap::from([
@@ -3803,6 +3800,22 @@ mod tests {
         assert_eq!(machine.get("_np_mastermul"), Some(&0), "the reading at the locate");
         assert_eq!(moved.get("_np_mastermul"), Some(&2240), "and the reading at the end");
         assert!(!moved.contains_key("_np_mastervol"), "it did not move");
+    }
+
+    /// A machine word above 32767 is printed **both ways**, and one function has
+    /// to be enough for every place that prints it: the raw reading of 40000 —
+    /// the mixing rate the music runs at — is `-25536` as a signed 16-bit word,
+    /// which on its own reads as a negative rate. `MAIN/STMIK.H` declares some
+    /// of these words `unsigned` (`_zmixspeed`, `_zbufsize`) and some `int`, so
+    /// the printer shows the signed reading and the unsigned one together, and
+    /// `music probe` delegates to the same function rather than re-deciding.
+    #[test]
+    fn a_machine_word_above_32767_is_printed_both_ways() {
+        assert_eq!(Analysis::show_word(40000), "40000");
+        assert_eq!(Analysis::show_word(-25536), "-25536 (40000 unsigned)");
+        // A word that fits in 16 bits and is not negative prints once.
+        assert_eq!(Analysis::show_word(192), "192");
+        assert_eq!(Analysis::show_word(0), "0");
     }
 
     /// The `zplus` rule against both modules' order lists: the marker-coming

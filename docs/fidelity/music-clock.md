@@ -84,15 +84,10 @@ Three things the trace guarantees, and why they matter:
 `second5` session:
 
 ```
-  the anchor the rows imply: the first row change is at frame 427 with `_np_zframe` 13, and
-    13 ticks at the measured 1.4622 frames a tick is 19.0 frames — so that row began at frame
-    408.0 (± the tick the row boundary is within and the frame the change is seen on)
-  the anchor the `zframe` column shows: frame 410 is the first frame whose `zframe` is not 0 —
-    2.0 frame(s), or 1.4 tick(s), from the rows' reading: the same tick, seen at the next
-    whole-frame sample. Both readings are quantised to a whole frame, so the gap is one frame
-    plus the tick the row change is seen within; it is not a claim that they agree to within a
-    tick, and the two numbers above say how big it is.
+  the anchor the rows imply: the first row change is at frame 427 with `_np_zframe` 13, and 13 ticks at the measured 1.4622 frames a tick is 19.0 frames — so that row began at frame 408.0 (± the tick the row boundary is within and the frame the change is seen on)
+  the anchor the `zframe` column shows: frame 410 is the first frame whose `zframe` is not 0 — 2.0 frame(s), or 1.4 tick(s), from the rows' reading: the same tick, seen at the next whole-frame sample. Both readings are quantised to a whole frame, so the gap is one frame plus the tick the row change is seen within; it is not a claim that they agree to within a tick, and the two numbers above say how big it is.
 ```
+(The tool prints each of those two readings as **one line**; they are pasted here as printed, not wrapped.)
 
 The derivation uses no simulation and no free parameter: the first row change is at frame
 427 with the *tick counter's own value* (13) there, and back-extrapolating 13 ticks at the
@@ -225,8 +220,11 @@ tick for tick.
 
 ## 5. Which soundcard and mixer rate the reference runs at
 
-`cargo xtask music analyse`, section 4, records each word **twice** — read when the segment
-was located (`second5`: frame 147, before the music) and again at the end of the trace:
+`cargo xtask music analyse`, section 4, records each word **twice** — the reading taken when
+the segment was located and the reading taken at the end of the trace. The pairs below are the
+ones `second5b`'s manifest carries (it is the one filed trace with `machine_moved`, and its
+segment was found at frame 144, §9); `second5`'s manifest, found at frame 147, records only the
+locate reading:
 
 | word | at the locate | when the music plays | what it is |
 |---|---|---|---|
@@ -341,20 +339,22 @@ trace's line as the tool prints it:
 
 | trace | the tool's coverage line |
 |---|---|
-| `second5` | `frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing (147, 409, 1220) (frames 147..147 of them are the boundary: the segment was located after they had gone) — this trace is NOT per-frame` |
+| `second5` | `frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing (147, 409, 1220) (frames 147..147 of them are the boundary: the segment was located after they had gone) — this trace is NOT per-frame (…)` |
 | `second5b` | `frames 146..1299 of the requested 144..1299: 1152 sample(s), 4 frame(s) missing (144..145, 409, 1220) (frames 144..145 of them are the boundary: …)` |
 | `second3` | `frames 144..2899 of the requested 142..2899: 2755 sample(s), 3 frame(s) missing (142..143, 417) (frames 142..143 of them are the boundary: …)` |
 | `hiddenu` | `frames 148..6499 of the requested 146..6499: 6351 sample(s), 3 frame(s) missing (146..147, 410) (frames 146..147 of them are the boundary: …)` |
 
 **A count of the absent frames belongs to that line and not to this sentence** — `second5b`
 misses four where the other three miss three. Its two kinds are the tool's own: the first run
-is the boundary the locate leaves (the segment is found a frame late), and the middle one is a
-frame the guest's counter moved across, with the manifest carrying what the counter did around
-it — for `second5`, `skipped` records `409..409 (the counter went 408 -> 410)` and
-`1220..1220 (the read that was opened on frame 1220 was still open when the guest moved to
-1221)`. **Which index falls at that point is session-dependent** — 409 (`second5`,
-`second5b`), 417 (`second3`), 410 (`hiddenu`) — and all of them sit at the same point in the
-demo, the boot's first graphics frame (the reference's own captures put that at 404, D17).
+is the boundary the locate leaves — the frames "the segment was located after they had gone",
+one frame in `second5` (`147..147`) and two in each of the other three (`144..145`, `142..143`,
+`146..147`) — and the middle one is a frame the guest's counter moved across, with the manifest
+carrying what the counter did around it — for `second5`, `skipped` records
+`409..409 (the counter went 408 -> 410)` and `1220..1220 (the read that was opened on frame
+1220 was still open when the guest moved to 1221)`. **Which index falls at that point is
+session-dependent** — 409 (`second5`, `second5b`), 417 (`second3`), 410 (`hiddenu`) — and all
+of them sit at the same point in the demo, the boot's first graphics frame (the reference's own
+captures put that at 404, D17).
 
 **Why is a hypothesis.** What is measured is the counter's own readings, and they say only
 that it went from one value to another with the frame between never current. The explanation
@@ -445,10 +445,15 @@ player moved). The trace reads through the **lowest** view, and the manifest rec
 view, the proof, and the frame it was measured at. `music analyse --at` tries every view, so
 §1.7's address is placed in the view it was measured in.
 
-**The filed manifests are older than the tool that reads them, in two ways, and they are left
+**The filed manifests are older than the tool that reads them, in three ways, and they are left
 as they were.** They carry no `coverage.before_sampling` (§7: the field that names
-the boundary run) and their `locate.aliasing` sentence still contains a doubled `0x` that the
-tool no longer writes. Neither is repaired here: `reference/` is input-only, a *new* directory
+the boundary run); their `locate.aliasing` sentence still contains a doubled `0x` that the
+tool no longer writes; and three of the four — `second5`, `second3`, `hiddenu` — carry no
+`machine_moved`, the field being newer than they are, so their `machine` map holds the reading
+at the locate and whatever the machine did later is not in their record. `second5b`, the same
+recipe as `second5` and the one manifest that carries the field, records four moved words, and
+`music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5` reads the mixing rate at
+40000 in that recipe. None is repaired here: `reference/` is input-only, a *new* directory
 under `reference/music/` is the only thing `music trace` may write inside it, and hand-editing
 a filed manifest is what Phase 2's `reference backfill` exists to avoid being done by a
 person. What keeps the filed records checkable is the reading side: `reference verify`
@@ -494,7 +499,7 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | the locator's views: several bases accepted only when the bytes are one memory | `xtask/src/music.rs`'s own tests |
 | the locator on a short last chunk (it used to underflow) | same |
 | a window out of a manifest that is back to front does not panic the verifier | same |
-| two machine readings that disagree are **both recorded**, and printed both ways when the value is above 32767 | same |
+| two machine readings that disagree are **both recorded**, and a word above 32767 is printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | same |
 | the `zplus` rule against both modules' order lists, restart case included | same |
 | **the anchor is 408 in every filed session**, the two readings within one frame plus a tick of each other | `xtask/tests/music.rs` |
 | the machine's words recorded twice when they move, once when they do not, and printed both ways | `xtask/src/music.rs`'s own tests |
