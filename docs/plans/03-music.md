@@ -305,11 +305,31 @@ passes (exit 0), and a copy with one byte of `trace.csv` flipped fails (exit 1) 
 both digests. A verifier that has never been seen to fail is worth nothing (this is Phase 2's
 Task 2 precedent, and the phase's Review Focus 5).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit what is measured so far**
 
 Commit the object-symbol API, the locator, the trace command, the trace itself, the note and D26.
 The commit message states the measured start index, the rate, and what the trace says about
 `zinfo` — in one sentence each, with the numbers.
+
+
+- [ ] **Step 7: The anchor's session spread, measured (added after the first review)**
+
+The trace's `zframe` column puts the music's first tick at frame 409 *or* 410 in `second5` — the
+trace holds `zframe` 0 at 408 and 1 at 410 and **never published 409** — and the row-change timeline
+independently requires 410 (a sample-accumulator simulation reproduces 57 of 61 row intervals at 410
+and **none** at 409), which is also what the filed reference frames require from the other side
+(ENDLOGO's gate breaks at 1146). One session, however, is not a spread: `hiddenu`, captured in a
+different session, holds a 409 with `zframe` 1 and loses 410 instead, so *that* session's first tick
+was a frame earlier.
+
+So: **re-take `second5` in a fresh session and report three numbers** — the `zframe` anchor, the
+start the row-change timeline implies, and whether they agree with the filed trace's. If the fresh
+session agrees with the filed one, the anchor is a property of the boot and the note can drop the
+"409 or 410" hedge for the recipe; if it differs by a frame, take a third session and record the
+spread as a measured interval, the way §1.7 did for the music clock's rate. Either outcome is a
+result; what is not allowed is leaving the port's anchor resting on an argument when one emulator
+run would settle it. File the new trace beside the old one (a distinct name), with its manifest, and
+let `reference verify` cover it.
 
 ---
 
