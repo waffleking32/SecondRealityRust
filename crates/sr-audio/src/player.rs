@@ -14,7 +14,8 @@
 //!
 //! 1. **A tick is a sample count and a row is a tick count.** The tick's sample count is
 //!    `mix_rate × 2.5/tempo` as the original computes it — an integer division
-//!    (`+0x3d99`…`0x3da4`: `_zmixspeed × 0x7d/(0x32 × tempo)`). A row ends when a counter of
+//!    (`+0x3d99`…`+0x3da6`, one of the claims
+//!    `tests/player.rs` asserts: `_zmixspeed × 0x7d/(0x32 × tempo)`). A row ends when a counter of
 //!    ticks reaches the *published* speed (`+0x4397`…`0x43b0`: `incw 0x2000`,
 //!    `cmp np_speed,0x2000`, `jge`), which is why a speed change lands on the tick it is
 //!    processed on, mid-row. A poll's samples are fractional (`mix_rate/70.086` is not an
@@ -305,8 +306,8 @@ impl Player {
     /// order-advance routine **directly** — which is why a seek publishes no position: the
     /// ring is fed only by a row advance (this module's header, point 3) — and only then sets
     /// `[0x938] = 1` (`+0x259a`). The routine it calls at `+0x258e` clears `[0x93b]`, the row
-    /// counter, the pattern, the loop counter and **`[0x8fd]`**, the published row
-    /// (`+0x5711`, `+0x570b`).
+    /// counter (`+0x5702`), the pattern (`+0x5708`), the loop counter and **`[0x8fd]`**, the
+    /// published row (`+0x5711`, `+0x570b`).
     ///
     /// The order of those two is load-bearing: a seek that lands on a `255` takes the
     /// scan's stop path (`+0x4476` clears `[0x938]`) and is then put back to running by
@@ -319,6 +320,13 @@ impl Player {
         self.loops = 0;
         self.pub_loop = 0;
         self.published.row = 0;
+        // The row and the pattern are zeroed by that same routine (`+0x5702`, `+0x5708`) and
+        // are only given values again by the order advance — so a seek that lands on a `255`
+        // (the scan returning without entering an order) leaves the engine at row 0 of pattern
+        // 0, and feeds those. Unreachable in both modules and unmeasured; the port follows the
+        // bytes.
+        self.row = 0;
+        self.pattern = 0;
         self.advance_flag = ADVANCE_NONE;
         self.state = STATE_STARTED;
         self.at_end = false;
@@ -435,10 +443,15 @@ impl Player {
         i32::from(self.published.zplus)
     }
 
-    /// The `zplus` the engine computed for the order it is playing now — the value the ring
-    /// will hand out [`FIFO_DEPTH`] polls from now. The object's own word is `[0x90d]`, written
-    /// by the order advance's two `orw`s (`+0x4452`, `+0x4461`), and the port's tests read it
-    /// here to pin the arithmetic rather than the delay.
+    /// The `zplus` the engine computed for the order it is playing now. The object's own word
+    /// is `[0x90d]`, written by the order advance's two `orw`s (`+0x4452`, `+0x4461`), and the
+    /// port's tests read it here to pin the arithmetic rather than the delay.
+    ///
+    /// Where it is the value the *ring* will publish [`FIFO_DEPTH`] polls from now, the ring
+    /// carries the order this is asserted against: after the order advance of a natural row
+    /// advance, a `B`, a `C` or a `_zgotosong` seek. It is **not** after a `_zplaysong` seek,
+    /// where nothing new enters the ring until the next row advance and this word describes an
+    /// order the parts will not be told about.
     pub fn engine_zplus(&self) -> i32 {
         i32::from(self.zplus)
     }
@@ -575,7 +588,7 @@ impl Player {
             self.pub_speed = value;
         } else {
             self.pub_tempo = value;
-            // The tick's sample count is recomputed by the tempo setter (`+0x3d99`…`0x3da4`)
+            // The tick's sample count is recomputed by the tempo setter (`+0x3d99`…`+0x3da6`)
             // and only there; the accumulator's carried remainder is what lets a tempo change
             // land mid-row without a jump.
             self.samples_per_tick = samples_per_tick(self.options.mix_rate, value);
@@ -690,11 +703,15 @@ impl Player {
     }
 
     /// The four words the ring carries for the player's current position.
+    ///
+    /// The order is `[0x940] - 1` (`+0x43e6`..`+0x43ef`), which is the order being played on
+    /// every path but one: the scan's give-up branch returns *without* entering an order, and
+    /// there this is the last index the scan looked at — what the original would feed too.
     fn entry_now(&self) -> Entry {
         Entry {
             row: self.row,
             pattern: u16::from(self.pattern),
-            order: self.order & 0x1ff,
+            order: self.next_order.wrapping_sub(1) & 0x1ff,
             zplus: self.zplus,
         }
     }
@@ -722,7 +739,7 @@ impl Player {
 }
 
 /// One tick's worth of samples, as the original computes it: `_zmixspeed × 2.5/tempo`,
-/// truncated (`+0x3d99`…`0x3da4`, whose `mul`/`div` pair is `_zmixspeed × 0x7d` over
+/// truncated (`+0x3d99`…`+0x3da6`, whose `mul`/`div` pair is `_zmixspeed × 0x7d` over
 /// `0x32 × tempo` — `mixspeed × 125/(50 × tempo)`, an integer division).
 fn samples_per_tick(mix_rate: MixRate, tempo: u8) -> u32 {
     let tempo = u32::from(tempo.max(1));

@@ -22,7 +22,9 @@
 //!    `tempo`, `loop` and `zplus`, the sequence of values the port publishes over the trace's
 //!    frames is exactly the trace's. Values rather than frames, so a one-frame displacement of
 //!    a row boundary passes and a skipped row, an invented row, a lost `A`/`T`, a pattern
-//!    published for the wrong order or a `zplus` bit left unset does not. Each word is a key
+//!    published for the wrong order or a `zplus` bit left unset does not. (`loop` is 0 in every
+//!    filed trace, so that key can catch only a wrong *value*: the counter never moves inside a
+//!    filed window, and a port that froze it at zero is indistinguishable here.) Each word is a key
 //!    of its own, because the fault this catches is one word going wrong while the other six
 //!    stay right — which a combined tuple compared only for equality would report as a whole
 //!    position differing and a print-only count would not report at all.

@@ -381,8 +381,8 @@ Task 3 makes the port's player reproduce the traces. **The original's player has
 source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is read out of its
 own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
 from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
-`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 22 load-bearing
-instructions at their own offsets). Offsets below are that object's segment offsets, and the
+`the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts 23 load-bearing
+instructions at their own offsets (the count the test itself prints)). Offsets below are that object's segment offsets, and the
 listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
 it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
 the object cannot settle — which *frame* a row change lands on — is measured against the traces,
@@ -511,9 +511,24 @@ if the player has not yet played a row (`[0x939] == 2`, which `_zplaysong` sets)
 order `_zplaysong` recorded (0, for every plain order the shell hands it — `+0x256b` clears it).
 If *that* entry is itself a `255`, `+0x4499`'s `je` jumps to `+0x447f` — which is **past** the
 stop at `+0x4476` — so it returns with the loop order in `ax` and the pattern, the order and the
-mixing flag untouched: the scan gives up and the player keeps playing what it was playing. (Neither
-module has a `255` at its first order, so this branch is unreachable in both, and no trace can
-measure it; the port follows the bytes.)
+mixing flag untouched: the scan gives up and the player keeps playing what it was playing.
+
+**Two things about those two `255` paths are worth stating because no trace can reach them** —
+neither module has a `255` at its first order — and the port follows the bytes in both rather than
+choosing:
+
+- A `_zplaysong` seek onto a `255` is *not* a stop. The scan's stop path clears `[0x938]`
+  (`+0x4476`) and the seek sets it back to 1 four instructions later (`+0x259a`), so the player is
+  left ticking; the row counter, the pattern and the published row were zeroed by the seek's own
+  routine (`+0x5702`, `+0x5708`, `+0x5711`) and nothing entered an order, so the engine sits at
+  row 0 of pattern 0 — while the ring, fed `[0x940] - 1`, hands the parts the index of the `255`
+  itself. `crates/sr-audio/tests/player.rs`'s
+  `a_255_ends_the_order_list_and_loops_when_the_song_was_already_running` asserts exactly that
+  state.
+- Reaching the give-up branch with the loop order already a `255` leaves `[0x940]` where the scan
+  stopped, so the fed order is the last index looked at rather than an order that was entered —
+  which is what `entry_now` computes (`next_order - 1`, `+0x43e6`..`+0x43ef`) and not the order the
+  engine reports.
 
 **`music-clock.md` §10 says the trace cannot show what the player does at a `255`. This is that
 question's answer, and it is a reading of the object rather than a measurement**: the note records
@@ -597,14 +612,29 @@ second5 against second5b: 131 row change(s) each, 8 of them on a different frame
   ord 26 row 56: frame 1207 against 1206
 ```
 
-so no player can be frame-identical to both, and the plan's four anomalies (rows 18, 28, 49, 57
-in `second5`) are this jitter and not a rule the port is missing. A test that listed them would be
-fitting; one that demanded exactness would be demanding the impossible. So the comparison asserts
-what a port can be held to —
+so no player can be frame-identical to both. **The plan's four anomalous intervals are this
+jitter**, and the diagnosis is the one the sessions actually support: over `second5`'s speed-6 run
+the row intervals spread over **8, 9 and 10 frames where the rule's 8.76 says 8 or 9** — three
+distinct gap sizes, one interval outside the two the row length brackets — and *which* interval
+comes out fatter is not a function of the position, because the two sessions disagree about eight
+of their 131 row changes, so the fat interval is not even in the same place from one capture to
+the next (`cargo xtask music analyse --trace reference/music/second5` prints the histogram;
+`cargo test -p sr-audio --test trace -- --nocapture the_two_sessions` prints which rows move).
+**A per-row mapping of the anomalies is not producible by any command**: rows 28, 49 and 57 of the
+`second5` run sit on the *same* frame in both sessions, so nothing singles them out — and that is
+the finding, not an omission: what the oracle's jitter moves is the interval, not a set of rows.
+A test that listed the anomalies would be fitting; one that demanded exactness would be demanding
+the impossible. So the comparison asserts what a port can be held to —
 
-1. **content**: the (order, row) sequence the port publishes over the trace's frames is the
-   trace's, and so is the (speed, tempo) sequence — no row skipped or invented, no order advance
-   early or late, no effect lost;
+1. **content, word by word**: for each of the seven words the trace records — `order`, `pattern`,
+   `row`, `speed`, `tempo`, `loop` and `zplus` — the sequence of values the port publishes over
+   the trace's frames is the trace's. No row skipped or invented, no order advance early or late,
+   no effect lost, no pattern published for the wrong order, no `zplus` bit left unset. What each
+   key can catch: `order` and `row` the order advance and the `254` step-over, `pattern` a wrong
+   placement of an order, `speed`/`tempo` a lost, doubled or mis-rowed `A`, `zplus` the marker
+   arithmetic. `loop` is **0 in every filed trace**, so a key that never moves can catch only a
+   wrong *value* — a port that published a loop count of its own would fail, while one that froze
+   the counter at zero matches what the traces do.
 2. **placement**: every published value is one the trace publishes at that frame or within
    3 frames of it;
 

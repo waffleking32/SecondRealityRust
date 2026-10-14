@@ -635,9 +635,10 @@ position matches the port's, and the worst displacement:
 ```
 
 The frames that disagree are one per row change — the ±1-frame placement of a row boundary — and
-the *content* is not in doubt: the comparison test asserts that the port publishes exactly the
-trace's sequence of `(order, row)` pairs and exactly its sequence of `(speed, tempo)` pairs, and
-that every published value is one the trace publishes within 3 frames of that frame.
+the *content* is not in doubt: the comparison test asserts, word by word, that the port publishes
+exactly the trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`,
+`loop` and `zplus`, and that every published value is one the trace publishes within 3 frames of
+that frame.
 
 **What is not an approximation here:** the ten-poll publication delay (`_np_*` is a ring buffer ten
 entries deep — `STMIK.300` + `0x2ac1`), the tick and row arithmetic (`+0x3d99`, `+0x4397`), the

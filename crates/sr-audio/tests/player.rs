@@ -670,19 +670,35 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
         "a seek onto a 255 runs the scan off the list"
     );
     // ...and the original then sets `[0x938] = 1` anyway (`+0x259a`), so the player is left
-    // *ticking* with no new order entered: the position is where it was and `_np_zframe`
-    // keeps counting. That is the limbo the port reproduces, not a stop.
-    let before = player.state();
+    // *ticking* with no new order entered: the mixing, the row counter and the pattern were
+    // all zeroed by the seek's own routine (`+0x5702`, `+0x5708`, `+0x5711`) and the scan only
+    // gives up, so the engine sits at row 0 of pattern 0 — while the ring, fed `[0x940] - 1`,
+    // hands the parts the index of the `255` itself. That is the limbo the port reproduces,
+    // not a stop, and neither module can reach it (neither has a `255` at its first order), so
+    // the bytes are all there is to follow.
+    let engine = player.engine_position();
+    assert_eq!(
+        (engine.order, engine.pattern, engine.row),
+        (0, 0, 0),
+        "the seek zeroed the row and the pattern, and entered no order"
+    );
     for _ in 0..200 {
         player.poll();
     }
-    assert_eq!(player.state().order, 0, "no new order was entered");
-    assert_eq!(player.state().pattern, 0);
+    assert_eq!(
+        player.state().pattern,
+        0,
+        "the scan entered no order, so nothing else was published"
+    );
+    assert_eq!(
+        player.state().order,
+        2,
+        "and the ring hands out `[0x940] - 1`: the index of the `255` the scan gave up on"
+    );
     assert!(
         player.zframe() > 0,
         "the ticks ran: the mixing flag was put back by the seek itself"
     );
-    let _ = before;
 
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
