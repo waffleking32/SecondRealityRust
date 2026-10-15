@@ -106,14 +106,23 @@ fn curve_at(mul: u32, base: i32, value: i32) -> i16 {
     // `(0x800 − K)/2` entries, then the ramp, then `0xFF` from `+0x55bd`'s tail. For mul 64
     // that is 768 zeros, the ramp at 768…1279 and 0xFF from 1280 — the boundaries the probe
     // read on MUSIC0's run.
-    let zeros = (0x800 - k) / 2;
+    // The machine's arithmetic: `2 × floor((0x800 − K)/4)` zero bytes (the two `shr $1,%cx`),
+    // then the ramp's `K` entries, then `2 × floor(rem/2)` bytes of `0xFFFF`. Identical to a
+    // plain halving for `mul` 64 and `mul` 16; for `mul` 48 — the port's mono multiplier — the
+    // zero fill is 682, not 683.
+    let span = 0x800 - k;
+    let zeros = (span / 4) * 2;
+    let rest = 0x800 - (zeros + k);
+    let tail = (rest / 2) * 2;
     let index = (base + value).clamp(0, 0x7ff) as usize;
     let byte = if index < zeros {
         0
     } else if index < zeros + k {
         ((((index - zeros) * step) >> 8) & 0xff) as u8
-    } else {
+    } else if index < zeros + k + tail {
         0xff
+    } else {
+        0 // the span's last byte, the object's own 0x01 filler, left alone
     };
     (i16::from(byte) - 128) * 256
 }
@@ -732,11 +741,9 @@ fn the_window_is_not_silent() {
         "the first chunk's unmarked planes are their own silence"
     );
 
-    // The first 120 polls are *inside* the reference's gate: `mul` 64's curve is 1536 zero
-    // entries and then a ramp, so a sample is the silence entry until the mix's value reaches
-    // 255 — and MUSIC0's intro does not. The window is therefore extended until the gate has
-    // opened, which is the honest form of "the output is not silent": the mixer is not
-    // producing a constant, and this says how long it takes to hear that.
+    // The window is extended past the intro because MUSIC0 starts quietly; what the
+    // assertion needs is that the mixer is not producing a constant, and over the longer
+    // window it plainly is not.
     for _ in 0..4000 {
         samples.extend(poll_and_drain(&mut player));
     }
@@ -864,8 +871,8 @@ fn a_note_off_leaves_the_voice_silent() {
     let mut out = vec![0i16; 128];
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), 128);
-    // A level of 0 makes every sample's value 0, so the samples are the curve's own entry for
-    // 0 — 0 while the planes are unmarked, and the marker's 8192 after — and never the note.
+    // A level of 0 makes every sample's value 0, so the samples are the table's own silence
+    // entry — the byte 128, i.e. 0 — and never the note.
     assert_eq!(curve_at(16, MARKED, 0), 0, "the curve's centre, the byte 128");
     assert!(out.iter().all(|sample| *sample == 0), "a level of 0 is the byte 128");
 }

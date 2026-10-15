@@ -621,8 +621,9 @@ impl Mixer {
         (left, right)
     }
 
-    /// The base the planes are on: `0x400` while the first chunk's zeroed accumulators are
-    /// still unmarked, `0x501` once a flush has written the `0x0101` marker into them.
+    /// The base the frame's value lands on: `0x400`, the flush's own `0x400 − centre_sum`
+    /// (`+0x30b4`, `+0x2cbe`) with the accumulator's own DC. The code's `0x0101` re-mark is
+    /// *not* applied — see the body.
     fn base(&self) -> i32 {
         // **The audible path carries no `0x101` marker**, measured: the buffer the DMA plays
         // (`[0xbe6]:0xC9B0`) is centred on the byte 0x80, which is the ramp's centre at index
@@ -785,12 +786,23 @@ impl Curve {
         let mul = mul.max(0x10);
         let ramp = 0x8000 / usize::from(mul);
         let step = 65536 / ramp;
-        let zeros = (0x800 - ramp) / 2;
+        // The machine's own arithmetic, step for step: the two `shr $1,%cx` at `+0x5592` and
+        // `+0x559b` leave `CX` = `floor((0x800 − K)/4)` **words**, so the zero fill is
+        // `2 × floor((0x800 − K)/4)` bytes; then the ramp's `K` entries; then `+0x55b5`'s
+        // shortfall, `0x800 − di`, another `2 × floor(rem/2)` bytes of `0xFFFF` — which leaves
+        // the span's last byte at the object's own `0x01` filler when `rem` is odd, and the
+        // port leaves it zero. For `mul` 64 (`K` 512) the fill is 768 and the tail 768, both
+        // even; for the port's own mono `mul` 48 (`K` 682) the zero fill is 682, not the 683 a
+        // plain division would write.
+        let span = 0x800 - ramp;
+        let zeros = (span / 4) * 2;
         let mut table = vec![0u8; 0x800];
         for entry in 0..ramp {
             table[zeros + entry] = ((entry * step) >> 8) as u8;
         }
-        for byte in table[zeros + ramp..].iter_mut() {
+        let rest = 0x800 - (zeros + ramp);
+        let tail = (rest / 2) * 2;
+        for byte in table[zeros + ramp..zeros + ramp + tail].iter_mut() {
             *byte = 0xff;
         }
         Curve { table, mul }
@@ -931,6 +943,28 @@ mod tests {
         // The floor: a multiplier below 0x10 is built as 0x10 (K = 2048 → its own shape).
         assert_eq!(Curve::build(1).mul(), 0x10);
         assert_eq!(Curve::build(1).table, Curve::build(16).table);
+        // `mul` 48, the port's own *mono* multiplier: K = 682, and the machine's zero fill is
+        // `2 × floor(1366/4)` = 682, where a plain halving would write 683. The two tables
+        // differ, which is what makes this a test of the arithmetic rather than of a shape.
+        let mono = Curve::build(48);
+        assert_eq!(0x8000 / 48, 682, "K");
+        assert_eq!(mono.table[681], 0);
+        assert_eq!(mono.table[682], 0, "the ramp's first entry");
+        assert_eq!(mono.table[683], 0);
+        assert_eq!(mono.table[684], 0, "(k × 96) >> 8 at k = 2");
+        assert_eq!(mono.table[685], 1, "(k × 96) >> 8 = 1 at k = 3");
+        assert_ne!(mono.table, {
+            // the same curve with the plain `(0x800 − K)/2` zero fill the port used to write
+            let mut wrong = vec![0u8; 0x800];
+            let zeros = (0x800 - 682) / 2;
+            for entry in 0..682usize {
+                wrong[zeros + entry] = ((entry * 96) >> 8) as u8;
+            }
+            for byte in wrong[zeros + 682..].iter_mut() {
+                *byte = 0xff;
+            }
+            wrong
+        });
     }
 
     #[test]

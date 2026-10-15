@@ -723,25 +723,32 @@ uses. The measurement says otherwise: with the buggy table the marker would put 
 1281, inside the `0xFF` tail, while the DMA buffer the probe read (`[0xbe6]:0xC9B0`) is a
 waveform **centred on 0x80** — the ramp's `(1024 − 768)/2` at index 1024 = `0x400 + 0`. The port
 follows the measurement (its `Mixer::base` uses `0x400`) and keeps the marker's bookkeeping in the
-code without applying it. What would settle it: a dump of one `_zchn` accumulator word — the
-planes live at `[0xbe4]:0x4000`, outside the located segment, so the probe needs a linear-address
-mode that reads that segment — taken at two consecutive flushes, to see whether the word a flush
-leaves behind is `0x0101`-marked or the sample's own value.
+code without applying it. The code's own side of it is not in doubt — `+0x2cf1` writes `0x0101`
+*after* reading and `+0x3482` adds into the plane, so the word a flush leaves behind is marked —
+which is exactly why the audible index's behaviour is unexplained and not a code question. What
+would settle it is a dump of the DMA buffer beside the accumulator plane it was flushed from:
+the plane lives at `[0xbe4]:0x4000`, outside the located segment, so the probe needs a
+linear-address mode that reads that segment, which this round does not add.
 
-**(b) The formula is not confirmed by a second multiplier.** The same dump under MUSIC1
-(`--cycles 30000 --arg 3 --frames 600..900`) does **not** show the boundaries at
-`(0x800 − K)/2 = 861` and `861 + K = 1202` for the `mul` 48 a mono configuration would give, nor
-at 768/1280 for a stereo `mul` 64: `cs:0x6E+0x35A` and `+0x3CB` read `00 00 00 00` and
-`2E 2F 2F 30`, and `+0x4B0`/`+0x4B4` read `A1 A1 A2 A2 A3 A3 A4 A4` — a *gentler* slope than any
-built ramp, i.e. **not the builder's output at all** in that run, while `cs:0x6C` is `6E 00`
-there too. So the bug is real in the builder's bytes and MUSIC0's run matches it exactly, and
-what MUSIC1's run is reading through is unexplained: the region may hold different data per
-session (heap or a second user of the span) rather than one table. The port's table is the
-MUSIC0-matched one, and this clause is the reason a reader should not treat it as settled for
-every run.
+**(b) Withdrawn 2026-10-15 — there was never a second table, and round 3's refutation of the
+formula was a label error in its own report.** The re-review re-measured the MUSIC1 window
+(`--cycles 30000 --arg 3 --frames 600..900`) and found **all 2048 bytes of the span identical to
+MUSIC0's run**, one change line, `cs:0x6C` = `6E 00` in both: the region is the builder's output,
+in two modules' runs, at the base the pointer names. Round 3 quoted `+0x35A`, `+0x3CB` and
+`+0x4B0` as if they were *table-relative* when they are absolute segment offsets, and read the
+table's own bytes at those addresses as a different shape (`--dump 0x3C8:4` reads `2D 2D 2E 2E`,
+where a shifted table would read zeros); its predicted boundaries were mis-derived too
+(`0x8000/48` is 682, not 341, and both sessions run `_zoutputmode` 5, so both modules' 0xB0 byte
+gives `mul` 64 and `mul` 48 is unreachable in this demo). The old wording is left here, named as
+withdrawn, because the ledger a later reader finds should say why it went. **So the port's table
+is not "the MUSIC0-matched one": it is the release of record's own behaviour, which is the
+stronger claim and the one D12 wants.**
 
 **Measured difference:** the port's byte is the machine's table applied to the object's
 accumulator — the same map MUSIC0's run is consistent with — and what remains uncertain is
 whether every run's table is that one (b) and whether the audible index carries the marker (a).
-No capture can quantify the audible result (the emulator runs silent, D17); the dump is the whole
-of the evidence, and `cargo xtask music probe --dump` reproduces every byte above.
+No capture can quantify the audible result (the emulator runs silent, D17). `cargo xtask music
+probe --dump` reproduces the **segment's** bytes above — the base word and the whole table span,
+in either module's run — and does **not** reach the DMA buffer's contents (the waveform and its
+0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
+that buffer beside the accumulator plane it came from is what would close (a).

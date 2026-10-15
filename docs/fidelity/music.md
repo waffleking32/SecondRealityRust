@@ -1303,13 +1303,15 @@ zeros. `Mixer::frame` forms each voice's contribution as its table value less it
 quantity the object forms by subtracting the summed centres at `+0x30b4`), indexes the curve with
 it, and widens the byte the card would play: `(byte − 128) × 256`.
 
-**The index's base is the planes' marker.** The flush does not merely read the accumulator, it
-re-marks it: `+0x2ce5`/`+0x2cf1` (stereo) and `+0x30d0`/`+0x30e8` (mono) write `0x01010101` into
-every word they have read, so a frame's accumulator is `0x0101 + Σ values` and the steady state's
-index is **`0x501 + value`**. Only the object's *first* chunk after the planes are zeroed
-(`+0x2943`) has no marker yet, and that chunk is 64 bytes — the DMA loop's countdown starts at 1
-(`+0x50ab`) and is rounded up to a multiple of 64 (`+0x50e6`) — so its index is `0x400 + value`.
-The port models both (`Mixer::base`, `FIRST_CHUNK`), and the tests assert the seam.
+**The index's base is `0x400 + value`, and the marker is not applied.** The flush does re-mark
+what it reads — `+0x2cf1` and `+0x30e8` write `0x0101` *after* the read, and `+0x3482` adds into
+the plane — so the code's own index would be `0x501 + value`, 257 entries higher. The
+measurement says the audible path does not land there: the DMA buffer (`[0xbe6]:0xC9B0`) is
+centred on the byte 0x80, which is the ramp's `(1024 − 768)/2` at index 1024, while `0x501`
+would put silence inside the `0xFF` tail the bug leaves. The port follows the machine
+(`Mixer::base`) and keeps the marker's bookkeeping in the code unapplied; **why** the audible
+index behaves otherwise is open and named in A14 — a re-dump of the DMA buffer beside the plane
+it came from is what would settle it.
 
 **The table the machine's memory holds is not the table the builder writes**, and the
 difference is measured: `cargo xtask music probe --dump` reads `cs:0x6E+0x000`…`+0x7FF` across a
@@ -1324,17 +1326,14 @@ flush's `0x0101` marker (which would put silence 257 entries higher, inside the 
 MUSIC1's own run reads through the same table — its dump does not match either multiplier's
 boundaries, so the port's table is the MUSIC0-matched one.
 
-**What that means for the sound, measured.** At `mul` 64 the curve's first 1536 entries are zero
-and the ramp covers the last 512, so a frame is the silence byte — the card's 0, i.e. −32768 —
-until the mix's value reaches **255**, a quarter of the accumulator's ±1024 range. Over MUSIC0's
-first **4120 polls** (2,351,396 samples, about a minute) only **214 samples** are above the
-silence entry, with a peak of **−14336** and 52 distinct values in the whole window; its first
-**120 polls** (68,487 samples) never leave it at all (`cargo test -p sr-audio --test mix --
---nocapture the_window_is_not_silent`). That is the reference's own gate doing what its parameters
-say it does, and it is recorded here as a measurement rather than smoothed away: the port's output
-is the object's, and if the phase concludes that a 1993 demo could not have shipped a mix that
-lives below its own gate, the thing to re-measure is `_np_mastermul`'s byte and not this
-arithmetic.
+**What that means for the sound, measured.** The table the machine holds is not a gate: 768
+zero entries, the `mul` 64 ramp at 768…1279 (one level per two entries) and `0xFF` from 1280, so
+a frame's byte is the ramp's value for the ordinary signal and `0xFF` only where the sum runs
+past the ramp's top. Over MUSIC0's first 4120 polls (`cargo test -p sr-audio --test mix --
+--nocapture the_window_is_not_silent`): **972,036 samples above the silence entry, peak 32512,
+256 distinct values**, and its first 120 polls: **3,719 of the window's samples are the silence
+entry, 115 distinct values, −15104 … 15360**. That is the release of record's own table doing
+what it does, and A14 carries the measurement.
 
 **The stereo** is the module's own channel table: `+0x37b5` reads the channel's `amixtype` byte
 (`+0x1b`), masks it to three bits, flips its low bit with the pass flag (`+0x37c1`'s

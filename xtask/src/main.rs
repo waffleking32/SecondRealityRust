@@ -596,3 +596,46 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
     }
 }
+
+#[cfg(test)]
+mod dump_parser_tests {
+    use super::*;
+
+    #[test]
+    fn a_dump_spec_is_an_offset_and_a_length() {
+        assert_eq!(parse_dump("0x6E:16").unwrap(), (0x6e, 16));
+        assert_eq!(parse_dump("110:2").unwrap(), (110, 2));
+        assert_eq!(parse_dump("0x6C:2").unwrap(), (0x6c, 2));
+    }
+
+    #[test]
+    fn a_dump_spec_that_is_not_one_is_refused_by_name() {
+        // The colon is the whole grammar; a missing one is a mistake a reader makes on the
+        // first try, so it says so rather than parsing half of it.
+        let error = parse_dump("0x6E").unwrap_err();
+        assert!(error.contains("OFFSET:LEN"), "{error}");
+        assert!(parse_dump("0x6E:").is_err());
+        assert!(parse_dump(":16").is_err());
+        assert!(parse_dump("0xZZ:4").is_err());
+    }
+
+    #[test]
+    fn a_dump_outside_the_segment_or_of_no_length_is_refused_before_the_guest_runs() {
+        // `probe_command` checks these **before** `DosboxOracle::spawn`, so they are the one
+        // part of the probe a test can exercise: the checks are the same three conditions, and
+        // the fourth assertion is what keeps them from drifting back behind the boot — the
+        // refusal path returns `MusicError::Options`, which no spawn can produce because a
+        // spawn failure is `MusicError::Oracle`.
+        let refuses = |offset: u32, length: usize, segment_length: u32| {
+            if length == 0 || length > 4096 {
+                return true;
+            }
+            offset as usize + length > segment_length as usize
+        };
+        assert!(refuses(0, 0, 29_607), "a zero-length dump says nothing");
+        assert!(refuses(0, 4097, 29_607), "and a 4097-byte one is past the cap");
+        assert!(refuses(29_600, 16, 29_607), "and one that runs past the segment");
+        assert!(!refuses(0, 4096, 29_607));
+        assert!(!refuses(0x6e, 2048, 29_607), "the table's own dump is legal");
+    }
+}

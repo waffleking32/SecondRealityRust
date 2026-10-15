@@ -1998,13 +1998,29 @@ pub fn probe_command(
 ) -> Result<ExitCode, MusicError> {
     validate_trace_options(options)?;
     let autoexec = options.autoexec_lines()?;
-    let mut oracle =
-        crate::oracle::dosbox::DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
     let object = std::fs::read(&options.object).map_err(|e| MusicError::Io {
         path: options.object.clone(),
         message: e.to_string(),
     })?;
     let map = symbol_map(&options.object, &object)?;
+    // `--dump`'s refusals are checked **before** the guest is spawned: a tool this phase depends
+    // on should fail loudly without an emulator boot, and a refusal that costs a boot is one no
+    // test can afford to exercise.
+    for (offset, length) in dumps {
+        if *length == 0 || *length > 4096 {
+            return Err(MusicError::Options(format!(
+                "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
+            )));
+        }
+        if *offset as usize + length > map.segment_length as usize {
+            return Err(MusicError::Options(format!(
+                "--dump {offset:#06X}:{length} runs past the segment's {} byte(s)",
+                map.segment_length
+            )));
+        }
+    }
+    let mut oracle =
+        crate::oracle::dosbox::DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
     let needles = needles(&object)?;
     oracle.set_cycles(options.cycles)?;
     oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
@@ -2068,17 +2084,6 @@ pub fn probe_command(
     // *when* an address moves and *what* it holds when it does.
     let mut regions: Vec<(u32, u32, usize)> = Vec::new();
     for (offset, length) in dumps {
-        if *length == 0 || *length > 4096 {
-            return Err(MusicError::Options(format!(
-                "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
-            )));
-        }
-        if *offset as usize + length > map.segment_length as usize {
-            return Err(MusicError::Options(format!(
-                "--dump {offset:#06X}:{length} runs past the segment's {} byte(s)",
-                map.segment_length
-            )));
-        }
         regions.push((*offset, view + *offset, *length));
     }
     if !regions.is_empty() {
