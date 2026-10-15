@@ -649,3 +649,45 @@ and nothing else.
 
 **If it is ever closed:** it would take a trace of the reference's own frame clock beside a trace
 of the guest's, which is a measurement `music probe`-style and not a code change.
+
+## A13 — The mixer's output curve is the object's linear case, not the reference's gated one
+
+**Part:** the music, under every part that plays it (Task 5; `crates/sr-audio/src/mix.rs`, read at
+`MAIN/STMIK.300`'s offsets, cited in `docs/fidelity/music.md` §10).
+
+**Original:** the mixer sums the voices in 16-bit accumulators and converts the sum to an 8-bit
+output byte through a table it builds at init (`+0x551c`) from `_np_mastermul` — the module
+header's master-volume byte, whose reference value is 0xB0 → `mul` 64 (`+0x5362`…`+0x538f`). At
+`mul` 64 the table's first `0x800 - 0x8000/64 = 1536` of 2048 entries are zero and the remaining
+512 ramp 0…255: with the index centred so that silence lands on 1024 (`+0x30b4`'s `0x400 -
+[0x2250]`, mono, and `+0x2cb4`/`+0x2cbe`'s stereo pair), **every accumulator below the centre plus
+512 becomes a zero byte and everything above is amplified fourfold.** The object's own clamp makes
+`mul = 16` the minimum, and at that value the table is the plain linear map
+`(index - 1024) / 8` — silence 0x80, full scale 0xFF/0x00.
+
+**Port:** `Mixer::frame` forms each voice's contribution as its volume-table value less its own
+centre (the quantity the object forms by subtracting the summed centres at `+0x30b4`), and widens
+the sum by `× 32` — the `mul = 16` map in i16, `±1024 → ±32768`, clamped. Everything up to that
+sum is the object's: the volume table's `(sample × scale[level]) >> 8`, the scale table at
+`+0x9c4`, the voice's `m_vol = (avol × master) >> 8`, the 16.16 step at `+0x58b9`/`+0x58c9`, the
+per-frame sample fetch at `+0x346e`, and the loop's end and rewrap at `+0x3840`…`+0x385a`.
+
+**Why:** the object's curve is not a fidelity feature to preserve but a calibration the port has no
+input for. Its parameter is the module's master-volume byte, which the *shell* reads and the port's
+player does not model; the table itself is built into a 2 KB BSS blob at `cs:[0x16e]` and depends
+on `_np_mastermul`'s byte and `_np_masterflags`' bit 4 at the moment of the build. Reproducing it
+would mean modelling the shell's fade path, and the curve it produces at the reference's own `mul`
+is a half-wave gate: it zeroes everything below *half* the accumulator range, including the whole
+negative half of the waveform. **The port plays the arithmetic the curve is applied to, linearly**,
+which is the same choice the object's own builder makes when its clamp floors `mul` at 0x10.
+
+**Measured difference:** the port's output is a linear function of the object's accumulator; the
+reference's is that function composed with the gated curve. There is no audio reference to measure
+the audible difference against — the emulator runs silent (D17) — so this is registered as a
+difference of *shape* that no capture in this tree can quantify, and `music.md` §10 says so in
+those words. What the port's own stream measures is in §10.4: 65,994 of 68,487 samples non-zero
+over MUSIC0's first 120 polls, peak 3,872 of 32,767.
+
+**If it is ever closed:** it needs the module header's master-volume byte modelled in the player,
+a table built at the player's init, and a listening comparison against the reference's own
+machine — which would first need the reference's audio, and there is none.

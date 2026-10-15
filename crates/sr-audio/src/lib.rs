@@ -12,16 +12,18 @@
 //! | [`module`] | the S3M container: patterns, cells, sample headers, the order list, D5's descrambling |
 //! | [`player`] | the tracker: the tick clock, the position, the order advance and `A`/`B`/`C` (Task 3) |
 //! | [`effects`] | one channel's state and the channel effects that move it: `D`, `E`, `F`, `G`, `H`, `J`, `K`, `O`, `Q`, `SDx` (Task 4) |
-//! | the mixer | the mixing engine and its output (Task 5) |
+//! | [`mix`] | the mixing engine and its output, and the drain the device pulls from (Task 5) |
 //!
 //! Nothing here reads the clock, sleeps, or looks at how fast the machine is; the player
 //! advances because the engine ticked — [`Player::poll`] is one video frame and nothing else.
 
 pub mod effects;
+pub mod mix;
 pub mod module;
 pub mod player;
 
 pub use effects::{note_period, period_step, scaled_period, Channel};
+pub use mix::{centre, side_of, step, voice_value, Mixer, Side, RING_SAMPLES, VOLUME_SCALE};
 pub use module::{
     descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, CHANNELS, ROWS,
 };

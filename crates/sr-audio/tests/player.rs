@@ -839,7 +839,9 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         (
             0x6FB8,
             &[0x66, 0x8B, 0x44, 0x5C, 0x66, 0x8B, 0x5C, 0x44, 0x66, 0x3B, 0xD8],
-            "the mixer: mov 0x5c(%si),%eax; mov 0x44(%si),%ebx; cmp %ebx,%eax — +0x5c is the position's shadow",
+            "the driver's voice update: mov 0x5c(%si),%eax; mov 0x44(%si),%ebx; cmp %eax,%ebx \
+             — +0x5c is the position's shadow and +0x44 the position, and the `je` past the \
+             rewrite at +0x6FC7 makes the comparison's direction unobservable",
         ),
         (
             0x6FC7,
@@ -850,6 +852,134 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             0x708C,
             &[0x8B, 0x4C, 0x58, 0x66, 0xC1, 0xE1, 0x0E],
             "mov 0x58(%si),%cx; shl $0xe,%ecx — +0x58 is the sample base, `m_base`",
+        ),
+        // ---------------------------------------------------------------------------------
+        // Task 5 — the mixing engine. The voice, its arithmetic, and the bounds it plays within.
+        // ---------------------------------------------------------------------------------
+        // The per-frame loop's body (`+0x345d`'s inner block): the sample byte is read at
+        // `es:(si)` with `si` = `m_pos`, looked up in the volume table at `(m_vol << 8) |
+        // sample` (`bh` is `m_vol`, `bl` the byte), and the two frames' values are added into
+        // the accumulators as one 32-bit `add`. `di` advances four bytes for two frames.
+        (
+            0x346C,
+            &[
+                0x03, 0xCD, 0x26, 0x8A, 0x1C, 0x13, 0xF2, 0x8A, 0x07, 0x66, 0xC1, 0xE0, 0x10, 0x03,
+                0xCD, 0x26, 0x8A, 0x1C, 0x13, 0xF2, 0x8A, 0x07, 0x66, 0x01, 0x05, 0x83, 0xC7, 0x04,
+            ],
+            "add %bp,%cx; mov %es:(%si),%bl; adc %dx,%si; mov (%bx),%al; shl $0x10,%eax; \
+             …twice…; add %eax,(%di); add $0x4,%di — the sample fetch, the volume lookup and \
+             the 16.16 position advance, two frames at a time",
+        ),
+        // The volume table's arithmetic: `mul %bx` with `bx` = (level << 8) | sample value,
+        // then `mov %ah` — an entry is `(sample × scale[level]) >> 8`, truncated.
+        (
+            0x5546,
+            &[
+                0xB9, 0x00, 0x01, 0xB8, 0x00, 0x00, 0x8A, 0xDF, 0x32, 0xFF, 0x8A, 0x18, 0x50, 0xF7,
+                0xE3, 0x26, 0x88, 0x25, 0x47, 0x58, 0x40, 0xE2, 0xF5,
+            ],
+            "mov $0x100,%cx; mov $0x0,%ax; mov %bh,%bl; xor %bh,%bh; mov (%bx,%si),%bl; \
+             push %ax; mul %bx; mov %ah,%es:(%di); inc %di; pop %ax; inc %ax; loop — 256 \
+             entries of `(sample × scale) >> 8` per level",
+        ),
+        // The scale table itself, at `+0x9c4`: `floor(level × 255/63)`, which is four a level
+        // from the bottom and a hair above it from level 21.
+        (0x9C4, &[0x00, 0x04, 0x08, 0x0C], "the scale table: level 0 is 0, level 1 is 4, …"),
+        (
+            0x9FF,
+            &[238],
+            "… sixty entries later: level 59's scale is 238 = floor(59 × 255/63), where four a \
+             level would be 236",
+        ),
+        (0xA03, &[255], "… and level 63's is 255, not 252"),
+        // The centre a voice at a level contributes when its sample is at 128: the table is
+        // read with `bl` = 0x80 and `bh` = `m_vol`, then shifted by the pan tables.
+        (
+            0x37AE,
+            &[
+                0xB3, 0x80, 0x64, 0x8A, 0x07, 0x32, 0xE4, 0x3E, 0x8B, 0x5E, 0x1B, 0x83, 0xE3, 0x07,
+                0x80, 0xFB, 0x06, 0x73, 0x04, 0x32, 0x1E, 0x1E, 0x21, 0x03, 0x1E, 0x1C, 0x21,
+            ],
+            "mov $0x80,%bl; mov %fs:(%bx),%al; xor %ah,%ah; mov %ds:0x1b(%bp),%bx; and $0x7,%bx; \
+             cmp $0x6,%bl; jae; xor 0x211e,%bl; add 0x211c,%bx — the centre read at \
+             `(m_vol << 8) | 0x80`, and the pan index = `(amixtype & 7) ^ pass`",
+        ),
+        // The two shifts the pan tables give the centre before it is accumulated: `+0x38e4`
+        // and `+0x38f4`, 16 bytes each, 0x10 meaning "not this side" (a word shifted by 16).
+        (0x38E4, &[0x00, 0x10, 0x01, 0x10], "shift table for [0x2250]/[0x2252]"),
+        (0x38F4, &[0x10, 0x00, 0x10, 0x01], "shift table for [0x2254]"),
+        // `m_speed`: the object's own base frequency over the period, then over the mixing rate.
+        (
+            0x58B9,
+            &[0xBA, 0xDA, 0x00, 0xB8, 0x00, 0x76, 0xF7, 0xF1],
+            "mov $0xda,%dx; mov $0x7600,%ax; div %cx — 0x00da7600 over the period",
+        ),
+        (
+            0x58C9,
+            &[
+                0xF7, 0x36, 0xD9, 0x08, 0x8B, 0xC8, 0x33, 0xC0, 0xF7, 0x36, 0xD9, 0x08, 0x89, 0x44,
+                0x50, 0x89, 0x4C, 0x52,
+            ],
+            "divw 0x8d9; mov %ax,%cx; xor %ax,%ax; divw 0x8d9; mov %ax,0x50(%si); mov \
+             %cx,0x52(%si) — the quotient and the remainder as m_speed's whole and fraction",
+        ),
+        // The stereo divisor's choice: the low word of `_zmixspeed` in mono, `[0x8d7]` in
+        // stereo, stored as the effective rate the step is divided by.
+        (
+            0x5397,
+            &[
+                0x2E, 0xA2, 0x16, 0x09, 0x2E, 0x8B, 0x16, 0xD5, 0x08, 0xA8, 0x80, 0x74, 0x05, 0x2E,
+                0x8B, 0x16, 0xD7, 0x08, 0x2E, 0x89, 0x16, 0xD9, 0x08,
+            ],
+            "mov %al,%cs:0x916 (np_mastermul); mov %cs:0x8d5,%dx; test $0x80,%al; je; mov \
+             %cs:0x8d7,%dx; mov %dx,%cs:0x8d9 — the master multiplier byte and the rate it \
+             selects, and [0x8d7] holds the segment's initial 21111 in stereo",
+        ),
+        // The two end paths: a one-shot stops (`m_speed = 0`) and a loop rewraps the position by
+        // `m_loop - m_end`, keeping the overshoot.
+        (
+            0x383C,
+            &[
+                0x2E, 0x8B, 0x46, 0x4C, 0x3D, 0xFF, 0xFF, 0x75, 0x11, 0x66, 0x33, 0xC0, 0x66, 0x2E,
+                0x89, 0x46, 0x50, 0x2E, 0xC7, 0x06, 0x4A, 0x21, 0x00, 0x80, 0xEB, 0x27, 0x2E, 0x2B,
+                0x46, 0x48, 0x03, 0xF0,
+            ],
+            "mov 0x4c(%bp),%ax (m_loop); cmp $0xffff,%ax; jne; xor %eax,%eax; mov \
+             %eax,0x50(%bp) (m_speed = 0); movw $0x8000,0x214a; jmp; sub 0x48(%bp),%ax; add \
+             %ax,%si — the one-shot's stop and the loop's rewrap",
+        ),
+        // The note start's bounds: `m_loop` = the header's loop end, `m_end` reduced by whole
+        // loop lengths until it is small, and the one-shot's `m_end` = length + 0x20 with the
+        // 0xffff marker.
+        (
+            0x489C,
+            &[
+                0x3D, 0x00, 0x00, 0x74, 0x1D, 0x26, 0x8B, 0x16, 0x14, 0x00, 0x89, 0x54, 0x4C, 0x2B,
+                0xD0, 0x3D, 0xF4, 0x01, 0x77, 0x09, 0x2B, 0xC2, 0x3D, 0xF4, 0x01, 0x72, 0xF9, 0x03,
+                0xC2, 0x89, 0x44, 0x48,
+            ],
+            "cmp $0x0,%ax; je; mov %es:0x14,%dx; mov %dx,0x4c(%si) (m_loop = the loop end); \
+             sub %ax,%dx; cmp $0x1f4,%ax; ja; sub %dx,%ax; cmp $0x1f4,%ax; jb; add %dx,%ax; \
+             mov %ax,0x48(%si) — m_end reduced by loop lengths until it is below 500",
+        ),
+        (
+            0x48BE,
+            &[0x26, 0xA1, 0x10, 0x00, 0x05, 0x20, 0x00, 0x89, 0x44, 0x48, 0xB8, 0xFF, 0xFF, 0x89, 0x44, 0x4C],
+            "mov %es:0x10,%ax; add $0x20,%ax; mov %ax,0x48(%si); mov $0xffff,%ax; mov \
+             %ax,0x4c(%si) — the one-shot's bounds, length plus the padding, m_loop = 0xffff",
+        ),
+        // The output conversion's other half: the accumulator less the centre sums, indexed
+        // into the table the builder wrote at `cs:[0x6c]`.
+        (
+            0x30AD,
+            &[0x2E, 0xA1, 0x6C, 0x00, 0x05, 0x00, 0x04, 0x2E, 0x2B, 0x06, 0x50, 0x22],
+            "mov %cs:0x6c,%ax; add $0x400,%ax; sub %cs:0x2250,%ax — the table's base plus \
+             0x400 less the mono centre sum",
+        ),
+        (
+            0x2CAF,
+            &[0x8B, 0xCA, 0xB8, 0x00, 0x04, 0x2E, 0x2B, 0x06, 0x54, 0x22],
+            "mov %dx,%cx; mov $0x400,%ax; sub %cs:0x2254,%ax — the stereo right side's",
         ),
     ];
 

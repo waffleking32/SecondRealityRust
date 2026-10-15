@@ -73,6 +73,7 @@
 //! moves the timeline on a channel effect's behalf.
 
 use crate::effects::{note_period, scaled_period, Channel, Portamento};
+use crate::mix::Mixer;
 use crate::{Module, CHANNELS, ROWS};
 
 /// The frame clock's denominator: the engine's logic tick is `70_086/1000` Hz
@@ -270,9 +271,11 @@ pub struct Player {
 
     /// The module's global-volume byte, which the shell's `fademusic` walks down.
     global_volume: u8,
-    /// `_zshutup` was called: the voices are silent. Task 5 owns the voices; this records the
-    /// request so the engine seam can see it.
+    /// `_zshutup` was called: the voices are silent until a row starts a note.
     silenced: bool,
+
+    /// The mixing engine: the voices, and the ring the device drains (Task 5).
+    mixer: Mixer,
 }
 
 impl Player {
@@ -321,6 +324,7 @@ impl Player {
             published: Entry::default(),
             global_volume,
             silenced: false,
+            mixer: Mixer::new(),
         }
     }
 
@@ -348,6 +352,9 @@ impl Player {
         for channel in &mut self.channels {
             channel.reset();
         }
+        // `+0x5614` clears each channel's mixer half too — `m_base` at `+0x5641`/`+0x5644` —
+        // so a seek is a fresh start for the voices as well as for the effects.
+        self.mixer.reset();
         self.loop_order = 0;
         self.next_order = u16::from(order);
         self.pending_row = 0;
@@ -437,32 +444,91 @@ impl Player {
     /// `zpollme` once per copper frame), so one `poll` per logic tick is the faithful model
     /// rather than a simplification of one (`music-clock.md` §5).
     ///
-    /// Inside the original's `zpollme` the work is ordered: mix, doing a tick whenever the
-    /// sample countdown runs out (`+0x5132`…`0x515c`); then **push** the position and **pop**
-    /// the one ten entries old (`+0x52c2`…`0x5326`). That order is kept here.
+    /// Inside the original's `zpollme` the work is ordered: mix a chunk of the DMA buffer
+    /// (`+0x510c`'s `call 0x3905`, reached from the loop at `+0x50d0`), run the tick that the
+    /// chunk ended on (`+0x5150`'s `call 0x4353`), mix the next chunk, and so on; then **push**
+    /// the position and **pop** the one ten entries old (`+0x52c2`…`+0x5326`). That order is
+    /// kept here: the samples before a tick are mixed before that tick runs.
     pub fn poll(&mut self) {
         let before = self.acc / FRAME_UNITS;
         self.acc += u64::from(self.options.mix_rate.samples_per_second()) * 1000;
         self.samples_this_poll = (self.acc / FRAME_UNITS - before) as u32;
 
         let threshold = u64::from(self.samples_per_tick) * FRAME_UNITS;
+        let mut pending = self.samples_this_poll as usize;
         while self.acc >= threshold {
             self.acc -= threshold;
+            // The bytes this poll contributes up to the tick: the object mixes a chunk bounded
+            // by the DMA buffer's room and by `m_safe`, never by more than a tick's worth at a
+            // time in the steady state. The port's chunks are tick-sized, which is what keeps
+            // a row's effects on the samples after them.
+            let take = pending.min(self.samples_per_tick as usize);
+            self.mix_samples(take);
+            pending -= take;
             if self.running {
                 self.tick();
             }
         }
+        self.mix_samples(pending);
 
         self.push_position();
         self.pop_position();
     }
 
+    /// Mix `samples` output samples — the object's DMA bytes, one i16 each — into the drain's
+    /// ring. The samples a poll produces are [`Player::samples_this_poll`]'s count exactly.
+    fn mix_samples(&mut self, samples: usize) {
+        let options = self.options;
+        self.mixer.mix(
+            &self.module,
+            &mut self.channels,
+            &options,
+            self.global_volume,
+            self.silenced,
+            samples,
+        );
+    }
+
     /// The whole samples this poll contributed — what Task 5's mixer mixes. Fractional
     /// samples are carried into the next poll rather than rounded away, so the rate does not
     /// drift by construction: at 40000 Hz this reads 570 four polls in five and 571 on the
-    /// fifth.
+    /// fifth. [`Player::poll`] hands exactly this many samples to the mixer, so the drain sees
+    /// the same count Task 3's tests pinned.
     pub fn samples_this_poll(&self) -> u32 {
         self.samples_this_poll
+    }
+
+    /// **The device's drain, and nothing else.** Copy up to `out.len()` of the mixed samples
+    /// the engine has produced and the device has not taken, oldest first, and return how many
+    /// were copied.
+    ///
+    /// The samples are interleaved as the output mode says: one a frame in mono, a left and a
+    /// right in stereo, so `MixRate::Hz40000` in stereo is 20000 frames a second of two i16
+    /// each. This moves no engine state — the position the parts read is [`Player::state`]'s,
+    /// and the device is behind it by whatever this has not drained
+    /// (`MAIN/STMIK.H:100-103`).
+    ///
+    /// A device that does not keep up loses samples, not time: the ring is bounded and drops
+    /// the *oldest* ones when it is full ([`Mixer::dropped`] counts them), because a poll is
+    /// one 70.086 Hz frame of the demo's timeline and may never wait.
+    pub fn take_samples(&mut self, out: &mut [i16]) -> usize {
+        self.mixer.take(out)
+    }
+
+    /// The samples the mixer has produced and the drain has not taken.
+    pub fn pending_samples(&self) -> usize {
+        self.mixer.pending()
+    }
+
+    /// The samples the ring's overflow policy has dropped since the player was made.
+    pub fn dropped_samples(&self) -> u64 {
+        self.mixer.dropped()
+    }
+
+    /// The last frame the mixer produced, left and right — the value `tests/mix.rs` checks its
+    /// hand-computed samples against, and a reader's window on the mixer without draining it.
+    pub fn last_mixed_frame(&self) -> (i16, i16) {
+        self.mixer.last_frame()
     }
 
     /// The player's published words — the ones `DIS/DISINT.ASM` reads and the traces record.
@@ -771,6 +837,11 @@ impl Player {
                     }
                     None => channel.last_instrument = 0,
                 }
+                // `+0x4872`…`0x48cb`: the note start hands the mixer its voice — which sample
+                // it plays and where the sample ends. `checkins` has already decided the
+                // instrument is a PCM one; the mixer reads its header's loop for itself.
+                self.mixer
+                    .start_note(index, &self.module, channel.instrument);
             }
             // `+0x48ce`: nothing to play a note on until an instrument has loaded.
             if channel.last_instrument == 0 {

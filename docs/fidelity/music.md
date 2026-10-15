@@ -1141,3 +1141,242 @@ The per-effect tests and their cells:
 The trace comparison cannot judge any of this (a wrong `D` does not move the timeline), which is
 why the tables in this section are asserted twice: once here, as numbers, and once against the
 object's image in `tests/player.rs`.
+
+## 10. The mixer — Task 5
+
+The mixer is `crates/sr-audio/src/mix.rs`: the voices, and the ring the audio device drains. It is
+the end of the chain `module.rs` (the container) → `player.rs` (the tracker) → `effects.rs` (the
+channel effects) started, and it is what makes the two modules audible. The evidence is
+
+```
+cargo test -p sr-audio --test mix -- --nocapture
+cargo test -p sr-audio --lib mix::                          # the tables and the step
+cargo test -p sr-audio --test player -- --nocapture the_objects_own_bytes
+```
+
+Every offset below is `MAIN/STMIK.300`'s segment offset and every load-bearing one is **asserted
+against the object's own bytes** by `tests/player.rs`'s claims table, which this task grew from
+**131 claims to 147**: the per-frame loop's body, the volume table's build, the scale table, the
+centre read and its pan shifts, the two pan shift tables, the two divisions of the step, the
+stereo divisor's selection, the two end paths, the note start's bounds, and the output
+conversion's two corrections.
+
+### 10.1 Where the mixer is, and how it is called
+
+`_zpollme` (`+0x261b`) checks `_zpollmix` and calls `+0x51c5`; the reference runs polled
+(`_zpollmix` is 1 from the music's start, `music-clock.md` §5), so that call is once per copper
+frame (`MAIN/COPPER.ASM:466`). Inside it, the DMA loop — `+0x4ff8`'s tail falling into `+0x50d0`
+— is:
+
+| offset | what it does |
+|---|---|
+| `+0x50d0` | how many bytes the DMA buffer still wants |
+| `+0x50e6` | the chunk: that count, or the tick's countdown, rounded **up to a multiple of 64** (`add $0x41,%ax; and $0xffc0,%ax`) |
+| `+0x510c` | **mix the chunk** — `call 0x3905` |
+| `+0x512d` | copy the chunk to the DMA buffer's real home (the `movsb` loop at `+0x3ad7`, for EMS) |
+| `+0x5150` | **`call 0x4353`, the tick** |
+| `+0x5157` | `[0xbe0] += [0x8e1]`, one tick's samples, and loop |
+
+So the samples before a tick are mixed before that tick runs. The port's `Player::poll` keeps that
+order: it hands the mixer the samples up to each tick boundary, then runs the tick, then mixes
+what is left of the poll.
+
+The mixer's own entry is `+0x3905`. It halves the count in stereo (`+0x396a`: `shrw $1,[0xbde]` —
+a byte count becomes a frame count), walks **eight** channel structs for the first side
+(`+0x396f`…`+0x398c`, `bp` from `0xda0` to `0x10a0`), sets the pass flag `[0x211e] = 1`
+(`+0x3996`) and walks the **next eight** for the other (`+0x39ac`…`+0x39c9`, `bp` from `0x10a0` to
+`0x13a0`); in mono it walks all sixteen into one accumulator (`+0x39cd`, `[0x211c] = 8`). Each
+walk calls the voice routine `+0x3765` for a channel with a sample and a nonzero step
+(`+0x377e`'s `or`/`je`).
+
+`+0x3765` is the whole voice, and it is where the three numbers the port keeps come from:
+
+- **the sample** — `es` = `m_base`'s high word (`+0x3795`/`+0x37a2`) and `si` = `m_pos`
+  (`+0x378a`), so the object's position is a **byte offset into the sample**;
+- **the bounds** — `m_end` (`+0x48`) and `m_loop` (`+0x4c`), read at `+0x383c`;
+- **the two cached words** — `m_speed` (`+0x50`) and `m_vol` (`+0x41`).
+
+### 10.2 The voice: the arithmetic the port reproduces
+
+**The volume table** is built by `+0x551c` (called from `+0x22d0`, `+0x2792`, `+0x53af` and
+`+0x5420`, i.e. at the sound init, at each module load and whenever the header watch sees the
+master volume move). It allocates (`+0x29a9`) 0x5000 bytes at `cs:[0xbe4]`, zeroes the second
+0x1000 — the accumulators — at `+0x2943`, and fills **64 levels × 256 sample values** with
+`(sample × scale[level]) >> 8` (`+0x5553`'s `mul %bx`, `+0x5555`'s `mov %ah`). `scale` is the
+object's own 64-byte table at `+0x9c4`, whose 64 values are exactly **`floor(level × 255/63)`** —
+read entry by entry out of the image and asserted by `tests/player.rs` at `+0x9c4` (0, 4, 8, 12),
+`+0x9ff` (level 59's 238, where four a level would be 236) and `+0xa03` (level 63's 255). So the
+top of the range is a hair below full scale — a sample of 255 at level 63 maps to 254 — and
+`level × 4` is the table's shape only up to level 20. **A sample byte is the S3M file's own unsigned value**: 128 is the centre,
+which is what `+0x37ae`'s `mov $0x80,%bl; mov %fs:(%bx),%al` reads (`bh` still holding `m_vol`) and
+what `+0x30b4` subtracts again.
+
+**The volume** is `m_vol = (avol × master) >> 8` (`+0x5925`: `mulw 0x913`, `mov %ah`), where
+`[0x913]` is `min(global volume byte, 64) × 4` (`+0x55c4`…`+0x55e1`). Both modules' global-volume
+byte is **64** (§5), so the master is **256** and `m_vol` is the channel's own volume — which the
+row parse already clamps to 63 (`+0x477b`). The shell's `fademusic` (`MAIN/U2.ASM:333-346`) walks
+that module byte down, which is what `Player::set_global_volume` carries.
+
+**The step** is `m_speed` (`+0x50`), 16.16 sample bytes an output frame: `+0x58b9` divides the
+object's own `0x00da7600` by the period **as a 32-bit integer** (the ≤ 218 branch at `+0x58a9`
+computes the same value in two halves; the remainder is discarded at `+0x58c1`'s `xor %dx,%dx`),
+and `+0x58c9`…`+0x58d8` divides *that* by the mixing rate, the quotient into the step's high word
+and the remainder's next 16 bits into its low word. A period of 0 returns with `m_speed = 0`
+without dividing (`+0x5876`), which is how a note off silences a voice.
+
+**The mixing rate** is `[0x8d9]`, chosen by the header watch at `+0x539b`…`+0x53a9` as
+`_zmixspeed` (mono) or `[0x8d7]` (stereo) from the master volume byte's bit 7. The shell doubles
+`_zmixspeed` to 40000 for SB Pro (`MAIN/U2.ASM:759`) and **never writes `[0x8d7]`** — its only
+store is `+0x228f`, in the PC-speaker initialiser, which the reference's mode 5 never reaches — so
+the reference's stereo voices divide by the segment's initial data, **21111**. The frame rate is
+20000 a second in stereo (40000 bytes of two), so the reference's stereo playback is
+**21111/20000 = 5.5 % flat** and its mono playback is exact. The port keeps the object's word; a
+run at `MixRate::Hz40000` in stereo is flat by the same factor, and `MixRate::Hz40000` in mono is
+not. `mix.rs`'s `a_step_is_the_objects_two_divisions` prints and asserts the steps.
+
+**The fetch and the accumulation**: `+0x346e` reads one byte at `es:(si)` — no interpolation, and
+the interpolating dispatch entries are `S1x`-gated with `[0x919]` = 0 in both files (§9.12) —
+`+0x3473` looks it up in the volume table at `(m_vol << 8) | sample`, and `+0x3482`'s 32-bit `add
+%eax,(%di)` puts two frames' values into the two 16-bit accumulator words at once. **The channel's
+accumulator is 16 bits and is biased**: the sound init fills the buffer with `0x8080` (`+0x293b`)
+and the flush replaces each pair with `0x01010101` (`+0x2ce5`, `+0x30d0`) — the same filler
+`+0x5628` writes into `m_pos`, and a marker rather than a sample value in both places.
+
+**The two clamps of the position's window** are `m_safe`/`m_lsafe`, computed at `+0x58e3`…`+0x5916`
+as `((m_end - m_pos) << 16 - m_poslow) / m_speed`, forced odd (`or $1`), incremented, and
+**clamped to 0x8000** when it does not fit — `cmp $0x7ffe` then `or $1; inc`, so a voice that
+cannot reach its end inside the window is *stopped* (`+0x3834`'s `cmpw $0x8000,0x56(%bp)`). That is
+the object's chunking device: the port mixes a frame at a time and tests the end per frame, which
+produces the same samples because the rewrap's displacement is congruent to the loop's length
+either way.
+
+**The end**: `m_end` and `m_loop` come from the instrument header at the note start (`+0x4872`…
+`+0x48cb`). A looping sample (`flags` bit 0, `+0x4894`) whose loop does **not** begin at 0
+(`+0x489c`) gets `m_loop` = the header's loop end (`+0x48a6`) and an `m_end` reduced by whole loop
+lengths until it is below 500 (`+0x48ab`…`+0x48b9`) — a **memory-layout hack**, so that a mixer
+reading past the position stays inside the 512 bytes `checkins` pads behind every sample
+(`module.rs`'s `Instrument`), and the port keeps the loop's end itself and reads no padding. A
+sample that does not loop, **or one whose loop begins at 0**, takes `+0x48be`'s path: `m_end` =
+length + 0x20 and `m_loop` = 0xffff. That second case is not hypothetical: `tests/mix.rs`'s
+`the_modules_looping_samples_and_the_objects_zero_loop_rule` counts the shipped files' headers as
+**7 + 5 loops and 10 one-shots in MUSIC0, 8 + 1 and 32 in MUSIC1**, i.e. **six of the twenty-one
+samples whose loop flag is set are played once and stopped** — 12 = 7 + 5 and 9 = 8 + 1 are the
+same two files' loop-flag counts (§5). When the position reaches `m_end`, `+0x3840` tests that
+marker, and a voice with a real loop rewraps by adding `m_loop - m_end` to the position
+(`+0x3856`/`+0x385a`) — the overshoot and therefore the loop's phase survive — while a one-shot
+stops: `m_speed = 0` (`+0x384d`).
+
+### 10.3 The output: what the object does with the sum, and what the port does instead
+
+Each voice's contribution is added into a 16-bit accumulator and the sum is converted at the end
+of the buffer by `+0x2c89` (the stereo flush) or `+0x30ad` (the mono one). Both add the object's
+own DC correction — `0x400 - [0x2250]`, the sum of the channels' centre values — to every
+accumulator word (`+0x2cb4`, `+0x30b4`) and index the table the same builder wrote at
+`cs:[0x6c]` (`+0x551c`'s second half). Since 0x400 *is* 1024 and the table's own middle is index
+1024, the quantity the object indexes with is exactly **the accumulator less the centre sum**: the
+signed sample, in a range of about ±1000 at these modules' volumes.
+
+That table is a **per-run gain curve** built from `_np_mastermul` (`+0x5569`: the master volume
+byte's low seven bits, floored at 0x10): the first `0x800 - 0x8000/mul` entries are zero and the
+rest ramp `0..255` across `0x8000/mul` entries. The reference's master volume byte is 0xB0
+(§5: 176 = stereo | 48) → `mul = min((48 × 11) >> 3 - 2, 127) = 64` (`+0x5362`…`+0x538f`) → 2240,
+the word `music-clock.md` measured — and at `mul` 64 the curve's knee is **512 above the centre**:
+everything quieter is zero, and what is above it is amplified fourfold. (The measured 2240 is the
+*published word*, not the multiplier: `+0x5397` stores a **byte** into `[0x916]` and the byte
+above it is `_np_masterflags`' low byte, which the header watch has set to the modules' 8 — so the
+word reads `0x08C0`. The builder reads the byte: `+0x5569`'s `mov 0x916,%bl`.)
+
+**The port does not reproduce that table**, and §A13 of `APPROXIMATIONS.md` registers it: it
+converts the accumulator after the object's own correction straight to `i16` with the curve's own
+linear case (`widened = value × 32`, the map the same builder produces at the 0x10 its own clamp
+forces as the minimum). What the port keeps is the arithmetic the curve is *applied to* — the
+per-voice table value, the centre subtraction, and the ±1024 range. The one consequence worth
+naming is that the port's output is linear where the reference's is gated and amplified; the sums
+themselves agree, and in particular the centre sum counts **exactly the voices that mix**: the
+voice routine tests `m_speed` at `+0x3783`/`+0x3786` and jumps to its return *before* the centre is
+read at `+0x37b0`, so a voice that has stopped contributes to neither side of the subtraction
+(`+0x3791`'s `m_pos == 0xffff` test is a second such gate, the marker the "volume 0" path parks).
+
+**The stereo** is the module's own channel table: `+0x37b5` reads the channel's `amixtype` byte
+(`+0x1b`), masks it to three bits, flips its low bit with the pass flag (`+0x37c1`'s
+`xor 0x211e,%bl`) and adds the pass's base (`+0x37c5`), which selects both the mixing loop
+(`+0x38c4`'s table) and the two shift tables at `+0x38e4`/`+0x38f4`. The file's 32-byte table
+(`Module::channel_pan`) is `0, 8, 1, 9, 2, 10, 3, 11` for channels 0…7 and 255 for the rest, and
+the S3M convention reads 0…7 as the left positions and 8…15 as the right ones — so the eight
+channels the music uses are hard-panned L, R, L, R, L, R, L, R, and the port's `side_of` reads
+exactly that. A **mono** run has one accumulator and no pan at all (`+0x39cd` walks all sixteen
+channels into it), which the port keeps.
+
+### 10.4 The port's numbers
+
+`tests/mix.rs` computes its expected samples **by hand from the S3M file's own bytes** — the
+tables pasted into the test file, the two divisions of the step written out, the 16.16 position
+accumulated a frame at a time — and never from a recording of the port. The load-bearing one takes
+MUSIC0's first sample, channel 0 (the module's leftmost pan), level 32, and the note C-4's period
+1712:
+
+```
+MUSIC0 instrument 1, channel 0, level 32, period 1712, step 25958 (16.16):
+  sample bytes [127, 127, 127, 128, 128, 128, 128, 128]
+  the first eight left samples [-32, -32, -32, 0, 0, 0, 0, 0]
+```
+
+The step is 8362 × 65536 / 21111 = **25958** in 16.16 — 0.396 of a byte a frame, so the positions
+of the first eight frames are 0, 0, 0, 1, 1, 1, 1, 2 and the bytes read are 127, 127, 127, 128, …;
+the level's scale is 129 and its centre is (128 × 129) >> 8 = **64**, so a byte of 127 is one
+below the centre — **−1 × 32 = −32** — and a byte of 128 is exactly the centre, **0**. The right
+i16 of every frame is 0 because channel 0's pan is the module's leftmost. The other hand-computed
+tests do the mono sum of two channels, the loop's rewrap and the one-shot's stop against the
+modules' own looping and non-looping instruments, a level of 0 as silence, and `_zshutup`'s
+silence at any volume.
+
+The stream's properties, from `cargo test -p sr-audio --test mix -- --nocapture`:
+
+```
+the first five polls' sample counts: [570, 571, 571, 570, 571]
+MUSIC0's first 120 polls: 68487 samples, 65994 of them not zero, peak 3872
+64 rows at speed 6: 320178 samples, predicted 319872, difference 306 (0.0957 %), one tick is 833
+a 600-poll window of MUSIC1: 342436 samples
+after 15 undrained polls the ring holds 8192 samples and has dropped 368
+```
+
+- **The poll's count is exact.** The five counts are Task 3's pinned `samples_this_poll` sequence,
+  which is the strongest form of "the poll produces the samples it says it does": the drain sees
+  exactly that many i16 every poll. A stereo budget that is odd — the counts `570, 571, …` and
+  the tick's own 833 both are — splits one frame across two calls: one i16 is held back and sent
+  at the head of the next, which is what a byte-stream DMA does when a boundary falls between a
+  frame's two bytes.
+- **The samples-per-tick relation holds.** 64 rows at speed 6 is 64 × 6 = 384 ticks of 833
+  samples = 319,872 predicted against 320,178 mixed: a difference of **306 samples, 0.0957 %**,
+  well inside one tick's worth (833), and the residue is the row-boundary sampling of a window
+  whose polls do not divide evenly into ticks.
+- **Two runs of a window are byte-identical** (600 polls of MUSIC1, 342,436 samples, == itself),
+  and a different order is a *different* stream, so the equality is not vacuous.
+- **The window is not silent**: 65,994 of 68,487 samples are not zero and the peak is 3,872 —
+  11.8 % of full scale, and just under the 4,064 a single voice can reach on its own (level 63's
+  scale is 255, so its swing is `((255 × 255) >> 8) − ((128 × 255) >> 8) = 127`, times 32).
+- **The drain takes whole samples and moves no state**: `take_samples` leaves the engine
+  position, the published position and `_np_zframe` where they were, and a second drain returns 0.
+- **The overflow policy is "drop the oldest"**, exercised through the player: after 15 undrained
+  polls the ring is full at 8192 samples and has dropped 368, and what remains is the newest.
+
+### 10.5 Why there is no null test against the original, and what stands in for one
+
+**There is no audio reference.** The emulator runs silent by D17 (`SDL_AUDIODRIVER=dummy` plus
+`mixer_nosound=true`), so nothing in `reference/` holds a sample of the original's output and no
+null test is possible — not "not yet run", but *not obtainable by this port's oracle at all*.
+What this section's evidence therefore is:
+
+1. **By construction**: the tables, the two divisions and the 16.16 position are the object's own
+   bytes, asserted byte for byte in `tests/player.rs`'s claims (147 in all), and the expected
+   samples are computed from the S3M file's own sample data in `tests/mix.rs`.
+2. **By invariant**: determinism, non-silence, the exact per-poll count and the samples-per-tick
+   relation, each asserted separately above.
+3. **By ear**: `cargo run --release --bin secondreality` — the engine has no seam to the mixer yet
+   (Task 6) and no device yet (Task 7), so listening to it is Task 7's acceptance test and not
+   this task's claim.
+
+**What is not claimed here.** That the mixed sound is the sound of the 1993 release. Two things
+are known to differ and are registered rather than argued away: the output curve (§A13) and the
+5.5 % stereo flatness the object's own `[0x8d7]` produces. Everything else in §10.2 is the
+object's arithmetic as its bytes have it.
