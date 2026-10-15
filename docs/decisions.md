@@ -1880,8 +1880,10 @@ column once the sample instant's one-index shift is taken out (753 of 891 frames
 than one tick apart: `src/shell.rs`'s
 `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` asserts it frame by frame,
 `ZFRAME_SLOP`), and its published positions are the trace's samples one index on — 100 of the window's
-130 compared position changes one frame earlier, 22 exact, 8 two earlier (the window holds 131; the
-last has no successor frame to compare against; the same test prints the distribution and fails if any
+130 compared position changes one frame earlier, 22 exact, 8 two earlier (the window holds 131, and
+the one the comparison skips is the window's **first** sample, which has no earlier frame for it to be
+a change from — `src/shell.rs`'s `if *frame > start`, whose own comment says so; the last change, at
+1295, *is* paired; the same test prints the distribution and fails if any
 change is more than two frames out), against the ~20 % the poll geometry
 predicts for an unshifted clock, which is what the sample instant (the frame's *start*, D17's own
 reading of the emulator) makes of them — and
@@ -1893,3 +1895,41 @@ sessions of one recipe. **Nothing in the music moved for it** — no anchor, no 
 and nothing in the part *could* move it: the part carries no hold length, which is the point of the
 task — the one lever left is `GATE_ALIGNMENT_TICKS`, the disclosed frame above. A run whose music starts elsewhere has no reference frame to align to, and the constant is a
 fact about this boot and `second5`.
+
+## D29 — Editing a record: guard the substitution, name the grep, and check the tree rather than the round's report (2026-10-15)
+
+Phase 3's most-repeated defect was not a wrong value but a **change that was never made**: five
+times a fix round's report described an edit as landed while the tree still held the old text, and
+each time only a re-review caught it, because the artifact was the only witness. The fifth
+instance's author found the mechanism, and it is mechanical rather than careless: the edit was an
+**unchecked `str.replace` whose target did not match**, so the substitution silently no-opped while
+the summary beside it was written from intent. Two rules follow, and they bind every later phase.
+
+**1. A text substitution is guarded at the point of edit and verified afterwards by search.** The
+tool that makes the edit fails when its target is absent or not unique; the round then re-reads the
+result rather than the intention. Guarding the substitution does not guard the sentence around it —
+the same round's last defect was a dangling fragment where an edit replaced the first half of a
+two-line sentence and orphaned the continuation — so the surrounding text is checked too.
+
+**2. A claim that rests on a search says which search.** This shell's `grep` is a **wrapper**, not
+the binary: it runs `ugrep` with `--ignore-files` and `-I`, so a recursive search silently skips
+every path an ignore file names (`out/`, and any untracked-but-ignored file) and every file it reads
+as binary. Measured: `grep -rl needle .` finds **0** where `command grep -rl needle .` finds **1**,
+for a file under the git-ignored `out/`. The wrapper is why two "no caller exists" / "no surviving
+copy" claims in this phase were false — the second being the discoverable one that stopped a round.
+The upstream tree adds the other half: its `.ASM` sources are **not UTF-8**
+(`upstream/SecondReality/MAIN/U2.ASM` is ISO-8859 with CRLF), so the wrapper's `-I` skips them
+outright and a search of them needs `command grep -a`. The port's evidence therefore names the tool
+it used, and the phase's own reviews redo a search with `command grep` when a negative is
+load-bearing.
+
+**3. A review reads the tree, and a correction is swept rather than pointed.** Three rounds in this
+phase fixed a corrected claim at the site a reviewer named and left copies standing elsewhere — in
+a module doc, in a test's *name*, in a plan, in the note 130 lines below — so the dispatch that
+follows a correction asks for a `grep` over the retracted vocabulary rather than a list of line
+numbers. This is D25's rule applied to the *act* of correcting: the measurement is reproducible by a
+command, and the correction is findable by one.
+
+**What this costs if it is not followed**, measured in this phase: nine reviews across seven tasks,
+the majority of their findings in records rather than in code, and one task's fix round spent
+entirely on the copies of a claim the task had already corrected once.

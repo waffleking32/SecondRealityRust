@@ -253,8 +253,9 @@ fadeout would start at **1146** — while the reference's frames put the fadeout
 
 **The port's player is not the one that moved, and the measurement that says so is quantitative.**
 The port's published positions differ from the trace's by one frame at 100 of this window's position
-changes, agree at 22 and differ by two at 8 — 130 in all, of the window's **131**, because the last
-change has no successor frame to compare against. Reproduced by
+changes, agree at 22 and differ by two at 8 — 130 in all, of the window's **131**: the one the
+comparison skips is the window's **first** sample, which has no earlier frame for it to be a change
+from (`src/shell.rs`'s `if *frame > start`), and the last change, at 1295, *is* paired. Reproduced by
 `cargo test -p secondreality --bin secondreality the_runs_music_is_where_the_trace -- --nocapture`,
 which prints `130 position change(s) compared; the port's frame minus the trace's: {-2: 8, -1: 100,
 0: 22}` and fails if any change is more than two frames out. That ratio is what the poll geometry
@@ -338,9 +339,13 @@ frame 430: 0.0000% differing (0/128000 px), max delta 0
 frame 500: 0.0000% differing (0/128000 px), max delta 0
 frame 900: 0.0000% differing (0/128000 px), max delta 0
 frame 1180: 0.0000% differing (0/128000 px), max delta 0
+(…)
 verdict: identical
 exit: 0
 ```
+
+(`(…)` marks the tool's `report: <path>` and `captures: 1 measured` lines, dropped here and named
+below; `exit: 0` is the shell's own reading of the command's exit code, not a line of its output.)
 
 **Both dumps are the acceptance, and both were re-run with the cue in place** (Task 8): the
 `--part endlogo` one and the `--block 5` one, which differ only in their plans (a one-part run and the
