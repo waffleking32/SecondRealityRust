@@ -536,6 +536,8 @@ mod tests {
                 &mut self.palette,
                 &mut self.timeline,
                 &mut self.copper,
+                // no player: this rig draws a band, and none of these parts asks for a cue
+                None,
                 frame,
                 0,
                 1,

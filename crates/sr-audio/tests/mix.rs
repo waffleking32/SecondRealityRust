@@ -848,9 +848,9 @@ fn a_device_that_stops_draining_loses_the_oldest_samples() {
 fn a_note_off_leaves_the_voice_silent() {
     // `0xfe` parks the position at 1 and the volume at 0 (`effects.rs`'s note start), and the
     // mixer then plays the sample at the centre — silence at level 0 whatever the byte is. The
-    // master-volume byte is the one that asks for the linear curve, so the *curve's* own entry
-    // for a value of 0 is visible: the byte 128 (0) while the planes are unmarked and the
-    // marker's byte 160 (8192) after, which is the object's own DC and not the voice's.
+    // master-volume byte is the one that asks for the linear curve, so a level of 0 reads the
+    // curve's own entry for 0 — the byte 128, i.e. 0 — and not the marker's byte 160 (8192),
+    // which the port does not apply (A14(a)); the counterfactual four lines below pins that.
     let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let mut channels = [Channel::default(); CHANNELS];

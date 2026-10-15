@@ -2,7 +2,9 @@
 //!
 //! The tick's order is the whole point of this module — copper slot 0 runs
 //! before the frame's drawing, slots 1 and 2 after it, and each band's palette
-//! is stamped as that band is composed. See spec §4.2.
+//! is stamped as that band is composed. See spec §4.2. The music is polled
+//! between slot 0 and the first band, which is where the original's copper
+//! calls `_zpollme` (`MAIN/COPPER.ASM:458-466`).
 //!
 //! Every `PartCtx` the engine builds reports `standalone = true`: the engine
 //! drives one part with no demo shell around it. An `exit_requested` a part or
@@ -15,6 +17,7 @@ use std::time::Duration;
 
 use crate::compose::{band_range, compose_band, IndexedFrame};
 use crate::copper::{CopperRegistry, COPPER_SLOTS};
+use crate::music::Music;
 use crate::palette::{Palette, PaletteTimeline};
 use crate::part::{Part, PartCtx, PartStatus};
 use crate::surface::Surface;
@@ -44,19 +47,24 @@ impl fmt::Display for EngineError {
 impl std::error::Error for EngineError {}
 
 /// The demo's hardware model: the surface, the view onto it, the live palette,
-/// this frame's palette timeline, the copper slots and the logic frame counter.
+/// this frame's palette timeline, the copper slots, the music and the logic
+/// frame counter.
 pub struct Engine {
     surface: Surface,
     view: View,
     palette: Palette,
     timeline: PaletteTimeline,
     copper: CopperRegistry,
+    /// The run's player, if it has one. Once installed it outlives the parts —
+    /// the original's music engine is a program of its own, and the parts are
+    /// separate EXEs that come and go around it.
+    music: Option<Box<dyn Music>>,
     frame_counter: u32,
     exit_requested: bool,
 }
 
 impl Engine {
-    /// A black palette, no copper callbacks, frame counter at zero.
+    /// A black palette, no copper callbacks, no music, frame counter at zero.
     pub fn new(surface_width: usize, surface_height: usize, view: View) -> Engine {
         Engine {
             surface: Surface::new(surface_width, surface_height),
@@ -64,6 +72,7 @@ impl Engine {
             palette: Palette::new(),
             timeline: PaletteTimeline::new(Palette::new()),
             copper: CopperRegistry::new(),
+            music: None,
             frame_counter: 0,
             exit_requested: false,
         }
@@ -105,6 +114,24 @@ impl Engine {
         self.exit_requested
     }
 
+    /// Install the run's music. It is polled once per tick from then on, and it
+    /// outlives the parts: `start` does not touch it, because the original's
+    /// music engine is not the part that happens to be running.
+    ///
+    /// The box is a `dyn Music` and not a `Player`: `sr-audio` does not depend
+    /// on `sr-engine` and this crate has no dependencies at all, so the
+    /// adapter that maps a `Player` onto [`Music`] belongs to the binary that
+    /// uses both (Task 7). See [`crate::music`]'s module comment.
+    pub fn set_music(&mut self, music: Box<dyn Music>) {
+        self.music = Some(music);
+    }
+
+    /// The run's music, for a caller that only wants to read it — the window's
+    /// status line reads [`Music::position`] through here.
+    pub fn music(&self) -> Option<&dyn Music> {
+        self.music.as_deref()
+    }
+
     /// Ask the running part to quit (`dis_exit()`), from **outside** the part:
     /// the exit flag the demo's interrupt server sets from the keyboard —
     /// "1=exit key pressed" (`DIS/DISINT.ASM:11`), set by `checkkeys` (`:112`)
@@ -134,6 +161,7 @@ impl Engine {
             &mut self.palette,
             &mut self.timeline,
             &mut self.copper,
+            self.music.as_deref_mut(),
             0,
             0,
             bands,
@@ -150,9 +178,10 @@ impl Engine {
         })
     }
 
-    /// One logic tick, in the fixed order of spec §4.2:
-    ///   1. copper slot 0   2. part.frame() per band, composing after each
-    ///   3. copper slot 1   4. copper slot 2
+    /// One logic tick, in the fixed order of spec §4.2 and the original's
+    /// copper (`MAIN/COPPER.ASM:449-468`): copper slot 0, then the music's
+    /// poll, then `part.frame()` per band with a compose after each, then
+    /// copper slots 1 and 2.
     ///
     /// The frame is the displayed area and nothing else, so it follows the
     /// view: a part that changes the view's geometry gets a frame of the new
@@ -177,6 +206,15 @@ impl Engine {
         // it writes is stamped at scanline 0 by the first band.
         self.run_copper(0, frame, 0, bands);
 
+        // `call _zpollme` (`MAIN/COPPER.ASM:466`): after slot 0's callback
+        // (`:458-464`) and before `u2copperint` (`:468`) — which the port runs
+        // as the shell's, not the engine's — and before anything this frame
+        // draws. One poll per displayed frame is the original's own clock
+        // (`docs/fidelity/music-clock.md` §5).
+        if let Some(music) = self.music.as_mut() {
+            music.poll();
+        }
+
         let mut status = PartStatus::Continuing;
         for band in 0..bands {
             let (band_status, exit) = {
@@ -189,6 +227,7 @@ impl Engine {
                     &mut self.palette,
                     &mut self.timeline,
                     &mut self.copper,
+                    self.music.as_deref_mut(),
                     frame,
                     band,
                     bands,
@@ -252,6 +291,7 @@ impl Engine {
                 &mut self.palette,
                 &mut self.timeline,
                 &mut self.copper,
+                self.music.as_deref_mut(),
                 frame,
                 band,
                 bands,
@@ -365,6 +405,7 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::music::{MusicPosition, NoMusic};
     use rstest::*;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -374,6 +415,70 @@ mod tests {
 
     #[derive(Default)]
     struct ProbePart { log: Log, bands: u16, finish_after: Option<u32> }
+
+    /// A `Music` that records every call made on it and answers with the null readings. The log
+    /// is what pins *when* the engine polls it: the poll is the only call the engine itself makes.
+    #[derive(Default)]
+    struct RecordingMusic { log: Log }
+
+    impl Music for RecordingMusic {
+        fn poll(&mut self) {
+            self.log.0.borrow_mut().push("music:poll".into());
+        }
+        fn position(&self) -> MusicPosition {
+            self.log.0.borrow_mut().push("music:position".into());
+            MusicPosition::default()
+        }
+        fn musplus(&mut self) -> i32 {
+            self.log.0.borrow_mut().push("music:musplus".into());
+            -32
+        }
+        fn musrow(&mut self) -> i32 {
+            self.log.0.borrow_mut().push("music:musrow".into());
+            0
+        }
+        fn muscode(&mut self, wanted: i32) -> i32 {
+            self.log.0.borrow_mut().push(format!("music:muscode:{wanted}"));
+            0
+        }
+        fn sync(&mut self) -> i32 {
+            self.log.0.borrow_mut().push("music:sync".into());
+            0
+        }
+        fn getmframe(&mut self) -> i32 {
+            self.log.0.borrow_mut().push("music:getmframe".into());
+            0
+        }
+        fn setmframe(&mut self, frame: i32) {
+            self.log.0.borrow_mut().push(format!("music:setmframe:{frame}"));
+        }
+    }
+
+    /// A part that asks the music for a cue — everything the six calls can hand it — and logs
+    /// either the readings or the fact that it was handed nothing at all.
+    struct AsksMusic { log: Log }
+
+    impl Part for AsksMusic {
+        fn name(&self) -> &'static str { "asks-music" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            let Some(music) = ctx.music() else {
+                self.log.0.borrow_mut().push("part:none".into());
+                return PartStatus::Continuing;
+            };
+            let order = music.position().order;
+            let plus = music.musplus();
+            let row = music.musrow();
+            let code = music.muscode(1);
+            let frame = music.getmframe();
+            music.setmframe(frame + 1);
+            self.log
+                .0
+                .borrow_mut()
+                .push(format!("part:{order}:{plus}:{row}:{code}:{frame}"));
+            PartStatus::Continuing
+        }
+    }
 
     /// Whole-frame part that sets one palette entry and otherwise does nothing.
     struct Flat;
@@ -572,6 +677,141 @@ mod tests {
         e.set_copper_for_test(0, copper_logging(&log, 0));
         e.tick(&mut part, &mut f);
         assert_eq!(log.0.borrow()[0], "copper:0");
+    }
+
+    #[test]
+    fn the_music_is_polled_between_copper_slot_zero_and_the_first_band() {
+        // `copper_doit` calls slot 0's routine, then `_zpollme`, then the
+        // rest (`MAIN/COPPER.ASM:458-468`), so the poll lands after the top of
+        // the screen has been drawn and before this frame draws anything.
+        let log = Log::default();
+        let mut part = ProbePart { log: log.clone(), bands: 2, ..Default::default() };
+        let (mut e, mut f) = engine_with(&mut part);
+        e.set_music(Box::new(RecordingMusic { log: log.clone() }));
+        e.set_copper_for_test(0, copper_logging(&log, 0));
+        e.set_copper_for_test(1, copper_logging(&log, 1));
+        e.set_copper_for_test(2, copper_logging(&log, 2));
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            ["copper:0", "music:poll", "frame:0:0", "frame:0:1", "copper:1", "copper:2"]
+        );
+    }
+
+    #[test]
+    fn a_tick_polls_the_music_exactly_once() {
+        // One poll per displayed frame is the player's own clock
+        // (`docs/fidelity/music-clock.md` §5), not one per band: a four-band
+        // frame is still one frame to the copper.
+        let log = Log::default();
+        let mut part = ProbePart { log: log.clone(), bands: 4, ..Default::default() };
+        let (mut e, mut f) = engine_with(&mut part);
+        e.set_music(Box::new(RecordingMusic { log: log.clone() }));
+        e.tick(&mut part, &mut f);
+        e.tick(&mut part, &mut f);
+        let polls = log
+            .0
+            .borrow()
+            .iter()
+            .filter(|line| line.as_str() == "music:poll")
+            .count();
+        assert_eq!(polls, 2, "one poll per tick, two ticks — four bands each");
+        assert_eq!(
+            log.0.borrow().first().map(String::as_str),
+            Some("music:poll"),
+            "and the poll is the first thing the tick does with the music"
+        );
+    }
+
+    #[test]
+    fn a_part_reaches_the_music_through_its_context() {
+        let log = Log::default();
+        let mut part = AsksMusic { log: log.clone() };
+        let (mut e, mut f) = engine_with(&mut part);
+
+        // No player in the run: the part is handed nothing, and says so.
+        e.tick(&mut part, &mut f);
+        assert_eq!(log.0.borrow().as_slice(), ["part:none"]);
+
+        e.set_music(Box::new(RecordingMusic { log: log.clone() }));
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            [
+                "part:none",
+                "music:poll",
+                "music:position",
+                "music:musplus",
+                "music:musrow",
+                "music:muscode:1",
+                "music:getmframe",
+                "music:setmframe:1",
+                "part:0:-32:0:0:0",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_music_outlives_the_part_that_is_running() {
+        let log = Log::default();
+        let mut part = Noop;
+        let (mut e, mut f) = engine_with(&mut part);
+        assert!(e.music().is_none(), "a fresh engine has no player");
+        e.set_music(Box::new(RecordingMusic { log: log.clone() }));
+        assert_eq!(
+            e.music().map(|music| music.position()),
+            Some(MusicPosition::default()),
+            "the window's status line reads the position through `Engine::music`"
+        );
+
+        // A part boundary is not a music boundary: the original's parts are
+        // separate EXEs that come and go around one music engine, so `start`
+        // clears the copper slots and the frame counter and leaves the player.
+        e.start(&mut part).unwrap();
+        assert!(e.music().is_some(), "the next part plays on the same music");
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            ["music:position", "music:poll"],
+            "the status line's read, then the new part's first tick"
+        );
+    }
+
+    #[test]
+    fn no_music_is_the_null_player_a_part_would_meet_without_one() {
+        // `NoMusic` is the engine's own stub, and it is not a degraded
+        // music: the readings are the ones a run with no player at all would
+        // give, so a part that needs a cue is visibly wrong rather than
+        // silently fine.
+        let log = Log::default();
+        let mut part = AsksMusic { log: log.clone() };
+        let (mut e, mut f) = engine_with(&mut part);
+        e.set_music(Box::new(NoMusic));
+        e.tick(&mut part, &mut f);
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            ["part:0:-32:0:0:0"],
+            "order 0, the no-plus sentinel, row 0, `_np_zinfo`'s 0, frame 0"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "NoMusic::sync()")]
+    fn a_part_that_syncs_against_the_stub_fails_where_it_can_be_seen() {
+        struct Syncs;
+        impl Part for Syncs {
+            fn name(&self) -> &'static str { "syncs" }
+            fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+            fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+                let music = ctx.music().expect("the stub is installed");
+                music.sync();
+                PartStatus::Continuing
+            }
+        }
+        let mut part = Syncs;
+        let (mut e, mut f) = engine_with(&mut part);
+        e.set_music(Box::new(NoMusic));
+        e.tick(&mut part, &mut f);
     }
 
     #[test]

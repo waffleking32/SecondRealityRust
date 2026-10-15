@@ -6,6 +6,7 @@
 pub mod compose;
 pub mod copper;
 pub mod engine;
+pub mod music;
 pub mod palette;
 pub mod part;
 pub mod present;
@@ -17,6 +18,9 @@ pub mod view;
 pub use compose::{band_range, compose_band, IndexedFrame};
 pub use copper::{CopperFn, CopperRegistry, COPPER_SLOTS};
 pub use engine::{Engine, EngineError, Runner};
+pub use music::{
+    muscode_from, musplus_from, sync_from, Music, MusicPosition, MusicRef, NoMusic, ORDERSYNC1,
+};
 pub use palette::{dac_expand, Palette, PaletteTimeline};
 pub use part::{Part, PartCtx, PartError, PartStatus};
 pub use surface::{Surface, MAX_HEIGHT, MAX_WIDTH};

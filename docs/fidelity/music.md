@@ -1439,9 +1439,10 @@ What this section's evidence therefore is:
    samples are computed from the S3M file's own sample data in `tests/mix.rs`.
 2. **By invariant**: determinism, non-silence, the exact per-poll count and the samples-per-tick
    relation, each asserted separately above.
-3. **By ear**: `cargo run --release --bin secondreality` — the engine has no seam to the mixer yet
-   (Task 6) and no device yet (Task 7), so listening to it is Task 7's acceptance test and not
-   this task's claim.
+3. **By ear**: `cargo run --release --bin secondreality` — the engine had no seam to the mixer
+   when this section was written (that is §11, Task 6) and the adapter and the device that would
+   carry the samples to a card are Task 7's, so listening to it is Task 7's acceptance test and
+   not this task's claim.
 
 **What is not claimed here.** That the mixed sound is the sound of the 1993 release. One thing is
 known to differ and one to be odd: the curve's index is **clamped** where the object's 16-bit `bx`
@@ -1449,3 +1450,150 @@ would read its own segment's neighbours past the table's end, and the arithmetic
 is the object's as its bytes have it — including the 5.26 % stereo flatness its own `[0x8d7]`
 produces and the table its own `mul` of 64 builds, bug and all. The measurement of that table is
 in §10.3, and it is the phase's to judge, not this section's to soften.
+
+## 11. The engine's seam — Task 6
+
+`crates/sr-engine/src/music.rs` is the whole of what a part knows about the music: a `Music` trait
+whose eight methods are the six `dis_*` calls `DIS/DIS.H:37-59` declares, the poll the engine makes
+on the part's behalf, and the position (`MusicPosition`) a status line or a test can read. The
+engine holds one as `Option<Box<dyn Music>>`; a part reaches it through `PartCtx::music()`, which is
+`None` when the run has no player.
+
+**Where the impl lives, and why it is not here.** The demonstration's own implementation,
+`impl Music for Player`, belongs to the **binary** (Task 7), not to either crate: `sr-audio` does
+not depend on `sr-engine` and `sr-engine` has no runtime dependencies at all — a rule the manifest
+test in `crates/sr-engine/src/lib.rs` reads as text — so neither crate can name the other's types,
+and the only crate that can is the one that depends on both. This task ships the trait, the wiring
+and the stub; nothing in `sr-engine` mentions a module, a pattern or a sample rate. The three
+translations below are here rather than in the adapter because they are the *DIS's* arithmetic —
+the parts' side of the seam, read out of `DIS/DISINT.ASM` — and the adapter's whole job is to hand
+them the player's published words.
+
+### Where the poll goes
+
+`copper_doit` (`MAIN/COPPER.ASM:449-468`) runs, in this order: slot 0's routine if the flag allows
+it (`:458-464`), **`call _zpollme`** (`:466`), and `u2copperint` (`:468`) — which is not a copper
+slot at all but the shell's control-key check (`MAIN/U2.ASM:286-289`: `call ctrldown`). Slots 1 and
+2 are the retrace routine's (`:302`, `:322`). So the port's tick is **slot 0, the music's poll, the
+bands, slots 1 and 2**, and two tests pin it: `the_music_is_polled_between_copper_slot_zero_and_the_first_band`
+(a stub that logs its poll against a part that logs its bands and three logging copper slots —
+`["copper:0", "music:poll", "frame:0:0", "frame:0:1", "copper:1", "copper:2"]`) and
+`a_tick_polls_the_music_exactly_once` (one poll per tick however many bands the tick draws, which is
+what makes a poll one frame of the player's own clock, §5).
+
+### The six calls, as the object computes them
+
+| call | what the object does | the port |
+|---|---|---|
+| `dis_muscode(code)` | `%ax` = `_np_zinfo` (`DIS/DISINT.ASM:249`), the parameter never read | `muscode_from` → **0**, D8's deferral |
+| `dis_musplus()` | `%dx` — the block's own arithmetic (`:252-271`) | `musplus_from(zplus, row)` |
+| `dis_musrow(code)` | `%bx` = `_np_row`, reloaded on the way out (`:272`) | the published `row`; the trait takes no argument, because the wrapper reads none (`DIS/DISC.ASM:114-123`) |
+| `dis_getmframe()` | `_np_zframe` (`:419`) | `Player::zframe()` |
+| `dis_setmframe(frame)` | writes `_np_zframe` (`:418`) | `Player::set_zframe(frame)` |
+| `dis_sync()` | the `ordersync1` lookup (`:449-463`) | `sync_from(order, row)` — with the boundary below |
+
+The three that share a service are read back by three wrappers in `DIS/DISC.ASM:91-123`, one per
+register: `_dis_muscode` returns `%ax`, `_dis_musplus` returns `%dx` (`:111`), `_dis_musrow`
+returns `%bx`. All three read the **published** words — the ones the ten-deep ring hands out
+(§8) — and so must the port: `musplus_from` and `sync_from` take `Player::zplus()` and
+`Player::state()`, never the engine's own row ten polls ahead.
+
+**`musplus`'s rule** is the block's two compares and the row it dispatches on, and the port
+transliterates it (`DIS/DISINT.ASM:252-271`): `%dx` starts at the sentinel `-32` (`:252`); a
+`zplus` of 0 keeps it; 1 takes the "plus coming" branch (`@@1b`), `row - 64` clamped up at `-32`
+by a **signed** `jge` (`:270`); 2 takes the plain-row branch (`@@1e`), the row itself while it is
+below 32 and the sentinel from 32 on; and any other value — 3, the only one a two-bit `zplus` can
+otherwise hold (§6) — dispatches on `row > 32` with an **unsigned** `ja` (`:260`), sending rows
+above 32 to the row-64 form and the rest through `@@1e`, so row 32 exactly reads the sentinel and
+row 33 reads `-31`. `musplus_is_the_objects_own_two_phase_rule` writes every boundary out as a
+table (four `zplus` values × the rows where the answer changes, 0/31/32/33/63/64/95/96/255), and
+`musplus_over_every_row_matches_the_objects_decision_tree` checks all 1,024 pairs against the same
+rule written as row ranges. The demo's own parts read the answer as a countdown to the marker:
+`GLENZ/MAIN.C:290` waits for it to reach `-19`, `TECHNO/KOE.C:213` and `:275` for `-4` and `-3`,
+`PLZPART/PLZ.C:68` for 0, `PLZPART/VECT.C:116` for 13, `JPLOGO/JP.C:71` for 4, and
+`GLENZ/MAIN.C:411` breaks when it lands between `-16` and 0.
+
+**`muscode` is 0, and the substitute keeps `_np_zinfo`'s shape.** D8's route 1 walked the object's
+symbols and read the word live: it is at segment offset `0x08F7` and it is **0 in every sample of
+every filed trace** (11,408 across the four, covering MUSIC0's orders 0 and 25…28 and 70…77 and
+MUSIC1's 0 and 42…48), so the port returns 0 (`music-clock.md` §6). `muscode_from` takes the
+position and the wanted code and ignores both, so the phase that finds a mechanism for its other
+values replaces one body; the parts that wait on it — `GRID/MAIN.C:72` for 2, `:160` for 3,
+`HARD/B.C:138` for 1, `HARD/BP.C:263` for 0xff — therefore wait for ever here exactly as they do
+against the reference's own 0, and they are Phase 8's to write against a cue this phase measured
+rather than inferred.
+
+### `sync`: the table, the read before it, and the read past it
+
+`ordersync1` (`DIS/DISINT.ASM:428-446`, fifteen entries, keys `(order << 8) | row`, codes 0…10 and
+then 1…4) is carried in `crates/sr-engine/src/music.rs` verbatim, and
+`the_table_is_the_shipped_shells_own_bytes` finds those sixty bytes exactly once in each of the
+three shell builds the tree holds — `MAIN/U2.EXE`, `MAIN/2NDFIX.EXE`, `U2.EXE` (the same bytes are
+in `MAIN/U2.OBJ`, where they are object records rather than an image). And the table is itself a
+build artefact: `MAIN/PROT/TEST.OLD`, the protection test build the shell's Makefile stages
+(`MAIN/MAKEFILE:39`, `:43-44`), carries **`0x030b`** — order 3, row 11 — where those three carry
+`0x0300`, which `an_older_build_carries_a_different_table` pins. What the port follows is
+DISINT.ASM's table as the shipping build assembled it.
+
+Two things about the loop around it (`:454-460`) decide the port's behaviour, and neither is
+visible in the table:
+
+1. **The answer is read at `%bx - 2`** (`:460`) — the code of the entry *before* the one whose key
+   matched, not of the matching entry. So the pairs are upper bounds: the position `(2, 0)`
+   (key `0x0200`) reads **0**, and `(2, 1)` reads **1**; every key's own row still answers with the
+   previous entry's code. The port keeps that: `sync_reads_the_table_the_object_reads` shows each
+   of six keys twice, at the key and one row later.
+2. **The loop runs sixteen times over fifteen entries** (`:455`'s `mov cx,16`), and the 16th
+   iteration's compare is against the word *past* the table. A position above the last key
+   (`0x4200`) therefore reads the object's own code and returns it, and how much of it is read
+   depends on the build: the test above reads the word after the table as `0x8E2E` (`sync_10`'s own
+   first instruction, `2e 8e`) in all three builds, and the return when that compare fails as
+   **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` —
+   it is the displacement of the `mov es, cs:stmikseg` that follows, which the linker sets.
+
+The first entry has the same problem from the other side: at `(0, 0)` the `%bx - 2` read is the
+word *before* the table, which is `pop es; ret` in all three builds — measured `0xC307`, i.e. code.
+So the domain this port reproduces is **`0 < (order << 8) | row <= 0x4200`**, and outside it
+`sync_from` **panics** with the position, the reason and the citations rather than returning a
+number the original does not have. (The plan's brief says "the reachable domain is ord ≤ 0x42";
+the lower end is the refinement — `(0, 0)` reads code too, and it is the position a part syncing
+before the music's first published row actually holds. What that code *does* to a caller is a
+reading of its own: `0xC307` as the 16-bit `int` the C callers see is **negative** (the parts' C is
+Turbo C — `PAM/PAM.PRJ` names `Turbo C Project File`, includes from `G:\BC\INCLUDE\` — whose
+`int` is 16 bits), so every
+`dis_sync() < N` in the tree with `N` ≥ 1 waits on — the effect of code 0 — while a word that
+happened to be small and positive would end those waits at once. That the tree's own builds read
+"wait", and that the value is code rather than a code, are both true; the port refuses because the
+second is what decides whether it may answer.) `APPROXIMATIONS.md` A15 registers it.
+
+The two callers in the tree are both block 1's and both reach the domain by a wide margin:
+`PAM/OUTTAA.C:39` waits for `dis_sync() < 10`, which the table's order-13 key gives, and
+`ALKU/MAIN.C:59`, `:66`, `:72`, `:79` and `:138` wait for 1 through 4, from order 2 on. What the
+phase cannot show is that they never call it outside the domain — both parts are Phase 4's, and how
+far MUSIC0's order list has got while they run is not measured. That is why A15 exists rather than
+a claim that the region is unreachable.
+
+### `zframe`, and what a part sees with no player
+
+`dis_getmframe`/`dis_setmframe` are the two halves of `musframe_9` (`DIS/DISINT.ASM:412-425`): one
+word, `_np_zframe`, which is the **tick** counter and not the frame counter (`music-clock.md` §8;
+`second3` reads 1516 → 0 at frame 2452 when a part calls `dis_setmframe(0)`). The port's trait hands
+it over as the player holds it, and `NoMusic` — the engine's own stub, and the type a test installs
+when it wants a part handed *something* — answers the way a run with no player at all does: a zero
+position, the `-32` sentinel, row 0, `_np_zinfo`'s 0, a frame counter that reads 0 and cannot be
+written, and a `sync()` that refuses. It is deliberately **not** a degraded music: a part that
+ignores music never calls it, and a part that waits on a cue is wrong where it can be seen rather
+than handed a plausible number. A run with no music at all is `None` — `PartCtx::music()` returns
+`None` — and the shell refuses to start a part whose cue is required (Task 7).
+
+The seam's own tests: `music.rs`'s `musplus_is_the_objects_own_two_phase_rule`,
+`musplus_over_every_row_matches_the_objects_decision_tree`,
+`sync_reads_the_table_the_object_reads` (and three `should_panic` cases: `(0, 0)`, `(66, 1)` and
+`(255, 255)`), `the_table_is_the_shipped_shells_own_bytes`,
+`an_older_build_carries_a_different_table`,
+`muscode_is_the_deferrals_substitute_over_every_code_the_parts_wait_for`,
+`no_music_answers_as_a_run_with_no_player`,
+`no_music_refuses_to_sync`; `engine.rs`'s four poll-and-context tests above plus
+`the_music_outlives_the_part_that_is_running` (a part boundary is not a music boundary: `start`
+clears the copper slots and the frame counter, and leaves the player) and
+`no_music_is_the_null_player_a_part_would_meet_without_one`.

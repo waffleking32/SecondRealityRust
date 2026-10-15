@@ -760,3 +760,49 @@ probe --dump` reproduces the **segment's** bytes above — the base word and the
 in either module's run — and does **not** reach the DMA buffer's contents (the waveform and its
 0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
 that buffer beside the accumulator plane it came from is what would close (a).
+
+## A15 — A `dis_sync()` position the object answers with a read of its own code is refused, not returned
+
+**Part:** the engine's music seam (§11 of `docs/fidelity/music.md`), reachable only by a part that
+calls `dis_sync()` — `PAM/OUTTAA.C:39` and `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138`, all of
+them block 1's and all of them Phase 4's.
+
+**Original:** `sync_10` (`DIS/DISINT.ASM:449-463`) turns the published position into a part-start
+code with the `ordersync1` table above it (`:428-446`): the loop is `mov cx,16` over fifteen
+four-byte entries (`:455`), the answer is read at `%bx - 2` (`:460`), and at two positions that
+read leaves the table — at `(order 0, row 0)`, where `%bx` is the table's own base, and above the
+last key (`0x4200`), where the 16th iteration compares against the word past the end and may
+return it.
+
+**Port:** `sr_engine::sync_from` reproduces the table and the `%bx - 2` arithmetic exactly for
+`0 < (order << 8) | row <= 0x4200`, and **panics** outside it, naming the position and the reason.
+(`NoMusic::sync` refuses too, for the blunter reason that a run with no player has no position to
+read at all.)
+
+**Why:** the two reads are of the original's own **code**, and the code differs between builds.
+Measured in this task's commit by `the_table_is_the_shipped_shells_own_bytes`, which finds the
+port's sixty table bytes exactly once in each of the three shells the tree holds: the word before
+the table is `0xC307` (`pop es; ret`) in all three, and the return when no key matched
+is **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` —
+it is the displacement of the `mov es, cs:stmikseg` that follows the table, which the linker sets.
+Returning any of them would be a number the port made up, and by D24 the value the 1993 release
+carried is not recoverable from the vendored tree at all.
+
+**Measured difference:** none yet, and that is the entry's point: no caller in the tree is *shown*
+to reach the outside of the domain. Both reach the inside by a wide margin — `PAM/OUTTAA.C:39`
+waits for code 10, which the table gives from order 13, and `ALKU/MAIN.C:59-79` waits for codes 1
+through 4, from order 2 — but how far MUSIC0's order list has got while either part runs is not
+measured until those parts are ported, so the phase cannot claim the outside is unreachable.
+
+**Revisit when ALKU is ported (Phase 4):** its first `dis_sync()` is likely to be at `(0, 0)` —
+the position a run holds before the music's first row is published — so the part will meet this
+refusal and need a decision. What the read *does* there is subtle enough to write down: `0xC307`
+as the 16-bit `int` the C callers see is **negative** (the parts' C is Turbo C — `PAM/PAM.PRJ`
+names `Turbo C Project File` and includes from `G:\BC\INCLUDE\` — and its `int` is 16 bits), so every `dis_sync() < N` in the tree with
+`N` ≥ 1 (all of them are) keeps waiting — the effect of code **0** — whereas a word that happened
+to be small and positive would end those waits at once. So returning 0 at `(0, 0)` would reproduce
+the tree's own builds' observable behaviour, at the price of answering a position the object
+answers with code, with a number the port cannot derive from the DIS's arithmetic; returning the
+measured word would be a fitted constant of exactly the kind Review Focus 5 forbids, since the
+release of record's own word is not in the tree (D24). The seam refuses loudly now so that the
+decision is made with the position named rather than hidden behind a plausible number.

@@ -3,11 +3,13 @@
 //!
 //! A part sees one [`PartCtx`] per call, holding everything DIS used to hand
 //! out through globals: the surface, the view, the live palette, the frame
-//! counter, and the copper slots.
+//! counter, the copper slots, and the music — which is a global in the
+//! original too (`DIS/DISINT.ASM`'s music entries read the player's segment).
 
 use std::fmt;
 
 use crate::copper::{CopperFn, CopperRegistry};
+use crate::music::MusicRef;
 use crate::palette::{Palette, PaletteTimeline};
 use crate::surface::Surface;
 use crate::view::View;
@@ -65,9 +67,11 @@ pub struct PartCtx<'a> {
     /// Running outside the demo shell (`dis_indemo()`).
     pub standalone: bool,
     pub exit_requested: bool,
-    // timeline and copper are private; reach them through the methods below
+    // timeline, copper and music are private; reach them through the methods
+    // below
     timeline: &'a mut PaletteTimeline,
     copper: &'a mut CopperRegistry,
+    music: Option<MusicRef<'a>>,
 }
 
 impl PartCtx<'_> {
@@ -82,7 +86,7 @@ impl PartCtx<'_> {
     /// hold the same `&mut` fields and be built at the same call site, which
     /// changes nothing about the borrow (and a `&mut Engine` parameter — the
     /// shape the lint is steering towards — is exactly what does not compile
-    /// here). Five of the ten are the engine's own fields in the order
+    /// here). Six of the eleven are the engine's own fields in the order
     /// `Engine::tick` splits them.
     #[allow(clippy::too_many_arguments)]
     pub fn new<'a>(
@@ -91,6 +95,7 @@ impl PartCtx<'_> {
         palette: &'a mut Palette,
         timeline: &'a mut PaletteTimeline,
         copper: &'a mut CopperRegistry,
+        music: Option<MusicRef<'a>>,
         frame: u32,
         band: u16,
         bands: u16,
@@ -108,6 +113,7 @@ impl PartCtx<'_> {
             exit_requested,
             timeline,
             copper,
+            music,
         }
     }
 
@@ -143,6 +149,19 @@ impl PartCtx<'_> {
     /// Whether copper slot `slot` already holds a callback.
     pub fn copper_is_set(&self, slot: usize) -> bool {
         self.copper.is_set(slot)
+    }
+
+    /// The music, when the run has any — `None` when it does not.
+    ///
+    /// This is the whole of a part's access to the player, the way `DIS/DIS.H:37-59` is the whole
+    /// of the original's: the six calls on [`Music`], the position, and nothing else. A part that
+    /// ignores music never calls this and is unaffected by a run having none; a part that needs a
+    /// cue is written against `Some` and says so, and the shell refuses to start it when the run
+    /// has no music (Task 7) rather than letting it wait for ever.
+    ///
+    /// [`Music`]: crate::music::Music
+    pub fn music(&mut self) -> Option<MusicRef<'_>> {
+        self.music.as_deref_mut()
     }
 
     /// Ask the engine to quit (`dis_exit()`).
