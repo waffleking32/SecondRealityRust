@@ -1744,3 +1744,75 @@ whole coverage from the file **field by field** rather than believing it. Why a 
 is lost is a **hypothesis** (a video-mode change publishes no frame for a moment, D17) and is
 recorded as one — the measurement is the counter's own readings, and they say only that the
 frame was never current.
+
+## D27 — The run's music: the entry point decides the module, and the anchor decides the clock (2026-10-15)
+
+Before this the port had a player nothing played. `--block 5` now installs it, seeks it, feeds
+it a sound card or a WAV file, and shows its position in the window's title — and the two
+things that had to be decided rather than derived are **which module an entry point starts,
+and when its clock starts**. Both are D13's business, which said "`sr-shell` must implement
+the restarts as *entry-point* positions — one restart table keyed by which blocks are going to
+run, not a single linear timeline"; this is that table and the clock beside it.
+
+**The restart table** is `shell::MUSIC_RESTARTS`, one row an entry point, each carrying the
+module (`restartmus`'s `ax`), the order (`bx`), the guard bits (`whattorun`) and the lines of
+`MAIN/U2.ASM` it is read from: `SECOND 1`/no argument → MUSIC0 at order 0 (`:766-775`,
+`:785-787`), every other block → MUSIC1 at order 0 (`:772-775`), `SECOND 3` → MUSIC1 at 42
+(`:856-863`), `SECOND 4` → MUSIC0 at 18 (`:880-885`), `SECOND U` → MUSIC0 at 70 (`:889-894`),
+`SECOND 5` → MUSIC0 at 25 (`:898-905`). The test beside it reads the upstream file **as
+bytes** — it is not UTF-8, and a decoded read misplaces every line after the first non-ASCII
+byte — and checks each row's instructions against its cited lines and its guard against the
+block's own `partsmask`. A run takes the row of the entry point it starts at, which is its
+plan's first part; a demo part no entry point starts at is played from the demo's own
+beginning, and the test card — the port's own part and not the demo's — has no music.
+
+**The clock starts at frame 408, and what a run does about that depends on where it begins.**
+408 is Task 1's measurement (D26), and the trace's words around it say what it is: the
+modules' own speed/tempo words change at 396 (the boot's initial `restartmus`) and at 408 (the
+block's restart), with **zero ticks in between** — the twelve frames `_zsoundon` (`:779`) and
+`_asmcopperinit` (`:781`) take before `_zpollmix = 1` (`:783`) hands the player to the
+copper's per-frame `zpollme`. The tick clock starts when the polling does, and in every filed
+session that is 408. A run anchored **at or before** it *waits*: the module is loaded and
+seeked at the run's start, the adapter is installed so a part may ask it anything, and nothing
+advances it until the frame the original's own first tick falls on. A run anchored **after**
+it *pre-polls* the frames in between at its start, because the music's advance is
+deterministic and does not depend on a frame being drawn (`SECOND 3` is that case —
+MNTSCRL's first graphics frame is in (415, 420] — and no run the port can make today is,
+because both blocks it can start at are anchored at 404).
+
+**What that buys, and what it costs.** A `--block 5` run's music is the trace's: 778 of
+`second5`'s 894 frames from 404 agree exactly on the published `(order, row)` and the worst
+displacement is 2 frames — the same shape the trace test measures for a bare player (771 of
+887) — and the four ENDLOGO keyframes come out exactly `0:0`, `25:1`, `25:9`, `25:55`,
+`26:53`. A four-frame error in the anchor fails the comparison loudly (the run publishes a row
+the trace's window never reaches), which is the falsification the note records. The cost is
+the boot's own twelve-frame transient: the port does not load MUSIC1 first and replace it, so
+the *speed* and *tempo* words at frames 404…407 read MUSIC0's patched 6/120 where the trace
+still reads MUSIC1's 3/130. The position words a part can read are identical either way, which
+is why this is recorded as a divergence rather than modelled.
+
+**And the seek clears `[0x2000]`.** Task 3 left it open: `_zplaysong`'s routine zeroes the
+tick-in-row counter (`+0x56ec`, `movw $0x0,0x2000`) and `play_song` did not mirror it, which
+was unobservable while every seek was made on a fresh player. The shell's restarts are seeks
+made **mid-song** — `restartmus` reaches `_zplaysong` at `:775`, `:818`, `:863`, `:885`, `:894`
+and `:905` with the player anywhere inside a row — and a stale counter would begin the new
+order's row 0 on a later tick, so that row's cells would never be read. The object's byte says
+what to do, so `play_song` mirrors it, and the test
+(`a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read`) fails without it.
+
+**The device is a drain, and it is the binary's.** SDL2 audio opens only in window mode, at the
+mixer's own specification with `allowed_changes` at zero — a card that cannot give that rate is
+not opened rather than resampled into one that can, and the run prints a line and plays silent
+— and its callback copies what the ring holds and fills the rest with zeroes: **silence, never
+a stall, never a repeat, never a resample**, because the music's position is the tick's and a
+device may not pull it. `--no-audio` asks for the same state, `--audio-dump` writes the tick's
+samples as a 16-bit WAV instead (the ring has one consumer, so a dump is silent to watch) at
+20000 frames a second stereo, and `--headless` does all of this with no device at all — which
+is what makes a dump of a music-gated part the same run a window plays, and why the frames are
+byte-identical with and without `--no-audio`.
+
+**The fade is `@@partsdone`'s**, which is what the port's *hold* is: `fademusic`
+(`MAIN/U2.ASM:333-346`) walks the module's own global-volume byte (`ds:[30h]`, 0x40 in both
+files) down by a step a frame — the loop's `int 0fch` is `dis_waitb()` — so the shell calls one
+step a tick, with the demo's own `mov cx,1`, from the moment there is nothing left to play.
+Each row of this section has a test; §12 of `docs/fidelity/music.md` is the note.

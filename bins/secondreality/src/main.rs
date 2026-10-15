@@ -7,6 +7,7 @@
 //! dump holds are the same run. The engine keeps zero runtime dependencies;
 //! the window is a client of it like any other.
 
+mod audio;
 mod cli;
 mod headless;
 mod parts;
@@ -23,10 +24,13 @@ const USAGE: &str = "\
 usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
-                     [--run-seconds <S>]
+                     [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
 keys:  in a window, ESC ends the part that is playing — and closes the window
        once the run has nothing left to play; Ctrl skips the part that is
-       playing. No other key does anything, and nothing waits on a key.";
+       playing. No other key does anything, and nothing waits on a key.
+music: a window plays the demo's music on the default sound card; --no-audio runs
+       silent, and --audio-dump <FILE> writes it to a WAV instead (the ring has one
+       consumer, so a dump is silent to watch). The music runs either way.";
 
 fn main() -> ExitCode {
     let cli = match cli::Cli::parse(std::env::args().skip(1)) {

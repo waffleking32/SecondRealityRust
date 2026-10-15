@@ -11,6 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 sr-engine.workspace = true
+# The run's music, and the player the engine's `Music` seam is adapted from. The
+# adapter itself is this binary's (`src/audio.rs`): neither crate can name the other's
+# types, and the binary is the only crate that depends on both.
+sr-audio.workspace = true
 # A part reads its media in the original's format, through the port's own
 # decoders: BEGLOGO's picture is an Origin RLE PIC, and nothing in this tree
 # pre-converts it.

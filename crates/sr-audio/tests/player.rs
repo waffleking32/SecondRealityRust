@@ -1151,6 +1151,42 @@ fn a_seek_starts_the_order_without_publishing_a_position() {
 }
 
 #[test]
+fn a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read() {
+    // `_zplaysong`'s routine zeroes `[0x2000]` — its own first instruction, `+0x56ec`'s
+    // `movw $0x0,0x2000` — and the shell's restarts reach it **mid-song**: `restartmus`
+    // (`MAIN/U2.ASM:348-397`) is called with the player part-way through a row at `:775`,
+    // `:818`, `:863`, `:885`, `:894` and `:905`. A stale counter begins the new order's row 0
+    // on a *later* tick, because `+0x4371`'s `cmpw $0x0,0x2000` is then false: the row's cells
+    // are never read, and its notes and commands never start.
+    //
+    // The observable is an `A` command on the row the seek lands on — the row's own first act,
+    // and the one thing a row that is never processed cannot do.
+    let module = Builder::new(
+        &[0, 1],
+        &[
+            cell(0, None, Some((1, 0x09))), // pattern 0 row 0: A09
+            cell(0, None, Some((1, 0x0c))), // pattern 1 row 0: A0C — what the seek must read
+        ],
+    )
+    .build();
+    let mut player = Player::new(module, PlayerOptions::default());
+    player.play_song(0);
+    // One tick in: pattern 0's row 0 has been processed, so the counter is part-way through
+    // the row — exactly the state the shell's restart finds the player in.
+    poll_until(&mut player, 10, |player, _| player.state().speed == 9);
+
+    player.play_song(1);
+    let at = poll_until(&mut player, 6, |player, _| player.state().speed == 0x0c);
+    assert_eq!(player.engine_position().order, 1);
+    assert_eq!(
+        player.engine_position().row,
+        0,
+        "the seek's row 0 is the row whose cells were read"
+    );
+    println!("the seek's own row 0 was processed {at} poll(s) after it");
+}
+
+#[test]
 fn the_published_position_is_ten_polls_behind_the_engine() {
     // The ring is primed ten entries deep (`+0x2ac1`). The engine enters row 1 six ticks
     // after the seek; the ring publishes it ten polls after the poll that pushed it.

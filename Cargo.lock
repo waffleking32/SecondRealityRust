@@ -634,6 +634,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sr-assets",
+ "sr-audio",
  "sr-engine",
 ]
 

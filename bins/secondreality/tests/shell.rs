@@ -16,8 +16,15 @@ use std::process::{Command, Output};
 const USAGE: i32 = 2;
 const OK: i32 = 0;
 
+/// Run the binary the way the repository's own commands do: **from the repository root**,
+/// which is where `assets/` is and where a part and the music read their media from
+/// (`bins/secondreality/tests/endlogo.rs` does the same, and for the same reason).
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_secondreality")).args(args).output().unwrap()
+    Command::new(env!("CARGO_BIN_EXE_secondreality"))
+        .current_dir(repository_root())
+        .args(args)
+        .output()
+        .unwrap()
 }
 
 /// A dump directory of this test's own, removed first so a stale manifest
@@ -148,4 +155,113 @@ fn a_part_the_port_has_not_reached_is_a_command_line_error() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+// --- the run's music ---------------------------------------------------------
+
+/// The reference index of ENDLOGO's first drawn frame under `SECOND 5`: the boot's first
+/// graphics frame, and where a `--block 5` run begins (`shell::boot_anchor`).
+const BLOCK5_ANCHOR: u32 = 404;
+
+/// One frame of a filed trace: the published position at a reference index.
+///
+/// `reference/music/second5` is a `SECOND 5` session — the recipe a `--block 5` run is
+/// comparable with — and its `trace.csv` holds a row a frame, exactly the frames the trace
+/// *has* (the manifest's gaps are missing rows, not zero rows).
+fn trace_position(name: &str, frame: u32) -> (u8, u8) {
+    let path = repository_root().join("reference/music").join(name).join("trace.csv");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for line in text.lines().skip(1) {
+        let mut fields = line.split(',');
+        let number = |fields: &mut std::str::Split<'_, char>| -> u32 {
+            fields.next().unwrap().trim().parse().unwrap()
+        };
+        let index = number(&mut fields);
+        let order = number(&mut fields);
+        let row = number(&mut fields);
+        if index == frame {
+            return (order as u8, row as u8);
+        }
+    }
+    panic!("{name} holds no frame {frame}")
+}
+
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// A `--block 5` headless run that dumps the frames asked for, and the manifest it wrote.
+fn block5_dump(name: &str, frames: &str) -> (PathBuf, serde_json::Value) {
+    let dir = scratch(name);
+    let out = run(&[
+        "--headless",
+        "--block",
+        "5",
+        "--dump-frames",
+        frames,
+        "--dump-dir",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(OK), "{}", String::from_utf8_lossy(&out.stderr));
+    let manifest = manifest(&dir);
+    (dir, manifest)
+}
+
+#[test]
+fn a_block_five_run_plays_music_one_at_the_order_its_entry_point_names() {
+    // The shell's own answer for this run: `SECOND 5`'s restart is `restartmus(0, 25, ...)`
+    // (`MAIN/U2.ASM:898-905`), so the run begins on MUSIC0 at order 25 and the manifest says
+    // so — the module, the order, and the frame the music's own clock starts on.
+    let frames = format!("{BLOCK5_ANCHOR},430,500,900,1180");
+    let (dir, manifest) = block5_dump("music", &frames);
+    assert_eq!(manifest["music"]["module"], "MUSIC0");
+    assert_eq!(manifest["music"]["start_order"], 25);
+    assert_eq!(manifest["music"]["start_frame"], 408);
+
+    // And every dumped frame's published position is the trace's at that same reference
+    // index: the run's music is where the original's was, frame for frame, or the frames
+    // are not the demo's.
+    for entry in manifest["frames"].as_array().unwrap() {
+        let index = entry["index"].as_u64().unwrap() as u32;
+        let (order, row) = trace_position("second5", index);
+        assert_eq!(
+            entry["music_position"],
+            serde_json::json!(format!("{order}:{row}")),
+            "frame {index}: the trace holds {order}:{row}"
+        );
+    }
+
+    // The first drawn frame is four frames before the music's own start, and the trace is
+    // explicit about what that holds: the seek publishes nothing, so the position is the
+    // ring's priming — `0:0` — until the first row advance comes out of it ten polls later.
+    let first = &manifest["frames"][0];
+    assert_eq!(first["index"], BLOCK5_ANCHOR);
+    assert_eq!(first["music_position"], "0:0");
+    assert_eq!(trace_position("second5", BLOCK5_ANCHOR), (0, 0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_run_whose_entry_point_has_no_music_says_so_in_its_manifest() {
+    // The test card is the port's own part and not the demo's: `music_for_part` answers
+    // `None` for it, so the run installs no player and the manifest carries no music —
+    // which is what `PartCtx::music()` returning `None` looks like from outside.
+    let dir = scratch("no-music");
+    let out = run(&[
+        "--headless",
+        "--part",
+        "testcard",
+        "--dump-frames",
+        "2",
+        "--dump-dir",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(OK), "{}", String::from_utf8_lossy(&out.stderr));
+    let manifest = manifest(&dir);
+    assert_eq!(manifest["music"], serde_json::Value::Null);
+    assert_eq!(manifest["frames"][0]["music_position"], serde_json::Value::Null);
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

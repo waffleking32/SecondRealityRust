@@ -532,13 +532,21 @@ follows the bytes in all three rather than choosing:
   which is what `entry_now` computes (`next_order - 1`, `+0x43e6`..`+0x43ef`) and not the order the
   engine reports.
 - The same routine zeroes **the tick-in-row counter** (`+0x56ec`, `movw $0x0,0x2000`), and
-  `player.rs`'s `play_song` does **not** mirror that today: nothing in the tree seeks mid-song
-  (every test, and every filed trace, seeks on a fresh player, whose counter is already 0), so the
-  difference is unobservable. It stops being unobservable the moment something restarts the music
-  mid-run — the shell's `restartmus` (`MAIN/U2.ASM:348-397`, the restart path Task 7 owns) does
-  exactly that — and a seek that leaves a *stale* counter begins the new row's first tick with the
-  counter non-zero, so that row's cells are not processed at all. Whoever puts the shell's restart
-  into the engine has to decide it there, against `+0x56ec`'s bytes.
+  **Task 7 decided it: `play_song` mirrors it.** Until then `player.rs`'s `play_song` left the
+  counter alone, which was unobservable because nothing in the tree seeks mid-song — every test
+  and every filed trace seeks on a fresh player, whose counter is already 0. It stopped being
+  unobservable in this task, because the shell's restart *is* a mid-song seek: `restartmus`
+  (`MAIN/U2.ASM:348-397`) reaches `_zplaysong` (`:394`) with the player anywhere inside a row
+  (it is called at `:775`, `:818`, `:863`, `:885`, `:894` and `:905`, and the last four are entry
+  points an already-playing player is restarted into). A seek that left a *stale* counter would
+  begin the new order's row 0 on a later tick — `+0x4371`'s `cmpw $0x0,0x2000` false — so the
+  row's cells would not be read and its notes and commands would never start, which is a visible
+  divergence rather than a subtle one. The object's byte says what to do (`+0x56ec` is the
+  routine's own first instruction, asserted byte for byte in
+  `crates/sr-audio/tests/player.rs`'s claims), so the port does it, and
+  `a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read` is the test that fails
+  without it: it seeks with the counter part-way through a row and watches the new row 0's `A`
+  command land. One line, and a state the phase can now reach.
 
 **`music-clock.md` §10 says the trace cannot show what the player does at a `255`. This is that
 question's answer, and it is a reading of the object rather than a measurement**: the note records
@@ -1551,11 +1559,15 @@ visible in the table:
      in every build, because they are the instruction's prefix and opcode), and the answer read at
      `%bx - 2` is the table's own last code, **4** — deterministic here in every build the tree
      holds;
-   - `key > 0x8E2E`: the compare fails, `%bx` advances past the table, and the loop's fall-through
-     returns the word *after* the table: the modrm byte `06` and the *low byte* of the
-     `mov`'s displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in
-     `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE`, i.e. one byte of instruction framing and a
-     **linker-set** address. That is the half a port cannot have.
+   - `key > 0x8E2E`: the compare fails and `%bx` advances one entry further, so the loop's
+     fall-through returns **the word after the one it just compared** — not the two bytes past
+     the table, which are the compare itself, but the two *after* those: the modrm byte `06` and
+     the *low byte* of the `mov`'s displacement, measured **`0xCD06`** in `MAIN/U2.EXE`,
+     **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE`, i.e. one byte of instruction
+     framing and a **linker-set** address. That is the half a port cannot have. (The distinction
+     matters because the two words are three bytes apart in the same instruction: `2e 8e 06 cd 16
+     …` is `mov es, cs:stmikseg`'s own encoding, and the tier above this one answers with the
+     *table's* last code because that compare *matched*.)
 
 **What the port does at each end, and why.**
 
@@ -1578,9 +1590,10 @@ visible in the table:
   the rest) keeps waiting, exactly as it does against the reference. Note which trace this is and
   which it is not: `second5` is a `SECOND 5` session, and ALKU does not run in it (`MAIN/U2.ASM:792`
   guards `exe1` — `:62`'s `'ALKU.EXE'` — on `whattorun & 1`, which block 5's mask does not set).
-  ALKU's *first* `dis_sync()` is at this position by its own source — `ALKU/MAIN.C:59` runs before
-  the part waits for code 1, and `part-sequence.md` §1 runs ALKU first in block 1 — and the trace
-  is what shows the position itself is one a run holds, not what shows ALKU holding it.
+  ALKU's *first* `dis_sync()` is at this position by its own source: `ALKU/MAIN.C:59` **is** the
+  `while(dis_sync() < 1)` wait, and ALKU makes that call before the code has reached 1 — which is
+  what `part-sequence.md` §1's running ALKU first in block 1 means here. The trace is what shows
+  the position itself is one a run holds, not what shows ALKU holding it.
 - **Above the table it refuses.** `sync_from` **panics** for `(order << 8) | row > 0x4200`, with
   the position, the reason and the citations, rather than answering a number that differs between
   builds of the original. The first tier above the key is answerable in the builds the tree holds
@@ -1610,15 +1623,196 @@ ignores music never calls it, and a part that waits on a cue is wrong where it c
 than handed a plausible number. A run with no music at all is `None` — `PartCtx::music()` returns
 `None` — and the shell refuses to start a part whose cue is required (Task 7).
 
-The seam's own tests: `music.rs`'s `musplus_is_the_objects_own_two_phase_rule`,
+The seam's own tests: `music.rs` has **thirteen**, in the file's own order —
+`musplus_is_the_objects_own_two_phase_rule`,
 `musplus_over_every_row_matches_the_objects_decision_tree`,
-`sync_reads_the_table_the_object_reads`, `sync_answers_the_position_before_the_table_with_its_own_word`
-(and three `should_panic` cases: `(66, 1)`, `(255, 255)` and the answerable band's `(0x8e, 0x2e)`),
+`sync_reads_the_table_the_object_reads`,
+`sync_answers_the_position_before_the_table_with_its_own_word`,
+`sync_refuses_the_position_past_the_tables_last_key` (**`should_panic`**, the position `(66, 1)`),
+`sync_refuses_the_far_end_of_the_order_range` (**`should_panic`**, `(255, 255)`),
+`sync_refuses_the_band_whose_16th_compare_matches` (**`should_panic`**, the answerable band's
+`(0x8e, 0x2e)`),
+`the_refused_regions_two_tiers_are_the_ones_the_object_draws` (which pins the comparison the two
+panic messages' tiers are chosen by),
 `the_table_is_the_shipped_shells_own_bytes`,
 `an_older_build_carries_a_different_table`,
 `muscode_is_the_deferrals_substitute_over_every_code_the_parts_wait_for`,
 `no_music_answers_as_a_run_with_no_player`,
-`no_music_refuses_to_sync`; `engine.rs`'s four poll-and-context tests above plus
+`no_music_refuses_to_sync` (**`should_panic`**). And `engine.rs`'s: the four
+poll-and-context tests above plus
 `the_music_outlives_the_part_that_is_running` (a part boundary is not a music boundary: `start`
 clears the copper slots and the frame counter, and leaves the player) and
 `no_music_is_the_null_player_a_part_would_meet_without_one`.
+
+## 12. The run's music — Task 7
+
+The player above is a library: nothing played it in a run until this task. What a *run* does
+is three things — which module it starts and at which order, when that music's own clock
+starts, and where its samples go — and all three are the shell's
+(`bins/secondreality/src/shell.rs`, `src/audio.rs`).
+
+### Which module, at which order: the demo's own restart table
+
+`SECOND n` selects a `partsmask` byte (`MAIN/U2.ASM:110-120`, `:595-630`) and the shell's
+`restartmus` (`:348-397`) is what loads a module and seeks it: the call's `ax` is the module
+(`0` = MUSIC0, `1` = MUSIC1), `bx` the order, and `cx` the speed adjustment it writes to
+`_zspeedadjust2` *only* for output modes 7 and 2 (`:383-389`), which the reference's card is
+not. The table, as `shell::MUSIC_RESTARTS` carries it, with the lines each row is read from:
+
+| entry point | module | order | the lines |
+|---|---|---|---|
+| `SECOND 1` (and no argument — `whattorun = 7fh`, `:108`) | MUSIC0 | 0 | `:766-775` (`mov ax,0` / `mov bx,-1`), `:785-787` (`push 0` / `call _zplaysong`) |
+| every other block | MUSIC1 | 0 | `:772-775` (`mov ax,1` / `mov bx,0` / `mov cx,48700`) |
+| `SECOND 3` | MUSIC1 | 42 | `:856-863`, guarded `whattorun & 4` and not `& 2` |
+| `SECOND 4` | MUSIC0 | 18 | `:880-885`, guarded `& 8` |
+| `SECOND U` | MUSIC0 | 70 | `:889-894`, guarded `& 80h` |
+| `SECOND 5` | MUSIC0 | 25 | `:898-905`, guarded `& 16` and not `& 8` |
+
+Two of the six are what happens when a bit is **not** set (`mov bx,-1` means "no seek here":
+the shell calls `_zplaysong(0)` itself once the sound is on, `:785-787`), and the middle four
+are the entry-point restarts D13 records. `every_row_of_the_restart_table_is_the_originals_own`
+reads `upstream/SecondReality/MAIN/U2.ASM` — **as bytes**, because the file is not UTF-8 and
+a decoded read misplaces every line after the first non-ASCII byte — and checks each row's
+instructions against its cited lines, in order, with its guard against the block's own
+`partsmask` byte.
+
+**A run takes the row of the entry point it starts at**, which for the port is the plan's
+first part: `--block 5` and `--part endlogo` both begin at ENDLOGO and both get `SECOND 5`'s
+row (`music_for_part`). A demo part no entry point starts at (TUNNELI, CRED, ENDSCRL) is
+played from the demo's own beginning — block 1's row, the module the demo's own run reaches
+those parts under — and the test card, which is the port's own part and not the demo's, has no
+music at all: `PartCtx::music()` is `None` and a `--audio-dump` of such a run is refused.
+
+### When the music's clock starts: the anchor, and what a run does about it
+
+`MUSIC_START_FRAME` is **408** — `music-clock.md` §2's measurement, stable to a tenth of a
+frame across four sessions. It is where the player's tick clock starts, and the traces show
+what surrounds it: `second5` reads `ord 0 row 0 pat 0` from its first sample (frame 148) to
+frame **426**, `_np_zframe` 0 until 408, and the first published row is **427**. The words
+around it also say *why* it is the same frame in every recipe: the modules' own speed/tempo
+words change at 396 (MUSIC1 loaded by the initial `restartmus` at `:775`) and again at 408
+(MUSIC0, patched, by the block's restart at `:905`) — with **zero ticks in between**, which is
+the twelve frames `_zsoundon` (`:779`) and `_asmcopperinit` (`:781`) take before
+`_zpollmix = 1` (`:783`) puts the player under the copper's per-frame `zpollme`
+(`MAIN/COPPER.ASM:466`). The tick clock starts when the polling does, and the polling starts
+there in every session. (The readings *before* 396 — speed 6, tempo 125, from frame 148 on —
+are the segment's own initialisers and not a loaded module, `music-clock.md` §2: nothing is
+loaded at all until 396, and 6/125 is what the object's statics hold.)
+
+A run reaches that clock in one of two ways, and the shell computes both from its own anchor
+(`MusicStart`):
+
+- **At or before 408**, the run *waits*: the module is loaded and seeked at the run's start,
+  the engine's adapter is installed so that a part may ask it anything, and nothing advances
+  it until the frame the original's own first tick falls on. Block 2 and block 5 both draw
+  from 404, four frames early. This is what the trace holds at 404…407 — a seek publishes
+  nothing, so the position is the ring's priming — and it is why the port's first published
+  row change is frame **426** against the trace's 427.
+- **After 408**, the run *pre-polls*: the frames between 408 and the run's first drawn frame
+  are polled at the run's start, because the music's advance is deterministic and does not
+  depend on a frame being drawn. `SECOND 3` is the case — MNTSCRL's first graphics frame is in
+  (415, 420] while the music starts at 408 — and no run the port can make today is one, since
+  the two blocks it can start at are anchored at 404.
+- A run whose numbering is **its own** has no reference frame to synchronise to, so its music
+  starts with it, on its frame 0. `--part beglogo` and `--part endlogo` are *not* that case —
+  both parts carry measured anchors (`shell::boot_anchor`), so those runs wait for 408 exactly
+  as the blocks they stand in for do — but `--part tunneli`, `--part cred` and
+  `--part endscrl` are: a `--part cred` run installs MUSIC0 at order 0 (the demo's own
+  beginning, the row `music_for_part` falls back to) and reads `0:2` at its own frame 30.
+
+**The evidence, and its two halves.** `shell.rs`'s
+`the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` drives a `--block 5`
+run in process — real player, stub parts — over every frame of `reference/music/second5` from
+404 on, and compares the published position two ways: **placement** (every position the port
+publishes is one the trace publishes at that frame or within the 3 frames A12 measures between
+two sessions of one recipe) and **content** (the sequence of distinct positions is the trace's,
+in order). It prints:
+
+```
+second5: 778 of 894 frames agree exactly (87.025 %); worst displacement 2 frame(s)
+```
+
+— against the same trace driven directly through a `Player` in
+`crates/sr-audio/tests/trace.rs` (771 of 887, 86.922 %, worst 2). A four-frame error in the
+anchor fails both assertions: with `MUSIC_START_FRAME` set to 404 the same test reports *the
+run published [(1298, (28, 5)), (1299, (28, 5))], which the trace publishes nowhere in frames
+404..=1299 — its music is ahead of the trace's*, because the run has played a row the trace's
+window does not reach. And four of ENDLOGO's frames are **exact** through the real binary:
+`a_block_five_run_plays_music_one_at_the_order_its_entry_point_names` dumps 404, 430, 500, 900
+and 1180 and finds `0:0`, `25:1`, `25:9`, `25:55`, `26:53` — the trace's own `(order, row)` at
+each.
+
+**What the port does not reproduce.** The boot's own twelve-frame transient — MUSIC1 loaded at
+396 and never ticked, then replaced at 408 — is not modelled: a run installs its entry point's
+module once, at its start. The *position* words are identical either way (both are the ring's
+priming, `0:0`), and the speed/tempo words at 404…407 differ (the port reads MUSIC0's patched
+6/120 where the trace still reads MUSIC1's 3/130), which is the one thing about this seam the
+phase does not carry. It is a transient of the boot rather than of the demo: no part can read
+it, because a part does not start before 404 in either of the two runs the port can make.
+
+### Where the samples go: the device, the dump, and the status line
+
+The **adapter** (`impl Music for PlayerMusic`, `bins/secondreality/src/audio.rs`) is the
+binary's, for the reason §11 gives: neither crate can name the other's types. It is a forwarder
+over the eight methods — the three DIS translations are `sr-engine`'s — and its only state is
+the wait above. The player itself is behind an `Arc<Mutex<Player>>` because the *tick* polls it
+and the sound card's callback *drains* it, and neither does the other's job.
+
+The **device** is SDL2's, in window mode only, and it is a drain and nothing else: the callback
+copies what `Player::take_samples` gives up and **fills the rest of its buffer with zeroes**.
+That is the underrun policy, stated as behaviour and unit-tested against the callback
+(`an_empty_ring_under_runs_into_silence`, `the_device_drains_at_the_mixers_own_rate_and_never_resamples`):
+silence, never a stall, never a repeat, never a resample — the music's position is the *tick's*,
+and a device that asked for more would be pulling the picture's clock into the card's. The
+device is opened at the mixer's own specification with SDL's `allowed_changes` at zero, so a
+card that cannot give that rate is not resampled into one that can: it is not opened at all,
+and the window prints `no audio device (…); the run plays silent` and runs on. `--no-audio` is
+the same state asked for rather than discovered.
+
+`--audio-dump <FILE>` writes the tick's samples as a 16-bit signed PCM WAV instead of opening a
+card — the ring has one consumer, so a dump is silent to watch — at the mixer's own rate and
+channel count: **20000 frames a second stereo**, because `MixRate::Hz40000` counts the 40000
+*i16 samples* a second the mixer produces and two channels make a frame (§10.2's "the frame
+rate is 20000 a second in stereo", which is also the rate the reference's 5.26 %-flat stereo
+divides against). The header's two size fields are patched on every write, so an interrupted
+run leaves a readable file rather than one whose header claims nothing. The dump is the phase's
+artifact for the human listen (`bins/secondreality/tests/audio.rs` checks its header, its
+byte count as one poll a tick from 408 on, and that it is not silent); there is still no
+reference audio to compare it against (§10.5).
+
+The **status line** — the window's title — gains the music position as `order:row`, the
+*published* one a part reads, ten polls behind the player's own (§8). It is what a person
+debugging a sync problem needs and what Task 8's human check is about. A run with no player
+says nothing about music rather than `0:0`.
+
+The **fade** is `audio::fade_music`, one pass of `MAIN/U2.ASM:333-346`'s loop body: the
+module's own global-volume byte (`ds:[30h]`) less `step`, saturating at zero. The source's
+loop is a step a *frame* — its `int 0fch` is `dis_waitb()` — so the shell calls it once per
+tick with the step the demo passes (`mov cx,1` at `:927` and `:938`), from the moment the run
+has nothing left to play. That moment is the port's hold, which is `@@partsdone`
+(`MAIN/U2.ASM:935-942`) in the shell's own terms: the plan has run out or the next part is one
+the port has not written. The fade is 64 frames at both modules' own `0x40`, and a run that
+holds at an unported part fades too — the original would be playing that part — which is the
+port's hold being what marks the end of the run rather than a claim about the original.
+
+### The tests this task adds
+
+| what | where |
+|---|---|
+| the restart table against the shell's own source, line by line, and its guards against `partsmask` | `src/shell.rs`'s `every_row_of_the_restart_table_is_the_originals_own` |
+| the entry point's row is the one a run's plan finds | `src/shell.rs`'s `a_blocks_first_part_is_the_entry_point_its_row_is_about` |
+| the music's start: the wait, the catch-up, and a run with its own numbering | `src/shell.rs`'s `the_music_waits_for_its_anchor_and_catches_up_past_it` |
+| **the published position against every frame of `reference/music/second5`** | `src/shell.rs`'s `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` |
+| the adapter: the published words it hands over, and the wait | `src/audio.rs`'s `the_adapter_hands_the_engine_the_players_published_words`, `the_adapter_waits_out_the_frames_before_the_music_starts` |
+| the WAV's header, its patching on every write, and a write that fails | `src/audio.rs`'s `the_dump_is_a_wav_at_the_mixers_own_rate_and_width`, `the_header_is_true_at_every_tick_not_only_at_the_end`, `a_write_that_cannot_be_made_is_kept_rather_than_lost` |
+| **the underrun policy: silence, no stall, no resample** | `src/audio.rs`'s `an_empty_ring_under_runs_into_silence`, `the_device_drains_at_the_mixers_own_rate_and_never_resamples` |
+| the fade walks the module's byte to zero and stops (`fademusic`'s own arithmetic) | `src/audio.rs`'s `the_fade_walks_the_modules_own_byte_down_to_zero_and_stops` |
+| **and it is wired to the hold**: a step a tick from the moment there is nothing left to play | `src/shell.rs`'s `a_run_with_nothing_left_to_play_fades_the_music_out_a_step_a_tick` |
+| **the four keyframes' positions, through the real binary** | `tests/shell.rs`'s `a_block_five_run_plays_music_one_at_the_order_its_entry_point_names` |
+| a run with no music says so in its manifest | `tests/shell.rs`'s `a_run_whose_entry_point_has_no_music_says_so_in_its_manifest` |
+| **`--headless` with and without `--no-audio`: the same frames, byte for byte** | `tests/audio.rs`'s `a_headless_run_plays_the_music_with_and_without_a_device` |
+| the dump's header, its sample count, and that it is not silent | `tests/audio.rs`'s `the_audio_dump_is_the_ticks_samples_at_the_mixers_own_rate` |
+| **a machine with no audio device prints a line and keeps running** | `tests/audio.rs`'s `a_machine_with_no_audio_device_says_so_and_keeps_running` (`SDL_AUDIODRIVER` names a driver that is not there) |
+| a run with no music refuses to dump, and a dump that cannot be written fails the run | `tests/audio.rs`'s `a_run_with_no_music_refuses_to_dump_audio`, `a_dump_that_cannot_be_written_fails_the_run` |
+| the status line shows `order:row`, and nothing for a run with no player | `src/window.rs`'s `the_status_line_shows_where_the_music_is` |
+| the seek clears the tick-in-row counter (§8's decision) | `crates/sr-audio/tests/player.rs`'s `a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read` |

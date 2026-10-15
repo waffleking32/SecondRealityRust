@@ -32,6 +32,7 @@ use sdl2::video::WindowContext;
 use sr_engine::present::{output_size, present, FrameBuffer, PresentOptions};
 use sr_engine::{IndexedFrame, Tick};
 
+use crate::audio::Device;
 use crate::cli::Cli;
 use crate::shell::Sequence;
 
@@ -77,6 +78,11 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
     let timer = sdl.timer()?;
+    // The sound card, or the dump, or nothing. A run that asked for a WAV writes the file
+    // and opens no device — the ring has one consumer and a second one would take samples
+    // away from the first — and a run that asked for neither (or for `--no-audio`) plays
+    // nothing at all, which the music does not notice: its position is the tick's.
+    let audio = audio_of(&sdl, &mut run, cli)?;
 
     let mut raster = output_size(run.frame(), &opts);
     let mut status = status_line(&run, block);
@@ -150,7 +156,57 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         let left = TICK_PERIOD.saturating_sub(now.elapsed());
         timer.delay(left.as_millis().max(1) as u32);
     }
+    // The device is dropped with `audio`, which stops the callback; a dump is complete at
+    // the last tick it wrote, because its header is patched on every write.
+    drop(audio);
+    if let Some(error) = run.audio_error() {
+        return Err(format!("--audio-dump: {error}").into());
+    }
     Ok(())
+}
+
+/// Open what the command line asked the run to play through: a sound card, a WAV file, or
+/// nothing.
+///
+/// **The device is a drain and nothing else**, and it is opened only in a window
+/// (`--headless` never touches it). A machine that cannot open one — no card, no audio
+/// subsystem, a driver that will not give the mixer's own rate — prints a line and runs
+/// silent rather than failing: the demo must still run, and the picture is not the card's.
+/// `--no-audio` is the same state asked for rather than discovered, and is why it prints
+/// nothing.
+fn audio_of(sdl: &sdl2::Sdl, run: &mut Sequence, cli: &Cli) -> Result<Option<Device>, Box<dyn Error>> {
+    if let Some(path) = cli.audio_dump.as_deref() {
+        run.dump_audio(path)?;
+        println!(
+            "secondreality: writing the music to {} (16-bit WAV at the mixer's own rate); \
+             no sound card is opened",
+            path.display()
+        );
+        return Ok(None);
+    }
+    if cli.no_audio {
+        return Ok(None);
+    }
+    let Some(player) = run.audio_player() else {
+        return Ok(None);
+    };
+    let (rate, channels) = run.audio_format().unwrap_or((20_000, 2));
+    match Device::open(sdl, player, rate, channels as u8) {
+        Ok(device) => {
+            let (opened_rate, opened_channels) = device.spec();
+            println!(
+                "secondreality: audio at {opened_rate} Hz, {opened_channels} channel(s)"
+            );
+            Ok(Some(device))
+        }
+        // Not a failure: the demo runs silent, which is what a machine without a card
+        // does. The line is the difference between "this machine has no audio" and "the
+        // port forgot to play the music".
+        Err(message) => {
+            println!("secondreality: no audio device ({message}); the run plays silent");
+            Ok(None)
+        }
+    }
 }
 
 /// What the keys seen this drain ask of the run.
@@ -273,6 +329,14 @@ fn status_line(run: &Sequence, block: Option<char>) -> String {
     match run.frame_index() {
         Some(index) => line.push_str(&format!(" — frame {index}")),
         None => line.push_str(" — starting"),
+    }
+    // The music, as `order:row` — the *published* position the parts read, which is the
+    // one a person debugging a sync problem needs (`docs/fidelity/music.md` §8: it comes
+    // through the ring and lags the player's own by ten polls, and a part that syncs is
+    // asking about the music the machine is playing *now*). A run with no player says
+    // nothing rather than `0:0`.
+    if let Some(position) = run.music_position() {
+        line.push_str(&format!(" — music {}:{}", position.order, position.row));
     }
     if !run.index_is_reference() {
         line.push_str(" (its own frame numbering, not the reference's)");
@@ -547,6 +611,53 @@ mod tests {
             status_line(&run, None),
             "Second Reality — testcard — frame 0 (its own frame numbering, not the reference's)"
         );
+    }
+
+    /// A run of `plan` with the *real* player — the modules read at the path a unit test
+    /// reads them by ([`crate::audio::test_player`]) — and parts that draw nothing.
+    ///
+    /// The window's own stubs retire early (the key tests watch the handover); a run whose
+    /// music is under test has to keep ticking, so `endlogo` and the two parts after it
+    /// never retire here.
+    fn music_run() -> Sequence {
+        Sequence::with_run(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
+            crate::shell::block_plan('5').unwrap(),
+            |name| match name {
+                "endlogo" | "cred" | "endscrl" => Some(Box::new(Stub { retires: None })),
+                other => stub_source(other),
+            },
+            Some(crate::audio::test_player),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_status_line_shows_where_the_music_is() {
+        // `order:row`, the *published* position a part reads (`docs/fidelity/music.md` §8:
+        // it comes through the ring, ten polls behind the player's own) — which is what a
+        // person debugging a sync problem is looking at, and what the phase's human check
+        // is about.
+        let mut run = music_run();
+        assert_eq!(
+            status_line(&run, Some('5')),
+            "Second Reality — block 5 — endlogo — starting — music 0:0",
+            "the seek publishes nothing: the ring still holds its priming"
+        );
+        // 30 ticks from the block's 404 put the run at frame 433, and the filed trace
+        // (`reference/music/second5`) holds order 25, row 1 there — the first row the seek
+        // published, ten polls after the engine's own row advance.
+        run_out(&mut run, 30);
+        assert_eq!(
+            status_line(&run, Some('5')),
+            "Second Reality — block 5 — endlogo — frame 433 — music 25:1"
+        );
+        // A run with no player says nothing about music rather than `0:0`.
+        let mut plain = run_of(vec!["beglogo"]);
+        plain.tick();
+        assert_eq!(status_line(&plain, None), "Second Reality — beglogo — frame 404");
     }
 
     #[test]

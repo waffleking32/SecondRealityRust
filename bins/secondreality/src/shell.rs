@@ -20,8 +20,11 @@
 
 use std::error::Error;
 use std::fmt;
+use std::io;
 use std::time::Duration;
 
+use sr_audio::PlayerOptions;
+use sr_engine::music::MusicPosition;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
 use sr_engine::{Engine, EngineError, IndexedFrame, Palette, Tick};
@@ -141,6 +144,319 @@ const PART_ORDER: &[(&str, u8)] = &[
 /// tested after the last of them landed.
 pub(crate) type PartSource = fn(&str) -> Option<Box<dyn Part>>;
 
+// -------------------------------------------------------------------------------------------
+// The music: which module, at which order, and when its clock starts
+// -------------------------------------------------------------------------------------------
+
+/// One of the two modules the demo plays: `MUSIC0.S3M` and `MUSIC1.S3M`.
+///
+/// The shell decides **which** module a run begins with (`MAIN/U2.ASM:766-775`'s
+/// `restartmus(ax, bx, cx)`, where `ax` is this number), so the mapping to a file is
+/// the shell's too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleId {
+    /// `ax = 0` — `MUSIC0.S3M`, whose tempo byte the shell patches
+    /// (`MAIN/STARTMUS.C:254-258`).
+    Music0,
+    /// `ax = 1` — `MUSIC1.S3M`.
+    Music1,
+}
+
+impl ModuleId {
+    /// The module's own name, as the demo's files spell it and as the status line and the
+    /// manifest record it.
+    pub fn name(self) -> &'static str {
+        match self {
+            ModuleId::Music0 => "MUSIC0",
+            ModuleId::Music1 => "MUSIC1",
+        }
+    }
+
+    /// The module's own file, at the path a run reads its media from (the working
+    /// directory, which for this repository's commands is its root).
+    pub fn path(self) -> &'static str {
+        match self {
+            ModuleId::Music0 => "assets/MAIN/MUSIC0.S3M",
+            ModuleId::Music1 => "assets/MAIN/MUSIC1.S3M",
+        }
+    }
+
+    /// The number `restartmus`'s `ax` carries for this module (`MAIN/U2.ASM:767`,
+    /// `:772`) — the value the restart table's `mov ax,N` carries, which is what the test
+    /// beside that table checks it against.
+    #[cfg(test)]
+    pub fn number(self) -> u8 {
+        match self {
+            ModuleId::Music0 => 0,
+            ModuleId::Music1 => 1,
+        }
+    }
+
+    /// The initial tempo byte the shell patches into this module's header, or `None`
+    /// where it patches nothing.
+    ///
+    /// `MAIN/STARTMUS.C:252-265`'s `switch(a)`: case 0 loads MUSIC0 and then sets
+    /// `module[50] = 0x78` — the S3M header's `initialTempo` byte at offset 50, 125 →
+    /// 120 — and case 1 loads MUSIC1 and patches nothing, so MUSIC1 plays at its file's
+    /// own 130. `measure`'s `music-clock.md` §3 has the two headers.
+    pub fn tempo_patch(self) -> Option<u8> {
+        match self {
+            ModuleId::Music0 => Some(0x78),
+            ModuleId::Music1 => None,
+        }
+    }
+}
+
+/// The music's own clock, in the reference's frame space: the frame the first tick falls
+/// on.
+///
+/// **Measured, and stable to a tenth of a frame across four sessions** (Task 1, Step
+/// 4.1; `docs/fidelity/music-clock.md` §2): the trace's first row change is at frame 427
+/// with `_np_zframe` 13 there, and 13 ticks at the tick clock's measured 1.4622 frames a
+/// tick puts the first tick at **408.0**; the same derivation gives 408.0 in the fresh
+/// session of the same recipe and 408.1 in each of the other two captures. It is a
+/// property of the boot, not of a session, which is why it is one number.
+///
+/// Everything before it is silence in the player's own terms: `_np_ord`, `_np_row` and
+/// `_np_pat` are 0 in every sample from frame 148 to 426 of `second5`, and `_np_zframe`
+/// is 0 too. The port's run reaches it by [`MusicStart`], which is where the two kinds of
+/// entry point part company.
+pub const MUSIC_START_FRAME: u32 = 408;
+
+/// How a run reaches the music's own clock.
+///
+/// The original does one of two things, and which one depends on where the run's own
+/// frames begin:
+///
+/// - A run whose first drawn frame is **at or before** [`MUSIC_START_FRAME`] waits for it:
+///   the player is installed and seeked at the run's start, and does not advance until
+///   the frame the music's first tick falls on. This is the demo's own beginning — block 2
+///   and block 1 both draw from 404, four frames before the music starts — and it is what
+///   `second5`'s frames 404…407 hold: a loaded module that has not ticked.
+/// - A run whose first drawn frame is **after** it **pre-polls** the frames it missed, at
+///   its start, because the music's advance is deterministic and does not depend on a
+///   frame being drawn: `Player::poll` is the only thing that moves it, and N polls in a
+///   row leave it exactly where N polls spread over N frames would. A `SECOND 3` run is
+///   this case — MNTSCRL's first graphics frame is in (415, 420] while the music starts at
+///   408 — and so is every run whose entry point is not the demo's own start.
+/// - A run whose numbering is **its own** (`index_is_reference` is false — `--part X`,
+///   `--part testcard`) has no reference frame to synchronise to: its music starts with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MusicStart {
+    /// The frame the music's own clock starts on, in the run's numbering.
+    pub frame: u32,
+    /// Polls the engine makes before the music advances: the frames between the run's
+    /// first drawn frame and the music's start.
+    pub waiting: u32,
+    /// Polls the run makes at its start, before its first tick, so that the music is
+    /// where it would have been had it been polled since its start.
+    pub pre: u32,
+}
+
+impl MusicStart {
+    /// The music's start for a run whose first drawn frame carries the reference index
+    /// `anchor`, or `None` for a run with a numbering of its own.
+    pub fn new(anchor: Option<u32>) -> MusicStart {
+        match anchor {
+            Some(anchor) if anchor < MUSIC_START_FRAME => MusicStart {
+                frame: MUSIC_START_FRAME,
+                waiting: MUSIC_START_FRAME - anchor,
+                pre: 0,
+            },
+            Some(anchor) if anchor > MUSIC_START_FRAME => MusicStart {
+                frame: anchor,
+                waiting: 0,
+                pre: anchor - MUSIC_START_FRAME,
+            },
+            Some(_) => MusicStart {
+                frame: MUSIC_START_FRAME,
+                waiting: 0,
+                pre: 0,
+            },
+            None => MusicStart {
+                frame: 0,
+                waiting: 0,
+                pre: 0,
+            },
+        }
+    }
+}
+
+/// How a [`Sequence`] builds its player. The binary's is
+/// [`audio::load_player`](crate::audio::load_player).
+///
+/// The seam is [`PartSource`]'s: the modules are read from the working directory, which a
+/// unit test does not share with a run, and a test that wants the real player without the
+/// real parts (or no player at all) must not have to reach the assets' path to get one.
+pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, String>;
+
+/// One roll of the demo's own restart table: which module an entry point starts, at which
+/// order, and where `MAIN/U2.ASM` says so.
+///
+/// **The block's mask is the guard**, and `when`/`unless` are the two bits the guard's
+/// code tests: `when` must be set in the block's `partsmask` byte, `unless` must be clear.
+/// Two of the six rows are what happens when a bit is *not* set (block 2 starts MUSIC1
+/// because `whattorun & 1` is clear), and the middle four are the entry-point restarts
+/// D13 records.
+#[derive(Debug, Clone, Copy)]
+// The four fields below are the row's *evidence* — which `whattorun` bits guard it and
+// where `MAIN/U2.ASM` says so — and nothing at run time reads them: the test beside the
+// table is what does, line by line. They are fields and not comments because that test
+// has to be able to check them.
+#[allow(dead_code)]
+pub struct MusicRow {
+    /// The block (`SECOND n`'s argument) this row is the entry point of.
+    pub block: char,
+    pub module: ModuleId,
+    /// The order the entry point starts the module at, or 0 for the demo's own start,
+    /// which reaches order 0 through `_zplaysong(0)` at `:786`.
+    pub order: u8,
+    /// The `whattorun` bit the row requires, or 0 when it requires none.
+    pub when: u8,
+    /// The `whattorun` bit the row requires to be **clear**.
+    pub unless: u8,
+    /// The lines of `MAIN/U2.ASM` the row is read from, as `file:first-last`. The test
+    /// beside this table reads them and checks `said` against them.
+    pub citations: &'static [&'static str],
+    /// What those lines carry, in order. The test asserts each string occurs in the cited
+    /// lines, in this order, and that the module's own number (`mov ax,N`) and the order
+    /// (`mov bx,NN`) are among them.
+    pub said: &'static [&'static str],
+}
+
+/// The demo's own restart table, in the original's own order: the initial start
+/// (`MAIN/U2.ASM:766-786`) and then the four entry-point restarts (`:856-863`, `:880-885`,
+/// `:889-894`, `:898-905`).
+///
+/// Every row carries its citation and is checked against it by
+/// `tests/shell.rs`'s `every_row_of_the_restart_table_is_the_originals_own`, which reads
+/// the cited lines out of `upstream/SecondReality/MAIN/U2.ASM` — the file is not UTF-8,
+/// so it is read as bytes.
+pub const MUSIC_RESTARTS: &[MusicRow] = &[
+    // The demo's own beginning: `SECOND 1` runs block 1, and the shell starts MUSIC0 at
+    // order 0 for it (`mov ax,0` / `mov bx,-1` — the -1 is "no seek here", and the play
+    // is the `push 0 / call _zplaysong` after the sound is on).
+    MusicRow {
+        block: '1',
+        module: ModuleId::Music0,
+        order: 0,
+        when: 0x01,
+        unless: 0,
+        citations: &["MAIN/U2.ASM:766-775", "MAIN/U2.ASM:785-787"],
+        said: &["mov ax,0", "mov bx,-1", "call restartmus", "push 0", "call _zplaysong"],
+    },
+    // Everything else: MUSIC1 at order 0. This is the initial start's other branch, and
+    // it is what `SECOND 2` plays — no restart follows it for a block whose bit 0 is
+    // clear (`:813-818`'s is guarded by `whattorun & 1`).
+    MusicRow {
+        block: '2',
+        module: ModuleId::Music1,
+        order: 0,
+        when: 0,
+        unless: 0x01,
+        citations: &["MAIN/U2.ASM:772-775"],
+        said: &["mov ax,1", "mov bx,0", "mov cx,48700", "call restartmus"],
+    },
+    // `SECOND 3`'s entry-point restart, guarded `whattorun & 4` and not `whattorun & 2`.
+    MusicRow {
+        block: '3',
+        module: ModuleId::Music1,
+        order: 42,
+        when: 0x04,
+        unless: 0x02,
+        citations: &["MAIN/U2.ASM:856-863"],
+        said: &[
+            "test cs:whattorun,4",
+            "test cs:whattorun,2",
+            "mov ax,1",
+            "mov bx,42",
+            "call restartmus",
+        ],
+    },
+    // `SECOND 4`'s, guarded `whattorun & 8`.
+    MusicRow {
+        block: '4',
+        module: ModuleId::Music0,
+        order: 18,
+        when: 0x08,
+        unless: 0,
+        citations: &["MAIN/U2.ASM:880-885"],
+        said: &["test cs:whattorun,8", "mov ax,0", "mov bx,18", "call restartmus"],
+    },
+    // The hidden part's, guarded `whattorun & 80h` — `SECOND U`.
+    MusicRow {
+        block: 'U',
+        module: ModuleId::Music0,
+        order: 70,
+        when: 0x80,
+        unless: 0,
+        citations: &["MAIN/U2.ASM:889-894"],
+        said: &["test cs:whattorun,80h", "mov ax,0", "mov bx,70", "call restartmus"],
+    },
+    // `SECOND 5`'s, guarded `whattorun & 16` and not `whattorun & 8`.
+    MusicRow {
+        block: '5',
+        module: ModuleId::Music0,
+        order: 25,
+        when: 0x10,
+        unless: 0x08,
+        citations: &["MAIN/U2.ASM:898-905"],
+        said: &[
+            "test cs:whattorun,16",
+            "test cs:whattorun,8",
+            "mov ax,0",
+            "mov bx,25",
+            "call restartmus",
+        ],
+    },
+];
+
+/// The module and order `SECOND block` starts its music at — the restart table's row for
+/// the block, or [`ShellError::UnknownPart`] for a block the original rejects.
+pub fn music_for(block: char) -> Result<(ModuleId, u8), ShellError> {
+    let block = block.to_ascii_uppercase();
+    MUSIC_RESTARTS
+        .iter()
+        .find(|row| row.block == block)
+        .map(|row| (row.module, row.order))
+        .ok_or(ShellError::UnknownPart {
+            name: block.to_string(),
+        })
+}
+
+/// The music of a run that begins at `part`: the entry point the demo itself starts that
+/// part at.
+///
+/// A single-part run names a part as its own entry point, so the question "which module,
+/// at which order" is the one the demo answers for that part: `SECOND 5` starts ENDLOGO,
+/// `SECOND 2` starts BEGLOGO, and their restarts are the table above. A demo part **no**
+/// block starts at — TUNNELI, CRED, ENDSCRL: reached by a run, never started by one — is
+/// played from the demo's own beginning, which is block 1's row (`MAIN/U2.ASM:766-775`,
+/// `MOV ax,0` / `_zplaysong(0)`): the demo's own run reaches those parts under exactly that
+/// module, whatever order it has got to by then.
+///
+/// `None` for a name the demo does not have at all — the test card, which is the port's own
+/// and not the demo's — because a run of that has no music to install, and `PartCtx::music()`
+/// is then `None` rather than a player nobody asked for.
+pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
+    let entry_point = BLOCKS
+        .iter()
+        .map(|(block, _)| *block)
+        .find(|block| {
+            block_plan(*block)
+                .ok()
+                .and_then(|plan| plan.first().copied())
+                == Some(part)
+        });
+    match entry_point {
+        Some(block) => music_for(block).ok(),
+        // No entry point starts where this run does. A demo part is then played from the
+        // demo's own beginning — block 1's row, the module the demo's own run reaches those
+        // parts under — and a name the demo does not have at all has no music.
+        None => demo_part(part).and_then(|_| music_for('1').ok()),
+    }
+}
+
 /// Whether a run is still going.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SequenceStatus {
@@ -202,6 +518,27 @@ pub struct Sequence {
     /// when the plan itself ran out.
     stopped_at: Option<&'static str>,
     finished: bool,
+    /// The run's music, when it has any. See [`RunMusic`].
+    music: Option<RunMusic>,
+}
+
+/// The music a run was built with: the player, which module and order it began at, where
+/// its own clock starts, and the dump it feeds.
+struct RunMusic {
+    /// The player, shared with the engine's adapter and with whatever drains it.
+    player: crate::audio::Shared,
+    /// The module and order the run's entry point starts at ([`MUSIC_RESTARTS`]).
+    module: ModuleId,
+    order: u8,
+    /// Where the music's own clock starts, in the run's numbering ([`MusicStart`]).
+    start: MusicStart,
+    /// `--audio-dump`'s file, when one was asked for: every tick's samples, in order.
+    ///
+    /// The dump and the sound card are two consumers of one ring, so a run has one or the
+    /// other and never both (`window::run` opens no device when a dump is asked for).
+    dump: Option<crate::audio::AudioDump>,
+    /// The samples this tick produced, drained into `dump`.
+    scratch: Vec<i16>,
 }
 
 /// The part a run holds with: it draws nothing, and touches nothing of the
@@ -250,18 +587,57 @@ impl Sequence {
         view: View,
         plan: Vec<&'static str>,
     ) -> Result<Sequence, ShellError> {
-        Sequence::with_source(surface_width, surface_height, view, plan, parts::new_part)
+        Sequence::with_run(
+            surface_width,
+            surface_height,
+            view,
+            plan,
+            parts::new_part,
+            Some(crate::audio::load_player),
+        )
     }
 
-    /// [`Sequence::new`] with the parts coming from somewhere else. Crate-wide
-    /// rather than private so `headless`'s own tests can drive a run of stub
-    /// parts and see what a dump does with it.
+    /// [`Sequence::new`] with the parts coming from somewhere else, and no music.
+    /// Crate-wide rather than private so `headless`'s own tests can drive a run of stub
+    /// parts and see what a dump does with it — which is all it is for, now that a run
+    /// with music goes through [`with_run`](Sequence::with_run).
+    #[cfg(test)]
     pub(crate) fn with_source(
         surface_width: usize,
         surface_height: usize,
         view: View,
         plan: Vec<&'static str>,
         source: PartSource,
+    ) -> Result<Sequence, ShellError> {
+        Sequence::with_run(
+            surface_width,
+            surface_height,
+            view,
+            plan,
+            source,
+            None,
+        )
+    }
+
+    /// A run of `plan`'s parts, with the parts coming from `source` and the player from
+    /// `music` — or no music at all, for `None`.
+    ///
+    /// **The run's music is the entry point's**, decided from the plan's first name
+    /// ([`music_for_part`]) because that name *is* the entry point: `--block 5` and
+    /// `--part endlogo` both begin at ENDLOGO, and the demo starts ENDLOGO at MUSIC0 order
+    /// 25 either way. The module is loaded and seeked here, at the run's start; when its
+    /// polls begin is [`MusicStart`]'s business.
+    ///
+    /// `None` is a run with no player rather than a loader that fails: it is what the
+    /// shell's own tests want when what they are watching is the numbering, the keys or the
+    /// dump, and what a part the demo does not have (the test card) gets.
+    pub(crate) fn with_run(
+        surface_width: usize,
+        surface_height: usize,
+        view: View,
+        plan: Vec<&'static str>,
+        source: PartSource,
+        music: Option<MusicSource>,
     ) -> Result<Sequence, ShellError> {
         // A run of nothing has no part to name and no frame to draw; the
         // binary never builds one, because every block has at least one part
@@ -287,12 +663,57 @@ impl Sequence {
             holding: false,
             stopped_at: None,
             finished: false,
+            music: None,
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
         *run.engine.palette_mut() = hardware_default_palette();
+        if let (Some(loader), Some((module, order))) = (music, music_for_part(first)) {
+            run.install_music(module, order, loader)?;
+        }
         run.start(first)?;
         Ok(run)
+    }
+
+    /// Load the module, seek it, and hand the engine the adapter that polls it.
+    ///
+    /// The order here is the original's: the module is loaded (`MAIN/U2.ASM:775`'s
+    /// `restartmus` runs `exemus`), seeked (`:394`'s `call _zplaysong`, or `:786`'s for the
+    /// demo's own start), and only then does anything poll it — the engine's `set_music`
+    /// makes it the run's player from the next tick on, and [`MusicStart::waiting`] holds
+    /// its clock back to the frame the music's own first tick falls on.
+    fn install_music(
+        &mut self,
+        module: ModuleId,
+        order: u8,
+        source: MusicSource,
+    ) -> Result<(), ShellError> {
+        let player = source(module).map_err(|message| ShellError::Music { message })?;
+        let start = MusicStart::new(self.anchor);
+        crate::audio::lock(&player).play_song(order);
+        // **The frames the music missed before this run began.** A run whose first drawn
+        // frame is *after* the music's own start pre-polls the frames in between, because
+        // the music's advance is deterministic and does not depend on a frame being drawn:
+        // `Player::poll` is the only thing that moves it, and `pre` polls in a row leave it
+        // exactly where `pre` polls spread over `pre` frames would. A run that begins
+        // *before* the music's start has nothing to catch up on — its player waits
+        // (`MusicStart::waiting`) rather than running early.
+        for _ in 0..start.pre {
+            crate::audio::lock(&player).poll();
+        }
+        self.engine.set_music(Box::new(crate::audio::PlayerMusic::new(
+            std::sync::Arc::clone(&player),
+            start.waiting,
+        )));
+        self.music = Some(RunMusic {
+            player,
+            module,
+            order,
+            start,
+            dump: None,
+            scratch: vec![0; 1024],
+        });
+        Ok(())
     }
 
     /// One logic tick. Returns `Finished` only when the run has ended — see
@@ -314,7 +735,46 @@ impl Sequence {
         if status == PartStatus::Finished || self.engine.exit_requested() {
             self.live = None;
         }
+        // The music, after the part has drawn: the fade while there is nothing left to
+        // play, and the tick's own samples to the dump. Both are the *shell's* acts — a
+        // part never restarts, fades or drains the player — and neither can change what
+        // the tick drew.
+        self.music_after_tick();
         SequenceStatus::Continuing
+    }
+
+    /// What the shell does to the music once a tick has drawn.
+    fn music_after_tick(&mut self) {
+        let Some(music) = self.music.as_mut() else {
+            return;
+        };
+        // `@@partsdone` (`MAIN/U2.ASM:935-942`): with nothing left to play, `mov cx,1;
+        // call fademusic` walks the module's own global-volume byte down, one step a frame
+        // (that is `fademusic`'s own `dis_waitb`), and the demo deinits and returns to DOS.
+        // The port's hold *is* that moment — the plan has run out, or the next part is one
+        // the port has not written — so the fade runs here, once per tick, until the byte
+        // reaches zero.
+        if self.holding {
+            crate::audio::fade_music(&mut crate::audio::lock(&music.player), 1);
+        }
+        // The dump's samples are the tick's: `take_samples` is the ring's only consumer,
+        // and a tick's worth is what the poll inside `engine.tick` mixed.
+        if let Some(dump) = music.dump.as_mut() {
+            // One poll's worth is a few hundred samples and the scratch holds more, so a
+            // steady run takes this branch once a tick; the loop is here because how much
+            // the ring holds is not this code's to bound (a pre-polled run starts with a
+            // catch-up's worth in it).
+            loop {
+                let n = crate::audio::lock(&music.player).take_samples(&mut music.scratch);
+                if n == 0 {
+                    break;
+                }
+                dump.write(&music.scratch[..n]);
+                if n < music.scratch.len() {
+                    break;
+                }
+            }
+        }
     }
 
     /// Put a part in `live` for this tick: the next one in the plan, or the
@@ -448,6 +908,83 @@ impl Sequence {
     /// `None` when the run's own plan ran out.
     pub fn stopped_at(&self) -> Option<&'static str> {
         self.stopped_at
+    }
+
+    // --- the music ---------------------------------------------------------
+
+    /// The music's published position — `_np_ord`, `_np_pat`, `_np_row` and the two words
+    /// written straight through — or `None` for a run with no player.
+    ///
+    /// This is what a person debugging a sync problem needs (the window's status line
+    /// shows `order:row`), and it is the *published* position: the ring's, ten polls behind
+    /// the player's own (`docs/fidelity/music.md` §8), which is the one the parts read.
+    pub fn music_position(&self) -> Option<MusicPosition> {
+        self.engine.music().map(|music| music.position())
+    }
+
+    /// Which module the run is playing and the order it was seeked to, or `None` for a run
+    /// with no player.
+    pub fn music_module(&self) -> Option<(ModuleId, u8)> {
+        self.music.as_ref().map(|music| (music.module, music.order))
+    }
+
+    /// Where the music's own clock starts, in the run's numbering, or `None` for a run with
+    /// no player.
+    pub fn music_start_frame(&self) -> Option<u32> {
+        self.music.as_ref().map(|music| music.start.frame)
+    }
+
+    /// The module's own global-volume byte, or `None` for a run with no player.
+    ///
+    /// This is the byte `fademusic` (`MAIN/U2.ASM:333-346`) walks — the S3M header's offset
+    /// 48, 0x40 in both files — and it is what the shell's fade reads and writes. A run that
+    /// is holding walks it to zero, one step a tick.
+    #[cfg(test)]
+    pub fn music_volume(&self) -> Option<u8> {
+        self.music
+            .as_ref()
+            .map(|music| crate::audio::lock(&music.player).global_volume())
+    }
+
+    /// The player, for a caller that drains it — the sound card's callback, which holds its
+    /// own share of the same ring.
+    pub fn audio_player(&self) -> Option<crate::audio::Shared> {
+        self.music.as_ref().map(|music| std::sync::Arc::clone(&music.player))
+    }
+
+    /// The mixer's stream as a WAV header describes it — frames a second and channels — or
+    /// `None` for a run with no player.
+    pub fn audio_format(&self) -> Option<(u32, u16)> {
+        self.music.as_ref().map(|_| crate::audio::wav_format(&PlayerOptions::default()))
+    }
+
+    /// Send every tick's samples to `path` as a 16-bit WAV at the mixer's rate and channel
+    /// count (`--audio-dump`).
+    ///
+    /// **The dump replaces the sound card rather than joining it**: the ring has one
+    /// consumer, so a run with a dump writes the file and opens no device — which is what
+    /// `window::run` does, and why a dump is silent to watch.
+    pub fn dump_audio(&mut self, path: &std::path::Path) -> std::io::Result<()> {
+        // A run with no player has nothing to dump, and a file with a header and nothing
+        // in it reads as a recording that captured silence. The command line refuses this
+        // combination (`Cli::validate`); this is the same rule for a `Cli` built by hand.
+        let (rate, channels) = self.audio_format().ok_or_else(|| {
+            io::Error::other("this run has no music to dump")
+        })?;
+        let dump = crate::audio::AudioDump::create(path, rate, channels)?;
+        let music = self.music.as_mut().expect("audio_format answered, so there is music");
+        music.dump = Some(dump);
+        Ok(())
+    }
+
+    /// The first write `--audio-dump` could not make, if any: asked at the end of a run,
+    /// because a dump that stopped half way is a failure and not a shorter recording.
+    pub fn audio_error(&self) -> Option<String> {
+        self.music
+            .as_ref()
+            .and_then(|music| music.dump.as_ref())
+            .and_then(|dump| dump.error())
+            .map(|error| error.to_string())
     }
 
     /// The reference index of the frame [`frame`](Sequence::frame) holds, or
@@ -601,6 +1138,14 @@ pub enum ShellError {
     EmptyPlan,
     /// A part failed to start.
     Engine(EngineError),
+    /// The run's music could not be built: the module's file is missing or is not an S3M.
+    ///
+    /// **A failure, not a silent run.** The demo is music-counted — a part that begins at
+    /// the wrong music position drifts against every later part (D13) — so a run whose
+    /// module cannot be read is a run that is not the demo, and it says so instead of
+    /// drawing frames that nothing answers for. `--no-audio` is how a caller asks for no
+    /// *device*; the player still runs.
+    Music { message: String },
 }
 
 impl fmt::Display for ShellError {
@@ -610,6 +1155,7 @@ impl fmt::Display for ShellError {
             ShellError::EmptyPlan => write!(f, "a run needs at least one part"),
             ShellError::NotPorted { name } => write!(f, "{name} is not ported yet"),
             ShellError::Engine(e) => write!(f, "{e}"),
+            ShellError::Music { message } => write!(f, "the run's music cannot be loaded: {message}"),
         }
     }
 }
@@ -687,6 +1233,398 @@ mod tests {
         // not frames. A number here would be a guess wearing a citation.
         assert_eq!(boot_anchor("cred"), None);
         assert_eq!(boot_anchor("endscrl"), None);
+    }
+
+    // --- the restart table --------------------------------------------------
+
+    /// The demo's own source, the file every row of [`MUSIC_RESTARTS`] cites, read as
+    /// **bytes**: it is not UTF-8 (it is a 1993 DOS source with box-drawing characters in
+    /// it), and a reader that decoded it as text would misplace every line after the first
+    /// non-ASCII byte. The same trap the phase has hit twice with `grep`.
+    fn upstream_lines() -> Vec<String> {
+        let path = "../../upstream/SecondReality/MAIN/U2.ASM";
+        let bytes = std::fs::read(path).unwrap_or_else(|error| {
+            panic!("{path}: {error} — the upstream tree is a submodule; run `git submodule update --init`")
+        });
+        // One line per `\n`, each with its bytes made into a `char` one for one, and every
+        // run of spaces and tabs — the source aligns its operands with tabs — collapsed to
+        // one space: what a `said` string has to match is the instruction, not the column
+        // it starts in.
+        bytes
+            .split(|byte| *byte == b'\n')
+            .map(|line| {
+                let text: String = line.iter().map(|byte| char::from(*byte)).collect();
+                text.split_whitespace().collect::<Vec<_>>().join(" ")
+            })
+            .collect()
+    }
+
+    /// The lines a citation names: `MAIN/U2.ASM:898-905`.
+    fn cited(lines: &[String], citation: &str) -> Vec<String> {
+        let (file, range) = citation
+            .split_once(':')
+            .unwrap_or_else(|| panic!("{citation:?} is not `file:first-last`"));
+        assert_eq!(file, "MAIN/U2.ASM", "every row cites the shell's own source");
+        let (first, last) = range
+            .split_once('-')
+            .unwrap_or_else(|| panic!("{citation:?} is not a line range"));
+        let first: usize = first.parse().unwrap();
+        let last: usize = last.parse().unwrap();
+        assert!(first <= last, "{citation}: back to front");
+        (first..=last)
+            .map(|number| {
+                lines
+                    .get(number - 1)
+                    .unwrap_or_else(|| panic!("{citation}: line {number} is past the file's end"))
+                    .clone()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_row_of_the_restart_table_is_the_originals_own() {
+        // **The table against the file it cites**, line by line: each row's `said` strings
+        // must occur in the cited lines, in order, and the block's own `partsmask` bit must
+        // be the guard the code tests. A row that carries a number the source does not is
+        // the failure this test exists to catch — the phase has had two false claims from
+        // reading this file with tools that called it binary.
+        let lines = upstream_lines();
+        let mut checked = 0;
+        for row in MUSIC_RESTARTS {
+            let text: Vec<String> = row
+                .citations
+                .iter()
+                .flat_map(|citation| cited(&lines, citation))
+                .collect();
+            let joined = text.join("\n");
+            let mut at = 0usize;
+            for said in row.said {
+                let found = joined[at..].find(said).unwrap_or_else(|| {
+                    panic!(
+                        "{} cites {:?}, and {said:?} is not in it after byte {at}:\n{}",
+                        row.block,
+                        row.citations,
+                        joined
+                    )
+                });
+                at += found + said.len();
+            }
+            // The numbers are the ones the instructions carry, not a second transcription:
+            // the module is `mov ax,N` and the order is `mov bx,NN`, both already checked
+            // above — this says so out loud.
+            assert!(
+                row.said.contains(&"call restartmus"),
+                "{}'s row must be a `restartmus` call",
+                row.block
+            );
+            let module_number = format!("mov ax,{}", row.module.number());
+            assert!(
+                row.said.contains(&module_number.as_str()),
+                "{} runs {}, whose number is {module_number:?}",
+                row.block,
+                row.module.name()
+            );
+            // The order, where the row's own `mov bx,NN` carries it — the initial start's
+            // block-1 row reaches order 0 through `push 0 / call _zplaysong` instead, and
+            // its citation carries that.
+            if row.block == '1' {
+                assert!(row.order == 0 && row.said.contains(&"mov bx,-1"), "{}", row.block);
+            } else {
+                let order = format!("mov bx,{}", row.order);
+                assert!(row.said.contains(&order.as_str()), "{}: {order}", row.block);
+            }
+            // The guard: the code's own two tests, against the block's `partsmask` byte.
+            let mask = BLOCKS
+                .iter()
+                .find(|(name, _)| *name == row.block)
+                .unwrap_or_else(|| panic!("{} is not a block", row.block))
+                .1;
+            assert_eq!(
+                mask & row.when,
+                row.when,
+                "{}'s row is guarded by bit {:#04x}, which its mask lacks",
+                row.block,
+                row.when
+            );
+            assert_eq!(
+                mask & row.unless,
+                0,
+                "{}'s mask has the bit ({:#04x}) the row requires to be clear",
+                row.block,
+                row.unless
+            );
+            // And the row is what the function hands out for that block.
+            assert_eq!(
+                music_for(row.block).ok(),
+                Some((row.module, row.order)),
+                "{}'s row is not the one `music_for` answers with",
+                row.block
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 6, "the six entry points D13 records");
+        assert_eq!(MUSIC_RESTARTS.len(), BLOCKS.len(), "one row a block");
+    }
+
+    #[test]
+    fn a_blocks_first_part_is_the_entry_point_its_row_is_about() {
+        // The table's rows are keyed by block; a *plan* is keyed by its first part, and the
+        // two meet in `music_for_part`, which is what a run actually uses. Every block's row
+        // must therefore be the row its own plan finds — and the two blocks the port can run
+        // are the two this matters for today.
+        for row in MUSIC_RESTARTS {
+            let first = block_plan(row.block).unwrap()[0];
+            assert_eq!(
+                music_for_part(first),
+                Some((row.module, row.order)),
+                "{first} starts {}'s plan and must start its music",
+                row.block
+            );
+        }
+        // ENDLOGO is block 5's entry point and BEGLOGO is block 2's: the two runs the port
+        // can make today, and the two the trace at `reference/music/second5` covers.
+        assert_eq!(music_for_part("endlogo"), Some((ModuleId::Music0, 25)));
+        assert_eq!(music_for_part("beglogo"), Some((ModuleId::Music1, 0)));
+        // A part no block *starts* at is played from the demo's own beginning — the module
+        // the demo's own run reaches those parts under.
+        assert_eq!(music_for_part("cred"), Some((ModuleId::Music0, 0)));
+        // And a name the demo does not have at all has no music: the test card is the
+        // port's own, so a run of it installs no player and `PartCtx::music()` is `None`.
+        assert_eq!(music_for_part("testcard"), None);
+    }
+
+    #[test]
+    fn a_run_with_nothing_left_to_play_fades_the_music_out_a_step_a_tick() {
+        // `@@partsdone` (`MAIN/U2.ASM:935-942`) is `mov cx,1; call fademusic` — and the
+        // port's hold *is* that moment, so the shell walks the module's own global-volume
+        // byte down, one step a tick, from the tick the run has nothing left to play. The
+        // demo's step is `mov cx,1` (`:927`/`:938`) and 0x40 is the byte both modules carry,
+        // so the fade is 64 ticks long and stops at zero (`fademusic`'s `@@done`).
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["pam"],
+            stub_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        let start = run.music_volume().expect("pam's run plays MUSIC0");
+        assert_eq!(start, 0x40, "the module's own global-volume byte");
+
+        // The part retires on its first tick, so the hold begins with the second.
+        run.tick();
+        assert!(!run.holding(), "the part drew its one frame");
+        assert_eq!(run.music_volume(), Some(start), "and nothing has faded yet");
+        for expected in (0..start).rev() {
+            run.tick();
+            assert!(run.holding(), "the run has nothing left to play");
+            assert_eq!(
+                run.music_volume(),
+                Some(expected),
+                "the fade is one step a tick, and {} steps are left",
+                expected
+            );
+        }
+        // And it stops at zero rather than wrapping: further ticks leave it there.
+        run.tick();
+        run.tick();
+        assert_eq!(run.music_volume(), Some(0), "the byte saturates at zero");
+    }
+
+    // --- the run's music against the filed trace -----------------------------
+
+    /// One row of a filed trace: the frame, and the published position at it.
+    ///
+    /// `reference/music/<name>/trace.csv` holds exactly the frames the trace *has* — the
+    /// emulator's own gaps are missing rows and not zeroes — so walking the file is
+    /// walking the frames the trace holds, which is what the brief's "read the trace's own
+    /// gaps from its manifest" is for. The manifest is where a *reader* checks that; a
+    /// reader of the rows needs nothing else.
+    fn trace(name: &str) -> Vec<(u32, (u8, u8))> {
+        let path = format!("../../reference/music/{name}/trace.csv");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+        text.lines()
+            .skip(1)
+            .map(|line| {
+                let number = |index: usize| -> u32 {
+                    line.split(',')
+                        .nth(index)
+                        .unwrap_or_else(|| panic!("{line}: no field {index}"))
+                        .trim()
+                        .parse()
+                        .unwrap_or_else(|error| panic!("{line}: field {index}: {error}"))
+                };
+                (number(0), (number(1) as u8, number(2) as u8))
+            })
+            .collect()
+    }
+
+    /// How far a published position may be from the frame the trace publishes it at.
+    ///
+    /// **Measured, not chosen**, and the same measurement `crates/sr-audio/tests/trace.rs`
+    /// uses: the two filed sessions of one recipe (`second5` and `second5b` — the same
+    /// command, the same emulator, the same cycles) disagree with *each other* about which
+    /// frame eight of their row changes land on, and the port — whose clock is exact —
+    /// sits between the sessions. The worst displacement against any filed trace is 3
+    /// frames (`docs/fidelity/APPROXIMATIONS.md` A12, whose evidence is that test's own
+    /// per-trace counts).
+    const JITTER_FRAMES: u32 = 3;
+
+    /// The distinct values of a sequence, in order.
+    fn distinct<T: PartialEq + Copy>(items: impl Iterator<Item = T>) -> Vec<T> {
+        let mut out: Vec<T> = Vec::new();
+        for item in items {
+            if out.last() != Some(&item) {
+                out.push(item);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has() {
+        // **The phase's own test of the run's music start.** A `SECOND 5` entry point —
+        // `--block 5`'s plan, whose first part *is* the entry point — driven in process
+        // with the real player and stub parts: what is under test is the shell's music, and
+        // the music does not depend on what the parts draw. Every frame of
+        // `reference/music/second5` from the run's own start on is compared, because a
+        // music start four frames off moves every row change in the run and only a
+        // frame-by-frame comparison sees it.
+        let plan = block_plan('5').unwrap();
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            plan,
+            stub_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(run.anchor(), Some(404), "block 5 draws from the boot's 404");
+        assert_eq!(
+            run.music_start_frame(),
+            Some(MUSIC_START_FRAME),
+            "and the music's own clock starts at 408"
+        );
+
+        let trace = trace("second5");
+        let last = trace.iter().map(|(frame, _)| *frame).max().unwrap();
+        let start = run.index();
+        let wanted: std::collections::BTreeMap<u32, (u8, u8)> =
+            trace.iter().copied().filter(|(frame, _)| *frame >= start).collect();
+
+        // The run's own published position, one sample a frame, for every frame the trace
+        // holds.
+        let mut port: std::collections::BTreeMap<u32, (u8, u8)> =
+            std::collections::BTreeMap::new();
+        while run.frame_index().is_none_or(|index| index < last) {
+            if run.tick() == SequenceStatus::Finished {
+                break;
+            }
+            let index = run.index() - 1;
+            if wanted.contains_key(&index) {
+                let position = run.music_position().expect("block 5 has a player");
+                port.insert(index, (position.order, position.row));
+            }
+        }
+        assert_eq!(
+            port.len(),
+            wanted.len(),
+            "every frame the trace holds was visited"
+        );
+
+        // 1. **Placement.** Every position the port publishes is one the trace publishes at
+        //    that frame or within the jitter the two filed sessions of the recipe measure on
+        //    each other. This is the check that pins the *anchor*: a music start four frames
+        //    out moves every row change in the run.
+        let nearest = |frame: u32, position: (u8, u8)| -> Option<u32> {
+            wanted
+                .iter()
+                .filter(|(_, value)| **value == position)
+                .map(|(at, _)| at.abs_diff(frame))
+                .min()
+        };
+        let mut exact = 0usize;
+        let mut worst = 0u32;
+        let mut unknown: Vec<(u32, (u8, u8))> = Vec::new();
+        for (frame, position) in &port {
+            match nearest(*frame, *position) {
+                Some(0) => exact += 1,
+                Some(distance) => worst = worst.max(distance),
+                None => unknown.push((*frame, *position)),
+            }
+        }
+        println!(
+            "second5: {exact} of {} frames agree exactly ({:.3} %); worst displacement \
+             {worst} frame(s)",
+            port.len(),
+            100.0 * exact as f64 / port.len() as f64
+        );
+        // A position the trace publishes nowhere in its window is a run whose music is
+        // *ahead* of the trace's — the tail of a run started early — and it is a different
+        // fault from a displacement, so it is named as one.
+        assert!(
+            unknown.is_empty(),
+            "the run published {unknown:?}, which the trace publishes nowhere in frames \
+             {}..={last} — its music is ahead of the trace's",
+            start,
+        );
+        assert!(
+            worst <= JITTER_FRAMES,
+            "the worst displacement is {worst} frames, more than the {JITTER_FRAMES} the \
+             two filed sessions measure on each other (A12)"
+        );
+
+        // And then **content**: the sequence of positions the port publishes is the
+        // trace's, so a dropped row, an invented row or an order published for the wrong
+        // pattern shows up however the frames line up. Placement first on purpose: a music
+        // start in the wrong frame leaves the *values* almost right (only the tail moves)
+        // and the displacement is the diagnosis a reader wants.
+        assert_eq!(
+            distinct(port.values().copied()),
+            distinct(wanted.values().copied()),
+            "the run's positions, in order, are not the trace's"
+        );
+    }
+
+    // --- the music's own start ----------------------------------------------
+
+    #[test]
+    fn the_music_waits_for_its_anchor_and_catches_up_past_it() {
+        // The anchor is 408 in the reference's frame space, and a run's own start decides
+        // which side of it the run is on.
+        assert_eq!(MUSIC_START_FRAME, 408);
+        // A block entry: the run draws from 404, four frames before the music starts. The
+        // player is installed and seeked at the run's start, and waits.
+        assert_eq!(
+            MusicStart::new(Some(404)),
+            MusicStart { frame: 408, waiting: 4, pre: 0 }
+        );
+        // A run that begins exactly on the anchor waits for nothing.
+        assert_eq!(
+            MusicStart::new(Some(408)),
+            MusicStart { frame: 408, waiting: 0, pre: 0 }
+        );
+        // A run that begins after it catches up: `SECOND 3`'s MNTSCRL draws from about 417
+        // (the part's first graphics frame is in (415, 420], `reference-indices.md`), and
+        // the music would have ticked through the frames the run never drew.
+        assert_eq!(
+            MusicStart::new(Some(417)),
+            MusicStart { frame: 417, waiting: 0, pre: 9 }
+        );
+        assert!(MusicStart::new(Some(417)).pre > 0);
+        // A run with a numbering of its own has no reference frame to synchronise to: its
+        // music starts with it, on its frame 0.
+        assert_eq!(
+            MusicStart::new(None),
+            MusicStart { frame: 0, waiting: 0, pre: 0 }
+        );
+        // A run that waits for the anchor is a run whose music is *late*: the player is
+        // there, and nothing polls it until the frame the original's first tick falls on.
+        assert_eq!(MusicStart::new(Some(404)).waiting, 4);
+        assert_eq!(MusicStart::new(Some(404)).pre, 0);
     }
 
     #[test]
@@ -767,6 +1705,16 @@ mod tests {
             // Draws nothing at all: whatever the screen holds when it starts is
             // what its frames show, which is how the handover is tested.
             "b" => Some(Box::new(Stub { name: "b", fill: None, retires: Some(0) })),
+            // A demo part that retires at once, so a run of it reaches the hold and its
+            // music's fade. `pam` is the demo's own part and no block *starts* at it, which
+            // is why it is played from the demo's beginning (MUSIC0 at order 0).
+            "pam" => Some(Box::new(Stub { name: "pam", fill: None, retires: Some(0) })),
+            // `--block 5`'s plan, for the test that watches the *music*: the three
+            // scrollers draw nothing and never retire, so the run ticks to the trace's
+            // last frame with the numbering the block gave it.
+            "endlogo" => Some(Box::new(Stub { name: "endlogo", fill: None, retires: None })),
+            "cred" => Some(Box::new(Stub { name: "cred", fill: None, retires: None })),
+            "endscrl" => Some(Box::new(Stub { name: "endscrl", fill: None, retires: None })),
             _ => None,
         }
     }

@@ -769,9 +769,12 @@ them block 1's and all of them Phase 4's.
 
 **Original:** `sync_10` (`DIS/DISINT.ASM:449-463`) turns the published position into a part-start
 code with the `ordersync1` table above it (`:428-446`): the loop is `mov cx,16` over fifteen
-four-byte entries (`:455`), the answer is read at `%bx - 2` (`:460`), and above the last key
-(`0x4200`) the 16th iteration compares against — and, when it does not match, returns — the bytes
-that follow the table, which are `sync_10`'s own first instruction, `mov es, cs:stmikseg`.
+four-byte entries (`:455`) and the answer is read at `%bx - 2` (`:460`). Above the last key
+(`0x4200`) the 16th iteration compares against the bytes that follow the table, which are
+`sync_10`'s own first instruction, `mov es, cs:stmikseg` (`2e 8e 06 …`); where that 16th compare
+*matches*, the answer is the table's last code, and where it does not, the loop falls through one
+entry further and returns the word **after the one it compared** — the `mov`'s own modrm byte and
+the low byte of its displacement, not the `2e 8e` it just compared with.
 
 **Port:** `sr_engine::sync_from` reproduces the table, the `%bx - 2` arithmetic and the read
 *before* the table exactly (the position `(0, 0)` included — see below), and **panics** for a
@@ -782,7 +785,7 @@ position above the last key, naming the position and the reason.
 | key | what the object's 16th iteration does | the port |
 |---|---|---|
 | `<= 0x8E2E` | the compare matches (`2e 8e` read as a word — the `mov`'s prefix and opcode, the same in every build) and the answer read at `%bx - 2` is the table's own last code, **4** | refused |
-| `> 0x8E2E` | the compare fails and the loop returns the word after the table: the modrm byte `06` and the *low byte* of a **linker-set** displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` | refused |
+| `> 0x8E2E` | the compare fails and the loop returns the word after the one it compared — **not** the word the row above compares with, which is `2e 8e`, but the two bytes *after* those: the `mov`'s modrm byte `06` and the *low byte* of a **linker-set** displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` | refused |
 
 Only the second tier *forces* a refusal: a port cannot return a number that differs between builds
 of the original. The first tier is deterministic in every build the tree holds, and the port

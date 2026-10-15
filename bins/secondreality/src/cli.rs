@@ -49,6 +49,16 @@ pub struct Cli {
     pub aspect: Aspect,
     /// Whether to draw the frame's overscan colour as a border.
     pub border: bool,
+    /// Write the music to this file as a 16-bit WAV instead of opening a sound card.
+    ///
+    /// The ring has one consumer, so a dump *replaces* the device rather than joining it:
+    /// a run that writes a file is silent to watch. The artifact is the point — a person
+    /// listens to it and a test reads its bytes — and no reference audio exists to compare
+    /// against (`docs/fidelity/music.md` §10.5).
+    pub audio_dump: Option<PathBuf>,
+    /// Do not open a sound card. The player still runs: the music's position is the tick's
+    /// and this only stops the tick's samples from being played.
+    pub no_audio: bool,
 }
 
 impl Default for Cli {
@@ -65,6 +75,8 @@ impl Default for Cli {
             scale: 1,
             aspect: Aspect::FourThree,
             border: true,
+            audio_dump: None,
+            no_audio: false,
         }
     }
 }
@@ -127,6 +139,10 @@ impl Cli {
                 }
                 "--no-border" => cli.border = false,
                 "--headless" => cli.headless = true,
+                "--audio-dump" => {
+                    cli.audio_dump = Some(PathBuf::from(value(&mut args, "--audio-dump")?))
+                }
+                "--no-audio" => cli.no_audio = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }
         }
@@ -149,6 +165,16 @@ impl Cli {
         }
         if self.block.is_some() && self.part.is_some() {
             return Err("give --part or --block, not both".to_string());
+        }
+        // A dump of a run with no music would be a file with a header and nothing in it,
+        // which reads as a recording that captured silence. Which runs have music is the
+        // shell's answer (`music_for_part`), not this module's: the test card is the port's
+        // own and not the demo's, so a run of it has no player at all.
+        if self.audio_dump.is_some() && shell::music_for_part(self.first_part()?).is_none() {
+            return Err(format!(
+                "--audio-dump needs a run with music, and a run of {} has none",
+                self.first_part()?
+            ));
         }
         // The block's first part has to be one the port can run, in **either**
         // mode: the window drives the same `Sequence` a headless run dumps, so

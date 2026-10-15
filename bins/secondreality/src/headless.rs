@@ -55,6 +55,12 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(dir)?;
 
     let mut run = crate::new_sequence(cli)?;
+    // The music, before the first tick: `--headless` opens no sound card (`--no-audio` is
+    // therefore a no-op here, which is why a run with and without it is the same run), and
+    // `--audio-dump` writes the WAV the tick's samples go to.
+    if let Some(path) = cli.audio_dump.as_deref() {
+        run.dump_audio(path)?;
+    }
     let frames = match (cli.frames, cli.run_seconds, cli.dump_frames.as_deref()) {
         // A parsed command line carries exactly one of the three, so the order
         // here is not a precedence rule — the last arm only catches a `Cli`
@@ -67,6 +73,11 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         }
     };
 
+    // A dump that stopped half way is a failure and not a shorter recording (the sink keeps
+    // the first write it could not make rather than printing on a tick).
+    if let Some(error) = run.audio_error() {
+        return Err(format!("--audio-dump: {error}").into());
+    }
     write_manifest(dir, &run, &frames)
 }
 
@@ -88,7 +99,7 @@ fn by_tick(
         }
         // The frame just drawn is the run's cursor minus one, so a part the
         // shell started at its anchor dumps that anchor's own frame first.
-        frames.push(dump(dir, run.part(), run.index() - 1, run.frame())?);
+        frames.push(dump(dir, run, run.index() - 1)?);
     }
     Ok(frames)
 }
@@ -139,7 +150,7 @@ fn by_index(
         }
         let index = run.index() - 1;
         if wanted.contains(&index) {
-            frames.push(dump(dir, run.part(), index, run.frame())?);
+            frames.push(dump(dir, run, index)?);
         }
         if index >= last {
             break;
@@ -210,7 +221,7 @@ fn run_for(run: &mut Sequence, dir: &Path, seconds: f64) -> Result<FrameEntry, B
     let Some(index) = run.frame_index() else {
         return Err(format!("--run-seconds {seconds} ended before the run drew a frame").into());
     };
-    Ok(dump(dir, run.part(), index, run.frame())?)
+    Ok(dump(dir, run, index)?)
 }
 
 /// The manifest's word for a run's numbering: `boot` when its indices are the
@@ -229,8 +240,10 @@ fn index_origin(is_reference: bool) -> &'static str {
 }
 
 /// Write one frame as `<part>_<index:06>.idx` and `<part>_<index:06>.rgb`, and
-/// describe it for the manifest.
-fn dump(dir: &Path, part: &'static str, index: u32, frame: &IndexedFrame) -> io::Result<FrameEntry> {
+/// describe it for the manifest — including where the music was when it was drawn.
+fn dump(dir: &Path, run: &Sequence, index: u32) -> io::Result<FrameEntry> {
+    let part = run.part();
+    let frame = run.frame();
     let idx = file_name(part, index, "idx");
     let rgb = file_name(part, index, "rgb");
     fs::write(dir.join(&idx), &frame.pixels)?;
@@ -242,7 +255,15 @@ fn dump(dir: &Path, part: &'static str, index: u32, frame: &IndexedFrame) -> io:
         height: frame.height,
         idx,
         rgb,
+        music_position: music_position(run),
     })
+}
+
+/// The published music position, as the status line spells it — `order:row` — or `None`
+/// for a run with no player.
+fn music_position(run: &Sequence) -> Option<String> {
+    run.music_position()
+        .map(|position| format!("{}:{}", position.order, position.row))
 }
 
 /// `<part>_<index:06>.<extension>`.
@@ -278,6 +299,11 @@ fn write_manifest(dir: &Path, run: &Sequence, frames: &[FrameEntry]) -> Result<(
         // and are not.
         index_origin: index_origin(run.index_is_reference()),
         anchor: run.anchor(),
+        music: run.music_module().map(|(module, start_order)| MusicSetup {
+            module: module.name(),
+            start_order,
+            start_frame: run.music_start_frame().unwrap_or(0),
+        }),
         frames,
     };
     let mut json = serde_json::to_vec_pretty(&manifest)?;
@@ -305,6 +331,15 @@ struct FrameEntry {
     height: u16,
     idx: String,
     rgb: String,
+    /// Where the music was when this frame was drawn — the published `order:row`, the
+    /// same spelling the window's status line uses — or `null` for a run with no player.
+    ///
+    /// **This is what makes a dump's frames answerable for the run that drew them.** The
+    /// demo is music-counted (D13): the same part drawn at a different music position is a
+    /// different demo, and a comparison that cannot see the position is comparing frames
+    /// without knowing that. `xtask compare` ignores the field (it reads `index`, `idx`
+    /// and `rgb`, and a manifest's other keys are not its business), so this is additive.
+    music_position: Option<String>,
 }
 
 /// The dump's index file.
@@ -321,7 +356,24 @@ struct Manifest<'a> {
     index_origin: &'a str,
     /// The reference index the run began at, for a `boot` run.
     anchor: Option<u32>,
+    /// The music the run began with: which module, the order its entry point starts at, and
+    /// the frame its own clock starts on — the shell's restart table's answer
+    /// (`shell::MUSIC_RESTARTS`), recorded the way a capture records the argument it
+    /// started the original with (D13). `null` for a run with no player.
+    music: Option<MusicSetup<'a>>,
     frames: &'a [FrameEntry],
+}
+
+/// What a run's music started as, for the manifest.
+#[derive(Debug, Serialize)]
+struct MusicSetup<'a> {
+    /// `MUSIC0` or `MUSIC1`.
+    module: &'a str,
+    /// The order the run's entry point seeked to.
+    start_order: u8,
+    /// The frame, in this manifest's own numbering, the music's own clock starts on
+    /// ([`shell::MusicStart`](crate::shell::MusicStart)).
+    start_frame: u32,
 }
 
 

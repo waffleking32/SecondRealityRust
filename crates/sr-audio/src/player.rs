@@ -348,7 +348,17 @@ impl Player {
     /// That routine also **clears every channel** (`+0x5614`, called at `+0x5716`): the period,
     /// the volume, the remembered parameters, the vibrato position and the cell fields all go
     /// back to zero, so a seek is a fresh start for the effects too.
+    ///
+    /// **And it clears `[0x2000]`, the tick-in-row counter** (`+0x56ec`, `movw $0x0,0x2000` —
+    /// the routine's own first instruction). The port mirrors it, because the shell's restarts
+    /// are seeks made *mid-song*: `restartmus` (`MAIN/U2.ASM:348-397`) is reached with the
+    /// player part-way through a row, and a stale counter would begin the new order's row 0 on
+    /// a later tick — `+0x4371`'s `cmpw $0x0,0x2000` would be false, so the row's cells would
+    /// not be processed at all. Nothing else in the port seeks mid-song, so on a fresh player
+    /// this line changes nothing; it is load-bearing for the shell's restart.
     pub fn play_song(&mut self, order: u8) {
+        // `+0x56ec`: the counter is zeroed first, before anything else the routine does.
+        self.tick_in_row = 0;
         for channel in &mut self.channels {
             channel.reset();
         }
