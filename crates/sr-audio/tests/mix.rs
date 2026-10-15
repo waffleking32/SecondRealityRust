@@ -79,7 +79,10 @@ fn value(sample: u8, level: u8) -> i32 {
     ((i32::from(sample) * scale) >> 8) - ((128 * scale) >> 8)
 }
 
-const MARKED: i32 = 0x501;
+/// The base the audible path uses (`0x400`, so silence is the curve's 1024th entry — the byte
+/// 0x80 the DMA buffer is centred on). The name is kept from the round that modelled the
+/// flush's `0x0101` re-mark as well: A14(a) records why the port does not apply it.
+const MARKED: i32 = 0x400;
 const UNMARKED: i32 = 0x400;
 
 /// The number of the object's first mixed chunk: the DMA loop's countdown starts at 1
@@ -97,13 +100,20 @@ fn curve_with(mul: u32, value: i32) -> i16 {
     curve_at(mul, MARKED, value)
 }
 fn curve_at(mul: u32, base: i32, value: i32) -> i16 {
-    let k = 0x8000 / mul;
+    let k = (0x8000 / mul) as usize;
     let step = 65536 / k;
-    let index = (base + value).clamp(0, 0x7ff) as u32;
-    let byte = if index < 0x800 - k {
+    // `+0x559d`'s `rep stosw` leaves `CX` = 0, so the zero fill is half its intended length:
+    // `(0x800 − K)/2` entries, then the ramp, then `0xFF` from `+0x55bd`'s tail. For mul 64
+    // that is 768 zeros, the ramp at 768…1279 and 0xFF from 1280 — the boundaries the probe
+    // read on MUSIC0's run.
+    let zeros = (0x800 - k) / 2;
+    let index = (base + value).clamp(0, 0x7ff) as usize;
+    let byte = if index < zeros {
         0
+    } else if index < zeros + k {
+        ((((index - zeros) * step) >> 8) & 0xff) as u8
     } else {
-        (((index - (0x800 - k)) * step) >> 8) as u8
+        0xff
     };
     (i16::from(byte) - 128) * 256
 }
@@ -316,12 +326,11 @@ fn one_voice_is_the_modules_own_sample_bytes() {
     assert_eq!(value(176, 63), 48);
     assert_eq!(0x501 + 48, 1329);
     assert_eq!(1329 / 8, 166);
-    assert_eq!(curve_at(16, MARKED, 48), 9728, "the steady state's index 1329");
-    assert_eq!(curve_at(16, UNMARKED, -13), -512, "the first chunk's index 1011");
-    // The first 64 samples are the unmarked chunk: the sample's 115 is the value −13, index
-    // 0x400 − 13 = 1011, byte 126, i.e. −512; its 176 is the value +48, index 1072, byte 134,
-    // i.e. 1536. The positions are 0 five times and then 1, so the first five samples are the
-    // first and the next three the second.
+    assert_eq!(curve_at(16, MARKED, 48), 1536, "index 0x400 + 48 = 1072, the byte 134");
+    assert_eq!(curve_at(16, MARKED, -13), -512, "index 1011, the byte 126");
+    // The sample's 115 is the value −13 → index 1011 → the byte 126 → −512; its 176 is +48 →
+    // index 1072 → the byte 134 → 1536. The positions are 0 five times and then 1, so the first
+    // five samples are the first and the next three the second.
     assert_eq!(
         &out[..8],
         &[-512, -512, -512, -512, -512, 1536, 1536, 1536]
@@ -340,7 +349,7 @@ fn one_voice_is_the_modules_own_sample_bytes() {
 }
 
 #[test]
-fn the_references_own_curve_gates_a_solo_voice() {
+fn a_solo_voice_is_audible_through_the_table_the_machine_holds() {
     // The same voice on the modules' *own* master-volume byte, 0xB0 → `mul` 64, whose curve is
     // 1536 zeros and then 512 entries of `k/2`: an index below 1536 is the byte 0. A solo
     // voice's value is at most ±127 — `(255 × 255) >> 8 = 254` against the centre's 127 — so
@@ -362,11 +371,23 @@ fn the_references_own_curve_gates_a_solo_voice() {
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
-    assert_eq!(curve(0), -32768, "the gate's byte");
-    assert_eq!(curve(127), -32768, "a solo voice's loudest value");
+    // The machine's table at `mul` 64 is the halved-zero fill the builder's `rep stosw` bug
+    // leaves: 768 zero entries, the ramp at 768…1279 (one level per two entries) and 0xFF
+    // above. Silence is the ramp's centre — the byte 0x80, which is what the DMA buffer the
+    // probe read is centred on — and a solo voice's ±127 of value moves it by ±63: audible,
+    // neither gated nor clipped.
+    assert_eq!(curve(0), 0, "the byte 128, the card's centre");
+    assert_eq!(curve(127) / 256, 63, "the byte 191");
+    assert_eq!(curve(-127) / 256, -64, "the byte 64, one level per two of value");
+    let left: Vec<i16> = out.iter().step_by(2).copied().collect();
+    let right: Vec<i16> = out.iter().skip(1).step_by(2).copied().collect();
     assert!(
-        out.iter().all(|sample| *sample == -32768),
-        "both sides: the voice is on the left pan and the right's index is the marker's"
+        left.iter().any(|sample| *sample > 0) && left.iter().any(|sample| *sample < 0),
+        "the voice swings both ways through the machine's ramp, on the left pan"
+    );
+    assert!(
+        right.iter().all(|sample| *sample == 0),
+        "and the right accumulator is empty, so its samples are the ramp's centre"
     );
     // The loudest byte the sample carries, at the top level, is still inside the gate.
     let loudest = bytes.iter().copied().max().unwrap();
@@ -731,17 +752,14 @@ fn the_window_is_not_silent() {
          {distinct} distinct values",
         samples.len()
     );
-    assert!(above > 0, "the gate opened somewhere in the window");
     assert!(distinct > 16, "the ramp is reached: {distinct} distinct values");
     assert!(
-        samples.iter().all(|sample| *sample >= silence),
-        "the curve's floor is its zero entry, so nothing is below the silence"
+        samples.iter().any(|sample| *sample > silence),
+        "and the window reaches above the ramp's centre"
     );
     assert!(
-        above < samples.len() / 100,
-        "and the reference's own gate is closed for the great majority of it: {above} of {} \
-         are above the silence",
-        samples.len()
+        samples.iter().any(|sample| *sample < silence),
+        "and below it"
     );
 }
 
@@ -848,10 +866,8 @@ fn a_note_off_leaves_the_voice_silent() {
     assert_eq!(mixer.take(&mut out), 128);
     // A level of 0 makes every sample's value 0, so the samples are the curve's own entry for
     // 0 — 0 while the planes are unmarked, and the marker's 8192 after — and never the note.
-    assert_eq!(curve_at(16, UNMARKED, 0), 0);
-    assert_eq!(curve_at(16, MARKED, 0), 8192);
-    assert_eq!(&out[..64], &[0i16; 64], "the unmarked first chunk");
-    assert!(out[64..].iter().all(|sample| *sample == 8192));
+    assert_eq!(curve_at(16, MARKED, 0), 0, "the curve's centre, the byte 128");
+    assert!(out.iter().all(|sample| *sample == 0), "a level of 0 is the byte 128");
 }
 
 #[test]

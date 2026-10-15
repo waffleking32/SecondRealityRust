@@ -118,10 +118,11 @@ const NO_LOOP: u32 = 0xffff_ffff;
 /// (`+0x50ab`) and is rounded up to a multiple of 64 before the mixer sees it (`+0x50e6`).
 const FIRST_CHUNK: usize = 64;
 
-/// The object's table base offset index: silence is the 1024th of the curve's 2048 entries and
-/// the flush's `0x400 - centre_sum` puts a frame's own `value` on top of it, marked
-/// (`0x501 = 0x400 + 0x101`) or not.
-const INDEX_BASE_MARKED: i32 = 0x501;
+/// The flush's own base: `+0x30b4`'s `0x400 − centre_sum` plus the accumulator, so a frame's
+/// value lands on the curve's 1024th entry — the byte 0x80 the audible buffer is centred on.
+/// The flush's `0x0101` re-mark (`+0x2ce5`, `+0x30d0`) would put silence 257 entries higher and
+/// the port does not apply it, because the measurement says the audible path does not: A14(a).
+const UNMARKED_BASE: i32 = 0x400;
 
 /// The largest position the object can hold: `m_pos`'s whole bytes are a 16-bit word
 /// (`+0x378a`: `mov 0x44(%bp),%si`), so nothing past this is reachable, and the bounds the
@@ -623,11 +624,14 @@ impl Mixer {
     /// The base the planes are on: `0x400` while the first chunk's zeroed accumulators are
     /// still unmarked, `0x501` once a flush has written the `0x0101` marker into them.
     fn base(&self) -> i32 {
-        if self.unmarked > 0 {
-            INDEX_BASE_MARKED - 0x101
-        } else {
-            INDEX_BASE_MARKED
-        }
+        // **The audible path carries no `0x101` marker**, measured: the buffer the DMA plays
+        // (`[0xbe6]:0xC9B0`) is centred on the byte 0x80, which is the ramp's centre at index
+        // 1024 — `0x400 + 0` — while the marker's `0x101` would put silence 257 entries higher,
+        // inside the `0xFF` tail the builder's bug leaves (A14(a) carries the argument and what
+        // is still open about it). The marker's own `unmarked` bookkeeping is kept because the
+        // object's code has it; the base does not use it.
+        let _ = self.unmarked;
+        UNMARKED_BASE
     }
 
     /// One output sample: the curve's entry for a frame's value, and the marker's consumption —
@@ -760,14 +764,34 @@ impl Curve {
         Curve::build(multiplier(master_volume, stereo))
     }
 
-    /// The curve for a multiplier, without the header watch in front of it.
+    /// The curve for a multiplier, without the header watch in front of it — **with the
+    /// builder's own bug in it**, because the machine's memory holds the bug and the flush
+    /// reads it.
+    ///
+    /// `+0x559d`'s `rep stosw` leaves `CX` = 0, so `+0x559f`'s `add %cx,%cx` doubles **zero**
+    /// and `+0x55a1`'s `rep stosb` writes nothing: the zero region is `(0x800 − ramp)/2`
+    /// entries, half of what the code intends, and the ramp therefore starts `(0x800 −
+    /// ramp)/2` entries into the span instead of `0x800 − ramp`. `+0x55b5`'s `sub %di,%cx`
+    /// then computes the shortfall from that short `di` and `+0x55bd`'s `rep stosw` fills it
+    /// with `0xFFFF` — the tail is `0xFF`, not zero.
+    ///
+    /// Measured, at the reference's own parameters: `music probe --cycles 30000 --arg 5
+    /// --frames 400..1300 --dump 0x6E:16 --dump 0x46E:16 …` reads zeros for indices 0…767,
+    /// the ramp for 768…1279 (`00 00 01 01 … F0 F0 F1 F1`, one level per two entries) and
+    /// `FF` for 1280…2047, unchanged across the window. `tests/mix.rs`'s `curve_with` is the
+    /// same arithmetic written out again, and its test asserts the boundaries for both
+    /// multipliers the two modules ask for.
     pub fn build(mul: u8) -> Curve {
         let mul = mul.max(0x10);
         let ramp = 0x8000 / usize::from(mul);
         let step = 65536 / ramp;
+        let zeros = (0x800 - ramp) / 2;
         let mut table = vec![0u8; 0x800];
         for entry in 0..ramp {
-            table[0x800 - ramp + entry] = ((entry * step) >> 8) as u8;
+            table[zeros + entry] = ((entry * step) >> 8) as u8;
+        }
+        for byte in table[zeros + ramp..].iter_mut() {
+            *byte = 0xff;
         }
         Curve { table, mul }
     }
@@ -879,31 +903,41 @@ mod tests {
         // K = 0x8000/mul entries of ramp, the high byte of k × (65536/K), after 0x800 − K
         // zeros. At the reference's mul of 64: K = 512, 1536 zeros, then (k × 128) >> 8 =
         // k/2 — 0, 0, 1, 1, … 255, 255.
+        // The reference's own, mul 64: K = 512, and the bug halves the zero fill to
+        // (0x800 − 512)/2 = 768 entries — so the ramp runs 768…1279 and 0xFF covers
+        // 1280…2047. Every boundary here is one the probe read.
         let curve = Curve::build(64);
         assert_eq!(curve.mul(), 64);
-        for entry in [0usize, 1, 1024, 1535] {
+        for entry in [0usize, 1, 766, 767] {
             assert_eq!(curve.table[entry], 0, "entry {entry} is in the zero region");
         }
-        assert_eq!(curve.table[1536], 0);
-        assert_eq!(curve.table[1537], 0);
-        assert_eq!(curve.table[1538], 1);
-        assert_eq!(curve.table[1539], 1);
-        assert_eq!(curve.table[2046], 255);
-        assert_eq!(curve.table[2047], 255);
-        // The linear case, mul = 16: K = 2048, no zeros, and the ramp is k/8.
-        let linear = Curve::build(16);
-        assert_eq!(linear.table[0], 0);
-        assert_eq!(linear.table[8], 1);
-        assert_eq!(linear.table[1024], 128);
-        assert_eq!(linear.table[2047], 255);
-        // And the floor: a multiplier below 0x10 is built as 0x10.
+        assert_eq!(curve.table[768], 0, "the ramp's first entry is 0");
+        assert_eq!(curve.table[769], 0);
+        assert_eq!(curve.table[770], 1);
+        assert_eq!(curve.table[771], 1);
+        assert_eq!(curve.table[1024], 128, "the ramp's centre");
+        assert_eq!(curve.table[1152], 192);
+        assert_eq!(curve.table[1248], 240);
+        assert_eq!(curve.table[1278], 255);
+        assert_eq!(curve.table[1279], 255);
+        for entry in [1280usize, 1300, 2046, 2047] {
+            assert_eq!(curve.table[entry], 0xff, "entry {entry} is the 0xFFFF tail");
+        }
+        // The intended builder would have put 1536 zeros and the ramp at 1536…2047; the
+        // linear map would have no zeros and a K of 2048. Both are refuted by the table
+        // above: 768 is a ramp entry and 1280 is not.
+        assert_eq!(0x800 - 512, 1536, "the intended zero count");
+        assert_eq!((0x800 - 512) / 2, 768, "the buggy one");
+        // The floor: a multiplier below 0x10 is built as 0x10 (K = 2048 → its own shape).
         assert_eq!(Curve::build(1).mul(), 0x10);
-        assert_eq!(Curve::build(1).table, linear.table);
+        assert_eq!(Curve::build(1).table, Curve::build(16).table);
     }
 
     #[test]
     fn a_curve_entry_becomes_the_cards_unsigned_byte() {
         // The card plays unsigned 8-bit, so the port's i16 is (byte − 128) × 256.
+        // The linear case (mul 16): K = 2048, so the zeros are (0x800 − 2048)/2 = 0 and the
+        // ramp covers the whole span — the map the port shipped before this round.
         let curve = Curve::build(16);
         assert_eq!(curve.sample(1024), 0, "index 1024 is the byte 128, the card's centre");
         assert_eq!(curve.sample(0), -32768);
@@ -911,14 +945,16 @@ mod tests {
         // The reference's own curve, at the marker's base: silence is index 0x501 = 1281, in
         // the zero region, so it reads the byte 0 — the bottom of the card's range.
         let curve = Curve::build(64);
-        assert_eq!(curve.sample(0x501), -32768, "the value 0 is silence");
-        assert_eq!(curve.sample(0x501 + 255), -32768, "index 1536, the ramp's first entry");
-        assert_eq!(curve.sample(0x501 + 256), -32768, "index 1537, still the byte 0");
-        assert_eq!(curve.sample(0x501 + 257), -32768 + 256, "index 1538, the byte 1");
-        assert_eq!(curve.sample(0x501 + 766), 32512, "index 2047, the byte 255");
+        // At the *unmarked* base, silence is the ramp's centre — the byte 0x80 the audible
+        // buffer is centred on.
+        assert_eq!(curve.sample(0x400), 0, "index 1024, the byte 128");
+        assert_eq!(curve.sample(0x400 + 80), 40 * 256, "±80 of value is ±40 of byte");
+        assert_eq!(curve.sample(0x400 - 80), -40 * 256);
+        // Past the ramp the tail is 0xFF: the byte 255, i.e. the top of the card's range.
+        assert_eq!(curve.sample(0x400 + 512), 32512, "index 1536");
         // Past the table's end the port clamps where the object's 16-bit index would read its
         // own segment's neighbours.
-        assert_eq!(curve.sample(0x501 + 100_000), 32512);
+        assert_eq!(curve.sample(0x400 + 100_000), 32512);
         assert_eq!(curve.sample(-100_000), -32768);
     }
 

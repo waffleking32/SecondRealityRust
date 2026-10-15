@@ -1316,10 +1316,13 @@ difference is measured: `cargo xtask music probe --dump` reads `cs:0x6E+0x000`�
 whole window and finds the zero region at **half** its length, the ramp 768 bytes early and the
 rest filled with `0xFF` — because `+0x559d`'s `rep stosw` leaves `CX` = 0 and `+0x55a1`'s `rep
 stosb` therefore writes nothing, which makes `+0x55bd`'s tail fill the shortfall with `0xFFFF`.
-`APPROXIMATIONS.md` A14 is the measurement and the two things it leaves open; the port plays the
-**linear** path the audible buffer supports (`[0xbe6]:0xC9B0` holds a waveform centred on 0x80,
-which is the mis-placed ramp's byte 128 at index 1024, not the gate's 0x00 and not the tail's
-0xFF).
+`APPROXIMATIONS.md` A14 is the measurement. The port **plays the table the machine holds**: the
+halved zero fill, the ramp where the bug leaves it, the `0xFF` tail, indexed at `0x400 + value`
+— the base the audible buffer supports, since `[0xbe6]:0xC9B0` holds a waveform centred on 0x80,
+which is the ramp's byte 128 at index 1024. Two clauses of A14 are open and named there: the
+flush's `0x0101` marker (which would put silence 257 entries higher, inside the tail) and whether
+MUSIC1's own run reads through the same table — its dump does not match either multiplier's
+boundaries, so the port's table is the MUSIC0-matched one.
 
 **What that means for the sound, measured.** At `mul` 64 the curve's first 1536 entries are zero
 and the ramp covers the last 512, so a frame is the silence byte — the card's 0, i.e. −32768 —

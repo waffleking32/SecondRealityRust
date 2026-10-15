@@ -708,16 +708,40 @@ through the table the machine actually holds does not: index `0x400 + 0` = 1024 
 `(1024 − 768)/2` = **0x80**, the buffer's own centre, and a value of ±80 moves the byte by ±40 —
 the measured swing.
 
-**What the port does about it, and what is still open.** The port ships the **linear** path: the
-`mul`-64 gate is code the object contains, the machine's memory does not hold it, and the buffer
-is not what plays it. Two things are *not* settled by this round's evidence and are registered
-here rather than guessed at: **(a)** why the index on the audible path carries no `0x101` marker,
-when the flush writes `0x0101` into every word it reads (`+0x2ce5`, `+0x30d0`) — the measurement
-says silence lands on the ramp's centre, and the marker's arithmetic says it should land 257
-entries higher, in the `FF` region; and **(b)** whether the table's misplacement is always this
-one (a 768-byte shift for `K` = 512 at `0x006E`) or depends on the run's multiplier, which a
-second window with a different module would distinguish. **Measured difference:** the port's
-samples are a linear map of the object's accumulator where the reference's are that map through
-the mis-placed ramp with an `FF` ceiling above it; no capture can quantify the audible result
-(the emulator runs silent, D17), and the buffer above is the whole of the evidence for the
-*shape*.
+**What the port does about it.** `Curve::build` reproduces the builder **with its bug**: the zero
+region is `(0x800 − K)/2` entries, the ramp follows it, and `0xFF` fills the remainder of the
+span. For `mul` 64 that is 768 zeros, the ramp at 768…1279 and `0xFF` from 1280 — the boundaries
+the probe read — and `tests/mix.rs`'s `curve_with` is the same arithmetic written out again, so a
+test that computed the *intended* table (1536 zeros, the ramp at 1536…2047) or the linear map
+fails. The mixer indexes it at **`0x400 + value`** (the audible base — see (a)).
+
+**Still open, with the measurement behind each clause.**
+
+**(a) The marker.** The flush writes `0x0101` into every accumulator word it reads (`+0x2ce5`,
+`+0x30d0`), so the *code's* index should be `0x501 + value` — 257 entries above the base the port
+uses. The measurement says otherwise: with the buggy table the marker would put silence at index
+1281, inside the `0xFF` tail, while the DMA buffer the probe read (`[0xbe6]:0xC9B0`) is a
+waveform **centred on 0x80** — the ramp's `(1024 − 768)/2` at index 1024 = `0x400 + 0`. The port
+follows the measurement (its `Mixer::base` uses `0x400`) and keeps the marker's bookkeeping in the
+code without applying it. What would settle it: a dump of one `_zchn` accumulator word — the
+planes live at `[0xbe4]:0x4000`, outside the located segment, so the probe needs a linear-address
+mode that reads that segment — taken at two consecutive flushes, to see whether the word a flush
+leaves behind is `0x0101`-marked or the sample's own value.
+
+**(b) The formula is not confirmed by a second multiplier.** The same dump under MUSIC1
+(`--cycles 30000 --arg 3 --frames 600..900`) does **not** show the boundaries at
+`(0x800 − K)/2 = 861` and `861 + K = 1202` for the `mul` 48 a mono configuration would give, nor
+at 768/1280 for a stereo `mul` 64: `cs:0x6E+0x35A` and `+0x3CB` read `00 00 00 00` and
+`2E 2F 2F 30`, and `+0x4B0`/`+0x4B4` read `A1 A1 A2 A2 A3 A3 A4 A4` — a *gentler* slope than any
+built ramp, i.e. **not the builder's output at all** in that run, while `cs:0x6C` is `6E 00`
+there too. So the bug is real in the builder's bytes and MUSIC0's run matches it exactly, and
+what MUSIC1's run is reading through is unexplained: the region may hold different data per
+session (heap or a second user of the span) rather than one table. The port's table is the
+MUSIC0-matched one, and this clause is the reason a reader should not treat it as settled for
+every run.
+
+**Measured difference:** the port's byte is the machine's table applied to the object's
+accumulator — the same map MUSIC0's run is consistent with — and what remains uncertain is
+whether every run's table is that one (b) and whether the audible index carries the marker (a).
+No capture can quantify the audible result (the emulator runs silent, D17); the dump is the whole
+of the evidence, and `cargo xtask music probe --dump` reproduces every byte above.
