@@ -739,7 +739,13 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   boundary**: the reachable domain (ord ≤ 0x42) returns the table's codes, and beyond it the call is
   refused loudly rather than returned as a fabricated number, with the reason in `music.md` and an
   entry in `APPROXIMATIONS.md` if the phase cannot show the domain is unreachable for every part in
-  the tree (the only caller, `PAM/OUTTAA.C:39`, is block 1's, and Phase 4's).
+  the tree — and **both ends of the domain turn out to be reachable**, which Task 6 found by reading
+  the callers rather than this plan: `sync_10`'s `%bx - 2` read makes `(order 0, row 0)` an
+  out-of-table read at the *near* end too, and `(0, 0)` is exactly what ALKU's first `dis_sync()`
+  holds. The callers in the tree are block 1's (Phase 4's) and are **six**, not the one this plan
+  first claimed: `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138` and `PAM/OUTTAA.C:39`. So the phase
+  cannot show the out-of-domain region is unreachable, and the boundary is A15's decision for
+  Phase 4 either way.
 - `muscode` (`DIS/DISINT.ASM:242-282`, `DIS/DISC.ASM:91-100`): returns `zinfo`, whose value comes
   from Task 1's resolution or from the documented deferral, and the deferral's substitute is
   implemented here as the same *shape* (a function of the position) so that a later phase's
