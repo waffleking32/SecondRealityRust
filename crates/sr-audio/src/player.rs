@@ -55,11 +55,16 @@
 //!    (`music-clock.md` §10), so this paragraph is the object's reading, not a measurement,
 //!    and `docs/fidelity/music.md` says so.
 //!
-//! 6. **`A` and `T` are one handler told apart by their parameter** (`+0x3d73`:
-//!    `cmp $0x20,%ax; jbe` — 32 and under is a speed, above it a tempo, Scream Tracker's own
-//!    convention), `B` defers its jump to the row's end (`+0x3de2`) and `BFF` ends the song,
-//!    and `C`'s parameter is **decimal** and unclamped (`+0x3dfe`: `mov %al,%ah; shr $0x4; and
-//!    $0xf; aad $0xa`).
+//! 6. **`A` and `T` are two handlers with two table entries, not one told apart by its
+//!    parameter.** This file's first reading of them was the other way round and Task 4
+//!    corrected it: `A` is the first-tick table's entry 1 and its whole body is `+0x3dd2` —
+//!    `cmp $0x0,%al; je; xor %ah,%ah; mov %ax,%cs:0x2002` — with **no upper bound** on the
+//!    parameter, while `T` is entry 20 and only it has the `cmp $0x20,%ax; jbe 0x3dce` split
+//!    (32 and under goes to the driver call and never to the speed). The object's own header
+//!    watch is the second witness: it calls `+0x3dd2` for the module's speed byte and
+//!    `+0x3d73` for its tempo byte. `B` defers its jump to the row's end (`+0x3de2`) and `BFF`
+//!    ends the song, and `C`'s parameter is **decimal** and unclamped (`+0x3dfe`: `mov %al,%ah;
+//!    shr $0x4; and $0xf; aad $0xa`).
 //!
 //! The channel effects (D, E, F, G, H, J, K, O, Q, S) live in [`crate::effects`], on the
 //! per-channel state this file owns and drives: a row's cells are read and installed first

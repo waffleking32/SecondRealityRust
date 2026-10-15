@@ -318,6 +318,42 @@ fn the_cells_the_tests_drive_are_the_modules_own() {
     assert_eq!(delays("MUSIC0"), BTreeMap::from([(3u8, 77usize), (6, 63)]));
     assert_eq!(delays("MUSIC1"), BTreeMap::from([(2u8, 48usize)]));
 
+    // `Q`'s nibbles are the object's: the **low** nibble is the interval and the high one the
+    // volume code (`+0x41f6`). These are the code and interval multisets both files carry —
+    // the set the port's tables are tested against, and the set that leaves code 6's row of
+    // the multiplier table (10/16) reached by no shipped cell.
+    let codes = |name: &str| {
+        let module = module(name);
+        let mut codes: BTreeMap<u8, usize> = BTreeMap::new();
+        let mut intervals: BTreeMap<u8, usize> = BTreeMap::new();
+        for index in 0..module.pattern_count() {
+            for cells in &module.pattern(index).expect("a pattern").rows {
+                for cell in cells {
+                    if cell.has_command() && cell.command == 17 {
+                        *codes.entry(cell.info >> 4).or_default() += 1;
+                        *intervals.entry(cell.info & 0x0f).or_default() += 1;
+                    }
+                }
+            }
+        }
+        println!("  {name}: Q codes {codes:?}, intervals {intervals:?}");
+        (codes, intervals)
+    };
+    assert_eq!(
+        codes("MUSIC0"),
+        (
+            BTreeMap::from([(0u8, 49usize), (4, 2), (7, 11), (12, 2), (14, 1), (15, 19)]),
+            BTreeMap::from([(0u8, 48usize), (3, 7), (4, 28), (6, 1)]),
+        )
+    );
+    assert_eq!(
+        codes("MUSIC1"),
+        (
+            BTreeMap::from([(0u8, 38usize)]),
+            BTreeMap::from([(3u8, 38usize)]),
+        )
+    );
+
     // The named cells, checked against the data the tests below drive them through.
     let m0 = module("MUSIC0");
     assert_cell(&m0, 0, 0, 0, 4, 0x10); // D10
@@ -1346,11 +1382,12 @@ fn sdx_delays_the_note_to_its_own_tick() {
     // The three delays the two modules carry, driven from their own cells. `SDx` puts the low
     // nibble into the channel's `atrigcnt` on the row's first tick (`+0x4296`), counts it down
     // on every later tick (`+0x429a`) and starts the deferred note when it reaches zero — so
-    // the note begins on tick `x`, and a row with not enough ticks never starts it at all.
-    //
-    // MUSIC0's `SD6` rows are that case: pattern 40 (order 44) is `SD6` and MUSIC0 runs at
-    // speed 6, so the ticks are 0…5 and tick 6 does not exist — **the note never starts**, and
-    // the channel keeps the period it had.
+    // the note begins on tick `x` of the row, and a row with fewer ticks than `x` has no tick
+    // that fires it. All three of these rows do fire, and the speed each row runs at is *read
+    // from the player* rather than assumed: the first pass over this test assumed MUSIC0's
+    // second row was a 6-tick row whose `SD6` note could never start, and the print below
+    // showed the speed is 12 there and the note fires on tick 6. The `None` branch is the
+    // guard for the case that is not in the data.
     for (name, order, pattern, row, channel, delay) in [
         ("MUSIC0", 45u8, 41usize, 0usize, 5usize, 3u8),
         ("MUSIC0", 44, 40, 1, 5, 6),
@@ -1760,4 +1797,79 @@ fn the_volume_zero_optimisation_stops_a_pattern_break_from_running() {
         "and the order advances when the pattern ends"
     );
     assert_eq!(player.engine_position().row, 0);
+}
+
+#[test]
+fn music1s_a7f_row_takes_127_ticks_and_takes_its_own_row_with_it() {
+    // Where §8's `A`/`T` correction is spent. MUSIC1 carries one `A` cell above 32 — `A7F`,
+    // order 98 (pattern 72) row 48, the only order that names pattern 72 — and the object's
+    // handler for `A` (`+0x3dd2`) writes it into the *speed* with no upper bound, so that row
+    // plays at speed 127 and so does every row after it until the order list wraps. The speed
+    // is written on the row's own first tick (the row timer reads the published word), so the
+    // `A7F` row takes 127 ticks, not the 6 the rows before it take.
+    let m1 = module("MUSIC1");
+    assert_eq!(m1.orders()[98], 72, "order 98 names pattern 72");
+    assert_eq!(m1.orders()[99], 0xff, "and it is the last order before the end");
+    assert_eq!(
+        (0..32)
+            .filter(|&c| {
+                let k = cell(&m1, 72, 48, c);
+                k.has_command() && k.command == 1
+            })
+            .count(),
+        1,
+        "one `A` cell in the row"
+    );
+    // Find it, so the assertion above cannot pass on a different channel.
+    let channel = (0..32)
+        .find(|&c| {
+            let k = cell(&m1, 72, 48, c);
+            k.command == 1 && k.info == 0x7f
+        })
+        .expect("the `A7F` cell");
+    println!("  the `A7F` is pattern 72 row 48 channel {channel}");
+
+    let mut player = Player::new(m1, PlayerOptions::default());
+    player.play_song(0);
+    run_to_row(&mut player, 72, 0);
+    assert_eq!(player.state().speed, 6, "the speed the `A6`s before it left");
+    // Every row of the order, one logic tick at a time: `tick` advances exactly one tick, so
+    // a row's ticks are counted where the engine puts them and not where a poll happens to
+    // fall. The row's length is the ticks the engine spent while its position was that row.
+    let mut lengths: Vec<i64> = Vec::new();
+    loop {
+        let start = player.engine_position();
+        if start.order != 98 {
+            break;
+        }
+        let mut ticks = 0i64;
+        loop {
+            let before = player.zframe();
+            tick(&mut player);
+            ticks += i64::from(player.zframe() - before);
+            let now = player.engine_position();
+            if now.order != 98 || now.row != start.row {
+                break;
+            }
+        }
+        lengths.push(ticks);
+    }
+    assert_eq!(lengths.len(), 64, "the whole pattern was played");
+    assert!(
+        lengths[..48].iter().all(|&ticks| ticks == 6),
+        "the rows before the cell: {:?}",
+        &lengths[..48]
+    );
+    assert!(
+        lengths[48..].iter().all(|&ticks| ticks == 127),
+        "and the cell's own row and the fifteen after it: {:?}",
+        &lengths[48..]
+    );
+    let total: i64 = lengths.iter().sum();
+    assert_eq!(total, 2320, "the order's ticks");
+    println!(
+        "  MUSIC1 order 98: 48 rows at 6 then 16 at 127 = {total} ticks; the sixteen at 127 \
+         are {} where the sixteen at 6 would be 96",
+        lengths[48..].iter().sum::<i64>()
+    );
 }

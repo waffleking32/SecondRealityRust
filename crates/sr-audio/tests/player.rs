@@ -282,18 +282,29 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             &[0x3C, 0x00, 0x74, 0xF8, 0x32, 0xE4, 0x2E, 0xA3, 0x02, 0x20, 0xC3],
             "A: cmp $0x0,%al; je (+0x3dce); xor %ah,%ah; mov %ax,%cs:0x2002 (_np_speed); ret",
         ),
-        // ...and the object's own *header watch* is the second witness: it calls `+0x3dd2`
-        // for the module's speed byte (offset 49) and `+0x3d73` for its tempo byte (offset
-        // 50), so the two handlers are distinct by construction and not by parameter.
+        // ...and the object's own *header watch* is the second witness: it reads the module
+        // header's tempo byte (offset 50, `0x32` — the two `mov %al,ds:[..]` below are the
+        // read) and calls `+0x3d73` with it, then reads the speed byte (offset 49, `0x31`)
+        // and calls `+0x3dd2`. Four sites, and each of the four is its own claim.
         (
-            0x53D8,
-            &[0xE8, 0xF7, 0xE9],
-            "the header watch calls +0x3dd2 for the initial *speed* byte (offset 49, read at +0x53ca)",
+            0x53B9,
+            &[0xA0, 0x32, 0x00],
+            "the header watch reads the header's *tempo* byte (offset 50) into %al",
         ),
         (
             0x53C7,
             &[0xE8, 0xA9, 0xE9],
-            "and +0x3d73 for the initial *tempo* byte (offset 50, read at +0x53b9)",
+            "and calls +0x3d73 with it — the tempo handler, the only one that gets this byte",
+        ),
+        (
+            0x53CA,
+            &[0xA0, 0x31, 0x00],
+            "then reads the header's *speed* byte (offset 49) into %al",
+        ),
+        (
+            0x53D8,
+            &[0xE8, 0xF7, 0xE9],
+            "and calls +0x3dd2 with it — the speed handler, which takes every value it is given",
         ),
         (
             0x3D7B,

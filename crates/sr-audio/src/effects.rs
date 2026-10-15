@@ -159,15 +159,28 @@ impl Channel {
     /// false — the part of the module initialiser (`+0x5614`, which `_zplaysong` calls at
     /// `+0x258e`) that any Task 4 assertion can observe.
     ///
-    /// **The object's own writes are wider than that, and Task 5's mixer will meet them.** It
-    /// zeroes the channel number (`+0x5625`), the cell fields, the volume and the period words,
-    /// but it writes the **`0x01010101`** markers into the position and the base (`+0x5628`,
-    /// `+0x5630`), sets `lastadlins` to `0x65` (`+0x5681`), and leaves `a0volcut` and the effect
-    /// counters as they were; the silence pass that follows (`+0x569a`) then writes `0xff` into
-    /// `+0x04` and `+0x3f` and 0 into `+0x41`. None of those is reachable by a Task 4
-    /// assertion — the position a note start writes replaces the marker — so the port carries
-    /// none of them, and the mixer decides for itself what to make of a channel that has never
-    /// played a note.
+    /// **The object's own writes are wider than that, and Task 5's mixer will meet them**, so
+    /// they are named against the fields it actually writes:
+    ///
+    /// - `+0x5625`, `mov %bl,0x3(%si)` — `channelnum` takes **the channel's own index** (`bl` is
+    ///   the loop counter the initialiser increments per channel), not zero.
+    /// - `+0x5628` writes the marker **`0x01010101`** into `m_pos` (`+0x44`), and `+0x5630`
+    ///   writes it into **`+0x5c`** — which is not `m_base`: it is the word the mixer keeps as
+    ///   its *shadow of the position* (`+0x6fb8` reads `+0x5c` and compares it with `+0x44`;
+    ///   `+0x6fc7` rewrites it). `m_base` is `+0x58`, the same initialiser **zeroes** it —
+    ///   both words, `+0x5641` and `+0x5644` — and it is the sample base (`0x708c`:
+    ///   `mov 0x58(%si),%cx; shl $0xe,%ecx`).
+    /// - `lastadlins` (`+0x3a`) is set to `0x65` (`+0x5681`); the cell fields and the
+    ///   remembered parameters *are* zeroed (the words at `+0x2b`, `avibcnt` at `+0x26`,
+    ///   `aorgvol` at `+0x2a`, `alastnfo` at `+0x39`), but the effect counters — `atreon`
+    ///   (`+0x2d`), `atrigcnt` (`+0x2e`), `atremor` (`+0x2f`), `avslide` (`+0x30`) and
+    ///   `a0volcut` (`+0x31`) — are left as they were: the initialiser writes none of them,
+    ///   and neither does the silence pass that follows it (`+0x569a`), which writes `0xff`
+    ///   into `+0x04` and `+0x3f` and 0 into `+0x41`.
+    ///
+    /// None of it is reachable by a Task 4 assertion — the position a note start writes
+    /// replaces the marker — so the port carries none of it, and the mixer decides for itself
+    /// what to make of a channel that has never played a note.
     pub(crate) fn reset(&mut self) {
         *self = Channel::default();
     }
@@ -780,9 +793,11 @@ const NOTE_PERIODS: [u16; 12] = [
 const NOTE_SHIFTS: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 5, 11, 17, 27, 32, 42, 47];
 
 /// The `Q` volume-variation addends at `+0x95c`, signed — with the same reading of the image
-/// applied as the multipliers below: the bytes at 6, 7, 8 and 14, 15 are the codes that take
-/// the *multiply* path, and where the image holds `0x0101` there the running program holds 0.
-/// (The slots the code actually reaches are 0…5 and 9…13, all of them real bytes.)
+/// applied as the multipliers below: 6, 7, 14 and 15 are the codes that take the *multiply*
+/// path (the only ones whose multiplier is not zero), code 8's addend is a real zero byte of its
+/// own, and where the image holds `0x0101` — the slots 14 and 15 — the running program holds
+/// 0. The slots a code can actually reach are 0…5, 8 and 9…13, all of them real bytes but for
+/// that pair.
 const RETRIGGER_ADD: [i8; 16] = [0, -1, -2, -4, -8, -16, 0, 0, 0, 1, 2, 4, 8, 16, 0, 0];
 
 /// The `Q` volume-variation multipliers at `+0x96c`, in sixteenths — with the object image's
