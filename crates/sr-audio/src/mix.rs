@@ -54,14 +54,16 @@
 //! **What this file does with each of those.**
 //!
 //! Points 1–5 are reproduced exactly: [`scale`], [`voice_value`], [`centre`], [`step`],
-//! `Mixer::frame` and the rewrap. Point 6 is where the port stops. The object's output table
-//! is a per-run gain curve built from `_np_mastermul` (the module header's master-volume byte,
-//! offset 0x33, which the reference runs at 0xB0 → 2240, `music.md` §10) and at that value it
-//! maps every accumulator below *the centre plus 512* to zero; the port converts the voice
-//! sums — each voice less its own centre, which is exactly the quantity the object forms at
-//! `+0x2cbe`/`+0x30b4` — straight to `i16` with the object's own *linear* case, the table the
-//! same builder produces at the minimum its own clamp allows. That is the whole of the
-//! approximation and it is registered in `docs/fidelity/APPROXIMATIONS.md`.
+//! `Mixer::frame` and the rewrap. Point 6 is the table [`Curve`] builds — a per-run gain curve
+//! from `_np_mastermul` (the module header's master-volume byte, offset 0x33, which the
+//! reference runs at 0xB0 → 2240, `music.md` §10) **as the machine's memory holds it, bug and
+//! all** — indexed at the base the audible DMA buffer supports (`0x400 + value`, the flush's
+//! own correction with the code's `0x0101` marker *not* applied; A14(a) is that open clause).
+//! Each voice's contribution is its table value less its own centre, which is exactly the
+//! quantity the object forms at `+0x2cbe`/`+0x30b4`, and the byte becomes the port's `i16` the
+//! way the card widens it: `(byte − 128) × 256`. What is approximated in the table's place is
+//! the **clamp** at its ends, where the object's 16-bit `bx` would read its own segment's
+//! neighbours — A13 (as it stands) in `docs/fidelity/APPROXIMATIONS.md`.
 //!
 //! The DMA plumbing is not reproduced either, and could not be: there is no 8-bit DAC, no
 //! `_zbufsize` ring for the hardware to walk, and no EMS page frame. What replaces it is
@@ -356,16 +358,20 @@ pub struct Mixer {
     /// The output curve, rebuilt when the module's master-volume byte or the output mode
     /// changes — which is when the object's header watch rebuilds it (`+0x53af`, `+0x5420`).
     curve: Curve,
-    /// How many of the next output samples are read against the object's *unmarked*
-    /// accumulator planes.
+    /// How many of the next output bytes the object would read against *unmarked* accumulator
+    /// planes — the first chunk's count, kept as the object's own bookkeeping.
     ///
     /// `+0x2943` zeroes the planes and every flush re-marks the words it read with `0x0101`
-    /// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`), so a frame's index is
-    /// `0x400 − centre sum + accumulator` while the planes are the zeroed ones and
-    /// `0x501 − centre sum + accumulator` — the marker's `0x101` — afterwards. Only the first
-    /// chunk after the planes are zeroed is unmarked, and that chunk is 64 bytes: the DMA
-    /// loop's countdown starts at 1 (`+0x50ab`) and is rounded up to a multiple of 64 before
-    /// mixing (`+0x50e6`'s `add $0x41,%ax; and $0xffc0,%ax`).
+    /// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`), which would make a frame's index
+    /// `0x501 − centre sum + accumulator` — the marker's `0x101` above the base — after the
+    /// first chunk. Only that first chunk is unmarked, and it is 64 bytes: the DMA loop's
+    /// countdown starts at 1 (`+0x50ab`) and is rounded up to a multiple of 64 before mixing
+    /// (`+0x50e6`'s `add $0x41,%ax; and $0xffc0,%ax`).
+    ///
+    /// **The port's base does not read this field** ([`Mixer::base`]): the audible buffer the
+    /// probe read is centred where the *unmarked* base puts silence, so every sample — the
+    /// first chunk's included — is read at `0x400 + value`, and this counter is kept only
+    /// because the object's code has it. A14(a) is that question and what would settle it.
     unmarked: usize,
     /// The samples the ring's overflow policy evicted.
     dropped: u64,
@@ -608,7 +614,7 @@ impl Mixer {
         }
 
         // `+0x30b4`/`+0x2cb4`: the accumulator less the centre sums, indexed into the curve at
-        // the base the planes' marker sets.
+        // `0x400 + value` — the flush's own base, without the marker (`Mixer::base`).
         let left = self.emit(left);
         // A mono mix writes one byte a frame, so only the left accumulator is an output sample;
         // the right's value is still converted for `last_frame` but consumes no marker unit.
@@ -635,9 +641,10 @@ impl Mixer {
         UNMARKED_BASE
     }
 
-    /// One output sample: the curve's entry for a frame's value, and the marker's consumption —
-    /// every *byte* the object writes consumes one of the first chunk's 64, so a stereo frame
-    /// consumes two and a mono frame one.
+    /// One output sample: the curve's entry for a frame's value, and the object's own marker
+    /// bookkeeping — every *byte* the object writes consumes one of the first chunk's 64, so a
+    /// stereo frame consumes two and a mono frame one. The bookkeeping changes no value:
+    /// [`Mixer::base`] reads the same base for every sample.
     fn emit(&mut self, value: i32) -> i16 {
         let base = self.base();
         if self.unmarked > 0 {
@@ -718,14 +725,18 @@ fn advance(voice: &mut Voice, channel: &mut Channel) {
 /// byte into the byte at `[0x916]`, whose low seven bits `+0x5569` reads. See [`multiplier`].
 ///
 /// **The table** (`+0x5565`…`+0x55c1`): `mul` is floored at `0x10` (`+0x5570`…`+0x5575`),
-/// `K = 0x8000 / mul` (`+0x557d`), and the buffer at `cs:[0x6c]` gets `0x800 - K` zero bytes
-/// (`+0x559d`/`+0x55a1`) followed by `K` entries of a ramp whose step is `65536 / K`
-/// (`+0x5588`) stored as the **high** byte of a 16-bit accumulator (`+0x55a7`: `mov %ah,(%di)`).
-/// So entry `0x800 - K + k` is `(k × (65536/K)) >> 8`.
+/// `K = 0x8000 / mul` (`+0x557d`), and the buffer at `cs:[0x6c]` is filled by three runs — the
+/// zero fill the two `shr $1,%cx` at `+0x5592`/`+0x559b` leave, `K` entries of a ramp whose step
+/// is `65536 / K` (`+0x5588`) stored as the **high** byte of a 16-bit accumulator (`+0x55a7`:
+/// `mov %ah,(%di)`), and the `0xFFFF` tail `+0x55bd` writes over the shortfall. The intended
+/// first run is `0x800 - K` bytes and the intended entry `0x800 - K + k` is
+/// `(k × (65536/K)) >> 8`; what the machine's memory holds instead is [`Curve::build`]'s
+/// subject, and this type builds that.
 ///
 /// At the reference's own byte — the modules' master volume is 176, `0xB0` — the multiplier is
-/// **64**, `K` is **512**, and the curve is 1536 zeros followed by 512 ramp entries: `value × 2`
-/// is the entry's index into 256 output levels. That is what the note's §10.3 is about.
+/// **64**, `K` is **512**, and the curve the machine holds is 768 zeros, the ramp at 768…1279
+/// (one output level per two entries) and `0xFF` from 1280. That is what the note's §10.3 is
+/// about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Curve {
     table: Vec<u8>,
@@ -770,11 +781,12 @@ impl Curve {
     /// reads it.
     ///
     /// `+0x559d`'s `rep stosw` leaves `CX` = 0, so `+0x559f`'s `add %cx,%cx` doubles **zero**
-    /// and `+0x55a1`'s `rep stosb` writes nothing: the zero region is `(0x800 − ramp)/2`
-    /// entries, half of what the code intends, and the ramp therefore starts `(0x800 −
-    /// ramp)/2` entries into the span instead of `0x800 − ramp`. `+0x55b5`'s `sub %di,%cx`
-    /// then computes the shortfall from that short `di` and `+0x55bd`'s `rep stosw` fills it
-    /// with `0xFFFF` — the tail is `0xFF`, not zero.
+    /// and `+0x55a1`'s `rep stosb` writes nothing: the zero region is the `⌊(0x800 − ramp)/4⌋`
+    /// **words** the two `shr $1,%cx` left, i.e. `2 × ⌊(0x800 − ramp)/4⌋` entries — half of the
+    /// `0x800 − ramp` the code intends, and one entry short of even that when `ramp` is 1 or 2
+    /// mod 4. The ramp therefore starts inside the span where that fill ends, and `+0x55b5`'s
+    /// `sub %di,%cx` computes the shortfall from the short `di` while `+0x55bd`'s `rep stosw`
+    /// fills it with `0xFFFF` in `2 × ⌊rem/2⌋` bytes — the tail is `0xFF`, not zero.
     ///
     /// Measured, at the reference's own parameters: `music probe --cycles 30000 --arg 5
     /// --frames 400..1300 --dump 0x6E:16 --dump 0x46E:16 …` reads zeros for indices 0…767,
@@ -912,12 +924,10 @@ mod tests {
 
     #[test]
     fn the_curve_is_the_objects_own_table() {
-        // K = 0x8000/mul entries of ramp, the high byte of k × (65536/K), after 0x800 − K
-        // zeros. At the reference's mul of 64: K = 512, 1536 zeros, then (k × 128) >> 8 =
-        // k/2 — 0, 0, 1, 1, … 255, 255.
-        // The reference's own, mul 64: K = 512, and the bug halves the zero fill to
-        // (0x800 − 512)/2 = 768 entries — so the ramp runs 768…1279 and 0xFF covers
-        // 1280…2047. Every boundary here is one the probe read.
+        // K = 0x8000/mul entries of ramp, the high byte of k × (65536/K); the reference's own,
+        // mul 64: K = 512, the ramp is (k × 128) >> 8 = k/2 — 0, 0, 1, 1, … 255, 255 — and the
+        // bug halves the zero fill to 2 × ⌊(0x800 − 512)/4⌋ = 768 entries, so the ramp runs
+        // 768…1279 and 0xFF covers 1280…2047. Every boundary here is one the probe read.
         let curve = Curve::build(64);
         assert_eq!(curve.mul(), 64);
         for entry in [0usize, 1, 766, 767] {
@@ -970,17 +980,17 @@ mod tests {
     #[test]
     fn a_curve_entry_becomes_the_cards_unsigned_byte() {
         // The card plays unsigned 8-bit, so the port's i16 is (byte − 128) × 256.
-        // The linear case (mul 16): K = 2048, so the zeros are (0x800 − 2048)/2 = 0 and the
-        // ramp covers the whole span — the map the port shipped before this round.
+        // The linear case (mul 16): K = 2048, so the zero fill is 2 × ⌊0/4⌋ = 0 and the ramp
+        // covers the whole span — the map the port shipped before the curve was implemented.
         let curve = Curve::build(16);
         assert_eq!(curve.sample(1024), 0, "index 1024 is the byte 128, the card's centre");
         assert_eq!(curve.sample(0), -32768);
         assert_eq!(curve.sample(2047), 127 * 256);
-        // The reference's own curve, at the marker's base: silence is index 0x501 = 1281, in
-        // the zero region, so it reads the byte 0 — the bottom of the card's range.
+        // The reference's own curve, at the base the port indexes with: silence is the ramp's
+        // centre — the byte 0x80 the audible buffer is centred on. The marker's `0x501` would
+        // put silence 257 entries higher, inside the 0xFF tail, and the port does not apply it
+        // (A14(a)).
         let curve = Curve::build(64);
-        // At the *unmarked* base, silence is the ramp's centre — the byte 0x80 the audible
-        // buffer is centred on.
         assert_eq!(curve.sample(0x400), 0, "index 1024, the byte 128");
         assert_eq!(curve.sample(0x400 + 80), 40 * 256, "±80 of value is ±40 of byte");
         assert_eq!(curve.sample(0x400 - 80), -40 * 256);

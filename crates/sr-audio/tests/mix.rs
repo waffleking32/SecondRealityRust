@@ -79,37 +79,41 @@ fn value(sample: u8, level: u8) -> i32 {
     ((i32::from(sample) * scale) >> 8) - ((128 * scale) >> 8)
 }
 
-/// The base the audible path uses (`0x400`, so silence is the curve's 1024th entry — the byte
-/// 0x80 the DMA buffer is centred on). The name is kept from the round that modelled the
-/// flush's `0x0101` re-mark as well: A14(a) records why the port does not apply it.
-const MARKED: i32 = 0x400;
-const UNMARKED: i32 = 0x400;
+/// The base the port indexes the curve with: the flush's own `0x400 − centre_sum`
+/// (`+0x30b4`, `+0x2cbe`), so a frame's value lands on entry `0x400 + value` and silence is the
+/// curve's 1024th entry — the byte 0x80 the audible DMA buffer is centred on. **Every** sample
+/// is read at this base, the first chunk's included: the flush's `0x0101` re-mark
+/// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`) would move the index up by [`MARKED_OFFSET`] for
+/// every later chunk, and the port does not apply it — A14(a) is that question.
+const BASE: i32 = 0x400;
 
 /// The number of the object's first mixed chunk: the DMA loop's countdown starts at 1
-/// (`+0x50ab`) and is rounded up to 64 (`+0x50e6`), and that chunk is flushed before any
-/// `0x0101` marker is written, so its index base is `0x400` where every later chunk's is
-/// `0x501`.
+/// (`+0x50ab`) and is rounded up to 64 (`+0x50e6`).
 const FIRST_CHUNK: usize = 64;
 
-/// The object's output curve, worked out by hand: `+0x5565`…`+0x55c1` builds `K = 0x8000/mul`
-/// ramp entries of `(k × (65536/K)) >> 8` after `0x800 − K` zeros, the flush indexes it with
-/// `0x400 − centre sum + accumulator` (`+0x2cb4`, `+0x30b4`) and the planes' own `0x0101`
-/// marker (`+0x2ce5`, `+0x30d0`) adds `0x101` to that, so the steady state's index is
-/// **`0x501 + value`**. The card plays unsigned 8-bit, so the port's `i16` is `(byte − 128) × 256`.
+/// The entries the flush's `0x0101` re-mark would move a later chunk's index up by
+/// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`). The port does not apply it, so nothing the mixer
+/// produces reads at `0x501 + value`; this constant exists only for the assertions below that
+/// pin what the marker's arithmetic *would* read, which A14(a) records as unsettled.
+const MARKED_OFFSET: i32 = 0x101;
+
+/// The object's output curve, worked out by hand: the machine's own counts of `+0x5565`…
+/// `+0x55c1` — `2 × ⌊(0x800 − K)/4⌋` zero entries (the two `shr $1,%cx` halve the count twice),
+/// `K = 0x8000/mul` ramp entries of `(k × (65536/K)) >> 8`, then `+0x55bd`'s `2 × ⌊rem/2⌋`-byte
+/// `0xFF` tail — indexed at the base the flush's correction gives a frame: `0x400 + value`,
+/// every sample of the window. The card plays unsigned 8-bit, so the port's `i16` is
+/// `(byte − 128) × 256`.
 fn curve_with(mul: u32, value: i32) -> i16 {
-    curve_at(mul, MARKED, value)
+    curve_at(mul, BASE, value)
 }
 fn curve_at(mul: u32, base: i32, value: i32) -> i16 {
     let k = (0x8000 / mul) as usize;
     let step = 65536 / k;
-    // `+0x559d`'s `rep stosw` leaves `CX` = 0, so the zero fill is half its intended length:
-    // `(0x800 − K)/2` entries, then the ramp, then `0xFF` from `+0x55bd`'s tail. For mul 64
-    // that is 768 zeros, the ramp at 768…1279 and 0xFF from 1280 — the boundaries the probe
-    // read on MUSIC0's run.
-    // The machine's arithmetic: `2 × floor((0x800 − K)/4)` zero bytes (the two `shr $1,%cx`),
-    // then the ramp's `K` entries, then `2 × floor(rem/2)` bytes of `0xFFFF`. Identical to a
-    // plain halving for `mul` 64 and `mul` 16; for `mul` 48 — the port's mono multiplier — the
-    // zero fill is 682, not 683.
+    // The machine's arithmetic, step for step: the two `shr $1,%cx` at `+0x5592`/`+0x559b` leave
+    // `2 × floor((0x800 − K)/4)` zero bytes, then the ramp's `K` entries, then `+0x55b5`'s
+    // shortfall as `2 × floor(rem/2)` bytes of `0xFFFF`. For mul 64 that is 768 zeros, the ramp
+    // at 768…1279 and 0xFF from 1280 — the boundaries the probe read; for mul 48 — the port's
+    // mono multiplier — the zero fill is 682, not the 683 a plain halving would write.
     let span = 0x800 - k;
     let zeros = (span / 4) * 2;
     let rest = 0x800 - (zeros + k);
@@ -128,9 +132,9 @@ fn curve_at(mul: u32, base: i32, value: i32) -> i16 {
 }
 
 /// The reference's own curve: the modules' master volume byte is 0xB0, whose
-/// `+0x5362`…`+0x5391` derivation gives a multiplier of **64**, so `K` is 512 — 1536 zeros and
-/// then 512 ramp entries of `k/2`, which is why a solo voice (whose values are at most ±127)
-/// reads the byte 0 for every sample.
+/// `+0x5362`…`+0x5391` derivation gives a multiplier of **64**, so `K` is 512 — 768 zeros, then
+/// 512 ramp entries of `k/2`, then the `0xFF` tail — with silence at the ramp's centre, the
+/// byte 0x80, which is the 0 every window here counts as its own silence.
 fn curve(value: i32) -> i16 {
     curve_with(64, value)
 }
@@ -184,8 +188,8 @@ fn expected_values(
 }
 
 /// [`expected_values`] through a curve, as a **stereo** window: a frame's left sample is the
-/// output sample `2 × frame`, so the first 32 frames are the unmarked chunk's 64 samples and
-/// every later one is read against the planes' marker.
+/// output sample `2 × frame`, and every frame — the first 32 frames' 64 samples included — is
+/// read at [`BASE`], because the port does not apply the flush's marker.
 #[allow(clippy::too_many_arguments)]
 fn expected_voice(
     mul: u32,
@@ -199,18 +203,7 @@ fn expected_voice(
 ) -> Vec<i16> {
     expected_values(bytes, level, step, start, end, loop_start, frames)
         .into_iter()
-        .enumerate()
-        .map(|(frame, value)| {
-            curve_at(
-                mul,
-                if frame * 2 < FIRST_CHUNK {
-                    UNMARKED
-                } else {
-                    MARKED
-                },
-                value,
-            )
-        })
+        .map(|value| curve_at(mul, BASE, value))
         .collect()
 }
 
@@ -286,13 +279,9 @@ fn one_voice_is_the_modules_own_sample_bytes() {
         None,
         frames,
     );
-    let expected: Vec<i16> = values
-        .iter()
-        .enumerate()
-        .map(|(frame, value)| {
-            curve_at(16, if frame < FIRST_CHUNK { UNMARKED } else { MARKED }, *value)
-        })
-        .collect();
+    // One base for the whole mono window: the port's index does not move at the first chunk's
+    // end (the marker is not applied; A14(a)), so this is the *same* curve for all 256 frames.
+    let expected: Vec<i16> = values.iter().map(|value| curve_with(16, *value)).collect();
     let positions: Vec<usize> = {
         let mut position = 0u32;
         let mut low = 0u16;
@@ -316,10 +305,9 @@ fn one_voice_is_the_modules_own_sample_bytes() {
 
     // And the numbers written out, so the arithmetic can be checked without running anything.
     // At level 63 the scale is 255 and the centre is (128 × 255) >> 8 = 127, so the sample's
-    // 115 is −13 and its 176 is +48; the curve's index is `0x501 + value`, and with the
-    // *linear* curve (`mul` 16 → `K` 2048 → no zeros and a step of 32) the byte is `index / 8`:
-    // 1268 / 8 = 158 and 1329 / 8 = 166, i.e. 7680 and 9728 once the card's 128-centred byte is
-    // widened.
+    // 115 is −13 and its 176 is +48; with the *linear* curve (`mul` 16 → `K` 2048 → no zero
+    // fill and a step of 32) and the port's base, the byte is `(0x400 + value) / 8`: 1011 / 8 =
+    // 126 and 1072 / 8 = 134, i.e. −512 and 1536 once the card's 128-centred byte is widened.
     println!(
         "MUSIC0 instrument 11, channel 0, level 63, period 1712, step {voice_step} (16.16), \
          mono, linear curve:\n  sample bytes {:?}\n  the first eight samples {:?}",
@@ -333,10 +321,14 @@ fn one_voice_is_the_modules_own_sample_bytes() {
     assert_eq!((128 * 255) >> 8, 127);
     assert_eq!(value(115, 63), -13);
     assert_eq!(value(176, 63), 48);
-    assert_eq!(0x501 + 48, 1329);
-    assert_eq!(1329 / 8, 166);
-    assert_eq!(curve_at(16, MARKED, 48), 1536, "index 0x400 + 48 = 1072, the byte 134");
-    assert_eq!(curve_at(16, MARKED, -13), -512, "index 1011, the byte 126");
+    assert_eq!(curve_with(16, 48), 1536, "index 0x400 + 48 = 1072, the byte 134");
+    assert_eq!(curve_with(16, -13), -512, "index 1011, the byte 126");
+    // The marker's arithmetic, which the port does **not** apply (A14(a)): `0x501 = 1281`, so
+    // the same two values would read 1268 and 1329 — the linear curve's bytes 158 and 166, i.e.
+    // 7680 and 9728. It is pinned here because `music.md` §10.4 quotes the two numbers; nothing
+    // the mixer produces is read at that index.
+    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, 48), 9728);
+    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, -13), 7680);
     // The sample's 115 is the value −13 → index 1011 → the byte 126 → −512; its 176 is +48 →
     // index 1072 → the byte 134 → 1536. The positions are 0 five times and then 1, so the first
     // five samples are the first and the next three the second.
@@ -346,8 +338,8 @@ fn one_voice_is_the_modules_own_sample_bytes() {
     );
     assert_eq!(
         out[FIRST_CHUNK],
-        curve_at(16, MARKED, values[FIRST_CHUNK]),
-        "and the sample after the first chunk is read against the marker"
+        curve_with(16, values[FIRST_CHUNK]),
+        "and the sample after the first chunk is read at the same base as the first"
     );
 
     // The step is 14317056/1712 × 65536 / 40000 = 13700 in 16.16 — 0.209 of a sample byte a
@@ -359,12 +351,11 @@ fn one_voice_is_the_modules_own_sample_bytes() {
 
 #[test]
 fn a_solo_voice_is_audible_through_the_table_the_machine_holds() {
-    // The same voice on the modules' *own* master-volume byte, 0xB0 → `mul` 64, whose curve is
-    // 1536 zeros and then 512 entries of `k/2`: an index below 1536 is the byte 0. A solo
-    // voice's value is at most ±127 — `(255 × 255) >> 8 = 254` against the centre's 127 — so
-    // `0x501 + value` never reaches 1536 and **every sample is the byte 0**, i.e. −32768. That
-    // is what the object's own configuration does with one voice, and it is not a defect of the
-    // port: it is what the table at `+0x551c` builds for `mul` 64.
+    // The same voice on the modules' *own* master-volume byte, 0xB0 → `mul` 64, whose table is
+    // the one the machine holds: 768 zero entries, the ramp at 768…1279 and `0xFF` above. A
+    // solo voice's value is at most ±127 — `(255 × 255) >> 8 = 254` against the centre's 127 —
+    // and the port indexes at `0x400 + value`, so the voice lands inside the ramp and is
+    // audible: the assertions below pin both ends of that swing.
     let module = module("MUSIC0");
     assert_eq!(module.master_volume(), 0xb0);
     assert_eq!(sr_audio::multiplier(module.master_volume(), true), 64);
@@ -398,7 +389,9 @@ fn a_solo_voice_is_audible_through_the_table_the_machine_holds() {
         right.iter().all(|sample| *sample == 0),
         "and the right accumulator is empty, so its samples are the ramp's centre"
     );
-    // The loudest byte the sample carries, at the top level, is still inside the gate.
+    // The loudest byte the sample carries, at the top level, is still inside the ramp's own
+    // range: a solo voice's value tops out at 127, well short of the +256 where the `0xFF`
+    // tail starts.
     let loudest = bytes.iter().copied().max().unwrap();
     assert_eq!(value(loudest, 63), (i32::from(loudest) * 255 / 256) - 127);
     assert!(value(loudest, 63) < 255);
@@ -457,12 +450,8 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
     for frame in 0..256 {
         assert_eq!(
             out[frame],
-            curve_at(
-                16,
-                if frame < FIRST_CHUNK { UNMARKED } else { MARKED },
-                first[frame] + second[frame]
-            ),
-            "frame {frame}: both channels through one curve"
+            curve_with(16, first[frame] + second[frame]),
+            "frame {frame}: both channels through one curve, at the port's one base"
         );
     }
 }
@@ -474,8 +463,8 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
     // sample that does not loop stops dead at its length (`+0x48be`'s `m_loop` = 0xffff, then
     // `+0x3845`'s `m_speed = 0`).
     // The module whose master-volume byte asks for the linear curve: the modules' own byte
-    // gives `mul` 64, whose gate swallows a solo voice entirely (see the gate test above), and
-    // this test is about the *bounds*, so the values have to be visible.
+    // gives `mul` 64, whose one-level-per-two table hides a value's low bit (the test above),
+    // and this test is about the *bounds*, so the values have to be visible.
     let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let rate = STEREO_DIVISOR;
@@ -573,7 +562,7 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
             // The stop is the last frame the by-hand model *plays*: the curve's own zero entry
             // is not enough to find it, because a playing frame whose value is small maps to
             // the same entry.
-            let zero = curve_at(16, MARKED, 0);
+            let zero = curve_with(16, 0);
             let stop = expected
                 .iter()
                 .rposition(|sample| *sample != zero)
@@ -711,9 +700,9 @@ fn the_window_is_not_silent() {
     // A mixer that produces the curve's own silence for every sample passes every "does it
     // run" test, so this one asks for signal: how many samples are *not* the silence entry,
     // how many distinct levels the window reaches, and what its extremes are. Two things are
-    // stated rather than assumed: the reference's own curve is a gate (a sample is the silence
-    // entry whenever the mix's value is below the gate's knee), and the silence entry is the
-    // byte 0, i.e. −32768, once the planes are marked.
+    // stated rather than assumed: the table the machine holds is not a gate — a value of ±128
+    // moves the byte ±64 — and the silence entry is the ramp's centre, the byte 0x80, i.e. 0,
+    // because the port indexes at `0x400` for every sample.
     let mut player = Player::new(module("MUSIC0"), PlayerOptions::default());
     player.play_song(0);
     let mut samples = Vec::new();
@@ -737,8 +726,8 @@ fn the_window_is_not_silent() {
     );
     assert_eq!(
         samples[..64],
-        [curve_at(64, UNMARKED, 0); 64],
-        "the first chunk's unmarked planes are their own silence"
+        [curve_with(64, 0); 64],
+        "the first chunk is the ramp's centre too: the marker never moves the base"
     );
 
     // The window is extended past the intro because MUSIC0 starts quietly; what the
@@ -872,8 +861,10 @@ fn a_note_off_leaves_the_voice_silent() {
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), 128);
     // A level of 0 makes every sample's value 0, so the samples are the table's own silence
-    // entry — the byte 128, i.e. 0 — and never the note.
-    assert_eq!(curve_at(16, MARKED, 0), 0, "the curve's centre, the byte 128");
+    // entry — the byte 128, i.e. 0 — and never the note. (The marker's `0x501` would read the
+    // byte 160, i.e. 8192, and the port does not apply it: A14(a).)
+    assert_eq!(curve_with(16, 0), 0, "the curve's centre, the byte 128");
+    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, 0), 8192, "the marker's byte 160");
     assert!(out.iter().all(|sample| *sample == 0), "a level of 0 is the byte 128");
 }
 
@@ -899,9 +890,7 @@ fn shutting_up_silences_the_voices_and_a_row_starts_them_again() {
     mixer.mix(&module, &mut channels, &options, 64, true, quiet.len());
     assert_eq!(mixer.take(&mut quiet), quiet.len());
     assert!(
-        quiet
-            .iter()
-            .all(|sample| *sample == curve_at(16, UNMARKED, 0) || *sample == curve_at(16, MARKED, 0)),
+        quiet.iter().all(|sample| *sample == curve_with(16, 0)),
         "shut up silences every voice, so the samples are the curve's own zero entry"
     );
     assert_ne!(quiet, loud, "and that is not what it was playing before");

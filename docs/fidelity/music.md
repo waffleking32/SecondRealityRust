@@ -1275,7 +1275,7 @@ overshoot and therefore the loop's phase survive — while a one-shot stops: `m_
 `m_loop - m_end` is a whole number of loop lengths either way, so the phase is the same, and on
 these modules the two are the same number.
 
-### 10.3 The output: what the object does with the sum, and what the port does instead
+### 10.3 The output: the table the machine holds, and the base it is indexed at
 
 Each voice's contribution is added into a 16-bit accumulator and the sum is converted at the end
 of the buffer by `+0x2c89` (the stereo flush) or `+0x30ad` (the mono one). Both add the object's
@@ -1286,20 +1286,29 @@ accumulator word (`+0x2cb4`, `+0x30b4`) and index the table the same builder wro
 signed sample, in a range of about ±1000 at these modules' volumes.
 
 That table is a **per-run gain curve** built from `_np_mastermul` (`+0x5569`: the master volume
-byte's low seven bits, floored at 0x10): the first `0x800 - 0x8000/mul` entries are zero and the
-rest ramp `0..255` across `0x8000/mul` entries. The reference's master volume byte is 0xB0
-(§5: 176 = stereo | 48) → `mul = min((48 × 11) >> 3 - 2, 127) = 64` (`+0x5362`…`+0x538f`) → 2240,
-the word `music-clock.md` measured — and at `mul` 64 the curve's knee is **512 above the centre**:
-everything quieter is zero, and what is above it is amplified fourfold. (The measured 2240 is the
-*published word*, not the multiplier: `+0x5397` stores a **byte** into `[0x916]` and the byte
-above it is `_np_masterflags`' low byte, which the header watch has set to the modules' 8 — so the
-word reads `0x08C0`. The builder reads the byte: `+0x5569`'s `mov 0x916,%bl`.)
+byte's low seven bits, floored at 0x10). The reference's master volume byte is 0xB0 (§5: 176 =
+stereo | 48) → `mul = min((48 × 11) >> 3 - 2, 127) = 64` (`+0x5362`…`+0x538f`) → 2240, the word
+`music-clock.md` measured — and the builder's own loop (`+0x5565`…`+0x55c1`) is a zero fill of
+the span's 0x800 entries down to where the ramp starts, then `K = 0x8000/mul` ramp entries of
+`(k × (65536/K)) >> 8`, one output level per `65536/K` entries, which at `mul` 64 is one level
+per two entries. **That is the loop's intent, and not what the machine's memory holds**: the
+zero fill is half the length the arithmetic implies and the span above the ramp is `0xFF`, for
+the reason the next paragraphs measure.
+(The measured 2240 is the *published word*, not the multiplier: `+0x5397` stores a **byte** into
+`[0x916]` and the byte above it is `_np_masterflags`' low byte, which the header watch has set to
+the modules' 8 — so the word reads `0x08C0`. The builder reads the byte: `+0x5569`'s `mov
+0x916,%bl`.)
 
-**The port reproduces that table.** `mix.rs`'s `multiplier` is the header watch's derivation
-from the module's master-volume byte — the modules' 0xB0 gives `mul` 64 on a stereo output and 48
-on a mono one, because the stereo bit is what doubles the volume — and `Curve::build` is the
-builder's own loop: `K = 0x8000/mul` ramp entries of `(k × (65536/K)) >> 8` after `0x800 − K`
-zeros. `Mixer::frame` forms each voice's contribution as its table value less its own centre (the
+**The port reproduces the table the machine holds.** `mix.rs`'s `multiplier` is the header watch's
+derivation from the module's master-volume byte — the modules' 0xB0 gives `mul` 64 on a stereo
+output and 48 on a mono one, because the stereo bit is what doubles the volume — and
+`Curve::build` is the builder's own loop **as the machine executes it**: `K = 0x8000/mul` ramp
+entries of `(k × (65536/K)) >> 8` after `2·⌊(0x800 − K)/4⌋` zero entries (the two `shr $1,%cx` at `+0x5592`
+and `+0x559b` halve the count twice), then `+0x55b5`'s shortfall as `2·⌊rem/2⌋` bytes of `0xFF`.
+For `mul` 64 that is 768 zeros, the ramp at 768…1279 and `0xFF` from 1280 — the boundaries the
+probe read — and for the port's own **mono** `mul` 48 the zero fill is 682 where a plain halving
+would write 683, which the unit test builds both ways and asserts differ.
+`Mixer::frame` forms each voice's contribution as its table value less its own centre (the
 quantity the object forms by subtracting the summed centres at `+0x30b4`), indexes the curve with
 it, and widens the byte the card would play: `(byte − 128) × 256`.
 
@@ -1321,15 +1330,21 @@ stosb` therefore writes nothing, which makes `+0x55bd`'s tail fill the shortfall
 `APPROXIMATIONS.md` A14 is the measurement. The port **plays the table the machine holds**: the
 halved zero fill, the ramp where the bug leaves it, the `0xFF` tail, indexed at `0x400 + value`
 — the base the audible buffer supports, since `[0xbe6]:0xC9B0` holds a waveform centred on 0x80,
-which is the ramp's byte 128 at index 1024. Two clauses of A14 are open and named there: the
-flush's `0x0101` marker (which would put silence 257 entries higher, inside the tail) and whether
-MUSIC1's own run reads through the same table — its dump does not match either multiplier's
-boundaries, so the port's table is the MUSIC0-matched one.
+which is the ramp's byte 128 at index 1024. One clause of A14 is open and named there: the
+flush's `0x0101` marker, which would put silence 257 entries higher, inside the tail. The table
+is not one run's: the re-review's dump of the **MUSIC1** window (`--cycles 30000 --arg 3
+--frames 600..900`) reads all 2048 bytes of the span *identical* to MUSIC0's, one change line,
+`cs:0x6C` = `6E 00` in both — so the port's table is the release of record's own behaviour, in
+either module's run. (Round 3's report of a second, gentler table under MUSIC1 was withdrawn in
+round 4: the offsets it quoted are absolute segment offsets read as if they were table-relative,
+and the boundaries it predicted came from `0x8000/48` = 341 where the instruction divides by
+682. A14(b) is the record of the withdrawal.)
 
 **What that means for the sound, measured.** The table the machine holds is not a gate: 768
 zero entries, the `mul` 64 ramp at 768…1279 (one level per two entries) and `0xFF` from 1280, so
-a frame's byte is the ramp's value for the ordinary signal and `0xFF` only where the sum runs
-past the ramp's top. Over MUSIC0's first 4120 polls (`cargo test -p sr-audio --test mix --
+a frame's byte is the ramp's own one level per two of value — `⌊(value + 256)/2⌋`, ±64 byte
+levels for a ±128 signal — and flat outside it: `0x00` at or below −257 (the zero region) and
+`0xFF` from +256 (the tail). Over MUSIC0's first 4120 polls (`cargo test -p sr-audio --test mix --
 --nocapture the_window_is_not_silent`): **972,036 samples above the silence entry, peak 32512,
 256 distinct values**, and its first 120 polls: **3,719 of the window's samples are the silence
 entry, 115 distinct values, −15104 … 15360**. That is the release of record's own table doing
@@ -1350,8 +1365,8 @@ channels into it), which the port keeps.
 `tests/mix.rs` computes its expected samples **by hand from the S3M file's own bytes** — the
 tables pasted into the test file, the two divisions of the step written out, the 16.16 position
 accumulated a frame at a time — and never from a recording of the port. The load-bearing one takes
-MUSIC0's first sample, channel 0 (the module's leftmost pan), level 32, and the note C-4's period
-1712:
+MUSIC0's eleventh sample (instrument byte 11), channel 0 (the module's leftmost pan), level 63,
+and the note C-4's period 1712:
 
 ```
 MUSIC0 instrument 11, channel 0, level 63, period 1712, step 13700 (16.16), mono, linear curve:
@@ -1361,28 +1376,31 @@ MUSIC0 instrument 11, channel 0, level 63, period 1712, step 13700 (16.16), mono
 
 The step is 14317056/1712 × 65536 / 40000 = **13700** in 16.16 — 0.209 of a sample byte a frame, so
 the positions of the first eight frames are 0 five times and then 1; the level's scale is 255 and
-its centre (128 × 255) >> 8 = **127**, so the sample's 115 is **−13** and its 176 is **+48**. The
-first 64 samples are the unmarked chunk: the index is `0x400 + value`, so −13 gives 1011 → the
-byte 126 → **−512**, and +48 gives 1072 → the byte 134 → **1536** — and the same two values read
-against the marker (`0x501 + value`) are the bytes 158 and 166, i.e. 7680 and 9728. The curve is
-the *linear* one because the run is mono and this test's module asks for it by its master-volume
-byte: the modules' own byte gives `mul` 64, whose gate the next test pins — **a solo voice can
-never open it**, since its value is at most 127 and the knee is at 255. The other hand-computed
-tests do the mono sum of two channels through one curve, both loop kinds and the one-shot's stop
-against the modules' own instruments, a level of 0 as the curve's own zero entry, and `_zshutup`'s
+its centre (128 × 255) >> 8 = **127**, so the sample's 115 is **−13** and its 176 is **+48**.
+Every sample is read at the audible base — the index is `0x400 + value`, the same base for the
+whole window, first chunk included — so −13 gives 1011 → the byte 126 → **−512**, and +48 gives
+1072 → the byte 134 → **1536**. (The marker's `0x501 + value` would make those two reads 1268 and
+1329, the bytes 158 and 166 — 7680 and 9728 — which is why the port does not apply it: A14(a).)
+The curve is the *linear* one because the run is mono and this test's module asks for it by its
+master-volume byte, so the voice's own arithmetic is visible through it. The modules' own byte
+gives `mul` 64, which the next test pins on the table the machine holds: a solo voice's value is
+at most ±127, so its byte spans the ramp's 64…191 — **audible, neither gated nor clipped**, +63
+above the centre and −64 below it, one level per two of value. The other hand-computed tests do
+the mono sum of two channels through one curve, both loop kinds and the one-shot's stop against
+the modules' own instruments, a level of 0 as the curve's own zero entry, and `_zshutup`'s
 silence at any volume.
 
 The stream's properties, from `cargo test -p sr-audio --test mix -- --nocapture`:
 
 ```
 the first five polls' sample counts: [570, 571, 571, 570, 571]
-MUSIC0's first 120 polls: 68487 samples, 68487 of them the curve's silence (-32768), 1 distinct
-MUSIC0's first 4120 polls (2351396 samples): 214 above the silence entry, peak -14336, 52 distinct
+MUSIC0's first 120 polls: 68487 samples, 3719 of them the curve's silence (0), 115 distinct values, quietest -15104, loudest 15360
+MUSIC0's first 4120 polls (2351396 samples): 972036 above the silence entry, peak 32512, 256 distinct values
 64 rows at speed 6: 320178 samples, predicted 319872, difference 306 (0.0957 %), one tick is 833
 a 600-poll window of MUSIC1: 342436 samples
 after 15 undrained polls the ring holds 8192 samples and has dropped 368
-MUSIC0: 12 samples loop, 5 of them from 0 to the sample's end; 10 do not loop, 0 with no loop end
-MUSIC1: 9 samples loop, 1 of them from 0 to the sample's end; 32 do not loop, 0 with no loop end
+MUSIC0: 12 samples loop, 5 of them from 0 to the sample's end; 10 do not loop, 0 of them with the flag set but no loop
+MUSIC1: 9 samples loop, 1 of them from 0 to the sample's end; 32 do not loop, 0 of them with the flag set but no loop
 ```
 
 - **The poll's count is exact.** The five counts are Task 3's pinned `samples_this_poll` sequence,
@@ -1397,11 +1415,13 @@ MUSIC1: 9 samples loop, 1 of them from 0 to the sample's end; 32 do not loop, 0 
   whose polls do not divide evenly into ticks.
 - **Two runs of a window are byte-identical** (600 polls of MUSIC1, 342,436 samples, == itself),
   and a different order is a *different* stream, so the equality is not vacuous.
-- **The window is not silent, and the reference's own gate is why it looks silent**: over the
-  first 120 polls every sample is the curve's silence entry, and over 4120 polls — a minute — 214
-  of 2,351,396 samples are above it, with a peak of −14336 and 52 distinct values in the window.
-  The mixer is producing signal; the curve the object builds for `mul` 64 passes only what rises
-  255 above silence, and MUSIC0's intro does not.
+- **The window is not silent.** Over the first 120 polls 3,719 of the 68,487 samples are the
+  curve's silence entry (0 — the ramp's centre, the byte 0x80) and the rest take **115** distinct
+  values, −15104 … 15360; over 4120 polls — a minute — **972,036** of 2,351,396 samples are above
+  that entry, the peak is **32512** and the window reaches **256** distinct values, i.e. every
+  byte from 0x00 to 0xFF. The mixer is producing signal through the table the machine holds, and
+  that table is not a gate: a value of ±128 moves the byte ±64, so a voice is audible without
+  being zeroed and without being clipped.
 - **The drain takes whole samples and moves no state**: `take_samples` leaves the engine
   position, the published position and `_np_zframe` where they were, and a second drain returns 0.
 - **The overflow policy is "drop the oldest"**, exercised through the player: after 15 undrained
@@ -1427,5 +1447,5 @@ What this section's evidence therefore is:
 known to differ and one to be odd: the curve's index is **clamped** where the object's 16-bit `bx`
 would read its own segment's neighbours past the table's end, and the arithmetic below the curve
 is the object's as its bytes have it — including the 5.26 % stereo flatness its own `[0x8d7]`
-produces and the gate its own `mul` of 64 builds. The measurement of that gate is in §10.3, and it
-is the phase's to judge, not this section's to soften.
+produces and the table its own `mul` of 64 builds, bug and all. The measurement of that table is
+in §10.3, and it is the phase's to judge, not this section's to soften.

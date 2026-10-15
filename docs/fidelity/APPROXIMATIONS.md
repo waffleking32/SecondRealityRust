@@ -657,8 +657,10 @@ accumulator linearly instead of through the table `+0x551c` builds. The review's
 the curve is behaviour on the reference's own path, with a parameter the port already loads
 (`Module::master_volume`), and that this project's oldest rule — port the algorithm, not a
 resemblance — decides it. It is now implemented: `sr_audio::{multiplier, Curve}`, `Curve::build`
-is the object's own loop (`K = 0x8000/mul` ramp entries after `0x800 − K` zeros), and
-`Mixer::frame` indexes it with the frame's value and widens the byte the card would play.
+is the builder's own loop **as the machine executes it** — `K = 0x8000/mul` ramp entries of
+`(k × (65536/K)) >> 8` after `2·⌊(0x800 − K)/4⌋` zero entries and before `2·⌊rem/2⌋` bytes of
+`0xFF` (A14's subject) — and `Mixer::frame` indexes it with the frame's value at `0x400 + value`
+and widens the byte the card would play.
 `docs/fidelity/music.md` §10.3 is the reading; §A13 leaves only one thing approximated in its
 place:
 
@@ -667,14 +669,16 @@ place:
 `+0x2d08`'s `mov %cs:0x0(%bp),%al`), so a signal further from silence than the table is wide reads
 whatever the linker put after it — the note tables at `+0x97c` are 0x10E bytes
 past the table's end at `cs:0x86e`, and the scale table at `+0x9c4` further on. The port has no such neighbours to read
-and clamps to the table's 2048 entries instead of inventing a value: `Curve::sample`. The index
-reaches past the table's end only for a value above +766 — 75 % of the accumulator's own range —
-and below it only for a value under −1281, which a sixteen-voice mono mix can reach. **Measured
-difference:** none that any capture can show (the emulator runs silent, D17); the object's value
-there is not a defined output but its own segment's bytes, which is the finding rather than a
-number.
+and clamps to the table's 2048 entries instead of inventing a value: `Curve::sample`. At the base
+the port indexes with (`0x400 + value`) the index reaches past the table's end only for a value
+at or above **+1024** — past the ±1000 these modules' signal reaches — and below the table's
+start only for a value at or below **−1025**, which a sixteen-voice mono mix can reach.
+(The marker's `0x501 + value`, which the port does not apply, would move both thresholds 257
+lower; A14(a) is that question.) **Measured difference:** none that any capture can show (the
+emulator runs silent, D17); the object's value there is not a defined output but its own
+segment's bytes, which is the finding rather than a number.
 
-## A14 — The output curve the port builds is not the curve the machine's memory holds: the builder's `rep stosw` clobbers its own count, and the index's base is open
+## A14 — The curve the machine's memory holds is not the curve the builder's formula describes: the `rep stosw` clobbers its own count, and the index's base is open
 
 **Part:** the music, under every part that plays it (the re-review's probe, `cargo xtask music
 probe --dump`).
@@ -692,30 +696,32 @@ probe --dump`).
    ramp's *shape* (one level per two entries) is there; its *placement* is 768 bytes early and
    the region above it is `FF`.
 3. **The reason is in the builder's own bytes.** `+0x559d`'s `rep stosw` leaves `CX` = 0, so
-   `+0x559f`'s `add %cx,%cx` doubles zero and `+0x55a1`'s `rep stosb` writes **nothing**: the
-   zero region is `(0x800 − K)/2` bytes, not `0x800 − K`. `+0x55b5`'s `sub %di,%cx` then sees a
-   short `di` and `+0x55bd`'s `rep stosw` fills the *remainder* with `0xFFFF` — which is exactly
-   the 768 bytes the probe read. The port's `Curve::build` writes what the code *intends*, not
-   what it does.
+   `+0x559f`'s `add %cx,%cx` doubles zero and `+0x55a1`'s `rep stosb` writes **nothing**. The two
+   `shr $1,%cx` at `+0x5592`/`+0x559b` had left `CX` = `⌊(0x800 − K)/4⌋` **words**, so the zero
+   region is `2·⌊(0x800 − K)/4⌋` bytes — half of `0x800 − K`, and one byte short of a plain
+   halving when `K` is 1 or 2 mod 4 (`mul` 48's 682 is the case the port's own mono runs hit).
+   `+0x55b5`'s `sub %di,%cx` then sees a short `di` and `+0x55bd`'s `rep stosw` fills the
+   *remainder* with `0xFFFF`, `2·⌊rem/2⌋` bytes of it, which is exactly the 768 bytes the probe
+   read. The port's `Curve::build` writes these counts, bug included.
 
 **The audible buffer says which reading the machine actually plays through.** `[0xbe6]` =
 `0x0C9B`, `[0xbe8]` = `0xC9B0` (measured, `base + 0x0BE4`), and the reviewer's dump of that
 buffer at frame 1299 is a stereo waveform **centred on 0x80** with a swing of ±40–50 and
-per-channel DCs ≈0x7C (L) and ≈0xA2 (R). The port's shipped curve — the gate at `mul` 64,
-indexed at `0x501 + value` — puts the byte **0x00** there, and the table the machine holds puts
-`0xFF` at `0x501 + value` for every value ≥ 0. Both contradict the buffer. The *unmarked* base
-through the table the machine actually holds does not: index `0x400 + 0` = 1024 is the ramp's
-`(1024 − 768)/2` = **0x80**, the buffer's own centre, and a value of ±80 moves the byte by ±40 —
-the measured swing.
+per-channel DCs ≈0x7C (L) and ≈0xA2 (R). The code's own index — the marker's `0x501 + value` —
+contradicts it: through the table the machine holds, `0x501` and everything above it is the
+`0xFF` tail the bug's short fill leaves, so silence would read the byte 0xFF. The *unmarked* base
+through that same table does not: index `0x400 + 0` = 1024 is the ramp's `(1024 − 768)/2` =
+**0x80**, the buffer's own centre, and a value of ±80 moves the byte by ±40 — the measured swing.
 
 **What the port does about it.** `Curve::build` reproduces the builder **with its bug**: the zero
-region is `(0x800 − K)/2` entries, the ramp follows it, and `0xFF` fills the remainder of the
-span. For `mul` 64 that is 768 zeros, the ramp at 768…1279 and `0xFF` from 1280 — the boundaries
-the probe read — and `tests/mix.rs`'s `curve_with` is the same arithmetic written out again, so a
-test that computed the *intended* table (1536 zeros, the ramp at 1536…2047) or the linear map
-fails. The mixer indexes it at **`0x400 + value`** (the audible base — see (a)).
+region is `2·⌊(0x800 − K)/4⌋` entries, the ramp follows it, and `+0x55bd`'s shortfall fills the
+remainder of the span with `0xFF` for `2·⌊rem/2⌋` bytes. For `mul` 64 that is 768 zeros, the ramp
+at 768…1279 and `0xFF` from 1280 — the boundaries the probe read — and `tests/mix.rs`'s
+`curve_with` is the same arithmetic written out again, so a test that computed the *intended*
+table (1536 zeros, the ramp at 1536…2047) or the linear map fails. The mixer indexes it at
+**`0x400 + value`** (the audible base — see (a)).
 
-**Still open, with the measurement behind each clause.**
+**One clause is still open, with the measurement behind it.**
 
 **(a) The marker.** The flush writes `0x0101` into every accumulator word it reads (`+0x2ce5`,
 `+0x30d0`), so the *code's* index should be `0x501 + value` — 257 entries above the base the port
@@ -739,15 +745,17 @@ in two modules' runs, at the base the pointer names. Round 3 quoted `+0x35A`, `+
 table's own bytes at those addresses as a different shape (`--dump 0x3C8:4` reads `2D 2D 2E 2E`,
 where a shifted table would read zeros); its predicted boundaries were mis-derived too
 (`0x8000/48` is 682, not 341, and both sessions run `_zoutputmode` 5, so both modules' 0xB0 byte
-gives `mul` 64 and `mul` 48 is unreachable in this demo). The old wording is left here, named as
-withdrawn, because the ledger a later reader finds should say why it went. **So the port's table
-is not "the MUSIC0-matched one": it is the release of record's own behaviour, which is the
-stronger claim and the one D12 wants.**
+gives `mul` 64 and `mul` 48 is unreachable in this demo). The wording that asserted the withdrawn
+claim was **replaced** rather than left standing — `music.md` §10.3 now says what both runs show
+— and this paragraph is the record of why it went, so a reader who meets the old claim in an
+earlier note or report finds the error named here. **So the port's table is not "the
+MUSIC0-matched one": it is the release of record's own behaviour, which is the stronger claim and
+the one D12 wants.**
 
 **Measured difference:** the port's byte is the machine's table applied to the object's
-accumulator — the same map MUSIC0's run is consistent with — and what remains uncertain is
-whether every run's table is that one (b) and whether the audible index carries the marker (a).
-No capture can quantify the audible result (the emulator runs silent, D17). `cargo xtask music
+accumulator — the same map **both modules' runs** are consistent with, byte for byte — and what
+remains open is whether the audible index carries the marker (a). No capture can quantify the
+audible result (the emulator runs silent, D17). `cargo xtask music
 probe --dump` reproduces the **segment's** bytes above — the base word and the whole table span,
 in either module's run — and does **not** reach the DMA buffer's contents (the waveform and its
 0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
