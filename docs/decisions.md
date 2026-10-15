@@ -329,13 +329,18 @@ and for the hidden part's (`:889-894`, `& 80h`, which only `partsmask[8]` carrie
 hold for the other two sites the shell has, and both are the shell's *own* restarts rather
 than the ones this entry was written about:
 
-- **`:880-885`** (`MUSIC0` at order 18) is guarded by `whattorun & 8` **alone** — one test,
-  where the other sites have two — so it fires for every block whose mask has bit 3:
-  `SECOND 1` (0x1f), `2` (0x1e), `3` (0x1c) and `4` (0x18). It is the entry point only of
-  `SECOND 4`, whose plan begins at U2E; for the other three the shell reaches it **mid-run**,
-  between JPLOGO (`exe18`) and U2E.
+- **`:880-885`** (`MUSIC0` at order 18) is guarded by `whattorun & 8` **alone** — one gating
+  test (`:880`/`:881`), and its `jz` lands on `:888`, *past* the restart — so it fires for
+  every block whose mask has bit 3: `SECOND 1` (0x1f), `2` (0x1e), `3` (0x1c) and `4` (0x18).
+  It is the entry point only of `SECOND 4`, whose plan begins at U2E; for the other three the
+  shell reaches it **mid-run**, between JPLOGO (`exe18`) and U2E. **It is not the only
+  single-test site**: `:889-894` has one too (`:889`'s `& 80h`, `jz @@skipp5`), and what keeps
+  *that* one entry-point-only is the masks — only `partsmask[8]` carries bit 7 — while what
+  makes `:880-885` mid-run is that four masks carry bit 3. The two-test shape belongs to
+  `:856-863` (`& 4` and not `& 2`), `:898-905` (`& 16` and not `& 8`) and `:813-818` (`& 2` and
+  `& 1`).
 - **`:813-818`** (`MUSIC1` at order 0) is guarded by `whattorun & 2` — the region `:801-802`
-  opens, closed at `:855` — **and** `& 1`, and fires for `SECOND 1` mid-run, between BEGLOGO
+  opens and `:855` closes — **and** `& 1`, and fires for `SECOND 1` mid-run, between BEGLOGO
   (`exe3`) and GLENZ (`exe4`).
 
 So the table this entry prescribes is right about **which module and order a block's run

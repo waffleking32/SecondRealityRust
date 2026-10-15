@@ -367,8 +367,9 @@ pub const MUSIC_RESTARTS: &[MusicRow] = &[
         said: &["mov ax,0", "mov bx,-1", "call restartmus", "push 0", "call _zplaysong"],
     },
     // Everything else: MUSIC1 at order 0. This is the initial start's other branch, and
-    // it is what `SECOND 2` plays — no restart follows it for a block whose bit 0 is
-    // clear (`:813-818`'s is guarded by `whattorun & 1`).
+    // it is what `SECOND 2` plays — the mid-run restart after BEGLOGO (`:813-818`) needs
+    // `whattorun & 2` (the region `:801-802` opens) **and** `& 1`, so a block whose bit 0
+    // is clear never reaches it.
     MusicRow {
         block: '2',
         module: ModuleId::Music1,
@@ -1439,10 +1440,29 @@ mod tests {
                  mid-run for it unless its plan begins at U2E"
             );
         }
-        // And the other three sites carry the `unless` bit that keeps them entry-point-only.
+        // Two of the three remaining sites carry an `unless` bit that keeps them
+        // entry-point-only (`:856`'s `& 2` and `:898`'s `& 8`); the third, `:889-894`, has
+        // none and is kept entry-point-only by the masks — asserted below, not assumed.
         for (block, unless) in [('3', 0x02), ('5', 0x08)] {
             let row = MUSIC_RESTARTS.iter().find(|row| row.block == block).unwrap();
             assert_eq!(row.unless, unless, "{block}'s restart fires only without the bit");
+        }
+        // `:889-894` is the fourth site and the odd one out: it has **one** gating test too
+        // (`:889`'s `& 80h`), and what keeps it entry-point-only is the masks rather than the
+        // guard — only `SECOND U`'s carries bit 7. Asserted here rather than left in prose,
+        // because this test's own comment used to claim it without checking it.
+        let hidden = MUSIC_RESTARTS.iter().find(|row| row.block == 'U').unwrap();
+        assert_eq!((hidden.when, hidden.unless), (0x80, 0));
+        for (block, mask) in BLOCKS {
+            if *block == 'U' {
+                continue;
+            }
+            assert_eq!(
+                mask & 0x80,
+                0,
+                "{block}'s mask carries bit 7, so `SECOND U` is not the only block reaching \
+                 :889 and the site is not entry-point-only"
+            );
         }
     }
 
@@ -1462,6 +1482,14 @@ mod tests {
             region_opening.contains("test cs:whattorun,2")
                 && region_opening.contains("jz @@skipp2"),
             "the restart is inside the region `& 2` opens: {region_opening}"
+        );
+        // ... and the region's close, so "the site is inside `& 2`'s region" is asserted
+        // rather than resting on the line numbers' order: `:855` carries the label `:802`
+        // jumps to.
+        let region_close = cited(&lines, "MAIN/U2.ASM:855-855").join("\n");
+        assert!(
+            region_close.contains("@@skipp2:"),
+            ":855 is the label `:802`'s `jz` lands on: {region_close}"
         );
         let site = cited(&lines, "MAIN/U2.ASM:813-818").join("\n");
         let mut at = 0usize;

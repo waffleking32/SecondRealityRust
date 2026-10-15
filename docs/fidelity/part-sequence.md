@@ -145,7 +145,7 @@ worth transcribing: the restart that a given part hears depends on the entry arg
 | Site (`MAIN/U2.ASM`) | Guard | Module | Order | Speed | When it fires |
 |---|---|---|---|---|---|
 | 767-775 + 785-786 | — | — | — | — | initial load and start of the run (see below) |
-| 813-818 | `whattorun & 1` | MUSIC1 | 0 | 48700 | after BEGLOGO, immediately before GLENZ — only when block 1 ran: `SECOND 1`, or no argument |
+| 813-818 | `whattorun & 2` (the region `:801-802` opens, closed at `:855`) **and** `whattorun & 1` | MUSIC1 | 0 | 48700 | after BEGLOGO, immediately before GLENZ — only when block 1 ran: `SECOND 1`, or no argument |
 | 860-863 `[entry]` | `whattorun & 4` **and not** `whattorun & 2` | MUSIC1 | 42 | 48700 | only `SECOND 3`; **not** on any run that played block 2 |
 | 882-885 | `whattorun & 8` | MUSIC0 | 18 | 45000 | immediately before U2E — every run that includes block 3: no argument, `SECOND 1`..`SECOND 4` |
 | 891-894 | `whattorun & 80h` | MUSIC0 | 70 | 45000 | only `SECOND U` |

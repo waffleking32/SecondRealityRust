@@ -1695,9 +1695,11 @@ is not ported; `--block 3` cannot start at all (MNTSCRL is not ported); `--block
 bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside blocks 2 or 3
 needs a **mid-run** restart at that point in the sequence, and the port's one-row-per-run model
 has no place for one yet. That is a Phase 4 dependency, and
-`one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it: the row's
-guard has no `unless` bit, every one of those four masks has bit 3, and the other three sites
-carry the `unless` bits that keep them entry-point-only.
+`one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it, site by site:
+`:880-885`'s guard has no `unless` bit and all four of those masks carry bit 3; `:856-863`'s and
+`:898-905`'s `unless` bits are asserted (and are what keep them entry-point-only); and
+`:889-894` — the fourth site — has **one** gating test as well, with **the masks** keeping it
+entry-point-only (only `SECOND U` carries bit 7), which that test asserts rather than assumes.
 
 **A run takes the row of the block whose plan begins where it does**, which for the port is
 the run's first part: `--block 5` and `--part endlogo` both begin at ENDLOGO and both get
