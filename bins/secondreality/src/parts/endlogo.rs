@@ -1103,8 +1103,9 @@ mod tests {
         // is `reference/music/second5`'s own published words, and what it asserts is that
         // the gate opens where Phase 2 derived — bit-exactly, from the reference's
         // **frames**, which are a different measurement entirely: the picture's own fade
-        // constants (`docs/fidelity/endlogo.md` §3). The two agree, and the wires between
-        // them are this part's three ticks:
+        // constants (`docs/fidelity/endlogo.md` §3). They meet on the tick §3 fixes once
+        // the three wires below are in place — two of them this part's, one of them the
+        // aligned frame — and that is the whole of the comparison:
         //
         //   the words cross          index 1144   (the port's player: row 49)
         //   the check's own frame    index 1145   (the source's placement: the check reads

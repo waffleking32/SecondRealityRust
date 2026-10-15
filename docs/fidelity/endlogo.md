@@ -198,7 +198,8 @@ rectangle rather than scanning one out. The music gate is modelled, and §5 is h
 port runs it: one iteration a tick — `dis_waitb()` *is* the tick, one band pass — the 5000-iteration
 cap stays, and the condition is the run's player's `musplus()`
 (`crates/sr-engine/src/music.rs`'s [`musplus_from`], the DIS's own arithmetic over the published
-`_np_zplus` and `_np_row`). **No length is in the part.** The hold is 567 ticks on the reference's
+`_np_zplus` and `_np_row`). **No *hold length* is in the part** — the one number the part carries
+for the gate is the alignment below, and that is a frame, not a length.
 boot because the music says so, and the same run with any other music would have that music's hold.
 
 **This is where the phase's proof lands, and it lands in two pieces.** A7 carried the gate as its
@@ -250,8 +251,12 @@ fadeout would start at **1146** — while the reference's frames put the fadeout
 **1147** (§3, bit-exactly from 500 and 1180).
 
 **The port's player is not the one that moved, and the measurement that says so is quantitative.**
-The port's published positions differ from the trace's by one frame at 100 of this window's 131
-position changes, agree at 22 and differ by two at 8 — and that ratio is what the poll geometry
+The port's published positions differ from the trace's by one frame at 100 of this window's position
+changes, agree at 22 and differ by two at 8 — 130 in all, because the last change of the window has no
+successor frame to compare against. Reproduced by
+`cargo test -p secondreality --bin secondreality the_runs_music_is_where_the_trace -- --nocapture`,
+which prints `130 position change(s) compared; the port's frame minus the trace's: {-2: 8, -1: 100,
+0: 22}` and fails if any change is more than two frames out. That ratio is what the poll geometry
 predicts: the port matches a session exactly when a row change falls in the fifth of the frame between
 the port's poll (the tick's start) and the original's (a fifth in), one match in five, against
 22/130 = **16.9 %** measured. A clock that had *shifted* would match at **none** of them. So the −1 is
@@ -370,8 +375,9 @@ boundary**: nothing here claims a person has judged them.
 `:91` and across the fades; the opening screen as the shell's surface through the shell's DAC; the
 blit landing on tick 36 / index 440 and not before 430; the fade-in's ramp and its truncating divide
 (including the `c = 1, palette = 0` case where it lands on 62, one below a rounded ramp); the
-fadeout's ramp *and* that it is not the fade-in reversed; the 510-byte upload's exact edges; the
-derivation scan of §3; §19.1's own sampled states reproduced; — and **Task 8's five new tests plus one rewritten**, which are the gate's:
+fadeout's ramp *and* that it is not the fade-in reversed; the 510-byte upload's exact edges; the part
+retiring on the tick after the fadeout's last step; the derivation scan of §3; §19.1's own sampled
+states reproduced — and **Task 8's five new tests plus one rewritten**, which are the gate's:
 `the_gate_opens_on_the_tick_the_reference_frames_derived` (§5's table, driven tick by tick with
 `reference/music/second5`'s own words), `the_runs_own_player_opens_the_gate_on_the_same_tick` (the
 same, through the shell with the run's own player and the composed frames compared against §3's
@@ -419,9 +425,10 @@ the sweep and the hold's arithmetic too:
 its alignment dropped, its placement dropped, and the check's own measurement moved — each takes the
 tests that read the frame the fadeout's `c = 63` is displayed on, which is the frame the reference's
 keyframe at 1180 counts back from. **And one mutation is now impossible, which is the point of the
-task**: editing the *part* can no longer move the gate's frame at all — there is no length in it —
-so the two rows that used to be "the plan's brackets" on the port's constants are the *check's*
-constant instead, and moving it makes the check disagree with the cue rather than the cue with the
+task**: there is no *hold length* in the part to edit — the one lever left is `GATE_ALIGNMENT_TICKS`,
+the disclosed frame of §5.2, and it moves the gate's frame 1:1 (the row above) — so the two rows that
+used to be "the plan's brackets" on the port's constants are the *check's* constant instead, and
+moving it makes the check disagree with the cue rather than the cue with the
 reference. The two rows that share `the_picture_is_blitted_after_the_vertical_blanks` are still the
 two ways the lead-in's map can be wrong: the blit on the wrong tick, and one blank short — which is
 why that test also pins the lead-in's counts (34 blanks, 37 ticks the source's code accounts for, ten

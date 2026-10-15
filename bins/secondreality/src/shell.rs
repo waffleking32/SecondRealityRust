@@ -1764,10 +1764,56 @@ mod tests {
              two filed sessions measure on each other (A12)"
         );
 
+        //    **The position-change distribution**, which is what says the −1 is a sub-sample
+        //    phase effect rather than a shifted clock: for each position the port and the
+        //    trace both publish, the frame each first publishes it on. The port's ticks land
+        //    at the frame's *start* and the original's poll a fifth of a frame in, so the
+        //    port is one frame early whenever the change falls in that fifth — and exactly on
+        //    time when it does not. `endlogo.md` §5.2 and D28 quote this printout.
+        let first_frame = |pairs: &std::collections::BTreeMap<u32, (u8, u8)>| {
+            let mut out: Vec<((u8, u8), u32)> = Vec::new();
+            let mut last: Option<(u8, u8)> = None;
+            for (frame, position) in pairs {
+                if last != Some(*position) {
+                    out.push((*position, *frame));
+                    last = Some(*position);
+                }
+            }
+            out
+        };
+        let port_changes = first_frame(&port);
+        let trace_changes: std::collections::BTreeMap<(u8, u8), u32> =
+            first_frame(&wanted).into_iter().collect();
+        let mut by_delta: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+        let mut compared_changes = 0usize;
+        for (position, frame) in &port_changes {
+            // The trace's own first frame for this position, when it has one in the window
+            // *and* the port's is not the window's first sample.
+            if let Some(at) = trace_changes.get(position) {
+                if *frame > start {
+                    by_delta
+                        .entry(i64::from(*frame) - i64::from(*at))
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                    compared_changes += 1;
+                }
+            }
+        }
+        println!(
+            "second5: {compared_changes} position change(s) compared; the port's frame minus \
+             the trace's: {:?}",
+            by_delta
+        );
+        assert!(
+            by_delta.keys().all(|delta| (-2..=0).contains(delta)),
+            "a position change more than two frames from the trace's is a shifted clock, not \
+             the sample instant: {by_delta:?}"
+        );
+
         // 2. **The tick counter.** `_np_zframe` is the other half of the position the parts
         //    read (D26: it is the clock, not the ring), and the port's is compared against
-        //    the trace's own column frame by frame.
-        // **The tick counter, and the one-index shift the sample instant makes.** The
+        //    the trace's own column frame by frame. **The one-index shift the sample instant
+        //    makes.** The
         // trace's sample for a frame is taken at that frame's *start*, before the copper
         // polls the player for it (D17: the emulator publishes a frame's pixels and counts
         // it immediately afterwards), so the port's tick `N` is the trace's frame `N + 1` —

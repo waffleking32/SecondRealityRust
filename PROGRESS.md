@@ -1138,18 +1138,21 @@ and the reconciliation is in `docs/fidelity/endlogo.md` §5 with the constants b
 (`GATE_ALIGNMENT_TICKS`, `bins/secondreality/src/parts/endlogo.rs`) and the decision in **D28**:
 
 - **The part's read is one tick behind the copper's poll** (§5.1): the source's check stands at the
-  frame boundary (`DIS/DISINT.ASM:160-180`'s wait on `copperframecount`, `MAIN/COPPER.ASM:320`) and
+  frame boundary (`DIS/DISINT.ASM:161-181`'s wait on `copperframecount`, `MAIN/COPPER.ASM:305-311`'s vsync loop,
+  `:320`'s increment) and
   the poll is a fifth of a frame later (`_zpollme`, `:466`, in `copper_doit`, the list's 20-of-100
   entry), while the port's engine polls before the part's code in the same tick — so the check tests
   the *previous* tick's words.
 - **One frame stays, and it is an alignment** (§5.2): the port's own player publishes `26:49` from
   index **1144**, so the break would fall on 1145, and the reference's *frames* — bit-exactly, from
   500 and 1180 — put the fadeout's first step at **1147** (the break at 1146). The port holds one
-  frame past its own break. **Which measurement moved is named**: the port's player is `second5`'s to
-  the frame (its `zframe` matches the trace's column; its published positions are the trace's samples
-  one index on, which is what the trace's sample instant makes of them), and `second5`'s published
-  row 49 begins one frame earlier, relative to the frame indices, than the session the reference's
-  keyframes came from — D17's per-session counter alignment. The cost is stated where the constant
+  frame past its own break. **Which measurement moved is named**: not the player — its
+  `_np_zframe` matches the trace's own column once the sample instant's one-index shift is taken out
+  (**753 of 891 frames exact, worst 1 tick**, asserted frame by frame in `src/shell.rs`'s
+  `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`, `ZFRAME_SLOP`), and its
+  published positions are the trace's samples one index on — but `second5`'s published row 49 begins
+  one frame earlier, relative to the frame indices, than the session the reference's keyframes came
+  from: D17's per-session counter alignment. The cost is stated where the constant
   is: one frame's disagreement with `second5`'s own session at this crossing, inside A12's ±3.
 
 **The acceptance, re-run with the real cue** (`cargo xtask compare`, both commands the phase names):

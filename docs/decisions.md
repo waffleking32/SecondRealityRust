@@ -1880,7 +1880,9 @@ column once the sample instant's one-index shift is taken out (753 of 891 frames
 than one tick apart: `src/shell.rs`'s
 `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` asserts it frame by frame,
 `ZFRAME_SLOP`), and its published positions are the trace's samples one index on — 100 of the window's
-131 position changes one frame earlier, 22 exact, 8 two earlier, against the ~20 % the poll geometry
+130 compared position changes one frame earlier, 22 exact, 8 two earlier (the window holds 131; the
+last has no successor frame to compare against; the same test prints the distribution and fails if any
+change is more than two frames out), against the ~20 % the poll geometry
 predicts for an unshifted clock, which is what the sample instant (the frame's *start*, D17's own
 reading of the emulator) makes of them — and
 `second5`'s published row 49 begins one frame earlier, relative to the frame indices, than the
@@ -1888,6 +1890,6 @@ session the reference's four keyframes were captured in. That is D17's per-sessi
 alignment, and the cost is stated where the constant is: the port disagrees with `second5`'s own
 session by one frame at this crossing, inside the ±3 frames A12 measures between the two filed
 sessions of one recipe. **Nothing in the music moved for it** — no anchor, no rate, no position —
-and nothing in the part *could* move it: the part carries no length, which is the point of the
-task. A run whose music starts elsewhere has no reference frame to align to, and the constant is a
+and nothing in the part *could* move it: the part carries no hold length, which is the point of the
+task — the one lever left is `GATE_ALIGNMENT_TICKS`, the disclosed frame above. A run whose music starts elsewhere has no reference frame to align to, and the constant is a
 fact about this boot and `second5`.

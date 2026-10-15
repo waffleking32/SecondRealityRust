@@ -265,7 +265,8 @@ and the small residual either side of it.
 
 **Retired 2026-10-15 (Task 8), and what replaced it.** The gate is `END.C:107-111`'s own loop, run
 against the run's player: one `dis_musplus() > -16` a tick, the source's five-thousand-iteration cap,
-and no length anywhere — the hold is 567 ticks on the reference's boot because the music says so.
+and no *hold length* anywhere — the hold is 567 ticks on the reference's boot because the music says
+so.
 `docs/fidelity/endlogo.md` §5 is the replacement and the measurement it was checked against, and the
 paragraphs below that describe the substitution are struck through with it. **Two things were kept
 from the substitution, and both are named where they live:** A7's *measurement* (the 567, and the two
@@ -315,7 +316,8 @@ reference's own frames are what say the port's is right on this boot — four ke
 **What Phase 3 replaced it with, and where the check landed.** The real cue, as above: the music
 player's position, sampled once per tick by the port's own mixer, with `dis_musplus()`'s −16
 threshold (`END.C:110`) as the condition — and the constant did disappear from the part, which now
-carries no length at all. What the phase's proof asked was whether the cue's own answer would be the
+carries no hold length at all. What the phase's proof asked was whether the cue's own answer would be
+the
 567 the substitution had measured from the reference's frames: it is, and the one frame between the
 two readings of it is named in `docs/fidelity/endlogo.md` §5.2. **A later phase reading this entry
 should take the alignment with it**: a run whose music starts elsewhere (a `SECOND 3` or `SECOND U`
