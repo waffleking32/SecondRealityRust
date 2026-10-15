@@ -1984,6 +1984,25 @@ fn record_name(kind: u8) -> String {
     format!("0x{kind:02X} {name}")
 }
 
+/// Why a `--dump` spec is refused, or `None` when it will be measured: a dump is
+/// between 1 and 4096 bytes, and it has to lie inside the segment the locator
+/// found. [`probe_command`] calls this for every spec **before** the guest is
+/// spawned, so a refusal costs no boot — and so this rule is a function a test
+/// can call rather than a check restated in one.
+pub fn dump_refusal(offset: u32, length: usize, segment_length: u32) -> Option<String> {
+    if length == 0 || length > 4096 {
+        return Some(format!(
+            "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
+        ));
+    }
+    if offset as usize + length > segment_length as usize {
+        return Some(format!(
+            "--dump {offset:#06X}:{length} runs past the segment's {segment_length} byte(s)"
+        ));
+    }
+    None
+}
+
 /// `cargo xtask music probe`: measure one 16-bit word of the STMIK segment over
 /// a frame window, and place it against the object's symbols.
 ///
@@ -2005,18 +2024,11 @@ pub fn probe_command(
     let map = symbol_map(&options.object, &object)?;
     // `--dump`'s refusals are checked **before** the guest is spawned: a tool this phase depends
     // on should fail loudly without an emulator boot, and a refusal that costs a boot is one no
-    // test can afford to exercise.
+    // test can afford to exercise. The rule itself lives in [`dump_refusal`], which is the
+    // function under this loop — so a test can exercise the product's own check.
     for (offset, length) in dumps {
-        if *length == 0 || *length > 4096 {
-            return Err(MusicError::Options(format!(
-                "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
-            )));
-        }
-        if *offset as usize + length > map.segment_length as usize {
-            return Err(MusicError::Options(format!(
-                "--dump {offset:#06X}:{length} runs past the segment's {} byte(s)",
-                map.segment_length
-            )));
+        if let Some(reason) = dump_refusal(*offset, *length, map.segment_length) {
+            return Err(MusicError::Options(reason));
         }
     }
     let mut oracle =

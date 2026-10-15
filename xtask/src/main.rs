@@ -619,23 +619,64 @@ mod dump_parser_tests {
         assert!(parse_dump("0xZZ:4").is_err());
     }
 
+    /// The STMIK segment's own declared length — the number `music.rs`'s
+    /// `the_machine_words_are_read_as_their_own_widths` reads out of the object. It is a
+    /// fixture here because the rule at `music::dump_refusal` is checked without an object.
+    const SEGMENT_LENGTH: u32 = 29_607;
+
     #[test]
     fn a_dump_outside_the_segment_or_of_no_length_is_refused_before_the_guest_runs() {
-        // `probe_command` checks these **before** `DosboxOracle::spawn`, so they are the one
-        // part of the probe a test can exercise: the checks are the same three conditions, and
-        // the fourth assertion is what keeps them from drifting back behind the boot — the
-        // refusal path returns `MusicError::Options`, which no spawn can produce because a
-        // spawn failure is `MusicError::Oracle`.
-        let refuses = |offset: u32, length: usize, segment_length: u32| {
-            if length == 0 || length > 4096 {
-                return true;
-            }
-            offset as usize + length > segment_length as usize
-        };
-        assert!(refuses(0, 0, 29_607), "a zero-length dump says nothing");
-        assert!(refuses(0, 4097, 29_607), "and a 4097-byte one is past the cap");
-        assert!(refuses(29_600, 16, 29_607), "and one that runs past the segment");
-        assert!(!refuses(0, 4096, 29_607));
-        assert!(!refuses(0x6e, 2048, 29_607), "the table's own dump is legal");
+        // These are called on the product's own function, `music::dump_refusal` — the one
+        // `probe_command` applies to every spec before it spawns the guest. A copy of the
+        // conditions here would pass while the product drifted; this cannot.
+        assert!(
+            music::dump_refusal(0, 0, SEGMENT_LENGTH).is_some(),
+            "a zero-length dump says nothing"
+        );
+        assert!(
+            music::dump_refusal(0, 4097, SEGMENT_LENGTH).is_some(),
+            "and a 4097-byte one is past the cap"
+        );
+        assert!(
+            music::dump_refusal(29_600, 16, SEGMENT_LENGTH).is_some(),
+            "and one that runs past the segment"
+        );
+        assert!(music::dump_refusal(0, 4096, SEGMENT_LENGTH).is_none());
+        assert!(
+            music::dump_refusal(0x6e, 2048, SEGMENT_LENGTH).is_none(),
+            "the table's own dump is legal"
+        );
+
+        // And the refusal is the product's own path: `probe_command` returns
+        // `MusicError::Options` for a bad spec **without a boot**, which is what makes these
+        // the one part of the probe a test can exercise. Were the check moved back behind the
+        // spawn, this call would reach the oracle instead — a spawn failure is
+        // `MusicError::Oracle`, not `Options` — and the call's own cost is the second half of
+        // the guard.
+        let options = probe_options();
+        for (offset, length) in [(0u32, 0usize), (29_600, 16)] {
+            let error = music::probe_command(&options, 0x525c, &[(offset, length)])
+                .expect_err("a bad dump is refused, not measured");
+            assert!(matches!(error, music::MusicError::Options(_)), "{error}");
+        }
+    }
+
+    /// The `probe` command's options, pointing at the vendored object and the reference's own
+    /// mounted original — the same paths the command is run with, resolved from this crate's
+    /// directory so the test does not depend on where it was started.
+    fn probe_options() -> music::TraceOptions {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        music::TraceOptions {
+            object: root.join(music::DEFAULT_OBJECT),
+            exe: root.join("reference/original/SECOND.EXE"),
+            cwd: root.join("reference/original"),
+            arguments: vec!["5".to_owned()],
+            cycles: 30_000,
+            window: [400, 1300],
+            out: PathBuf::from("out/probe"),
+            keys: Vec::new(),
+            boot: BootRecipe::Autoexec,
+            force: true,
+        }
     }
 }
