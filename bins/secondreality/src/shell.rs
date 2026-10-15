@@ -304,8 +304,11 @@ pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, Strin
 /// reaches it as an entry point (its plan begins at U2E, `:886-887`); blocks 1, 2 and 3 run
 /// the tier before it (`exe17`/`exe18`, `:875-878`) and reach it **mid-run**, between
 /// JPLOGO and U2E, where the shell restarts MUSIC0 at order 18 under a player that has been
-/// playing something else. `SECOND 1` has a second such restart of its own (`:813-818`,
-/// guarded `whattorun & 1` alone: MUSIC1 at order 0, between BEGLOGO and GLENZ).
+/// playing something else. `SECOND 1` has a second restart of its own (`:813-818`:
+/// MUSIC1 at order 0, between BEGLOGO and GLENZ), whose guard is **two** bits — `& 2`
+/// (the region `:801-802` opens and `:855` closes) **and** `& 1` (`:813-814`) — so its
+/// shape is not `:880`'s; it fires for every block with bit 0, and every such mask also
+/// has bit 1.
 ///
 /// **Nothing the port can run today reaches either of them** — `--block 2`'s plan stops at
 /// GLENZ, which is not ported; `--block 3` cannot start (MNTSCRL is not ported); `--block 5`'s
@@ -719,11 +722,20 @@ impl Sequence {
         // *before* the music's start has nothing to catch up on — its player waits
         // (`MusicStart::waiting`) rather than running early.
         //
-        // A catch-up longer than the ring (8192 samples) would have its oldest samples
-        // dropped by the ring's own overflow policy — the same policy an undrained device
-        // meets — so a pre-polled run that also dumps its audio would begin slightly
-        // clipped. Unreachable as the port stands: the largest catch-up a run can have is
-        // three frames, since the two blocks the port can start at are anchored at 404.
+        // **`pre` is zero for every run the port can make today**, and that is arithmetic
+        // rather than a hope: `pre` is `anchor - MUSIC_START_FRAME` and exists only for an
+        // anchor *after* that frame, `boot_anchor` answers `Some(404)` (which waits, since
+        // 404 < 408) or `None` (`pre` 0), and no part carries an anchor past 408. A
+        // catch-up needs an entry point whose first frame is later than 408 — MNTSCRL's is
+        // in (415, 420], which is `SECOND 3`'s, and that block cannot start yet (MNTSCRL is
+        // not ported).
+        //
+        // If one ever runs, two things about it are worth knowing before it is debugged: a
+        // catch-up longer than the ring (8192 samples) has its oldest samples dropped by the
+        // ring's own overflow policy — the same policy an undrained device meets — so a
+        // pre-polled run that also dumped its audio would begin slightly clipped; and the
+        // pre-poll is `poll` after `poll`, not a jump, because the music's advance is what
+        // `Player::poll` does and nothing else moves it.
         for _ in 0..start.pre {
             crate::audio::lock(&player).poll();
         }
@@ -1431,6 +1443,56 @@ mod tests {
         for (block, unless) in [('3', 0x02), ('5', 0x08)] {
             let row = MUSIC_RESTARTS.iter().find(|row| row.block == block).unwrap();
             assert_eq!(row.unless, unless, "{block}'s restart fires only without the bit");
+        }
+    }
+
+    #[test]
+    fn the_second_mid_run_restart_is_two_guards_and_the_masks_carry_both() {
+        // **The other site no row in this table is about**, and the one nothing else in the
+        // suite reads: `:813-818`'s restart. Its guard is **two** bits — `whattorun & 2`
+        // (the region `:801-802` opens with `jz @@skipp2`, closed at `:855`) **and**
+        // `whattorun & 1` (`:813-814`) — which is not `:880-885`'s single-test shape, so the
+        // two are worth telling apart. The conclusion survives the second guard: the only
+        // mask with bit 0 is `SECOND 1`'s, and it carries bit 1 as well, so the site fires
+        // for exactly the block whose run reaches it (after BEGLOGO, `exe3`, and before
+        // GLENZ, `exe4`).
+        let lines = upstream_lines();
+        let region_opening = cited(&lines, "MAIN/U2.ASM:801-802").join("\n");
+        assert!(
+            region_opening.contains("test cs:whattorun,2")
+                && region_opening.contains("jz @@skipp2"),
+            "the restart is inside the region `& 2` opens: {region_opening}"
+        );
+        let site = cited(&lines, "MAIN/U2.ASM:813-818").join("\n");
+        let mut at = 0usize;
+        for said in [
+            "test cs:whattorun,1",
+            "jz @@skip2b",
+            "mov ax,1",
+            "mov bx,0",
+            "mov cx,48700",
+            "call restartmus",
+        ] {
+            let found = site[at..]
+                .find(said)
+                .unwrap_or_else(|| panic!("{:?} is not in :813-818 after byte {at}: {site}", said));
+            at += found + said.len();
+        }
+        // The guard as a whole, then: bit 0 *and* bit 1, and every mask that has bit 0 has
+        // bit 1 — so "it fires for `SECOND 1`'s run only" is true of the pair, not of `& 1`
+        // alone.
+        for (block, mask) in BLOCKS {
+            if mask & 0x01 != 0 {
+                assert_eq!(
+                    *block, '1',
+                    "{block}'s mask has bit 0, so the assumption that `SECOND 1` is the \
+                     only block whose run reaches this restart is wrong"
+                );
+                assert!(
+                    mask & 0x02 != 0,
+                    "{block}'s mask has bit 1 too, so `& 2` does not narrow the site"
+                );
+            }
         }
     }
 

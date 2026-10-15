@@ -321,6 +321,32 @@ to run, not a single linear timeline — and the reference capture harness must 
 argument it started the original with, because the same part is diffed against different
 music positions depending on where the run started.
 
+**Amendment, 2026-10-15 (Task 7, D27): "entry-point" is true of the two sites above and not
+of the table's other two.** The claim this entry makes — that the restarts "fire *only* when
+the blocks leading up to them did not run" — holds for `MUSIC1` at order 42 (`:856-863`, whose
+guard is `& 4` and not `& 2`) and for `MUSIC0` at order 25 (`:898-905`, `& 16` and not `& 8`),
+and for the hidden part's (`:889-894`, `& 80h`, which only `partsmask[8]` carries). It does not
+hold for the other two sites the shell has, and both are the shell's *own* restarts rather
+than the ones this entry was written about:
+
+- **`:880-885`** (`MUSIC0` at order 18) is guarded by `whattorun & 8` **alone** — one test,
+  where the other sites have two — so it fires for every block whose mask has bit 3:
+  `SECOND 1` (0x1f), `2` (0x1e), `3` (0x1c) and `4` (0x18). It is the entry point only of
+  `SECOND 4`, whose plan begins at U2E; for the other three the shell reaches it **mid-run**,
+  between JPLOGO (`exe18`) and U2E.
+- **`:813-818`** (`MUSIC1` at order 0) is guarded by `whattorun & 2` — the region `:801-802`
+  opens, closed at `:855` — **and** `& 1`, and fires for `SECOND 1` mid-run, between BEGLOGO
+  (`exe3`) and GLENZ (`exe4`).
+
+So the table this entry prescribes is right about **which module and order a block's run
+begins on** — which is what Task 7's `shell::MUSIC_RESTARTS` implements, one row a block — and
+the word "entry-point" belongs to the row as a *starting* position, not to every site it cites.
+A run that reaches U2E inside blocks 2 or 3 (or GLENZ inside block 1) needs a **mid-run**
+restart at that point in the sequence, which the one-row-per-run model has no place for yet;
+nothing the port can run today gets that far (`--block 2`'s plan stops at GLENZ, unported;
+`--block 3` cannot start at all), and `docs/fidelity/music.md` §12 and D27 carry the
+citations.
+
 **Block arguments: the README and the code disagree, and the port follows the code.**
 `reference/original/README.1ST:66-79` documents `1`–`5` and their meanings, and all five
 agree with what the code selects. But the README never mentions `U`, which the code
