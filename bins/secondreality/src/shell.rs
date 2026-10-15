@@ -1604,7 +1604,7 @@ mod tests {
     /// the manifest's window minus its gaps, field by field, for every filed trace
     /// (`Trace::check_coverage`) — so this file may walk the rows without opening the
     /// manifest.
-    fn trace(name: &str) -> Vec<(u32, (u8, u8))> {
+    fn trace(name: &str) -> Vec<(u32, (u8, u8), i32)> {
         let path = format!("../../reference/music/{name}/trace.csv");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("{path}: {error}"));
@@ -1619,7 +1619,7 @@ mod tests {
                         .parse()
                         .unwrap_or_else(|error| panic!("{line}: field {index}: {error}"))
                 };
-                (number(0), (number(1) as u8, number(2) as u8))
+                (number(0), (number(1) as u8, number(2) as u8), number(9) as i32)
             })
             .collect()
     }
@@ -1634,6 +1634,16 @@ mod tests {
     /// frames (`docs/fidelity/APPROXIMATIONS.md` A12, whose evidence is that test's own
     /// per-trace counts).
     const JITTER_FRAMES: u32 = 3;
+
+    /// How far the port's `_np_zframe` may sit from the trace's own column, in ticks, once
+    /// the sample instant's one-frame shift is taken out.
+    ///
+    /// **Measured, not chosen.** The trace's sample lands within a fifth of a frame of the
+    /// poll it is about, and the two clocks' rate residuals over this window are a fraction
+    /// of a tick (`crates/sr-audio/tests/trace.rs`'s per-trace counts; A12) — so one tick is
+    /// the quantisation and two would be a drift. Measured at the commit that added this
+    /// check: 753 of 891 frames exact, worst displacement **1** tick.
+    const ZFRAME_SLOP: i32 = 1;
 
     /// The distinct values of a sequence, in order.
     fn distinct<T: PartialEq + Copy>(items: impl Iterator<Item = T>) -> Vec<T> {
@@ -1673,14 +1683,26 @@ mod tests {
         );
 
         let trace = trace("second5");
-        let last = trace.iter().map(|(frame, _)| *frame).max().unwrap();
+        let last = trace.iter().map(|(frame, _, _)| *frame).max().unwrap();
         let start = run.index();
-        let wanted: std::collections::BTreeMap<u32, (u8, u8)> =
-            trace.iter().copied().filter(|(frame, _)| *frame >= start).collect();
+        let wanted: std::collections::BTreeMap<u32, (u8, u8)> = trace
+            .iter()
+            .filter(|(frame, _, _)| *frame >= start)
+            .map(|(frame, position, _)| (*frame, *position))
+            .collect();
+        let wanted_ticks: std::collections::BTreeMap<u32, i32> = trace
+            .iter()
+            .filter(|(frame, _, _)| *frame >= start)
+            .map(|(frame, _, zframe)| (*frame, *zframe))
+            .collect();
 
         // The run's own published position, one sample a frame, for every frame the trace
         // holds.
         let mut port: std::collections::BTreeMap<u32, (u8, u8)> =
+            std::collections::BTreeMap::new();
+        // The port's own tick counter, `_np_zframe`, frame by frame: the second support for
+        // "the port's player is the trace's player", and the one the docs quote.
+        let mut port_ticks: std::collections::BTreeMap<u32, i32> =
             std::collections::BTreeMap::new();
         while run.frame_index().is_none_or(|index| index < last) {
             if run.tick() == SequenceStatus::Finished {
@@ -1690,6 +1712,8 @@ mod tests {
             if wanted.contains_key(&index) {
                 let position = run.music_position().expect("block 5 has a player");
                 port.insert(index, (position.order, position.row));
+                let player = run.audio_player().expect("block 5 has a player");
+                port_ticks.insert(index, crate::audio::lock(&player).zframe());
             }
         }
         assert_eq!(
@@ -1738,6 +1762,43 @@ mod tests {
             worst <= JITTER_FRAMES,
             "the worst displacement is {worst} frames, more than the {JITTER_FRAMES} the \
              two filed sessions measure on each other (A12)"
+        );
+
+        // 2. **The tick counter.** `_np_zframe` is the other half of the position the parts
+        //    read (D26: it is the clock, not the ring), and the port's is compared against
+        //    the trace's own column frame by frame.
+        // **The tick counter, and the one-index shift the sample instant makes.** The
+        // trace's sample for a frame is taken at that frame's *start*, before the copper
+        // polls the player for it (D17: the emulator publishes a frame's pixels and counts
+        // it immediately afterwards), so the port's tick `N` is the trace's frame `N + 1` —
+        // the same shift the published positions have. `ZFRAME_SLOP` is what is left: the
+        // sample is within a fifth of a frame of the poll and the two clocks' residuals over
+        // this window are a fraction of a tick (A12), so a tick either way is the measurement
+        // and not a tolerance of convenience.
+        let mut off_ticks: Vec<(u32, i32)> = Vec::new();
+        let mut compared = 0usize;
+        for (frame, ticks) in &port_ticks {
+            let want = u32::try_from(i64::from(*frame) + 1)
+                .ok()
+                .and_then(|at| wanted_ticks.get(&at).copied());
+            if let Some(want) = want {
+                compared += 1;
+                if *ticks != want {
+                    off_ticks.push((*frame, ticks - want));
+                }
+            }
+        }
+        let worst_ticks = off_ticks.iter().map(|(_, d)| d.abs()).max().unwrap_or(0);
+        println!(
+            "second5: {} of {compared} frames agree on `zframe` exactly (port index N vs \
+             trace frame N+1); worst displacement {worst_ticks} tick(s)",
+            compared - off_ticks.len()
+        );
+        assert!(compared > 800, "the walk covered {compared} frames");
+        assert!(
+            worst_ticks <= ZFRAME_SLOP,
+            "the worst `zframe` displacement is {worst_ticks} ticks, more than the \
+             {ZFRAME_SLOP} the sample instant and the two clocks' residuals allow (A12)"
         );
 
         // And then **content**: the sequence of positions the port publishes is the

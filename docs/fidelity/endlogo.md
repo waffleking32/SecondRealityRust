@@ -201,10 +201,14 @@ cap stays, and the condition is the run's player's `musplus()`
 `_np_zplus` and `_np_row`). **No length is in the part.** The hold is 567 ticks on the reference's
 boot because the music says so, and the same run with any other music would have that music's hold.
 
-**This is where the phase's proof lands.** A7 carried the gate as its *measured* length, 567 ticks
+**This is where the phase's proof lands, and it lands in two pieces.** A7 carried the gate as its
+*measured* length, 567 ticks
 derived bit-exactly from the reference's **frames** (§3 — the fade-in's last step displayed at 579,
 the fadeout's first at 1147). The port's cue is derived from the *player's state* — a different
-measurement of a different thing — and the two agree on the reference's boot:
+measurement of a different thing — and the two meet on the reference's boot, with **one frame that
+the cue supplies and the derivation does not** (§5.2): the placement below moves the break from the
+port's own crossing (1144) to **1145**, which is one of the two frames between the port's words and
+the reference's frames, and the second is the alignment. The rows:
 
 | | index | what |
 |---|---|---|
@@ -224,9 +228,9 @@ the run's own player, and compares the composed frames with §3's arithmetic.
 ### 5.1 Why the check reads the *previous* tick's words
 
 The source's check is the instruction after `dis_waitb()`, so it stands at a frame boundary; and
-`dis_waitb()` returns on the copper's own boundary. `waitb_1` (`DIS/DISINT.ASM:160-180`) spins on
+`dis_waitb()` returns on the copper's own boundary. `waitb_1` (`DIS/DISINT.ASM:161-181`) spins on
 `cs:copperframecount`, which `copper_end` (`MAIN/COPPER.ASM:283-320`) increments (`:320`) right after
-its wait for the vertical retrace (`:311-317`). The music's poll is somewhere else entirely: it is
+its wait for the vertical retrace (`:305-311`). The music's poll is somewhere else entirely: it is
 `call _zpollme` (`MAIN/COPPER.ASM:466`) inside `copper_doit`, and the copper's list runs that at 20 of
 a frame's 100 units (`copperlst0`, `:41-43`) — a fifth of a frame *after* the boundary the check
 stands on. So the check reads the words the **previous** frame's poll published, and the port's engine
@@ -245,6 +249,15 @@ trace's begins at 1145. With §5.1's placement the check therefore breaks on ind
 fadeout would start at **1146** — while the reference's frames put the fadeout's first step at
 **1147** (§3, bit-exactly from 500 and 1180).
 
+**The port's player is not the one that moved, and the measurement that says so is quantitative.**
+The port's published positions differ from the trace's by one frame at 100 of this window's 131
+position changes, agree at 22 and differ by two at 8 — and that ratio is what the poll geometry
+predicts: the port matches a session exactly when a row change falls in the fifth of the frame between
+the port's poll (the tick's start) and the original's (a fifth in), one match in five, against
+22/130 = **16.9 %** measured. A clock that had *shifted* would match at **none** of them. So the −1 is
+a sub-sample phase effect of where in the frame the poll and the sample sit, not a wrong player, and
+the one frame the gate is out by is the session's — which is what this section's next paragraph names.
+
 **The two measurements are one frame apart, and the frames are the record** (D12). The port holds one
 frame past its own break (`GATE_ALIGNMENT_TICKS`, `src/parts/endlogo.rs`), which is where the 567
 comes from, and the cost is named: **the port disagrees with `second5`'s own session by one frame at
@@ -254,8 +267,11 @@ sits between them (`APPROXIMATIONS.md` A12, `JITTER_FRAMES` 3; the port's own wo
 `second5` is 2 frames, 778 of 894 frames exact) — and it is inside D17's finding that a frame counter
 names one picture in a session and a picture one frame away in the next. **Which measurement moved is
 therefore nameable too:** not the anchor (Task 1 measured the first tick at 408.0 in four sessions,
-spread 0.1) and not the player (the port's direct `zframe` matches `second5`'s column frame for
-frame), but the *session* — `second5`'s published row 49 begins one frame earlier, relative to the
+spread 0.1) and not the player (the port's direct `_np_zframe` matches `second5`'s own column once the
+sample instant's one-index shift is taken out — 753 of 891 frames exact and never more than **1 tick**
+apart, asserted frame by frame in `src/shell.rs`'s
+`the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`, `ZFRAME_SLOP`), but the
+*session* — `second5`'s published row 49 begins one frame earlier, relative to the
 frame indices, than the session the reference's four keyframes were captured in. A run whose music
 starts elsewhere has no such alignment to make, and the constant is a fact about this boot and
 `second5`, not about ENDLOGO.
@@ -307,6 +323,8 @@ cargo run --bin secondreality -- --headless --block 5 --dump-frames 430,500,900,
     --dump-dir out/t8-block5
 cargo xtask compare --reference reference/parts/endlogo --rendered out/t8-part \
     --out out/t8-part-diff
+cargo xtask compare --reference reference/parts/endlogo --rendered out/t8-block5 \
+    --out out/t8-block5-diff
 ```
 
 ```
@@ -318,15 +336,18 @@ verdict: identical
 exit: 0
 ```
 
-**Both commands are the acceptance, and both were re-run with the cue in place** (Task 8): the
-`--part endlogo` dump above and the `--block 5` dump, which differ only in their plans (a
-one-part run and the block's three) and compare identically — `out/t8-part-diff/report.json` and
-`out/t8-block5-diff/report.json`, `mode: mixed`, every offset 0. The frames are the Phase 2 ones,
-byte for byte, with a real cue behind them: `--block 5` is the run whose music the phase built, and
+**Both dumps are the acceptance, and both were re-run with the cue in place** (Task 8): the
+`--part endlogo` one and the `--block 5` one, which differ only in their plans (a one-part run and the
+block's three) and compare identically — `out/t8-part-diff/report.json` and
+`out/t8-block5-diff/report.json`, `mode: mixed`, every offset 0, the same four lines of output under
+either. The block printed above is the first; the second's
+report is the file named beside it. The frames are the Phase 2 ones, byte for byte, with a real cue
+behind them: `--block 5` is the run whose music the phase built, and
 1180 is the frame that would move if the gate opened on any tick but §5.2's.
 
-`mode: mixed`, every offset 0 (`out/p2-endlogo-diff/report.json`, offsets `{"0": 4}`). **430 and 900
-go through the indexed path** — 430 because the reference files an `.idx` for it as well as its
+`mode: mixed`, every offset 0 (`out/t8-part-diff/report.json`, offsets `{"0": 4}` — the same file
+Phase 2's run wrote as `out/p2-endlogo-diff/report.json`). **430 and 900 go through the indexed
+path** — 430 because the reference files an `.idx` for it as well as its
 partners, and 900 because §19.3's census shows the reference's `.idx` there is a real one (72
 distinct indices, 69 distinct triples, no index carrying two, checked against the manifest's own
 palette) — and 500 and 1180 through RGB, because an indexed read is 20+ fade steps late and D15's
@@ -350,14 +371,17 @@ boundary**: nothing here claims a person has judged them.
 blit landing on tick 36 / index 440 and not before 430; the fade-in's ramp and its truncating divide
 (including the `c = 1, palette = 0` case where it lands on 62, one below a rounded ramp); the
 fadeout's ramp *and* that it is not the fade-in reversed; the 510-byte upload's exact edges; the
-derivation scan of §3; §19.1's own sampled states reproduced; and **the gate's five**, which are
-Task 8's: `the_gate_opens_on_the_tick_the_reference_frames_derived` (§5's table, driven tick by tick
-with `reference/music/second5`'s own words), `the_runs_own_player_opens_the_gate_on_the_same_tick`
-(the same, through the shell with the run's own player and the composed frames compared against §3's
-arithmetic), `the_gates_check_reads_the_previous_ticks_words` (§5.1's placement), `the_gate_holds_for_
-five_thousand_ticks_when_the_cue_never_comes` (`:107`'s own cap), `a_run_with_no_player_is_refused_by_
-name` (`init`), and `the_hold_is_the_cues_own_length_and_not_five_thousand` (the hold walked tick by
-tick with the trace's words, its length the difference of the two indices §3 fixed).
+derivation scan of §3; §19.1's own sampled states reproduced; — and **Task 8's five new tests plus one rewritten**, which are the gate's:
+`the_gate_opens_on_the_tick_the_reference_frames_derived` (§5's table, driven tick by tick with
+`reference/music/second5`'s own words), `the_runs_own_player_opens_the_gate_on_the_same_tick` (the
+same, through the shell with the run's own player and the composed frames compared against §3's
+arithmetic), `the_gates_check_reads_the_previous_ticks_words` (§5.1's placement),
+`the_gate_holds_for_five_thousand_ticks_when_the_cue_never_comes` (`:107`'s own cap) and
+`a_run_with_no_player_is_refused_by_name` (`init`) — and
+`the_hold_is_the_cues_own_length_and_not_five_thousand`, which is Phase 2's
+`the_hold_is_the_measured_length_and_not_five_thousand` renamed and rewritten: it now walks the hold
+with the trace's words and asserts its length is the difference of the two indices §3 fixed, where it
+used to read the port's own constant.
 
 `tests/endlogo.rs` (five, through the real binary from the repository root): the four keyframes in
 the reference's own numbering (`index_origin: boot`, anchor 404, 320×400 each); 430 as 128,000 bytes

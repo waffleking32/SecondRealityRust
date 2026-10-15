@@ -438,9 +438,9 @@ impl Endlogo {
     ///
     /// **The check is made on the words the *previous* tick published.** The source's check
     /// is the instruction after `dis_waitb()` returns, and `dis_waitb()` returns on the
-    /// copper's own frame boundary: `waitb_1` (`DIS/DISINT.ASM:160-180`) spins on
+    /// copper's own frame boundary: `waitb_1` (`DIS/DISINT.ASM:161-181`) spins on
     /// `cs:copperframecount`, which `copper_end` (`MAIN/COPPER.ASM:283-320`) increments
-    /// (`:320`) right after its wait for the vertical retrace (`:311-317`). The music's
+    /// (`:320`) right after its wait for the vertical retrace (`:305-311`). The music's
     /// poll is not there: it is `call _zpollme` (`MAIN/COPPER.ASM:466`) inside
     /// `copper_doit`, which the copper's list runs at 20 of the frame's 100 units
     /// (`copperlst0`, `:41-43`) — a fifth of a frame *after* the boundary the check stands

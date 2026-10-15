@@ -1858,7 +1858,7 @@ them: `bins/secondreality/src/parts/endlogo.rs` carries the two constants and
 
 **A part that reads the music at the tick's boundary reads the *previous* tick's words.** The
 source's ENDLOGO check is the instruction after `dis_waitb()`, so it stands at a frame boundary:
-`waitb_1` (`DIS/DISINT.ASM:160-180`) returns when `cs:copperframecount` changes, and `copper_end`
+`waitb_1` (`DIS/DISINT.ASM:161-181`) returns when `cs:copperframecount` changes, and `copper_end`
 (`MAIN/COPPER.ASM:283-320`) increments it (`:320`) at the vertical retrace. The music's poll is a
 fifth of a frame later — `call _zpollme` (`:466`) inside `copper_doit`, which the copper's list
 runs at 20 of the frame's 100 units (`copperlst0`, `:41-43`) — so the check reads the words the
@@ -1875,9 +1875,14 @@ the port's own player publishes `26:49` from index **1144**, and with the placem
 would break on **1145** — while the reference's *frames*, derived bit-exactly from 500 and 1180,
 put the fadeout's first step at **1147**, i.e. the break at 1146. The port holds one frame past its
 own break (`GATE_ALIGNMENT_TICKS`). **Which measurement moved is nameable, and it is the session's,
-not the port's:** the port's player is `second5`'s to the frame (its direct `zframe` matches the
-trace's column; its published positions are the trace's samples one index on, which is what the
-sample instant — the frame's *start*, D17's own reading of the emulator — makes of them), and
+not the port's:** the port's player is `second5`'s — its direct `_np_zframe` matches the trace's own
+column once the sample instant's one-index shift is taken out (753 of 891 frames exact, never more
+than one tick apart: `src/shell.rs`'s
+`the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` asserts it frame by frame,
+`ZFRAME_SLOP`), and its published positions are the trace's samples one index on — 100 of the window's
+131 position changes one frame earlier, 22 exact, 8 two earlier, against the ~20 % the poll geometry
+predicts for an unshifted clock, which is what the sample instant (the frame's *start*, D17's own
+reading of the emulator) makes of them — and
 `second5`'s published row 49 begins one frame earlier, relative to the frame indices, than the
 session the reference's four keyframes were captured in. That is D17's per-session counter
 alignment, and the cost is stated where the constant is: the port disagrees with `second5`'s own
