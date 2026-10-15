@@ -1847,6 +1847,38 @@ mod tests {
              {ZFRAME_SLOP} the sample instant and the two clocks' residuals allow (A12)"
         );
 
+        //    **And the strict same-index reading, printed beside the shifted one.** A reader
+        //    who has not met the sample instant compares port index `N` against the trace's
+        //    *same* frame `N`, and that reading is what falsifies the shift: if the one-index
+        //    offset were an artefact of a drifting clock rather than of where in the frame the
+        //    sample is taken, the strict reading's displacement would grow with the window
+        //    instead of sitting at the shift itself. The bound is `ZFRAME_SLOP + 1` — the
+        //    shift, plus the tick either way the shifted reading already allows — so "exactly
+        //    the shift, not a drift" is a measurement rather than a phrase.
+        let mut strict_off: Vec<i32> = Vec::new();
+        let mut strict_compared = 0usize;
+        for (frame, ticks) in &port_ticks {
+            if let Some(want) = wanted_ticks.get(frame) {
+                strict_compared += 1;
+                if *ticks != *want {
+                    strict_off.push(ticks - want);
+                }
+            }
+        }
+        let strict_worst = strict_off.iter().map(|d| d.abs()).max().unwrap_or(0);
+        println!(
+            "second5: {} of {strict_compared} frames agree on `zframe` at the strict same \
+             index (no shift); worst displacement {strict_worst} tick(s)",
+            strict_compared - strict_off.len()
+        );
+        assert!(strict_compared > 800, "the strict walk covered {strict_compared} frames");
+        assert!(
+            strict_worst <= ZFRAME_SLOP + 1,
+            "the strict same-index reading is {strict_worst} ticks out, more than the shift's \
+             own one plus the {ZFRAME_SLOP} the shifted reading allows — which is a drifting \
+             clock rather than a sample instant (A12)"
+        );
+
         // And then **content**: the sequence of positions the port publishes is the
         // trace's, so a dropped row, an invented row or an order published for the wrong
         // pattern shows up however the frames line up. Placement first on purpose: a music

@@ -1903,7 +1903,7 @@ times a fix round's report described an edit as landed while the tree still held
 each time only a re-review caught it, because the artifact was the only witness. The fifth
 instance's author found the mechanism, and it is mechanical rather than careless: the edit was an
 **unchecked `str.replace` whose target did not match**, so the substitution silently no-opped while
-the summary beside it was written from intent. Two rules follow, and they bind every later phase.
+the summary beside it was written from intent. Three rules follow, and they bind every later phase.
 
 **1. A text substitution is guarded at the point of edit and verified afterwards by search.** The
 tool that makes the edit fails when its target is absent or not unique; the round then re-reads the

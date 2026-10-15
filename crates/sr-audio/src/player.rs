@@ -501,9 +501,11 @@ impl Player {
 
     /// The whole samples this poll contributed — what Task 5's mixer mixes. Fractional
     /// samples are carried into the next poll rather than rounded away, so the rate does not
-    /// drift by construction: at 40000 Hz this reads 570 four polls in five and 571 on the
-    /// fifth. [`Player::poll`] hands exactly this many samples to the mixer, so the drain sees
-    /// the same count Task 3's tests pinned.
+    /// drift by construction: at 40000 Hz the mean is exactly `40000/70.086` = 570.727 a
+    /// poll, and the first five read `[570, 571, 571, 570, 571]` — the pattern follows the
+    /// carried fraction, so it is **not** a fixed four-and-one. [`Player::poll`] hands
+    /// exactly this many samples to the mixer, so the drain sees the same count Task 3's
+    /// tests pinned.
     pub fn samples_this_poll(&self) -> u32 {
         self.samples_this_poll
     }

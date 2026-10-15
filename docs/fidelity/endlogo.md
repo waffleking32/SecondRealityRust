@@ -277,7 +277,10 @@ therefore nameable too:** not the anchor (Task 1 measured the first tick at 408.
 spread 0.1) and not the player (the port's direct `_np_zframe` matches `second5`'s own column once the
 sample instant's one-index shift is taken out — 753 of 891 frames exact and never more than **1 tick**
 apart, asserted frame by frame in `src/shell.rs`'s
-`the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`, `ZFRAME_SLOP`), but the
+`the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`, `ZFRAME_SLOP`; the same
+test prints the *unshifted* reading beside it, **353 of 894, worst 2 ticks** — the shift's own tick
+and nothing that grows, which is what says the one-index offset is the sample instant rather than a
+drifting clock), but the
 *session* — `second5`'s published row 49 begins one frame earlier, relative to the
 frame indices, than the session the reference's four keyframes were captured in. A run whose music
 starts elsewhere has no such alignment to make, and the constant is a fact about this boot and
