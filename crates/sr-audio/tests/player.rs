@@ -787,6 +787,70 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             &[0xC6, 0x06, 0x3A, 0x09, 0x01, 0x3C, 0xFF],
             "movb $0x1,0x93a; cmp $0xff,%al (B, and BFF)",
         ),
+        // The channel initialiser and the mixer's shadow of the position: the offsets
+        // `effects.rs`'s `Channel::reset` doc names, asserted rather than described. Two
+        // labels in that doc were wrong for a round (`+0x5625` called a zero, `+0x5630` called
+        // `m_base`) and nothing here would have caught them; these twelve entries are that gap.
+        (
+            0x5625,
+            &[0x88, 0x5C, 0x03],
+            "the initialiser: mov %bl,0x3(%si) — `channelnum` takes the loop's own channel index, not a zero",
+        ),
+        (
+            0x5628,
+            &[0x66, 0xC7, 0x44, 0x44, 0x01, 0x01, 0x01, 0x01],
+            "movl $0x1010101,0x44(%si) — the marker goes into `m_pos`",
+        ),
+        (
+            0x5630,
+            &[0x66, 0xC7, 0x44, 0x5C, 0x01, 0x01, 0x01, 0x01],
+            "and into +0x5c — the mixer's shadow, not `m_base`",
+        ),
+        (
+            0x5641,
+            &[0x89, 0x44, 0x58],
+            "mov %ax,0x58(%si) with %ax zero (`xor %ax,%ax`, +0x561b) — `m_base`'s low word",
+        ),
+        (
+            0x5644,
+            &[0x89, 0x44, 0x5A],
+            "and its high word at +0x5a",
+        ),
+        (
+            0x5681,
+            &[0xC6, 0x44, 0x3A, 0x65],
+            "movb $0x65,0x3a(%si) — `lastadlins`, the loop's last store",
+        ),
+        (
+            0x56A6,
+            &[0xC6, 0x44, 0x04, 0xFF],
+            "the silence pass the initialiser ends with: movb $0xff,0x4(%si)",
+        ),
+        (
+            0x56AA,
+            &[0xC6, 0x44, 0x3F, 0xFF],
+            "and 0xff at +0x3f",
+        ),
+        (
+            0x56AE,
+            &[0xC6, 0x44, 0x41, 0x00],
+            "and 0 at +0x41",
+        ),
+        (
+            0x6FB8,
+            &[0x66, 0x8B, 0x44, 0x5C, 0x66, 0x8B, 0x5C, 0x44, 0x66, 0x3B, 0xD8],
+            "the mixer: mov 0x5c(%si),%eax; mov 0x44(%si),%ebx; cmp %ebx,%eax — +0x5c is the position's shadow",
+        ),
+        (
+            0x6FC7,
+            &[0x66, 0x89, 0x5C, 0x5C],
+            "and mov %ebx,0x5c(%si) rewrites it when the position has moved",
+        ),
+        (
+            0x708C,
+            &[0x8B, 0x4C, 0x58, 0x66, 0xC1, 0xE1, 0x0E],
+            "mov 0x58(%si),%cx; shl $0xe,%ecx — +0x58 is the sample base, `m_base`",
+        ),
     ];
 
     for (offset, bytes, meaning) in claims {

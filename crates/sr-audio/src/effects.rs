@@ -178,6 +178,11 @@ impl Channel {
     ///   and neither does the silence pass that follows it (`+0x569a`), which writes `0xff`
     ///   into `+0x04` and `+0x3f` and 0 into `+0x41`.
     ///
+    /// Every store named above is an entry in `tests/player.rs`'s claims table (`+0x5625`,
+    /// `+0x5628`, `+0x5630`, `+0x5641`, `+0x5644`, `+0x5681`, the silence pass's three at
+    /// `+0x56a6`, and the mixer's `+0x6fb8`, `+0x6fc7` and `0x708c`), so a wrong label here
+    /// fails a test rather than surviving a review round.
+    ///
     /// None of it is reachable by a Task 4 assertion — the position a note start writes
     /// replaces the marker — so the port carries none of it, and the mixer decides for itself
     /// what to make of a channel that has never played a note.
@@ -794,10 +799,10 @@ const NOTE_SHIFTS: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 5, 11, 17, 27, 32, 42,
 
 /// The `Q` volume-variation addends at `+0x95c`, signed — with the same reading of the image
 /// applied as the multipliers below: 6, 7, 14 and 15 are the codes that take the *multiply*
-/// path (the only ones whose multiplier is not zero), code 8's addend is a real zero byte of its
-/// own, and where the image holds `0x0101` — the slots 14 and 15 — the running program holds
-/// 0. The slots a code can actually reach are 0…5, 8 and 9…13, all of them real bytes but for
-/// that pair.
+/// path (the only ones whose multiplier is not zero), and code 8's addend is a real zero byte of
+/// its own. Every slot a code that *does* take this path can reach — 0…5, 8 and 9…13 — is a
+/// real byte of the image; the image's `0x0101` filler sits in the last two slots, 14 and 15,
+/// which are the multiply codes' and are never read here.
 const RETRIGGER_ADD: [i8; 16] = [0, -1, -2, -4, -8, -16, 0, 0, 0, 1, 2, 4, 8, 16, 0, 0];
 
 /// The `Q` volume-variation multipliers at `+0x96c`, in sixteenths — with the object image's

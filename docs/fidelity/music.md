@@ -382,7 +382,7 @@ source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is
 own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
 from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
 `the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts the load-bearing
-instructions at their own offsets (24 of them when Task 3 wrote it, **119** after Task 4 added
+instructions at their own offsets (24 of them when Task 3 wrote it, **131** after Task 4 added
 the effects' — the count the test itself prints)). Offsets below are that object's segment offsets, and the
 listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
 it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
@@ -576,7 +576,7 @@ row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and 
   (offset 49, read at `+0x53ca` into `%al`, called at `+0x53d8`) and `+0x3d73` for its initial
   *tempo* byte (offset 50, read at `+0x53b9`, called at `+0x53c7`). All six offsets — the two
   handlers and each one's read and call — are claims in `tests/player.rs`, which is what made
-  that table 119 rather than 117. Two handlers, two call sites, no parameter
+  that table 131 rather than 117. Two handlers, two call sites, no parameter
   test in either. This was not a reading that contributed nothing: MUSIC1 carries one `A7F` cell
   and Task 3's player played it as a *tempo*, which §9.13 and §8's end-to-end numbers follow
   through. Neither module carries a `T`
@@ -762,7 +762,7 @@ cargo test -p sr-audio --test player -- --nocapture the_objects_own_bytes
 
 Every offset below is `MAIN/STMIK.300`'s segment offset, and every one of them is **asserted
 against the object's own bytes** by `tests/player.rs`'s claims table, which Task 4 grew from 24
-claims to **119**: the handlers, the two dispatch tables, the `S` subcommand tables, the waveform
+claims to **131**: the handlers, the two dispatch tables, the `S` subcommand tables, the waveform
 entries and every table the arithmetic is measured in. Where the object and the ST3 semantics one would expect disagree, the
 object wins and the disagreement is named here.
 
@@ -997,8 +997,8 @@ tables they look like. Which of the codes the files reach is measured by the sco
 letters (`cargo test -p sr-audio --test effects -- --nocapture the_cells_the_tests_drive`): MUSIC0's
 84 `Q` cells carry codes `{0, 4, 7, 12, 14, 15}` on intervals `{0, 3, 4, 6}` and MUSIC1's 38 carry
 code 0 on interval 3 — so three of the four multiplier codes (7, 14, 15) are on shipped cells and
-**6 on neither file**, and the addends reached are 0 (both files), −8 (code 4, two cells) and +4
-(code 12, two).
+**6 on neither file**, and the addends reached are 0 (both files), −8 (code 4, two cells) and +8
+(code 12, two — the same code the `QC4` row of the table below drives).
 `q_multiplies_when_its_code_has_a_multiplier` drives MUSIC0's `QF4` (code 15) and asserts the
 doubling: 1 → 2 → 4 → 8 → 16 → 32 → 63 (the clamp), four ticks apart.
 
@@ -1135,6 +1135,7 @@ The per-effect tests and their cells:
 | `Q`'s multiplier | MUSIC0 order 24, pattern 47, row 56, channel 2 (`QF4`) | the doubling and the clamp at 63 |
 | `SD2`, `SD3`, `SD6` | MUSIC1 order 42, MUSIC0 orders 45 and 44 | the tick each fires on |
 | the volume-0 path | MUSIC1 order 0, pattern 73, row 3, channel 2 (`C00`) | the channel freed before the break, and the order still 0 at row 63 |
+| the `A` correction's own row | MUSIC1 order 98, pattern 72, row 48 (`A7F`) | 48 rows at 6 then 16 at 127 — 2320 ticks for the order, 1936 more than those sixteen would take at 6 |
 | the periods | the tables themselves | every octave of the note table, the c2spd scale and the step |
 
 The trace comparison cannot judge any of this (a wrong `D` does not move the timeline), which is
