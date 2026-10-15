@@ -270,6 +270,13 @@ enum MusicCommand {
         /// fall inside the located segment; the view it falls in is reported.
         #[arg(long, value_parser = parse_address)]
         at: u32,
+        /// A segment offset and byte count to dump, as `OFFSET:LEN` with the
+        /// offset in decimal or with an `0x` prefix — repeatable. One line is
+        /// printed per frame in which a region's bytes change, which is how an
+        /// address that is *written* (a pointer, a table the builder fills) is
+        /// told from one that never moves. The count is capped at 4096 bytes.
+        #[arg(long, value_parser = parse_dump, action = clap::ArgAction::Append)]
+        dump: Vec<(u32, usize)>,
         /// Key names sent once the setup screen appears, as `music trace`'s.
         #[arg(long, default_value = "KBD_left KBD_enter")]
         keys: String,
@@ -298,6 +305,13 @@ enum MusicCommand {
 }
 
 /// A physical address, in decimal or with an `0x` prefix.
+fn parse_dump(text: &str) -> Result<(u32, usize), String> {
+    let (offset, length) = text
+        .split_once(':')
+        .ok_or_else(|| format!("{text:?} is not `OFFSET:LEN`"))?;
+    Ok((parse_address(offset)?, parse_address(length)? as usize))
+}
+
 fn parse_address(text: &str) -> Result<u32, String> {
     let trimmed = text.trim();
     let (digits, radix) = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
@@ -560,6 +574,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                     cycles,
                     frames,
                     at,
+                    dump,
                     keys,
                     boot,
                 },
@@ -577,7 +592,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 boot,
                 force: true,
             };
-            Ok(music::probe_command(&options, at)?)
+            Ok(music::probe_command(&options, at, &dump)?)
         }
     }
 }

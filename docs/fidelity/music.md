@@ -1311,6 +1311,16 @@ index is **`0x501 + value`**. Only the object's *first* chunk after the planes a
 (`+0x50ab`) and is rounded up to a multiple of 64 (`+0x50e6`) — so its index is `0x400 + value`.
 The port models both (`Mixer::base`, `FIRST_CHUNK`), and the tests assert the seam.
 
+**The table the machine's memory holds is not the table the builder writes**, and the
+difference is measured: `cargo xtask music probe --dump` reads `cs:0x6E+0x000`…`+0x7FF` across a
+whole window and finds the zero region at **half** its length, the ramp 768 bytes early and the
+rest filled with `0xFF` — because `+0x559d`'s `rep stosw` leaves `CX` = 0 and `+0x55a1`'s `rep
+stosb` therefore writes nothing, which makes `+0x55bd`'s tail fill the shortfall with `0xFFFF`.
+`APPROXIMATIONS.md` A14 is the measurement and the two things it leaves open; the port plays the
+**linear** path the audible buffer supports (`[0xbe6]:0xC9B0` holds a waveform centred on 0x80,
+which is the mis-placed ramp's byte 128 at index 1024, not the gate's 0x00 and not the tail's
+0xFF).
+
 **What that means for the sound, measured.** At `mul` 64 the curve's first 1536 entries are zero
 and the ramp covers the last 512, so a frame is the silence byte — the card's 0, i.e. −32768 —
 until the mix's value reaches **255**, a quarter of the accumulator's ±1024 range. Over MUSIC0's

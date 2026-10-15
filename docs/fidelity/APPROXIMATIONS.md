@@ -665,11 +665,59 @@ place:
 **A13 (as it stands) — the curve's index is clamped at the table's ends.** The object's index is a
 16-bit `bx` added to the base and read out of its own code segment (`+0x2cf4`'s `mov %cs:(%bx),%ah`,
 `+0x2d08`'s `mov %cs:0x0(%bp),%al`), so a signal further from silence than the table is wide reads
-whatever the linker put after it — the note tables at `+0x97c` are 0x38 bytes past the table's end
-at `cs:0x6e`, and the scale table at `+0x9c4` further on. The port has no such neighbours to read
+whatever the linker put after it — the note tables at `+0x97c` are 0x10E bytes
+past the table's end at `cs:0x86e`, and the scale table at `+0x9c4` further on. The port has no such neighbours to read
 and clamps to the table's 2048 entries instead of inventing a value: `Curve::sample`. The index
 reaches past the table's end only for a value above +766 — 75 % of the accumulator's own range —
 and below it only for a value under −1281, which a sixteen-voice mono mix can reach. **Measured
 difference:** none that any capture can show (the emulator runs silent, D17); the object's value
 there is not a defined output but its own segment's bytes, which is the finding rather than a
 number.
+
+## A14 — The output curve the port builds is not the curve the machine's memory holds: the builder's `rep stosw` clobbers its own count, and the index's base is open
+
+**Part:** the music, under every part that plays it (the re-review's probe, `cargo xtask music
+probe --dump`).
+
+**Measured** at `--cycles 30000 --arg 5 --frames 400..1300` (`music probe --at 0x525C --dump
+0x6C:2 --dump 0x6E:16 … --dump 0x86C:2`, the whole window, one line per change — the dump printed
+**one** line per region, so nothing in these spans moved between frame 401 and frame 1299):
+
+1. **The base word never moves.** `cs:0x6C` reads `6E 00` at every frame of the window, before
+   the music starts and after. The port's single-address model is right.
+2. **The table's bytes are not `+0x551c`'s output as read.** They are `00` for `cs:0x6E+0x000`
+   (indices 0…767), then the **ramp itself** at `+0x300` (`00 00 01 01 … F0 F0 F1 F1 …`, i.e.
+   entry `(i − 768)/2`), ending at `+0x500`, and **`FF` for every byte of `+0x500 … +0x7FF`**
+   (`+0x56E`, `+0x5EE`, `+0x66E`, `+0x76E`, `+0x7EE` and `+0x86C` are all `FF`). The `mul` 64
+   ramp's *shape* (one level per two entries) is there; its *placement* is 768 bytes early and
+   the region above it is `FF`.
+3. **The reason is in the builder's own bytes.** `+0x559d`'s `rep stosw` leaves `CX` = 0, so
+   `+0x559f`'s `add %cx,%cx` doubles zero and `+0x55a1`'s `rep stosb` writes **nothing**: the
+   zero region is `(0x800 − K)/2` bytes, not `0x800 − K`. `+0x55b5`'s `sub %di,%cx` then sees a
+   short `di` and `+0x55bd`'s `rep stosw` fills the *remainder* with `0xFFFF` — which is exactly
+   the 768 bytes the probe read. The port's `Curve::build` writes what the code *intends*, not
+   what it does.
+
+**The audible buffer says which reading the machine actually plays through.** `[0xbe6]` =
+`0x0C9B`, `[0xbe8]` = `0xC9B0` (measured, `base + 0x0BE4`), and the reviewer's dump of that
+buffer at frame 1299 is a stereo waveform **centred on 0x80** with a swing of ±40–50 and
+per-channel DCs ≈0x7C (L) and ≈0xA2 (R). The port's shipped curve — the gate at `mul` 64,
+indexed at `0x501 + value` — puts the byte **0x00** there, and the table the machine holds puts
+`0xFF` at `0x501 + value` for every value ≥ 0. Both contradict the buffer. The *unmarked* base
+through the table the machine actually holds does not: index `0x400 + 0` = 1024 is the ramp's
+`(1024 − 768)/2` = **0x80**, the buffer's own centre, and a value of ±80 moves the byte by ±40 —
+the measured swing.
+
+**What the port does about it, and what is still open.** The port ships the **linear** path: the
+`mul`-64 gate is code the object contains, the machine's memory does not hold it, and the buffer
+is not what plays it. Two things are *not* settled by this round's evidence and are registered
+here rather than guessed at: **(a)** why the index on the audible path carries no `0x101` marker,
+when the flush writes `0x0101` into every word it reads (`+0x2ce5`, `+0x30d0`) — the measurement
+says silence lands on the ramp's centre, and the marker's arithmetic says it should land 257
+entries higher, in the `FF` region; and **(b)** whether the table's misplacement is always this
+one (a 768-byte shift for `K` = 512 at `0x006E`) or depends on the run's multiplier, which a
+second window with a different module would distinguish. **Measured difference:** the port's
+samples are a linear map of the object's accumulator where the reference's are that map through
+the mis-placed ramp with an `FF` ceiling above it; no capture can quantify the audible result
+(the emulator runs silent, D17), and the buffer above is the whole of the evidence for the
+*shape*.

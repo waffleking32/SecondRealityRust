@@ -100,7 +100,7 @@ const BASE_FREQ: u32 = 0x00da_7600;
 /// initial data: **21111**.
 ///
 /// It is read on every path the reference takes and written on none of them — the only store
-/// to it is `+0x228f`, inside `_zoutputmode == 2`'s branch, which `MAIN/U2.ASM:742-744` labels
+/// to it is `+0x228f`, inside `_zoutputmode == 2`'s branch, which `MAIN/U2.ASM:734` labels
 /// **Gravis** (the value it writes, 0x96bb = 38587, is 44100 × 7/8 — a GUS rate) and which the
 /// reference's SB Pro run never reaches (`_zoutputmode` is 5, `MAIN/U2.ASM:759`). The shell doubles `_zmixspeed` to 40000
 /// for that mode and leaves this word alone, so the reference's stereo voices step
@@ -784,7 +784,7 @@ impl Curve {
     /// The index is clamped to the table's own 2048 entries. The object does not clamp: its
     /// index is a 16-bit `bx` added to the base and read out of its own code segment, so a
     /// signal further from silence than the table is wide reads whatever the linker put after
-    /// it — the note tables at `+0x97c` are 0x38 bytes past the table's end. The port has no
+    /// it — the note tables at `+0x97c` are 0x10E bytes past the table's end at `cs:0x86e`. The port has no
     /// such neighbours to read and says so rather than inventing a value.
     pub fn sample(&self, index: i32) -> i16 {
         let entry = index.clamp(0, 0x7ff) as usize;

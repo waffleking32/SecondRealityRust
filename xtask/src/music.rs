@@ -1991,7 +1991,11 @@ fn record_name(kind: u8) -> String {
 /// `docs/fidelity/reference-indices.md` §1.7 — a word at an address that is not
 /// one of the published symbols cannot be read out of a *trace*, so it is
 /// measured live, at the same recipe the traces use.
-pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicError> {
+pub fn probe_command(
+    options: &TraceOptions,
+    at: u32,
+    dumps: &[(u32, usize)],
+) -> Result<ExitCode, MusicError> {
     validate_trace_options(options)?;
     let autoexec = options.autoexec_lines()?;
     let mut oracle =
@@ -2059,6 +2063,28 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
     // frames of the same session, and that is what tells a counter running at
     // the playing tempo's tick rate from one running at something else.
     let zframe_at = view + map.offset("_np_zframe")?;
+    // The `--dump` regions, as `(the segment offset, the base address, the byte count)`:
+    // printed as a change log rather than per frame, because the question they answer is
+    // *when* an address moves and *what* it holds when it does.
+    let mut regions: Vec<(u32, u32, usize)> = Vec::new();
+    for (offset, length) in dumps {
+        if *length == 0 || *length > 4096 {
+            return Err(MusicError::Options(format!(
+                "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
+            )));
+        }
+        if *offset as usize + length > map.segment_length as usize {
+            return Err(MusicError::Options(format!(
+                "--dump {offset:#06X}:{length} runs past the segment's {} byte(s)",
+                map.segment_length
+            )));
+        }
+        regions.push((*offset, view + *offset, *length));
+    }
+    if !regions.is_empty() {
+        println!("  dumping {} region(s), one line per change:", regions.len());
+    }
+    let mut previous: Vec<Option<Vec<u8>>> = vec![None; regions.len()];
     let mut samples: Vec<(u64, i16, i16)> = Vec::new();
     // From the window's own first frame, not from wherever the locate left the
     // guest: a rate measured from the segment's arrival would include the boot.
@@ -2073,6 +2099,19 @@ pub fn probe_command(options: &TraceOptions, at: u32) -> Result<ExitCode, MusicE
         }
         let bytes = oracle.read_memory(0, at, 2)?;
         let zframe = oracle.read_memory(0, zframe_at, 2)?;
+        for (index, (offset, base, length)) in regions.iter().enumerate() {
+            let dump = oracle.read_memory(0, *base, *length)?;
+            if previous[index].as_deref() != Some(dump.as_slice()) {
+                println!(
+                    "  frame {now}: base + 0x{offset:04X} = {}",
+                    dump.iter()
+                        .map(|byte| format!("{byte:02X}"))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                );
+                previous[index] = Some(dump);
+            }
+        }
         let after = oracle.frame_counter()?;
         if now == after && after >= next {
             samples.push((
