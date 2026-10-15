@@ -761,7 +761,7 @@ in either module's run — and does **not** reach the DMA buffer's contents (the
 0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
 that buffer beside the accumulator plane it came from is what would close (a).
 
-## A15 — A `dis_sync()` position the object answers with a read of its own code is refused, not returned
+## A15 — `dis_sync()` above the table's last key is refused, not returned
 
 **Part:** the engine's music seam (§11 of `docs/fidelity/music.md`), reachable only by a part that
 calls `dis_sync()` — `PAM/OUTTAA.C:39` and `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138`, all of
@@ -769,40 +769,55 @@ them block 1's and all of them Phase 4's.
 
 **Original:** `sync_10` (`DIS/DISINT.ASM:449-463`) turns the published position into a part-start
 code with the `ordersync1` table above it (`:428-446`): the loop is `mov cx,16` over fifteen
-four-byte entries (`:455`), the answer is read at `%bx - 2` (`:460`), and at two positions that
-read leaves the table — at `(order 0, row 0)`, where `%bx` is the table's own base, and above the
-last key (`0x4200`), where the 16th iteration compares against the word past the end and may
-return it.
+four-byte entries (`:455`), the answer is read at `%bx - 2` (`:460`), and above the last key
+(`0x4200`) the 16th iteration compares against — and, when it does not match, returns — the bytes
+that follow the table, which are `sync_10`'s own first instruction, `mov es, cs:stmikseg`.
 
-**Port:** `sr_engine::sync_from` reproduces the table and the `%bx - 2` arithmetic exactly for
-`0 < (order << 8) | row <= 0x4200`, and **panics** outside it, naming the position and the reason.
-(`NoMusic::sync` refuses too, for the blunter reason that a run with no player has no position to
-read at all.)
+**Port:** `sr_engine::sync_from` reproduces the table, the `%bx - 2` arithmetic and the read
+*before* the table exactly (the position `(0, 0)` included — see below), and **panics** for a
+position above the last key, naming the position and the reason.
 
-**Why:** the two reads are of the original's own **code**, and the code differs between builds.
-Measured in this task's commit by `the_table_is_the_shipped_shells_own_bytes`, which finds the
-port's sixty table bytes exactly once in each of the three shells the tree holds: the word before
-the table is `0xC307` (`pop es; ret`) in all three, and the return when no key matched
-is **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` —
-it is the displacement of the `mov es, cs:stmikseg` that follows the table, which the linker sets.
-Returning any of them would be a number the port made up, and by D24 the value the 1993 release
-carried is not recoverable from the vendored tree at all.
+**Why the boundary is there, tier by tier.** The region above `0x4200` is not one thing:
 
-**Measured difference:** none yet, and that is the entry's point: no caller in the tree is *shown*
-to reach the outside of the domain. Both reach the inside by a wide margin — `PAM/OUTTAA.C:39`
-waits for code 10, which the table gives from order 13, and `ALKU/MAIN.C:59-79` waits for codes 1
-through 4, from order 2 — but how far MUSIC0's order list has got while either part runs is not
-measured until those parts are ported, so the phase cannot claim the outside is unreachable.
+| key | what the object's 16th iteration does | the port |
+|---|---|---|
+| `<= 0x8E2E` | the compare matches (`2e 8e` read as a word — the `mov`'s prefix and opcode, the same in every build) and the answer read at `%bx - 2` is the table's own last code, **4** | refused |
+| `> 0x8E2E` | the compare fails and the loop returns the word after the table: the modrm byte `06` and the *low byte* of a **linker-set** displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` | refused |
 
-**Revisit when ALKU is ported (Phase 4):** its first `dis_sync()` is likely to be at `(0, 0)` —
-the position a run holds before the music's first row is published — so the part will meet this
-refusal and need a decision. What the read *does* there is subtle enough to write down: `0xC307`
-as the 16-bit `int` the C callers see is **negative** (the parts' C is Turbo C — `PAM/PAM.PRJ`
-names `Turbo C Project File` and includes from `G:\BC\INCLUDE\` — and its `int` is 16 bits), so every `dis_sync() < N` in the tree with
-`N` ≥ 1 (all of them are) keeps waiting — the effect of code **0** — whereas a word that happened
-to be small and positive would end those waits at once. So returning 0 at `(0, 0)` would reproduce
-the tree's own builds' observable behaviour, at the price of answering a position the object
-answers with code, with a number the port cannot derive from the DIS's arithmetic; returning the
-measured word would be a fitted constant of exactly the kind Review Focus 5 forbids, since the
-release of record's own word is not in the tree (D24). The seam refuses loudly now so that the
-decision is made with the position named rather than hidden behind a plausible number.
+Only the second tier *forces* a refusal: a port cannot return a number that differs between builds
+of the original. The first tier is deterministic in every build the tree holds, and the port
+refuses it too, on the brief's own boundary (`ord <= 0x42`): above the last key the answer stops
+being the table's arithmetic and starts being a read of whatever the assembler left after it, and
+this phase draws the line at the table rather than modelling that read. The tests say so —
+`sync_refuses_the_band_whose_16th_compare_matches` refuses the answerable tier by name, alongside
+the two harder ones — so the choice is visible rather than implied.
+
+**The read *before* the table is answered, not refused.** At `(0, 0)` the `%bx - 2` read lands on
+the two bytes before `ordersync1`, which are `pop es; ret` (`07 c3`) because `ordersync1` follows
+`musframe_9`, whose INDEMO body ends `pop es` (`DIS/DISINT.ASM:420`) then `ret` (`:424`) — the
+source's own instruction sequence, identical in all three shell builds the tree holds
+(`the_table_is_the_shipped_shells_own_bytes` finds them). `sync_from(0, 0)` returns that word as
+the C callers receive it, a 16-bit `int`: **-15609** (`0xC307` read signed; the parts' C is Turbo
+C — `PAM/PAM.PRJ` names `Turbo C Project File` — whose `int` is 16 bits), and
+`sync_answers_the_position_before_the_table_with_its_own_word` pins it. The position is **reached**
+rather than hypothetical: in `second5` every sample from frame 148 to 426 reads `ord 0 row 0 pat 0`
+(278 samples; the trace's coverage drops frame 409), the first published row is 427, and ALKU's
+first `dis_sync()` sits in that window. What it gets is a negative number, so every
+`dis_sync() < N` in the tree (`N` >= 1, all of them) keeps waiting — exactly what the reference
+does, and the reason this is an answer rather than a divergence.
+
+**Measured difference:** none for the answered domain — the word before the table is the same in
+every build the tree holds and the port returns it — and the refusal covers only what the phase
+cannot answer. For the refused region there is no measured difference either, and that is the
+honest statement of the gap: no caller in the tree is *shown* to call `dis_sync()` above the last
+key (both callers are block 1's, and how far MUSIC0's order list has got while they run is not
+measured until they are ported), while the answered position is measured — reached for 278
+consecutive samples of `second5`. An earlier draft of this entry claimed "no caller is shown to
+reach the outside of the domain" while its own next paragraph said ALKU's first call meets the
+refusal at `(0, 0)`; both cannot stand, and the trace settles which one is true: `(0, 0)` is
+reached, above `0x4200` is not shown reachable.
+
+**Revisit when a part is ported that syncs late (Phase 4):** if one of the two callers turns out to
+call `dis_sync()` above the last key, the first tier's answer (the deterministic 4) is derivable
+from the source's own instruction sequence and could be added here with its own note; the second
+tier's cannot be answered by anything the tree holds.

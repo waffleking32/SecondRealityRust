@@ -1543,33 +1543,52 @@ visible in the table:
    (key `0x0200`) reads **0**, and `(2, 1)` reads **1**; every key's own row still answers with the
    previous entry's code. The port keeps that: `sync_reads_the_table_the_object_reads` shows each
    of six keys twice, at the key and one row later.
-2. **The loop runs sixteen times over fifteen entries** (`:455`'s `mov cx,16`), and the 16th
-   iteration's compare is against the word *past* the table. A position above the last key
-   (`0x4200`) therefore reads the object's own code and returns it, and how much of it is read
-   depends on the build: the test above reads the word after the table as `0x8E2E` (`sync_10`'s own
-   first instruction, `2e 8e`) in all three builds, and the return when that compare fails as
-   **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` —
-   it is the displacement of the `mov es, cs:stmikseg` that follows, which the linker sets.
+2. **The loop runs sixteen times over fifteen entries** (`:455`'s `mov cx,16`), so a position
+   above the last key (`0x4200`) makes the 16th iteration compare against the bytes *past* the
+   table, which are `sync_10`'s own first instruction — `mov es, cs:stmikseg`, `2e 8e 06 …`. That
+   gives the region **two tiers**, and they are different in kind:
+   - `0x4200 < key <= 0x8E2E`: the compare *matches* (`2e 8e` read as a word; the same two bytes
+     in every build, because they are the instruction's prefix and opcode), and the answer read at
+     `%bx - 2` is the table's own last code, **4** — deterministic here in every build the tree
+     holds;
+   - `key > 0x8E2E`: the compare fails, `%bx` advances past the table, and the loop's fall-through
+     returns the word *after* the table: the modrm byte `06` and the *low byte* of the
+     `mov`'s displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in
+     `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE`, i.e. one byte of instruction framing and a
+     **linker-set** address. That is the half a port cannot have.
 
-The first entry has the same problem from the other side: at `(0, 0)` the `%bx - 2` read is the
-word *before* the table, which is `pop es; ret` in all three builds — measured `0xC307`, i.e. code.
-So the domain this port reproduces is **`0 < (order << 8) | row <= 0x4200`**, and outside it
-`sync_from` **panics** with the position, the reason and the citations rather than returning a
-number the original does not have. (The plan's brief says "the reachable domain is ord ≤ 0x42";
-the lower end is the refinement — `(0, 0)` reads code too, and it is the position a part syncing
-before the music's first published row actually holds. What that code *does* to a caller is a
-reading of its own: `0xC307` as the 16-bit `int` the C callers see is **negative** (the parts' C is
-Turbo C — `PAM/PAM.PRJ` names `Turbo C Project File`, includes from `G:\BC\INCLUDE\` — whose
-`int` is 16 bits), so every
-`dis_sync() < N` in the tree with `N` ≥ 1 waits on — the effect of code 0 — while a word that
-happened to be small and positive would end those waits at once. That the tree's own builds read
-"wait", and that the value is code rather than a code, are both true; the port refuses because the
-second is what decides whether it may answer.) `APPROXIMATIONS.md` A15 registers it.
+**What the port does at each end, and why.**
 
-The two callers in the tree are both block 1's and both reach the domain by a wide margin:
-`PAM/OUTTAA.C:39` waits for `dis_sync() < 10`, which the table's order-13 key gives, and
+- **Before the table it answers.** At `(0, 0)` the `%bx - 2` read is the word before `ordersync1`,
+  which is `pop es; ret` — `07 c3` — because `ordersync1` follows `musframe_9`, whose INDEMO body
+  ends `pop es` (`:420`) then `ret` (`:424`). That is not linker luck but the source's own
+  instruction sequence, and the same two bytes sit there in all three builds the tree holds
+  (pinned by `the_table_is_the_shipped_shells_own_bytes`), so `sync_from(0, 0)` returns it — as
+  the C callers receive it, a 16-bit `int`, i.e. **-15609** (the parts' C is Turbo C —
+  `PAM/PAM.PRJ` names `Turbo C Project File`, includes from `G:\BC\INCLUDE\` — whose `int` is
+  16 bits). `sync_answers_the_position_before_the_table_with_its_own_word` pins the value, and
+  the position is **reached**: in `second5` every sample from frame **148** to **426** reads
+  `ord 0 row 0 pat 0` — 278 of the trace's samples, its coverage dropping frame 409 — the first
+  published row is frame **427**, and the music's own start is frame 408 (`cargo xtask music
+  analyse --trace reference/music/second5`, section 1; the values are the trace's own
+  `frame,ord,row,pat` columns, which `crates/sr-audio/tests/trace.rs` drives a `Player` over frame
+  by frame). ALKU's first `dis_sync()` sits in that window, and what it gets is a *negative*
+  number:
+  every `dis_sync() < N` in the tree (`PAM/OUTTAA.C:39`'s `< 10`, `ALKU/MAIN.C:59`'s `< 1`, and
+  the rest) keeps waiting, exactly as it does against the reference.
+- **Above the table it refuses.** `sync_from` **panics** for `(order << 8) | row > 0x4200`, with
+  the position, the reason and the citations, rather than answering a number that differs between
+  builds of the original. The first tier above the key is answerable in the builds the tree holds
+  (the deterministic 4), and the port refuses it too: that boundary — the brief's `ord ≤ 0x42` —
+  is where the answer stops being the DIS's table arithmetic and starts being a read of the bytes
+  the assembler put after it, and modelling *that* is a step this phase does not take rather than
+  one it cannot. `sync_refuses_the_band_whose_16th_compare_matches` says so in the tests, so the
+  choice is visible. `APPROXIMATIONS.md` A15 registers the boundary.
+
+The two callers in the tree are both block 1's and both reach the *answered* domain by a wide
+margin: `PAM/OUTTAA.C:39` waits for `dis_sync() < 10`, which the table's order-13 key gives, and
 `ALKU/MAIN.C:59`, `:66`, `:72`, `:79` and `:138` wait for 1 through 4, from order 2 on. What the
-phase cannot show is that they never call it outside the domain — both parts are Phase 4's, and how
+phase cannot show is that they never call it above the last key — both parts are Phase 4's, and how
 far MUSIC0's order list has got while they run is not measured. That is why A15 exists rather than
 a claim that the region is unreachable.
 
@@ -1588,8 +1607,9 @@ than handed a plausible number. A run with no music at all is `None` — `PartCt
 
 The seam's own tests: `music.rs`'s `musplus_is_the_objects_own_two_phase_rule`,
 `musplus_over_every_row_matches_the_objects_decision_tree`,
-`sync_reads_the_table_the_object_reads` (and three `should_panic` cases: `(0, 0)`, `(66, 1)` and
-`(255, 255)`), `the_table_is_the_shipped_shells_own_bytes`,
+`sync_reads_the_table_the_object_reads`, `sync_answers_the_position_before_the_table_with_its_own_word`
+(and three `should_panic` cases: `(66, 1)`, `(255, 255)` and the answerable band's `(0x8e, 0x2e)`),
+`the_table_is_the_shipped_shells_own_bytes`,
 `an_older_build_carries_a_different_table`,
 `muscode_is_the_deferrals_substitute_over_every_code_the_parts_wait_for`,
 `no_music_answers_as_a_run_with_no_player`,

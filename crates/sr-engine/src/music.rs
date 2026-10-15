@@ -34,11 +34,14 @@ const NO_PLUS: i32 = -32;
 /// The published music position — the words the DIS hands the parts, and what the window's
 /// status line shows.
 ///
-/// All five are the *published* words (`MAIN/STMIK.H:125-131`; `muscode_6` reads `_np_row` and
-/// `_np_ord` at `DIS/DISINT.ASM:250-251`), so the three position ones come through the ten-poll
-/// ring and lag the player's own state by ten polls (`docs/fidelity/music.md` §8). That lag is
-/// the point rather than an artefact: a part that syncs is asking about the music the machine is
-/// playing *now*, not the row the engine has already scheduled.
+/// The three position words are the *published* ones (`_np_ord`, `_np_pat`, `_np_row`,
+/// `MAIN/STMIK.H:126-128`; `muscode_6` reads two of them at `DIS/DISINT.ASM:250-251`), so they
+/// come through the ten-poll ring and lag the player's own state by ten polls
+/// (`docs/fidelity/music.md` §8) — that lag is the point rather than an artefact, because a part
+/// that syncs is asking about the music the machine is playing *now*, not the row the engine has
+/// already scheduled. `speed` and `tempo` are not ring words at all: an `A` and a `T` command
+/// write `_np_speed` and `_np_tempo` straight through (`music.md` §8), which is why a trace's
+/// speed column can lead its row column.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct MusicPosition {
     /// `_np_ord`: the order the counter holds.
@@ -122,11 +125,12 @@ pub type MusicRef<'a> = &'a mut (dyn Music + 'static);
 /// - [`musrow`](Music::musrow) is 0.
 /// - [`muscode`](Music::muscode) is [`muscode_from`] — 0, D8's substitute, so the parts that wait
 ///   for 1, 2, 3 or 0xf0 wait for ever here exactly as they do against the reference's own word.
-/// - [`sync`](Music::sync) **refuses loudly**: the position has no code, and the object's own
-///   `sync_10` has no answer without a player — its INDEMO half reads a *code* word at that
-///   position, and its non-INDEMO half leaves `%ax` as the caller left it
-///   (`DIS/DISINT.ASM:449-463`). A part that ignores music never calls it; a part that waits on
-///   a start code fails where the port can see it rather than waiting on a number the port made up.
+/// - [`sync`](Music::sync) **refuses loudly**: there are no `_np_ord`/`_np_row` words to look a
+///   code up in, and the object's own `sync_10` has no answer for that state either — its INDEMO
+///   half reads the words out of a segment that would not exist, and its non-INDEMO half leaves
+///   `%ax` as the caller left it (`DIS/DISINT.ASM:449-463`). A part that ignores music never
+///   calls it; a part that waits on a start code fails where the port can see it rather than
+///   waiting on a number the port made up.
 /// - [`getmframe`](Music::getmframe) is 0 and [`setmframe`](Music::setmframe) writes nothing —
 ///   `_np_zframe` is a word in a segment that does not exist, so a part that waits for the
 ///   counter to arrive waits for ever, and a part that reads back its own write does not.
@@ -160,11 +164,11 @@ impl Music for NoMusic {
 
     fn sync(&mut self) -> i32 {
         panic!(
-            "NoMusic::sync(): there is no player, and the object has no answer without one — \
-             `sync_10` (`DIS/DISINT.ASM:449-463`) reads the position it would sync to out of the \
-             music engine's own segment and, when the position has no key in `ordersync1`, returns \
-             a word of its own code. Install a real `Music` (Task 7's adapter), or write the part \
-             so that it does not sync when the run has no music."
+            "NoMusic::sync(): there is no player, so there is no position to look up — \
+             `sync_10` (`DIS/DISINT.ASM:449-463`) reads `_np_ord` and `_np_row` out of the music \
+             engine's own segment, and a run without one has no such words (`stmikseg` is never \
+             set). Install a real `Music` (Task 7's adapter), or write the part so that it does \
+             not sync when the run has no music."
         )
     }
 
@@ -278,8 +282,20 @@ pub const ORDERSYNC1: &[(u16, i32)] = &[
     (0x4200, 4),
 ];
 
+/// The word the `%bx - 2` read finds at the table's first entry: the two bytes before
+/// `ordersync1`, which are `pop es; ret` — `07 c3` — because `ordersync1` follows `musframe_9`,
+/// whose INDEMO body ends `pop es` (`DIS/DISINT.ASM:420`) and then `ret` (`:424`).
+///
+/// Every build the tree holds carries exactly those two bytes there — the test below finds them
+/// — and a caller sees them the way the C callers do, as a 16-bit `int`: `0xC307` read signed is
+/// **-15609**. That is what `dis_sync()` answers for the position `(0, 0)`, and it is a value a
+/// caller lives with rather than a number the port invented: the tree's own callers compare it
+/// with a small positive (`PAM/OUTTAA.C:39`'s `dis_sync() < 10`, `ALKU/MAIN.C:59`'s `< 1`), so
+/// they keep waiting exactly as they do against the reference.
+const BEFORE_THE_TABLE: i32 = i16::from_le_bytes([0x07, 0xc3]) as i32;
+
 /// `dis_sync()`'s answer for a published position — `sync_10` (`DIS/DISINT.ASM:449-463`) over the
-/// table above, transliterated including the read that makes its domain narrower than the table.
+/// table above, transliterated including the reads at its two ends.
 ///
 /// The loop is the object's: `%cx` is 16 (`:455`) for the 15 entries, `%bx` walks the table four
 /// bytes at a time, and the first entry whose key is at or below the position ends it (`:456-457`,
@@ -289,56 +305,55 @@ pub const ORDERSYNC1: &[(u16, i32)] = &[
 /// reads from one row after the key before it, up to its own key inclusive — `(2, 0)` reads 0 and
 /// `(2, 1)` reads 1.
 ///
-/// **Two positions have no reproducible answer, and the port refuses them loudly.** The `bx - 2`
-/// read lands outside the table at the first entry (the position `(0, 0)`, key 0), and the 16th
-/// iteration compares against the word *past* the last entry (keys above `0x4200`, the last key).
-/// Both readings are of the object's own **code**: in the shell builds the tree holds, the word
-/// before the table is `pop es; ret` (`0xC307`) and the word after it is the first
-/// instruction of `sync_10` itself — `2e 8e` for the 16th compare, and, for the return when no key
-/// matched, the `mov es, cs:stmikseg` displacement, which is `0xCD06` in `MAIN/U2.EXE` and
-/// `0xED06` in `MAIN/2NDFIX.EXE`. A port cannot return a number that differs between builds of
-/// the original, so it names the boundary instead: the reproducible domain is
-/// `0 < (order << 8) | row <= 0x4200`, and outside it this function panics with the reason and
-/// the citations.
+/// **The read before the table is answered; the reads past it are refused.** At `(0, 0)` — the
+/// position a run holds before the music's first row is published, and one the phase's own traces
+/// hold for hundreds of frames — the read lands on `musframe_9`'s `pop es; ret`, and the port
+/// returns it ([`BEFORE_THE_TABLE`]), because that word is *pinned by the source* and identical
+/// in every build the tree holds. Above the last key (`0x4200`) the 16th iteration reads the
+/// bytes that follow the table, which are `sync_10`'s own first instruction, `mov es, cs:stmikseg`
+/// (`2e 8e 06 …`) — and there the port refuses, because the word it would return is one byte of
+/// instruction framing (`06`) and the *low byte* of a **linker-set** displacement: measured
+/// `0xCD06` in `MAIN/U2.EXE`, `0xED06` in `MAIN/2NDFIX.EXE` and `0x9D06` in `U2.EXE`. A port
+/// cannot return a number that differs between builds of the original, so its domain is
+/// `(order << 8) | row <= 0x4200` and above it this function panics with the reason and the
+/// citations. (In the band `0x4200 < key <= 0x8E2E` the 16th compare *does* match — `2e 8e`
+/// itself, pinned by the source and by all three builds — and the object answers with the last
+/// entry's code, 4; the port refuses that band too, on the brief's own boundary rather than on
+/// the value's variance. See `docs/fidelity/music.md` §11.)
 ///
 /// The callers the demo has reach the domain by a wide margin — `PAM/OUTTAA.C:39` waits for code
 /// 10, which the table gives from order 13 on, and `ALKU/MAIN.C:59-79` waits for 1 through 4, from
-/// order 2 on — but the phase cannot show that they never call it at a position outside it (both
-/// parts are Phase 4's, and how far MUSIC0's order list has got when they run is not measured).
+/// order 2 on — but the phase cannot show that they never call it above the last key (both parts
+/// are Phase 4's, and how far MUSIC0's order list has got when they run is not measured).
 /// `APPROXIMATIONS.md` A15 registers the boundary, and `docs/fidelity/music.md` §11 carries the
 /// evidence.
 ///
 /// # Panics
 ///
-/// For a position outside `0 < (order << 8) | row <= 0x4200`, where the object reads code.
+/// For a position above the table's last key — `(order << 8) | row > 0x4200` — where the object's
+/// 16th iteration reads the code that follows the table.
 pub fn sync_from(order: u8, row: u8) -> i32 {
     let key = (u16::from(order) << 8) | u16::from(row);
-    // The object's loop, at the two iterations that leave the table behind.
-    let index = match ORDERSYNC1.iter().position(|&(key_at, _)| key <= key_at) {
-        // `(0, 0)`: the compare at `bx` = the table's base matches the table's first key, so the
-        // answer is read at `bx - 2` — before the table, in the code of whatever precedes it.
-        Some(0) => {
-            panic!(
-                "dis_sync() at (order {order}, row {row}): the position is outside the domain \
-                 this port reproduces. `sync_10` reads a *code* word here — the two bytes before \
-                 `ordersync1` (`DIS/DISINT.ASM:460`, `bx - 2` at the table's base), which the \
-                 shell builds in the tree hold as `pop es; ret` (`0xC307`) — and that is why \
-                 `sync_from` refuses it rather than returning a number. See \
-                 `docs/fidelity/music.md` §11 and `APPROXIMATIONS.md` A15."
-            )
-        }
-        Some(index) => index,
+    // Only the position `(0, 0)` has key 0, and for it the object's compare matches at `%bx` =
+    // the table's base, so its answer is the word at `%bx - 2` — before the table.
+    if key == 0 {
+        return BEFORE_THE_TABLE;
+    }
+    let Some(index) = ORDERSYNC1.iter().position(|&(key_at, _)| key <= key_at) else {
         // No key matched: the object's 16th iteration compares against the word past the last
-        // entry and takes its answer from code that differs between builds.
-        None => {
-            panic!(
-                "dis_sync() at (order {order}, row {row}): the position is outside the domain \
-                 this port reproduces. Above the table's last key (`0x4200`) the object's 16th \
-                 iteration reads past the table and returns code — 0xCD06 in one shell build and \
-                 0xED06 in another — so the call is refused rather than answered with a number \
-                 the port made up. See `docs/fidelity/music.md` §11 and `APPROXIMATIONS.md` A15."
-            )
-        }
+        // entry and, when it does not match, returns the word after that — code, and one whose
+        // low byte the linker sets.
+        panic!(
+            "dis_sync() at (order {order}, row {row}): the position is above the table's last \
+             key (`0x4200`), where `sync_10`'s 16th iteration compares against the bytes that \
+             follow the table and, when they do not match, returns them (`DIS/DISINT.ASM:455-460`, \
+             `mov cx,16` over fifteen entries). What is returned there is `mov es, cs:stmikseg` \
+             read as a word — one byte of instruction framing and the low byte of a link-time \
+             displacement, measured as 0xCD06 in MAIN/U2.EXE, 0xED06 in MAIN/2NDFIX.EXE and \
+             0x9D06 in U2.EXE — so the port refuses the region rather than answering with a \
+             number that differs between builds. See `docs/fidelity/music.md` §11 and \
+             `APPROXIMATIONS.md` A15."
+        )
     };
     ORDERSYNC1[index - 1].1
 }
@@ -463,8 +478,10 @@ mod tests {
     /// What `sync_10` returns for a position, one case per boundary of the table
     /// (`DIS/DISINT.ASM:428-446`, read against the loop at `:454-460`). Each key is shown twice —
     /// at the key itself, where the *previous* entry's code still answers, and one row later,
-    /// where its own code does.
+    /// where its own code does — and `(0, 0)` is the read *before* the table, `pop es; ret` seen
+    /// as the 16-bit `int` a C caller gets.
     const SYNC_CASES: &[(u8, u8, i32)] = &[
+        (0, 0, -15609),
         (0, 1, 0),
         (1, 0, 0),
         (2, 0, 0),   // key 0x0200 itself: still code 0
@@ -497,27 +514,41 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the two bytes before `ordersync1`")]
-    fn sync_refuses_the_position_whose_read_is_the_word_before_the_table() {
-        sync_from(0, 0);
+    fn sync_answers_the_position_before_the_table_with_its_own_word() {
+        // `dis_sync()` at `(0, 0)` is `musframe_9`'s `pop es; ret` read as a word — the same two
+        // bytes in every build the tree holds, and a *negative* 16-bit `int` to the C callers,
+        // so a caller's `dis_sync() < 1` waits on exactly as the reference's does.
+        assert_eq!(sync_from(0, 0), -15609, "0xC307 as the `int` the callers see");
+        assert_eq!(BEFORE_THE_TABLE, i16::from_le_bytes([0x07, 0xc3]) as i32);
     }
 
     #[test]
-    #[should_panic(expected = "reads past the table")]
+    #[should_panic(expected = "above the table's last key")]
     fn sync_refuses_the_position_past_the_tables_last_key() {
         sync_from(66, 1);
     }
 
     #[test]
-    #[should_panic(expected = "reads past the table")]
+    #[should_panic(expected = "above the table's last key")]
     fn sync_refuses_the_far_end_of_the_order_range() {
         sync_from(255, 255);
     }
 
+    #[test]
+    #[should_panic(expected = "above the table's last key")]
+    fn sync_refuses_the_band_whose_16th_compare_matches() {
+        // `0x4200 < key <= 0x8E2E` (`sync_10`'s own first instruction, `2e 8e`, read as the 16th
+        // compare) is answerable in every build the tree holds — the object returns the last
+        // entry's code, 4 — but the port's boundary is the brief's, above the table's last key,
+        // and this test is what says the refusal is a choice rather than a constraint.
+        sync_from(0x8e, 0x2e);
+    }
+
     /// The table is the shipped shell's own bytes: the sixty bytes the port carries are searched
     /// for in each shell build the vendored tree holds, exactly once each, and the words the
-    /// object reads when a position has no key are read out beside them — that is the *reason*
-    /// `sync_from` refuses those positions, measured rather than asserted.
+    /// object reads at the table's two ends are read out beside them — the one `sync_from`
+    /// *answers* with at `(0, 0)`, and the ones it refuses above the last key, measured rather
+    /// than asserted.
     ///
     /// The shells are read from `upstream/SecondReality` at the submodule's pinned commit, as the
     /// asset tests read their files. This is a test-time read of the original, not a dependency
@@ -571,8 +602,9 @@ mod tests {
                 "{path}: the 16th iteration compares with `sync_10`'s own first two bytes"
             );
             // The return when no key matched is code, and it is *not* the same code in two
-            // builds of the same shell — which is why the port refuses a position above the
-            // table's last key instead of returning it.
+            // builds of the same shell — that half is what *forces* the refusal above the last
+            // key. (The band where the 16th compare matches is answerable in every build, and
+            // the port refuses it on the brief's boundary instead: see `sync_from`.)
             assert!(
                 matches!(*no_match_return, 0xcd06 | 0xed06 | 0x9d06),
                 "{path}: the no-match return reads {no_match_return:#06x}"
@@ -619,8 +651,13 @@ mod tests {
         let mut older = ORDERSYNC1.to_vec();
         older[2] = (0x030b, 2);
 
-        let image = std::fs::read("../../upstream/SecondReality/MAIN/PROT/TEST.OLD")
-            .expect("the upstream tree is a submodule; run `git submodule update --init`");
+        let path = "../../upstream/SecondReality/MAIN/PROT/TEST.OLD";
+        let image = std::fs::read(path).unwrap_or_else(|e| {
+            panic!(
+                "{path}: {e} — the upstream tree is a submodule; run `git submodule update \
+                 --init`"
+            )
+        });
         assert_eq!(
             image.windows(ours.len()).filter(|w| *w == ours.as_slice()).count(),
             0,
