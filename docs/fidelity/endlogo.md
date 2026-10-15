@@ -111,8 +111,10 @@ cannot tell a whole step from the truncation inside one. The same applies to the
    constants the fade-in's last step is displayed at 451 + 128 = **579**, so the first frame of the
    settled picture is **580** — the record's first byte-identical sample, named by a sweep that was
    run before this task existed — and the fadeout's first step is 1147, so the picture is displayed
-   unchanged for 1147 − 580 = **567** frames. `HOLD_TICKS` is that number, and the two indices it is
-   the difference of come from two different keyframes.
+   unchanged for 1147 − 580 = **567** frames. That number, and the two indices it is the difference
+   of, now live beside the check that compares the port's cue with it — `HOLD_TICKS` and
+   `FADE_OUT_FIRST_INDEX` in `bins/secondreality/src/parts/endlogo.rs`'s tests, where the part used to
+   carry them (§5).
 2. **The fadeout ends inside (1200, 1240].** The source's 64 steps from 1147 run to 1147 + 63 =
    **1210**, and `SECOND 5`'s change of geometry to CRED's mode 13h screen is in (1200, 1240]
    (`reference-indices.md` §20; §19.1's own sweep: 1200 is "the fadeout's tail, 30 colours, mean
@@ -170,7 +172,7 @@ and the acts that cost no blank fall on the tick after the blank that precedes t
 | 36 | 440 | `:94-99` | the picture is in video memory; the DAC is still white, so the screen is white |
 | 37-46 | 441-450 | — | not modelled (§5) |
 | 47-175 | 451-579 | `:101-106` | the fade-in, `c = index − 451` |
-| 176-742 | 580-1146 | `:107-111` | the hold: the picture through its own palette |
+| 176-742 | 580-1146 | `:107-111` | the hold: the picture through its own palette — 567 ticks, and the music's, not a constant (§5; the map is the reference's boot, and the port's ticks are whatever the cue says) |
 | 743-806 | 1147-1210 | `:112-117` | the fadeout, `c = 63 − (index − 1147)` |
 | 807+ | 1211+ | `:130` | `main()` has returned; the loader holds the black screen |
 
@@ -188,23 +190,80 @@ are the entries the 510-byte upload writes), and the tick after it reports
 **What is not modelled, and why it cannot be.** `:118-129` is commented out in the source, so the
 epilogue and the "second best endscroller ever" are not part of this part. The CRTC's timing
 registers are not written by `END.C` either and have no analogue in an engine that composes a
-rectangle rather than scanning one out. And the music gate is not modelled: §5.
+rectangle rather than scanning one out. The music gate is modelled, and §5 is how.
 
-## 5. The music gate, as its measured length — `APPROXIMATIONS.md` A7
+## 5. The music gate, which is the source's own loop
 
-`:107-111` is `for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }`,
-which waits on the music player's position. **The port has no music in this phase**, so the gate is
-replaced by the length the reference shows it having: 567 ticks, from the two derived constants
-(§3) — the picture is displayed from 580 and the fadeout begins at 1147. It is the *measured* length,
-not the loop's `a < 5000` bound, and not a number the port chose; the entry in
-`docs/fidelity/APPROXIMATIONS.md` carries the measurement, the difference (zero against this
-reference; unknown against any other music position or machine speed) and what Phase 3 replaces it
-with.
+`:107-111` is `for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }`. The
+port runs it: one iteration a tick — `dis_waitb()` *is* the tick, one band pass — the 5000-iteration
+cap stays, and the condition is the run's player's `musplus()`
+(`crates/sr-engine/src/music.rs`'s [`musplus_from`], the DIS's own arithmetic over the published
+`_np_zplus` and `_np_row`). **No length is in the part.** The hold is 567 ticks on the reference's
+boot because the music says so, and the same run with any other music would have that music's hold.
 
-The gate's `!dis_exit()` half has no port analogue either, and that is a property of this phase
-rather than an omission: a part's `PartCtx` is built with `exit_requested: false` and a part can only
+**This is where the phase's proof lands.** A7 carried the gate as its *measured* length, 567 ticks
+derived bit-exactly from the reference's **frames** (§3 — the fade-in's last step displayed at 579,
+the fadeout's first at 1147). The port's cue is derived from the *player's state* — a different
+measurement of a different thing — and the two agree on the reference's boot:
+
+| | index | what |
+|---|---|---|
+| the port's published words cross (`musplus` from −16 to −15) | **1144** | `26:49` at `zplus` 1 — `row − 64` |
+| the tick the check breaks on (§5.1) | **1145** | the source's `break`, drawn on that frame |
+| the tick the port holds past it (§5.2) | **1146** | the alignment |
+| the fadeout's `c = 63` — the first step below the picture | **1147** | 1180 − 33, from the reference's own frame |
+| the hold: 1147 − 580 | **567 ticks** | from two keyframes, 500 and 1180 |
+
+and the four keyframes the acceptance compares are still `0.0000 %`, both planes byte-identical
+(§7). The test that says so is
+`the_gate_opens_on_the_tick_the_reference_frames_derived` (`src/parts/endlogo.rs`), which drives the
+gate with `reference/music/second5`'s own words a tick at a time; and
+`the_runs_own_player_opens_the_gate_on_the_same_tick` drives the same part through the shell, with
+the run's own player, and compares the composed frames with §3's arithmetic.
+
+### 5.1 Why the check reads the *previous* tick's words
+
+The source's check is the instruction after `dis_waitb()`, so it stands at a frame boundary; and
+`dis_waitb()` returns on the copper's own boundary. `waitb_1` (`DIS/DISINT.ASM:160-180`) spins on
+`cs:copperframecount`, which `copper_end` (`MAIN/COPPER.ASM:283-320`) increments (`:320`) right after
+its wait for the vertical retrace (`:311-317`). The music's poll is somewhere else entirely: it is
+`call _zpollme` (`MAIN/COPPER.ASM:466`) inside `copper_doit`, and the copper's list runs that at 20 of
+a frame's 100 units (`copperlst0`, `:41-43`) — a fifth of a frame *after* the boundary the check
+stands on. So the check reads the words the **previous** frame's poll published, and the port's engine
+— which polls between copper slot 0 and the first band
+(`crates/sr-engine/src/engine.rs:206-219`), i.e. before the part's code in the same tick — hands a
+part the words of the tick's *own* poll. The part keeps the reading a tick: the tick it breaks on is
+the tick the source's `break` happens on.
+
+### 5.2 The one frame that is an alignment, and what it costs
+
+The port's own player publishes `26:49` from index **1144** — measured, and it is `second5`'s own
+player: the trace's frame `N` sample is taken at frame `N`'s *start* (the emulator publishes a frame's
+pixels and increments its counter immediately afterwards, D17's own reading), so `second5`'s frame `N`
+holds the words the port publishes at index `N − 1`, and the port's row 49 begins at 1144 where the
+trace's begins at 1145. With §5.1's placement the check therefore breaks on index **1145**, and the
+fadeout would start at **1146** — while the reference's frames put the fadeout's first step at
+**1147** (§3, bit-exactly from 500 and 1180).
+
+**The two measurements are one frame apart, and the frames are the record** (D12). The port holds one
+frame past its own break (`GATE_ALIGNMENT_TICKS`, `src/parts/endlogo.rs`), which is where the 567
+comes from, and the cost is named: **the port disagrees with `second5`'s own session by one frame at
+this crossing.** That is inside the spread the sessions themselves have — the two filed sessions of
+one recipe disagree with each other about which frame eight of their row changes land on, and the port
+sits between them (`APPROXIMATIONS.md` A12, `JITTER_FRAMES` 3; the port's own worst displacement from
+`second5` is 2 frames, 778 of 894 frames exact) — and it is inside D17's finding that a frame counter
+names one picture in a session and a picture one frame away in the next. **Which measurement moved is
+therefore nameable too:** not the anchor (Task 1 measured the first tick at 408.0 in four sessions,
+spread 0.1) and not the player (the port's direct `zframe` matches `second5`'s column frame for
+frame), but the *session* — `second5`'s published row 49 begins one frame earlier, relative to the
+frame indices, than the session the reference's four keyframes were captured in. A run whose music
+starts elsewhere has no such alignment to make, and the constant is a fact about this boot and
+`second5`, not about ENDLOGO.
+
+The gate's `!dis_exit()` half has no port analogue either, and that is a property of this task rather
+than an omission: a part's `PartCtx` is built with `exit_requested: false` and a part can only
 *request* an exit (`crates/sr-engine/src/part.rs:79-103`, `:139-147`), so no part observes the run's
-exit flag. Phase 3's cue replaces the whole condition.
+exit flag. The port's gate therefore runs the loop's *music* half and not its keyboard half.
 
 **And ten of the lead-in's ticks are not modelled** — A7's second half, the same class as A5's nine
 for BEGLOGO. The source's own code accounts for **37** of the 47 ticks between the part's first frame
@@ -243,9 +302,11 @@ been white since `:90-91` and never faded, going into CRED.
 
 ```bash
 cargo run --bin secondreality -- --headless --part endlogo --dump-frames 430,500,900,1180 \
-    --dump-dir out/p2-endlogo
-cargo xtask compare --reference reference/parts/endlogo --rendered out/p2-endlogo \
-    --out out/p2-endlogo-diff
+    --dump-dir out/t8-part
+cargo run --bin secondreality -- --headless --block 5 --dump-frames 430,500,900,1180 \
+    --dump-dir out/t8-block5
+cargo xtask compare --reference reference/parts/endlogo --rendered out/t8-part \
+    --out out/t8-part-diff
 ```
 
 ```
@@ -256,6 +317,13 @@ frame 1180: 0.0000% differing (0/128000 px), max delta 0
 verdict: identical
 exit: 0
 ```
+
+**Both commands are the acceptance, and both were re-run with the cue in place** (Task 8): the
+`--part endlogo` dump above and the `--block 5` dump, which differ only in their plans (a
+one-part run and the block's three) and compare identically — `out/t8-part-diff/report.json` and
+`out/t8-block5-diff/report.json`, `mode: mixed`, every offset 0. The frames are the Phase 2 ones,
+byte for byte, with a real cue behind them: `--block 5` is the run whose music the phase built, and
+1180 is the frame that would move if the gate opened on any tick but §5.2's.
 
 `mode: mixed`, every offset 0 (`out/p2-endlogo-diff/report.json`, offsets `{"0": 4}`). **430 and 900
 go through the indexed path** — 430 because the reference files an `.idx` for it as well as its
@@ -277,13 +345,19 @@ boundary**: nothing here claims a person has judged them.
 
 ## 8. Tests
 
-`src/parts/endlogo.rs` (unit, ten): the 765 bytes leaving entry 255 unwritten, at both `:63` and
+`src/parts/endlogo.rs` (unit, fifteen): the 765 bytes leaving entry 255 unwritten, at both `:63` and
 `:91` and across the fades; the opening screen as the shell's surface through the shell's DAC; the
 blit landing on tick 36 / index 440 and not before 430; the fade-in's ramp and its truncating divide
 (including the `c = 1, palette = 0` case where it lands on 62, one below a rounded ramp); the
-fadeout's ramp *and* that it is not the fade-in reversed; the 510-byte upload's exact edges; the hold
-as 567 ticks with the DAC not moving through it; the part retiring on the tick after the fadeout's
-last step; the derivation scan of §3; and §19.1's own sampled states reproduced.
+fadeout's ramp *and* that it is not the fade-in reversed; the 510-byte upload's exact edges; the
+derivation scan of §3; §19.1's own sampled states reproduced; and **the gate's five**, which are
+Task 8's: `the_gate_opens_on_the_tick_the_reference_frames_derived` (§5's table, driven tick by tick
+with `reference/music/second5`'s own words), `the_runs_own_player_opens_the_gate_on_the_same_tick`
+(the same, through the shell with the run's own player and the composed frames compared against §3's
+arithmetic), `the_gates_check_reads_the_previous_ticks_words` (§5.1's placement), `the_gate_holds_for_
+five_thousand_ticks_when_the_cue_never_comes` (`:107`'s own cap), `a_run_with_no_player_is_refused_by_
+name` (`init`), and `the_hold_is_the_cues_own_length_and_not_five_thousand` (the hold walked tick by
+tick with the trace's words, its length the difference of the two indices §3 fixed).
 
 `tests/endlogo.rs` (five, through the real binary from the repository root): the four keyframes in
 the reference's own numbering (`index_origin: boot`, anchor 404, 320×400 each); 430 as 128,000 bytes
@@ -308,18 +382,28 @@ the sweep and the hold's arithmetic too:
 | mutation | red | message |
 |---|---|---|
 | `FADE_IN_FIRST_INDEX` 451 → 450 (the plan's bracket) | the derivation test, the hold, the blit and the sweep | `the fade-in's step 0 is displayed at 451 / left: 451 / right: 450` |
-| `FADE_OUT_FIRST_INDEX` 1147 → 1145 (the plan's bracket) | the derivation test, the hold, the retire and the sweep | `the fade-out's step 63 is displayed at 1147 / left: 1147 / right: 1145` |
+| the check's `FADE_OUT_FIRST_INDEX` 1147 → 1145 (the plan's bracket) | the check, the derivation, the hold, the retire, the sweep and the run test | `left: 1147 / right: 1145`, and on the walks `left: 1208 / right: 1210` and `left: 739 / right: 741` |
+| **`GATE_ALIGNMENT_TICKS` 1 → 0** (§5.2's alignment dropped) | the check, the placement test, the hold, the retire and the run test | the walks move a tick earlier: `left: [48,45,42] / right: [47,44,41]` on the frame §5's table puts the fadeout on |
+| **the check reading the tick's *own* words** (§5.1's placement dropped) | the check, the hold, the retire and the run test | the same shape, one tick the other way |
 | the white written over entries 0-255 | `the_white_leaves_entry_255_unwritten` | `:63's 765 bytes stop short / left: [63,63,63] / right: [1,2,3]` |
 | `setpalarea` with the intended `3*count` | `the_upload_is_the_originals_two_count_plus_start_bytes` | `the 511th byte is never written / left: [42,5,6] / right: [1,2,3]` |
 | the blit moved onto the fade's first tick | `the_picture_is_blitted_after_the_vertical_blanks` | `the blit is the tick after the last blank / left: 47 / right: 36` |
-| the fadeout's first step taken at the picture (`c = 64`) | `the_hold_is_the_measured_length_and_not_five_thousand` | `left: [48,45,42] / right: [47,44,41]` — entry 1 one step up |
+| the fadeout's first step taken at the picture (`c = 64`) | `the_hold_is_the_cues_own_length_and_not_five_thousand` | `left: [48,45,42] / right: [47,44,41]` — entry 1 one step up |
 | `BLANKS_TICKS` 32 → 31 (the lead-in one tick short) | `the_picture_is_blitted_after_the_vertical_blanks` | `left: 31 / right: 32` |
 
-The two bracket mutations are the ones that take more than one test, and the two rows that share
-`the_picture_is_blitted_after_the_vertical_blanks` are the two ways its own map can be wrong: the blit
-on the wrong tick, and the lead-in one blank short — which is why that test also pins the lead-in's
-counts (34 blanks, 37 ticks the source's code accounts for, ten not modelled, `BLIT_TICK` 36) rather
-than leaving them to the note's prose.
+**The gate's three rows are the ones Task 8 added, and they are the phase's three ways to fail it**:
+its alignment dropped, its placement dropped, and the check's own measurement moved — each takes the
+tests that read the frame the fadeout's `c = 63` is displayed on, which is the frame the reference's
+keyframe at 1180 counts back from. **And one mutation is now impossible, which is the point of the
+task**: editing the *part* can no longer move the gate's frame at all — there is no length in it —
+so the two rows that used to be "the plan's brackets" on the port's constants are the *check's*
+constant instead, and moving it makes the check disagree with the cue rather than the cue with the
+reference. The two rows that share `the_picture_is_blitted_after_the_vertical_blanks` are still the
+two ways the lead-in's map can be wrong: the blit on the wrong tick, and one blank short — which is
+why that test also pins the lead-in's counts (34 blanks, 37 ticks the source's code accounts for, ten
+not modelled, `BLIT_TICK` 36) rather than leaving them to the note's prose.
 
-The first four are the traps this task was written around; the last two are the two ways a port that
-"looks right" fails a keyframe on this part.
+The first four are the traps Phase 2's task was written around; the last two are the two ways a port
+that "looks right" fails a keyframe on this part; and the gate's three are the ways a port that runs
+the source's loop but reads it at the wrong instant — or with no alignment — fails the same keyframe
+from the other side.

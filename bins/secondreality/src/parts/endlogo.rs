@@ -17,7 +17,11 @@
 //! 6. `:92` — 32 vertical blanks.
 //! 7. `:94-99` — `readp(palette,-1,pic)` and 400 `lineblit`ed rows.
 //! 8. `:101-106` — 129 steps of a white→picture ramp, one per vertical blank.
-//! 9. `:107-111` — the music gate.
+//! 9. `:107-111` — the music gate: one blank a tick, until `dis_musplus()` passes
+//!    `-16` or five thousand blanks have gone by. The port runs the source's own
+//!    loop, against the run's player — see [`Endlogo::gate`] for where in the
+//!    tick its check reads the music, which is where the reference's frames and
+//!    the trace's words meet.
 //! 10. `:112-117` — 64 steps of a picture→black ramp, one per vertical blank.
 //!
 //! Three things the part does **not** do, and each is a trap:
@@ -42,8 +46,15 @@
 //!
 //! The port's tick numbering follows the source's vertical blanks one for one,
 //! and ten of the ticks between the blit and the fade are frames the port does
-//! not model — `docs/fidelity/APPROXIMATIONS.md` A7, the same class as A5's
-//! nine for BEGLOGO.
+//! not model — `docs/fidelity/APPROXIMATIONS.md` A7's second half, the same
+//! class as A5's nine for BEGLOGO.
+//!
+//! **The gate is the part's only variable-length act.** Everything before it and
+//! everything after it is a fixed tick count — the lead-in is the source's own
+//! blanks and uploads, and the fade-out is 64 steps — so the part's tick map is
+//! those consts plus whatever the music says the hold is. On the reference's
+//! boot it is 567 ticks (`docs/fidelity/endlogo.md` §3's derivation, and §5 for
+//! the cue that reproduces it).
 
 use std::path::Path;
 
@@ -138,74 +149,57 @@ const FADE_IN_FIRST_TICK: u32 = FADE_IN_FIRST_INDEX - FIRST_INDEX;
 /// [`FADE_IN_FIRST_TICK`]. `c = 128` is the picture's own palette exactly.
 const FADE_IN_STEPS: u32 = 129;
 
-/// The first index of the settled picture: the tick after the fade-in's last
-/// step, and so where the hold's 567 ticks begin.
-const HOLD_FIRST_INDEX: u32 = FADE_IN_FIRST_INDEX + FADE_IN_STEPS;
-
-/// The reference index the fade-out's step `c = 63` is displayed on.
-///
-/// Derived the same way as [`FADE_IN_FIRST_INDEX`], from the reference's frame
-/// at 1180: one `c` in `63…0` reproduces it — `c = 30` — and the fade-out
-/// counts *down*, so the step displayed at 1180 is the 34th and step 63 is
-/// displayed at 1180 − 33 = **1147** (`docs/fidelity/endlogo.md` §3).
-///
-/// The two independent facts the plan asks to check it against both hold. The
-/// picture is byte-identical from 580 to 1120 (§19.1) and its last identical
-/// frame under this constant is 1146 — the fade-out's first step is 1147 — so
-/// the hold is real and 567 ticks long; and the source's 64-step fade-out runs
-/// from 1147 to 1210, inside the window **(1200, 1240]** in which `SECOND 5`
-/// leaves ENDLOGO's screen for CRED's mode 13h one (§20).
-const FADE_OUT_FIRST_INDEX: u32 = 1147;
-
-/// The part tick [`FADE_OUT_FIRST_INDEX`] is displayed on: the tick after the
-/// 129 fade-in steps and the hold's 567.
-///
-/// Written this way round — from the tick the fade-in ends on and the hold's
-/// measured length, not from [`FADE_OUT_FIRST_INDEX`] — because that is where
-/// the port's tick map and the reference's indices have to agree: this is what
-/// says the tick the source's fade-out loop starts on is the tick the
-/// reference's 1147 is drawn on. `the_fade_constants_are_derived_by_matching_
-/// the_reference_bit_for_bit` asserts the two are the same tick.
-const FADE_OUT_FIRST_TICK: u32 = FADE_IN_FIRST_TICK + FADE_IN_STEPS + HOLD_TICKS;
-
-/// `:112`'s `for(c=63;c>=0;c--)`: 64 fade steps, one per tick from
-/// [`FADE_OUT_FIRST_TICK`]. Note that the loop counts **down**, so the step
-/// displayed on tick `t` is `63 - (t - FADE_OUT_FIRST_TICK)`.
+/// `:112`'s `for(c=63;c>=0;c--)`: 64 fade steps, one per tick. Note that the
+/// loop counts **down**, so the step displayed on the `step`-th tick of the
+/// fade-out is `63 - step` ([`Endlogo::fade_out`]).
 const FADE_OUT_STEPS: u32 = 64;
 
-/// How many ticks the part spends on the settled picture — `:107-111`'s music
-/// gate, replaced by its measured length (`docs/fidelity/APPROXIMATIONS.md`
-/// A7).
-///
-/// The measurement is arithmetic from the two constants the reference's own
-/// frames fix, and it is a *prediction* of the record rather than a fit:
-/// [`HOLD_FIRST_INDEX`] is the index the fade-in's last step displays on (580)
-/// and [`FADE_OUT_FIRST_INDEX`] is the index the fade-out's first step displays
-/// on (1147) — derived from two different keyframes, 500 and 1180 — so the
-/// picture is displayed unchanged for 1147 − 580 = **567** ticks. The record
-/// agrees where it was written before this task existed:
-/// `reference-indices.md` §19.1's first byte-identical sample of the settled
-/// picture is **580**, and every sample from there to 1120 is one `sha256`.
-///
-/// The source's own gate is a *cue* — `for(a=0;a<5000 && !dis_exit();a++)
-/// { dis_waitb(); if(dis_musplus()>-16) break; }` — that the port cannot run in
-/// this phase: it waits on the music player's position, which is Phase 3's.
-/// Five thousand is the loop's bound, not its length; the gate's `dis_waitb()`
-/// is called `HOLD_TICKS` times on the reference's boot.
-const HOLD_TICKS: u32 = FADE_OUT_FIRST_INDEX - HOLD_FIRST_INDEX;
+/// `:110`'s `dis_musplus()>-16`: the row offset the gate waits to pass.
+const GATE_THRESHOLD: i32 = -16;
 
-/// The reference index the part's last frame is displayed on: the fade-out's
-/// step `c = 0`, after which `:118-129`'s commented-out epilogue and `:130`'s
-/// `}` end `main()`, and the loader holds the black screen it left.
-///
-/// This is the constant that sits in the plan's second check: 1210 is inside
-/// the window **(1200, 1240]** in which `SECOND 5` leaves ENDLOGO's screen for
-/// CRED's mode 13h one (`reference-indices.md` §20, and §19.1's own sweep:
-/// 1200 is still this part's, 1240 is CRED's).
-const PART_LAST_INDEX: u32 = FADE_OUT_FIRST_INDEX + FADE_OUT_STEPS - 1;
+/// `:107`'s `a<5000`: the loop's own bound, in iterations — which is also its
+/// only bound on the hold, and stays (the source's cap, not a port constant).
+const GATE_LIMIT: u32 = 5000;
 
-/// [`PART_LAST_INDEX`] in the part's own tick numbering.
-const PART_LAST_TICK: u32 = PART_LAST_INDEX - FIRST_INDEX;
+/// How many ticks the port holds the gate **past its own break**, so that the
+/// hold ends where the reference's *frames* put it. One, and it is the one frame
+/// the phase's two measurements are apart.
+///
+/// The break itself is the source's: the check reads the words the tick before
+/// published them ([`Endlogo::gate`]), so the tick it breaks on is the frame the
+/// source's `break` is drawn on, and `:112`'s fade-out would start the tick
+/// after that — which is what this constant delays.
+///
+/// **Why.** The port's player is `reference/music/second5`'s: its published row
+/// 49 begins at the run's index **1144**, and the gate's break therefore falls
+/// on index **1145**. The reference's own frames put the fade-out's first step
+/// at **1147** (`docs/fidelity/endlogo.md` §3, derived bit-exactly from the
+/// frames at 500 and 1180), i.e. the break at **1146**. The frame between them is
+/// the session difference this task measured and named: `second5` publishes row
+/// 49 from its frame 1145, so that session's music crossed one frame earlier
+/// than the session the reference's frames were captured in — D17's own finding,
+/// that a frame counter names one picture in a session and a picture one frame
+/// away in the next. **D12 makes the reference's frames the record for every
+/// comparison**, so the port sits where they do; the cost is that the port
+/// disagrees with `second5`'s own session by one frame at this crossing, which
+/// is inside the ±3 frames the two filed sessions of one recipe measure on each
+/// other (`APPROXIMATIONS.md` A12) and inside the 2 frames the port's own
+/// position already sits from that trace.
+///
+/// It applies to the cue's break and **not** to `GATE_LIMIT`: the loop's own
+/// bound is the source's answer when the cue never comes, and no reference frame
+/// measures it.
+const GATE_ALIGNMENT_TICKS: u32 = 1;
+
+/// What a run with no player answers the gate, unreachable through `init`.
+///
+/// `muscode_6` loads `%dx` with `-32` as its "no plus pending" sentinel
+/// (`DIS/DISINT.ASM:252`), which is also what `sr_engine::music::NoMusic`
+/// reports for a player that has nothing pending; the gate's threshold is above
+/// it, so a run that somehow reached here without music would hold for the
+/// loop's own five thousand ticks and then fade out, as the source's loop does
+/// when the cue never comes.
+const NO_PLAYER: i32 = -32;
 
 /// `:105`/`:116`'s `setpalarea(pal2,0,255)` — the third argument, which the
 /// routine treats as a *count* of entries but which the buggy length makes two
@@ -226,6 +220,37 @@ pub struct Endlogo {
     /// and, at the end of the fade-in, the screen's own colours.
     /// `END/END.C` calls it `palette[]`; it is not the live DAC.
     picture_palette: Palette,
+    /// The last `dis_musplus()` reading this part took, which is the one the
+    /// *next* tick's gate check tests — see [`Endlogo::gate`] for why the check
+    /// is a tick behind the reading.
+    plus: i32,
+    /// Where the part is in `main()`. The lead-in's ticks are the source's own
+    /// and fixed; the gate's length is the music's, so the loops after it are a
+    /// state and not a tick number.
+    phase: Phase,
+}
+
+/// `main()`'s three loops, as states.
+///
+/// The lead-in is a tick number because every tick of it is fixed by the
+/// source's own code; the gate and the fade-out are counts because the gate's
+/// end is the music's business ([`Endlogo::gate`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Phase {
+    /// `:61-106`: the blanks, the two white writes, the blit and the 129-step
+    /// fade-in, driven by `ctx.frame`.
+    LeadIn,
+    /// `:107-111`: the music gate. `count` is the source's `a` — the iteration
+    /// this tick is, and so the tick the hold is `count + 1` long on. `held` is
+    /// how many ticks the port has held past the break's own frame, the break
+    /// not counted ([`GATE_ALIGNMENT_TICKS`]); it is 0 while the gate is open.
+    Gate { count: u32, held: u32 },
+    /// `:112-117`: the fade-out. `step` is 0 on the tick the loop's `c = 63` is
+    /// displayed on and 63 on its last, so the displayed `c` is
+    /// `FADE_OUT_STEPS - 1 - step`.
+    FadeOut { step: u32 },
+    /// `:118-130`: `main()` has returned and the loader holds the black screen.
+    Done,
 }
 
 impl Endlogo {
@@ -235,6 +260,8 @@ impl Endlogo {
             picture_path: PICTURE_PATH,
             picture: Vec::new(),
             picture_palette: Palette::new(),
+            plus: NO_PLAYER,
+            phase: Phase::LeadIn,
         }
     }
 
@@ -266,6 +293,22 @@ impl Part for Endlogo {
     /// write, which is where BEGLOGO's CRTC block lives too (`src/parts/
     /// beglogo.rs`, `docs/fidelity/beglogo.md` §4).
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+        // `:107-111` waits on the music player's position and has nothing else to go on:
+        // a run with no player has no cue this part could ever be handed, and holding
+        // five thousand ticks against a silence that cannot break is not a fallback — it
+        // is a part that looks like it works. `PartCtx::music()` is `Some` for every run
+        // the shell can build that reaches this part (`shell::music_for_part`), and the
+        // refusal is the port's way of saying so where a hand-built run does not
+        // (`crates/sr-engine/src/part.rs:154-165`).
+        if ctx.music().is_none() {
+            return Err(PartError {
+                part: NAME,
+                message: "this part waits on the music player's position (`END/END.C:107-111`) \
+                          and the run has no music to wait on"
+                    .to_string(),
+            });
+        }
+
         // `:51-60`'s attribute-controller unlock ends in `outp(0x3c0,0x20)` —
         // the index register set to 0 with bit 5, the palette address source —
         // and PAS = 1 is the state in which the DAC's palette is displayed at
@@ -313,7 +356,44 @@ impl Part for Endlogo {
     }
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        match ctx.frame {
+        // `:110`'s reading, taken once a tick — the whole of what this part wants from
+        // the player, and taken on every tick rather than only inside the gate because
+        // the tick the gate's first check runs on needs the reading the tick before it
+        // took (see [`Endlogo::gate`]).
+        let reading = match ctx.music() {
+            Some(music) => music.musplus(),
+            // Unreachable through `init`, which refuses a run with no player; see
+            // [`NO_PLAYER`].
+            None => NO_PLAYER,
+        };
+        // The reading this tick's check tests, and the reading the next tick's will:
+        // the source's check stands at the frame boundary, before the copper polls the
+        // player for that frame, so it reads the words the *previous* tick published.
+        let previous = self.plus;
+        self.plus = reading;
+
+        match self.phase {
+            Phase::LeadIn => self.lead_in(ctx),
+            Phase::Gate { count, held } => self.gate(previous, count, held),
+            Phase::FadeOut { step } => self.fade_out(ctx, step),
+            // `:118-129`'s epilogue is commented out and `:130`'s `}` ends `main()`: the
+            // loader holds the black screen the fade left, and everything after this
+            // index is the next part's.
+            Phase::Done => PartStatus::Finished,
+        }
+    }
+}
+
+impl Endlogo {
+    /// `:61-106`: the blanks, the two white writes, the blit, the ten unmodelled ticks
+    /// and the 129-step fade-in.
+    ///
+    /// Every tick of it is fixed by the source's own code — which is why this half of
+    /// the part is tick numbers and the loops after it are not — and the last fade-in
+    /// step is the tick the gate's first iteration is reached on.
+    fn lead_in(&mut self, ctx: &mut PartCtx) -> PartStatus {
+        let tick = ctx.frame;
+        match tick {
             // `:61` — the vertical blank before the DAC is written. The screen
             // is `inittwk`'s index 0 through the DAC the shell installed.
             FIRST_WAIT_TICK => PartStatus::Continuing,
@@ -332,37 +412,90 @@ impl Part for Endlogo {
                 PartStatus::Continuing
             }
             // The ten ticks between `:99` and the fade's first upload: frames
-            // the port does not model (A7). The screen is white through them
-            // because the DAC is, not because the picture is invisible.
+            // the port does not model (A7's second half). The screen is white through
+            // them because the DAC is, not because the picture is invisible.
             tick if tick < FADE_IN_FIRST_TICK => PartStatus::Continuing,
             tick => {
-                if tick < FADE_IN_FIRST_TICK + FADE_IN_STEPS {
-                    // `:103-105` — one step of the white→picture ramp per
-                    // vertical blank.
-                    let step = tick - FADE_IN_FIRST_TICK;
-                    let ramp = fade_in_step(&self.picture_palette, step);
-                    setpalarea(ctx.palette, &ramp, 0, SETPALAREA_ENTRIES);
-                    PartStatus::Continuing
-                } else if tick < FADE_OUT_FIRST_TICK {
-                    // `:107-111` — the music gate, as its measured length
-                    // ([`HOLD_TICKS`], A7). The DAC is the picture's own
-                    // palette and the screen does not move.
-                    PartStatus::Continuing
-                } else if tick <= PART_LAST_TICK {
-                    // `:114-116` — one step of the picture→black ramp per
-                    // vertical blank, counting down.
-                    let step = tick - FADE_OUT_FIRST_TICK;
-                    let ramp = fade_out_step(&self.picture_palette, FADE_OUT_STEPS - 1 - step);
-                    setpalarea(ctx.palette, &ramp, 0, SETPALAREA_ENTRIES);
-                    PartStatus::Continuing
-                } else {
-                    // `:118-129`'s epilogue is commented out and `:130`'s `}`
-                    // ends `main()`: the loader holds the black screen the fade
-                    // left, and everything after this index is the next part's.
-                    PartStatus::Finished
+                // `:103-105` — one step of the white→picture ramp per vertical blank.
+                let step = tick - FADE_IN_FIRST_TICK;
+                let ramp = fade_in_step(&self.picture_palette, step);
+                setpalarea(ctx.palette, &ramp, 0, SETPALAREA_ENTRIES);
+                if step + 1 == FADE_IN_STEPS {
+                    // `:101`'s loop is done: the next tick is `:107`'s first iteration,
+                    // and `dis_musplus()`'s answer from the tick just gone is already
+                    // in `self.plus` for its check.
+                    self.phase = Phase::Gate { count: 0, held: 0 };
                 }
+                PartStatus::Continuing
             }
         }
+    }
+
+    /// `:107-111`: `for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16)
+    /// break; }` — one iteration a tick, and the loop's body has no DAC write of its own,
+    /// so the held frame is the fade-in's last step and this tick is the blank the
+    /// iteration waits on. `count` is the source's `a`.
+    ///
+    /// **The check is made on the words the *previous* tick published.** The source's check
+    /// is the instruction after `dis_waitb()` returns, and `dis_waitb()` returns on the
+    /// copper's own frame boundary: `waitb_1` (`DIS/DISINT.ASM:160-180`) spins on
+    /// `cs:copperframecount`, which `copper_end` (`MAIN/COPPER.ASM:283-320`) increments
+    /// (`:320`) right after its wait for the vertical retrace (`:311-317`). The music's
+    /// poll is not there: it is `call _zpollme` (`MAIN/COPPER.ASM:466`) inside
+    /// `copper_doit`, which the copper's list runs at 20 of the frame's 100 units
+    /// (`copperlst0`, `:41-43`) — a fifth of a frame *after* the boundary the check stands
+    /// on. So the words that check reads are the ones the **previous** frame's poll
+    /// published.
+    ///
+    /// The port's engine polls between copper slot 0 and the first band
+    /// (`crates/sr-engine/src/engine.rs:206-219`), so a part's `musplus()` at tick `T`
+    /// answers with the words tick `T`'s poll published, which is what the source's check at
+    /// the boundary into the *next* frame reads. That is where this part keeps the reading:
+    /// it tests `previous`, the answer [`Endlogo::frame`] took on the tick before, and the
+    /// tick it fires on is the tick the source's own break happens on.
+    ///
+    /// **And the break is held one tick longer than the source's loop**, because the
+    /// reference's frames — the record for every comparison (D12) — put the fade-out one
+    /// frame later than the port's own words do: [`GATE_ALIGNMENT_TICKS`] carries that
+    /// measurement and its cost. `the_gate_opens_on_the_tick_the_reference_frames_derived`
+    /// is the check, and `docs/fidelity/endlogo.md` §5 the account.
+    fn gate(&mut self, previous: i32, count: u32, held: u32) -> PartStatus {
+        if previous > GATE_THRESHOLD || held > 0 {
+            // The cue has crossed — on this tick, or on one of the ticks the port holds
+            // past it. `held` counts the ticks held since the break, the break's own frame
+            // not among them, so the fade-out's phase is entered on the tick `held` reaches
+            // [`GATE_ALIGNMENT_TICKS`] — and, because entering it is not the same as
+            // displaying it, its first step is the tick after that. With the alignment at
+            // one: the break's frame, one held frame, then `:112`'s `c = 63`.
+            if held >= GATE_ALIGNMENT_TICKS {
+                self.phase = Phase::FadeOut { step: 0 };
+            } else {
+                self.phase = Phase::Gate { count, held: held + 1 };
+            }
+        } else if count + 1 == GATE_LIMIT {
+            // `a` has reached five thousand and the loop is left without a break. The
+            // loop's own bound is the source's and no reference frame measures it, so the
+            // alignment is not applied to it.
+            self.phase = Phase::FadeOut { step: 0 };
+        } else {
+            self.phase = Phase::Gate { count: count + 1, held: 0 };
+        }
+        PartStatus::Continuing
+    }
+
+    /// `:112-117`: `for(c=63;c>=0;c--) { pal2 = (palette*c)/64; dis_waitb();
+    /// setpalarea(pal2,0,255); }` — one step a tick, counting down from the tick the
+    /// loop's `c = 63` is displayed on.
+    fn fade_out(&mut self, ctx: &mut PartCtx, step: u32) -> PartStatus {
+        // `:114-116` — one step of the picture→black ramp per vertical blank.
+        let ramp = fade_out_step(&self.picture_palette, FADE_OUT_STEPS - 1 - step);
+        setpalarea(ctx.palette, &ramp, 0, SETPALAREA_ENTRIES);
+        self.phase = if step + 1 < FADE_OUT_STEPS {
+            Phase::FadeOut { step: step + 1 }
+        } else {
+            Phase::Done
+        };
+        PartStatus::Continuing
     }
 }
 
@@ -489,15 +622,197 @@ fn setpalarea(dac: &mut Palette, ramp: &Palette, start: u32, count: u32) {
 mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
+    use sr_engine::music::{muscode_from, musplus_from, Music, MusicPosition};
     use sr_engine::palette::PaletteTimeline;
     use sr_engine::surface::Surface;
     use sr_engine::view::View;
 
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH, VIEW_HEIGHT, VIEW_WIDTH};
+    use crate::shell::{SequenceStatus, SURFACE_HEIGHT, SURFACE_WIDTH, VIEW_HEIGHT, VIEW_WIDTH};
 
     /// An index no path through the part writes, used as a marker for "the part
     /// left the shell's entry alone".
     const UNWRITTEN: u8 = 255;
+
+    // --- the reference's own map, kept as the check --------------------------
+    //
+    // These six are **not the part's** any more: the gate's length is the music's, and
+    // the only thing that says where the hold ends is `:107-111`'s own loop
+    // (Task 8). They are what Phase 2 derived from the reference's *frames*, kept so
+    // that the cue's own answer can be compared with it — the check the brief calls the
+    // phase's proof. `docs/fidelity/endlogo.md` §3 is the derivation and §5 the
+    // comparison.
+
+    /// The reference index the fade-out's step `c = 63` is displayed on.
+    ///
+    /// Derived in `docs/fidelity/endlogo.md` §3 by matching the reference's frame at
+    /// 1180 bit for bit: one `c` in `63…0` reproduces it — `c = 30` — and the fade-out
+    /// counts *down*, so the step displayed at 1180 is the 34th and step 63 is displayed
+    /// at 1180 − 33 = **1147**. The picture is byte-identical from 580 to 1120 (§19.1)
+    /// and its last identical frame is 1146, so the hold is real; and the source's
+    /// 64-step fade-out runs from 1147 to 1210, inside the window **(1200, 1240]** in
+    /// which `SECOND 5` leaves ENDLOGO's screen for CRED's mode 13h one (§20).
+    const FADE_OUT_FIRST_INDEX: u32 = 1147;
+
+    /// The first index of the settled picture: the tick after the fade-in's last step.
+    const HOLD_FIRST_INDEX: u32 = FADE_IN_FIRST_INDEX + FADE_IN_STEPS;
+
+    /// How many ticks the reference's frames show the settled picture held for — the
+    /// gate's length on the reference's boot, and the number the cue has to reproduce.
+    const HOLD_TICKS: u32 = FADE_OUT_FIRST_INDEX - HOLD_FIRST_INDEX;
+
+    /// The part tick [`FADE_OUT_FIRST_INDEX`] is displayed on.
+    const FADE_OUT_FIRST_TICK: u32 = FADE_OUT_FIRST_INDEX - FIRST_INDEX;
+
+    /// The reference index the part's last frame is displayed on: the fade-out's step
+    /// `c = 0`, after which `:118-129`'s commented-out epilogue and `:130`'s `}` end
+    /// `main()`. 1210 is inside the window **(1200, 1240]** in which `SECOND 5` leaves
+    /// ENDLOGO's screen for CRED's (`reference-indices.md` §20).
+    const PART_LAST_INDEX: u32 = FADE_OUT_FIRST_INDEX + FADE_OUT_STEPS - 1;
+
+    /// [`PART_LAST_INDEX`] in the part's own tick numbering.
+    const PART_LAST_TICK: u32 = PART_LAST_INDEX - FIRST_INDEX;
+
+    /// The player a unit test hands the part: the engine's [`Music`] seam, scripted.
+    ///
+    /// `init` refuses a run with no player, so every test that starts this part has to
+    /// hand it one; this stands in for `src/audio.rs`'s adapter and answers
+    /// `musplus()` from a script of `(zplus, row)` pairs, **one per tick**, indexed by
+    /// `ctx.frame`. Every other method is the null reading, because the gate is the only
+    /// thing here that reads the music (`DIS/DIS.H:37-59` is the whole of a part's
+    /// access, and this part uses one call of it).
+    struct Player {
+        /// `(zplus, row)` a tick, indexed by `ctx.frame`; empty means the object's own
+        /// "no plus pending" sentinel at every tick.
+        script: Vec<(i32, i32)>,
+        /// The tick the rig is on — the rig sets it before each `ctx`.
+        at: usize,
+    }
+
+    impl Player {
+        /// A player with no plus pending: `musplus()` is `-32` at every tick.
+        fn sentinel() -> Player {
+            Player { script: Vec::new(), at: 0 }
+        }
+
+        /// A player that answers `(zplus, row)` from `script`, one entry a tick.
+        fn scripted(script: Vec<(i32, i32)>) -> Player {
+            Player { script, at: 0 }
+        }
+
+        /// What the port's player publishes at the reference index `index` — this
+        /// script's answer for that tick — without moving the rig's own tick.
+        fn reading_at(&self, index: u32) -> i32 {
+            match self.script.get((index - FIRST_INDEX) as usize) {
+                Some(&(zplus, row)) => musplus_from(zplus, row),
+                None => musplus_from(0, 0),
+            }
+        }
+
+        /// **`reference/music/second5`'s own words, as the port's player publishes them.**
+        ///
+        /// The trace's columns are the published words (`_np_row`, `_np_zplus`) and it is
+        /// indexed by the *reference's* frame number — and **its sample for a frame is
+        /// taken at that frame's start**, before the copper polls the player for it: the
+        /// emulator's counter is incremented when a frame is published, which is the
+        /// instant the guest's own code for that frame runs (`reference-indices.md` D17's
+        /// "the emulator publishes a frame's pixels and counts it immediately
+        /// afterwards"), so `second5`'s frame `N` holds the words of the poll during frame
+        /// `N - 1`. The port's tick `N` publishes the words of the poll during frame `N` —
+        /// the same player, one tick of the *tick* clock later, which is why the port's
+        /// published row 49 begins at index 1144 where the trace's begins at frame 1145.
+        ///
+        /// So the script is the trace's words one reference index on: entry `t` is the
+        /// trace's frame `FIRST_INDEX + t + 1`, and a tick the trace cannot answer for —
+        /// past its last sample — gets the sentinel. The trace's three gaps (147, 409,
+        /// 1220) are filled by carrying the previous sample forward, which is what the
+        /// words do across a frame no sample was taken on: 408 and 410 are `(0, 0)` with
+        /// `zplus` 0 in this trace.
+        fn trace_second5() -> Player {
+            let mut script: Vec<(i32, i32)> = Vec::new();
+            for (frame, _order, zplus, row) in trace_second5_samples() {
+                // Before the part's first tick there is no tick of this part's to answer
+                // for; the trace's own window starts at 148, well before 404.
+                if frame < FIRST_INDEX + 1 {
+                    continue;
+                }
+                let at = (frame - FIRST_INDEX - 1) as usize;
+                // The gaps: carry the previous sample forward.
+                while script.len() < at {
+                    script.push(*script.last().unwrap_or(&(0, 0)));
+                }
+                script.push((zplus, row));
+            }
+            Player::scripted(script)
+        }
+    }
+
+    /// The words `reference/music/second5` holds, a frame each, as
+    /// `(reference frame, order, `zplus`, row)`.
+    ///
+    /// The trace file is read as text, field by field, the way `src/shell.rs`'s own trace
+    /// reader does: it is a committed record under `reference/`, and reading it is what
+    /// lets a test quote the trace's own numbers instead of restating them.
+    fn trace_second5_samples() -> Vec<(u32, u8, i32, i32)> {
+        let path = "../../reference/music/second5/trace.csv";
+        let text = std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{path}: {error}"));
+        text.lines()
+            .skip(1)
+            .map(|line| {
+                let fields: Vec<&str> = line.split(',').collect();
+                let number = |index: usize| -> i64 {
+                    fields
+                        .get(index)
+                        .unwrap_or_else(|| panic!("{line}: no field {index}"))
+                        .trim()
+                        .parse()
+                        .unwrap_or_else(|error| panic!("{line}: field {index}: {error}"))
+                };
+                (number(0) as u32, number(1) as u8, number(8) as i32, number(2) as i32)
+            })
+            .collect()
+    }
+
+    /// What the trace holds at a reference frame, as `("order:row", musplus)`.
+    fn trace_at(frame: u32) -> (String, i32) {
+        let (_, order, zplus, row) = *trace_second5_samples()
+            .iter()
+            .find(|(at, _, _, _)| *at == frame)
+            .unwrap_or_else(|| panic!("the trace holds no frame {frame}"));
+        (format!("{order}:{row}"), musplus_from(zplus, row))
+    }
+
+    impl Music for Player {
+        fn poll(&mut self) {}
+
+        fn position(&self) -> MusicPosition {
+            MusicPosition::default()
+        }
+
+        fn musplus(&mut self) -> i32 {
+            match self.script.get(self.at) {
+                Some(&(zplus, row)) => musplus_from(zplus, row),
+                None => musplus_from(0, 0),
+            }
+        }
+
+        fn musrow(&mut self) -> i32 {
+            0
+        }
+
+        fn muscode(&mut self, wanted: i32) -> i32 {
+            muscode_from(MusicPosition::default(), wanted)
+        }
+
+        fn sync(&mut self) -> i32 {
+            unreachable!("`END.C` never syncs: the part's one music call is `dis_musplus()`")
+        }
+
+        fn getmframe(&mut self) -> i32 {
+            0
+        }
+
+        fn setmframe(&mut self, _frame: i32) {}
+    }
 
     /// The engine's own pieces held together, so a `PartCtx` can be built for
     /// one call at a time — the same disjoint borrows `Engine::tick` makes.
@@ -507,6 +822,7 @@ mod tests {
         palette: Palette,
         timeline: PaletteTimeline,
         copper: CopperRegistry,
+        player: Player,
     }
 
     impl Rig {
@@ -526,17 +842,41 @@ mod tests {
                 palette,
                 timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
+                player: Player::sentinel(),
             }
         }
 
+        /// [`new`](Rig::new) with `player` standing in for the run's.
+        fn with_player(player: Player) -> Rig {
+            Rig { player, ..Rig::new() }
+        }
+
+        /// One tick's context, with the player at `frame`.
         fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
+            self.player.at = frame as usize;
             PartCtx::new(
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
                 &mut self.timeline,
                 &mut self.copper,
-                // no player: this rig draws a band, and none of these parts asks for a cue
+                Some(&mut self.player),
+                frame,
+                0,
+                1,
+                true,
+                false,
+            )
+        }
+
+        /// One tick's context for a run with **no** player.
+        fn ctx_without_music(&mut self, frame: u32) -> PartCtx<'_> {
+            PartCtx::new(
+                &mut self.surface,
+                &mut self.view,
+                &mut self.palette,
+                &mut self.timeline,
+                &mut self.copper,
                 None,
                 frame,
                 0,
@@ -552,9 +892,14 @@ mod tests {
     /// The picture is the curated `END/PIC.UH`, by the path that resolves from
     /// this crate's own directory — a unit test's working directory is not the
     /// repository root. `tests/endlogo.rs` runs the real binary, and so the
-    /// part's own `assets/END/PIC.UH`, from there.
+    /// part's own `assets/END/PIC.UH`, from there. The player is the sentinel
+    /// one: a test that needs the gate to open builds its own rig.
     fn started() -> (Rig, Endlogo) {
-        let mut rig = Rig::new();
+        started_with(Rig::new())
+    }
+
+    /// [`started`] against a rig of the caller's own.
+    fn started_with(mut rig: Rig) -> (Rig, Endlogo) {
         let mut part = Endlogo::at("../../assets/END/PIC.UH");
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -565,6 +910,16 @@ mod tests {
         for at in 0..ticks {
             part.frame(&mut rig.ctx(at));
         }
+    }
+
+    /// The DAC's entries 0-169, which is every entry the picture or a fade writes.
+    fn dac_entries(rig: &Rig) -> Vec<[u8; 3]> {
+        (0..=169u8).map(|index| rig.palette.entry(index)).collect()
+    }
+
+    /// The DAC the part's settled picture leaves: the fade-in's last step.
+    fn settled(part: &Endlogo) -> Vec<[u8; 3]> {
+        (0..=169u8).map(|index| part.picture_palette.entry(index)).collect()
     }
 
     #[test]
@@ -739,43 +1094,288 @@ mod tests {
         assert_eq!(other.entry(169), [ramp.entry(169)[0], 9, 9]);
     }
 
-    #[test]
-    fn the_hold_is_the_measured_length_and_not_five_thousand() {
-        // `:107-111` waits on the music player's position, which this phase
-        // does not have. The gate becomes its measured length: the settled
-        // picture is displayed from the tick after the fade-in's last step
-        // (index 580) until the fade-out's first step (index 1147), which is
-        // 567 ticks — not the loop's 5000-iteration bound, and not something
-        // the port chose.
-        assert_eq!(HOLD_TICKS, 567);
-        assert_eq!(HOLD_FIRST_INDEX, 580);
-        assert_eq!(FADE_OUT_FIRST_INDEX, 1147);
+    // --- the gate, and the check that it reproduces the measurement ----------
 
+    #[test]
+    fn the_gate_opens_on_the_tick_the_reference_frames_derived() {
+        // **The phase's proof.** `:107-111` runs its own loop against a player: one
+        // iteration a tick, `break` when `dis_musplus()>-16`. What this test drives it with
+        // is `reference/music/second5`'s own published words, and what it asserts is that
+        // the gate opens where Phase 2 derived — bit-exactly, from the reference's
+        // **frames**, which are a different measurement entirely: the picture's own fade
+        // constants (`docs/fidelity/endlogo.md` §3). The two agree, and the wires between
+        // them are this part's three ticks:
+        //
+        //   the words cross          index 1144   (the port's player: row 49)
+        //   the check's own frame    index 1145   (the source's placement: the check reads
+        //                                          the words the tick before published)
+        //   the aligned frame        index 1146   ([`GATE_ALIGNMENT_TICKS`]: the one frame
+        //                                          `second5`'s session and the frames'
+        //                                          session are apart)
+        //   the fade-out's `c = 63`  index 1147   (1147 − 580 = 567 ticks, the hold)
+        //
+        // The words cross the threshold on exactly one index, and the trace says which:
+        // `zplus` is 1 through MUSIC0's order 26 (its successor at 27 is a `254`), so
+        // `musplus` is `row - 64` — **-16** at row 48, which is *not* `> -16`, and -15 from
+        // row 49 on. `second5` holds row 48 at 1136…1144 and row 49 from 1145; its frame
+        // 1145 is the port's index 1144 (see [`Player::trace_second5`]).
+        let player = Player::trace_second5();
+        assert_eq!(player.reading_at(1143), musplus_from(1, 48), "the index before the crossing");
+        assert_eq!(player.reading_at(1143), GATE_THRESHOLD, "…and it is exactly the threshold");
+        assert_eq!(player.reading_at(1144), musplus_from(1, 49), "the crossing, at the port's 1144");
+
+        // The fade-in's last tick is 175 and the gate's first is 176, so the break's frame
+        // is the tick whose count is 1145 − 580 = 565: run the part to it and the check has
+        // just broken — the phase says so, and the DAC has not moved.
+        let (mut rig, mut part) = started_with(Rig::with_player(player));
+        let break_tick = FADE_OUT_FIRST_TICK - 2;
+        assert_eq!(break_tick, 741, "the break's tick, index 1145");
+        run_ticks(&mut rig, &mut part, break_tick + 1);
+        assert_eq!(
+            part.phase,
+            Phase::Gate { count: break_tick - (FADE_IN_FIRST_TICK + FADE_IN_STEPS), held: 1 },
+            "the break is detected on its own frame, and the alignment has begun"
+        );
+        assert_eq!(dac_entries(&rig), settled(&part), "index 1145 is still the held picture");
+
+        // The aligned frame, still the held picture, and then the fade-out's `c = 63` — the
+        // first step below the picture, which is what the reference's frame at 1180 counts
+        // back from (1180 − 33 = 1147).
+        run_ticks(&mut rig, &mut part, (FADE_OUT_FIRST_TICK - 1) - break_tick);
+        assert_eq!(dac_entries(&rig), settled(&part), "index 1146 is the aligned frame");
+        let status = part.frame(&mut rig.ctx(FADE_OUT_FIRST_TICK));
+        assert_eq!(status, PartStatus::Continuing);
+        assert_eq!(rig.palette.entry(1), fade_out_step(&part.picture_palette, 63).entry(1));
+        assert_eq!(rig.palette.entry(1), [47, 44, 41]);
+        assert_ne!(rig.palette.entry(1), part.picture_palette.entry(1));
+
+        // The held length the cue answered with, against the one the reference's frames
+        // give: 1147 − 580 = 567 ticks, from two different keyframes (500 and 1180).
+        assert_eq!(HOLD_TICKS, 567);
+        assert_eq!(HOLD_FIRST_INDEX + HOLD_TICKS, FADE_OUT_FIRST_INDEX);
+        assert_eq!(FIRST_INDEX + FADE_OUT_FIRST_TICK, FADE_OUT_FIRST_INDEX);
+    }
+
+    #[test]
+    fn the_gate_holds_for_five_thousand_ticks_when_the_cue_never_comes() {
+        // `:107` is `for(a=0;a<5000 && !dis_exit();a++)`: five thousand is the loop's own
+        // bound, and the port keeps it. A player that never crosses the threshold — the
+        // sentinel every tick — leaves the part holding exactly that long and then
+        // fading out, which is the behaviour a run whose music never reaches the gate's
+        // window gets, and the only length in this part that is not the music's.
+        assert_eq!(GATE_LIMIT, 5000);
         let (mut rig, mut part) = started();
-        // The tick before the hold's first: the fade-in's c = 128, which is
-        // the picture's own palette.
+        let last_hold = FADE_IN_FIRST_TICK + FADE_IN_STEPS + GATE_LIMIT - 1;
+        run_ticks(&mut rig, &mut part, last_hold + 1);
+        assert_eq!(dac_entries(&rig), settled(&part), "tick {last_hold}: the last of the five thousand");
+        // The loop's `a++` takes `a` to 5000 and the loop is left; the tick after the
+        // last iteration is the fade-out's first step.
+        part.frame(&mut rig.ctx(last_hold + 1));
+        assert_eq!(rig.palette.entry(1), fade_out_step(&part.picture_palette, 63).entry(1));
+        // Which is 5000 ticks and not 5001: the cap is on iterations, and the break's
+        // own tick is one of them.
+        assert_eq!(
+            last_hold + 1 - (FADE_IN_FIRST_TICK + FADE_IN_STEPS),
+            GATE_LIMIT,
+            "the hold is the loop's bound"
+        );
+    }
+
+    #[test]
+    fn the_gates_check_reads_the_previous_ticks_words() {
+        // **The one frame the two measurements are apart by, held still.**
+        //
+        // The source's check is the instruction after `dis_waitb()` returns, so it stands
+        // at the frame boundary — and the copper's poll is a fifth of a frame *later*
+        // (`copper_doit` is the list's scanline-20 entry, `MAIN/COPPER.ASM:41-43`, and
+        // `_zpollme` is `:466` inside it), so the words it reads are the previous frame's.
+        // The port's engine polls before the part runs in the same tick, so the part's own
+        // `musplus()` at tick `T` is the words the source's check at the boundary into the
+        // *next* tick's frame reads: the check tests the tick before.
+        //
+        // Two scripts make that a measurement rather than prose. Both cross at the first
+        // gate tick — `musplus` is -15 at every tick, the smallest row that crosses — and
+        // where the part starts fading says which tick's words the check read.
+        let (mut rig, mut part) = started_with(Rig::with_player(Player::sentinel()));
+        // The sentinel player is scripted by `at`, so this rig's own script is set after
+        // `init`: every tick from the join on answers -15 (`zplus` 1, row 49).
+        let crossing =
+            vec![(1, 49); (FADE_IN_FIRST_TICK + FADE_IN_STEPS + 2) as usize];
+        rig.player = Player::scripted(crossing);
+
+        // The gate's first iteration is the tick after the fade-in's last, index 580, and
+        // the words it reads are the tick before's — the fade-in's last tick. They crossed
+        // there, so the gate breaks at once: the tick the break is drawn on is still the
+        // held picture (the source's `break` follows its own `dis_waitb()`), the tick after
+        // it is the frame the port holds past the break ([`GATE_ALIGNMENT_TICKS`]), and the
+        // *third* tick is the fade-out's first step.
+        let first_gate_tick = FADE_IN_FIRST_TICK + FADE_IN_STEPS;
+        run_ticks(&mut rig, &mut part, first_gate_tick + 1);
+        assert_eq!(dac_entries(&rig), settled(&part), "tick {first_gate_tick} is the break's own frame");
+        assert_eq!(
+            part.phase,
+            Phase::Gate { count: 0, held: 1 },
+            "the break is detected on the first iteration, and the alignment has begun"
+        );
+        run_ticks(&mut rig, &mut part, 1);
+        assert_eq!(dac_entries(&rig), settled(&part), "tick {} is the aligned frame", first_gate_tick + 1);
+        part.frame(&mut rig.ctx(first_gate_tick + 2));
+        assert_eq!(
+            rig.palette.entry(1),
+            fade_out_step(&part.picture_palette, 63).entry(1),
+            "the tick after the alignment is the fade-out's `c = 63`"
+        );
+        // One tick of hold for the break and one for the alignment: the check that broke
+        // was the very first iteration's, and the iteration's frame is the hold's first
+        // (index 580).
+        assert_eq!(FIRST_INDEX + first_gate_tick, HOLD_FIRST_INDEX, "the gate's first iteration is index 580");
+
+        // And the crossing the script carries is one above the threshold — `row - 64` at
+        // `zplus` 1 — which is what the gate's own comparison is about.
+        assert_eq!(musplus_from(1, 49), GATE_THRESHOLD + 1);
+        assert!(musplus_from(1, 48) <= GATE_THRESHOLD, "…and one row below it does not cross");
+    }
+
+    #[test]
+    fn a_run_with_no_player_is_refused_by_name() {
+        // A part that waits on a cue cannot be handed nothing: `init` says so, and names
+        // itself, rather than letting a run hold five thousand ticks against a silence
+        // that cannot break (`src/parts/endlogo.rs`'s `init`, `PartCtx::music`).
+        let mut rig = Rig::new();
+        let mut part = Endlogo::at("../../assets/END/PIC.UH");
+        let error = part.init(&mut rig.ctx_without_music(0)).unwrap_err();
+        assert_eq!(error.part, NAME);
+        assert!(error.message.contains("107-111"), "{}", error.message);
+        assert!(error.message.contains("no music"), "{}", error.message);
+    }
+
+    #[test]
+    fn the_hold_is_the_cues_own_length_and_not_five_thousand() {
+        // The hold as the reference's frames have it, walked tick by tick with the
+        // trace's words: the settled picture from the tick after the fade-in's last step
+        // (index 580) until the fade-out's first (index 1147), 567 ticks — not the
+        // loop's 5000-iteration bound, and not something the port chose. The check is
+        // [`the_gate_opens_on_the_tick_the_reference_frames_derived`]; this walks the
+        // whole hold instead of its ends.
+        let (mut rig, mut part) = started_with(Rig::with_player(Player::trace_second5()));
+        // The tick before the hold's first: the fade-in's c = 128, which is the
+        // picture's own palette.
         run_ticks(&mut rig, &mut part, FADE_IN_FIRST_TICK + FADE_IN_STEPS);
-        let settled: Vec<[u8; 3]> = (0..=169u8).map(|index| rig.palette.entry(index)).collect();
+        let settled = settled(&part);
         for (index, entry) in settled.iter().enumerate() {
             assert_eq!(*entry, part.picture_palette.entry(index as u8), "entry {index} at c = 128");
         }
 
-        // Through the hold, the DAC does not move.
+        // Through the hold, the DAC does not move — and the last tick of it is the one
+        // whose check breaks.
         for tick in FADE_IN_FIRST_TICK + FADE_IN_STEPS..FADE_OUT_FIRST_TICK {
             let status = part.frame(&mut rig.ctx(tick));
             assert_eq!(status, PartStatus::Continuing, "tick {tick} is inside the hold");
-            let dac: Vec<[u8; 3]> = (0..=169u8).map(|index| rig.palette.entry(index)).collect();
-            assert_eq!(&dac[..], &settled[..], "tick {tick} moved the DAC");
+            assert_eq!(dac_entries(&rig), settled, "tick {tick} moved the DAC");
         }
-        // And the tick the gate would have opened on is the fade-out's c = 63,
-        // one step below the picture: entry 1 is `(48,45,42)` in the picture's
-        // palette and `(47,44,41)` one step down, which is the difference the
-        // hold's end is made of. (Entry 0 is black in both — a picture's own
-        // palette starts there — so it cannot tell the two apart.)
-        part.frame(&mut rig.ctx(FADE_OUT_FIRST_TICK));
-        assert_eq!(rig.palette.entry(1), fade_out_step(&part.picture_palette, 63).entry(1));
-        assert_eq!(rig.palette.entry(1), [47, 44, 41]);
-        assert_ne!(rig.palette.entry(1), part.picture_palette.entry(1));
+        // The number of ticks walked, as arithmetic on the two constants the
+        // reference's frames fixed.
+        assert_eq!(FADE_OUT_FIRST_TICK - (FADE_IN_FIRST_TICK + FADE_IN_STEPS), HOLD_TICKS);
+    }
+
+    #[test]
+    fn the_runs_own_player_opens_the_gate_on_the_same_tick() {
+        // **Step 2's check, where the cue is the port's own.** The test above drives the
+        // gate with the trace's words; this one drives it through a real run — the same
+        // entry point `--part endlogo` and `--block 5` begin at, the run's own anchor and
+        // numbering, the real asset, and `src/audio.rs`'s player. Together they are the
+        // phase's proof: the port's cue opens the gate on the tick Phase 2 derived from the
+        // reference's *frames* (`docs/fidelity/endlogo.md` §3), and the words it opens it
+        // on are the trace's (`src/shell.rs`'s
+        // `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`).
+        //
+        // What the run's frames are compared against is the derivation's own arithmetic,
+        // not `reference/`: the four keyframes are the integration test's business, and
+        // this test's is the *tick* — with a real player, the only thing that can move it
+        // is the music.
+        let plan = vec!["endlogo"];
+        let mut run = crate::shell::Sequence::with_run(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            View::new(VIEW_WIDTH, VIEW_HEIGHT),
+            plan,
+            |name| {
+                (name == NAME)
+                    .then(|| Box::new(Endlogo::at("../../assets/END/PIC.UH")) as Box<dyn Part>)
+            },
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(run.anchor(), Some(FIRST_INDEX), "the run's indices are the reference's");
+        assert_eq!(
+            run.music_start_frame(),
+            Some(crate::shell::MUSIC_START_FRAME),
+            "and its clock starts where the music's own does"
+        );
+
+        // Run to the fade-out's first index, noting the published position at the hold's
+        // two ends — the two readings the report carries, taken from the port's player
+        // rather than from the stub.
+        let mut ends: Vec<(u32, String)> = Vec::new();
+        while run.index() < FADE_OUT_FIRST_INDEX {
+            assert_ne!(
+                run.tick(),
+                SequenceStatus::Finished,
+                "the run stopped at index {} without the gate opening",
+                run.index()
+            );
+            let index = run.index() - 1;
+            if index == HOLD_FIRST_INDEX || index + 1 == FADE_OUT_FIRST_INDEX {
+                let position = run.music_position().expect("this run has a player");
+                ends.push((index, format!("{}:{}", position.order, position.row)));
+            }
+        }
+
+        // The tick the gate broke on: the held picture, from the part's own arithmetic —
+        // the fade-in's last step, which is the picture's own palette.
+        let image = picture();
+        let held = rendered(image.pixels(), &dac_after_fade_in(&image.palette, FADE_IN_STEPS - 1));
+        assert_eq!(
+            render(run.frame()),
+            held,
+            "index {} is the held picture",
+            FADE_OUT_FIRST_INDEX - 1
+        );
+
+        // And the tick after it is the fade-out's `c = 63`, the step the reference's 1180
+        // counts 33 steps back from.
+        assert_ne!(run.tick(), SequenceStatus::Finished, "the fade-out draws");
+        assert_eq!(run.index() - 1, FADE_OUT_FIRST_INDEX);
+        let first_step = rendered(image.pixels(), &dac_after_fade_out(&image.palette, FADE_OUT_STEPS - 1));
+        assert_eq!(render(run.frame()), first_step, "index {FADE_OUT_FIRST_INDEX} is `c = 63`");
+
+        // The hold the cue produced, in the run's own numbering: 1147 − 580 = 567 ticks,
+        // the number the reference's frames give.
+        assert_eq!(FADE_OUT_FIRST_INDEX - HOLD_FIRST_INDEX, HOLD_TICKS);
+        // And the two ends' published positions are the trace's own, as the place in the
+        // music that the run's clock and the trace's frames meet.
+        assert_eq!(ends.len(), 2, "both ends of the hold were visited");
+        for (index, position) in &ends {
+            let (trace, _) = trace_at(*index);
+            assert_eq!(
+                *position, trace,
+                "the run's position at index {index} is not the trace's"
+            );
+        }
+    }
+
+    /// The composed frame as RGB, the way a dump writes it: `present` under the dump's own
+    /// options — one output pixel a source pixel, no border, no scaling.
+    fn render(frame: &sr_engine::IndexedFrame) -> Vec<u8> {
+        use sr_engine::present::{present, Aspect, FrameBuffer, PresentOptions};
+        let options = PresentOptions { aspect: Aspect::SquarePixels, scale: 1, border: false };
+        let mut buffer = FrameBuffer::new(0, 0);
+        present(frame, &options, &mut buffer);
+        let mut rgb = Vec::with_capacity(buffer.width() * buffer.height() * 3);
+        for rgba in buffer.rgba().chunks_exact(4) {
+            rgb.extend_from_slice(&rgba[..3]);
+        }
+        rgb
     }
 
     #[test]
@@ -787,7 +1387,7 @@ mod tests {
         assert_eq!(FIRST_INDEX + FADE_OUT_FIRST_TICK + FADE_OUT_STEPS - 1, PART_LAST_INDEX);
         assert_eq!(PART_LAST_INDEX, 1210);
 
-        let (mut rig, mut part) = started();
+        let (mut rig, mut part) = started_with(Rig::with_player(Player::trace_second5()));
         let last = FADE_OUT_FIRST_TICK + FADE_OUT_STEPS - 1;
         run_ticks(&mut rig, &mut part, last);
         assert_eq!(part.frame(&mut rig.ctx(last)), PartStatus::Continuing, "the last step draws");

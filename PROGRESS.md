@@ -12,7 +12,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
-| 3 | Music engine | not started | — | — |
+| 3 | Music engine | **in progress** — Tasks 1-7 landed on branch `phase-3-music` (the trace, the player, the mixer, the shell's restarts and clock, the device); Task 8 replaced ENDLOGO's stand-in gate with the source's own loop and re-ran the phase's acceptance: four keyframes, exit 0, 0.0000 %, both planes byte-identical. Evidence below | [03-music.md](docs/plans/03-music.md) | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
@@ -41,8 +41,9 @@ staged runs in a scratch tree (5 → 6 → 7 under the plan's command, 11 more u
 in all) and checking every code change for behaviour-neutrality. Its words: "claims that do not
 reproduce are the exception here, not the rule".
 
-**Phase 3 (music) is next.** It is not started: no plan exists yet, and a phase's plan is written
-just in time (`CLAUDE.md`). What Phase 3 inherits from this one:
+**Phase 3 (music) is in progress on `phase-3-music`** — its plan is `docs/plans/03-music.md`, its
+per-task ledger `.superpowers/sdd/03-music/progress.md`, and Tasks 1-7 are on the branch. Task 8, the
+phase's proof, is recorded below. What Phase 3 inherits from Phase 2:
 
 - **Every music gate in the port is a measured frame, and Phase 3 replaces them.** The phase's one
   gate is ENDLOGO's hold — `END.C:107-111`'s `dis_musplus() > -16` loop, replaced by its measured
@@ -1124,6 +1125,60 @@ the numbers are `docs/fidelity/endscrl.md` §6.
 **The sheets, and the look.** `cargo xtask frames sheet --dir out/p2-endscrl --out
 out/p2-endscrl-sheet.png` sits beside the reference's own sheet. **The human look is deferred to the
 phase boundary**: nothing here claims a person has judged the frames.
+
+### Phase 3 — Task 8: the gate is the source's own loop, and the phase's proof (2026-10-15)
+
+**The task.** ENDLOGO was the one part that waited on music (`END/END.C:107-111`'s
+`dis_musplus() > -16` loop), and Phase 2 replaced it with its measured length — 567 ticks, registered
+as **A7**. Task 8 retired the stand-in: the part now runs the source's loop against the run's player
+(one iteration a tick, the 5000-iteration cap kept), and A7's number survives as the *check*.
+
+**The check, and the one frame.** The cue's own answer and A7's derived 567 came out one frame apart,
+and the reconciliation is in `docs/fidelity/endlogo.md` §5 with the constants beside the code
+(`GATE_ALIGNMENT_TICKS`, `bins/secondreality/src/parts/endlogo.rs`) and the decision in **D28**:
+
+- **The part's read is one tick behind the copper's poll** (§5.1): the source's check stands at the
+  frame boundary (`DIS/DISINT.ASM:160-180`'s wait on `copperframecount`, `MAIN/COPPER.ASM:320`) and
+  the poll is a fifth of a frame later (`_zpollme`, `:466`, in `copper_doit`, the list's 20-of-100
+  entry), while the port's engine polls before the part's code in the same tick — so the check tests
+  the *previous* tick's words.
+- **One frame stays, and it is an alignment** (§5.2): the port's own player publishes `26:49` from
+  index **1144**, so the break would fall on 1145, and the reference's *frames* — bit-exactly, from
+  500 and 1180 — put the fadeout's first step at **1147** (the break at 1146). The port holds one
+  frame past its own break. **Which measurement moved is named**: the port's player is `second5`'s to
+  the frame (its `zframe` matches the trace's column; its published positions are the trace's samples
+  one index on, which is what the trace's sample instant makes of them), and `second5`'s published
+  row 49 begins one frame earlier, relative to the frame indices, than the session the reference's
+  keyframes came from — D17's per-session counter alignment. The cost is stated where the constant
+  is: one frame's disagreement with `second5`'s own session at this crossing, inside A12's ±3.
+
+**The acceptance, re-run with the real cue** (`cargo xtask compare`, both commands the phase names):
+
+```
+--part endlogo   frame 430: 0.0000% differing (0/128000 px), max delta 0
+                 frame 500: 0.0000% differing (0/128000 px), max delta 0
+                 frame 900: 0.0000% differing (0/128000 px), max delta 0
+                 frame 1180: 0.0000% differing (0/128000 px), max delta 0
+                 verdict: identical      exit: 0
+--block 5        the same four frames, the same numbers, verdict: identical, exit: 0
+```
+
+**The phase's proof, in the two directions it can be stated.** The port's cue, driven by
+`reference/music/second5`'s own words a tick at a time, opens the gate on the tick Phase 2 derived
+from the reference's frames (`the_gate_opens_on_the_tick_the_reference_frames_derived`); and the same
+part, driven through the shell by the run's own player with the real asset, draws §3's held picture
+at 1146 and the fadeout's `c = 63` at 1147 (`the_runs_own_player_opens_the_gate_on_the_same_tick`).
+The readings the task asked for beside them:
+
+| reading | where |
+|---|---|
+| the trace's `musplus` either side of the crossing | frame 1144 `zplus` 1 row 48 → **−16** (not `> -16`); frame 1145 row 49 → **−15** (the crossing); the trace shows row 48 over 1136-1144 and row 49 from 1145 |
+| the port's own `(order, row)` at the hold's two ends | index 580 → **25:18**, index 1146 → **26:49** (`out/t8-ends/manifest.json`) — the trace's own values at those frames |
+
+**A7 is retired, not deleted**: `APPROXIMATIONS.md`'s entry is struck through in place, with the cue
+named as what replaced it, the measurement kept as the check, and the ten unmodelled lead-in frames
+(its second half) left standing. **The human listen is the user's and is not claimed here** — see the
+task report's paragraph.
 
 ## Phase log
 

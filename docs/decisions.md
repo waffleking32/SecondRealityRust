@@ -1847,3 +1847,42 @@ byte-identical with and without `--no-audio`.
 files) down by a step a frame — the loop's `int 0fch` is `dis_waitb()` — so the shell calls one
 step a tick, with the demo's own `mov cx,1`, from the moment there is nothing left to play.
 Each row of this section has a test; §12 of `docs/fidelity/music.md` is the note.
+
+## D28 — A part's music read is one tick behind the copper's poll, and the one frame that is an alignment (2026-10-15)
+
+Task 8 ran ENDLOGO's gate, `END/END.C:107-111`, against the run's player — the first part in the
+port that waits on music — and the cue's answer and A7's measured 567 came out **one frame apart**.
+Both halves of that gap are decisions, and both are now written where the code can be read with
+them: `bins/secondreality/src/parts/endlogo.rs` carries the two constants and
+`docs/fidelity/endlogo.md` §5 the account.
+
+**A part that reads the music at the tick's boundary reads the *previous* tick's words.** The
+source's ENDLOGO check is the instruction after `dis_waitb()`, so it stands at a frame boundary:
+`waitb_1` (`DIS/DISINT.ASM:160-180`) returns when `cs:copperframecount` changes, and `copper_end`
+(`MAIN/COPPER.ASM:283-320`) increments it (`:320`) at the vertical retrace. The music's poll is a
+fifth of a frame later — `call _zpollme` (`:466`) inside `copper_doit`, which the copper's list
+runs at 20 of the frame's 100 units (`copperlst0`, `:41-43`) — so the check reads the words the
+*previous* frame's poll published. The port's engine polls between copper slot 0 and the first band
+(`crates/sr-engine/src/engine.rs:206-219`), i.e. before the part's code in the same tick, so its
+`musplus()` at tick `T` is the words tick `T`'s poll published: one frame newer than the source's
+check at the same instant. **The part keeps the reading for a tick and tests that**, and the tick
+it breaks on is the tick the source's break happens on. This is not ENDLOGO's rule: it is the
+engine's poll placement showing through, and any later part that reads the music as the first act
+of its frame (GLENZ's openers, PLZPART's waits) has the same one-tick relationship.
+
+**The one frame that stayed is a disclosed alignment, not a derivation.** On the reference's boot
+the port's own player publishes `26:49` from index **1144**, and with the placement above the gate
+would break on **1145** — while the reference's *frames*, derived bit-exactly from 500 and 1180,
+put the fadeout's first step at **1147**, i.e. the break at 1146. The port holds one frame past its
+own break (`GATE_ALIGNMENT_TICKS`). **Which measurement moved is nameable, and it is the session's,
+not the port's:** the port's player is `second5`'s to the frame (its direct `zframe` matches the
+trace's column; its published positions are the trace's samples one index on, which is what the
+sample instant — the frame's *start*, D17's own reading of the emulator — makes of them), and
+`second5`'s published row 49 begins one frame earlier, relative to the frame indices, than the
+session the reference's four keyframes were captured in. That is D17's per-session counter
+alignment, and the cost is stated where the constant is: the port disagrees with `second5`'s own
+session by one frame at this crossing, inside the ±3 frames A12 measures between the two filed
+sessions of one recipe. **Nothing in the music moved for it** — no anchor, no rate, no position —
+and nothing in the part *could* move it: the part carries no length, which is the point of the
+task. A run whose music starts elsewhere has no reference frame to align to, and the constant is a
+fact about this boot and `second5`.

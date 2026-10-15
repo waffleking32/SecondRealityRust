@@ -257,11 +257,23 @@ pictures *and* a longer run to see where the two trajectories diverge — the re
 (`reference-indices.md` §1.8) is what would say whether the picture the port draws is a picture no
 session drew.
 
-## A7 — ENDLOGO: the music gate is its measured length, and ten lead-in frames are not modelled
+## A7 — ENDLOGO: ~~the music gate is its measured length~~ **retired, Task 8 — the cue is the source's own loop**, and ten lead-in frames are not modelled
 
 **Part:** ENDLOGO (`END/END.C`), Phase 2. Two entries in one, following A5's shape: the one gate in
 this phase that a faithful-looking port would have had to *wait on* something that does not exist,
 and the small residual either side of it.
+
+**Retired 2026-10-15 (Task 8), and what replaced it.** The gate is `END.C:107-111`'s own loop, run
+against the run's player: one `dis_musplus() > -16` a tick, the source's five-thousand-iteration cap,
+and no length anywhere — the hold is 567 ticks on the reference's boot because the music says so.
+`docs/fidelity/endlogo.md` §5 is the replacement and the measurement it was checked against, and the
+paragraphs below that describe the substitution are struck through with it. **Two things were kept
+from the substitution, and both are named where they live:** A7's *measurement* (the 567, and the two
+indices it is the difference of) survives as the **check** — the cue's own answer is compared with it
+in `bins/secondreality/src/parts/endlogo.rs`'s tests — and the ten unmodelled lead-in frames, this
+entry's second half, are untouched. The one **new** approximation Task 8 leaves behind is the gate's
+alignment: one frame, because the port's own words and the reference's frames are one frame apart
+(`docs/fidelity/endlogo.md` §5.2), and the frames are the record (D12).
 
 **The original — the gate.** `END.C:107-111` is
 
@@ -272,35 +284,43 @@ for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }
 — a loop that waits one vertical blank per iteration until the music player's position passes −16, or
 until five thousand blanks have gone by. Nothing in it is a duration: how long the hold lasts is a
 property of the music, of where `SECOND 5` restarted it (`MAIN/U2.ASM:905` puts MUSIC0 at order 25
-before the part starts) and of the machine's speed. **The port decodes, mixes and plays no audio in
-this phase**, so the cue cannot be evaluated at all — this is not a routine that could be stubbed and
-called later, it is the loop's exit condition.
+before the part starts) and of the machine's speed. ~~**The port decodes, mixes and plays no audio in
+this phase**~~ — *until Phase 3, which is the task this entry's retirement records:* the cue is the
+loop's exit condition, and it was the phase's own work to have something to evaluate it against.
 
-**Port:** the gate is replaced by the length the reference shows it having — **567 ticks**, one
+~~**Port:** the gate was replaced by the length the reference shows it having — **567 ticks**, one
 `dis_waitb()` each — derived in `docs/fidelity/endlogo.md` §3 from the part's two measured fade
 constants, which come from two different keyframes: the fade-in's last step is *displayed* at
 reference index 579 (from 500 at the ramp's `c = 49`, uniquely) and the fadeout's first step at 1147
-(from 1180 at `c = 30`, uniquely), so the settled picture is displayed for 1147 − 580 = 567 frames.
-The record corroborates it from the other side without being asked: `reference-indices.md` §19.1's
-sweep has the picture byte-identical at **twelve** consecutive samples, **580**, 620, 660, 700, 740,
-780, 840, 900, 960, 1020, 1080 and 1120 — one `sha256` — and 580 is exactly the hold's first frame
-under the two constants. The derivation test reproduces all nine of the states that table names
-separately — 430, 460, 500, 540, 580, 900, 1120, 1160 and 1200, colour count and mean — from the two
-constants (`the_sweeps_own_samples_are_the_ramps_frames`).
+(from 1180 at `c = 30`, uniquely), so the settled picture is displayed for 1147 − 580 = 567
+frames.~~ The record corroborates that length from the other side without being asked:
+`reference-indices.md` §19.1's sweep has the picture byte-identical at **twelve** consecutive
+samples, **580**, 620, 660, 700, 740, 780, 840, 900, 960, 1020, 1080 and 1120 — one `sha256` — and
+580 is exactly the hold's first frame. The derivation test reproduces all nine of the states that
+table names separately — 430, 460, 500, 540, 580, 900, 1120, 1160 and 1200, colour count and mean —
+from the two constants (`the_sweeps_own_samples_are_the_ramps_frames`), and that is what makes them
+the check the port's cue is measured against rather than a memory.
 
-**Measured difference: zero against this reference, and unknown against any other.** All four
+~~**Measured difference: zero against this reference, and unknown against any other.** All four
 keyframes compare at exit 0 (`docs/fidelity/endlogo.md` §7), and 900 sits inside the hold, so the
 substitution is invisible to the comparison — but only because the reference was captured on this
 recipe's music, from this boot. A run whose music started elsewhere, or a machine whose frames are
 not the emulator's, would reach `dis_musplus() > -16` at a different frame and the hold would be a
-different length; the port's constant would be wrong there and nothing in the port could say so. That
-is the sense in which this entry is an approximation rather than a translation, and it is why the
-number is written down as a measurement rather than as a port constant.
+different length; the port's constant would be wrong there and nothing in the port could say so.~~
+**The warning above is what the cue answers**, and the answer was measured rather than hoped for: the
+port's hold is the music's, so a run whose music started elsewhere gets that run's hold; and the
+reference's own frames are what say the port's is right on this boot — four keyframes, 0.0000 %, exit
+0 (`docs/fidelity/endlogo.md` §7).
 
-**What Phase 3 replaces it with.** The real cue: the music player's position, sampled once per tick
-by the port's own mixer, with `dis_musplus()`'s −16 threshold (`END.C:110`) as the condition. The
-constant disappears entirely when that lands — it is not a threshold to tune, it is a stand-in for a
-value that does not exist yet.
+**What Phase 3 replaced it with, and where the check landed.** The real cue, as above: the music
+player's position, sampled once per tick by the port's own mixer, with `dis_musplus()`'s −16
+threshold (`END.C:110`) as the condition — and the constant did disappear from the part, which now
+carries no length at all. What the phase's proof asked was whether the cue's own answer would be the
+567 the substitution had measured from the reference's frames: it is, and the one frame between the
+two readings of it is named in `docs/fidelity/endlogo.md` §5.2. **A later phase reading this entry
+should take the alignment with it**: a run whose music starts elsewhere (a `SECOND 3` or `SECOND U`
+entry point) has no reference frame to align to, and `GATE_ALIGNMENT_TICKS` is a fact about the
+reference's boot and `second5`'s session, not about ENDLOGO.
 
 **The second half — the lead-in's ten unmodelled ticks.** The port's ticks follow the source's
 vertical blanks one for one: tick 0 is `:61`, tick 1 is `:62-63`'s white and `:67-88`'s CRTC and AC,

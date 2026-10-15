@@ -1688,7 +1688,9 @@ region `:801-802` opens and `:855` closes, **and** `whattorun & 1` (`:813-814`) 
 for every block with bit 0, and every such mask carries bit 1 as well. The row for `SECOND 1`
 above is that block's *start*, not this restart, and
 `the_second_mid_run_restart_is_two_guards_and_the_masks_carry_both` is the test that reads
-`:801-802` and `:813-818` and pins it (nothing else in the suite looks at this site).
+`:801-802`, `:813-818` and the region's close at `:855-855` — the label `:802`'s `jz` lands on, which
+is what makes "the site is inside `& 2`'s region" an assertion rather than a reading of the line
+numbers' order — and pins it (nothing else in the suite looks at this site).
 
 **Nothing the port can run today reaches either** — `--block 2`'s plan stops at GLENZ, which
 is not ported; `--block 3` cannot start at all (MNTSCRL is not ported); `--block 5`'s mask has
@@ -1857,7 +1859,7 @@ port's hold being what marks the end of the run rather than a claim about the or
 | the restart table against the shell's own source, line by line, and its guards against `partsmask` | `src/shell.rs`'s `every_row_of_the_restart_table_is_the_originals_own` |
 | the entry point's row is the one a run's plan finds | `src/shell.rs`'s `a_blocks_first_part_is_the_entry_point_its_row_is_about` |
 | **`SECOND 4`'s row is not entry-point-only**, and which rows are | `src/shell.rs`'s `one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` |
-| **the second mid-run restart** (`:813-818`), its two-bit guard, and the masks that carry both | `src/shell.rs`'s `the_second_mid_run_restart_is_two_guards_and_the_masks_carry_both` |
+| **the second mid-run restart** (`:813-818`), its two-bit guard, the region that guard encloses (`:801-802` open, `:855` close), and the masks that carry both | `src/shell.rs`'s `the_second_mid_run_restart_is_two_guards_and_the_masks_carry_both` |
 | the music's start: the wait, the catch-up, and a run with its own numbering | `src/shell.rs`'s `the_music_waits_for_its_anchor_and_catches_up_past_it` |
 | **the published position against every frame of `reference/music/second5`** | `src/shell.rs`'s `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` |
 | the adapter: the published words it hands over, and the wait | `src/audio.rs`'s `the_adapter_hands_the_engine_the_players_published_words`, `the_adapter_waits_out_the_frames_before_the_music_starts` |
