@@ -198,9 +198,10 @@ rectangle rather than scanning one out. The music gate is modelled, and §5 is h
 port runs it: one iteration a tick — `dis_waitb()` *is* the tick, one band pass — the 5000-iteration
 cap stays, and the condition is the run's player's `musplus()`
 (`crates/sr-engine/src/music.rs`'s [`musplus_from`], the DIS's own arithmetic over the published
-`_np_zplus` and `_np_row`). **No *hold length* is in the part** — the one number the part carries
-for the gate is the alignment below, and that is a frame, not a length.
-boot because the music says so, and the same run with any other music would have that music's hold.
+`_np_zplus` and `_np_row`). **No *hold length* is in the part.** The hold is 567 ticks on the
+reference's boot because the music says so, and the same run with any other music would have that
+music's hold. The gate's own numbers are its threshold and its cap (the source's `-16` and `5000`) and
+the **one lever** the alignment below adds — a frame, not a length.
 
 **This is where the phase's proof lands, and it lands in two pieces.** A7 carried the gate as its
 *measured* length, 567 ticks
@@ -252,8 +253,8 @@ fadeout would start at **1146** — while the reference's frames put the fadeout
 
 **The port's player is not the one that moved, and the measurement that says so is quantitative.**
 The port's published positions differ from the trace's by one frame at 100 of this window's position
-changes, agree at 22 and differ by two at 8 — 130 in all, because the last change of the window has no
-successor frame to compare against. Reproduced by
+changes, agree at 22 and differ by two at 8 — 130 in all, of the window's **131**, because the last
+change has no successor frame to compare against. Reproduced by
 `cargo test -p secondreality --bin secondreality the_runs_music_is_where_the_trace -- --nocapture`,
 which prints `130 position change(s) compared; the port's frame minus the trace's: {-2: 8, -1: 100,
 0: 22}` and fails if any change is more than two frames out. That ratio is what the poll geometry
