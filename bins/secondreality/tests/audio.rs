@@ -180,7 +180,7 @@ fn the_audio_dump_is_the_ticks_samples_at_the_mixers_own_rate() {
     assert_eq!(word(40), (bytes.len() - 44) as u32, "the data chunk is the file");
     assert_eq!(bytes.len() % 4, 44 % 4, "a whole number of stereo frames");
 
-    // **The samples are the ticks'.)** A `--block 5` run begins at 404 and the music's own
+    // **The samples are the ticks'.** A `--block 5` run begins at 404 and the music's own
     // clock starts at 408, so 30 ticks (404…433) are 26 polls — one a tick from 408 — and a
     // poll is `40000/70.086` = 570.7 samples. The count is asserted in that bracket rather
     // than against a number remembered from elsewhere: the point is that it is *one poll a

@@ -290,14 +290,29 @@ impl MusicStart {
 /// real parts (or no player at all) must not have to reach the assets' path to get one.
 pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, String>;
 
-/// One roll of the demo's own restart table: which module an entry point starts, at which
+/// One roll of the demo's own restart table: which module a block's run begins on, at which
 /// order, and where `MAIN/U2.ASM` says so.
 ///
-/// **The block's mask is the guard**, and `when`/`unless` are the two bits the guard's
-/// code tests: `when` must be set in the block's `partsmask` byte, `unless` must be clear.
-/// Two of the six rows are what happens when a bit is *not* set (block 2 starts MUSIC1
-/// because `whattorun & 1` is clear), and the middle four are the entry-point restarts
-/// D13 records.
+/// **The block's mask is the guard**, and `when`/`unless` are the two bits the guard's code
+/// tests: `when` must be set in the block's `partsmask` byte, `unless` must be clear. Two of
+/// the six rows are what happens when a bit is *not* set (block 2 begins MUSIC1 because
+/// `whattorun & 1` is clear), and the middle four are the restart sites D13 transcribes.
+///
+/// **A row is a block's *starting* music, and three of those four sites are also that block's
+/// entry point — but `:880-885` is not.** Its guard is `whattorun & 8` **alone** (`:880`), so
+/// it fires for every block whose mask has bit 3: `SECOND 1`, `2`, `3` and `4`. Only block 4
+/// reaches it as an entry point (its plan begins at U2E, `:886-887`); blocks 1, 2 and 3 run
+/// the tier before it (`exe17`/`exe18`, `:875-878`) and reach it **mid-run**, between
+/// JPLOGO and U2E, where the shell restarts MUSIC0 at order 18 under a player that has been
+/// playing something else. `SECOND 1` has a second such restart of its own (`:813-818`,
+/// guarded `whattorun & 1` alone: MUSIC1 at order 0, between BEGLOGO and GLENZ).
+///
+/// **Nothing the port can run today reaches either of them** — `--block 2`'s plan stops at
+/// GLENZ, which is not ported; `--block 3` cannot start (MNTSCRL is not ported); `--block 5`'s
+/// mask has bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside
+/// blocks 2 or 3 needs a **mid-run** restart at that point in the sequence, and this
+/// one-row-per-run table has no place for one yet. That is the Phase 4 dependency the row for
+/// block 4 does not, by itself, express.
 #[derive(Debug, Clone, Copy)]
 // The four fields below are the row's *evidence* — which `whattorun` bits guard it and
 // where `MAIN/U2.ASM` says so — and nothing at run time reads them: the test beside the
@@ -325,8 +340,11 @@ pub struct MusicRow {
 }
 
 /// The demo's own restart table, in the original's own order: the initial start
-/// (`MAIN/U2.ASM:766-786`) and then the four entry-point restarts (`:856-863`, `:880-885`,
-/// `:889-894`, `:898-905`).
+/// (`MAIN/U2.ASM:766-786`) and then the four restart sites D13 transcribes (`:856-863`,
+/// `:880-885`, `:889-894`, `:898-905`) — one row a *block*, giving the module and order that
+/// block's run begins at. Three of the four sites are that block's entry point; `:880-885` is
+/// entry-point-only for `SECOND 4` and a mid-run restart for `SECOND 1`, `2` and `3` (see
+/// [`MusicRow`], and the test below that pins it).
 ///
 /// Every row carries its citation and is checked against it by
 /// `tests/shell.rs`'s `every_row_of_the_restart_table_is_the_originals_own`, which reads
@@ -373,7 +391,9 @@ pub const MUSIC_RESTARTS: &[MusicRow] = &[
             "call restartmus",
         ],
     },
-    // `SECOND 4`'s, guarded `whattorun & 8`.
+    // `SECOND 4`'s — and, for `SECOND 1`, `2` and `3`, the mid-run restart before U2E:
+    // the guard is bit 3 **alone**, which those masks also carry (`:877-885`, after
+    // JPLOGO and before `exe19`). Only block 4's plan starts here.
     MusicRow {
         block: '4',
         module: ModuleId::Music0,
@@ -698,6 +718,12 @@ impl Sequence {
         // exactly where `pre` polls spread over `pre` frames would. A run that begins
         // *before* the music's start has nothing to catch up on — its player waits
         // (`MusicStart::waiting`) rather than running early.
+        //
+        // A catch-up longer than the ring (8192 samples) would have its oldest samples
+        // dropped by the ring's own overflow policy — the same policy an undrained device
+        // meets — so a pre-polled run that also dumps its audio would begin slightly
+        // clipped. Unreachable as the port stands: the largest catch-up a run can have is
+        // three frames, since the two blocks the port can start at are anchored at 404.
         for _ in 0..start.pre {
             crate::audio::lock(&player).poll();
         }
@@ -1367,6 +1393,48 @@ mod tests {
     }
 
     #[test]
+    fn one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which() {
+        // **The characterization the table has to get right.** Three of the four restart
+        // sites fire only when the block they belong to is the one whose plan reaches them
+        // first — `:856`'s guard is `& 4` *and not* `& 2`, `:898`'s is `& 16` and not `& 8`,
+        // and `:889`'s is `& 80h` alone but only `SECOND U`'s mask has bit 7. The fourth,
+        // `:880-885`, is guarded by `whattorun & 8` **alone**, and every block whose mask has
+        // bit 3 reaches it: `SECOND 1` (0x1f), `2` (0x1e), `3` (0x1c) and `4` (0x18).
+        //
+        // For `SECOND 4` that is its entry point (its plan begins at U2E, `:886-887`); for
+        // the other three it is a **mid-run** restart between JPLOGO (`exe18`, `:877-878`)
+        // and U2E, under a player that has been playing something else — which the port's
+        // one-row-per-run table has no place for. Nothing the port can run today reaches it,
+        // and this test is what makes that a stated dependency rather than a hidden one.
+        let row = MUSIC_RESTARTS
+            .iter()
+            .find(|row| row.block == '4')
+            .expect("the block whose start the row gives");
+        assert_eq!(
+            (row.when, row.unless),
+            (0x08, 0),
+            "the guard is bit 3 alone — an `unless` would be what made it entry-point-only"
+        );
+        for block in ['1', '2', '3', '4'] {
+            let mask = BLOCKS
+                .iter()
+                .find(|(name, _)| *name == block)
+                .unwrap_or_else(|| panic!("{block} is not a block"))
+                .1;
+            assert!(
+                mask & 0x08 != 0,
+                "{block}'s mask has bit 3, so its run reaches :880 too — the restart is \
+                 mid-run for it unless its plan begins at U2E"
+            );
+        }
+        // And the other three sites carry the `unless` bit that keeps them entry-point-only.
+        for (block, unless) in [('3', 0x02), ('5', 0x08)] {
+            let row = MUSIC_RESTARTS.iter().find(|row| row.block == block).unwrap();
+            assert_eq!(row.unless, unless, "{block}'s restart fires only without the bit");
+        }
+    }
+
+    #[test]
     fn a_blocks_first_part_is_the_entry_point_its_row_is_about() {
         // The table's rows are keyed by block; a *plan* is keyed by its first part, and the
         // two meet in `music_for_part`, which is what a run actually uses. Every block's row
@@ -1439,8 +1507,13 @@ mod tests {
     /// `reference/music/<name>/trace.csv` holds exactly the frames the trace *has* — the
     /// emulator's own gaps are missing rows and not zeroes — so walking the file is
     /// walking the frames the trace holds, which is what the brief's "read the trace's own
-    /// gaps from its manifest" is for. The manifest is where a *reader* checks that; a
-    /// reader of the rows needs nothing else.
+    /// gaps from its manifest" is for, read the other way round.
+    ///
+    /// **That the two readings agree is checked, not assumed**: `crates/sr-audio`'s
+    /// `tests/trace.rs` recomputes each trace's coverage from the same CSV and asserts it is
+    /// the manifest's window minus its gaps, field by field, for every filed trace
+    /// (`Trace::check_coverage`) — so this file may walk the rows without opening the
+    /// manifest.
     fn trace(name: &str) -> Vec<(u32, (u8, u8))> {
         let path = format!("../../reference/music/{name}/trace.csv");
         let text = std::fs::read_to_string(&path)

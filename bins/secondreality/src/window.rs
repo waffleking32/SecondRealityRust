@@ -190,7 +190,12 @@ fn audio_of(sdl: &sdl2::Sdl, run: &mut Sequence, cli: &Cli) -> Result<Option<Dev
     let Some(player) = run.audio_player() else {
         return Ok(None);
     };
-    let (rate, channels) = run.audio_format().unwrap_or((20_000, 2));
+    // Unreachable as an `Option`: a run with a player has a format, and the two come from
+    // the same `Option<RunMusic>` — but the rate is the *player's* (that is the point of
+    // `wav_format`) and re-typing a fallback here would be a second copy of it.
+    let Some((rate, channels)) = run.audio_format() else {
+        return Ok(None);
+    };
     match Device::open(sdl, player, rate, channels as u8) {
         Ok(device) => {
             let (opened_rate, opened_channels) = device.spec();

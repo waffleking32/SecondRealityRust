@@ -299,10 +299,15 @@ fn write_manifest(dir: &Path, run: &Sequence, frames: &[FrameEntry]) -> Result<(
         // and are not.
         index_origin: index_origin(run.index_is_reference()),
         anchor: run.anchor(),
-        music: run.music_module().map(|(module, start_order)| MusicSetup {
-            module: module.name(),
-            start_order,
-            start_frame: run.music_start_frame().unwrap_or(0),
+        // A run that has a module has a start frame too — both come from the same
+        // `Option<RunMusic>` — so this is one `and_then` and not a default that no run
+        // reaches.
+        music: run.music_module().and_then(|(module, start_order)| {
+            Some(MusicSetup {
+                module: module.name(),
+                start_order,
+                start_frame: run.music_start_frame()?,
+            })
         }),
         frames,
     };

@@ -1659,26 +1659,45 @@ starts, and where its samples go — and all three are the shell's
 `_zspeedadjust2` *only* for output modes 7 and 2 (`:383-389`), which the reference's card is
 not. The table, as `shell::MUSIC_RESTARTS` carries it, with the lines each row is read from:
 
-| entry point | module | order | the lines |
+| the block | module | order | the lines |
 |---|---|---|---|
 | `SECOND 1` (and no argument — `whattorun = 7fh`, `:108`) | MUSIC0 | 0 | `:766-775` (`mov ax,0` / `mov bx,-1`), `:785-787` (`push 0` / `call _zplaysong`) |
 | every other block | MUSIC1 | 0 | `:772-775` (`mov ax,1` / `mov bx,0` / `mov cx,48700`) |
 | `SECOND 3` | MUSIC1 | 42 | `:856-863`, guarded `whattorun & 4` and not `& 2` |
-| `SECOND 4` | MUSIC0 | 18 | `:880-885`, guarded `& 8` |
+| `SECOND 4` | MUSIC0 | 18 | `:880-885`, guarded `& 8` — **and not entry-point-only** (below) |
 | `SECOND U` | MUSIC0 | 70 | `:889-894`, guarded `& 80h` |
 | `SECOND 5` | MUSIC0 | 25 | `:898-905`, guarded `& 16` and not `& 8` |
 
 Two of the six are what happens when a bit is **not** set (`mov bx,-1` means "no seek here":
-the shell calls `_zplaysong(0)` itself once the sound is on, `:785-787`), and the middle four
-are the entry-point restarts D13 records. `every_row_of_the_restart_table_is_the_originals_own`
-reads `upstream/SecondReality/MAIN/U2.ASM` — **as bytes**, because the file is not UTF-8 and
+the shell calls `_zplaysong(0)` itself once the sound is on, `:785-787`).
+`every_row_of_the_restart_table_is_the_originals_own` reads
+`upstream/SecondReality/MAIN/U2.ASM` — **as bytes**, because the file is not UTF-8 and
 a decoded read misplaces every line after the first non-ASCII byte — and checks each row's
 instructions against its cited lines, in order, with its guard against the block's own
 `partsmask` byte.
 
-**A run takes the row of the entry point it starts at**, which for the port is the plan's
-first part: `--block 5` and `--part endlogo` both begin at ENDLOGO and both get `SECOND 5`'s
-row (`music_for_part`). A demo part no entry point starts at (TUNNELI, CRED, ENDSCRL) is
+**Three of the four restart sites are entry-point-only, and `:880-885` is not.** Its guard is
+`whattorun & 8` **alone** (`:880`, no second test), so it fires for every block whose mask has
+bit 3 — `SECOND 1` (0x1f), `2` (0x1e), `3` (0x1c) and `4` (0x18). It is block 4's entry point
+(its plan begins at U2E, `:886-887`, and the tier before it is skipped by `:856`'s `& 4` test);
+for the other three the shell reaches it **mid-run**, between JPLOGO (`exe18`, `:877-878`) and
+U2E, and restarts MUSIC0 at order 18 under a player that has been playing something else.
+`SECOND 1` has a second restart of that shape (`:813-818`, guarded `whattorun & 1` alone:
+MUSIC1 at order 0 between BEGLOGO and GLENZ, `exe3`/`exe4`), and the row for it above is that
+block's *start*, not this restart.
+
+**Nothing the port can run today reaches either** — `--block 2`'s plan stops at GLENZ, which
+is not ported; `--block 3` cannot start at all (MNTSCRL is not ported); `--block 5`'s mask has
+bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside blocks 2 or 3
+needs a **mid-run** restart at that point in the sequence, and the port's one-row-per-run model
+has no place for one yet. That is a Phase 4 dependency, and
+`one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it: the row's
+guard has no `unless` bit, every one of those four masks has bit 3, and the other three sites
+carry the `unless` bits that keep them entry-point-only.
+
+**A run takes the row of the block whose plan begins where it does**, which for the port is
+the run's first part: `--block 5` and `--part endlogo` both begin at ENDLOGO and both get
+`SECOND 5`'s row (`music_for_part`). A demo part no entry point starts at (TUNNELI, CRED, ENDSCRL) is
 played from the demo's own beginning — block 1's row, the module the demo's own run reaches
 those parts under — and the test card, which is the port's own part and not the demo's, has no
 music at all: `PartCtx::music()` is `None` and a `--audio-dump` of such a run is refused.
@@ -1712,7 +1731,11 @@ A run reaches that clock in one of two ways, and the shell computes both from it
   are polled at the run's start, because the music's advance is deterministic and does not
   depend on a frame being drawn. `SECOND 3` is the case — MNTSCRL's first graphics frame is in
   (415, 420] while the music starts at 408 — and no run the port can make today is one, since
-  the two blocks it can start at are anchored at 404.
+  the two blocks it can start at are anchored at 404. (A catch-up of more than the ring's
+  8192 samples would have its oldest samples dropped rather than saved — the ring's overflow
+  policy, which is the same one an undrained device meets — so a pre-polled run with
+  `--audio-dump` would begin slightly clipped. Unreachable today: the largest catch-up the
+  port can have is a run starting three frames after the anchor.)
 - A run whose numbering is **its own** has no reference frame to synchronise to, so its music
   starts with it, on its frame 0. `--part beglogo` and `--part endlogo` are *not* that case —
   both parts carry measured anchors (`shell::boot_anchor`), so those runs wait for 408 exactly
@@ -1722,18 +1745,25 @@ A run reaches that clock in one of two ways, and the shell computes both from it
 
 **The evidence, and its two halves.** `shell.rs`'s
 `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` drives a `--block 5`
-run in process — real player, stub parts — over every frame of `reference/music/second5` from
-404 on, and compares the published position two ways: **placement** (every position the port
-publishes is one the trace publishes at that frame or within the 3 frames A12 measures between
-two sessions of one recipe) and **content** (the sequence of distinct positions is the trace's,
-in order). It prints:
+run in process — real player, stub parts, the real plan and anchor — over every frame of
+`reference/music/second5` from 404 on, and compares the published position two ways:
+**placement** (every position the port publishes is one the trace publishes at that frame or
+within the 3 frames A12 measures between two sessions of one recipe) and **content** (the
+sequence of distinct positions is the trace's, in order). It prints:
 
 ```
 second5: 778 of 894 frames agree exactly (87.025 %); worst displacement 2 frame(s)
 ```
 
 — against the same trace driven directly through a `Player` in
-`crates/sr-audio/tests/trace.rs` (771 of 887, 86.922 %, worst 2). A four-frame error in the
+`crates/sr-audio/tests/trace.rs` (771 of 887, 86.922 %, worst 2).
+
+The frames it walks are the trace's **own `trace.csv`** rows, not the manifest's coverage
+list — a deviation from the brief's wording, and the same set of frames read the other way
+round: the gaps are missing *rows*, so iterating the rows cannot include one. What holds the
+two readings together is `crates/sr-audio/tests/trace.rs`'s `check_coverage`, which recomputes
+the coverage from the CSV and asserts it is the manifest's window minus its gaps, field by
+field, for every filed trace. A four-frame error in the
 anchor fails both assertions: with `MUSIC_START_FRAME` set to 404 the same test reports *the
 run published [(1298, (28, 5)), (1299, (28, 5))], which the trace publishes nowhere in frames
 404..=1299 — its music is ahead of the trace's*, because the run has played a row the trace's
@@ -1747,8 +1777,16 @@ each.
 module once, at its start. The *position* words are identical either way (both are the ring's
 priming, `0:0`), and the speed/tempo words at 404…407 differ (the port reads MUSIC0's patched
 6/120 where the trace still reads MUSIC1's 3/130), which is the one thing about this seam the
-phase does not carry. It is a transient of the boot rather than of the demo: no part can read
-it, because a part does not start before 404 in either of the two runs the port can make.
+phase does not carry. **What makes that invisible is which words a part can ask for, not which
+frame a part starts on** (ENDLOGO draws 404…407 itself): the six `dis_*` entries the demo's
+parts call (`DIS/DIS.H:37-59`) hand back a sync code (`dis_muscode`, `dis_musplus`,
+`dis_sync`), the published row (`dis_musrow`) and the tick counter (`_dis_getmframe`,
+`_dis_setmframe`) — **none of them returns `_np_speed` or `_np_tempo`**, and neither does any
+`DIS` wrapper in the tree. `MusicPosition::speed` and `::tempo` are the port's own, for the
+status line and the manifest, which the shell reads and no part does; and no ported part calls
+the music at all today (ENDLOGO's gate is Task 8's, and it waits on `dis_musplus`). So the
+difference is visible to a reader of the status line and of `Player::state` — and to nothing
+the part API can reach.
 
 ### Where the samples go: the device, the dump, and the status line
 
@@ -1789,7 +1827,11 @@ The **fade** is `audio::fade_music`, one pass of `MAIN/U2.ASM:333-346`'s loop bo
 module's own global-volume byte (`ds:[30h]`) less `step`, saturating at zero. The source's
 loop is a step a *frame* — its `int 0fch` is `dis_waitb()` — so the shell calls it once per
 tick with the step the demo passes (`mov cx,1` at `:927` and `:938`), from the moment the run
-has nothing left to play. That moment is the port's hold, which is `@@partsdone`
+has nothing left to play. The demo's other call site (`:927`) is **not wired**, and it is not
+an oversight: it sits in the `looping` path (`:919-933`, `looping` non-zero and not 2 — the
+`/gravis` and looping modes, D13), where the shell fades the music, restarts it at order 0 and
+jumps back to `@@partsagain`. The port has no looping mode and no equivalent of that path, so
+`@@partsdone`'s call is the one that has a place here. That moment is the port's hold, which is `@@partsdone`
 (`MAIN/U2.ASM:935-942`) in the shell's own terms: the plan has run out or the next part is one
 the port has not written. The fade is 64 frames at both modules' own `0x40`, and a run that
 holds at an unported part fades too — the original would be playing that part — which is the
@@ -1801,6 +1843,7 @@ port's hold being what marks the end of the run rather than a claim about the or
 |---|---|
 | the restart table against the shell's own source, line by line, and its guards against `partsmask` | `src/shell.rs`'s `every_row_of_the_restart_table_is_the_originals_own` |
 | the entry point's row is the one a run's plan finds | `src/shell.rs`'s `a_blocks_first_part_is_the_entry_point_its_row_is_about` |
+| **`SECOND 4`'s row is not entry-point-only**, and which rows are | `src/shell.rs`'s `one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` |
 | the music's start: the wait, the catch-up, and a run with its own numbering | `src/shell.rs`'s `the_music_waits_for_its_anchor_and_catches_up_past_it` |
 | **the published position against every frame of `reference/music/second5`** | `src/shell.rs`'s `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` |
 | the adapter: the published words it hands over, and the wait | `src/audio.rs`'s `the_adapter_hands_the_engine_the_players_published_words`, `the_adapter_waits_out_the_frames_before_the_music_starts` |
