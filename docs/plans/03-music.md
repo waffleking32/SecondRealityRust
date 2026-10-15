@@ -749,7 +749,9 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   (`reference/music/second5`) holds `(0, 0)` for 278 samples before the first published row, but that
   run is a `SECOND 5` boot, and ALKU is guarded off for it (`MAIN/U2.ASM:792`'s `whattorun & 1`), so
   ALKU does not appear in that trace at all. The trace shows the *position* is reached; ALKU's own
-  source shows *that part* calls from it, in a full run (`docs/fidelity/part-sequence.md`). **What the port does at the boundary, settled
+  source shows *that part* calls from it, in a full run (`docs/fidelity/part-sequence.md`).
+
+  **What the port does at the boundary, settled
   in Task 6's review**: the *near* end is **answered** with the object's own word — the bytes before
   the table are `pop es; ret` (`DIS/DISINT.ASM:420`, `:424`), identical in all three shells and
   pinned by the source, so `(0, 0)` returns −15609 as the C callers receive it (their `< N` waits,
