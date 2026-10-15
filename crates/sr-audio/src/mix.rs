@@ -100,17 +100,28 @@ const BASE_FREQ: u32 = 0x00da_7600;
 /// initial data: **21111**.
 ///
 /// It is read on every path the reference takes and written on none of them — the only store
-/// to it is `+0x228f`, in the PC-speaker initialiser, which the reference's SB Pro run never
-/// reaches (`_zoutputmode` is 5, `MAIN/U2.ASM:759`). The shell doubles `_zmixspeed` to 40000
+/// to it is `+0x228f`, inside `_zoutputmode == 2`'s branch, which `MAIN/U2.ASM:742-744` labels
+/// **Gravis** (the value it writes, 0x96bb = 38587, is 44100 × 7/8 — a GUS rate) and which the
+/// reference's SB Pro run never reaches (`_zoutputmode` is 5, `MAIN/U2.ASM:759`). The shell doubles `_zmixspeed` to 40000
 /// for that mode and leaves this word alone, so the reference's stereo voices step
 /// `14317056/period/21111` per frame while the frame rate is 20000 a second: **the reference's
-/// stereo playback runs 5.5 % flat** (`21111/20000`) and a mono run does not. The port keeps
+/// stereo playback runs **5.26 % flat** — one semitone is 5.95 % — because `21111/20000` is the
+/// reciprocal of the divisor's being 5.56 % too large, and a mono run is exact. The port keeps
 /// the object's word, so it is flat in the same proportion, and `music.md` §10 records it.
 const STEREO_DIVISOR: u32 = 0x5277;
 
 /// The object's one-shot marker for `m_loop` (`+0x48cb`): a voice whose loop word is this
 /// stops at `m_end` rather than rewrapping.
 const NO_LOOP: u32 = 0xffff_ffff;
+
+/// The bytes in the object's first mixed chunk: the DMA loop's countdown starts at 1
+/// (`+0x50ab`) and is rounded up to a multiple of 64 before the mixer sees it (`+0x50e6`).
+const FIRST_CHUNK: usize = 64;
+
+/// The object's table base offset index: silence is the 1024th of the curve's 2048 entries and
+/// the flush's `0x400 - centre_sum` puts a frame's own `value` on top of it, marked
+/// (`0x501 = 0x400 + 0x101`) or not.
+const INDEX_BASE_MARKED: i32 = 0x501;
 
 /// The largest position the object can hold: `m_pos`'s whole bytes are a 16-bit word
 /// (`+0x378a`: `mov 0x44(%bp),%si`), so nothing past this is reachable, and the bounds the
@@ -205,9 +216,11 @@ struct Voice {
     /// that has never been given one. The object's `m_base` is zero until a note start writes
     /// it (`+0x4886`, `+0x488d`) and `m_speed` is 0 until then, so the two mean the same.
     instrument: Option<u8>,
-    /// `m_end`, in sample bytes: where the voice stops or rewraps.
+    /// `m_end` (`+0x48`), in sample bytes: where the voice stops or rewraps. The note start
+    /// puts the header's **`lend`** here.
     end: u32,
-    /// `m_loop`, in sample bytes: where a rewrapped voice continues, or [`NO_LOOP`].
+    /// `m_loop` (`+0x4c`), in sample bytes: the header's **`lbeg`** — where a rewrapped voice
+    /// continues — or [`NO_LOOP`].
     loop_start: u32,
     /// `m_speed`, 16.16 sample bytes an output frame, cached against `cached_period`.
     speed: u32,
@@ -339,6 +352,20 @@ pub const RING_SAMPLES: usize = 8192;
 pub struct Mixer {
     voices: [Voice; CHANNELS],
     ring: Ring,
+    /// The output curve, rebuilt when the module's master-volume byte or the output mode
+    /// changes — which is when the object's header watch rebuilds it (`+0x53af`, `+0x5420`).
+    curve: Curve,
+    /// How many of the next output samples are read against the object's *unmarked*
+    /// accumulator planes.
+    ///
+    /// `+0x2943` zeroes the planes and every flush re-marks the words it read with `0x0101`
+    /// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`), so a frame's index is
+    /// `0x400 − centre sum + accumulator` while the planes are the zeroed ones and
+    /// `0x501 − centre sum + accumulator` — the marker's `0x101` — afterwards. Only the first
+    /// chunk after the planes are zeroed is unmarked, and that chunk is 64 bytes: the DMA
+    /// loop's countdown starts at 1 (`+0x50ab`) and is rounded up to a multiple of 64 before
+    /// mixing (`+0x50e6`'s `add $0x41,%ax; and $0xffc0,%ax`).
+    unmarked: usize,
     /// The samples the ring's overflow policy evicted.
     dropped: u64,
     /// A stereo frame the last budget split: the left sample went out, this is its right.
@@ -367,6 +394,10 @@ impl Mixer {
         Mixer {
             voices: [Voice::default(); CHANNELS],
             ring: Ring::new(capacity),
+            // The reference's own: the modules' master volume byte is 0xB0 and its output mode
+            // is SB Pro's stereo, and the curve is rebuilt from the module at the first mix.
+            curve: Curve::new(0xb0, true),
+            unmarked: FIRST_CHUNK,
             dropped: 0,
             held_right: None,
             last_frame: (0, 0),
@@ -398,21 +429,37 @@ impl Mixer {
         self.dropped = 0;
         self.held_right = None;
         self.last_frame = (0, 0);
+        // The curve and the plane marker are the *card's*, not the song's: `_zplaysong` clears
+        // the channels (`+0x5614`) and touches neither the table nor the accumulator planes.
     }
 
     /// Give a channel a fresh sample: the note start's half of the mixer's state.
     ///
     /// `+0x4872`…`+0x48cb` is where the object writes `m_base`, `m_end` and `m_loop` from the
-    /// instrument header it just loaded. A sample that loops (`flags` bit 0, `+0x4894`) and
-    /// whose loop does not begin at 0 (`+0x489c`) keeps its loop; everything else is a
-    /// one-shot that ends at the sample's length, which is the object's `+0x48be` path plus
-    /// the slack `checkins` pads behind every sample in memory (`module.rs`'s `Instrument`).
+    /// instrument header it just loaded, and the two bounds are the header's own two loop
+    /// fields: **`m_loop` takes `lbeg`** (`+0x4890` reads `es:0x18` into `ax` — `lend`, the
+    /// loader's layout `STARTEMS.C:28-48` — `+0x48a1` reads `es:0x14` — `lbeg` — into `dx`,
+    /// and `+0x48a6` stores *that* into `0x4c(%si)`) and **`m_end` takes `lend`** (`+0x48b9`).
+    /// Reading those two the other way round gets the *bounds* right by symmetry and the
+    /// *rule* wrong, which is what this function did before the review: the test at `+0x489c`
+    /// is `cmp $0x0,%ax; je` on `ax` = `lend`, so what sends a sample down the object's
+    /// one-shot path is a **zero loop end**, not a loop that begins at 0.
     ///
-    /// The object's looping `m_end` is not the loop's end but the loop's end reduced by whole
-    /// loop lengths until it is small (`+0x48a9`…`+0x48b9`), so that the mixer's over-read
-    /// stays inside the padded sample. That value is congruent to the loop's end modulo the
-    /// loop's length, which is the only thing the rewrap's arithmetic uses — so the port keeps
-    /// the loop's end itself and reads no padding.
+    /// Combined with the loader's own rule — `checkins` clears the loop flag when
+    /// `lend <= lbeg` (`STARTEMS.C:145`) — a sample loops exactly when its flag is set and its
+    /// loop end is past its loop begin. That is not a formality: **five of MUSIC0's twelve
+    /// looping samples and one of MUSIC1's nine have `lbeg` 0 and `lend` = the length** — a
+    /// full-sample loop — and the object wraps them at the sample's end back to 0, where the
+    /// earlier reading stopped them once.
+    ///
+    /// The object's `m_end` is not always `lend`: when `lend` is at or below 500 it is reduced
+    /// by whole loop lengths until it is small (`+0x48ab`…`+0x48b7`), so that the mixer's
+    /// over-read stays inside the 512 bytes `checkins` copies in behind the loop
+    /// (`STARTEMS.C:157-161`). That value is congruent to `lend` modulo the loop's length, and
+    /// the rewrap's displacement `m_loop - m_end` is a whole number of loop lengths, so the
+    /// phase is the same either way — **and on these two modules the reduction never runs at
+    /// all**: every looping sample has a loop end well past 500 (`tests/mix.rs` prints the
+    /// census). The port keeps `lend` itself and reads no padding.
     pub fn start_note(&mut self, channel: usize, module: &Module, instrument: u8) {
         let Some(voice) = self.voices.get_mut(channel) else {
             return;
@@ -431,11 +478,15 @@ impl Mixer {
         voice.stopped = false;
         voice.speed = 0;
         voice.cached_period = 0;
-        if header.loops() && header.loop_begin != 0 && header.loop_end > header.loop_begin {
+        if header.loops() && header.loop_end > header.loop_begin {
             voice.loop_start = header.loop_begin.min(MAX_POS);
             voice.end = header.loop_end.min(MAX_POS);
         } else {
             voice.loop_start = NO_LOOP;
+            // `+0x48be`: `m_end` = the length plus 0x20, inside the 512 bytes of 0x80 `checkins`
+            // writes behind a one-shot (`STARTEMS.C:167-172`) — so the object's slack holds no
+            // sample data and the port's `end` = the length is the same signal, not a shorter
+            // one.
             voice.end = header.length.min(MAX_POS);
         }
     }
@@ -462,6 +513,12 @@ impl Mixer {
     ) {
         // `+0x55c4`: `[0x913] = min(global volume byte, 64) × 4`.
         let master = u16::from(global_volume.min(64)) * 4;
+        // The header watch rebuilds the curve whenever the byte it watches moves
+        // (`+0x5397`…`+0x53af`); the port rebuilds it when the multiplier it derives moves.
+        let mul = multiplier(module.master_volume(), options.stereo);
+        if self.curve.mul() != mul {
+            self.curve = Curve::build(mul);
+        }
         let width = if options.stereo { 2 } else { 1 };
         let mut budget = samples;
 
@@ -549,10 +606,44 @@ impl Mixer {
             advance(voice, channel);
         }
 
-        let left = widen(left);
-        let right = widen(right);
+        // `+0x30b4`/`+0x2cb4`: the accumulator less the centre sums, indexed into the curve at
+        // the base the planes' marker sets.
+        let left = self.emit(left);
+        // A mono mix writes one byte a frame, so only the left accumulator is an output sample;
+        // the right's value is still converted for `last_frame` but consumes no marker unit.
+        let right = if options.stereo {
+            self.emit(right)
+        } else {
+            self.peek(right)
+        };
         self.last_frame = (left, right);
         (left, right)
+    }
+
+    /// The base the planes are on: `0x400` while the first chunk's zeroed accumulators are
+    /// still unmarked, `0x501` once a flush has written the `0x0101` marker into them.
+    fn base(&self) -> i32 {
+        if self.unmarked > 0 {
+            INDEX_BASE_MARKED - 0x101
+        } else {
+            INDEX_BASE_MARKED
+        }
+    }
+
+    /// One output sample: the curve's entry for a frame's value, and the marker's consumption —
+    /// every *byte* the object writes consumes one of the first chunk's 64, so a stereo frame
+    /// consumes two and a mono frame one.
+    fn emit(&mut self, value: i32) -> i16 {
+        let base = self.base();
+        if self.unmarked > 0 {
+            self.unmarked -= 1;
+        }
+        self.curve.sample(base + value)
+    }
+
+    /// The same conversion without consuming a marker unit.
+    fn peek(&self, value: i32) -> i16 {
+        self.curve.sample(self.base() + value)
     }
 }
 
@@ -611,16 +702,94 @@ fn advance(voice: &mut Voice, channel: &mut Channel) {
     channel.position = voice.loop_start + overshoot;
 }
 
-/// The object's output conversion, in the port's linear case.
+// -------------------------------------------------------------------------------------------
+// The output curve
+// -------------------------------------------------------------------------------------------
+
+/// The object's output curve: the table `+0x551c`'s second half builds at `cs:[0x6c]` and the
+/// flush at `+0x2c89` applies.
 ///
-/// The accumulator is unsigned with each sounding voice's centre as its middle; the object
-/// subtracts the centre sum and indexes a table whose middle is silence (`music.md` §10). The
-/// port's `value` is already that difference — plus or minus about a thousand, the object's
-/// own full scale — and the shift takes it to i16: `±1024 × 32 = ±32768`. The object's table
-/// at its loudest is the same linear map, and its own clamp makes that the minimum gain it
-/// can be built with.
-fn widen(value: i32) -> i16 {
-    (value * 32).clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+/// **The multiplier.** The header watch (`+0x535e`…`+0x5391`) turns the module's master-volume
+/// byte into the byte at `[0x916]`, whose low seven bits `+0x5569` reads. See [`multiplier`].
+///
+/// **The table** (`+0x5565`…`+0x55c1`): `mul` is floored at `0x10` (`+0x5570`…`+0x5575`),
+/// `K = 0x8000 / mul` (`+0x557d`), and the buffer at `cs:[0x6c]` gets `0x800 - K` zero bytes
+/// (`+0x559d`/`+0x55a1`) followed by `K` entries of a ramp whose step is `65536 / K`
+/// (`+0x5588`) stored as the **high** byte of a 16-bit accumulator (`+0x55a7`: `mov %ah,(%di)`).
+/// So entry `0x800 - K + k` is `(k × (65536/K)) >> 8`.
+///
+/// At the reference's own byte — the modules' master volume is 176, `0xB0` — the multiplier is
+/// **64**, `K` is **512**, and the curve is 1536 zeros followed by 512 ramp entries: `value × 2`
+/// is the entry's index into 256 output levels. That is what the note's §10.3 is about.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Curve {
+    table: Vec<u8>,
+    mul: u8,
+}
+
+/// The multiplier byte the curve is built from, from the module header's master-volume byte
+/// (`Module::master_volume`, the file's offset 0x33) — the header watch's arithmetic at
+/// `+0x535e`…`+0x5391` follows by the builder's own floor at `+0x5575`.
+///
+/// Bit 7 of the byte is the *stereo* request. On a stereo output (the reference's mode 5,
+/// `MAIN/U2.ASM:759`) the byte becomes `min((v × 11) >> 3 − 2, 0x7f) | 0x80`, and the modules'
+/// 0xB0 gives `((48 × 11) >> 3) − 2 = 64` — the `mul` of 64 `music-clock.md` §5 measures
+/// through the published 2240. The subtraction is a 16-bit `sub $0x2,%ax` and its underflow
+/// meets `cmp $0x7f,%ax; jbe`, which *fails* for a wrapped value and resets to 0x7f — so a
+/// byte of `0x80` (volume 0, stereo asked for) gives a multiplier of 127, not 0. Without
+/// stereo the byte is `v & 0x7f` and the curve is the linear map.
+pub fn multiplier(master_volume: u8, stereo: bool) -> u8 {
+    let volume = master_volume & 0x7f;
+    let byte = if stereo && master_volume & 0x80 != 0 {
+        let scaled = (u16::from(volume) * 11) >> 3;
+        let clamped = match scaled.wrapping_sub(2) {
+            value if value > 0x7f => 0x7f,
+            value => value as u8,
+        };
+        clamped | 0x80
+    } else {
+        volume
+    };
+    (byte & 0x7f).max(0x10)
+}
+
+impl Curve {
+    /// The curve for a module's master-volume byte and an output mode, the way the object
+    /// builds one at `+0x53af`/`+0x5420` and at the sound init.
+    pub fn new(master_volume: u8, stereo: bool) -> Curve {
+        Curve::build(multiplier(master_volume, stereo))
+    }
+
+    /// The curve for a multiplier, without the header watch in front of it.
+    pub fn build(mul: u8) -> Curve {
+        let mul = mul.max(0x10);
+        let ramp = 0x8000 / usize::from(mul);
+        let step = 65536 / ramp;
+        let mut table = vec![0u8; 0x800];
+        for entry in 0..ramp {
+            table[0x800 - ramp + entry] = ((entry * step) >> 8) as u8;
+        }
+        Curve { table, mul }
+    }
+
+    /// The multiplier the table was built with — what [`Mixer::mix`] re-checks so that a
+    /// module or an output mode change rebuilds the curve the way `+0x53af` does.
+    pub fn mul(&self) -> u8 {
+        self.mul
+    }
+
+    /// One entry, and the widening the DMA's byte gets when it becomes a sample: the card
+    /// plays unsigned 8-bit, so 128 is its centre and the port's `i16` is `(byte − 128) × 256`.
+    ///
+    /// The index is clamped to the table's own 2048 entries. The object does not clamp: its
+    /// index is a 16-bit `bx` added to the base and read out of its own code segment, so a
+    /// signal further from silence than the table is wide reads whatever the linker put after
+    /// it — the note tables at `+0x97c` are 0x38 bytes past the table's end. The port has no
+    /// such neighbours to read and says so rather than inventing a value.
+    pub fn sample(&self, index: i32) -> i16 {
+        let entry = index.clamp(0, 0x7ff) as usize;
+        (i16::from(self.table[entry]) - 128) * 256
+    }
 }
 
 #[cfg(test)]
@@ -690,15 +859,67 @@ mod tests {
     }
 
     #[test]
-    fn the_output_shift_is_the_objects_full_scale() {
-        // ±1024, the accumulator's own range at the object's full scale, ×32 = ±32768.
-        assert_eq!(widen(0), 0);
-        assert_eq!(widen(127), 4064);
-        assert_eq!(widen(-127), -4064);
-        assert_eq!(widen(1024), i16::MAX);
-        assert_eq!(widen(-1024), -32768);
-        assert_eq!(widen(100_000), i16::MAX);
-        assert_eq!(widen(-100_000), i16::MIN);
+    fn the_multiplier_is_the_header_watchs_arithmetic() {
+        // +0x5362…+0x5391 with the modules' own master volume byte, 0xB0: 176 has bit 7 set
+        // (stereo asked for) and 48 in its low seven bits, so with a stereo output the byte
+        // becomes ((48 × 11) >> 3) − 2 = 64 with the stereo bit set — the 2240 the trace reads
+        // through the overlapping `_np_masterflags` byte, and a `mul` of 64.
+        assert_eq!(multiplier(0xb0, true), 64);
+        assert_eq!(multiplier(0xb0, false), 48);
+        // The floor the builder applies (+0x5570…+0x5575): 0x83's low bits are 3, whose
+        // `((3 × 11) >> 3) − 2` is 2, and a multiplier below 0x10 is built as 0x10.
+        assert_eq!(multiplier(0x83, true), 0x10);
+        // The underflow: 0x80's low bits are 0, so ((0 × 11) >> 3) − 2 wraps and the
+        // `cmp $0x7f,%ax; jbe` sends it to 0x7f.
+        assert_eq!(multiplier(0x80, true), 0x7f);
+    }
+
+    #[test]
+    fn the_curve_is_the_objects_own_table() {
+        // K = 0x8000/mul entries of ramp, the high byte of k × (65536/K), after 0x800 − K
+        // zeros. At the reference's mul of 64: K = 512, 1536 zeros, then (k × 128) >> 8 =
+        // k/2 — 0, 0, 1, 1, … 255, 255.
+        let curve = Curve::build(64);
+        assert_eq!(curve.mul(), 64);
+        for entry in [0usize, 1, 1024, 1535] {
+            assert_eq!(curve.table[entry], 0, "entry {entry} is in the zero region");
+        }
+        assert_eq!(curve.table[1536], 0);
+        assert_eq!(curve.table[1537], 0);
+        assert_eq!(curve.table[1538], 1);
+        assert_eq!(curve.table[1539], 1);
+        assert_eq!(curve.table[2046], 255);
+        assert_eq!(curve.table[2047], 255);
+        // The linear case, mul = 16: K = 2048, no zeros, and the ramp is k/8.
+        let linear = Curve::build(16);
+        assert_eq!(linear.table[0], 0);
+        assert_eq!(linear.table[8], 1);
+        assert_eq!(linear.table[1024], 128);
+        assert_eq!(linear.table[2047], 255);
+        // And the floor: a multiplier below 0x10 is built as 0x10.
+        assert_eq!(Curve::build(1).mul(), 0x10);
+        assert_eq!(Curve::build(1).table, linear.table);
+    }
+
+    #[test]
+    fn a_curve_entry_becomes_the_cards_unsigned_byte() {
+        // The card plays unsigned 8-bit, so the port's i16 is (byte − 128) × 256.
+        let curve = Curve::build(16);
+        assert_eq!(curve.sample(1024), 0, "index 1024 is the byte 128, the card's centre");
+        assert_eq!(curve.sample(0), -32768);
+        assert_eq!(curve.sample(2047), 127 * 256);
+        // The reference's own curve, at the marker's base: silence is index 0x501 = 1281, in
+        // the zero region, so it reads the byte 0 — the bottom of the card's range.
+        let curve = Curve::build(64);
+        assert_eq!(curve.sample(0x501), -32768, "the value 0 is silence");
+        assert_eq!(curve.sample(0x501 + 255), -32768, "index 1536, the ramp's first entry");
+        assert_eq!(curve.sample(0x501 + 256), -32768, "index 1537, still the byte 0");
+        assert_eq!(curve.sample(0x501 + 257), -32768 + 256, "index 1538, the byte 1");
+        assert_eq!(curve.sample(0x501 + 766), 32512, "index 2047, the byte 255");
+        // Past the table's end the port clamps where the object's 16-bit index would read its
+        // own segment's neighbours.
+        assert_eq!(curve.sample(0x501 + 100_000), 32512);
+        assert_eq!(curve.sample(-100_000), -32768);
     }
 
     #[test]

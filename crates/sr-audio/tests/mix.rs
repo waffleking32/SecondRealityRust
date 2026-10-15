@@ -79,17 +79,60 @@ fn value(sample: u8, level: u8) -> i32 {
     ((i32::from(sample) * scale) >> 8) - ((128 * scale) >> 8)
 }
 
-/// The port's conversion of that difference to `i16` (`mix.rs`'s `widen`): the object's own
-/// full scale is ±1024 and the shift takes it to ±32768.
-fn widen(value: i32) -> i16 {
-    (value * 32).clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+const MARKED: i32 = 0x501;
+const UNMARKED: i32 = 0x400;
+
+/// The number of the object's first mixed chunk: the DMA loop's countdown starts at 1
+/// (`+0x50ab`) and is rounded up to 64 (`+0x50e6`), and that chunk is flushed before any
+/// `0x0101` marker is written, so its index base is `0x400` where every later chunk's is
+/// `0x501`.
+const FIRST_CHUNK: usize = 64;
+
+/// The object's output curve, worked out by hand: `+0x5565`…`+0x55c1` builds `K = 0x8000/mul`
+/// ramp entries of `(k × (65536/K)) >> 8` after `0x800 − K` zeros, the flush indexes it with
+/// `0x400 − centre sum + accumulator` (`+0x2cb4`, `+0x30b4`) and the planes' own `0x0101`
+/// marker (`+0x2ce5`, `+0x30d0`) adds `0x101` to that, so the steady state's index is
+/// **`0x501 + value`**. The card plays unsigned 8-bit, so the port's `i16` is `(byte − 128) × 256`.
+fn curve_with(mul: u32, value: i32) -> i16 {
+    curve_at(mul, MARKED, value)
+}
+fn curve_at(mul: u32, base: i32, value: i32) -> i16 {
+    let k = 0x8000 / mul;
+    let step = 65536 / k;
+    let index = (base + value).clamp(0, 0x7ff) as u32;
+    let byte = if index < 0x800 - k {
+        0
+    } else {
+        (((index - (0x800 - k)) * step) >> 8) as u8
+    };
+    (i16::from(byte) - 128) * 256
+}
+
+/// The reference's own curve: the modules' master volume byte is 0xB0, whose
+/// `+0x5362`…`+0x5391` derivation gives a multiplier of **64**, so `K` is 512 — 1536 zeros and
+/// then 512 ramp entries of `k/2`, which is why a solo voice (whose values are at most ±127)
+/// reads the byte 0 for every sample.
+fn curve(value: i32) -> i16 {
+    curve_with(64, value)
+}
+
+/// MUSIC0 with one header byte replaced. The master volume byte is 0x33, and `0x82` is
+/// stereo | 2, whose derivation `((2 × 11) >> 3) − 2` underflows into the builder's own floor
+/// of 0x10 — the *linear* curve, the one the object builds when nothing else asks for more, and
+/// the one the voice arithmetic below is visible through.
+fn module_with_master_volume(byte: u8) -> Module {
+    let mut bytes = shipped("MUSIC0.S3M");
+    bytes[0x33] = byte;
+    let mut module = Module::load(&bytes).expect("MUSIC0 with one byte patched");
+    module.apply_tempo_patch(0x78);
+    module
 }
 
 /// The samples one voice plays, worked out by hand from the module's bytes: the table value at
 /// the position, the position advanced by the object's 16.16 step, and the loop's rewrap —
 /// `+0x3840`…`+0x385a` adds `m_loop - m_end` and keeps the overshoot, and a one-shot voice
 /// stops at its end (`+0x3845`).
-fn expected_voice(
+fn expected_values(
     bytes: &[u8],
     level: u8,
     step: u32,
@@ -97,7 +140,7 @@ fn expected_voice(
     end: u32,
     loop_start: Option<u32>,
     frames: usize,
-) -> Vec<i16> {
+) -> Vec<i32> {
     let mut position = start;
     let mut low: u16 = 0;
     let mut out = Vec::with_capacity(frames);
@@ -107,7 +150,7 @@ fn expected_voice(
             continue;
         }
         let byte = bytes[position as usize];
-        out.push(widen(value(byte, level)));
+        out.push(value(byte, level));
         let (next_low, carry) = low.overflowing_add((step & 0xffff) as u16);
         low = next_low;
         position += (step >> 16) + u32::from(carry);
@@ -119,6 +162,55 @@ fn expected_voice(
         }
     }
     out
+}
+
+/// [`expected_values`] through a curve, as a **stereo** window: a frame's left sample is the
+/// output sample `2 × frame`, so the first 32 frames are the unmarked chunk's 64 samples and
+/// every later one is read against the planes' marker.
+#[allow(clippy::too_many_arguments)]
+fn expected_voice(
+    mul: u32,
+    bytes: &[u8],
+    level: u8,
+    step: u32,
+    start: u32,
+    end: u32,
+    loop_start: Option<u32>,
+    frames: usize,
+) -> Vec<i16> {
+    expected_values(bytes, level, step, start, end, loop_start, frames)
+        .into_iter()
+        .enumerate()
+        .map(|(frame, value)| {
+            curve_at(
+                mul,
+                if frame * 2 < FIRST_CHUNK {
+                    UNMARKED
+                } else {
+                    MARKED
+                },
+                value,
+            )
+        })
+        .collect()
+}
+
+/// The 16.16 walk the mixer performs, to find the first frame that reads inside the loop
+/// again: the frame after the one whose advance reached `m_end`, and the position the rewrap
+/// left — `+0x3856`'s `m_loop - m_end` keeps the overshoot, so it need not land on `lbeg`.
+fn wrap_frame(step: u32, end: u32, loop_start: u32) -> (usize, u32) {
+    let mut position = 0u32;
+    let mut low = 0u16;
+    for frame in 0..1_000_000 {
+        let (next_low, carry) = low.overflowing_add((step & 0xffff) as u16);
+        low = next_low;
+        position += (step >> 16) + u32::from(carry);
+        if position >= end {
+            position = loop_start + (position - end);
+            return (frame + 1, position);
+        }
+    }
+    panic!("the voice never reached its end");
 }
 
 /// A channel holding nothing but the three fields the mixer reads.
@@ -137,93 +229,149 @@ fn channel(period: u16, volume: u8, position: u32) -> Channel {
 
 #[test]
 fn one_voice_is_the_modules_own_sample_bytes() {
-    // MUSIC0, instrument 1 (the file's first PCM header), channel 0 — whose pan entry is 0,
-    // the module's own table (`channel_pan`), so its samples land in the left i16.
-    //
-    // The note is C-4 at the format's reference: period 1712, which is what a note at
-    // `c2spd` 8363 leaves (`effects.rs`'s `scaled_period`). The level is 32 — the middle of
-    // the range, scale 129, so a silent sample's centre is 64 and the table's values run 0…129.
-    let module = module("MUSIC0");
-    let bytes = module.sample_bytes(0).expect("MUSIC0's first sample");
-    let header = module.instrument(0).expect("MUSIC0's first header");
-    assert!(header.is_pcm() && header.loops(), "the first sample loops");
+    // MUSIC0 with its master-volume byte asking for the *linear* curve
+    // (`module_with_master_volume`: 0x82 is stereo | 2, whose derivation underflows into the
+    // builder's own floor of 0x10), its eleventh sample — a one-shot whose first bytes swing
+    // widely, 115, 176, 162, 147, … — at level 63, playing C-4 at the format's reference period
+    // 1712, mixed **mono** so that the drain is one i16 a frame and the whole mix is one voice.
+    let module = module_with_master_volume(0x82);
+    let bytes = module.sample_bytes(10).expect("MUSIC0's eleventh sample");
+    let header = module.instrument(10).expect("its header");
+    assert!(header.is_pcm() && !header.loops() && header.length > 512);
+    assert_eq!(&bytes[..4], &[115, 176, 162, 147]);
 
-    let level = 32u8;
+    let level = 63u8;
     let period = 1712u16;
-    let options = PlayerOptions::default();
-    let voice_step = step(period, STEREO_DIVISOR);
+    let options = PlayerOptions {
+        stereo: false,
+        ..PlayerOptions::default()
+    };
+    let voice_step = step(period, 40000);
 
     let mut channels = [Channel::default(); CHANNELS];
     channels[0] = channel(period, level, 0);
     let mut mixer = Mixer::new_with_capacity(4096);
-    mixer.start_note(0, &module, 1);
+    mixer.start_note(0, &module, 11);
 
-    // One tick's worth at tempo 120: 833 samples, i.e. 833 i16 = 416 stereo frames and a half.
-    let mut out = vec![0i16; 833];
+    let frames = 256;
+    let mut out = vec![0i16; frames];
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
-    let expected = expected_voice(
+    let values = expected_values(
         bytes,
         level,
         voice_step,
         0,
-        header.loop_end,
-        Some(header.loop_begin),
-        417,
+        header.length,
+        None,
+        frames,
     );
-    for frame in 0..416 {
-        assert_eq!(
-            out[frame * 2],
-            expected[frame],
-            "frame {frame}, left: byte {} at the position the 16.16 step reaches",
-            bytes[((frame as u64 * u64::from(voice_step)) >> 16) as usize]
-        );
-        assert_eq!(
-            out[frame * 2 + 1],
-            0,
-            "frame {frame}, right: channel 0 is the module's leftmost pan"
-        );
-    }
-
-    // And the numbers themselves, printed so the note can quote them. The module's first four
-    // sample bytes are 127, 128, 128, 128 and the positions 0, 0, 0, 1: at level 32 the scale
-    // is 129 and the centre is (128 × 129) >> 8 = 64, so a byte of 127 is one below it and a
-    // byte of 128 is exactly it — the first three frames are −1 × 32 and the fourth is 0.
-    let bytes_here: Vec<u8> = (0..8)
-        .map(|frame| bytes[((frame as u64 * u64::from(voice_step)) >> 16) as usize])
+    let expected: Vec<i16> = values
+        .iter()
+        .enumerate()
+        .map(|(frame, value)| {
+            curve_at(16, if frame < FIRST_CHUNK { UNMARKED } else { MARKED }, *value)
+        })
         .collect();
-    println!(
-        "MUSIC0 instrument 1, channel 0, level 32, period 1712, step {voice_step} (16.16):\n  \
-         sample bytes {:?}\n  the first eight left samples {:?}",
-        bytes_here,
-        &expected[..8]
-    );
-    assert_eq!(
-        &bytes[..4],
-        &[127, 128, 128, 128],
-        "MUSIC0's first sample bytes"
-    );
-    assert_eq!(SCALE[32], 129);
-    assert_eq!((128 * 129) >> 8, 64, "the level's centre");
-    assert_eq!(&bytes_here[..8], &[127, 127, 127, 128, 128, 128, 128, 128]);
-    assert_eq!(
-        &expected[..4],
-        &[-32, -32, -32, 0],
-        "the hand-computed frames"
-    );
-    for (frame, byte) in bytes_here.iter().enumerate() {
+    let positions: Vec<usize> = {
+        let mut position = 0u32;
+        let mut low = 0u16;
+        (0..frames)
+            .map(|_| {
+                let here = position as usize;
+                let (next_low, carry) = low.overflowing_add((voice_step & 0xffff) as u16);
+                low = next_low;
+                position += (voice_step >> 16) + u32::from(carry);
+                here
+            })
+            .collect()
+    };
+    for frame in 0..frames {
         assert_eq!(
-            expected[frame],
-            widen(value(*byte, level)),
-            "frame {frame}: byte {byte} at level {level}"
+            out[frame], expected[frame],
+            "frame {frame}: byte {} at position {}",
+            bytes[positions[frame]], positions[frame]
         );
     }
 
-    // The step is 8362 × 65536 / 21111 = 25958 in 16.16: 0.396 of a sample byte a frame, so
-    // 416 frames read 164 bytes of the sample — the same bytes the object would read.
-    assert_eq!(voice_step, 25958);
-    assert_eq!((416 * u64::from(voice_step)) >> 16, 164);
+    // And the numbers written out, so the arithmetic can be checked without running anything.
+    // At level 63 the scale is 255 and the centre is (128 × 255) >> 8 = 127, so the sample's
+    // 115 is −13 and its 176 is +48; the curve's index is `0x501 + value`, and with the
+    // *linear* curve (`mul` 16 → `K` 2048 → no zeros and a step of 32) the byte is `index / 8`:
+    // 1268 / 8 = 158 and 1329 / 8 = 166, i.e. 7680 and 9728 once the card's 128-centred byte is
+    // widened.
+    println!(
+        "MUSIC0 instrument 11, channel 0, level 63, period 1712, step {voice_step} (16.16), \
+         mono, linear curve:\n  sample bytes {:?}\n  the first eight samples {:?}",
+        positions[..8]
+            .iter()
+            .map(|p| bytes[*p])
+            .collect::<Vec<u8>>(),
+        &out[..8]
+    );
+    assert_eq!((115 * 255) >> 8, 114);
+    assert_eq!((128 * 255) >> 8, 127);
+    assert_eq!(value(115, 63), -13);
+    assert_eq!(value(176, 63), 48);
+    assert_eq!(0x501 + 48, 1329);
+    assert_eq!(1329 / 8, 166);
+    assert_eq!(curve_at(16, MARKED, 48), 9728, "the steady state's index 1329");
+    assert_eq!(curve_at(16, UNMARKED, -13), -512, "the first chunk's index 1011");
+    // The first 64 samples are the unmarked chunk: the sample's 115 is the value −13, index
+    // 0x400 − 13 = 1011, byte 126, i.e. −512; its 176 is the value +48, index 1072, byte 134,
+    // i.e. 1536. The positions are 0 five times and then 1, so the first five samples are the
+    // first and the next three the second.
+    assert_eq!(
+        &out[..8],
+        &[-512, -512, -512, -512, -512, 1536, 1536, 1536]
+    );
+    assert_eq!(
+        out[FIRST_CHUNK],
+        curve_at(16, MARKED, values[FIRST_CHUNK]),
+        "and the sample after the first chunk is read against the marker"
+    );
+
+    // The step is 14317056/1712 × 65536 / 40000 = 13700 in 16.16 — 0.209 of a sample byte a
+    // frame — so 256 frames read 53 bytes of the sample: positions 0 four times, then 1.
+    assert_eq!(voice_step, 13_700);
+    assert_eq!(positions[..8], [0, 0, 0, 0, 0, 1, 1, 1]);
+    assert_eq!(positions[255], 53);
+}
+
+#[test]
+fn the_references_own_curve_gates_a_solo_voice() {
+    // The same voice on the modules' *own* master-volume byte, 0xB0 → `mul` 64, whose curve is
+    // 1536 zeros and then 512 entries of `k/2`: an index below 1536 is the byte 0. A solo
+    // voice's value is at most ±127 — `(255 × 255) >> 8 = 254` against the centre's 127 — so
+    // `0x501 + value` never reaches 1536 and **every sample is the byte 0**, i.e. −32768. That
+    // is what the object's own configuration does with one voice, and it is not a defect of the
+    // port: it is what the table at `+0x551c` builds for `mul` 64.
+    let module = module("MUSIC0");
+    assert_eq!(module.master_volume(), 0xb0);
+    assert_eq!(sr_audio::multiplier(module.master_volume(), true), 64);
+
+    let bytes = module.sample_bytes(10).expect("MUSIC0's eleventh sample");
+    let options = PlayerOptions::default();
+    let mut channels = [Channel::default(); CHANNELS];
+    channels[0] = channel(1712, 63, 0);
+    let mut mixer = Mixer::new_with_capacity(1024);
+    mixer.start_note(0, &module, 11);
+    let frames = 256;
+    let mut out = vec![0i16; frames * 2];
+    mixer.mix(&module, &mut channels, &options, 64, false, out.len());
+    assert_eq!(mixer.take(&mut out), out.len());
+
+    assert_eq!(curve(0), -32768, "the gate's byte");
+    assert_eq!(curve(127), -32768, "a solo voice's loudest value");
+    assert!(
+        out.iter().all(|sample| *sample == -32768),
+        "both sides: the voice is on the left pan and the right's index is the marker's"
+    );
+    // The loudest byte the sample carries, at the top level, is still inside the gate.
+    let loudest = bytes.iter().copied().max().unwrap();
+    assert_eq!(value(loudest, 63), (i32::from(loudest) * 255 / 256) - 127);
+    assert!(value(loudest, 63) < 255);
 }
 
 #[test]
@@ -231,7 +379,7 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
     // The object's mono path is one accumulator over all sixteen channels (`+0x39cd`), so a
     // hard-right channel is *not* lost — the pan is the stereo path's. Channel 1 of MUSIC0 is
     // the module's rightmost pan (its table entry is 8).
-    let module = module("MUSIC0");
+    let module = module_with_master_volume(0x82);
     let bytes = module.sample_bytes(0).expect("MUSIC0's first sample");
     let header = module.instrument(0).expect("MUSIC0's first header");
     let options = PlayerOptions {
@@ -251,7 +399,7 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
-    let first = expected_voice(
+    let first = expected_values(
         bytes,
         32,
         voice_step,
@@ -260,7 +408,7 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
         Some(header.loop_begin),
         256,
     );
-    let second = expected_voice(
+    let second = expected_values(
         bytes,
         16,
         voice_step,
@@ -269,11 +417,22 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
         Some(header.loop_begin),
         256,
     );
+    println!(
+        "mono: first {:?} second {:?} sums {:?} out {:?}",
+        &first[..6],
+        &second[..6],
+        (0..6).map(|f| first[f] + second[f]).collect::<Vec<i32>>(),
+        &out[..6]
+    );
     for frame in 0..256 {
         assert_eq!(
             out[frame],
-            widen((i32::from(first[frame]) + i32::from(second[frame])) / 32),
-            "frame {frame}: both channels, one i16"
+            curve_at(
+                16,
+                if frame < FIRST_CHUNK { UNMARKED } else { MARKED },
+                first[frame] + second[frame]
+            ),
+            "frame {frame}: both channels through one curve"
         );
     }
 }
@@ -284,12 +443,35 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
     // first sample loops (its header's flags bit 0 is set and its loop begins at 5720), and a
     // sample that does not loop stops dead at its length (`+0x48be`'s `m_loop` = 0xffff, then
     // `+0x3845`'s `m_speed = 0`).
-    let module = module("MUSIC0");
+    // The module whose master-volume byte asks for the linear curve: the modules' own byte
+    // gives `mul` 64, whose gate swallows a solo voice entirely (see the gate test above), and
+    // this test is about the *bounds*, so the values have to be visible.
+    let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let rate = STEREO_DIVISOR;
 
     let looping = module.instrument(0).expect("MUSIC0's first header").clone();
     assert!(looping.loops() && looping.loop_begin > 0);
+
+    // The case the review caught: a full-sample loop, `lbeg` 0 with `lend` = the length. The
+    // object wraps these at the sample's end back to 0 (`m_loop` = the header's `lbeg`, which
+    // is 0) — the reading that tested `lbeg != 0` played them once and stopped.
+    let full_loop_index = (0..32)
+        .find(|index| {
+            module.instrument(*index).is_some_and(|header| {
+                header.is_pcm()
+                    && header.loops()
+                    && header.loop_begin == 0
+                    && header.loop_end > header.loop_begin
+            })
+        })
+        .expect("MUSIC0 carries full-sample loops");
+    let full_loop = module
+        .instrument(full_loop_index)
+        .expect("the header")
+        .clone();
+    assert_eq!(full_loop.loop_begin, 0);
+    assert_eq!(full_loop.loop_end, full_loop.length);
 
     let one_shot_index = (0..32)
         .find(|index| {
@@ -312,6 +494,11 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
 
     for (index, header, loop_start) in [
         (1u8, looping.clone(), Some(looping.loop_begin)),
+        (
+            full_loop_index as u8 + 1,
+            full_loop.clone(),
+            Some(full_loop.loop_begin),
+        ),
         (one_shot_index as u8 + 1, one_shot.clone(), None::<u32>),
     ] {
         let bytes = module
@@ -334,6 +521,7 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
         assert_eq!(mixer.take(&mut out), frames * 2);
 
         let expected = expected_voice(
+            16,
             bytes,
             63,
             voice_step,
@@ -351,17 +539,48 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
         }
         if loop_start.is_none() {
             // Past its length the voice is stopped and stays stopped: `+0x384d`'s `m_speed = 0`.
-            let stop = header.length as usize / (voice_step >> 16) as usize + 1;
-            assert!(stop < frames, "the one-shot stopped inside the window");
+            // The frame it stops on is the by-hand walk's, not an assumption about the step.
+            // The stop is the last frame the by-hand model *plays*: the curve's own zero entry
+            // is not enough to find it, because a playing frame whose value is small maps to
+            // the same entry.
+            let zero = curve_at(16, MARKED, 0);
+            let stop = expected
+                .iter()
+                .rposition(|sample| *sample != zero)
+                .map(|last| last + 1)
+                .unwrap_or_else(|| {
+                    panic!("instrument {index}: the one-shot stopped inside the window")
+                });
+            assert!(stop < frames, "instrument {index}: it stopped inside the window");
             assert!(
-                out[stop * 2..].iter().all(|sample| *sample == 0),
-                "every frame after the end is silent"
+                expected[stop..].iter().all(|sample| *sample == zero),
+                "the by-hand model never plays again"
+            );
+            assert!(
+                out[stop * 2..].iter().all(|sample| *sample == zero),
+                "and every frame the port produced after the end is the curve's zero entry"
             );
         } else {
-            // A looping voice never stops: the loop rewraps it while the window lasts.
+            // A looping voice never stops: the loop rewraps it while the window lasts, and for
+            // the full-sample loop the frame after the sample's end is the sample's own first
+            // byte again — `m_loop` is 0, so the rewrap goes back to the start.
+            // The loop never stops: the by-hand sequence above covers frames past the sample's
+            // end, so the equality already pins the rewrap rather than a stop. What is left is
+            // to say *where* the wrap lands: the position reaches `m_end` on an advance, and
+            // `+0x3856` adds `m_loop - m_end` to it, overshoot and all.
+            let (after, position) = wrap_frame(voice_step, end, header.loop_begin);
             assert!(
                 out[..].iter().any(|sample| *sample != 0),
                 "the loop kept producing samples"
+            );
+            assert!(
+                (header.loop_begin..end).contains(&position),
+                "instrument {index}: the rewrapped position {position} is inside the loop"
+            );
+            assert_eq!(
+                out[after * 2],
+                curve_with(16, value(bytes[position as usize], 63)),
+                "instrument {index}: the first frame after the rewrap reads the loop"
             );
         }
     }
@@ -459,34 +678,70 @@ fn two_runs_of_a_window_are_byte_identical() {
 
 #[test]
 fn the_window_is_not_silent() {
-    // A mixer that produces zeros passes every "does it run" test, so this one asks for
-    // signal: how many samples are not zero, how far from zero the furthest is, and that the
-    // first note's attack is audible.
+    // A mixer that produces the curve's own silence for every sample passes every "does it
+    // run" test, so this one asks for signal: how many samples are *not* the silence entry,
+    // how many distinct levels the window reaches, and what its extremes are. Two things are
+    // stated rather than assumed: the reference's own curve is a gate (a sample is the silence
+    // entry whenever the mix's value is below the gate's knee), and the silence entry is the
+    // byte 0, i.e. −32768, once the planes are marked.
     let mut player = Player::new(module("MUSIC0"), PlayerOptions::default());
     player.play_song(0);
     let mut samples = Vec::new();
     for _ in 0..120 {
         samples.extend(poll_and_drain(&mut player));
     }
-    let nonzero = samples.iter().filter(|sample| **sample != 0).count();
-    let peak = samples
+    let silence = curve(0);
+    let silent = samples.iter().filter(|sample| **sample == silence).count();
+    let loudest = samples.iter().copied().max().expect("a window");
+    let quietest = samples.iter().copied().min().expect("a window");
+    let distinct = samples
         .iter()
-        .map(|sample| i32::from(*sample).abs())
-        .max()
-        .expect("a window");
+        .copied()
+        .collect::<std::collections::BTreeSet<i16>>()
+        .len();
     println!(
-        "MUSIC0's first 120 polls: {} samples, {nonzero} of them not zero, peak {peak}",
+        "MUSIC0's first 120 polls: {} samples, {silent} of them the curve's silence ({}), \
+         {distinct} distinct values, quietest {quietest}, loudest {loudest}",
+        samples.len(),
+        silence
+    );
+    assert_eq!(
+        samples[..64],
+        [curve_at(64, UNMARKED, 0); 64],
+        "the first chunk's unmarked planes are their own silence"
+    );
+
+    // The first 120 polls are *inside* the reference's gate: `mul` 64's curve is 1536 zero
+    // entries and then a ramp, so a sample is the silence entry until the mix's value reaches
+    // 255 — and MUSIC0's intro does not. The window is therefore extended until the gate has
+    // opened, which is the honest form of "the output is not silent": the mixer is not
+    // producing a constant, and this says how long it takes to hear that.
+    for _ in 0..4000 {
+        samples.extend(poll_and_drain(&mut player));
+    }
+    let above = samples.iter().filter(|sample| **sample > silence).count();
+    let peak = samples.iter().copied().max().expect("a window");
+    let distinct = samples
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<i16>>()
+        .len();
+    println!(
+        "MUSIC0's first 4120 polls ({} samples): {above} above the silence entry, peak {peak}, \
+         {distinct} distinct values",
         samples.len()
     );
+    assert!(above > 0, "the gate opened somewhere in the window");
+    assert!(distinct > 16, "the ramp is reached: {distinct} distinct values");
     assert!(
-        nonzero > samples.len() / 4,
-        "{nonzero} of {} are not zero",
-        samples.len()
+        samples.iter().all(|sample| *sample >= silence),
+        "the curve's floor is its zero entry, so nothing is below the silence"
     );
-    assert!(peak > 1000, "the peak is {peak}");
     assert!(
-        samples.iter().all(|sample| *sample != i16::MIN),
-        "nothing pinned to the bottom of the range"
+        above < samples.len() / 100,
+        "and the reference's own gate is closed for the great majority of it: {above} of {} \
+         are above the silence",
+        samples.len()
     );
 }
 
@@ -559,13 +814,12 @@ fn a_device_that_stops_draining_loses_the_oldest_samples() {
     let mut out = vec![0i16; 4];
     assert_eq!(player.take_samples(&mut out), 4);
     let engine = player.engine_position();
-    let frame_before = player.last_mixed_frame();
+    let dropped_before = player.dropped_samples();
     player.poll();
-    assert_eq!(player.engine_position(), engine);
-    assert_ne!(
-        player.last_mixed_frame(),
-        frame_before,
-        "the mixer is still producing frames while the device is behind"
+    assert_eq!(player.engine_position(), engine, "a poll advances nothing here");
+    assert!(
+        player.dropped_samples() > dropped_before,
+        "the mixer is still producing samples while the device is behind"
     );
     assert_eq!(player.pending_samples(), sr_audio::RING_SAMPLES);
 
@@ -579,8 +833,11 @@ fn a_device_that_stops_draining_loses_the_oldest_samples() {
 #[test]
 fn a_note_off_leaves_the_voice_silent() {
     // `0xfe` parks the position at 1 and the volume at 0 (`effects.rs`'s note start), and the
-    // mixer then plays the sample at the centre — silence at level 0 whatever the byte is.
-    let module = module("MUSIC0");
+    // mixer then plays the sample at the centre — silence at level 0 whatever the byte is. The
+    // master-volume byte is the one that asks for the linear curve, so the *curve's* own entry
+    // for a value of 0 is visible: the byte 128 (0) while the planes are unmarked and the
+    // marker's byte 160 (8192) after, which is the object's own DC and not the voice's.
+    let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let mut channels = [Channel::default(); CHANNELS];
     channels[0] = channel(1712, 0, 1);
@@ -589,17 +846,21 @@ fn a_note_off_leaves_the_voice_silent() {
     let mut out = vec![0i16; 128];
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), 128);
-    assert!(
-        out.iter().all(|sample| *sample == 0),
-        "a level of 0 is silence for every sample byte"
-    );
+    // A level of 0 makes every sample's value 0, so the samples are the curve's own entry for
+    // 0 — 0 while the planes are unmarked, and the marker's 8192 after — and never the note.
+    assert_eq!(curve_at(16, UNMARKED, 0), 0);
+    assert_eq!(curve_at(16, MARKED, 0), 8192);
+    assert_eq!(&out[..64], &[0i16; 64], "the unmarked first chunk");
+    assert!(out[64..].iter().all(|sample| *sample == 8192));
 }
 
 #[test]
 fn shutting_up_silences_the_voices_and_a_row_starts_them_again() {
     // `_zshutup` (`MAIN/STMIK.H:39`) and the "volume 0" path's channel-freeing: the player's
-    // `silenced` flag is what the mixer reads, and a row's first tick clears it.
-    let module = module("MUSIC0");
+    // `silenced` flag is what the mixer reads, and a row's first tick clears it. The module is
+    // the one whose curve lets a solo voice through, so "was playing" and "is silent" are
+    // distinguishable at all.
+    let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let mut channels = [Channel::default(); CHANNELS];
     channels[0] = channel(1712, 63, 0);
@@ -615,22 +876,32 @@ fn shutting_up_silences_the_voices_and_a_row_starts_them_again() {
     mixer.mix(&module, &mut channels, &options, 64, true, quiet.len());
     assert_eq!(mixer.take(&mut quiet), quiet.len());
     assert!(
-        quiet.iter().all(|sample| *sample == 0),
-        "shut up is silent at any volume"
+        quiet
+            .iter()
+            .all(|sample| *sample == curve_at(16, UNMARKED, 0) || *sample == curve_at(16, MARKED, 0)),
+        "shut up silences every voice, so the samples are the curve's own zero entry"
     );
+    assert_ne!(quiet, loud, "and that is not what it was playing before");
 }
 
 #[test]
-fn the_modules_looping_samples_and_the_objects_zero_loop_rule() {
-    // `+0x489c`: a sample whose loop **begins at 0** takes the one-shot path even when its
-    // header's loop flag is set — `cmp $0x0,%ax; je` sends it to `+0x48be` — so the object
-    // plays it once and stops. The port's `start_note` keeps that rule, and this counts what
-    // it means for the two shipped files.
-    for name in ["MUSIC0", "MUSIC1"] {
+fn the_modules_loops_and_the_objects_zero_loop_end_rule() {
+    // `+0x4890` reads the header's **`lend`** (`es:0x18`) into `ax` and `+0x489c` sends it to
+    // the one-shot path when it is **0**; `+0x48a6` puts **`lbeg`** (`es:0x14`) into `m_loop`.
+    // With the loader's own rule that clears the loop flag when `lend <= lbeg`
+    // (`STARTEMS.C:145`), a sample loops exactly when its flag is set and its loop end is past
+    // its loop begin — and the case that separates that rule from "the loop must not begin at
+    // 0" is not hypothetical: **five of MUSIC0's twelve looping samples and one of MUSIC1's
+    // nine have `lbeg` 0 with `lend` = the length**, a full-sample loop the object wraps at the
+    // sample's end back to 0.
+    for (name, looping, zero_begin, one_shot) in
+        [("MUSIC0", 12, 5, 10), ("MUSIC1", 9, 1, 32)]
+    {
         let module = module(name);
-        let mut looping = 0;
-        let mut zero_begin = 0;
-        let mut one_shot = 0;
+        let mut loops = 0;
+        let mut begins_at_zero = 0;
+        let mut one_shots = 0;
+        let mut zero_ends = 0;
         for index in 0..module.instrument_count() {
             let Some(header) = module.instrument(index) else {
                 continue;
@@ -638,30 +909,31 @@ fn the_modules_looping_samples_and_the_objects_zero_loop_rule() {
             if !header.is_pcm() {
                 continue;
             }
-            if !header.loops() {
-                one_shot += 1;
-            } else if header.loop_begin == 0 {
-                zero_begin += 1;
+            if header.loops() && header.loop_end > header.loop_begin {
+                loops += 1;
+                if header.loop_begin == 0 {
+                    begins_at_zero += 1;
+                    assert_eq!(
+                        header.loop_end, header.length,
+                        "{name} instrument {}: a full-sample loop",
+                        index + 1
+                    );
+                }
             } else {
-                looping += 1;
+                one_shots += 1;
+                if header.loops() {
+                    zero_ends += 1;
+                }
             }
         }
         println!(
-            "{name}: {looping} samples loop from a nonzero offset, {zero_begin} loop from 0 \
-             (played as one-shots), {one_shot} do not loop"
+            "{name}: {loops} samples loop, {begins_at_zero} of them from 0 to the sample's end; \
+             {one_shots} do not loop, {zero_ends} of them with the flag set but no loop"
         );
-        assert_eq!(
-            (looping, zero_begin, one_shot),
-            if name == "MUSIC0" {
-                (7, 5, 10)
-            } else {
-                (8, 1, 32)
-            },
-            "{name}'s sample headers"
-        );
-        // Which is Task 2's own census, split: 7 + 5 = 12 looping samples in MUSIC0 and
-        // 8 + 1 = 9 in MUSIC1 (`tests/module.rs`'s flag counts), of which the zero-begin ones
-        // the object plays as one-shots.
-        assert_eq!(looping + zero_begin, if name == "MUSIC0" { 12 } else { 9 });
+        assert_eq!((loops, begins_at_zero, one_shots), (looping, zero_begin, one_shot));
+        // No sample in either file has the flag set with a zero loop *end*, so `+0x489c`'s test
+        // is a rule the data does not reach — it is the loader's `lend <= lbeg` clearing that
+        // the shipped files exercise.
+        assert_eq!(zero_ends, 0, "{name}: no zero-lend sample, so +0x489c is unreached");
     }
 }

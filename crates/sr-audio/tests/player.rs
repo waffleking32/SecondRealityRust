@@ -948,19 +948,25 @@ fn the_objects_own_bytes_say_what_the_player_says() {
              %eax,0x50(%bp) (m_speed = 0); movw $0x8000,0x214a; jmp; sub 0x48(%bp),%ax; add \
              %ax,%si — the one-shot's stop and the loop's rewrap",
         ),
-        // The note start's bounds: `m_loop` = the header's loop end, `m_end` reduced by whole
-        // loop lengths until it is small, and the one-shot's `m_end` = length + 0x20 with the
-        // 0xffff marker.
+        // The note start's bounds, and the two header fields they come from: `+0x4890` reads
+        // `es:0x18` into `ax` — the loader's `lend` (`STARTEMS.C:28-48`: type, filename,
+        // memseg2, memseg, length at 0x10, lbeg at 0x14, lend at 0x18, vol, disk, pack, flags
+        // at 0x1f) — so the `cmp $0x0,%ax; je` at `+0x489c` is **`lend == 0`**, and `+0x48a6`
+        // stores `es:0x14`, the **`lbeg`**, into `m_loop`. Reading the pair the other way round
+        // gives the same two bounds and the wrong one-shot rule.
         (
-            0x489C,
+            0x4890,
             &[
-                0x3D, 0x00, 0x00, 0x74, 0x1D, 0x26, 0x8B, 0x16, 0x14, 0x00, 0x89, 0x54, 0x4C, 0x2B,
-                0xD0, 0x3D, 0xF4, 0x01, 0x77, 0x09, 0x2B, 0xC2, 0x3D, 0xF4, 0x01, 0x72, 0xF9, 0x03,
-                0xC2, 0x89, 0x44, 0x48,
+                0x26, 0xA1, 0x18, 0x00, 0x26, 0xF6, 0x06, 0x1F, 0x00, 0x01, 0x74, 0x22, 0x3D, 0x00,
+                0x00, 0x74, 0x1D, 0x26, 0x8B, 0x16, 0x14, 0x00, 0x89, 0x54, 0x4C, 0x2B, 0xD0, 0x3D,
+                0xF4, 0x01, 0x77, 0x09, 0x2B, 0xC2, 0x3D, 0xF4, 0x01, 0x72, 0xF9, 0x03, 0xC2, 0x89,
+                0x44, 0x48,
             ],
-            "cmp $0x0,%ax; je; mov %es:0x14,%dx; mov %dx,0x4c(%si) (m_loop = the loop end); \
-             sub %ax,%dx; cmp $0x1f4,%ax; ja; sub %dx,%ax; cmp $0x1f4,%ax; jb; add %dx,%ax; \
-             mov %ax,0x48(%si) — m_end reduced by loop lengths until it is below 500",
+            "mov %es:0x18,%ax (lend); testb $0x1,%es:0x1f (the loop flag); je; cmp $0x0,%ax; \
+             je; mov %es:0x14,%dx (lbeg); mov %dx,0x4c(%si) (m_loop = the loop's begin); \
+             sub %ax,%dx (lbeg - lend, a whole number of loop lengths); cmp $0x1f4,%ax; ja; \
+             sub %dx,%ax; cmp $0x1f4,%ax; jb; add %dx,%ax; mov %ax,0x48(%si) — m_end is lend, \
+             reduced by loop lengths until it is below 500",
         ),
         (
             0x48BE,

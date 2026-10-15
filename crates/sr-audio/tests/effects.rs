@@ -1317,14 +1317,11 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
         before.volume, 1,
         "the note's own volume column has not applied yet"
     );
-    // The position is the *mixer's* from Task 5 on: every poll's frames advance `m_pos` by the
-    // voice's step (`mix.rs`, `+0x3471`/`+0x3860`), so what is left to assert here is that the
-    // row has not restarted it — the row's own cell, when its first tick comes, starts the
-    // note again from the offset.
-    assert!(
-        before.position > 0,
-        "the mixer has advanced the note's position and the row has not restarted it"
-    );
+    // Task 5 removed this test's second row-entry assertion: the position used to be 0 here
+    // and the claim was that the row had not restarted the note. The position is the *mixer's*
+    // now — every poll advances `m_pos` by the voice's step (`mix.rs`, `+0x3471`/`+0x3860`) — so
+    // "greater than zero" holds whichever way the row went, and a test that cannot fail is not a
+    // test. The volume assertion above carries the meaning on its own.
 
     let mut count = before.retrigger;
     let mut volume = 0i32;
