@@ -744,8 +744,15 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   out-of-table read at the *near* end too, and `(0, 0)` is exactly what ALKU's first `dis_sync()`
   holds. The callers in the tree are block 1's (Phase 4's) and are **six**, not the one this plan
   first claimed: `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138` and `PAM/OUTTAA.C:39`. So the phase
-  cannot show the out-of-domain region is unreachable, and the boundary is A15's decision for
-  Phase 4 either way.
+  cannot show the out-of-domain region is unreachable. **What the port does at the boundary, settled
+  in Task 6's review**: the *near* end is **answered** with the object's own word — the bytes before
+  the table are `pop es; ret` (`DIS/DISINT.ASM:420`, `:424`), identical in all three shells and
+  pinned by the source, so `(0, 0)` returns −15609 as the C callers receive it (their `< N` waits,
+  exactly as the reference's does) — while the region above the last key is **refused loudly**, and
+  it has two tiers: up to `0x8E2E` the object's sixteenth compare matches and the answer is the
+  table's own last code, deterministically, and only above that is the returned word linker-set
+  (`0xCD06`/`0xED06`/`0x9D06`). A15 carries the measurements; anything above the last key is Phase
+  4's, with the deterministic tier derivable if a caller ever syncs there.
 - `muscode` (`DIS/DISINT.ASM:242-282`, `DIS/DISC.ASM:91-100`): returns `zinfo`, whose value comes
   from Task 1's resolution or from the documented deferral, and the deferral's substitute is
   implemented here as the same *shape* (a function of the position) so that a later phase's
