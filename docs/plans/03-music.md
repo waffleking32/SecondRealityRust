@@ -742,9 +742,14 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   the tree — and **both ends of the domain turn out to be reachable**, which Task 6 found by reading
   the callers rather than this plan: `sync_10`'s `%bx - 2` read makes `(order 0, row 0)` an
   out-of-table read at the *near* end too, and `(0, 0)` is exactly what ALKU's first `dis_sync()`
-  holds. The callers in the tree are block 1's (Phase 4's) and are **six**, not the one this plan
-  first claimed: `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138` and `PAM/OUTTAA.C:39`. So the phase
-  cannot show the out-of-domain region is unreachable. **What the port does at the boundary, settled
+  holds (`ALKU/MAIN.C:59`, at the top of its `main`). The callers in the tree are block 1's (Phase
+  4's) and are **six**, not the one this plan first claimed: `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`,
+  `:138` and `PAM/OUTTAA.C:39`. **Two different things establish that `(0, 0)` is reached, and they
+  should not be run together** — Task 6's review caught the note doing it: the filed trace
+  (`reference/music/second5`) holds `(0, 0)` for 278 samples before the first published row, but that
+  run is a `SECOND 5` boot, and ALKU is guarded off for it (`MAIN/U2.ASM:792`'s `whattorun & 1`), so
+  ALKU does not appear in that trace at all. The trace shows the *position* is reached; ALKU's own
+  source shows *that part* calls from it, in a full run (`docs/fidelity/part-sequence.md`). **What the port does at the boundary, settled
   in Task 6's review**: the *near* end is **answered** with the object's own word — the bytes before
   the table are `pop es; ret` (`DIS/DISINT.ASM:420`, `:424`), identical in all three shells and
   pinned by the source, so `(0, 0)` returns −15609 as the C callers receive it (their `< N` waits,
