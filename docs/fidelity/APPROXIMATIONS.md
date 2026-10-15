@@ -801,10 +801,13 @@ the C callers receive it, a 16-bit `int`: **-15609** (`0xC307` read signed; the 
 C — `PAM/PAM.PRJ` names `Turbo C Project File` — whose `int` is 16 bits), and
 `sync_answers_the_position_before_the_table_with_its_own_word` pins it. The position is **reached**
 rather than hypothetical: in `second5` every sample from frame 148 to 426 reads `ord 0 row 0 pat 0`
-(278 samples; the trace's coverage drops frame 409), the first published row is 427, and ALKU's
-first `dis_sync()` sits in that window. What it gets is a negative number, so every
-`dis_sync() < N` in the tree (`N` >= 1, all of them) keeps waiting — exactly what the reference
-does, and the reason this is an answer rather than a divergence.
+(278 samples; the trace's coverage drops frame 409) and the first published row is 427. What a
+caller gets there is a negative number, so every `dis_sync() < N` in the tree (`N` >= 1, all of
+them) keeps waiting — exactly what the reference does, and the reason this is an answer rather than
+a divergence. (ALKU's first `dis_sync()` is at this position by its own source, `ALKU/MAIN.C:59`,
+and `part-sequence.md` §1 runs ALKU first in block 1 — but `second5` is a `SECOND 5` session and
+does not run ALKU (`MAIN/U2.ASM:792` guards `exe1` on `whattorun & 1`), so the trace is the
+position's evidence, not ALKU's.)
 
 **Measured difference:** none for the answered domain — the word before the table is the same in
 every build the tree holds and the port returns it — and the refusal covers only what the phase

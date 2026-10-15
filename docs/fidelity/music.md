@@ -1570,12 +1570,17 @@ visible in the table:
   the position is **reached**: in `second5` every sample from frame **148** to **426** reads
   `ord 0 row 0 pat 0` — 278 of the trace's samples, its coverage dropping frame 409 — the first
   published row is frame **427**, and the music's own start is frame 408 (`cargo xtask music
-  analyse --trace reference/music/second5`, section 1; the values are the trace's own
-  `frame,ord,row,pat` columns, which `crates/sr-audio/tests/trace.rs` drives a `Player` over frame
-  by frame). ALKU's first `dis_sync()` sits in that window, and what it gets is a *negative*
-  number:
+  analyse --trace reference/music/second5`: §2's row anchor, "that row began at frame 408.0";
+  §1's "first advancing frame: 410" is the frame that tick is *seen* on. The values are the
+  trace's own `frame,ord,row,pat` columns, which `crates/sr-audio/tests/trace.rs` drives a
+  `Player` over frame by frame.) What that buys is a number a caller lives with:
   every `dis_sync() < N` in the tree (`PAM/OUTTAA.C:39`'s `< 10`, `ALKU/MAIN.C:59`'s `< 1`, and
-  the rest) keeps waiting, exactly as it does against the reference.
+  the rest) keeps waiting, exactly as it does against the reference. Note which trace this is and
+  which it is not: `second5` is a `SECOND 5` session, and ALKU does not run in it (`MAIN/U2.ASM:792`
+  guards `exe1` — `:62`'s `'ALKU.EXE'` — on `whattorun & 1`, which block 5's mask does not set).
+  ALKU's *first* `dis_sync()` is at this position by its own source — `ALKU/MAIN.C:59` runs before
+  the part waits for code 1, and `part-sequence.md` §1 runs ALKU first in block 1 — and the trace
+  is what shows the position itself is one a run holds, not what shows ALKU holding it.
 - **Above the table it refuses.** `sync_from` **panics** for `(order << 8) | row > 0x4200`, with
   the position, the reason and the citations, rather than answering a number that differs between
   builds of the original. The first tier above the key is answerable in the builds the tree holds

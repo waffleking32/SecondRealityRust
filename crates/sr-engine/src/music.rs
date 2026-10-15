@@ -72,7 +72,9 @@ pub trait Music {
     /// either move that arithmetic into the engine or make the engine aware of a mixing rate.
     fn poll(&mut self);
 
-    /// The published position (`_np_ord`, `_np_pat`, `_np_row`, `_np_speed`, `_np_tempo`).
+    /// The position a part reads: `_np_ord`, `_np_pat` and `_np_row` — the ring-published words,
+    /// ten polls behind the player's own state — and `_np_speed`/`_np_tempo`, which an `A` and a
+    /// `T` command write straight through. See [`MusicPosition`].
     fn position(&self) -> MusicPosition;
 
     /// `dis_musplus()` (`DIS/DISC.ASM:102-112`): the row offset a "plus coming" marker asks for —
@@ -294,6 +296,16 @@ pub const ORDERSYNC1: &[(u16, i32)] = &[
 /// they keep waiting exactly as they do against the reference.
 const BEFORE_THE_TABLE: i32 = i16::from_le_bytes([0x07, 0xc3]) as i32;
 
+/// The word `sync_10`'s 16th iteration compares against — the two bytes *after* `ordersync1`,
+/// which are `2e 8e`: the CS prefix and the `mov Sreg, r/m16` opcode of the `mov es, cs:stmikseg`
+/// that follows the table (`DIS/DISINT.ASM:451`).
+///
+/// Those two bytes are the source's own, so they are the same in every build — and that is what
+/// makes the first tier of the refused region answerable: a key at or below this word *matches*
+/// the 16th compare, and the object then returns the table's own last code. Only the two bytes
+/// after them — the instruction's displacement, which the linker sets — are not.
+const PAST_THE_TABLE: u16 = u16::from_le_bytes([0x2e, 0x8e]);
+
 /// `dis_sync()`'s answer for a published position — `sync_10` (`DIS/DISINT.ASM:449-463`) over the
 /// table above, transliterated including the reads at its two ends.
 ///
@@ -340,19 +352,27 @@ pub fn sync_from(order: u8, row: u8) -> i32 {
         return BEFORE_THE_TABLE;
     }
     let Some(index) = ORDERSYNC1.iter().position(|&(key_at, _)| key <= key_at) else {
-        // No key matched: the object's 16th iteration compares against the word past the last
-        // entry and, when it does not match, returns the word after that — code, and one whose
-        // low byte the linker sets.
+        // No key matched: the position is above the table's last entry, and the object's 16th
+        // iteration (`DIS/DISINT.ASM:455-460`, `mov cx,16` over fifteen entries) compares against
+        // the bytes that follow the table. What it does there depends on the position, so the
+        // refusal says which of the two things it is refusing.
+        let because = if key <= PAST_THE_TABLE {
+            "Here the compare matches, and what the object answers with is the table's own last \
+             code, 4. The port refuses this band on the boundary it draws — above the \
+             table's last key the answer stops being the table's arithmetic and becomes a read of \
+             whatever the assembler left after it — and not because the value varies."
+        } else {
+            "Here the compare fails, and the loop's fall-through returns the word after the table \
+             instead: one byte of instruction framing (the `mov`'s modrm byte, `06`) and the low \
+             byte of a link-time displacement, measured as 0xCD06 in MAIN/U2.EXE, 0xED06 in \
+             MAIN/2NDFIX.EXE and 0x9D06 in U2.EXE. A number that differs between builds of the \
+             original is one this port will not return."
+        };
         panic!(
-            "dis_sync() at (order {order}, row {row}): the position is above the table's last \
-             key (`0x4200`), where `sync_10`'s 16th iteration compares against the bytes that \
-             follow the table and, when they do not match, returns them (`DIS/DISINT.ASM:455-460`, \
-             `mov cx,16` over fifteen entries). What is returned there is `mov es, cs:stmikseg` \
-             read as a word — one byte of instruction framing and the low byte of a link-time \
-             displacement, measured as 0xCD06 in MAIN/U2.EXE, 0xED06 in MAIN/2NDFIX.EXE and \
-             0x9D06 in U2.EXE — so the port refuses the region rather than answering with a \
-             number that differs between builds. See `docs/fidelity/music.md` §11 and \
-             `APPROXIMATIONS.md` A15."
+            "dis_sync() at (order {order}, row {row}): the position is above the table's last key \
+             (`0x4200`), where `sync_10`'s 16th iteration compares against the bytes past the \
+             table — the `mov es, cs:stmikseg` that follows it. {because} See \
+             `docs/fidelity/music.md` §11 and `APPROXIMATIONS.md` A15."
         )
     };
     ORDERSYNC1[index - 1].1
@@ -523,25 +543,39 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "above the table's last key")]
+    #[should_panic(expected = "what the object answers with is the table's own last code, 4")]
     fn sync_refuses_the_position_past_the_tables_last_key() {
+        // The first key of the refused region: `0x4201`, inside the band where the 16th compare
+        // matches. The panic says so, rather than claiming a variance that does not apply here.
         sync_from(66, 1);
     }
 
     #[test]
-    #[should_panic(expected = "above the table's last key")]
+    #[should_panic(expected = "A number that differs between builds of the original")]
     fn sync_refuses_the_far_end_of_the_order_range() {
         sync_from(255, 255);
     }
 
     #[test]
-    #[should_panic(expected = "above the table's last key")]
+    #[should_panic(expected = "what the object answers with is the table's own last code, 4")]
     fn sync_refuses_the_band_whose_16th_compare_matches() {
         // `0x4200 < key <= 0x8E2E` (`sync_10`'s own first instruction, `2e 8e`, read as the 16th
         // compare) is answerable in every build the tree holds — the object returns the last
         // entry's code, 4 — but the port's boundary is the brief's, above the table's last key,
-        // and this test is what says the refusal is a choice rather than a constraint.
+        // and this test is what says the refusal is a choice rather than a constraint. The
+        // message has to agree: it names the 4, not the linker-set word.
         sync_from(0x8e, 0x2e);
+    }
+
+    #[test]
+    fn the_refused_regions_two_tiers_are_the_ones_the_object_draws() {
+        // The band's upper edge is the word past the table (`2e 8e`), read from the source's own
+        // instruction; `sync_from` answers at or below the last key, and the first key above the
+        // last key is in the band. The tier the panic message chooses is decided by exactly this
+        // comparison, so it is worth pinning beside the message tests.
+        assert_eq!(PAST_THE_TABLE, 0x8e2e);
+        assert!(u16::from(0x42u8) << 8 | u16::from(0x01u8) <= PAST_THE_TABLE);
+        assert!(u16::from(0xffu8) << 8 | u16::from(0xffu8) > PAST_THE_TABLE);
     }
 
     /// The table is the shipped shell's own bytes: the sixty bytes the port carries are searched
