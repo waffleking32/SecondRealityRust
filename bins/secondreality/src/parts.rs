@@ -14,6 +14,7 @@ pub mod beglogo;
 pub mod cred;
 pub mod endlogo;
 pub mod endscrl;
+pub mod poslist;
 pub mod tunneli;
 
 use sr_engine::part::Part;
