@@ -89,20 +89,6 @@ fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
         .count()
 }
 
-/// How many pixels of `rendered` differ, each a three-byte RGB triple.
-fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "a short read is not a comparison"
-    );
-    rendered
-        .chunks_exact(3)
-        .zip(expected.chunks_exact(3))
-        .filter(|(a, b)| a != b)
-        .count()
-}
-
 /// The part tick that draws a reference index, under the release's own
 /// timeline: tick 0 is boot 419, the number the fade-in's recorded means pin
 /// (`src/parts/mntscrl.rs`'s `REFERENCE_FIRST_INDEX`). A mapping, not an
@@ -196,51 +182,50 @@ fn the_held_opening_is_the_references_frame_500_in_both_planes() {
 }
 
 #[test]
-fn the_tree_wait_holds_through_the_reference_scroll_keyframes() {
-    // **D24's measured divergence, through the real player.** The tree's
-    // `:153-159` waits for `dis_musplus() >= 0`, and `reference/music/second3`
-    // never reads that until frame 2488 (order 47 row 0), which the port's
-    // one-frame lead puts on its tick 2068. Every reference keyframe after
-    // 500 is therefore inside the wait, and the port draws the held opening
-    // there: 81, 681, 1281 and 1881 are one frame. The reference's own
-    // scroller is 61.97 %, 62.01 % and 62.09 % of pixels away from it. The
-    // note records this under D24; the part's unit tests show that the
-    // release's 71-tick hold reproduces all three exactly.
+fn the_four_keyframes_match_the_reference() {
+    // The part's own timeline is the release's: tick 0 is boot 419, the first
+    // wait is 71 ticks, the pre-roll 127, the main loop from tick 263. The
+    // reference's frame at boot `K` is the run's tick `K - 419`, and all four
+    // keyframes compare byte for byte through the real binary. 500 is the held
+    // opening, compared indexed; the three scroll keyframes are RGB-only in
+    // the reference.
     //
-    // Each keyframe is dumped with D19's `K-1, K, K+1` support. In this run
-    // all three are the held opening — that is the divergence — where the
-    // reference's three are a moving scroller.
+    // Each keyframe is dumped with D19's `K-1, K, K+1` support. The scroller
+    // moves 2.4-3.1 % of its pixels a frame, so the neighbours are different
+    // pictures — which is what makes the mapping exact and not a search's
+    // loosest fit.
     let (dir, manifest) = dump(
-        "divergence",
+        "keyframes",
         "80,81,82,680,681,682,1280,1281,1282,1880,1881,1882",
     );
-    let held = frame_file(&dir, 81, "rgb");
-    let mut counts = Vec::new();
+
+    assert_eq!(
+        differing_bytes(&frame_file(&dir, 81, "idx"), &reference_frame(500, "idx")),
+        0,
+        "500's index plane"
+    );
+    assert_eq!(
+        differing_bytes(&frame_file(&dir, 81, "rgb"), &reference_frame(500, "rgb")),
+        0,
+        "500's RGB"
+    );
+
     for index in [1100u32, 1700, 2300] {
         let tick = tick_of(index);
-        for at in [tick - 1, tick, tick + 1] {
-            assert_eq!(
-                frame_file(&dir, at, "rgb"),
-                held,
-                "boot {index} (tick {at}) is not the held opening"
+        let key = frame_file(&dir, tick, "rgb");
+        assert_eq!(
+            differing_bytes(&key, &reference_frame(index, "rgb")),
+            0,
+            "boot {index} (tick {tick})"
+        );
+        for neighbour in [tick - 1, tick + 1] {
+            assert_ne!(
+                frame_file(&dir, neighbour, "rgb"),
+                key,
+                "boot {index}: tick {neighbour} is not distinguishable"
             );
         }
-        let dumped = frame_file(&dir, tick, "rgb");
-        let reference = reference_frame(index, "rgb");
-        counts.push((
-            index,
-            differing_bytes(&dumped, &reference),
-            differing_pixels(&dumped, &reference),
-        ));
     }
-    assert_eq!(
-        counts,
-        [
-            (1100, 118_843, 39_658),
-            (1700, 118_924, 39_684),
-            (2300, 119_056, 39_738),
-        ]
-    );
     assert_eq!(manifest["index_origin"], "part");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -283,22 +268,23 @@ fn a_block_three_run_starts_here_and_is_numbered_the_same_way() {
 }
 
 #[test]
-fn the_tree_waits_until_the_traces_first_non_negative_reading() {
-    // `reference/music/second3`'s first `musplus >= 0` is frame 2488 (order
-    // 47 row 0), and the port's published words lead the trace's frame by one
-    // (its tick 2068 reads the trace's 2488). So the wait's last tick is
-    // 2068 — nothing drawn, position `47:0` — and the pre-roll's first `scr`
-    // changes the frame on 2069.
-    let (dir, manifest) = dump("wait", "81,2067,2068,2069");
+fn the_releases_first_wait_is_seventy_one_ticks() {
+    // The reference's last held frame is boot 554 and its pre-roll's first
+    // `scr` is boot 555 — ticks 135 and 136 with tick 0 at 419. The wait has
+    // no visible boundary of its own in the music: the published position is
+    // order 42 row 16 at both 134 and 135 (`zplus` 0, so `musplus` is -32 at
+    // both), which is why the release's duration is a constant rather than a
+    // threshold (`docs/fidelity/mntscrl.md` §6).
+    let (dir, manifest) = dump("wait", "81,134,135,136");
     let held = frame_file(&dir, 81, "rgb");
-    assert_eq!(frame_file(&dir, 2067, "rgb"), held);
+    assert_eq!(frame_file(&dir, 134, "rgb"), held, "tick 134 still holds");
     assert_eq!(
-        frame_file(&dir, 2068, "rgb"),
+        frame_file(&dir, 135, "rgb"),
         held,
-        "the wait's last tick draws"
+        "the wait's last tick draws nothing"
     );
     assert_ne!(
-        frame_file(&dir, 2069, "rgb"),
+        frame_file(&dir, 136, "rgb"),
         held,
         "the pre-roll's first scr"
     );
@@ -308,35 +294,42 @@ fn the_tree_waits_until_the_traces_first_non_negative_reading() {
         .iter()
         .map(|frame| frame["music_position"].as_str().unwrap())
         .collect();
-    assert_eq!(positions, ["42:10", "45:63", "47:0", "47:0"]);
+    assert_eq!(positions, ["42:10", "42:16", "42:16", "42:17"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn the_real_players_cue_fades_the_part_out_and_the_run_holds_black() {
-    // The tree's `:196-203` cue is `dis_musplus() == -11` exactly, and the
-    // real player reaches one — order 48 row 53, after the wait — at tick
-    // ~2,532; the 65-tick fade (`:207-214`) ends before 2,650. The music
-    // positions are the player's own and are pinned with the frames: 2,500 is
-    // still the full scroller at `48:42`; 2,650 is black at `50:16` and 2,700
-    // is the same black (the part has retired and the run holds its screen).
-    let (dir, manifest) = dump("fade", "2500,2650,2700");
+    // The tree's `:196-203` cue is `dis_musplus() == -11` exactly. With the
+    // release's wait the main loop starts at tick 263, and the first -11
+    // after it is order 45 row 53: the dump reads `45:53` at 1,979 (the
+    // fade's full-palette upload) and the frame is one step down at 1,980.
+    // The 65-tick fade (`:207-214`) ends by 2,050: 2,040 is its tail, and
+    // 2,050 and 2,100 are black — the part has retired and the run holds its
+    // screen.
+    let (dir, manifest) = dump("fade", "1960,1979,1980,2040,2050,2100");
     let positions: Vec<&str> = manifest["frames"]
         .as_array()
         .unwrap()
         .iter()
         .map(|frame| frame["music_position"].as_str().unwrap())
         .collect();
-    assert_eq!(positions, ["48:42", "50:16", "50:28"]);
-
-    let scrolling = frame_file(&dir, 2500, "rgb");
-    assert!(
-        scrolling.iter().filter(|byte| **byte != 0).count() > 100_000,
-        "2,500 is still the scroller"
+    assert_eq!(
+        positions,
+        ["45:50", "45:53", "45:53", "45:60", "45:61", "47:8"]
     );
-    // The fade drives the DAC to zero; the index plane is still the last
-    // scroller's, which is what the run holds once the part has retired.
-    for index in [2650u32, 2700] {
+
+    let ink = |index: u32| -> usize {
+        frame_file(&dir, index, "rgb")
+            .iter()
+            .filter(|byte| **byte != 0)
+            .count()
+    };
+    assert!(ink(1960) > 180_000, "1,960 is still the full scroller");
+    assert!(ink(1979) > 180_000, "1,979 uploads the full palette");
+    assert!(ink(1980) < ink(1979), "the fade's first step is visible");
+    assert!(ink(2040) < 5_000, "2,040 is the fade's tail");
+    for index in [2050u32, 2100] {
         let rgb = frame_file(&dir, index, "rgb");
         assert!(
             rgb.iter().all(|byte| *byte == 0),

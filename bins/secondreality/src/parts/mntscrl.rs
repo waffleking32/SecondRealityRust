@@ -20,7 +20,9 @@
 //! 6. `:144-151` — `tmppal = pal`, `fpal = pal` with those bands black, an
 //!    upload, and the font built: source columns 0-132 into font columns
 //!    104-236 of each of the 31 rows, with `scp := 133`.
-//! 7. `:153-159` — the music wait: `dis_musplus() >= 0`.
+//! 7. `:153-159` — the first wait. The release's own frames measure it at
+//!    **71 ticks**; the tree's `dis_musplus() >= 0` is kept as the measured
+//!    counterfactual ([`Mntscrl::tree_wait`], [`RELEASE_WAIT_TICKS`]).
 //! 8. `:165-182` — the 127-frame pre-roll: `scr(sss)` with `sss` cycling 0,1,2,
 //!    the band ramp re-uploaded on odd frames.
 //! 9. `:184-224` — the main loop: one `scr(sss)` a tick, the fade-out when
@@ -57,8 +59,8 @@
 //! tick 0        the mode set, the loads, the black DAC and the background blit
 //! ticks 1-64    the 64 fade-in uploads (`:132-142`)
 //! tick 64       also `:144-151`: the palette swap and the font build
-//! ticks 65-…    the music wait (`:153-159`) — one tick a poll, drawing nothing
-//! 127 ticks     the pre-roll (`:165-182`)
+//! ticks 65-135  the release's 71-tick wait — nothing drawn
+//! ticks 136-262 the pre-roll (`:165-182`)
 //! then          the main loop (`:193-224`), one tick a `scr`
 //! ```
 //!
@@ -83,21 +85,21 @@
 //! part ever gains an anchor, the shell's pre-poll and this one would have to
 //! become one.
 //!
-//! **The release's first wait is not the tree's.** `READ2.PAS:153-159` waits
-//! for `dis_musplus() >= 0`, and `reference/music/second3` never reads a
-//! `musplus` at or above zero between the part's start (419) and its end —
-//! the first is frame 2488, when order 47 begins — so a faithful translation
-//! holds through every reference keyframe but 500. The release's own keyframes
-//! put its last held frame at boot **554** and its main loop's first at **682**
-//! — a first wait of **71 ticks**, fitted on 1100 and predicting 1700 and 2300
-//! exactly (`docs/fidelity/mntscrl.md` §6). The tree cannot produce that hold
-//! from any `musplus` reading: `musplus` is the constant `-32` for the whole
-//! interval (`zplus` is 0 until order 45, frame 1971), and its first
-//! non-negative reading is frame 2488 (order 47). The port keeps the tree's
-//! wait — `D24`'s rule for a release that differs in behaviour the tree does
-//! not hold — and records the measured consequence in the note. The cue that
-//! *ends* the part, `== -11` exactly (`:196-203`), is the tree's and is tested
-//! here.
+//! **The first wait follows the release, not the tree.** `READ2.PAS:153-159`
+//! waits for `dis_musplus() >= 0`, and `reference/music/second3` never reads
+//! that until frame 2488 (order 47) — over 1,900 frames after the release
+//! leaves the wait. The release's own keyframes put its last held frame at
+//! boot **554** and its pre-roll's first `scr` at 555, so with tick 0 at 419
+//! the wait is **71 ticks** (65 through 135). It cannot be a `musplus`
+//! threshold: the trace's position is order 42 row 16 on both sides of the
+//! boundary (`zplus` 0, `musplus` -32 at both), so every threshold either
+//! exits at tick 65 or never at 135. The port therefore runs the measured
+//! duration ([`RELEASE_WAIT_TICKS`]), as the controller's D24 ruling requires
+//! — the real run must match the reference's four keyframes — and
+//! [`Mntscrl::tree_wait`] keeps the tree's condition so
+//! `the_trees_own_wait_would_hold_through_the_scroll_keyframes` can measure
+//! what the development snapshot would have drawn. The cue that *ends* the
+//! part, `== -11` exactly (`:196-203`), is the tree's and is tested here.
 //!
 //! # The bugs, preserved
 //!
@@ -239,6 +241,21 @@ const FADE_OUT_STEPS: u32 = 65;
 /// `:200` `cmp dx,-11 / jnz @a`: the fade begins when `dis_musplus()` is
 /// **exactly** -11 (`zplus` 1, row 53; `sr_engine::music::musplus_from`).
 const CUE: i32 = -11;
+
+/// The release's first wait, in ticks — the tree's `musplus >= 0` replaced by
+/// the duration the release's own frames measure.
+///
+/// The reference's last held frame is boot **554** and its pre-roll's first
+/// `scr` is boot **555** (`docs/fidelity/mntscrl.md` §6): with tick 0 at 419
+/// the wait occupies ticks 65 through 135, so it lasts **71** ticks. No
+/// `musplus` threshold can produce that boundary — at ticks 134 and 135 the
+/// published position is order 42 row 16 on both sides (`zplus` 0), so
+/// `musplus` is -32 at both, and every threshold either ends the wait at tick
+/// 65 or never ends it at 135. The constant is the fitted value the single
+/// reference run supports; the release's mechanism is not recoverable from
+/// its frames. [`Mntscrl::tree_wait`] keeps the tree's condition as the
+/// measured counterfactual.
+const RELEASE_WAIT_TICKS: u32 = 71;
 /// `:3` `const veke = 2800` — dead, because `inc(frame)` is commented out at
 /// `:221`. Kept as the source's number; no code path can use it.
 #[cfg(test)]
@@ -275,8 +292,10 @@ enum Phase {
     Setup,
     /// `:132-142`: fade-in upload `y`.
     FadeIn { y: u32 },
-    /// `:153-159`: one `dis_musplus()` a tick, drawing nothing.
-    Wait,
+    /// The release's first wait: `ticks` of its 71 have passed; nothing is
+    /// drawn. The tree's `:153-159` `dis_musplus() >= 0` is the counterfactual
+    /// [`Mntscrl::tree_wait`].
+    Wait { ticks: u32 },
     /// `:165-182`: pre-roll iteration `y`.
     PreRoll { y: u32 },
     /// `:193-224`: the main loop.
@@ -311,6 +330,13 @@ pub struct Mntscrl {
     /// can run the tree's 639 through the same code and measure the frames it
     /// produces; nothing outside that test sets it.
     scp_bound: u16,
+    /// Run the tree's `:153-159` wait — `dis_musplus() >= 0` a tick — instead
+    /// of the release's [`RELEASE_WAIT_TICKS`]. A field for the counterfactual
+    /// test `the_trees_own_wait_would_hold_through_the_scroll_keyframes`,
+    /// which measures what the development snapshot would have drawn; the
+    /// part's own behaviour is the release's wait, and nothing at run time
+    /// sets this.
+    tree_wait: bool,
     /// `:45` `sss`: the list `scr` is on this tick.
     sss: u8,
     /// `:98` `fp`: the fade-out's step.
@@ -343,6 +369,7 @@ impl Mntscrl {
             fpal: [[0; 3]; 256],
             scp: SCP_START,
             scp_bound: SCP_MAX,
+            tree_wait: false,
             sss: 0,
             fp: 0,
             fadeout: false,
@@ -621,6 +648,7 @@ impl Part for Mntscrl {
         self.font = vec![0; FONT_LEN + 1];
         self.scp = SCP_START;
         self.scp_bound = SCP_MAX;
+        self.tree_wait = false;
         self.sss = 0;
         self.fp = 0;
         self.fadeout = false;
@@ -668,13 +696,13 @@ impl Part for Mntscrl {
                 self.fade_in_tick(ctx);
                 if y + 1 == FADE_IN_STEPS {
                     self.finish_fade(ctx);
-                    self.phase = Phase::Wait;
+                    self.phase = Phase::Wait { ticks: 0 };
                 } else {
                     self.phase = Phase::FadeIn { y: y + 1 };
                 }
                 PartStatus::Continuing
             }
-            Phase::Wait => {
+            Phase::Wait { ticks } => {
                 // The source's loop never checks `dis_exit`, but the port does
                 // not spin: an exit request ends the wait on the tick it is
                 // seen (the phase's Review Focus 1).
@@ -682,12 +710,20 @@ impl Part for Mntscrl {
                     self.phase = Phase::Done;
                     return PartStatus::Finished;
                 }
-                // `:156-158` `cmp dx,0 / jl`: the wait ends on `>= 0`. The
-                // next tick is the pre-roll's first `waitr`.
-                let reading = ctx.music().map_or(-32, |music| music.musplus());
-                if reading >= 0 {
+                if self.tree_wait {
+                    // The development snapshot's `:156-158` `cmp dx,0 / jl`.
+                    let reading = ctx.music().map_or(-32, |music| music.musplus());
+                    if reading >= 0 {
+                        self.phase = Phase::PreRoll { y: 0 };
+                        return PartStatus::Continuing;
+                    }
+                } else if ticks + 1 >= RELEASE_WAIT_TICKS {
+                    // The release's hold is up; the next tick is the
+                    // pre-roll's first `waitr` (boot 555 for tick 0 at 419).
                     self.phase = Phase::PreRoll { y: 0 };
+                    return PartStatus::Continuing;
                 }
+                self.phase = Phase::Wait { ticks: ticks + 1 };
                 PartStatus::Continuing
             }
             Phase::PreRoll { y } => {
@@ -797,13 +833,18 @@ mod tests {
         "../../assets/FOREST/POS3.DAT",
     ];
 
-    /// The frame a `wait` of `wait` ticks ends on: the wait occupies ticks 65
-    /// through `64 + wait`, and its last tick is the one whose `musplus` reads
-    /// non-negative. The script answers `-32` before it and `0` from it on.
-    fn wait_script(last_tick: u32, wait: u32) -> Vec<(i32, i32)> {
-        let exit = 64 + wait;
+    /// A script with no plus pending: `musplus` is -32 at every tick (the
+    /// object's own sentinel), so the main loop's -11 cue never comes.
+    fn quiet_script(last_tick: u32) -> Vec<(i32, i32)> {
+        vec![(0, 0); last_tick as usize + 1]
+    }
+
+    /// The tree's counterfactual: `musplus` is -32 until the trace's first
+    /// non-negative reading, order 47 row 0 at trace frame 2488, which the
+    /// port's one-frame lead puts on tick 2068; from there it is 0.
+    fn tree_script(last_tick: u32) -> Vec<(i32, i32)> {
         (0..=last_tick)
-            .map(|tick| if tick < exit { (0, 0) } else { (2, 0) })
+            .map(|tick| if tick < 2068 { (0, 0) } else { (2, 0) })
             .collect()
     }
 
@@ -1212,7 +1253,7 @@ mod tests {
         let mut expected = expected;
         black_bands(&mut expected);
         assert_eq!(live, expected, "`:144-148` after the 64th upload");
-        assert_eq!(part.phase, Phase::Wait);
+        assert_eq!(part.phase, Phase::Wait { ticks: 0 });
         // `:150-151`: the font and `scp`.
         for row in 0..FBUF_ROWS {
             assert_eq!(
@@ -1232,51 +1273,51 @@ mod tests {
     }
 
     #[test]
-    fn the_wait_draws_nothing_and_ends_on_the_first_non_negative_reading() {
-        // (a) The cue never comes: the part draws nothing and stays running.
+    fn the_wait_is_the_releases_seventy_one_ticks() {
+        // The release's own frames put its last held frame at boot 554 and its
+        // pre-roll's first `scr` at 555; with tick 0 at 419 that is ticks 65
+        // through 135 — **71 ticks** — and the pre-roll's first `waitr` is
+        // tick 136. The wait draws nothing and its length is the release's,
+        // not the music's: the trace's position is order 42 row 16 on both
+        // sides of the boundary (`zplus` 0, `musplus` -32 at both), so no
+        // `musplus` threshold can end it there.
+        assert_eq!(RELEASE_WAIT_TICKS, 71);
         let (mut rig, mut part) = started();
-        run_to(&mut rig, &mut part, FADE_IN_STEPS + 1);
+        run_to(&mut rig, &mut part, FADE_IN_STEPS + 1); // tick 65
         let surface = rig.surface.pixels().to_vec();
         let palette = live_palette(&rig);
         let view = rig.view.clone();
-        run_ticks(&mut rig, &mut part, 10);
-        assert_eq!(part.phase, Phase::Wait);
+        run_ticks(&mut rig, &mut part, 10); // ticks 65..=74
+        assert_eq!(part.phase, Phase::Wait { ticks: 10 });
         assert_eq!(rig.surface.pixels(), &surface[..], "the wait drew");
         assert_eq!(live_palette(&rig), palette, "the wait moved the DAC");
         assert_eq!(rig.view, view, "the wait moved the display");
 
-        // `:156-158` `cmp dx,0 / jl`: a reading of -11 is still a wait. This
-        // script's wait ends at tick 100, so tick 70's -11 is read *inside*
-        // the wait.
-        let (mut rig, mut part) = started_with(Player::scripted({
-            let mut script = wait_script(200, 36);
-            script[70] = (1, 53); // musplus -11
-            script
-        }));
-        run_to(&mut rig, &mut part, 71);
-        assert_eq!(
-            part.phase,
-            Phase::Wait,
-            "-11 is below zero; the wait goes on"
-        );
+        // A -11 reading inside the wait changes nothing: the cue belongs to
+        // the main loop, and the wait's length is the release's.
+        let mut script = quiet_script(200);
+        script[70] = (1, 53); // musplus -11
+        let (mut rig, mut part) = started_with(Player::scripted(script));
+        run_to(&mut rig, &mut part, 100);
+        assert_eq!(part.phase, Phase::Wait { ticks: 35 });
+        assert!(!part.fadeout, "the wait does not fade on -11");
+        assert_eq!(rig.surface.pixels(), &surface[..], "the wait drew");
 
-        // The tick the reading first reaches zero draws nothing either; the
-        // pre-roll's first `waitr` is the next tick.
-        let (mut rig, mut part) = started_with(Player::scripted(wait_script(300, 80)));
-        run_to(&mut rig, &mut part, 145); // through the wait's last tick, 64 + 80
-        assert_eq!(part.tick, 145);
-        let surface = rig.surface.pixels().to_vec();
+        // The boundary: tick 134 is the 70th wait tick and still holds; tick
+        // 135 is the 71st and turns the phase over; the pre-roll's first
+        // `scr` is tick 136.
+        let (mut rig, mut part) = started();
+        run_to(&mut rig, &mut part, 135); // through tick 134
+        assert_eq!(part.phase, Phase::Wait { ticks: 70 });
         assert_eq!(rig.surface.pixels(), &surface[..]);
-        // The exit tick is 144 itself: the script's first zero. The phase is
-        // the pre-roll's start and nothing has been drawn.
+        run_to(&mut rig, &mut part, 136); // through tick 135
         assert_eq!(part.phase, Phase::PreRoll { y: 0 });
         assert_eq!(
             rig.surface.pixels(),
             &surface[..],
             "the wait's last tick drew nothing"
         );
-        // Tick 145 is the pre-roll's first `scr`.
-        part.frame(&mut rig.ctx(145));
+        part.frame(&mut rig.ctx(136));
         assert_ne!(
             rig.surface.pixels(),
             &surface[..],
@@ -1291,7 +1332,7 @@ mod tests {
         // spin, so an exit notice is honoured on the tick it arrives.
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, FADE_IN_STEPS + 5);
-        assert_eq!(part.phase, Phase::Wait);
+        assert_eq!(part.phase, Phase::Wait { ticks: 4 });
         let surface = rig.surface.pixels().to_vec();
         assert_eq!(
             part.frame(&mut rig.ctx_exit(part.tick)),
@@ -1305,12 +1346,12 @@ mod tests {
     fn the_pre_roll_uploads_on_odd_frames_and_ramps_entries_zero_to_176() {
         // `:165-182`: 127 iterations, the band ramp on odd `y` only, `scr`
         // every tick with `sss` cycling.
-        let (mut rig, mut part) = started_with(Player::scripted(wait_script(600, 1)));
-        run_to(&mut rig, &mut part, 66); // through the wait's exit tick 65: nothing drawn
+        let (mut rig, mut part) = started();
+        run_to(&mut rig, &mut part, 136); // through the wait's last tick 135: nothing drawn
         assert_eq!(part.phase, Phase::PreRoll { y: 0 });
         let after_fade = live_palette(&rig);
 
-        // y = 0 (tick 65+1): no upload.
+        // y = 0 (tick 136): no upload.
         assert_eq!(part.frame(&mut rig.ctx(part.tick)), PartStatus::Continuing);
         assert_eq!(live_palette(&rig), after_fade);
         // y = 1: upload the step-0 table (still black in the bands), then
@@ -1335,7 +1376,7 @@ mod tests {
 
         // The loop's end: `scp` has advanced one per `scr(2)` — 42 of them —
         // and the next `sss` is 1.
-        run_to(&mut rig, &mut part, 193);
+        run_to(&mut rig, &mut part, 263);
         assert_eq!(part.phase, Phase::Main);
         assert_eq!(part.scp, SCP_START + 42);
         assert_eq!(part.sss, 1);
@@ -1442,15 +1483,15 @@ mod tests {
 
     // --- the cue and the fade-out ------------------------------------------
 
-    /// The tick the main loop starts on: 64 fade ticks, the wait's exit tick
-    /// and 127 pre-roll ticks all drawn first — 193 for a one-tick wait.
-    const MAIN_FIRST: u32 = 193;
+    /// The tick the main loop starts on: 64 fade ticks, the release's 71-tick
+    /// wait and 127 pre-roll ticks — 263, which is boot 682.
+    const MAIN_FIRST: u32 = 263;
 
     #[test]
     fn the_cue_is_exactly_minus_eleven() {
         // `:200` `cmp dx,-11 / jnz @a`. -10 and -12 must both leave the part
         // scrolling with the full palette; -11 starts the fade.
-        let mut script = wait_script(300, 1);
+        let mut script = quiet_script(300);
         script[MAIN_FIRST as usize] = (1, 54); // -10
         script[MAIN_FIRST as usize + 1] = (1, 52); // -12
         let (mut rig, mut part) = started_with(Player::scripted(script));
@@ -1462,7 +1503,7 @@ mod tests {
         assert_eq!(live_palette(&rig), full, "no fade without the cue");
 
         // And -11 is: the fade's first upload is still the full palette.
-        let mut script = wait_script(400, 1);
+        let mut script = quiet_script(400);
         script[MAIN_FIRST as usize] = (1, 53); // -11
         let (mut rig, mut part) = started_with(Player::scripted(script));
         run_to(&mut rig, &mut part, MAIN_FIRST);
@@ -1478,7 +1519,7 @@ mod tests {
 
     #[test]
     fn the_fade_out_is_sixty_five_ticks_and_ends_the_part() {
-        let mut script = wait_script(400, 1);
+        let mut script = quiet_script(400);
         script[MAIN_FIRST as usize] = (1, 53);
         let (mut rig, mut part) = started_with(Player::scripted(script));
         run_to(&mut rig, &mut part, MAIN_FIRST);
@@ -1523,7 +1564,7 @@ mod tests {
         // `frame = veke` therefore never true. The script never reaches -11.
         assert_eq!(VEKE, 2800);
         let (mut rig, mut part) =
-            started_with(Player::scripted(wait_script(MAIN_FIRST + VEKE + 2, 1)));
+            started_with(Player::scripted(quiet_script(MAIN_FIRST + VEKE + 2)));
         run_to(&mut rig, &mut part, MAIN_FIRST + VEKE + 1);
         assert_eq!(part.phase, Phase::Main);
         assert_eq!(part.frame(&mut rig.ctx(part.tick)), PartStatus::Continuing);
@@ -1554,62 +1595,52 @@ mod tests {
     }
 
     #[test]
-    fn the_reference_holds_seventy_one_frames_and_predicts_every_scroll_keyframe() {
-        // **D24's measurement.** A part whose first wait lasted `W` ticks has
-        // its main loop starting on its tick `192 + W`, so the reference's
-        // frame at boot `K` is its main-loop tick `K - 611 - W`. The port run
-        // here has a one-tick wait, whose main loop starts at tick 193: its
-        // main tick `m` is the call at tick `193 + m`. Equating the two gives
-        // the tick to compare, `K - 418 - W`.
-        //
-        // The wait's length is the one thing the tree's `musplus >= 0` cannot
-        // supply in the release — it holds for ~2,000 frames instead of ~70 —
-        // so it is fitted here on 1100, and then has to *predict* the two
-        // keyframes it was not fitted to.
-        let render = |wait: u32, tick: u32| -> Vec<u8> {
-            let (mut rig, mut part) = started_with(Player::scripted(wait_script(tick + 2, wait)));
-            run_to(&mut rig, &mut part, tick);
-            assert_eq!(part.frame(&mut rig.ctx(tick)), PartStatus::Continuing);
-            rendered_rgb(&rig)
-        };
+    fn the_four_keyframes_match_the_reference_at_the_stated_mapping() {
+        // The part's own timeline is the release's: tick 0 is boot 419, the
+        // first wait is 71 ticks and the pre-roll 127, so the main loop starts
+        // at tick 263 (boot 682). The reference's frame at boot `K` is the
+        // call at tick `K - 419`, and all four keyframes compare byte for
+        // byte. The frame either side of each is a different picture (the
+        // scroller moves 2.4-3.1 % of its pixels a frame), which is what makes
+        // the mapping exact and not a search's loosest fit.
+        let tick = |index: u32| index - REFERENCE_FIRST_INDEX;
 
-        // Fit W on 1100: every candidate is one executed tick in 482..=682.
-        let target = reference(1100, "rgb");
-        let (mut rig, mut part) = started_with(Player::scripted(wait_script(700, 1)));
-        let mut matches = Vec::new();
-        for tick in 0..=682u32 {
-            run_to(&mut rig, &mut part, tick);
-            assert_eq!(part.frame(&mut rig.ctx(tick)), PartStatus::Continuing);
-            if tick >= 482 && differing_bytes(&rendered_rgb(&rig), &target) == 0 {
-                matches.push(682 - tick);
-            }
-        }
-        assert_eq!(
-            matches,
-            [71],
-            "the wait lengths that reproduce 1100: {matches:?}"
-        );
-
-        // The same 71 at the two keyframes it was not fitted to, at the
-        // boot-mapped tick `K - 419` — a run whose script matches the
-        // release's own hold.
-        for (index, expected) in [
-            (1700u32, reference(1700, "rgb")),
-            (2300, reference(2300, "rgb")),
-        ] {
-            let tick = index - REFERENCE_FIRST_INDEX;
-            let mine = render(71, tick);
+        // 500: both planes. It is inside the wait, so it is the held opening.
+        {
+            let (mut rig, mut part) = started();
+            run_to(&mut rig, &mut part, tick(500) + 1);
             assert_eq!(
-                differing_bytes(&mine, &expected),
+                differing_bytes(&rendered_indices(&rig), &reference(500, "idx")),
                 0,
-                "boot {index} (tick {tick}) with the release's 71-tick hold"
+                "500's index plane"
             );
-            // D19's support: the frame either side is a different one, so the
-            // mapping is exact and not a search's loosest fit.
-            for neighbour in [tick - 1, tick + 1] {
-                assert!(
-                    differing_bytes(&render(71, neighbour), &expected) > 0,
-                    "boot {index}: tick {neighbour} is not distinguishable from {tick}"
+            assert_eq!(
+                differing_bytes(&rendered_rgb(&rig), &reference(500, "rgb")),
+                0,
+                "500's RGB"
+            );
+        }
+
+        // The three scroll keyframes, RGB-only in the reference, with D19's
+        // support: the neighbours are distinguishable from the keyframe.
+        for index in [1100u32, 1700, 2300] {
+            let frame = |at: u32| -> Vec<u8> {
+                let (mut rig, mut part) = started();
+                run_to(&mut rig, &mut part, at + 1);
+                rendered_rgb(&rig)
+            };
+            let key = frame(tick(index));
+            assert_eq!(
+                differing_bytes(&key, &reference(index, "rgb")),
+                0,
+                "boot {index} (tick {})",
+                tick(index)
+            );
+            for neighbour in [tick(index) - 1, tick(index) + 1] {
+                assert_ne!(
+                    frame(neighbour),
+                    key,
+                    "boot {index}: tick {neighbour} is not distinguishable"
                 );
             }
         }
@@ -1627,7 +1658,7 @@ mod tests {
         assert_eq!(SCP_MAX, 640);
         let render = |bound: u16, index: u32| -> Vec<u8> {
             let tick = index - REFERENCE_FIRST_INDEX;
-            let (mut rig, mut part) = started_with(Player::scripted(wait_script(tick + 2, 71)));
+            let (mut rig, mut part) = started();
             part.scp_bound = bound;
             run_to(&mut rig, &mut part, tick + 1);
             rendered_rgb(&rig)
@@ -1653,34 +1684,33 @@ mod tests {
     }
 
     #[test]
-    fn the_reference_comparison_at_the_tree_timeline_measures_the_wait_divergence() {
-        // What a `--part mntscrl` run draws at the reference indices with the
-        // tree's own `musplus >= 0` wait. `reference/music/second3`'s first
-        // non-negative reading is frame 2488 (order 47 row 0); the port leads
-        // the trace by one frame (`docs/fidelity/endlogo.md` §5), so its wait
-        // ends on tick 2068 — 2,004 wait ticks after tick 65 — and every one
-        // of these indices falls inside it: the frame is the held opening,
-        // not the reference's scroller. This is the divergence D24 registers.
-
-        // The held opening, at tick 81 (boot 500) — the frame compared above.
-        let (mut rig, mut part) = started_with(Player::sentinel());
-        run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX + 1);
-        let held = rendered_rgb(&rig);
-
+    fn the_trees_own_wait_would_hold_through_the_scroll_keyframes() {
+        // The development snapshot's `:153-159` counterfactual: `musplus >= 0`
+        // is first true at trace frame 2488 (order 47 row 0), which the port's
+        // one-frame lead puts on tick 2068. Under that policy the part is
+        // still waiting at every scroll keyframe and draws the held opening
+        // there; the counts are the divergence A17 records, and the part's
+        // own behaviour is the release's wait (`RELEASE_WAIT_TICKS`).
+        let run = |tick: u32| -> (Phase, Vec<u8>) {
+            let (mut rig, mut part) = started_with(Player::scripted(tree_script(tick + 2)));
+            part.tree_wait = true;
+            run_to(&mut rig, &mut part, tick + 1);
+            (part.phase, rendered_rgb(&rig))
+        };
+        let (phase, held) = run(tick_of(500));
+        assert!(matches!(phase, Phase::Wait { .. }));
         let mut counts = Vec::new();
         for index in [1100u32, 1700, 2300] {
-            let tick = index - REFERENCE_FIRST_INDEX;
-            let (mut rig, mut part) = started_with(Player::scripted(wait_script(tick + 2, 2_004)));
-            run_to(&mut rig, &mut part, tick + 1);
-            assert_eq!(part.phase, Phase::Wait, "boot {index}");
-            let mine = rendered_rgb(&rig);
+            let tick = tick_of(index);
+            let (phase, mine) = run(tick);
+            assert!(matches!(phase, Phase::Wait { .. }), "boot {index}");
             assert_eq!(mine, held, "boot {index} is not the held opening");
-            counts.push((index, differing_bytes(&mine, &reference(index, "rgb"))));
+            counts.push(differing_bytes(&mine, &reference(index, "rgb")));
         }
-        assert_eq!(
-            counts,
-            [(1100, 118_843), (1700, 118_924), (2300, 119_056)],
-            "the tree's wait holds through every scroll keyframe"
-        );
+        assert_eq!(counts, [118_843, 118_924, 119_056]);
+    }
+
+    fn tick_of(index: u32) -> u32 {
+        index - REFERENCE_FIRST_INDEX
     }
 }

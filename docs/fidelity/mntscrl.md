@@ -108,88 +108,65 @@ rebased segment's layout — the 64,000 picture bytes followed by the asset's
 own last 778 bytes — so that a blitter offset in the 64 KB range reads what
 the original's data segment held (`BACKGROUND_LEN`).
 
-## 6. The music, and the release's timeline — the D24 measurement
+## 6. The music, and the release's timeline
 
 **The head start.** The block-3 restart (`MAIN/U2.ASM:856-863`) starts MUSIC1
 at order 42 on the music clock's first tick, frame 408
-(`shell::MUSIC_START_FRAME`). The reference's part tick 0 is boot 419, so its
-player had been polled **11 times** before the part's first tick. An
-unanchored run starts the player with the part, so `Mntscrl::init` pre-polls
-those 11 (`tick_zero_is_the_background_through_a_black_dac` asserts the poll
-count; the value is the same `pre` `MusicStart` would compute for an anchor at
-419). The observable consequence is the dump's music position: at tick 81
-(boot 500) it is `42:10`, which is exactly what
+(`shell::MUSIC_START_FRAME`). The reference's part tick 0 is boot 419 (the
+fade mapping above), so its player had been polled **11 times** before the
+part's first tick. An unanchored run starts the player with the part, so
+`Mntscrl::init` pre-polls those 11 (`tick_zero_is_the_background_through_a_black_dac`
+asserts the poll count; the value is the same `pre` `MusicStart` would compute
+for an anchor at 419). The observable consequence is the dump's music
+position: at tick 81 (boot 500) it is `42:10`, exactly what
 `reference/music/second3/trace.csv` holds at frame 500
 (`the_music_is_eleven_polls_in_at_the_parts_first_tick`). Without the
 pre-roll the position would read `42:9`.
 
-**The release's first wait is not the tree's.** `:153-159` waits for
-`dis_musplus() >= 0`, and the trace never reads that until frame 2488 (order
-47 row 0): from the part's start to then, `zplus` is 0 through orders 42-44
-and 1 from order 45, where `musplus = row - 64` is still negative until row
-64. A faithful translation therefore holds through every reference keyframe
-but 500.
+**The first wait is the release's 71 ticks.** The tree's `:153-159` waits for
+`dis_musplus() >= 0`, but no threshold of that shape can produce the
+release's timing. The release's last held frame is boot **554** and its
+pre-roll's first `scr` is boot **555** — ticks 135 and 136 with tick 0 at 419
+— and the trace's published position is order 42 row 16 **on both sides of
+that boundary** (`zplus` 0, so `musplus` is -32 at both; the port's published
+position at ticks 134 and 135 is `42:16`, measured by
+`the_releases_first_wait_is_seventy_one_ticks`). Any `musplus >= X` or `> X`
+therefore either ends the wait at tick 65 (X ≤ -32) or never at tick 135
+(X > -32). The port runs the measured duration instead: `RELEASE_WAIT_TICKS`
+= 71, named and cited, occupying ticks 65 through 135. This is the
+controller's D24 ruling — the reference is the authority and the real run
+must match its four keyframes. A single reference run cannot distinguish a
+constant from a release-side condition the frames do not expose; the constant
+is the fitted value the evidence supports, and the mechanism remains unknown.
 
-What the release does instead is measured from its own keyframes. With a
-first wait of `W` ticks, the reference's frame at boot `K` is the part's
-main-loop tick `K - 611 - W`; the port's unit test runs the same part with a
-scripted wait of each candidate `W` and compares the rendered RGB:
+**The tree's counterfactual, measured.** The development snapshot's
+`musplus >= 0` would first be true at trace frame **2488** (order 47 row 0,
+`zplus` 2, row 0 → 0), which the port's one-frame lead puts on tick **2068**;
+the tree's main loop would then start at tick 2196. Under that policy the
+part is still holding at every reference keyframe after 500, and the frames
+would be the held opening: `the_trees_own_wait_would_hold_through_the_scroll_keyframes`
+measures **118,843 / 118,924 / 119,056 bytes** against the reference's 1100,
+1700 and 2300. That is the divergence the tree would have had; the part does
+not have it.
 
-- at boot **1100**, exactly one `W` in 0…200 reproduces the frame: **71**
-  (0 of 192,000 bytes);
-- the same 71, applied without refitting, reproduces **1700** and **2300**
-  byte for byte.
+**The real run.** With the release's wait all four keyframes are byte-for-byte
+identical through the binary at the mapped ticks (`the_four_keyframes_match_the_reference`):
+500 in the index plane (both sides carry `.idx`) and 1100, 1700 and 2300 in
+RGB (the reference files no `.idx` for those three). D19's support is dumped
+too: `K-1` and `K+1` are distinguishable from `K` at every scroll keyframe —
+the scroller moves 2.4–3.1 % of its pixels a frame — so the mapping is exact
+and not a search's loosest fit. `cargo xtask compare` is not the tool here: it
+pairs frames by the manifest's index, and a run numbered from zero at tick 81
+is not index 500. The integration test's byte comparison at the mapped tick is
+stricter than `compare`'s ±1 pairing, because the port has no
+session-to-session phase to search.
 
-So in the release the last held frame is boot **554** (tick 135), the
-pre-roll runs 555-681 (ticks 136-262), and the main loop starts at boot
-**682** (tick 263). That is `the_reference_holds_seventy_one_frames_and_predicts_every_scroll_keyframe`,
-and it is a *prediction*, not a fit: 1100 alone chooses the number, and the
-other two keyframes test it.
-
-**What the tree's wait draws at those indices.** In the real run the trace's
-first non-negative reading lands on part tick **2068** (the port's published
-words lead the trace by one frame; the dump at 2068 reads `47:0` and the
-pre-roll's first `scr` changes the frame at 2069 —
-`the_tree_waits_until_the_traces_first_non_negative_reading`). The main loop
-therefore starts at tick 2196. The real cue — order 48 row 53, `musplus =
--11` — falls inside the integration test's bracket: 2,500 is the full
-scroller at `48:42`, and 2,650 is black at `50:16`, the part retired
+**The cue persists.** The main loop begins at tick 263. The tree's
+`:196-203` cue — `dis_musplus() == -11` exactly — first fires after it at
+order 45 row 53, tick 1,979 (the dump reads `45:53`; the frame at 1,979 is
+the fade's full-palette upload and 1,980 is one step down). The 65-tick fade
+ends by tick 2,043; 2,050 and 2,100 are black and the run holds that screen
 (`the_real_players_cue_fades_the_part_out_and_the_run_holds_black`).
-
-Consequently the four keyframes through the binary compare as
-
-| boot | part tick | tree's wait | differing bytes | differing pixels | % of 64,000 px |
-|---|---|---|---|---|---|
-| 500 | 81 | held opening | 0 (both planes) | 0 | 0.0000 |
-| 1100 | 681 | still waiting | 118,843 | 39,658 | 61.97 |
-| 1700 | 1281 | still waiting | 118,924 | 39,684 | 62.01 |
-| 2300 | 1881 | still waiting | 119,056 | 39,738 | 62.09 |
-
-500 is compared **indexed** (both sides have `.idx`; the port's tick-81 `.idx`
-is the reference's byte for byte — `the_held_opening_is_the_references_frame_500_in_both_planes`).
-1100, 1700 and 2300 are RGB-only in the reference, so they are compared RGB
-(`the_tree_wait_holds_through_the_reference_scroll_keyframes` for the
-percentages, `the_reference_comparison_at_the_tree_timeline_measures_the_wait_divergence`
-for the byte counts).
-
-`cargo xtask compare` is not the tool here, and cannot be: it pairs frames by
-the manifest's index, and a run numbered from zero at tick 81 is not index
-500. The comparison above is the integration test's own byte count at the
-mapped tick — stricter than `compare`'s ±1 pairing, because the port has no
-session-to-session phase to search. **D19's support is taken anyway**: the
-integration test dumps `K-1, K, K+1` around each keyframe and the run's three
-are all the held opening — the divergence in its sharpest form — while the
-unit test's 71-tick run matches `K` and is *different* at `K±1`, which is what
-makes the mapping exact rather than a search's loosest fit.
-
-**The decision, under D24.** The tree cannot produce the release's hold from
-any `musplus` reading: through the whole interval `musplus` is the constant
-`-32`, so every threshold either exits at tick 65 or waits until tick 2,068.
-The release's behaviour is therefore registered, not adopted (A17), and the
-port keeps `:153-159`'s wait. The *picture* is not in doubt: with the
-release's 71-tick hold the port reproduces all four keyframes exactly, which
-is the note's evidence that the transliteration of the blit, the font, the
-palette and the pre-roll is right and the difference is the wait alone.
 
 ## 7. The `scp` bound: the release's 640 (D24's single constant, adopted)
 
