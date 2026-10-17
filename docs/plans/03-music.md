@@ -406,9 +406,10 @@ D5's verification is the specification and every number in it is re-derived here
   census** is asserted: MUSIC0 is 22 PCM and 22 empty, MUSIC1 41 PCM and 13 empty, **no type-2
   (adlib) instrument in either module** — which is why this phase does not model OPL, a fact that
   belongs in the note as a measurement.
-- The pattern pointer table's location (`0x60 + ordNum + insNum*2`, a **byte** offset: `parains` is
-  `char far *` arithmetic and `parapat = parains + insNum` adds `insNum × 2` bytes,
-  `STARTEMS.C:293`, `:333-334`; each table *entry* is a paragraph, `parapat[a] << 4`,
+- The pattern pointer table's location (`0x60 + ordNum + insNum*2`, a **byte** offset: `module` is
+  `char far *`, so `STARTEMS.C:333`'s address arithmetic is in bytes, and `parains`/`parapat` are
+  `int *`, so `parapat = parains + insNum` adds `insNum × 2` bytes, `STARTEMS.C:293`, `:333-334`;
+  each table *entry* is a paragraph, `parapat[a] << 4`,
   `STARTEMS.C:347`) and the
   observation D5 relied on — the blocks tile contiguously on 16-byte boundaries — are both asserted,
   because they are the evidence that the pointer table was read correctly at all. Measured while

@@ -530,9 +530,10 @@ key(i) = (((n ^ (n >> 2)) << 3) | ((5*i + 2) & 7)) & 0xFF
 
 Apply `data[ptr+2+i] ^= key(i)` for `i` in `0 .. ln-2`, where `ptr = patternPtr * 16`,
 `ln = u16_le(data[ptr..ptr+2])`, and the pattern pointer table is at
-`0x60 + ordNum + insNum*2` — a **byte** offset (`parains` and `parapat` are `char far *`
-arithmetic, `STARTEMS.C:293`, `:333-334`); what is in paragraphs is each table *entry*
-(`parapat[a] << 4`, `STARTEMS.C:347`).
+`0x60 + ordNum + insNum*2` — a **byte** offset (`module` is `char far *`, so
+`STARTEMS.C:333`'s address arithmetic is in bytes, and `parains`/`parapat` are `int *`,
+so `:334`'s `parapat = parains + insNum` adds `insNum × 2` bytes); what is in paragraphs
+is each table *entry* (`parapat[a] << 4`, `STARTEMS.C:347`).
 
 **Verified:** MUSIC0 77/77 patterns decode as exactly 64 rows consuming exactly their
 data; MUSIC1 76/77 (one cell has command byte 0; treat 0 as no-command). Zero invalid

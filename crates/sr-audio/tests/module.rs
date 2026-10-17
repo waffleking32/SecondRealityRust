@@ -176,9 +176,9 @@ fn word(bytes: &[u8], at: usize) -> u16 {
 }
 
 /// The pattern pointer table's location, a **byte** offset: `0x60 + ordNum + insNum * 2`
-/// (`STARTEMS.C:333-334`; `parains` and `parapat` are `char far *` arithmetic). Each
-/// *entry* is a paragraph number — `parapat[a] << 4` gives the file offset
-/// (`STARTEMS.C:345-347`).
+/// (`STARTEMS.C:333-334`; `module` is `char far *`, and `parains`/`parapat` are `int *`,
+/// so `parapat = parains + insNum` adds `insNum × 2` bytes). Each *entry* is a paragraph
+/// number — `parapat[a] << 4` gives the file offset (`STARTEMS.C:345-347`).
 fn pattern_table(loaded: &Loaded) -> Vec<u16> {
     let orders = usize::from(word(&loaded.bytes, 32));
     let instruments = usize::from(word(&loaded.bytes, 34));
