@@ -14,6 +14,7 @@ pub mod beglogo;
 pub mod cred;
 pub mod endlogo;
 pub mod endscrl;
+pub mod minvball;
 pub mod mntscrl;
 pub mod poslist;
 pub mod rayscrl;
@@ -35,6 +36,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
         // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).
         ("mntscrl", || Box::new(mntscrl::Mntscrl::new())),
+        // `DOTS/MAIN.C`, block 3's fourth (`MAIN/U2.ASM:856-874`).
+        ("minvball", || Box::new(minvball::Minvball::new())),
         // `WATER/DEMO.PAS`, block 3's fifth (`MAIN/U2.ASM:856-874`).
         ("rayscrl", || Box::new(rayscrl::Rayscrl::new())),
         // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).

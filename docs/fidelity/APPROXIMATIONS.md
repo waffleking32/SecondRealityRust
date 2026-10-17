@@ -988,3 +988,50 @@ fade, and it runs 65 uploads to black (`the_cue_is_exactly_minus_eleven_and_fade
 **Leads for whoever takes it:** the shipped part is `upstream/SecondReality/MAIN/DATA/RAYSCRL.EXE`
 (90,351 bytes, PKLITE-packed, like MNTSCRL's). What is measured here is each wait's leave frame;
 the packed image's own conditions would need an unpacker.
+
+---
+
+## A19 — MINVBALL: the release's coincident-dot overlay is not the tree's, and the RNG is Microsoft's
+
+**Part:** MINVBALL (`DOTS/MAIN.C` + `DOTS/ASM.ASM`), Phase 4. Under D24: the source is the
+evidence, the reference's frames are the authority, and the shipped release is the tiebreaker.
+
+**The RNG, identified from the compile.** The brief names Turbo C; the source says Microsoft C
+6.0. `DOTS/MAKEFILE:10-16` uses `cl /qc /AL` — Microsoft's large-model compiler — and the linked
+`DOTS.EXE` carries the **“MS Run-Time Library - Copyright (c) 1990, Microsoft Corp”** string. Its
+`rand()` is the 32-bit LCG with modulus 2³², multiplier **214,013**, increment **2,531,011**,
+seed 1, returning `(seed >> 16) & 0x7FFF`; the first ten values are 41, 18,467, 6,334, 26,500,
+19,169, 15,724, 11,478, 29,358, 26,962, 24,464
+(`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`). The port implements that
+generator, not Borland's; the reference's dense 12,400 scatter frame is reproduced to **25
+pixels** (`the_four_keyframes_match_the_reference_at_the_mapping`), which is the evidence the
+stream is the release's.
+
+**The residual the port does not reproduce.** The four reference keyframes differ from the port
+by **67 / 63 / 37 / 25 pixels** of 64,000 (10,900 / 11,200 / 11,800 / 12,400; 0.1047 / 0.0984 /
+0.0578 / 0.0391 %), asserted exactly by `the_four_keyframes_match_the_reference_at_the_mapping`.
+The geometry is exact — at least **99 %** of each reference frame's shadow pixels are at the same
+pixel in the port's frame (same test) — so the difference is confined to *coincident* dots: two
+balls, or a ball and a shadow, land on one pixel and the draw order decides the colour. The
+source fixes the draw order (the `dot` array), but which dot draws a given position is the
+`dottaul` permutation, and the permutation's cursor `j` is **never initialized** (`MAIN.C:87`,
+`:200`): the value is whatever the stack held. The port fits the one value the source leaves free
+to the reference, **88** (the value the residues in this entry are measured with;
+`the_setup_is_deterministic_and_its_permutation_is_fixed` pins the setup around it); the residual
+is the release's own stack/permutation difference. Of the 512 values the task tried, 88 was the
+lowest; that search is the task's measurement, not a committed test.
+
+**Why it cannot be followed further.** The shipped part is
+`upstream/SecondReality/MAIN/DATA/MINVBALL.EXE`, a 7,395-byte PKLITE-packed self-extractor (the
+same shape as A17/A18's leads); the tree's `DOTS/DOTS.EXE` is the 10,372-byte development build
+of the ported source. The release's `dottaul` and its stack value are inside the packed image
+and need an unpacker to read. Everything the source states is implemented literally — the
+`mov ax,ax` stale-`bx` rotation, the `mov ds:[si+6],ax` shadow-row bug, the gravity integration
+skipped when the shadow is off screen (`ja @@2` jumps past it), the shadow colour 87 inside the
+background ramp, the exact cue window and the frame cap.
+
+**Measured difference, through the real binary.** 67/63/37/25 pixels at the four keyframes, with
+the shadow layer at 1856/1860, 2152/2159, 2175/2187 and 2168/2170 pixels shared (99.78 / 99.68 /
+99.45 / 99.91 %), and every keyframe reproduced at exactly one frame counter
+(403/703/1303/1903; the `K±1` neighbours are different pictures, asserted by the test, so the
+mapping is not a loose fit).

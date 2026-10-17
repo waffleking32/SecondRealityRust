@@ -530,6 +530,10 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         "tunneli" => Some((ModuleId::Music1, 0)),
         "cred" => Some((ModuleId::Music0, 26)),
         "endscrl" => Some((ModuleId::Music0, 43)),
+        // DOTS starts in the middle of block 3, after PLZPART. The trace's order
+        // when the part's start window opens (boot 10,300..10,368) is 75; it
+        // advances to 77 at 10,380, twelve frames into the part's fade.
+        "minvball" => Some((ModuleId::Music1, 75)),
         "rayscrl" => Some((ModuleId::Music1, 86)),
         _ => None,
     }
@@ -1614,6 +1618,7 @@ mod tests {
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
+            ("minvball", Some((ModuleId::Music1, 75))),
             ("rayscrl", Some((ModuleId::Music1, 86))),
             ("endlogo", Some((ModuleId::Music0, 25))),
             ("cred", Some((ModuleId::Music0, 26))),
