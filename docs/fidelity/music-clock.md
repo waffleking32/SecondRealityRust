@@ -211,10 +211,7 @@ Two runs in these traces have their outliers bunched at the start, and the tool 
 `second5`'s post-speed-change transient (§3) and the same run in `second5b`:
 
 ```
-  the 6 gap(s) outside the 8..9 the run's own row length (8.76 frames) brackets, by their
-    position in the run: 1 of 35 (1024 -> 1025, 1), 2 of 35 (1025 -> 1027, 2),
-    3 of 35 (1027 -> 1028, 1), 4 of 35 (1028 -> 1030, 2), 5 of 35 (1030 -> 1031, 1),
-    27 of 35 (1215 -> 1225, 10)
+    the 6 gap(s) outside the 8..9 the run's own row length (8.76 frames) brackets, by their position in the run: 1 of 35 (1024 -> 1025, 1), 2 of 35 (1025 -> 1027, 2), 3 of 35 (1027 -> 1028, 1), 4 of 35 (1028 -> 1030, 2), 5 of 35 (1030 -> 1031, 1), 27 of 35 (1215 -> 1225, 10)
 ```
 
 and `hiddenu`'s, where all five are at positions 1…5 of 40 (`1 of 40 (6182 -> 6183, 1)`, …
@@ -358,10 +355,7 @@ the note quotes it rather than counting in prose — one `second5` line the long
 trace's line as the tool prints it:
 
 ```
-  frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing
-    (147, 409, 1220) (frames 147..147 of them are the boundary: the segment was located
-    after they had gone) — this trace is NOT per-frame (recomputed from the trace file's
-    own frames)
+  frames 148..1299 of the requested 147..1299: 1150 sample(s), 3 frame(s) missing (147, 409, 1220) (frames 147..147 of them are the boundary: the segment was located after they had gone) — this trace is NOT per-frame (recomputed from the trace file's own frames)
 ```
 
 | trace | the tool's coverage line |
@@ -422,19 +416,34 @@ second, independent way of measuring what §3 measures through the row rate.
 address **`0x105B0E`** advancing **0.7424 times a video frame**, reading 371/373/374 at video
 frame 900. `cargo xtask music probe --arg 2 --cycles 30000 --frames 899..3000 --at 0x105B0E`
 measures it — **and `_np_zframe` beside it, in the same bracketed samples**, so the two are
-comparable frame for frame — and run twice in two sessions it gives the same answer:
+comparable frame for frame. The block below is that command's output **as the tool prints it**
+(one line per reading; nothing re-wrapped), from four idle runs at the fix wave's tip:
 
 ```
 address 0x105B0E: the segment's base(s) are 0x0051F0, 0x1051F0 (of 29607 byte(s))
   in the view at 0x1051F0 it is that base + 0x091E
-  the last published symbol at or below it is _zmixercount (base + 0x091C, 2 byte(s) below);
-    the next above is _zchn at base + 0x0DA0
+  the last published symbol at or below it is _zmixercount (base + 0x091C, 2 byte(s) below); the next above is _zchn at base + 0x0DA0
   frame 900: 370; frame 2999: 1927 — +0.7418 per frame, +51.99 per second at 70.086 Hz
   2099 sample(s) between them
-  _np_zframe over the same window: 1 at frame 1112 to 1401 at frame 2999 — +0.7419 per frame,
-    +52.00 per second (1 reset(s))
-  the player's own words at frame 2999: tempo 130, speed 3, zframe 1401, ord 10, row 63
+  _np_zframe over the same window: 1 at frame 1112 to 1401 at frame 2999 — +0.7419 per frame, +52.00 per second (1 reset(s))
+  the player's own words at frame 2999: tempo 130, speed 3, zframe 1401, ord 11, row 0
 ```
+
+**What reproduces, and what does not.** Three of the four idle runs printed every line above
+verbatim; the fourth differed on one figure only — `_np_zframe`'s first frame was **1111**
+(rate 0.7415, 51.97) rather than 1112, which is D17's host-timing term reaching even an idle
+session. The last line read **`ord 11, row 0` in all four runs**. An earlier draft of this note
+printed `ord 10, row 63` there: that was a reading from a different session, and it is recorded
+here rather than deleted — the command does not reproduce it at this tip.
+
+**The equality is idle-host, not absolute.** Under concurrent host load the same command moves
+the frame column: with eight busy loops running, one run gave `frame 904: 374; frame 2999: 1934 —
++0.7446 per frame` and `ord 11, row 2`, and the final review's loaded runs read
+`1927/1931/1939/1928` at frame 2999 with rates `0.7418/0.7437/0.7456/0.7423`. What the block
+supports is the **rate**, not the digits: the two words advance at the same rate to within
+0.2 % in every run recorded here (this fix wave's five and the review's eight), which is the
+same clock; where a given frame sits is the emulator's host-timing term (D17), not a property
+of the port or of the word.
 
 - **It is not `_np_zframe`** (`0x08FB`), and it is not a different *clock* either: over the
   same 2,099 frames the two advance at the same rate to four places — **51.99 a second and

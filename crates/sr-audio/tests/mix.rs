@@ -23,7 +23,7 @@
 
 use std::path::Path;
 
-use sr_audio::{Channel, MixRate, Mixer, Module, Player, PlayerOptions, CHANNELS};
+use sr_audio::{Channel, Curve, MixRate, Mixer, Module, Player, PlayerOptions, CHANNELS};
 
 const ASSETS: &str = "../../assets/MAIN";
 
@@ -103,6 +103,15 @@ const MARKED_OFFSET: i32 = 0x101;
 /// `0xFF` tail — indexed at the base the flush's correction gives a frame: `0x400 + value`,
 /// every sample of the window. The card plays unsigned 8-bit, so the port's `i16` is
 /// `(byte − 128) × 256`.
+///
+/// **This is a second copy of `Curve::build`'s arithmetic, and deliberately so**: the expected
+/// sample values below must not be computed by the code they are checking, so the oracle is
+/// written out from the object's instructions instead of called. What it catches is a
+/// transcription slip in either copy (`the_files_hand_arithmetic_is_the_builders_at_every_entry`
+/// also pins the two together, and M1's mutation of the builder fails five tests through it);
+/// what it cannot catch is a *shared* misreading of `+0x559d`…`+0x55bd`. That one is guarded
+/// from outside — the probe's 768/1279/1280 measurement (A14) and `mix::tests::
+/// the_curve_is_the_objects_own_table`'s literal boundary entries — not by this copy.
 fn curve_with(mul: u32, value: i32) -> i16 {
     curve_at(mul, BASE, value)
 }
@@ -347,6 +356,25 @@ fn one_voice_is_the_modules_own_sample_bytes() {
     assert_eq!(voice_step, 13_700);
     assert_eq!(positions[..8], [0, 0, 0, 0, 0, 1, 1, 1]);
     assert_eq!(positions[255], 53);
+}
+
+#[test]
+fn the_files_hand_arithmetic_is_the_builders_at_every_entry() {
+    // `curve_at` is a second copy of `Curve::build`'s arithmetic — deliberately, so the
+    // expected values are not computed by the code they check — and this is what keeps the
+    // two copies from drifting apart silently. It cannot make the copy independent of a
+    // *shared* misreading of `+0x559d`…`+0x55bd`; the probe's 768/1279/1280 measurement and
+    // `mix::tests::the_curve_is_the_objects_own_table`'s literal entries are that guard.
+    for mul in [16u32, 48, 64, 127] {
+        let builder = Curve::build(mul as u8);
+        for index in 0..0x800i32 {
+            assert_eq!(
+                curve_at(mul, BASE, index - BASE),
+                builder.sample(index),
+                "mul {mul}, table entry {index}: the hand copy and the builder"
+            );
+        }
+    }
 }
 
 #[test]
@@ -642,6 +670,56 @@ fn a_poll_produces_exactly_the_samples_it_says_it_does() {
     }
     println!("the first five polls' sample counts: {counts:?}");
     assert_eq!(counts, vec![570, 571, 571, 570, 571]);
+}
+
+#[test]
+fn the_samples_before_a_tick_are_mixed_before_it_runs() {
+    // **`Player::poll`'s documented order**, the object's `zpollme` (`player.rs:457-461`):
+    // the samples before a tick are mixed before that tick runs. A row's first tick is where
+    // its cells load and its note starts, so on a seek the samples *before* the first tick
+    // must still be the silence the reset left, and the note must first sound in the samples
+    // after it. Mixing the chunk after the tick it ends on would put the note one chunk
+    // early — this test's name and its failure messages are both about that order.
+    let mut player = Player::new(module("MUSIC0"), PlayerOptions::default());
+    player.play_song(1); // order 1: pattern 1 row 0 carries `O05` + note 0x30 on channel 2
+    let mut samples: Vec<i16> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    let mut before_tick = None;
+    while player.zframe() < 3 {
+        player.poll();
+        let count = player.samples_this_poll() as usize;
+        counts.push(count);
+        let mut out = vec![0i16; player.pending_samples()];
+        let taken = player.take_samples(&mut out);
+        assert_eq!(taken, out.len(), "the drain takes what the poll produced");
+        samples.extend_from_slice(&out[..taken]);
+        if player.zframe() > 0 && before_tick.is_none() {
+            // The first tick ran inside this poll. No poll here spans a whole tick — the
+            // counts asserted below are all under the 833 samples a tick holds at tempo
+            // 120 — so every sample this poll mixed came before the tick.
+            before_tick = Some(samples.len());
+        }
+    }
+    assert_eq!(&counts[..2], &[570, 571], "the fixture's first two polls");
+    assert!(
+        counts.iter().all(|count| *count < 833),
+        "no poll spans a whole tick, so the boundary below is exact: {counts:?}"
+    );
+    let before_tick = before_tick.expect("the first tick ran in the window");
+    assert_eq!(
+        before_tick, 1141,
+        "the first tick's sample boundary in this fixture (570 + 571)"
+    );
+    assert!(
+        samples[..before_tick].iter().all(|&sample| sample == 0),
+        "the samples before the first tick are silent: they are mixed before the row's cells \
+         load, which is `Player::poll`'s documented order (the samples before a tick are mixed \
+         before that tick runs)"
+    );
+    assert!(
+        samples[before_tick..].iter().any(|&sample| sample != 0),
+        "the note the row starts is audible only in the samples after that tick"
+    );
 }
 
 #[test]

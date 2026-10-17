@@ -761,6 +761,43 @@ impl std::fmt::Display for PatternFault {
 
 impl std::error::Error for ModuleError {}
 
+/// One of the two songs the demo plays: the shell's name for it, the file a run reads, and
+/// the initial-tempo byte `MAIN/STARTMUS.C:252-265` patches into its header before the player
+/// loads it.
+///
+/// **One copy of the fact for both readers.** The shell decides which module a run installs
+/// and applies [`Module::apply_tempo_patch`]; `xtask music analyse` predicts the tick rate
+/// from the same module's header. The paths and the patch therefore live here, beside the
+/// loader whose method applies it, rather than in either caller — a tool and a run that
+/// disagreed about the patch would disagree about the tick rate with nothing to catch it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Song {
+    /// The demo's own name for the module — `MUSIC0`/`MUSIC1`, as the status line and the
+    /// manifests spell it.
+    pub name: &'static str,
+    /// The module's file at the path a run reads its media from (the working directory,
+    /// which for this repository's commands is its root).
+    pub file: &'static str,
+    /// The tempo byte the shell patches into the header, or `None` where it patches nothing.
+    pub tempo_patch: Option<u8>,
+}
+
+/// The two songs the demo plays, in the order `restartmus`'s module number names them
+/// (`MAIN/U2.ASM:766-775`): `0` is MUSIC0 — patched to tempo 120 (`0x78`) — and `1` is
+/// MUSIC1, played at its file's own 130.
+pub const SONGS: [Song; 2] = [
+    Song {
+        name: "MUSIC0",
+        file: "assets/MAIN/MUSIC0.S3M",
+        tempo_patch: Some(0x78),
+    },
+    Song {
+        name: "MUSIC1",
+        file: "assets/MAIN/MUSIC1.S3M",
+        tempo_patch: None,
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

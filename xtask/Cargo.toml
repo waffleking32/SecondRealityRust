@@ -24,6 +24,10 @@ sr-assets = { path = "../crates/sr-assets" }
 # picture through its palette, and re-deriving that rule here is how the
 # widening would come to differ between the tool and the demo.
 sr-engine = { workspace = true }
+# For the two songs' shared row (`sr_audio::SONGS`): the module paths and the
+# tempo the shell patches are one fact, and `music analyse` reads the same copy
+# the run applies rather than a second table.
+sr-audio = { path = "../crates/sr-audio" }
 # `--tree` re-hashes every asset and compares it with `assets/PROVENANCE.md`,
 # whose digests are `sha256sum`'s. The standard implementation, so the tool and
 # the command the record was measured with cannot disagree.

@@ -393,6 +393,10 @@ D5's verification is the specification and every number in it is re-derived here
   S:48` plus **one cell whose command byte is 0** — which is D5's recorded MUSIC1 exception, and the
   decoder must treat 0 as no command. The test counts them itself; the numbers above are what it
   should find, and a disagreement is a finding in the note either way.
+  **This paragraph replaces the plan's original wording**, which read D5's six numbers as a
+  *cross-module* histogram; the decode above showed they are MUSIC0's own, and the earlier reading
+  is kept in commit `4e45aaa`'s message. The note was corrected in place at the same time and the
+  two documents agree.
 - Each module's header, asserted as measured: `ordNum/insNum/patNum` 80/44/77 and 100/54/77, global
   volume 64, initial speed 6 and 3, initial tempo **125** (before the patch) and 130, master volume
   176 (stereo bit set), and the pan table's 32 bytes. The patch is applied in a test and the tempo
@@ -402,7 +406,10 @@ D5's verification is the specification and every number in it is re-derived here
   census** is asserted: MUSIC0 is 22 PCM and 22 empty, MUSIC1 41 PCM and 13 empty, **no type-2
   (adlib) instrument in either module** — which is why this phase does not model OPL, a fact that
   belongs in the note as a measurement.
-- The pattern pointer table's location (`0x60 + ordNum + insNum*2`, paragraph units) and the
+- The pattern pointer table's location (`0x60 + ordNum + insNum*2`, a **byte** offset: `parains` is
+  `char far *` arithmetic and `parapat = parains + insNum` adds `insNum × 2` bytes,
+  `STARTEMS.C:293`, `:333-334`; each table *entry* is a paragraph, `parapat[a] << 4`,
+  `STARTEMS.C:347`) and the
   observation D5 relied on — the blocks tile contiguously on 16-byte boundaries — are both asserted,
   because they are the evidence that the pointer table was read correctly at all. Measured while
   writing this plan so the assertion is precise: **all 76 consecutive pairs in each module are
@@ -734,12 +741,13 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   Task 3.
 - `sync` (`DIS/DISINT.ASM:428-463`): the `ordersync1` table verbatim, the unsigned `jbe` compare,
   the `(order << 8) | row` key, and the **read past the table's last entry** when no row matches
-  (the loop runs 16 times over 15 entries). The port cannot reproduce what that read returns — it
-  is code, and the code differs between builds — so the port's behaviour there is a **declared
-  boundary**: the reachable domain (ord ≤ 0x42) returns the table's codes, and beyond it the call is
-  refused loudly rather than returned as a fabricated number, with the reason in `music.md` and an
-  entry in `APPROXIMATIONS.md` if the phase cannot show the domain is unreachable for every part in
-  the tree — and **both ends of the domain turn out to be reachable**, which Task 6 found by reading
+  (the loop runs 16 times over 15 entries). The port cannot reproduce what that read returns above
+  the 16th compare — it is code, and the code differs between builds — so the port's behaviour
+  there is a **declared boundary**: the table's own domain (ord ≤ 0x42) returns the table's codes;
+  `0x4200 < key <= 0x8E2E` returns the table's last code, **4**, because the 16th compare matches
+  the source's own `2e 8e`; above `0x8E2E` the call is refused loudly rather than returned as a
+  fabricated number, with the reason in `music.md` and `APPROXIMATIONS.md` A15.
+  **The near end of the domain is reached**, and Task 6 found it by reading
   the callers rather than this plan: `sync_10`'s `%bx - 2` read makes `(order 0, row 0)` an
   out-of-table read at the *near* end too, and `(0, 0)` is exactly what ALKU's first `dis_sync()`
   holds (`ALKU/MAIN.C:59`, at the top of its `main`). The callers in the tree are block 1's (Phase
@@ -751,15 +759,20 @@ These are *translations*, and three of them have a detail that a "clean" impleme
   ALKU does not appear in that trace at all. The trace shows the *position* is reached; ALKU's own
   source shows *that part* calls from it, in a full run (`docs/fidelity/part-sequence.md`).
 
-  **What the port does at the boundary, settled
-  in Task 6's review**: the *near* end is **answered** with the object's own word — the bytes before
+  **What the port does at the boundary, settled in Task 6's review and completed in the final
+  review's fix wave**: the *near* end is **answered** with the object's own word — the bytes before
   the table are `pop es; ret` (`DIS/DISINT.ASM:420`, `:424`), identical in all three shells and
   pinned by the source, so `(0, 0)` returns −15609 as the C callers receive it (their `< N` waits,
-  exactly as the reference's does) — while the region above the last key is **refused loudly**, and
-  it has two tiers: up to `0x8E2E` the object's sixteenth compare matches and the answer is the
-  table's own last code, deterministically, and only above that is the returned word linker-set
-  (`0xCD06`/`0xED06`/`0x9D06`). A15 carries the measurements; anything above the last key is Phase
-  4's, with the deterministic tier derivable if a caller ever syncs there.
+  exactly as the reference's does) — and the band above the last key is answered with the table's
+  last code up to `0x8E2E`, where the sixteenth compare matches the source's own `2e 8e`; only
+  above `0x8E2E` is the returned word linker-set (`0xCD06`/`0xED06`/`0x9D06`) and refused. A15
+  carries the measurements.
+
+  **An earlier revision of this paragraph said "both ends of the domain turn out to be
+  reachable."** Only the near end is shown reachable; the far end (above `0x8E2E`) is not, and the
+  phase's own `hiddenu` trace — which occupies the answered band for 81.1 % of its frames — never
+  reaches it. The sentence was corrected in the fix wave that also implemented the answered band,
+  because this plan is the document Phase 4 reads first.
 - `muscode` (`DIS/DISINT.ASM:242-282`, `DIS/DISC.ASM:91-100`): returns `zinfo`, whose value comes
   from Task 1's resolution or from the documented deferral, and the deferral's substitute is
   implemented here as the same *shape* (a function of the position) so that a later phase's
@@ -918,7 +931,7 @@ What could not be confirmed, stated as such: no audio reference exists (the orac
 D17, so the mixed *sound* is verified by construction, by internal invariants and by a person's
 ears — never by a null test against the original); `zinfo`'s status (resolved, or deferred with
 D8's record); whatever the trace could not settle; the order-list questions the trace answered and
-any it did not; and the `sync` table's unreachable domain.
+any it did not; and the `sync` table's region above `0x8E2E`, which no caller is shown to reach.
 
 - [ ] **Step 4: The record**
 

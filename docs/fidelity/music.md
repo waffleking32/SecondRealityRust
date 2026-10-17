@@ -50,7 +50,10 @@ MUSIC1.S3M: 100 orders at 0x60, 54 instrument pointers at 196, 77 pattern pointe
 
 so the container is one layout with two tables between the header and the blocks: the order list at
 0x60, `insNum` instrument pointers next, then `patNum` pattern pointers — the offset the plan calls
-`0x60 + ordNum + insNum*2`, in paragraph units, which is `STARTEMS.C:333-334` read literally.
+`0x60 + ordNum + insNum*2`. It is a **byte** offset: `STARTEMS.C:293`'s `char far *module` makes
+`parains` byte arithmetic and `parapat = parains + insNum` adds `insNum × 2` **bytes**
+(`STARTEMS.C:333-334`), and the loader uses it that way. What is in paragraphs is each table
+**entry**: `parapat[a] << 4` (`STARTEMS.C:347`).
 
 ### The block's length word includes its own two bytes
 
@@ -382,8 +385,9 @@ source in the tree**: `MAIN/STMIK.300` is an OMF object, and everything below is
 own segment image — the 29,607 bytes the symbol map records for `text_stmik300_text`, rebuilt
 from the object's 105 `LEDATA` and 118 `LIDATA` records (`crates/sr-audio/tests/player.rs`'s
 `the_objects_own_bytes_say_what_the_player_says`, which rebuilds it and asserts the load-bearing
-instructions at their own offsets (24 of them when Task 3 wrote it, **131** after Task 4 added
-the effects' — the count the test itself prints)). Offsets below are that object's segment offsets, and the
+instructions at their own offsets (24 of them when Task 3 wrote it, 131 after Task 4 added the
+effects', and **151 at the tip** — Task 5's mixer claims plus the fix wave's four gate/clamp
+claims — the count the test itself prints)). Offsets below are that object's segment offsets, and the
 listings are that image disassembled (`objdump -b binary -m i8086 -D`) — the lines are pasted as
 it prints them, `(…)` marks an elision, and the `;` comments are this note's, not the tool's. What
 the object cannot settle — which *frame* a row change lands on — is measured against the traces,
@@ -420,7 +424,7 @@ post-speed-change transient. The row's cells are read on the row's first tick
 `speed` word therefore leads its `row` column, and the plan's third implementation detail is this
 instruction and not a convention.
 
-A poll's samples are fractional (`40000/70.086` = 570.733…), and `player.rs` carries the fraction
+A poll's samples are fractional (`40000/70.086` = 570.727…), and `player.rs` carries the fraction
 in a `1/70_086`-sample accumulator rather than rounding per poll. The original carries the
 remainder the same way, in the mixing countdown that a tick tops up
 (`+0x50f0: sub %ax,0xbe0` … `+0x5157: add %ax,0xbe0`).
@@ -610,10 +614,14 @@ row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and 
 
 ### 254 and the pattern break, as the trace has them
 
-```
-reference/music/second5: frames 1251 → 1260  ord 26 row 61 → ord 28 row 0   (the C00, over the 254 at order 27)
-reference/music/second5: frames 970 → 979    ord 25 row 63 → ord 26 row 0   (pattern 71's A01 at speed 1)
-```
+Read from `second5`'s own `frame,ord,row` columns (not a command's output; the values are the
+CSV's, checked against the trace file). Two transitions are the evidence for the `C`/`254`
+reading:
+
+| frames | transition | what it is |
+|---|---|---|
+| 1251 → 1260 | ord 26 row 61 → ord 28 row 0 | the `C00`, over the 254 at order 27 |
+| 970 → 979 | ord 25 row 63 → ord 26 row 0 | pattern 71's `A01` at speed 1 |
 
 Both are in `crates/sr-audio/tests/trace.rs`, which walks `reference/music/`, drives a `Player`
 from the boot's own music start (frame 408, derived from each trace's own columns and checked
@@ -1121,8 +1129,16 @@ as the object's own bytes, and `tests/player.rs`'s claims assert those same byte
   MUSIC1: 0x00:1 A:54 C:4 D:3340 E:217 F:180 G:2607 H:365 K:62 O:2417 Q:38 S:48
   MUSIC0: S subcommands {13: 140}, delays {3: 77, 6: 63}
   MUSIC1: S subcommands {13: 48}, delays {2: 48}
+  MUSIC0: Q codes {0: 49, 4: 2, 7: 11, 12: 2, 14: 1, 15: 19}, intervals {0: 48, 3: 7, 4: 28, 6: 1}
+  MUSIC1: Q codes {0: 38}, intervals {3: 38}
   MUSIC0: 27 fine-up (0x?f) and 144 fine-down (0xf?) D cells
 ```
+
+Those six lines are one test's output (`the_cells_the_tests_drive_are_the_modules_own`) in the
+order it prints them; the seventh is printed by a **different** test,
+`the_fine_volume_slides_move_once_on_the_first_tick`, which is the next test in the serial run.
+The capture is `cargo test -p sr-audio --test effects -- --nocapture --test-threads=1`;
+the harness's own prefix and result dots are stripped, the lines are otherwise as printed.
 
 The per-effect tests and their cells:
 
@@ -1164,10 +1180,11 @@ cargo test -p sr-audio --test player -- --nocapture the_objects_own_bytes
 
 Every offset below is `MAIN/STMIK.300`'s segment offset and every load-bearing one is **asserted
 against the object's own bytes** by `tests/player.rs`'s claims table, which this task grew from
-**131 claims to 147**: the per-frame loop's body, the volume table's build, the scale table, the
-centre read and its pan shifts, the two pan shift tables, the two divisions of the step, the
-stereo divisor's selection, the two end paths, the note start's bounds, and the output
-conversion's two corrections.
+**131 claims to 147**, and the fix wave to **151**: the per-frame loop's body, the volume table's
+build, the scale table, the centre read and its pan shifts, the two pan shift tables, the two
+divisions of the step, the stereo divisor's selection, the two end paths, the note start's
+bounds, the output conversion's two corrections, and the fix wave's period clamp and `m_pos`
+gate.
 
 ### 10.1 Where the mixer is, and how it is called
 
@@ -1204,6 +1221,16 @@ walk calls the voice routine `+0x3765` for a channel with a sample and a nonzero
 - **the bounds** — `m_end` (`+0x48`) and `m_loop` (`+0x4c`), read at `+0x383c`;
 - **the two cached words** — `m_speed` (`+0x50`) and `m_vol` (`+0x41`).
 
+**Which channels it walks is two tests, not one.** The walk's caller tests `m_speed`
+(`+0x377e`'s `or`/`je`), and the voice routine tests it again at `+0x3783` and then tests
+`m_pos == 0xffff` at `+0x378e`/`+0x3791` — both jump to the routine's return before the sample or
+the centre is read. The second is the "volume 0" optimisation's marker: a channel that path frees
+has its position parked at `0xffff`, and the object's mixer then skips it entirely. The port's
+`voice_contribution` tests the same word, which matters for the *position* and not the sound: the
+freed channel's volume is 0, so no sample changes, but a port without the test would advance the
+position of a voice the object leaves alone. Measured on the shipped modules: 398 gate hits in
+MUSIC0 and 1,068 in MUSIC1 over 120,000 polls, every one at volume 0.
+
 ### 10.2 The voice: the arithmetic the port reproduces
 
 **The volume table** is built by `+0x551c` (called from `+0x22d0`, `+0x2792`, `+0x53af` and
@@ -1232,6 +1259,19 @@ and `+0x58c9`…`+0x58d8` divides *that* by the mixing rate, the quotient into t
 and the remainder's next 16 bits into its low word. A period of 0 returns with `m_speed = 0`
 without dividing (`+0x5876`), which is how a note off silences a voice.
 
+**The period is clamped before the division.** `+0x582b` compares `aspd` with the two words at
+`0x958`/`0x95A` — the image holds **`0x7FFF`** and **`0x0040`** — and substitutes the bound when
+the period is outside them (`cmp 0x958,%cx; jbe` at `+0x5863` then `mov 0x958,%cx` at `+0x5869`;
+`cmp 0x95A,%cx; jae` at `+0x5890` then `mov 0x95A,%cx` at `+0x5896`), with the zero test between
+the two (`+0x5876`) so 0 still returns 0. The divisions above never see a period outside
+`[64, 32767]`, and `step` clamps the same way. **On the shipped modules the clamp is inaudible**:
+the probe measured periods above `0x7FFF` **2,408** times in MUSIC0 and **2,635** in MUSIC1, every
+one on a channel whose volume is 0 (a note-off parks `org_period` at `0xffff`, `player.rs:871`,
+and a vibrato adds its level to it), and the low bound never binds at all — the smallest non-zero
+period seen was `0x81`. The object also writes the clamped word back to `aorgspd`/`aspd`, but only
+when the module's flags word at `0x917` has bit 4 set (`+0x583d`, `+0x586e`, `+0x589a`); both
+modules carry flags 8, so that write-back never runs and the port does not model it.
+
 **The mixing rate** is `[0x8d9]`, chosen by the header watch at `+0x539b`…`+0x53a9` as
 `_zmixspeed` (mono) or `[0x8d7]` (stereo) from the master volume byte's bit 7. The shell doubles
 `_zmixspeed` to 40000 for SB Pro (`MAIN/U2.ASM:759`) and **never writes `[0x8d7]`** — its only
@@ -1241,7 +1281,8 @@ the reference's stereo voices divide by the segment's initial data, **21111**. T
 **5.26 % flat** — `21111` is 5.56 % larger than 20000 and `1/1.0556` is the flatness, 94 cents,
 just short of a semitone's 5.95 % — while its mono playback is exact. The port keeps the object's word; a
 run at `MixRate::Hz40000` in stereo is flat by the same factor, and `MixRate::Hz40000` in mono is
-not. `mix.rs`'s `a_step_is_the_objects_two_divisions` prints and asserts the steps.
+not. `mix.rs`'s `a_step_is_the_objects_two_divisions` and
+`a_step_clamps_the_period_the_way_the_object_does` print and assert the steps.
 
 **The fetch and the accumulation**: `+0x346e` reads one byte at `es:(si)` — no interpolation, and
 the interpolating dispatch entries are `S1x`-gated with `[0x919]` = 0 in both files (§9.12) —
@@ -1398,16 +1439,30 @@ the mono sum of two channels through one curve, both loop kinds and the one-shot
 the modules' own instruments, a level of 0 as the curve's own zero entry, and `_zshutup`'s
 silence at any volume.
 
-The stream's properties, from `cargo test -p sr-audio --test mix -- --nocapture`:
+The stream's properties, gathered from **six tests** in `cargo test -p sr-audio --test mix --
+--nocapture --test-threads=1`. Each line is a paste and the `(…)` marks the elision between
+tests — the lines are never adjacent in a run, so without the markers the block would read as
+one test's output. The tests, in the order their lines appear:
+`a_poll_produces_exactly_the_samples_it_says_it_does`,
+`the_window_is_not_silent` (two lines), `a_window_of_rows_carries_its_samples`,
+`two_runs_of_a_window_are_byte_identical`, `a_device_that_stops_draining_loses_the_oldest_samples`
+and `the_modules_loops_and_the_objects_zero_loop_end_rule`.
 
 ```
 the first five polls' sample counts: [570, 571, 571, 570, 571]
+  (…)
 MUSIC0's first 120 polls: 68487 samples, 3719 of them the curve's silence (0), 115 distinct values, quietest -15104, loudest 15360
+  (…)
 MUSIC0's first 4120 polls (2351396 samples): 972036 above the silence entry, peak 32512, 256 distinct values
+  (…)
 64 rows at speed 6: 320178 samples, predicted 319872, difference 306 (0.0957 %), one tick is 833
+  (…)
 a 600-poll window of MUSIC1: 342436 samples
+  (…)
 after 15 undrained polls the ring holds 8192 samples and has dropped 368
+  (…)
 MUSIC0: 12 samples loop, 5 of them from 0 to the sample's end; 10 do not loop, 0 of them with the flag set but no loop
+  (…)
 MUSIC1: 9 samples loop, 1 of them from 0 to the sample's end; 32 do not loop, 0 of them with the flag set but no loop
 ```
 
@@ -1443,7 +1498,7 @@ null test is possible — not "not yet run", but *not obtainable by this port's 
 What this section's evidence therefore is:
 
 1. **By construction**: the tables, the two divisions and the 16.16 position are the object's own
-   bytes, asserted byte for byte in `tests/player.rs`'s claims (147 in all), and the expected
+   bytes, asserted byte for byte in `tests/player.rs`'s claims (151 in all), and the expected
    samples are computed from the S3M file's own sample data in `tests/mix.rs`.
 2. **By invariant**: determinism, non-silence, the exact per-poll count and the samples-per-tick
    relation, each asserted separately above.
@@ -1594,21 +1649,31 @@ visible in the table:
   `while(dis_sync() < 1)` wait, and ALKU makes that call before the code has reached 1 — which is
   what `part-sequence.md` §1's running ALKU first in block 1 means here. The trace is what shows
   the position itself is one a run holds, not what shows ALKU holding it.
-- **Above the table it refuses.** `sync_from` **panics** for `(order << 8) | row > 0x4200`, with
-  the position, the reason and the citations, rather than answering a number that differs between
-  builds of the original. The first tier above the key is answerable in the builds the tree holds
-  (the deterministic 4), and the port refuses it too: that boundary — the brief's `ord ≤ 0x42` —
-  is where the answer stops being the DIS's table arithmetic and starts being a read of the bytes
-  the assembler put after it, and modelling *that* is a step this phase does not take rather than
-  one it cannot. `sync_refuses_the_band_whose_16th_compare_matches` says so in the tests, so the
-  choice is visible. `APPROXIMATIONS.md` A15 registers the boundary.
+- **Above the table it answers the deterministic tier and refuses only the varying one.**
+  `sync_from` returns the table's own last code, **4**, for `0x4200 < key <= 0x8E2E`: the
+  16th compare is against the source's own first instruction (`2e 8e`), it *matches*, and the
+  read at `%bx - 2` is the last entry's code field — the same 4 in every build the tree holds.
+  Above `0x8E2E` the compare fails, the fall-through returns a word whose low byte is a
+  link-time displacement, and `sync_from` **panics** with the position, the reason and the
+  citations rather than answering a number that differs between builds.
+  `sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code` pins the `4` at
+  `0x4201`, `0x4300` and `0x8E2E`, and `sync_refuses_the_first_key_past_the_sixteenth_compare`
+  pins the refusal at `0x8E2F`; `the_answerable_bands_upper_edge_is_the_word_past_the_table`
+  ties the boundary to the image's own word. `APPROXIMATIONS.md` A15 registers the refusal.
+
+  The band is not a theoretical one. The `hiddenu` trace — `SECOND U`, a filed trace of the
+  shipped shell driving a module — holds `(order << 8) | row > 0x4200` for **5,148 of its
+  6,351 frames (81.1 %)**, while `second5`, `second5b` and `second3` hold 0 of their 1,150 /
+  1,152 / 2,755. A Phase-4 part waiting on `dis_sync()` while MUSIC1 or HIDDENU plays meets
+  the answered band immediately, which is why the deterministic tier is modelled rather than
+  refused.
 
 The two callers in the tree are both block 1's and both reach the *answered* domain by a wide
 margin: `PAM/OUTTAA.C:39` waits for `dis_sync() < 10`, which the table's order-13 key gives, and
 `ALKU/MAIN.C:59`, `:66`, `:72`, `:79` and `:138` wait for 1 through 4, from order 2 on. What the
-phase cannot show is that they never call it above the last key — both parts are Phase 4's, and how
-far MUSIC0's order list has got while they run is not measured. That is why A15 exists rather than
-a claim that the region is unreachable.
+phase cannot show is that they never call it above `0x8E2E` — both parts are Phase 4's, and how
+far MUSIC0's order list has got while they run is not measured. That is why A15 exists rather
+than a claim that the refusal's region is unreachable.
 
 ### `zframe`, and what a part sees with no player
 
@@ -1628,12 +1693,12 @@ The seam's own tests: `music.rs` has **thirteen**, in the file's own order —
 `musplus_over_every_row_matches_the_objects_decision_tree`,
 `sync_reads_the_table_the_object_reads`,
 `sync_answers_the_position_before_the_table_with_its_own_word`,
-`sync_refuses_the_position_past_the_tables_last_key` (**`should_panic`**, the position `(66, 1)`),
+`sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code` (the `4` at
+`0x4201`, `0x4300` and `0x8E2E`),
 `sync_refuses_the_far_end_of_the_order_range` (**`should_panic`**, `(255, 255)`),
-`sync_refuses_the_band_whose_16th_compare_matches` (**`should_panic`**, the answerable band's
-`(0x8e, 0x2e)`),
-`the_refused_regions_two_tiers_are_the_ones_the_object_draws` (which pins the comparison the two
-panic messages' tiers are chosen by),
+`sync_refuses_the_first_key_past_the_sixteenth_compare` (**`should_panic`**, `(0x8e, 0x2f)`),
+`the_answerable_bands_upper_edge_is_the_word_past_the_table` (which pins the comparison the
+refusal is chosen by),
 `the_table_is_the_shipped_shells_own_bytes`,
 `an_older_build_carries_a_different_table`,
 `muscode_is_the_deferrals_substitute_over_every_code_the_parts_wait_for`,
@@ -1705,10 +1770,20 @@ entry-point-only (only `SECOND U` carries bit 7), which that test asserts rather
 
 **A run takes the row of the block whose plan begins where it does**, which for the port is
 the run's first part: `--block 5` and `--part endlogo` both begin at ENDLOGO and both get
-`SECOND 5`'s row (`music_for_part`). A demo part no entry point starts at (TUNNELI, CRED, ENDSCRL) is
-played from the demo's own beginning — block 1's row, the module the demo's own run reaches
-those parts under — and the test card, which is the port's own part and not the demo's, has no
-music at all: `PartCtx::music()` is `None` and a `--audio-dump` of such a run is refused.
+`SECOND 5`'s row (`music_for_part`). A part no entry point starts at is not played from block
+1's row — that sentence was in this note and in `music_for_part`'s own doc until the final
+review showed it false for TUNNELI. What the demo's `whattorun` guards put in force is:
+
+| part | the sequences that reach it | module and order at its start | how the value is known |
+|---|---|---|---|
+| TUNNELI | blocks 1 and 2 | **MUSIC1, 0** | the module is the restart's: block 1 takes `:813-818`'s `mov ax,1` / `mov bx,0` (its bit 0 is set) and block 2, whose bit 0 is clear, took `:772-775`'s other initial branch — also MUSIC1 at 0. **The order in force when TUNNELI begins is not established**: GLENZ has played since the restart and no block-1/2 music trace exists, so the restart's own order (0) is the value the evidence names |
+| CRED | block 5, and the full run (block 1) | **MUSIC0, 26** | the module is MUSIC0 in both sequences (block 5's entry restart at `:898-905` is order 25; block 1's mid-run `:880-885` is order 18 and it skips `:898-905`). The block-5 traces `second5`/`second5b` put the published music at **26:56 at reference index 1212**, CRED's tick 0 — measured |
+| ENDSCRL | block 5, and block 1 | **MUSIC0, 43** | the filed traces end at frame 1299, ~7,600 frames before ENDSCRL begins (~8917), so this is **derived, not measured**: advancing MUSIC0 from the block-5 restart (order 25 at frame 408) with the port's own player puts the engine at order 43 across the reference's whole ENDSCRL-start window (8841..8938) |
+
+`music_for_part`'s doc in `shell.rs` carries the same table and the same two caveats; its test
+asserts a row for every name `--part` accepts. The test card, which is the port's own part and
+not the demo's, has no music at all: `PartCtx::music()` is `None` and a `--audio-dump` of such
+a run is refused.
 
 ### When the music's clock starts: the anchor, and what a run does about it
 
@@ -1750,8 +1825,9 @@ A run reaches that clock in one of two ways, and the shell computes both from it
   starts with it, on its frame 0. `--part beglogo` and `--part endlogo` are *not* that case —
   both parts carry measured anchors (`shell::boot_anchor`), so those runs wait for 408 exactly
   as the blocks they stand in for do — but `--part tunneli`, `--part cred` and
-  `--part endscrl` are: a `--part cred` run installs MUSIC0 at order 0 (the demo's own
-  beginning, the row `music_for_part` falls back to) and reads `0:2` at its own frame 30.
+  `--part endscrl` are: a `--part cred` run installs **MUSIC0 at order 26** (the order the
+  block-5 traces put in force at CRED's tick 0, `music_for_part`) and reads its first published
+  rows from there.
 
 **The evidence, and its two halves.** `shell.rs`'s
 `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` drives a `--block 5`

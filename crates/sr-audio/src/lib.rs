@@ -28,7 +28,8 @@ pub use mix::{
     VOLUME_SCALE,
 };
 pub use module::{
-    descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, CHANNELS, ROWS,
+    descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, Song, CHANNELS,
+    ROWS, SONGS,
 };
 pub use player::{MixRate, Player, PlayerOptions, Position};
 

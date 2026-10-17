@@ -1740,7 +1740,15 @@ mod tests {
         // five indices are held screens, and `reference-indices.md` §20 records
         // that the reference "says nothing about the 590 frames a screen spends
         // opening and closing".
-        let Some(frames) = record_frames() else { return };
+        let Some(frames) = record_frames() else {
+            panic!(
+                "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
+                 which is not here: there is nothing to check. Produce it with the recipe \
+                 `docs/fidelity/cred.md` §7 names (`cargo xtask reference capture`), or run \
+                 the suite without `--ignored` — a missing capture must fail loudly, not \
+                 pass silently"
+            )
+        };
         let byte_for = |index: u32| frames.iter().find(|(at, _)| *at == index).unwrap().1.clone();
 
         // The last column is the bytes by which the *doubled* pan reading — the
@@ -1884,7 +1892,15 @@ mod tests {
         // `(screen, the record's hold sample, band bytes, caption bytes)` —
         // the band is displayed rows 0-99 (the picture), the caption rows
         // 100-199 (the page below the split).
-        let Some(frames) = record_frames() else { return };
+        let Some(frames) = record_frames() else {
+            panic!(
+                "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
+                 which is not here: there is nothing to check. Produce it with the recipe \
+                 `docs/fidelity/cred.md` §7 names (`cargo xtask reference capture`), or run \
+                 the suite without `--ignored` — a missing capture must fail loudly, not \
+                 pass silently"
+            )
+        };
         // The other twelve screens' own samples first: the claim is that those
         // screens are the tree's *byte for byte*, and half a claim with no test
         // behind it is what this file's rule is against.

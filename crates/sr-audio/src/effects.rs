@@ -56,15 +56,12 @@ pub struct Channel {
     /// is not zero (`+0x3c4d`, `+0x3d41`). The row parse sets it to 1 (`+0x474a`), an `SDx`
     /// note start to `0x81` (`+0x475e`) and the "volume 0" path to 0 (`+0x3ca9`).
     pub used: bool,
-    /// `achannelused` bit 7: the channel has something new for the mixer. Set by the
-    /// first-tick pass (`+0x3cc5`) and by every effect that writes the volume or the period
-    /// (`+0x5925`, `+0x582b`), and cleared by the mixer's voice update (`+0x5785`) — Task 5's.
-    pub dirty: bool,
     /// `aequ` (`+0x02`), the raw byte: the sample's playback state. A note start that has to
     /// move the position sets it to `0xff` (`+0x491a`) and the note start's tail replaces
     /// that with `avol + 0x10` (`+0x496a`) — so a channel playing at volume 0 still reads
-    /// `0x10`, not 0. A note that only re-targets a `G` leaves it alone. The mixer is what
-    /// reads it.
+    /// `0x10`, not 0. A note that only re-targets a `G` leaves it alone. The port's only
+    /// readers are those two writes in `start_note`; the mixer plays from `volume`, not this
+    /// byte (the object's voice routine reads `m_vol` at `+0x41`, `+0x37a6`).
     pub aequ: u8,
     /// `avol` (`+0x1a`): the channel's volume, 0..=63. Never 64: a cell's volume column is
     /// clamped to `0x3f` by the row parse (`+0x477b`) and a volume slide clamps itself
@@ -108,8 +105,6 @@ pub struct Channel {
     pub retrigger_count: u8,
     /// `atremor` (`+0x2f`): the `I` (tremor) tick counter.
     pub tremor_count: u8,
-    /// `avslide` (`+0x30`): written by `E`/`F` when they are gliding to a note, unread here.
-    pub slide_speed: u8,
     /// `a0volcut` (`+0x31`): the "volume 0" optimisation's countdown (`+0x3c97`). Three rows
     /// with a zero volume and no new note free the channel.
     pub zero_volume_count: u8,
@@ -314,7 +309,6 @@ impl Channel {
             return true;
         }
 
-        self.dirty = true;
         if command == 0x4 {
             // `+0x3d24`: a `D` row restores the period too, and then dispatches.
             self.restore_period();
@@ -337,7 +331,6 @@ impl Channel {
         self.retrigger_count = 0;
         if self.period != self.org_period {
             self.period = self.org_period;
-            self.dirty = true;
         }
     }
 
@@ -412,7 +405,6 @@ impl Channel {
     /// `+0x3f33`/`+0x3f55`: the slide, clamped at both ends (0 and **63**).
     fn add_volume(&mut self, delta: i16) {
         self.volume = (i16::from(self.volume) + delta).clamp(0, 0x3f) as u8;
-        self.dirty = true;
     }
 }
 
@@ -482,7 +474,6 @@ impl Channel {
         };
         self.period = period;
         self.org_period = org_period;
-        self.dirty = true;
     }
 }
 
@@ -522,7 +513,6 @@ impl Channel {
             self.period = self.period.saturating_sub(step).max(self.target_period);
         }
         self.org_period = self.period;
-        self.dirty = true;
     }
 }
 
@@ -587,7 +577,6 @@ impl Channel {
         self.period = self.org_period.wrapping_add(level as u16);
         let from = if stale { 0 } else { position & 0xff };
         self.vibrato_position = (from + speed * 2) & 0x7e;
-        self.dirty = true;
     }
 }
 
@@ -624,7 +613,6 @@ impl Channel {
             octave = octave.wrapping_add(0x10);
         }
         self.period = scaled_period(note_period(octave | semitone), c2spd);
-        self.dirty = true;
     }
 }
 
@@ -666,7 +654,6 @@ impl Channel {
                 self.volume =
                     (i16::from(self.volume) + i16::from(RETRIGGER_ADD[code])).clamp(0, 0x3f) as u8;
             }
-            self.dirty = true;
         }
         self.retrigger_count = self.retrigger_count.wrapping_add(1);
     }

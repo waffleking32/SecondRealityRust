@@ -116,10 +116,6 @@ const STEREO_DIVISOR: u32 = 0x5277;
 /// stops at `m_end` rather than rewrapping.
 const NO_LOOP: u32 = 0xffff_ffff;
 
-/// The bytes in the object's first mixed chunk: the DMA loop's countdown starts at 1
-/// (`+0x50ab`) and is rounded up to a multiple of 64 before the mixer sees it (`+0x50e6`).
-const FIRST_CHUNK: usize = 64;
-
 /// The flush's own base: `+0x30b4`'s `0x400 − centre_sum` plus the accumulator, so a frame's
 /// value lands on the curve's 1024th entry — the byte 0x80 the audible buffer is centred on.
 /// The flush's `0x0101` re-mark (`+0x2ce5`, `+0x30d0`) would put silence 257 entries higher and
@@ -156,6 +152,23 @@ pub fn centre(level: u8) -> u16 {
 
 /// The position's step per output frame, in 16.16: `m_speed` (`+0x50`).
 ///
+/// **The period is clamped before the division, as the object's own `+0x582b` does it.** The
+/// routine compares `aspd` with the two words at `0x958`/`0x95A` — the segment image holds
+/// **`0x7FFF`** and **`0x0040`** there — and substitutes the bound when the period is outside
+/// it: `cmp 0x958,%cx; jbe` (`+0x5863`) then `mov 0x958,%cx` (`+0x5869`) on the high side, and
+/// `cmp 0x95A,%cx; jae` (`+0x5890`) then `mov 0x95A,%cx` (`+0x5896`) on the low, with the zero
+/// test between them (`+0x5876`) so a period of 0 still returns 0 rather than the low bound.
+/// The clamped value is what both divisions see. (The object also *writes* the clamped word back
+/// to `aorgspd`/`aspd`, but only when the module's own flags word at `0x917` has bit 4 set,
+/// `+0x583d`/`+0x586e`/`+0x589a`; both modules carry flags 8, so the write-back never runs and
+/// the port does not model it.)
+///
+/// **Inaudible on the shipped modules.** Periods above `0x7FFF` do occur — a note-off parks
+/// `org_period` at `0xffff` (`player.rs:871-872`) and a vibrato adds its level to it — but only
+/// on channels whose volume is 0, so no audible sample changes: the review's probe measured
+/// 2,408 such periods in MUSIC0 and 2,635 in MUSIC1, every one at volume 0, and the low bound
+/// never binds at all (the smallest non-zero period seen was `0x81`). `music.md` §10 records it.
+///
 /// `+0x58b9`'s division is the object's own: `0x00da7600 / period` as a 32-bit integer (the
 /// quotient's halves go into `addherz`, `+0x58c3`/`+0x58c6`, whose split path below 218 is the
 /// same value computed in two 16-bit steps), and then `+0x58c9`…`+0x58d8` divides *that*
@@ -167,6 +180,8 @@ pub fn step(period: u16, mix_rate: MixRate, stereo: bool) -> u32 {
     if period == 0 {
         return 0;
     }
+    // `+0x5863`/`+0x5869` and `+0x5890`/`+0x5896`: the object's two bounds, in its own words.
+    let period = period.clamp(0x40, 0x7fff);
     let rate = if stereo {
         STEREO_DIVISOR
     } else {
@@ -358,21 +373,6 @@ pub struct Mixer {
     /// The output curve, rebuilt when the module's master-volume byte or the output mode
     /// changes — which is when the object's header watch rebuilds it (`+0x53af`, `+0x5420`).
     curve: Curve,
-    /// How many of the next output bytes the object would read against *unmarked* accumulator
-    /// planes — the first chunk's count, kept as the object's own bookkeeping.
-    ///
-    /// `+0x2943` zeroes the planes and every flush re-marks the words it read with `0x0101`
-    /// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`), which would make a frame's index
-    /// `0x501 − centre sum + accumulator` — the marker's `0x101` above the base — after the
-    /// first chunk. Only that first chunk is unmarked, and it is 64 bytes: the DMA loop's
-    /// countdown starts at 1 (`+0x50ab`) and is rounded up to a multiple of 64 before mixing
-    /// (`+0x50e6`'s `add $0x41,%ax; and $0xffc0,%ax`).
-    ///
-    /// **The port's base does not read this field** ([`Mixer::base`]): the audible buffer the
-    /// probe read is centred where the *unmarked* base puts silence, so every sample — the
-    /// first chunk's included — is read at `0x400 + value`, and this counter is kept only
-    /// because the object's code has it. A14(a) is that question and what would settle it.
-    unmarked: usize,
     /// The samples the ring's overflow policy evicted.
     dropped: u64,
     /// A stereo frame the last budget split: the left sample went out, this is its right.
@@ -404,7 +404,6 @@ impl Mixer {
             // The reference's own: the modules' master volume byte is 0xB0 and its output mode
             // is SB Pro's stereo, and the curve is rebuilt from the module at the first mix.
             curve: Curve::new(0xb0, true),
-            unmarked: FIRST_CHUNK,
             dropped: 0,
             held_right: None,
             last_frame: (0, 0),
@@ -508,7 +507,6 @@ impl Mixer {
     /// `channels` is the player's own channel state, which the mixer *advances*: `m_pos` and
     /// `m_poslow` are the fields the note start writes (`+0x491e`, `+0x492a`), so a later note
     /// inherits the position the mixer left.
-    #[allow(clippy::too_many_arguments)]
     pub fn mix(
         &mut self,
         module: &Module,
@@ -635,22 +633,16 @@ impl Mixer {
         // (`[0xbe6]:0xC9B0`) is centred on the byte 0x80, which is the ramp's centre at index
         // 1024 — `0x400 + 0` — while the marker's `0x101` would put silence 257 entries higher,
         // inside the `0xFF` tail the builder's bug leaves (A14(a) carries the argument and what
-        // is still open about it). The marker's own `unmarked` bookkeeping is kept because the
-        // object's code has it; the base does not use it.
-        let _ = self.unmarked;
+        // is still open about it). The marker's own bookkeeping is not modelled: the object's
+        // code has it, but it changes no value here, so the port has nothing to keep.
         UNMARKED_BASE
     }
 
-    /// One output sample: the curve's entry for a frame's value, and the object's own marker
-    /// bookkeeping — every *byte* the object writes consumes one of the first chunk's 64, so a
-    /// stereo frame consumes two and a mono frame one. The bookkeeping changes no value:
-    /// [`Mixer::base`] reads the same base for every sample.
+    /// One output sample: the curve's entry for a frame's value. The object's marker
+    /// bookkeeping (`0x0101` re-marks of the first chunk's 64 bytes) would change no value on
+    /// the audible path, so the port does not carry it — see [`Mixer::base`].
     fn emit(&mut self, value: i32) -> i16 {
-        let base = self.base();
-        if self.unmarked > 0 {
-            self.unmarked -= 1;
-        }
-        self.curve.sample(base + value)
+        self.curve.sample(self.base() + value)
     }
 
     /// The same conversion without consuming a marker unit.
@@ -665,13 +657,27 @@ impl Mixer {
 /// The object forms the same difference the other way round — the sums of the table values in
 /// the accumulators and the sum of the centres in `[0x2250]`/`[0x2252]`/`[0x2254]`, subtracted
 /// at `+0x30b4` — and the two agree because the sum of the differences is the difference of the
-/// sums. The *set* of voices agrees too: the object's voice routine tests `m_speed` at `+0x3783`
-/// and jumps to its return at `+0x3786` **before** the centre is read at `+0x37b0`, and
-/// `+0x3791` gates on `m_pos == 0xffff` the same way, so a voice that has stopped is in neither
-/// sum. The port's three conditions are those two tests plus the sample the voice must have.
+/// sums. The *set* of voices is the object's own, and the two tests that decide it in the
+/// object's voice routine are both here:
+///
+/// - `m_speed` at `+0x3783` (`or %eax,%eax` at `+0x3783`, `je` at `+0x3786`, before the centre
+///   is read at `+0x37b0`) — the port's `voice.stopped || voice.speed == 0`, one condition
+///   (`stopped` is only ever set together with `speed = 0`).
+/// - `m_pos == 0xffff` at `+0x378e`/`+0x3791` (`mov 0x44(%bp),%si`; `cmp $0xffff,%si`; `je` to
+///   the same return). The "volume 0" optimisation frees a channel by parking its position
+///   there (`effects.rs:297`), and the object's mixer then skips it; a port without the test
+///   would mix its (silent) sample *and advance its position*, which is a divergence no
+///   shipped module lets you hear and one a later `G`/`O` note on the freed channel would.
+///
+/// The third condition is the port's: a voice that has never been given a sample has nothing
+/// to read (`voice.instrument?`), which is the object's `m_base` being zero before a note start.
 fn voice_contribution(module: &Module, voice: &Voice, channel: &Channel) -> Option<i32> {
     let instrument = voice.instrument?;
     if voice.stopped || voice.speed == 0 {
+        return None;
+    }
+    // `+0x378a` reads `m_pos` as a 16-bit word, so the compare is on the word the object holds.
+    if (channel.position & 0xffff) == MAX_POS {
         return None;
     }
     let bytes = module.sample_bytes(usize::from(instrument.wrapping_sub(1)))?;
@@ -883,6 +889,78 @@ mod tests {
         // Stereo divides by the object's own [0x8d7] rather than by half the frame rate.
         assert_eq!(step(1712, MixRate::Hz40000, true), 8_362 * 65_536 / 21_111);
         assert_eq!(step(0, MixRate::Hz40000, false), 0);
+    }
+
+    #[test]
+    fn a_step_clamps_the_period_the_way_the_object_does() {
+        // `+0x5863`/`+0x5869` against `[0x958]` = 0x7FFF, and `+0x5890`/`+0x5896` against
+        // `[0x95A]` = 0x40; the zero test (`+0x5876`) sits *between* them, so a zero period
+        // still returns 0 rather than the low bound.
+        for period in [0x8000u16, 0xffff] {
+            assert_eq!(
+                step(period, MixRate::Hz40000, false),
+                step(0x7fff, MixRate::Hz40000, false),
+                "period {period:#06x} is above the object's high bound"
+            );
+        }
+        for period in [0x3fu16, 1] {
+            assert_eq!(
+                step(period, MixRate::Hz40000, false),
+                step(0x40, MixRate::Hz40000, false),
+                "period {period:#06x} is below the object's low bound"
+            );
+        }
+        assert_eq!(step(0, MixRate::Hz40000, false), 0, "zero is not clamped up");
+        // The object's arithmetic at the high bound: 14317056 / 0x7FFF is 436, and
+        // 436 × 65536 / 40000 is 714 in 16.16.
+        assert_eq!(step(0x8000, MixRate::Hz40000, false), 714);
+    }
+
+    #[test]
+    fn a_voice_freed_at_position_ffff_is_not_advanced() {
+        // `+0x378e`/`+0x3791`: the object's voice routine compares `m_pos` with 0xffff and
+        // jumps to its return, so a channel the "volume 0" path freed (`effects.rs:297` parks
+        // the position there) is in neither the sums nor the position walk. The port's
+        // `frame` advances only a voice `voice_contribution` accepted, so the assertion is
+        // the channel's position: without the gate it moves.
+        let bytes = std::fs::read("../../assets/MAIN/MUSIC0.S3M")
+            .expect("the shipped module; a missing asset is not this test's subject");
+        let module = Module::load(&bytes).expect("MUSIC0 loads");
+        let instrument = (1..=module.instrument_count())
+            .find(|&index| {
+                module
+                    .instrument(index - 1)
+                    .is_some_and(crate::module::Instrument::is_pcm)
+            })
+            .expect("MUSIC0 has a PCM instrument") as u8;
+
+        let mut mixer = Mixer::new();
+        let mut channels = [Channel::default(); CHANNELS];
+        mixer.start_note(0, &module, instrument);
+        channels[0].position = MAX_POS;
+        // The object's low bound: a step of about eleven bytes a frame, so one missing gate
+        // moves the position within the first frame.
+        channels[0].period = 0x40;
+        channels[0].volume = 0;
+        let options = PlayerOptions::default();
+        for frame in 0..4 {
+            mixer.frame(&module, &mut channels, &options, 64, false);
+            assert_eq!(
+                channels[0].position, MAX_POS,
+                "frame {frame}: a voice at m_pos 0xffff is skipped, not walked"
+            );
+        }
+
+        // The control: one byte earlier the same voice *does* move — the advance either adds
+        // to the position or rewraps it at the voice's end — so the loop above is the gate and
+        // not a voice that never had a speed.
+        channels[0].position = MAX_POS - 1;
+        mixer.frame(&module, &mut channels, &options, 64, false);
+        assert_ne!(
+            channels[0].position,
+            MAX_POS - 1,
+            "the same voice at m_pos 0xfffe is walked (or rewrapped), not skipped"
+        );
     }
 
     #[test]

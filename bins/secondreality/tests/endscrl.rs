@@ -102,16 +102,31 @@ fn the_four_keyframes_dump_in_the_references_own_numbering() {
 
     // Each frame is dumped under the part that owns it, which is what makes the
     // acceptance's dump files `endscrl_*.rgb`; and the four are the reference's
-    // own frames, same geometry — the comparison itself is `xtask compare`'s,
+    // own frames, same geometry. The pixel comparison itself is `xtask compare`'s,
     // and it is **not** zero (the unit tests measure the reference's build), so
-    // what this asserts is only that both sides are the same frame of the same
-    // part, so that the tool's report is about the pixels and not the wiring.
+    // what this test asserts is the wiring **and that each dump is a real,
+    // distinct scroller frame** — a uniform or truncated buffer would make the
+    // tool's report about a buffer rather than about pixels.
+    let mut dumps: Vec<(u32, Vec<u8>)> = Vec::new();
     for (index, name) in REFERENCE_FRAMES {
         let dumped = std::fs::read(dir.join(format!("endscrl_{index:06}.rgb"))).unwrap();
         let expected =
             std::fs::read(repository_root().join("reference/parts/endscrl").join(name)).unwrap();
         assert_eq!(dumped.len(), expected.len(), "{index}");
         assert_eq!(dumped.len(), 640 * 400 * 3, "{index}");
+        assert!(
+            dumped.iter().any(|&byte| byte != dumped[0]),
+            "{index}: the dumped frame is one uniform byte, not a picture"
+        );
+        dumps.push((index, dumped));
+    }
+    for (at, (index, frame)) in dumps.iter().enumerate() {
+        for (other_index, other) in &dumps[at + 1..] {
+            assert_ne!(
+                frame, other,
+                "{index} and {other_index}: the scroller's two frames are identical"
+            );
+        }
     }
 
     // `reference/` is input-only: a run that wrote into it would be the failure

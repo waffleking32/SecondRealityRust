@@ -23,7 +23,6 @@ use std::fmt;
 use std::io;
 use std::time::Duration;
 
-use sr_audio::PlayerOptions;
 use sr_engine::music::MusicPosition;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
@@ -163,22 +162,24 @@ pub enum ModuleId {
 }
 
 impl ModuleId {
+    /// The shared song row: the module's name, its file and the tempo the shell patches.
+    fn song(self) -> &'static sr_audio::Song {
+        match self {
+            ModuleId::Music0 => &sr_audio::SONGS[0],
+            ModuleId::Music1 => &sr_audio::SONGS[1],
+        }
+    }
+
     /// The module's own name, as the demo's files spell it and as the status line and the
     /// manifest record it.
     pub fn name(self) -> &'static str {
-        match self {
-            ModuleId::Music0 => "MUSIC0",
-            ModuleId::Music1 => "MUSIC1",
-        }
+        self.song().name
     }
 
     /// The module's own file, at the path a run reads its media from (the working
     /// directory, which for this repository's commands is its root).
     pub fn path(self) -> &'static str {
-        match self {
-            ModuleId::Music0 => "assets/MAIN/MUSIC0.S3M",
-            ModuleId::Music1 => "assets/MAIN/MUSIC1.S3M",
-        }
+        self.song().file
     }
 
     /// The number `restartmus`'s `ax` carries for this module (`MAIN/U2.ASM:767`,
@@ -198,12 +199,10 @@ impl ModuleId {
     /// `MAIN/STARTMUS.C:252-265`'s `switch(a)`: case 0 loads MUSIC0 and then sets
     /// `module[50] = 0x78` — the S3M header's `initialTempo` byte at offset 50, 125 →
     /// 120 — and case 1 loads MUSIC1 and patches nothing, so MUSIC1 plays at its file's
-    /// own 130. `measure`'s `music-clock.md` §3 has the two headers.
+    /// own 130. `measure`'s `music-clock.md` §3 has the two headers. The value is the
+    /// shared [`sr_audio::Song`] row's, so `xtask music analyse` reads the same copy.
     pub fn tempo_patch(self) -> Option<u8> {
-        match self {
-            ModuleId::Music0 => Some(0x78),
-            ModuleId::Music1 => None,
-        }
+        self.song().tempo_patch
     }
 }
 
@@ -449,15 +448,46 @@ pub fn music_for(block: char) -> Result<(ModuleId, u8), ShellError> {
 }
 
 /// The music of a run that begins at `part`: the entry point the demo itself starts that
-/// part at.
+/// part at, or — for a part the demo only *reaches* — the module and order in force when its
+/// own sequence gets there.
 ///
-/// A single-part run names a part as its own entry point, so the question "which module,
-/// at which order" is the one the demo answers for that part: `SECOND 5` starts ENDLOGO,
-/// `SECOND 2` starts BEGLOGO, and their restarts are the table above. A demo part **no**
-/// block starts at — TUNNELI, CRED, ENDSCRL: reached by a run, never started by one — is
-/// played from the demo's own beginning, which is block 1's row (`MAIN/U2.ASM:766-775`,
-/// `MOV ax,0` / `_zplaysong(0)`): the demo's own run reaches those parts under exactly that
-/// module, whatever order it has got to by then.
+/// A single-part run names a part as its own entry point, so for a part a block plan begins
+/// at the question "which module, at which order" is the one the demo answers for that part:
+/// `SECOND 5` starts ENDLOGO, `SECOND 2` starts BEGLOGO, and their restarts are the table
+/// above. `--part endlogo` and `--part beglogo` take those rows.
+///
+/// **A part no block starts at is not played from block 1's row.** TUNNELI, CRED and ENDSCRL
+/// are reached mid-run, and which module is in force there is the `whattorun` guards' answer,
+/// not block 1's. (The demo's first three parts — ALKU, U2A, PAM — are answered too, because a
+/// hand-built plan may name one: they run before any restart, under block 1's boot start,
+/// MUSIC0 at order 0.)
+///
+/// - **TUNNELI** runs only where `whattorun & 2` is set (blocks 1 and 2, masks `0x1f`/`0x1e`).
+///   Block 1's bit 0 is set, so it takes the mid-run restart at `MAIN/U2.ASM:813-818` —
+///   `mov ax,1` / `mov bx,0` — which puts **MUSIC1 at order 0** between BEGLOGO and
+///   GLENZ/TUNNELI; block 2's bit 0 is clear, so it skips that site and took the initial
+///   start's other branch, also **MUSIC1 at order 0** (`:772-775`). Both sequences therefore
+///   reach TUNNELI under MUSIC1. The **order in force** when TUNNELI begins is not in any
+///   filed evidence — GLENZ has played since the restart, and no block-1 or block-2 music
+///   trace exists — so the port seeks to the restart's own order, **0**, which is the only
+///   value the evidence names. That the order is not established is deliberate in the record,
+///   not an oversight: a run of `--part tunneli` plays the right module and the right
+///   movement of the track, from the top of it.
+/// - **CRED** runs in the full run (block 1) and in block 5. Block 5's entry restart is
+///   **MUSIC0 at order 25** (`:898-905`, guard `whattorun & 16` and not `& 8`); block 1's is
+///   the mid-run **MUSIC0 at order 18** (`:880-885`, guard `& 8` alone), and block 1 skips
+///   `:898-905` because bit 3 is set. Both sequences are MUSIC0. The filed block-5 traces
+///   (`second5`, `second5b`) put the published music at order **26** at CRED's tick 0
+///   (reference index 1212: `26:56` in both), so the port seeks to **26** — measured, not
+///   inferred. The full run's order at CRED is not measured by any filed trace.
+/// - **ENDSCRL** is CRED's successor in the same block-5 sequence, and the filed traces end
+///   at frame 1299, some 7,600 frames before ENDSCRL begins (~8917). Its order is therefore
+///   **derived, not measured**: advancing MUSIC0 from the block-5 restart (order 25 at frame
+///   408) with the port's own player — the one those traces verify at frames 1212 and 1299 —
+///   puts the engine at order **43** across the reference's whole ENDSCRL-start window
+///   (8841..8938), so 43 is the value the evidence best supports. The derivation is recorded
+///   here because it is the only number in this function that is not either a source constant
+///   or a trace reading.
 ///
 /// `None` for a name the demo does not have at all — the test card, which is the port's own
 /// and not the demo's — because a run of that has no music to install, and `PartCtx::music()`
@@ -472,12 +502,20 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
                 .and_then(|plan| plan.first().copied())
                 == Some(part)
         });
-    match entry_point {
-        Some(block) => music_for(block).ok(),
-        // No entry point starts where this run does. A demo part is then played from the
-        // demo's own beginning — block 1's row, the module the demo's own run reaches those
-        // parts under — and a name the demo does not have at all has no music.
-        None => demo_part(part).and_then(|_| music_for('1').ok()),
+    if let Some(block) = entry_point {
+        return music_for(block).ok();
+    }
+    match part {
+        // The demo's first region (block 1's `whattorun & 1` parts, `MAIN/U2.ASM:793-799`)
+        // runs before any restart, under the initial start's MUSIC0 at order 0 (`:766-775`,
+        // which block 1 takes because its bit 0 is set). The order in force at each part's
+        // start is not established (the track has played on since the start), so the start's
+        // own order — 0 — is the value the evidence names.
+        "alku" | "u2a" | "pam" => Some((ModuleId::Music0, 0)),
+        "tunneli" => Some((ModuleId::Music1, 0)),
+        "cred" => Some((ModuleId::Music0, 26)),
+        "endscrl" => Some((ModuleId::Music0, 43)),
+        _ => None,
     }
 }
 
@@ -993,8 +1031,15 @@ impl Sequence {
 
     /// The mixer's stream as a WAV header describes it — frames a second and channels — or
     /// `None` for a run with no player.
+    ///
+    /// The rate is the **player's own** `PlayerOptions`, not a fresh `Default`: the samples
+    /// being written are the mixer's, so a header built from a second copy of the options
+    /// would silently describe a stream the mixer is not producing if the loader's ever
+    /// changed (a different `MixRate`, mono).
     pub fn audio_format(&self) -> Option<(u32, u16)> {
-        self.music.as_ref().map(|_| crate::audio::wav_format(&PlayerOptions::default()))
+        self.music.as_ref().map(|music| {
+            crate::audio::wav_format(&crate::audio::lock(&music.player).options())
+        })
     }
 
     /// Send every tick's samples to `path` as a 16-bit WAV at the mixer's rate and channel
@@ -1528,8 +1573,7 @@ mod tests {
     fn a_blocks_first_part_is_the_entry_point_its_row_is_about() {
         // The table's rows are keyed by block; a *plan* is keyed by its first part, and the
         // two meet in `music_for_part`, which is what a run actually uses. Every block's row
-        // must therefore be the row its own plan finds — and the two blocks the port can run
-        // are the two this matters for today.
+        // must therefore be the row its own plan finds.
         for row in MUSIC_RESTARTS {
             let first = block_plan(row.block).unwrap()[0];
             assert_eq!(
@@ -1539,16 +1583,37 @@ mod tests {
                 row.block
             );
         }
-        // ENDLOGO is block 5's entry point and BEGLOGO is block 2's: the two runs the port
-        // can make today, and the two the trace at `reference/music/second5` covers.
-        assert_eq!(music_for_part("endlogo"), Some((ModuleId::Music0, 25)));
-        assert_eq!(music_for_part("beglogo"), Some((ModuleId::Music1, 0)));
-        // A part no block *starts* at is played from the demo's own beginning — the module
-        // the demo's own run reaches those parts under.
-        assert_eq!(music_for_part("cred"), Some((ModuleId::Music0, 0)));
-        // And a name the demo does not have at all has no music: the test card is the
-        // port's own, so a run of it installs no player and `PartCtx::music()` is `None`.
-        assert_eq!(music_for_part("testcard"), None);
+        // And every name `--part` accepts is in the table below: the entry points by their
+        // rows, the three parts no block starts at by the module and order in force when the
+        // demo's own sequence reaches them (TUNNELI's and ENDSCRL's order are the two values
+        // `music_for_part`'s doc says are unestablished and derived; CRED's is the block-5
+        // traces' `26:56` at reference index 1212), and the test card with no music at all.
+        let expected: &[(&str, Option<(ModuleId, u8)>)] = &[
+            ("testcard", None),
+            ("beglogo", Some((ModuleId::Music1, 0))),
+            ("tunneli", Some((ModuleId::Music1, 0))),
+            ("endlogo", Some((ModuleId::Music0, 25))),
+            ("cred", Some((ModuleId::Music0, 26))),
+            ("endscrl", Some((ModuleId::Music0, 43))),
+        ];
+        for (name, music) in expected {
+            assert_eq!(
+                music_for_part(name),
+                *music,
+                "the music the demo's own sequence reaches {name} under"
+            );
+        }
+        assert_eq!(
+            expected.len(),
+            crate::parts::registry().len(),
+            "every `--part` name the port accepts has a row above"
+        );
+        for (name, _) in crate::parts::registry() {
+            assert!(
+                expected.iter().any(|(at, _)| at == name),
+                "{name} is accepted by `--part` but has no expected music"
+            );
+        }
     }
 
     #[test]
@@ -1608,8 +1673,30 @@ mod tests {
         let path = format!("../../reference/music/{name}/trace.csv");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("{path}: {error}"));
-        text.lines()
-            .skip(1)
+        let mut lines = text.lines();
+        let header: Vec<&str> = lines
+            .next()
+            .unwrap_or_else(|| panic!("{path}: no header row"))
+            .split(',')
+            .map(str::trim)
+            .collect();
+        // The columns are bound by the header's own names, not by position: this is the
+        // format's third reader (`xtask/src/music.rs`'s `PlayerState::parse` and
+        // `crates/sr-audio/tests/trace.rs`'s `parse_row` are the others), and a column
+        // inserted before `zframe` must not silently re-bind this one.
+        let column = |wanted: &str| -> usize {
+            header
+                .iter()
+                .position(|field| *field == wanted)
+                .unwrap_or_else(|| panic!("{path}: no `{wanted}` column in {header:?}"))
+        };
+        let (frame_at, ord_at, row_at, zframe_at) = (
+            column("frame"),
+            column("ord"),
+            column("row"),
+            column("zframe"),
+        );
+        lines
             .map(|line| {
                 let number = |index: usize| -> u32 {
                     line.split(',')
@@ -1619,7 +1706,11 @@ mod tests {
                         .parse()
                         .unwrap_or_else(|error| panic!("{line}: field {index}: {error}"))
                 };
-                (number(0), (number(1) as u8, number(2) as u8), number(9) as i32)
+                (
+                    number(frame_at),
+                    (number(ord_at) as u8, number(row_at) as u8),
+                    number(zframe_at) as i32,
+                )
             })
             .collect()
     }

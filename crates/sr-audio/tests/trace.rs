@@ -194,7 +194,16 @@ fn traces() -> Vec<Trace> {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert!(!names.is_empty(), "no traces under {}", root.display());
+    // The filed traces are the comparison's *input*, and the phase's headline check is that
+    // the port reproduces **all** of them. A walk that silently narrowed to three because a
+    // directory went missing would still pass every assertion below; the floor is what makes
+    // that a failure. It is a floor, not a list, so a fifth trace is covered with no edit.
+    assert!(
+        names.len() >= 4,
+        "the filed traces: {} under {} — the phase's four are expected",
+        names.len(),
+        root.display()
+    );
 
     names
         .into_iter()

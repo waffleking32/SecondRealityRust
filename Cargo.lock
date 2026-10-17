@@ -916,6 +916,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sr-assets",
+ "sr-audio",
  "sr-engine",
  "ureq",
 ]

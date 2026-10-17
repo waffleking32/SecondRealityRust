@@ -592,6 +592,14 @@ impl Player {
         self.zframe
     }
 
+    /// The options this player was built with — the mixing rate and channel count the samples
+    /// it produces actually have. A reader that describes the stream (the WAV dump's header,
+    /// say) must ask the player rather than rebuild a `Default`, or the header can describe a
+    /// stream the mixer is not producing.
+    pub fn options(&self) -> PlayerOptions {
+        self.options
+    }
+
     /// `_dis_setmframe(frame)` (`DIS/DISC.ASM:138-148`): the parts write this word, which is
     /// why it can go backwards mid-song — `second3` frame 2452 reads 1516 → 0 with the same
     /// pattern still playing.
@@ -666,6 +674,13 @@ impl Player {
         for channel in &mut self.channels {
             channel.clear_cell();
         }
+        // **A pattern index past `patNum`, or a row past the pattern's, is treated as an empty
+        // row.** The object would read the paragraph table's neighbouring entry — a read past
+        // an array, which a Rust port cannot reproduce — and the loader cannot validate the
+        // case (the order list is read before the patterns), so `None` is the safe reading. No
+        // shipped module reaches it: both order lists name patterns inside their `patNum`
+        // (77 in each). It is documented rather than changed because silence is the behaviour
+        // the object cannot be asked about here, not a value the port chose over a known one.
         let cells = self
             .module
             .pattern(usize::from(self.pattern))
@@ -777,7 +792,12 @@ impl Player {
             (17, _) => self.channels[index].retrigger(info),
             // `S` (`+0x424e` on the first tick, `+0x4261` later), subcommand `d` only. Both
             // modules' cells are `SDx` and nothing else — the subcommand set is asserted in
-            // `tests/effects.rs` — so the rest are refused rather than guessed at.
+            // `tests/effects.rs` — so every other subcommand is **silently ignored** rather
+            // than guessed at: it falls through these guards to the `_ => {}` below, which is
+            // a no-op and not a refusal. (The object has handlers for subcommands 3, 4, 12
+            // and 14 — `tests/player.rs`'s claims table reads their first-tick entries at
+            // `0x3b98`/`0x3bb8` — but no cell in either module carries one, so the crate's
+            // "absent" lists cover them; this comment says what the code does.)
             (19, true) if info >> 4 == 0x0d => self.channels[index].note_delay(info),
             (19, false) if info >> 4 == 0x0d => self.note_delay_tick(index),
             // `O` (the sample offset) has no handler in either table: it is applied where the
@@ -845,7 +865,6 @@ impl Player {
                         // `+0x485b`…`0x4867`: the header's volume byte, clamped to 0…63.
                         channel.volume = header_volume.min(0x3f);
                         channel.org_volume = channel.volume;
-                        channel.dirty = true;
                     }
                     None => channel.last_instrument = 0,
                 }
@@ -870,7 +889,6 @@ impl Player {
                 channel.volume = 0;
                 channel.org_period = 0xffff;
                 channel.target_period = 0xffff;
-                channel.dirty = true;
             } else {
                 // `+0x490e`: a note on a channel with no period yet starts a sample, and a
                 // note with no `G` under it restarts the position — both take the offset the
@@ -889,7 +907,6 @@ impl Player {
                 if fresh || channel.command != 0x07 {
                     channel.period = period;
                     channel.vibrato_position = 0;
-                    channel.dirty = true;
                 }
                 channel.org_period = period;
                 channel.target_period = period;
@@ -897,10 +914,11 @@ impl Player {
             if channel.cell_volume != 0xff {
                 channel.volume = channel.cell_volume;
                 channel.org_volume = channel.cell_volume;
-                channel.dirty = true;
             }
             // `+0x496a`: a note start that has not been given a volume yet keeps `avol + 0x10`
-            // as its `aequ`, the value the mixer plays from.
+            // as its `aequ`, the channel's playback-state byte. The mixer plays from `volume`,
+            // not this byte (`mix.rs`'s `refresh_volume`); `aequ`'s only readers are the two
+            // writes in this function, and the value is carried because the object carries it.
             if channel.aequ == 0xff {
                 channel.aequ = channel.volume.wrapping_add(0x10);
             }
@@ -993,6 +1011,13 @@ impl Player {
                 self.end_song();
                 return;
             }
+            // The nine-bit mask is the object's own: `_zplaysong`'s order counter is nine bits
+            // wide, and `next_order` carries that mask. The scan index `at` itself is **not**
+            // masked, and `self.order` stores it whole (`at as u16`), so an order list longer
+            // than 512 entries would make the published `entry_now()` (masked) and
+            // `engine_position()` (not) disagree. No shipped module can reach it — 80 and 100
+            // entries — and only a malformed one could; the asymmetry is the object's mask
+            // over the port's plain index, kept and documented rather than changed.
             self.next_order = (at as u16 + 1) & 0x1ff;
             let current = orders[at];
             let next = orders.get(at + 1).copied().unwrap_or(0);

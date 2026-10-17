@@ -104,13 +104,9 @@ pub const MACHINE_WORDS: &[&str] = &[
     "_np_mastervol",
 ];
 
-/// The modules the demo plays, with the tempo `MAIN/STARTMUS.C:257` patches into
-/// the first of them. The analysis reads their headers, because the tick rate is
-/// a *prediction* of the module's own data and not a fit to the trace.
-pub const MODULES: &[(&str, Option<u8>)] = &[
-    ("assets/MAIN/MUSIC0.S3M", Some(120)),
-    ("assets/MAIN/MUSIC1.S3M", None),
-];
+// The modules the demo plays are `sr_audio::SONGS` — the shared row of file path and tempo
+// patch, read by the shell that applies the patch and by this tool that predicts the tick
+// rate from it. There is deliberately no second table here.
 
 /// The video clock the demo's own frame counter runs on
 /// (`MAIN/COPPER.ASM:300-320` reprograms the PIT and polls the retrace): every
@@ -2574,9 +2570,9 @@ impl Analysis {
         // block 3 trace plays MUSIC1's patterns while its speed word reads 6,
         // where that file says 3).
         let coverage = Coverage::of(manifest.coverage.window, &frames_in(&samples));
-        let module = MODULES
+        let module = sr_audio::SONGS
             .iter()
-            .filter_map(|(path, patched)| read_module(path, *patched).ok())
+            .filter_map(|song| read_module(song.file, song.tempo_patch).ok())
             .find(|module| {
                 let mut pairs = 0usize;
                 for state in &samples {
@@ -3143,7 +3139,10 @@ impl Analysis {
                 ("_zoutputmode", 1) => " (Sound Blaster)",
                 ("_zoutputmode", 2) => " (Gravis Ultrasound)",
                 ("_zoutputmode", 7) => " (no sound)",
-                ("_zpollmix", 0) => " (the player mixes from the 70 Hz timer interrupt)",
+                ("_zpollmix", 0) => {
+                    " (0 at the locate: the demo has not switched the player to the polled \
+                     mode yet)"
+                }
                 ("_zpollmix", 1) => " (the caller polls the player: `_zpollme` once a frame)",
                 ("_znoborders", 1) => " (no border colours)",
                 _ => "",
@@ -3156,6 +3155,13 @@ impl Analysis {
                  whose two readings differ is recorded as both, not merged",
                 Self::show_word(self.manifest.machine.get(name).copied().unwrap_or(0)),
                 Self::show_word(*value)
+            );
+        }
+        if self.manifest.machine_moved.is_empty() {
+            println!(
+                "  (this capture records the locate-time readings only: it has no \
+                 `machine_moved`, so what these words became when the music started is not in \
+                 the file — `music-clock.md` §9)"
             );
         }
         println!(

@@ -198,9 +198,12 @@ fn audio_of(sdl: &sdl2::Sdl, run: &mut Sequence, cli: &Cli) -> Result<Option<Dev
     };
     match Device::open(sdl, player, rate, channels as u8) {
         Ok(device) => {
-            let (opened_rate, opened_channels) = device.spec();
+            let (opened_rate, opened_channels, opened_samples) = device.spec();
+            // The callback size is SDL's, not the desired spec's: report it, because the
+            // ring's margin is `RING_SAMPLES` over `opened_samples × channels`.
             println!(
-                "secondreality: audio at {opened_rate} Hz, {opened_channels} channel(s)"
+                "secondreality: audio at {opened_rate} Hz, {opened_channels} channel(s), \
+                 {opened_samples} frame(s) a callback"
             );
             Ok(Some(device))
         }

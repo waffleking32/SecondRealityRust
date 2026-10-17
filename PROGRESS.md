@@ -12,7 +12,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
-| 3 | Music engine | **complete — untagged** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and 802 tests pass. Evidence below. **The tag waits for the whole-branch review** | [03-music.md](docs/plans/03-music.md) | — |
+| 3 | Music engine | **complete — untagged** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. **The tag waits for the review of the fix wave** | [03-music.md](docs/plans/03-music.md) | — |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
@@ -76,13 +76,15 @@ whose parts *wait on* the cue, so the five below are its inheritance:
   where the original's check stands at the frame boundary and reads the previous frame's. **D28**'s
   placement is not ENDLOGO's rule but the engine's showing through, and every later part that gates
   on the music has the same one-tick relationship to work out (`docs/fidelity/endlogo.md` §5.1).
-- **`dis_sync()` has a boundary, and two tiers of it.** `sync_from` answers the position `(0, 0)`
-  with the object's own word (−15609, `musframe_9`'s `pop es; ret`) and **refuses** anything above
-  the table's last key (`0x4200`). Both callers the demo has are Phase 4's — `PAM/OUTTAA.C:39` and
-  `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138` — and the phase **cannot show they stay inside the
-  domain**: how far MUSIC0's order list has got when they run is not measured until they are
-  ported. **A15** registers it; the first tier's answer (the deterministic 4) is derivable from the
-  source's own instruction sequence if a caller turns out to need it.
+- **`dis_sync()` has a boundary at `0x8E2E`.** `sync_from` answers the position `(0, 0)` with the
+  object's own word (−15609, `musframe_9`'s `pop es; ret`), and returns the table's own last code
+  **4** for `0x4200 < key <= 0x8E2E` — the 16th compare matches the source's own `2e 8e`, and the
+  answer is the same in every build. It **refuses** only above `0x8E2E`, where the word is
+  linker-set and differs between builds. Both callers the demo has are Phase 4's —
+  `PAM/OUTTAA.C:39` and `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138` — and the phase **cannot
+  show they stay inside `key <= 0x8E2E`**: how far MUSIC0's order list has got when they run is not
+  measured until they are ported. **A15** registers the refusal; the answered band is
+  reachability-measured (`hiddenu` holds it for 5,148 of its 6,351 frames, 81.1 %).
 - **`zinfo` is 0, and a part that waits on it waits for ever — as it does against the reference.**
   `dis_muscode` returns the measured 0, so HARD's `HARD/B.C:138` (waiting on 1) and GRID's
   `GRID/MAIN.C:72`/`:160` (on 2 or 3) must be written against that measurement rather than against
@@ -1385,42 +1387,48 @@ purpose or by a different instrument, **not** the evidence the constant was deri
 | `MusicStart`'s rule: wait, pre-poll, or neither | anchor ≤ 408 → wait `408 − anchor` polls; > 408 → **pre-poll** `anchor − 408` at the run's start; own numbering → start with the run | D27, from the trace's words around 408: the speed/tempo words change at 396 (the boot's `restartmus`) and at 408 (the block's), with **zero ticks between** — the twelve frames `_zsoundon`/`_asmcopperinit` take before `_zpollmix = 1` hands the player to the copper | a run anchored at 404 would start its music four frames early (every row change four frames out) or wait four frames too long | **no independent check** — every runnable entry point today is anchored at 404, so the **pre-poll branch is never taken by a run the port can make** (`pre` exists only for an anchor past 408, and its maximum today is **zero**): it is derived, unit-tested, and unexercised end-to-end. `SECOND 3` is the case it exists for, and Phase 4 owns it |
 | the tick quantisation: `2.5/tempo` a tick, `speed` ticks a row | `samples_per_tick = mix_rate × 5/(2 × tempo)`, truncated; `833` at 40000/tempo 120, `769` at 130 | read out of `STMIK.300`'s rebuilt segment image (`+0x3d99`…`+0x3da6`'s `mul`/`div` pair is `_zmixspeed × 0x7d` over `0x32 × tempo`), not fitted | one tick a row and a whole row's effects move; at speed 6 the row boundary moves by 8.76 frames | **yes** — the trace's own row intervals: the longest window (296 intervals over 3,455 frames of `hiddenu`) is predicted to **−2.6 frames (0.08 %)** from the player's own speed and tempo words, and four sessions agree |
 | the poll's placement in the engine | one `music.poll()` a tick, **between copper slot 0 and the first band** (`crates/sr-engine/src/engine.rs:206-219`) | `MAIN/COPPER.ASM:449-466`: `copper_doit` runs slot 0, then `call _zpollme` (`:466`), then `u2copperint`; the list runs that entry at 20 of the frame's 100 units (`copperlst0`, `:41-43`) | a part's `musplus()` at tick `T` would be the *previous* tick's words (poll after the part) or the tick's own (poll before it) — one frame on ENDLOGO's gate, which is exactly the gap §5.1 explains | **yes** — the instruments that fire are **the engine's own three** (`the_music_is_polled_between_copper_slot_zero_and_the_first_band`, whose recorded order is `["copper:0", "music:poll", "frame:0:0", "frame:0:1", "copper:1", "copper:2"]`, `a_tick_polls_the_music_exactly_once` and `a_part_reaches_the_music_through_its_context`) plus ENDLOGO's `the_runs_own_player_opens_the_gate_on_the_same_tick`, `tests/cred.rs`, `tests/endlogo.rs`, `tests/endscrl.rs` and `tests/headless.rs` — all failing by name when **the re-reviewer** moved `music.poll()` past the band loop in a scratch copy (a mutation this close-out did not run; the re-review disclosed the temporary edit and proved the revert with `sha256sum -c`). **Two things that mutation does *not* do, both measured:** it leaves `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` **passing with identical numbers** (`778 of 894`, `753 of 891`, `353 of 894` — that test samples `music_position()` after each tick, so a move *within* a tick is invisible to it), and it makes ENDLOGO's acceptance **fail** (**exit 1**, frame 1180, **25.7117 % differing**, 32911/128000 px, max delta 5). So the acceptance does fire on this row; what it cannot do is attribute the failure between the placement and the `GATE_ALIGNMENT_TICKS` that compensates it — the limit the A7 row below states about the alignment |
-| the `zplus` rule: the object's **two-bit OR** | `1` if the next order-list entry is `254`; `2` **OR-ed in** if the order being played *is* a `254` the walk stepped over; `0` otherwise; a seek clears it | the object's own order walk (`+0x4452`…`0x4467`, disassembled from the rebuilt segment image) — **the artifact, not the note**: `music-clock.md` §6 first read it as a choice between the two and was amended to the OR when the object disagreed | `[254, X, 254]` — a shape MUSIC1 carries at orders 25/26/27 — gives **3**, where a two-way reading gives 1. `musplus` then moves by a row, and ENDLOGO's gate with it | **yes** — `music analyse`'s section 5 re-derives the rule from each trace's own order sequence: **11,408 samples, 0 mismatches** (1,150 + 1,152 + 2,755 + 6,351 across the four). It is the phase's own rule checked against the reference's own words |
+| the `zplus` rule: the object's **two-bit OR** | `1` if the next order-list entry is `254`; `2` **OR-ed in** if the order being played *is* a `254` the walk stepped over; `0` otherwise; a seek clears it | the object's own order walk (`+0x4452`…`0x4467`, disassembled from the rebuilt segment image) — **the artifact, not the note**: `music-clock.md` §6 first read it as a choice between the two and was amended to the OR when the object disagreed | `[254, X, 254]` — a shape MUSIC1 carries at orders 25/26/27 — gives **3**, where a two-way reading gives 1. `musplus` then moves by a row, and ENDLOGO's gate with it | **half** — `music analyse`'s section 5 re-derives the rule from each trace's own order sequence: **11,408 samples, 0 mismatches** (1,150 + 1,152 + 2,755 + 6,351 across the four), which is a real check of every shape the traces hold. But the shape this row's own error names — `[254, X, 254]` — is in **no filed trace** (`music-clock.md` §6), so the count is blind to the error the row exists to catch. What *does* discriminate is the object's own `orw`s at `+0x4452`…`0x4467`, pinned by `xtask/src/music.rs`'s `zplus_rule(&music1.orders, &[24, 26]) == [1, 3]` — and that is the rule's derivation evidence, not an independent instrument |
 | the mixer's samples-per-tick relation | one poll produces exactly `samples_this_poll` (`mix_rate/70.086`, fraction carried; mean `570.727` at 40000 Hz, and the first five polls read `[570, 571, 571, 570, 571]`) | `player.rs`'s `FRAME_UNITS` = 70,086 — integer arithmetic in 1/70,086 of a sample so the ratio stays exact | the mixer would drift against the tick clock by a fraction of a sample a poll, and the row boundaries would move after ~10⁴ polls | **yes** — `a_poll_produces_exactly_the_samples_it_says_it_does` and `the_polls_samples_are_the_frames_share_and_carry_their_fraction`; and the trace comparison over 8,732/28,618 polls is the end-to-end check, since a drifting sample count moves every row change |
 | the ring's drain | 8,192 samples, bounded, **oldest dropped** when full, `dropped()` counts them; the drain moves no engine state | `player.rs`'s `RING_SAMPLES`, `mix.rs`'s capacity, and the object's own DMA buffer room; `MAIN/STMIK.H:100-103` for the position being the engine's rather than the device's | the device would either stall the tick (forbidden: never spin-wait) or repeat samples; a shorter ring drops music on a slow drain | **yes** — `a_device_that_stops_draining_loses_the_oldest_samples` and `the_drain_moves_no_engine_state`; and `--headless` dumps are byte-identical with and without `--no-audio`, which pins the player's advance to the tick and not to any consumer |
 | the output curve and the table the machine holds | `K = 0x8000 / mul` ramp entries of `(k × (65536/K)) >> 8`; **zero fill `2·⌊(0x800 − K)/4⌋`**; tail `2·⌊rem/2⌋` bytes of `0xFF`; indexed at `0x400 + value` | the builder's own bytes (`+0x5565`–`+0x55c1`) **as the machine executes them**: `+0x559d`'s `rep stosw` leaves `CX` = 0, so `add %cx,%cx` doubles zero and `+0x55a1`'s `rep stosb` writes nothing — the zero region is half what the code intends, and `+0x55bd`'s shortfall fills `0xFF` | at the reference's `mul` 64 the boundaries move from 768/1280 to 1,536/2,048 — the *intended* table — and the mixer would index the ramp where the machine's memory holds zeros or `0xFF`; the port's own mono `mul` 48 is off by one entry (682 against 683) | **yes** — `cargo xtask music probe --dump` read the bytes off the machine, and the re-review read them twice: the **same table byte for byte in two modules' runs** (all 2,048, one change line, `cs:0x6C` = `6E 00` both times). `tests/mix.rs` builds **both** the machine's table and the intended one and asserts they differ at `mul` 48 |
 | the stereo divisor | **21111** (`0x5277`), making the reference's stereo playback **5.26 % flat** (one semitone is 5.95 %) | the segment's own initial data at `[0x8d7]`, read on every path the reference takes and **written on none** of them — the only store is `+0x228f`, inside `_zoutputmode == 2`'s **Gravis** branch (`MAIN/U2.ASM:734`), which the SB Pro run never reaches | the pitch moves by a quarter-tone's worth of cents and every sample is stepped wrong; the port and the reference would disagree about the module's tempo in the audible sense | **no independent check** — no audio reference exists (D17), so nothing measures the pitch. The check is that the word is *read* and never written on the reference's path, which two independent readings agree on (`music`'s segment localisation and the `music probe` dump); the 5.26 % is arithmetic from the two numbers, not a measurement of sound |
 | A7's 567 and Task 8's reconciliation | the hold is **567 ticks** (the break at 1146, the fadeout's first step at 1147), supplied by **two** pieces: the poll-placement (1144 → 1145) and `GATE_ALIGNMENT_TICKS = 1` | A7 (Phase 2) derived 1147 bit-exactly from two reference frames; Task 8 re-derived it from the *player's state* and got 1145 | the fadeout's first index moves one step: 1180's `c` becomes 31 or 29 instead of 30, and the keyframe stops matching — **the acceptance fails at 0 and at 2**, which is what makes the constant load-bearing rather than a fudge | **the placement: yes** (§5.1 is a chain of citations, corroborated quantitatively — the port's `_np_zframe` matches the trace's own column 753 of 891 frames at one tick, and the 100/22/8 split is what the poll geometry's ~20 % predicts, where a *shifted* clock would match **none**). **The alignment: no** — its value **equals the difference the acceptance absorbs**, so the acceptance cannot falsify it. The evidence is the placement, the trace and A12's ±3, and it is stated as such in the note, in D28 and by Task 8's review |
-| the `sync` boundary | answers `(0, 0)` with **−15609** (`0xC307`, `musframe_9`'s `pop es; ret`); **refuses** above `0x4200`, in two tiers | `DIS/DISINT.ASM:428-463` (the table, `mov cx,16`, the `%bx − 2` read) and `:420`/`:424` for the two bytes before it; the refusal's tiers from what the 16th compare reads | getting `(0, 0)` wrong is a **behaviour divergence**, not a cosmetic one: the tree's callers compare `dis_sync()` with a small positive, so a wrong answer starts a part or hangs it. A one-unit error inside the table moves a caller's start by one row's worth of codes | **the answered end: yes** — the two bytes are the source's own instruction sequence and `the_table_is_the_shipped_shells_own_bytes` finds the 60-byte table exactly once in each of the three shells; the position is *reached*, 278 consecutive samples at `ord 0 row 0` in `second5`. **The refused end: no** — nothing in the tree is *shown* to call above `0x4200` (both callers are block 1's, and how far MUSIC0's order list has got when they run is not measured until they are ported). See A15 |
-| `ZFRAME_SLOP` | **1 tick** | the sample instant's one-index shift (D17's own reading of the emulator: a session's frame is published at the frame's *start*), measured as the check's own line: **753 of 891** frames exact at the shift, worst **1 tick** | at 0 the check fails on the shift the sample instant makes; at 2 it stops distinguishing the shift from a drifting port clock — and the strict same-index reading (no shift at all) gives **353 of 894**, worst **2 ticks** — the one-tick shift plus the one tick the shifted reading already allows, and nothing that grows with the window | **yes** — the *same test* prints both readings and asserts each one's bound (the shifted reading's `ZFRAME_SLOP`, the strict one's `ZFRAME_SLOP + 1`), so "the shift, not a drift" is a printed measurement rather than a phrase: `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`'s third and fourth lines |
-| `JITTER_FRAMES` (A12's ±3) | **3 frames** | the two filed sessions of one recipe (second5/second5b) disagree by one frame at 8 of their 131 row changes; three is the observed worst displacement in any direction across all four traces (`hiddenu`'s 3) | a smaller value fails on the oracle's own jitter; a larger one stops catching a displaced clock (the phase's placement test would pass a run whose music started up to three frames out) | **yes** — it is a *measurement of the oracle against itself*, re-derived by the reviewer from the committed CSVs (8 of 131, each exactly ±1 frame, the same eight); and the shell's test for a four-frame anchor error fails regardless of it |
+| the `sync` boundary | answers `(0, 0)` with **−15609** (`0xC307`, `musframe_9`'s `pop es; ret`); returns the table's last code, **4**, for `0x4200 < key <= 0x8E2E`; **refuses** only above `0x8E2E` | `DIS/DISINT.ASM:428-463` (the table, `mov cx,16`, the `%bx − 2` read) and `:420`/`:424` for the two bytes before it; the boundary from the word the 16th compare reads (`2e 8e`, `0x8E2E`) | getting `(0, 0)` wrong is a **behaviour divergence**, not a cosmetic one: the tree's callers compare `dis_sync()` with a small positive, so a wrong answer starts a part or hangs it. A one-unit error inside the table moves a caller's start by one row's worth of codes | **the answered domain: yes** — the word before the table and the last code field are the source's own instruction sequence (`the_table_is_the_shipped_shells_own_bytes` finds the 60-byte table exactly once in each of the three shells); `(0, 0)` is *reached* for 278 consecutive samples of `second5`, and the `0x4200 < key <= 0x8E2E` band is *reached* for 5,148 of `hiddenu`'s 6,351 frames (81.1 %). **The refused region: no** — nothing in the tree is *shown* to call above `0x8E2E` (both callers are block 1's, and how far MUSIC0's order list has got when they run is not measured until they are ported). See A15 |
+| `ZFRAME_SLOP` | **1 tick** | the sample instant's one-index shift (D17's own reading of the emulator: a session's frame is published at the frame's *start*), measured as the check's own line: **753 of 891** frames exact at the shift, worst **1 tick** | at 0 the check fails on the shift the sample instant makes; at 2 it stops distinguishing the shift from a drifting port clock — and the strict same-index reading (no shift at all) gives **353 of 894**, worst **2 ticks** — the one-tick shift plus the one tick the shifted reading already allows, and nothing that grows with the window | **no independent check** — the *same test* prints both readings and asserts each one's bound (the shifted reading's `ZFRAME_SLOP`, the strict one's `ZFRAME_SLOP + 1`), so "the shift, not a drift" is a printed measurement rather than a phrase: `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`'s third and fourth lines. It is the measurement the constant was derived from, read twice, not a second instrument — defensible as a falsification, not as an independent one under this table's preamble |
+| `JITTER_FRAMES` (A12's ±3) | **3 frames** | the two filed sessions of one recipe (second5/second5b) disagree by one frame at 8 of their 131 row changes; three is the observed worst displacement in any direction across all four traces (`hiddenu`'s 3) | a smaller value fails on the oracle's own jitter; a larger one stops catching a displaced clock (the phase's placement test would pass a run whose music started up to three frames out) | **no independent check** — it is a *measurement of the oracle against itself*, re-derived from the same two committed CSVs the constant came from (8 of 131, each exactly ±1 frame, the same eight). The shell's test for a four-frame anchor error is an outside check on the constant's *use*, not on its value |
 | the tick-in-row clear on a seek | `play_song` zeroes `[0x2000]` (`+0x56ec`) | Task 3 found the gap and Task 7 is where it became reachable: `restartmus` reaches `_zplaysong` **mid-song** with the player anywhere inside a row | a seek mid-song would begin the new order's row 0 on a *later* tick and that row's cells would never be read — a different song from the second restart on, in every block | **yes** — `a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read` (fails without the mirror), and the object's byte says so; the pre-condition is itself measured (the stopped-state tick path *cycles* `[0x2000]` mod `_np_speed` rather than clearing it, so at a restart the counter is generally non-zero) |
 
 **The count, measured rather than assumed.** The table has fourteen rows, and they divide three ways:
 
-- **Nine are checked by something independent of their own derivation**: the tick quantisation, the
-  poll's placement, the `zplus` rule, the samples-per-tick relation, the ring's drain, the curve's
-  table, `ZFRAME_SLOP`, `JITTER_FRAMES`, and the tick-in-row clear. Each names what the check *is* —
-  a trace measured for another purpose, a mutation, the object's own instruction sequence, or two
-  modules' runs where one was expected.
-- **Two are half-checked, and the halves are named.** The anchor is four measurements of one number
-  by one instrument (a spread of 0.1 frames, and no *other* instrument to check it with). The sync
-  boundary's **answered** end is measured — the word before the table is the source's
-  own instruction sequence and the position is reached for 278 consecutive samples — while its
-  **refused** end is not: nothing shows the demo's callers stay inside the domain.
-- **Three have no independent check at all**, and they are the ones the phase's reviews found:
+- **Six are checked by something independent of their own derivation**: the tick quantisation, the
+  poll's placement, the samples-per-tick relation, the ring's drain, the curve's table, and the
+  tick-in-row clear. Each names what the check *is* — a trace measured for another purpose, a
+  mutation, the object's own instruction sequence, or two modules' runs where one was expected.
+- **Four are half-checked, and the halves are named.** The anchor is four measurements of one number
+  by one instrument (a spread of 0.1 frames, and no *other* instrument to check it with). The
+  `zplus` rule's trace count is real but blind to the `[254, X, 254]` shape its own error names —
+  the object's `orw`s decide that case, and they are the derivation evidence. A7's **placement** is
+  mutation-tested while its **alignment**'s value equals the difference the acceptance absorbs. The
+  sync boundary's **answered** domains are measured — the word before the table and the last code
+  field are the source's own, `(0, 0)` is reached for 278 samples of `second5`, and the
+  `0x4200 < key <= 0x8E2E` band for 5,148 of `hiddenu`'s 6,351 frames — while its **refused**
+  region above `0x8E2E` is not: nothing shows the demo's callers stay inside the answered domain.
+- **Four have no independent check at all**, and they are the ones the phase's reviews found:
   `MusicStart`'s pre-poll branch (unreachable by any run the port can make today), the stereo divisor
-  (there is no audio reference to measure a pitch against), and **A7's alignment** (its value equals
-  the difference the acceptance absorbs, so the acceptance cannot falsify it — the evidence is §5.1's
-  placement, the trace and A12). The curve's table is measured on two modules' runs, but its **index
-  base** is an open choice (**A14(a)**) — a fourth absence, in a row that otherwise passes.
+  (there is no audio reference to measure a pitch against), and `ZFRAME_SLOP` and `JITTER_FRAMES`
+  (each is the measurement it was derived from, printed twice or re-derived from the same CSVs —
+  defensible as a falsification, not as an independent instrument). The curve's table is measured on
+  two modules' runs, but its **index base** is an open choice (**A14(a)**) — a fifth absence, in a
+  row that otherwise passes.
 
 The plan's Step 2 named **A7's 567 as *the* independent check on the cue**; the measurement splits
 that into the piece that is one (the placement, mutation-tested) and the piece that is not (the
 alignment, whose value is the difference the acceptance absorbs). It also adds checks the plan did
 not name — the poll's placement, the ring's drain, the curve's table, `ZFRAME_SLOP`,
-`JITTER_FRAMES` and the tick-in-row clear — and it names four absences. That difference is recorded
-rather than smoothed over, as Phase 2 recorded its own two-and-two.
+`JITTER_FRAMES` and the tick-in-row clear — and it names five absences. That difference is recorded
+rather than smoothed over, as Phase 2 recorded its own two-and-two. The `zplus`, `ZFRAME_SLOP` and
+`JITTER_FRAMES` rows were regraded from "yes" in the final review's fix wave: their checks are real
+but none is independent of the evidence the value came from.
 
 #### The verification commands, re-run
 
@@ -1480,6 +1488,13 @@ a kind it does not know is **refused by name**, not walked past (measured in Tas
   like the demo's and whether ENDLOGO holds about as long as it sounds like it should. Nothing here
   reports it, and no test in the tree can stand in for it — Phase 0's single human look found a bug
   (the SDL texture-format misread, `03a3b11`) that no test in the repository could see.
+- **The `--block 5` half of ENDLOGO's acceptance is a recorded comparison, not an assertion.** The
+  automated keyframe test (`bins/secondreality/tests/endlogo.rs`) dumps under **`--part endlogo`
+  only**; the same four keyframes under `--block 5` are compared with `cargo xtask compare` and
+  their `0.0000 %` is recorded here, not asserted by a test. What the suite does pin through the
+  block is the chain's timing — `tests/shell.rs`'s published positions at 404/430/500/900/1180 —
+  and CRED's two indices through the same chain, so a chain-level timing change is caught; the
+  block-5 pixels themselves are a manual result, which is B-M7's parked ruling.
 - **The boot's twelve-frame transient is not modelled.** The modules' own speed/tempo words change at
   frame 396 (the boot's initial `restartmus`) and again at 408 (the block's restart), with **zero
   ticks between** them; on a `--block 5` run the only frames it is visible on are 404–407, where the
@@ -1504,13 +1519,15 @@ a kind it does not know is **refused by name**, not walked past (measured in Tas
   reference's frames, so the four keyframes confirm it either way — the evidence is §5.1's placement,
   the trace and A12, not the diff. It is a fact about this boot and `second5`: a run whose music
   starts elsewhere has no reference frame to align to.
-- **`dis_sync()`'s far tier is refused and cannot be answered.** Above the table's last key the
-  object's 16th compare reads the code after it — one byte of instruction framing and the **low byte
-  of a linker-set displacement**, measured `0xCD06` in `MAIN/U2.EXE`, `0xED06` in `MAIN/2NDFIX.EXE`
-  and `0x9D06` in `U2.EXE`. A number that differs between builds of the original is not one this
-  port returns. The band where the compare *does* match is deterministic (the table's own last code,
-  4) and the port refuses that too, on the boundary it draws — so the phase's domain is
-  `(order << 8) | row <= 0x4200` and nothing shows the demo's callers stay inside it (A15).
+- **`dis_sync()` above `0x8E2E` is refused and cannot be answered.** Above the word the 16th
+  compare reads (`0x8E2E`, the source's own `2e 8e`) the loop's fall-through returns one byte of
+  instruction framing and the **low byte of a linker-set displacement**, measured `0xCD06` in
+  `MAIN/U2.EXE`, `0xED06` in `MAIN/2NDFIX.EXE` and `0x9D06` in `U2.EXE`. A number that differs
+  between builds of the original is not one this port returns. Up to and including `0x8E2E` the
+  compare matches and the answer is the table's own last code, 4 — deterministic, and returned —
+  so the phase's answered domain is `(order << 8) | row <= 0x8E2E` and nothing shows the demo's
+  callers stay inside it (A15). The answered band is not hypothetical: `hiddenu` holds
+  `(ord << 8) | row > 0x4200` for 5,148 of its 6,351 frames (81.1 %).
 - **The three build divergences D24 registers are still open, and Phase 3 added none.** TUNNELI's
   second ramp (followed the release), CRED's data (**A10**, followed the tree) and ENDSCRL's build
   (**A11**, followed the tree) are unchanged. Phase 3's one candidate — a `_zpollmix` reading that
@@ -1544,13 +1561,14 @@ a kind it does not know is **refused by name**, not walked past (measured in Tas
   is unit-tested, and every runnable entry point today takes the wait branch instead — `SECOND 3`,
   the case it exists for, is Phase 4's.
 
-#### The whole-branch review, and the tag
+#### The whole-branch review, the fix wave, and the tag
 
-**Not yet run, and deliberately so.** The plan's Step 5 runs the final whole-branch review over
-`53eb9c1..HEAD` **before** `git tag phase-3`, on Phase 1's and Phase 2's ruling that a tag which has
-to be moved is worse than a tag applied a few commits later. This close-out therefore records the
-evidence and **withholds the tag**; the phase's row reads `complete — untagged` until the review's
-findings are applied.
+**The review ran** over `53eb9c1..66ab915` in four slices and returned **0 Critical / 10 Important /
+30 Minor**. The adjudicated fix wave is the commit after `66ab915`; its per-finding record is
+`.superpowers/sdd/03-music/fix-wave-report.md` (git-ignored, like the ledger). The tag still waits —
+now for the **re-review of the fix wave's commits** — on Phase 1's and Phase 2's ruling that a tag
+which has to be moved is worse than a tag applied a few commits later. The phase's row reads
+`complete — untagged` until that re-review is clean.
 
 ## Phase log
 

@@ -783,7 +783,7 @@ in either module's run — and does **not** reach the DMA buffer's contents (the
 0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
 that buffer beside the accumulator plane it came from is what would close (a).
 
-## A15 — `dis_sync()` above the table's last key is refused, not returned
+## A15 — `dis_sync()` above `0x8E2E` is refused, not returned
 
 **Part:** the engine's music seam (§11 of `docs/fidelity/music.md`), reachable only by a part that
 calls `dis_sync()` — `PAM/OUTTAA.C:39` and `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`, `:138`, all of
@@ -799,23 +799,31 @@ entry further and returns the word **after the one it compared** — the `mov`'s
 the low byte of its displacement, not the `2e 8e` it just compared with.
 
 **Port:** `sr_engine::sync_from` reproduces the table, the `%bx - 2` arithmetic and the read
-*before* the table exactly (the position `(0, 0)` included — see below), and **panics** for a
-position above the last key, naming the position and the reason.
+*before* the table exactly (the position `(0, 0)` included — see below). Above the last key it
+**returns the table's own last code, 4**, up to and including `0x8E2E`; above that it **panics**,
+naming the position and the reason.
 
-**Why the boundary is there, tier by tier.** The region above `0x4200` is not one thing:
+**Why the line is at `0x8E2E`, tier by tier.** The region above `0x4200` is not one thing:
 
 | key | what the object's 16th iteration does | the port |
 |---|---|---|
-| `<= 0x8E2E` | the compare matches (`2e 8e` read as a word — the `mov`'s prefix and opcode, the same in every build) and the answer read at `%bx - 2` is the table's own last code, **4** | refused |
+| `<= 0x8E2E` | the compare matches (`2e 8e` read as a word — the `mov`'s prefix and opcode, the same in every build) and the answer read at `%bx - 2` is the table's own last code, **4** | **returns 4** — the same number in every build the tree holds |
 | `> 0x8E2E` | the compare fails and the loop returns the word after the one it compared — **not** the word the row above compares with, which is `2e 8e`, but the two bytes *after* those: the `mov`'s modrm byte `06` and the *low byte* of a **linker-set** displacement — measured **`0xCD06`** in `MAIN/U2.EXE`, **`0xED06`** in `MAIN/2NDFIX.EXE` and **`0x9D06`** in `U2.EXE` | refused |
 
 Only the second tier *forces* a refusal: a port cannot return a number that differs between builds
-of the original. The first tier is deterministic in every build the tree holds, and the port
-refuses it too, on the brief's own boundary (`ord <= 0x42`): above the last key the answer stops
-being the table's arithmetic and starts being a read of whatever the assembler left after it, and
-this phase draws the line at the table rather than modelling that read. The tests say so —
-`sync_refuses_the_band_whose_16th_compare_matches` refuses the answerable tier by name, alongside
-the two harder ones — so the choice is visible rather than implied.
+of the original. The first tier is deterministic in every build the tree holds — both the compare
+and the code it reads are the source's own bytes — so the port returns it. The tests pin both
+edges: `sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code` checks the `4`
+at `0x4201`, `0x4300` and `0x8E2E`, `sync_refuses_the_first_key_past_the_sixteenth_compare` the
+refusal at `0x8E2F`, and `the_answerable_bands_upper_edge_is_the_word_past_the_table` ties the
+boundary to the image's own `2e 8e`.
+
+**The answered band is not a corner.** The `hiddenu` trace (`SECOND U`) holds
+`(order << 8) | row > 0x4200` for **5,148 of its 6,351 frames (81.1 %)**, while `second5`,
+`second5b` and `second3` hold 0 of their 1,150 / 1,152 / 2,755. The phase's earlier entry refused
+that band on a drawn boundary; the final review changed it because the object's answer there is a
+table value and a Phase-4 part waiting on `dis_sync()` while MUSIC1 or HIDDENU plays would have
+met the refusal within seconds.
 
 **The read *before* the table is answered, not refused.** At `(0, 0)` the `%bx - 2` read lands on
 the two bytes before `ordersync1`, which are `pop es; ret` (`07 c3`) because `ordersync1` follows
@@ -834,18 +842,39 @@ and `part-sequence.md` §1 runs ALKU first in block 1 — but `second5` is a `SE
 does not run ALKU (`MAIN/U2.ASM:792` guards `exe1` on `whattorun & 1`), so the trace is the
 position's evidence, not ALKU's.)
 
-**Measured difference:** none for the answered domain — the word before the table is the same in
-every build the tree holds and the port returns it — and the refusal covers only what the phase
-cannot answer. For the refused region there is no measured difference either, and that is the
-honest statement of the gap: no caller in the tree is *shown* to call `dis_sync()` above the last
-key (both callers are block 1's, and how far MUSIC0's order list has got while they run is not
-measured until they are ported), while the answered position is measured — reached for 278
-consecutive samples of `second5`. An earlier draft of this entry claimed "no caller is shown to
-reach the outside of the domain" while its own next paragraph said ALKU's first call meets the
-refusal at `(0, 0)`; both cannot stand, and the trace settles which one is true: `(0, 0)` is
-reached, above `0x4200` is not shown reachable.
+**Measured difference:** none for the answered domain — the word before the table and the last
+code field are the same in every build the tree holds, and the port returns them. For the refused
+region (`> 0x8E2E`) there is no measured difference either, and that is the honest statement of the
+gap: no caller in the tree is *shown* to call `dis_sync()` there (both callers are block 1's, and
+how far MUSIC0's order list has got while they run is not measured until they are ported). The
+answered band, by contrast, is measured — occupied for 81.1 % of `hiddenu`'s frames.
 
 **Revisit when a part is ported that syncs late (Phase 4):** if one of the two callers turns out to
-call `dis_sync()` above the last key, the first tier's answer (the deterministic 4) is derivable
-from the source's own instruction sequence and could be added here with its own note; the second
-tier's cannot be answered by anything the tree holds.
+call `dis_sync()` above `0x8E2E`, the returned word there is linker-set and cannot be answered by
+anything the tree holds; the part would see a panic rather than the reference's arbitrary number,
+which is the one case this entry cannot close.
+
+## A16 — The boot's twelve-frame music transient: a run installs its own module at its start, not the boot's
+
+**Part:** the music of a run whose entry restart replaces the boot's module — today `--block 5`
+and `--part endlogo`, which install MUSIC0 at order 25 where the boot had loaded MUSIC1; a future
+block whose entry restart does the same inherits it.
+**Original:** the shell's boot loads **MUSIC1 at order 0** at `MAIN/U2.ASM:772-775` (the initial
+`restartmus`), and a block-5 run then replaces it with **MUSIC0 at order 25** at `:898-905` before
+ENDLOGO starts. The modules' own speed/tempo words therefore change at frame **396** (MUSIC1's
+3/130) and again at frame **408** (MUSIC0's patched 6/120), with no tick between them: the twelve
+frames 396…407 are the boot's transient, and `_np_zframe` is 0 throughout.
+**Port:** the run installs the entry point's module — MUSIC0 at order 25 for block 5 — at the run's
+start and never loads-and-replaces MUSIC1. The run's first drawn frame is 404, so on frames
+**404…407** the port's part-facing `MusicPosition::speed`/`tempo` read MUSIC0's **6/120** where
+the trace reads MUSIC1's **3/130**.
+**Why it is not modelled:** reproducing it means loading a module, polling nothing, and replacing
+it four frames later — a second player's lifetime for four frames of a boot the port's runs start
+inside (`MusicStart`'s whole design is "the run begins at its entry point"). The consequence is
+confined to the two words: the published position is `0:0` on both sides (neither module has
+ticked), so every cue a part could read is identical, and no part in either runnable block reads
+`speed`/`tempo`.
+**Measured difference:** the four frames 404–407 of a `--block 5` run differ in `speed` and
+`tempo` only (6/120 against 3/130), recorded in the run manifest and in
+`docs/decisions.md` D27; from frame 408 on the two agree. `music.md` §12 has the trace's own two
+readings (`reference/music/second5` frame 396 = 3/130, frame 408 = 6/120).

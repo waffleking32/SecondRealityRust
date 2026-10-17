@@ -224,8 +224,9 @@ pub(crate) fn wav_format(options: &PlayerOptions) -> (u32, u16) {
 /// demo passes (`mov cx,1` at `:927` and `:938`).
 ///
 /// Once per tick is `@@partsdone`'s own timing: the demo's fade runs from the moment there
-/// is nothing left to play until the byte reaches zero — 192 frames at the shipped
-/// module's 0xC0.
+/// is nothing left to play until the byte reaches zero — **64** frames at the shipped
+/// modules' shared `0x40` (the S3M header's offset 48, not `_np_mastervol`'s 0xC0: see the
+/// test below, which asserts the byte it walks).
 pub fn fade_music(player: &mut Player, step: u8) {
     player.set_global_volume(player.global_volume().saturating_sub(step));
 }
@@ -351,11 +352,20 @@ impl Device {
     /// Open the default playback device at the mixer's own rate and channel count.
     ///
     /// `allowed_changes` is SDL's zero (`sdl2`'s `AudioDevice::open` passes it), so the
-    /// device opens at exactly this specification or not at all: samples in a format the
-    /// caller did not ask for would be a **resample**, which is the one thing this device
-    /// must never do. A machine that cannot give that format — no card, no audio
-    /// subsystem, a card the driver will not open — gets `Err`, and the caller prints a
-    /// line and runs silent rather than failing (`window::run`).
+    /// device opens at exactly this **format** or not at all: samples in a frequency,
+    /// channel count or sample format the caller did not ask for would be a **resample**,
+    /// which is the one thing this device must never do. A machine that cannot give that
+    /// format — no card, no audio subsystem, a card the driver will not open — gets `Err`,
+    /// and the caller prints a line and runs silent rather than failing (`window::run`).
+    ///
+    /// **`samples` is not part of that contract.** The desired spec asks for `None` and SDL
+    /// adjusts the buffer size to the driver: measured against the system SDL2 (2.30.0) on
+    /// the `dummy`, `alsa`, `pulseaudio` and `pipewire` drivers, 20000 Hz stereo gives
+    /// **1024 frames** a callback (2048 i16, 0.051 s) and a request of 4096 is honoured —
+    /// so the buffer is SDL's, and [`Device::spec`] reports what it gave. Today's 1024
+    /// frames are a 4× margin under [`RING_SAMPLES`](sr_audio::RING_SAMPLES) = 8192 i16; a
+    /// driver that returned 4096 stereo frames or more would take the whole ring in one
+    /// callback, which is why the size is printed with the rate rather than assumed.
     pub fn open(sdl: &sdl2::Sdl, player: Shared, rate: u32, channels: u8) -> Result<Device, String> {
         let audio = sdl.audio()?;
         let spec = AudioSpecDesired {
@@ -368,10 +378,10 @@ impl Device {
         Ok(Device { device })
     }
 
-    /// The rate and channel count SDL actually gave us.
-    pub fn spec(&self) -> (i32, u8) {
+    /// The rate, channel count and callback buffer size SDL actually gave us, in frames.
+    pub fn spec(&self) -> (i32, u8, u16) {
         let spec = self.device.spec();
-        (spec.freq, spec.channels)
+        (spec.freq, spec.channels, spec.samples)
     }
 }
 
@@ -488,8 +498,9 @@ mod tests {
         music.setmframe(1516);
         assert_eq!(music.getmframe(), 1516, "`dis_setmframe` writes it through");
 
-        // `MUSIC0` is 0xC0 at its header's own initialiser: the music is audible, and the
-        // fade is what will take it down.
+        // `MUSIC0`'s global-volume byte is 0x40 — the S3M header's own offset 48, which is
+        // what `fademusic` walks, not `_np_mastervol`'s 0xC0 initialiser: the music is
+        // audible, and the fade is what will take it down.
         assert!(!is_faded(&lock(&player)));
     }
 

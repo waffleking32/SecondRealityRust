@@ -301,49 +301,55 @@ const BEFORE_THE_TABLE: i32 = i16::from_le_bytes([0x07, 0xc3]) as i32;
 /// that follows the table (`DIS/DISINT.ASM:451`).
 ///
 /// Those two bytes are the source's own, so they are the same in every build — and that is what
-/// makes the first tier of the refused region answerable: a key at or below this word *matches*
+/// makes the band above the table answerable up to here: a key at or below this word *matches*
 /// the 16th compare, and the object then returns the table's own last code. Only the two bytes
-/// after them — the instruction's displacement, which the linker sets — are not.
+/// after them — the instruction's displacement, which the linker sets — are not, and those are
+/// what the refusal above this word is about.
 const PAST_THE_TABLE: u16 = u16::from_le_bytes([0x2e, 0x8e]);
 
 /// `dis_sync()`'s answer for a published position — `sync_10` (`DIS/DISINT.ASM:449-463`) over the
 /// table above, transliterated including the reads at its two ends.
 ///
 /// The loop is the object's: `%cx` is 16 (`:455`) for the 15 entries, `%bx` walks the table four
-/// bytes at a time, and the first entry whose key is at or below the position ends it (`:456-457`,
-/// `jbe` — an *unsigned* compare of the whole `(order << 8) | row` word). The answer is then read
-/// at **`%bx - 2`** (`:460`) — the *code of the entry before* the one that matched, not the code
-/// of the matching entry. So the table's pairs are upper bounds: code `c` is what the position
-/// reads from one row after the key before it, up to its own key inclusive — `(2, 0)` reads 0 and
-/// `(2, 1)` reads 1.
+/// bytes at a time, and the first entry whose key is at or *above* the position ends it
+/// (`:456-457`, `jbe` — an *unsigned* compare of the whole `(order << 8) | row` word, so the
+/// matched entry is the first one with `key <= key_at`). The answer is then read at **`%bx - 2`**
+/// (`:460`) — the *code of the entry before* the one that matched, not the code of the matching
+/// entry. So the table's pairs are upper bounds: code `c` is what the position reads from one row
+/// after the key before it, up to its own key inclusive — `(2, 0)` reads 0 and `(2, 1)` reads 1.
 ///
-/// **The read before the table is answered; the reads past it are refused.** At `(0, 0)` — the
-/// position a run holds before the music's first row is published, and one the phase's own traces
-/// hold for hundreds of frames — the read lands on `musframe_9`'s `pop es; ret`, and the port
-/// returns it ([`BEFORE_THE_TABLE`]), because that word is *pinned by the source* and identical
-/// in every build the tree holds. Above the last key (`0x4200`) the 16th iteration reads the
-/// bytes that follow the table, which are `sync_10`'s own first instruction, `mov es, cs:stmikseg`
-/// (`2e 8e 06 …`) — and there the port refuses, because the word it would return is one byte of
-/// instruction framing (`06`) and the *low byte* of a **linker-set** displacement: measured
-/// `0xCD06` in `MAIN/U2.EXE`, `0xED06` in `MAIN/2NDFIX.EXE` and `0x9D06` in `U2.EXE`. A port
-/// cannot return a number that differs between builds of the original, so its domain is
-/// `(order << 8) | row <= 0x4200` and above it this function panics with the reason and the
-/// citations. (In the band `0x4200 < key <= 0x8E2E` the 16th compare *does* match — `2e 8e`
-/// itself, pinned by the source and by all three builds — and the object answers with the last
-/// entry's code, 4; the port refuses that band too, on the brief's own boundary rather than on
-/// the value's variance. See `docs/fidelity/music.md` §11.)
+/// **The read before the table is answered; the reads past it are answered up to `0x8E2E` and
+/// refused above that.** At `(0, 0)` — the position a run holds before the music's first row is
+/// published, and one the phase's own traces hold for hundreds of frames — the read lands on
+/// `musframe_9`'s `pop es; ret`, and the port returns it ([`BEFORE_THE_TABLE`]), because that word
+/// is *pinned by the source* and identical in every build the tree holds. Above the last key
+/// (`0x4200`) the 16th iteration reads the bytes that follow the table, which are `sync_10`'s own
+/// first instruction, `mov es, cs:stmikseg` (`2e 8e 06 …`):
 ///
-/// The callers the demo has reach the domain by a wide margin — `PAM/OUTTAA.C:39` waits for code
-/// 10, which the table gives from order 13 on, and `ALKU/MAIN.C:59-79` waits for 1 through 4, from
-/// order 2 on — but the phase cannot show that they never call it above the last key (both parts
-/// are Phase 4's, and how far MUSIC0's order list has got when they run is not measured).
-/// `APPROXIMATIONS.md` A15 registers the boundary, and `docs/fidelity/music.md` §11 carries the
-/// evidence.
+/// - `0x4200 < key <= 0x8E2E`: the 16th compare is against `2e 8e` itself, pinned by the source
+///   and by all three builds, so it **matches**; the read at `%bx - 2` is the table's own last
+///   entry's code field, **4**. The port returns 4.
+/// - `key > 0x8E2E`: the compare fails and the loop's fall-through returns the word after the one
+///   it compared — one byte of instruction framing (`06`) and the *low byte* of a **linker-set**
+///   displacement: measured `0xCD06` in `MAIN/U2.EXE`, `0xED06` in `MAIN/2NDFIX.EXE` and `0x9D06`
+///   in `U2.EXE`. A port cannot return a number that differs between builds of the original, so
+///   above `0x8E2E` this function panics with the reason and the citations.
+///
+/// The band above the last key is not a corner. The `hiddenu` trace — a filed trace of the
+/// shipped shell driving a module — holds `(order << 8) | row > 0x4200` for **5,148 of its 6,351
+/// frames (81.1 %)**, while `second5`, `second5b` and `second3` hold 0 of their 1,150 / 1,152 /
+/// 2,755. The callers the demo has reach the table's own domain by a wide margin — `PAM/OUTTAA.C:39`
+/// waits for code 10, which the table gives from order 13 on, and `ALKU/MAIN.C:59-79` waits for 1
+/// through 4, from order 2 on — but the phase cannot show that they never call it above `0x8E2E`
+/// (both parts are Phase 4's, and how far MUSIC0's order list has got when they run is not
+/// measured). `APPROXIMATIONS.md` A15 registers the boundary, and `docs/fidelity/music.md` §11
+/// carries the evidence.
 ///
 /// # Panics
 ///
-/// For a position above the table's last key — `(order << 8) | row > 0x4200` — where the object's
-/// 16th iteration reads the code that follows the table.
+/// For a position above `0x8E2E` — `(order << 8) | row > 0x8E2E` — where the object's 16th
+/// iteration fails and the loop's fall-through returns a link-time word that varies between
+/// builds of the original.
 pub fn sync_from(order: u8, row: u8) -> i32 {
     let key = (u16::from(order) << 8) | u16::from(row);
     // Only the position `(0, 0)` has key 0, and for it the object's compare matches at `%bx` =
@@ -351,31 +357,25 @@ pub fn sync_from(order: u8, row: u8) -> i32 {
     if key == 0 {
         return BEFORE_THE_TABLE;
     }
-    let Some(index) = ORDERSYNC1.iter().position(|&(key_at, _)| key <= key_at) else {
-        // No key matched: the position is above the table's last entry, and the object's 16th
-        // iteration (`DIS/DISINT.ASM:455-460`, `mov cx,16` over fifteen entries) compares against
-        // the bytes that follow the table. What it does there depends on the position, so the
-        // refusal says which of the two things it is refusing.
-        let because = if key <= PAST_THE_TABLE {
-            "Here the compare matches, and what the object answers with is the table's own last \
-             code, 4. The port refuses this band on the boundary it draws — above the \
-             table's last key the answer stops being the table's arithmetic and becomes a read of \
-             whatever the assembler left after it — and not because the value varies."
-        } else {
-            "Here the compare fails, and the loop's fall-through returns the word after the table \
-             instead: one byte of instruction framing (the `mov`'s modrm byte, `06`) and the low \
-             byte of a link-time displacement, measured as 0xCD06 in MAIN/U2.EXE, 0xED06 in \
-             MAIN/2NDFIX.EXE and 0x9D06 in U2.EXE. A number that differs between builds of the \
-             original is one this port will not return."
-        };
-        panic!(
-            "dis_sync() at (order {order}, row {row}): the position is above the table's last key \
-             (`0x4200`), where `sync_10`'s 16th iteration compares against the bytes past the \
-             table — the `mov es, cs:stmikseg` that follows it. {because} See \
-             `docs/fidelity/music.md` §11 and `APPROXIMATIONS.md` A15."
-        )
-    };
-    ORDERSYNC1[index - 1].1
+    if let Some(index) = ORDERSYNC1.iter().position(|&(key_at, _)| key <= key_at) {
+        return ORDERSYNC1[index - 1].1;
+    }
+    // No entry matched: the position is above the table's last key, and the object's 16th
+    // iteration (`DIS/DISINT.ASM:455-460`, `mov cx,16` over fifteen entries) compares against
+    // the bytes that follow the table. Up to the compare's own word the compare matches and the
+    // read at `%bx - 2` is the last entry's code; past it the answer varies by build.
+    if key <= PAST_THE_TABLE {
+        return ORDERSYNC1[ORDERSYNC1.len() - 1].1;
+    }
+    panic!(
+        "dis_sync() at (order {order}, row {row}): the position is above the word `sync_10`'s 16th \
+         iteration compares against (`0x8E2E`), so the compare fails and the loop's fall-through \
+         returns the word after it: one byte of instruction framing (the `mov`'s modrm byte, \
+         `06`) and the low byte of a link-time displacement, measured as 0xCD06 in MAIN/U2.EXE, \
+         0xED06 in MAIN/2NDFIX.EXE and 0x9D06 in U2.EXE. A number that differs between builds \
+         of the original is one this port will not return. See `docs/fidelity/music.md` §11 and \
+         `APPROXIMATIONS.md` A15."
+    )
 }
 
 #[cfg(test)]
@@ -543,46 +543,54 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "what the object answers with is the table's own last code, 4")]
-    fn sync_refuses_the_position_past_the_tables_last_key() {
-        // The first key of the refused region: `0x4201`, inside the band where the 16th compare
-        // matches. The panic says so, rather than claiming a variance that does not apply here.
-        sync_from(66, 1);
-    }
-
-    #[test]
     #[should_panic(expected = "A number that differs between builds of the original")]
     fn sync_refuses_the_far_end_of_the_order_range() {
         sync_from(255, 255);
     }
 
     #[test]
-    #[should_panic(expected = "what the object answers with is the table's own last code, 4")]
-    fn sync_refuses_the_band_whose_16th_compare_matches() {
-        // `0x4200 < key <= 0x8E2E` (`sync_10`'s own first instruction, `2e 8e`, read as the 16th
-        // compare) is answerable in every build the tree holds — the object returns the last
-        // entry's code, 4 — but the port's boundary is the brief's, above the table's last key,
-        // and this test is what says the refusal is a choice rather than a constraint. The
-        // message has to agree: it names the 4, not the linker-set word.
-        sync_from(0x8e, 0x2e);
+    #[should_panic(expected = "the position is above the word `sync_10`'s 16th iteration compares against (`0x8E2E`)")]
+    fn sync_refuses_the_first_key_past_the_sixteenth_compare() {
+        // `0x8E2F` is one word past `2e 8e`: the 16th compare fails here, and what the
+        // fall-through returns is the linker-set word the port cannot answer.
+        assert!(u16::from(0x8eu8) << 8 | u16::from(0x2fu8) > PAST_THE_TABLE);
+        sync_from(0x8e, 0x2f);
     }
 
     #[test]
-    fn the_refused_regions_two_tiers_are_the_ones_the_object_draws() {
-        // The band's upper edge is the word past the table (`2e 8e`), read from the source's own
-        // instruction; `sync_from` answers at or below the last key, and the first key above the
-        // last key is in the band. The tier the panic message chooses is decided by exactly this
-        // comparison, so it is worth pinning beside the message tests.
+    fn sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code() {
+        // The table's last key (`0x4200`) still reads the *previous* entry's code, 3 — the
+        // `%bx - 2` rule. One row later no entry matches, the loop reaches its 16th
+        // iteration, and that compare (`2e 8e`, `0x8E2E`) is the one that matches: the read
+        // at `%bx - 2` is the last entry's code field, **4**, and it is 4 in every build
+        // because both the compare and the code are the source's own bytes.
+        assert_eq!(sync_from(66, 0), 3, "0x4200: the last table key, previous entry's code");
+        assert_eq!(sync_from(66, 1), 4, "0x4201: the first key above the table");
+        assert_eq!(sync_from(0x43, 0), 4, "0x4300: inside the answerable band");
+        assert_eq!(sync_from(0x8e, 0x2e), 4, "0x8E2E: the 16th compare's own word");
+        assert_eq!(
+            ORDERSYNC1[ORDERSYNC1.len() - 1].1,
+            4,
+            "which is the table's own last code field"
+        );
+    }
+
+    #[test]
+    fn the_answerable_bands_upper_edge_is_the_word_past_the_table() {
+        // The band's upper edge is the word past the table (`2e 8e`), read from the source's
+        // own instruction; `sync_from` answers at or below the last key and again in the band
+        // whose 16th compare matches, and refuses only past it.
         assert_eq!(PAST_THE_TABLE, 0x8e2e);
         assert!(u16::from(0x42u8) << 8 | u16::from(0x01u8) <= PAST_THE_TABLE);
-        assert!(u16::from(0xffu8) << 8 | u16::from(0xffu8) > PAST_THE_TABLE);
+        assert!(u16::from(0x8eu8) << 8 | u16::from(0x2fu8) > PAST_THE_TABLE);
+        assert_eq!(sync_from(0x8e, 0x2e), 4, "the edge itself is answerable");
     }
 
     /// The table is the shipped shell's own bytes: the sixty bytes the port carries are searched
     /// for in each shell build the vendored tree holds, exactly once each, and the words the
-    /// object reads at the table's two ends are read out beside them — the one `sync_from`
-    /// *answers* with at `(0, 0)`, and the ones it refuses above the last key, measured rather
-    /// than asserted.
+    /// object reads at the table's ends are read out beside them — the word before it (answered
+    /// at `(0, 0)`), the word `sync_10`'s 16th compare matches (`0x8E2E`, answered with the
+    /// table's last code), and the word after that (refused, and measured rather than asserted).
     ///
     /// The shells are read from `upstream/SecondReality` at the submodule's pinned commit, as the
     /// asset tests read their files. This is a test-time read of the original, not a dependency
@@ -636,9 +644,9 @@ mod tests {
                 "{path}: the 16th iteration compares with `sync_10`'s own first two bytes"
             );
             // The return when no key matched is code, and it is *not* the same code in two
-            // builds of the same shell — that half is what *forces* the refusal above the last
-            // key. (The band where the 16th compare matches is answerable in every build, and
-            // the port refuses it on the brief's boundary instead: see `sync_from`.)
+            // builds of the same shell — that is what *forces* the refusal above `0x8E2E`.
+            // (Up to and including `0x8E2E` the 16th compare matches and `sync_from` answers
+            // with the table's last code, 4: see `sync_from`.)
             assert!(
                 matches!(*no_match_return, 0xcd06 | 0xed06 | 0x9d06),
                 "{path}: the no-match return reads {no_match_return:#06x}"

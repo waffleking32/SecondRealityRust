@@ -987,6 +987,29 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             &[0x8B, 0xCA, 0xB8, 0x00, 0x04, 0x2E, 0x2B, 0x06, 0x54, 0x22],
             "mov %dx,%cx; mov $0x400,%ax; sub %cs:0x2254,%ax — the stereo right side's",
         ),
+        // The voice routine's second gate, and the period clamp `step` reproduces: the
+        // `m_pos == 0xffff` test at `+0x3791`, the two bound words at `0x958`/`0x95A`, and
+        // the compares that apply them to `aspd` (`+0x5863`'s `jbe` and `+0x5890`'s `jae`).
+        (
+            0x378A,
+            &[0x3E, 0x8B, 0x76, 0x44, 0x83, 0xFE, 0xFF, 0x0F, 0x84, 0x13, 0x01],
+            "mov 0x44(%bp),%si (m_pos); cmp $0xffff,%si; je (the voice routine's return)",
+        ),
+        (
+            0x0958,
+            &[0xFF, 0x7F, 0x40, 0x00],
+            "the step's high and low period bounds: 0x7FFF and 0x0040",
+        ),
+        (
+            0x5863,
+            &[0x3B, 0x0E, 0x58, 0x09, 0x76, 0x0D, 0x8B, 0x0E, 0x58, 0x09],
+            "cmp 0x958,%cx; jbe; mov 0x958,%cx — the high bound on aspd",
+        ),
+        (
+            0x5890,
+            &[0x3B, 0x0E, 0x5A, 0x09, 0x73, 0x0D, 0x8B, 0x0E, 0x5A, 0x09],
+            "cmp 0x95a,%cx; jae; mov 0x95a,%cx — the low bound on aspd",
+        ),
     ];
 
     for (offset, bytes, meaning) in claims {
@@ -1536,7 +1559,7 @@ fn stop_keeps_the_position_and_shut_up_only_silences() {
 
 #[test]
 fn the_polls_samples_are_the_frames_share_and_carry_their_fraction() {
-    // 40000/70.086 = 570.733… samples a poll. The port hands Task 5 whole samples and carries
+    // 40000/70.086 = 570.727… samples a poll. The port hands Task 5 whole samples and carries
     // the fraction, rather than rounding per poll (which would drift by 0.13 %): the fives are
     // 570, 571, 571, 570, 571 — the fraction showing up as the odd 571, never lost.
     let mut player = player("MUSIC0");
