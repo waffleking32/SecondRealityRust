@@ -2720,6 +2720,14 @@ impl Analysis {
     /// trace rather than out of this function having to know which transition
     /// was a restart: a crossing is only a crossing when the counter came from
     /// the order before the skipped entry.
+    ///
+    /// **The first order has no transition inside the trace**, and a trace filed
+    /// from a later window begins mid-song: `hiddenu2` starts on MUSIC0 order 28
+    /// with `zplus` 2, the crossing of the 254 at order 27, which no sample in
+    /// the window saw. Its first sample is the evidence for that order's state,
+    /// so it seeds the expectation; every later order is still computed from an
+    /// entry the trace holds. A trace that holds the music's start seeds 0,
+    /// which is what the rule computes there anyway.
     pub fn zplus_check(&self) -> Option<ZplusCheck> {
         let module = self.module.as_ref()?;
         let mut held: Vec<u8> = Vec::new();
@@ -2728,7 +2736,10 @@ impl Analysis {
                 held.push(state.ord);
             }
         }
-        let expected = zplus_rule(&module.orders, &held);
+        let mut expected = zplus_rule(&module.orders, &held);
+        if let (Some(first), Some(state)) = (expected.first_mut(), self.samples.first()) {
+            *first = state.zplus;
+        }
         let value_of = |order: u8| -> i16 {
             held.iter()
                 .position(|held| *held == order)

@@ -3,12 +3,25 @@
 //!
 //! The traces are committed — `reference/` is input-only (`docs/fidelity/music-clock.md` §1
 //! and §7) — so this test is unconditional: a fresh clone runs it. It **walks**
-//! `reference/music/`, so a fifth trace is covered without an edit, and it takes nothing
+//! `reference/music/`, so a later trace is covered without an edit, and it takes nothing
 //! about a trace on trust: the module is identified from the trace's own `(ord, pat)` pairs
-//! against the two order lists, the start order is the first order the trace publishes, the
-//! start frame is derived from the trace's own columns the way `cargo xtask music analyse`
-//! derives the boot's anchor, and the coverage — which frames exist and which are the
+//! against the two order lists, the start order is the first order the trace's recipe
+//! publishes at its anchor, the anchor is derived from the columns of the same recipe's trace
+//! that holds the music's start, and the coverage — which frames exist and which are the
 //! emulator's own gaps — is recomputed from the trace file and checked against the manifest.
+//!
+//! **Three of the eight filed traces are windows, not boots.** `second1b`, `second3b` and
+//! `hiddenu2` were filed for Phase 4's parts and begin thousands of frames after the music's
+//! start. A window trace's own columns derive the last tick-counter reset before it, not a
+//! boot anchor, so the port is simulated from its recipe's anchor — the seek the boot made —
+//! and **phase-aligned to the session** at the window's first row change, because the boot's
+//! phase is session-dependent (D17) and the two `SECOND U` sessions differ by ten ticks at
+//! frames 6499/6500. It is then held to the trace from the window's first frame. That is the
+//! only way a later window can be reached by a player that never seeks mid-song.
+//!
+//! `second1` is a boot trace but on a different recipe: `SECOND 1` has no block restart, so
+//! its clock starts eight frames earlier than the restart recipes' 408 (see
+//! [`MUSIC_START_FRAME`]).
 //!
 //! **What is asserted, and what is measured.** The reference's tick clock and the port's are
 //! both uniform, but the reference's is sampled by an emulated machine whose frame counter
@@ -40,12 +53,24 @@ use sr_audio::{Module, Player, PlayerOptions, Position};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The boot's music-start anchor — the reference's own frame counter, measured in four
+/// The frame the music's start lands on in the recipes that restart their player at boot —
+/// `SECOND 3`, `5` and `U`, whose `restartmus` reloads STMIK and so zeroes the tick counter
+/// about eight frames after the initial `_zplaysong(0)`. It is measured in four Phase 3
 /// sessions and stable to 0.1 frames (`docs/fidelity/music-clock.md` §2; `xtask/tests/music.rs`'s
 /// `the_anchor_is_the_same_in_every_filed_session` asserts the same number from the other
-/// end). Each trace's own columns are used to *derive* it, and the derivation is then
-/// checked against this: a trace of a different recipe is refused rather than compared from
-/// the wrong frame.
+/// end).
+///
+/// It is also the boundary that says whether a trace *holds the start*: a trace whose
+/// coverage window begins at or before it does, and its own columns derive the recipe's
+/// anchor. `SECOND 1` is the exception that makes the anchor per recipe: block 1 has no
+/// restart (its `restartmus` row carries `bx = -1`, "no seek"), so its clock starts at the
+/// initial `_zplaysong(0)` instead, and its derived anchor is 400 — measured in
+/// `reference/music/second1` (`music-clock.md` §2).
+///
+/// **An anchor is per recipe, not one number for the tree.** Each trace's own columns are
+/// used to *derive* its recipe's anchor, and the derivation is then checked against the
+/// recipe's first boot trace: a trace of a different recipe is refused rather than compared
+/// from the wrong frame.
 const MUSIC_START_FRAME: i64 = 408;
 
 /// The port's logic tick, in millihertz (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). A
@@ -58,9 +83,24 @@ const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of mi
 /// before this test calls it a disagreement. **Measured, not chosen**: the two sessions of one
 /// recipe (`second5` and `second5b`) differ by one frame at eight of their row changes, and the
 /// port — whose clock is exact — sits between the sessions; the worst displacement any filed
-/// trace shows against the port is **3 frames**, in `hiddenu`'s 6,088 compared frames, which is
-/// the number this constant is. `docs/fidelity/APPROXIMATIONS.md` A12 records the measurement.
-const JITTER_FRAMES: i64 = 3;
+/// trace shows against the port is **7 frames**, in `second1`'s 5,542 compared frames, which is
+/// the number this constant is. That 7 is the exact clock's accumulated difference from the
+/// reference's own measured tick rate — 48.06 a second at tempo 120 against the port's 48.00
+/// (`music-clock.md` §2's `second1` row, §3's rule) — over a window twice as long as the ones
+/// Phase 3 filed; it is still under one 6-tick row (8.76 frames) at that trace's speed, so a
+/// skipped row is still caught. `docs/fidelity/APPROXIMATIONS.md` A12 records the measurement.
+const JITTER_FRAMES: i64 = 7;
+
+/// How far a window trace's session may sit from its recipe's boot phase before this test
+/// refuses to align it. The three window shifts measure **−16, +1 and +1 frames** (printed by
+/// `the_port_reproduces_every_filed_trace`): the two `SECOND U` sessions, `hiddenu` (frames
+/// 146…6499) and `hiddenu2` (6500…8199), read `_np_zframe` 4175 and 4185 at adjacent frames —
+/// ten ticks, about fifteen frames — which is the largest session phase spread the tree
+/// measures at a window (`music-clock.md` §2). The bound is **a guard, not a measurement**: 20
+/// is the largest measured shift plus a quarter of a speed-6 row; it keeps the alignment from
+/// hiding a trace that is a different song position, while the content comparison is what
+/// actually refuses one.
+const PHASE_ALIGN_FRAMES: i64 = 20;
 
 /// One trace, its manifest and its module.
 struct Trace {
@@ -70,7 +110,20 @@ struct Trace {
     /// The manifest's coverage window, half open, and its gap list of inclusive ranges.
     window: [i64; 2],
     missing: Vec<(i64, i64)>,
+    /// The first frame this comparison holds the port to: the recipe's anchor for a trace
+    /// that covers the music's start, the window's own first frame for a trace filed from a
+    /// later stretch of the run (whose rows all lie after the anchor).
     start: i64,
+    /// The frame the port's simulation begins at — always the recipe's anchor, because the
+    /// player must play the same rows the reference did to reach a later window.
+    run_from: i64,
+    /// The order the boot's seek plays, read from a trace of the same recipe that holds the
+    /// start (the first position it publishes).
+    start_order: u8,
+    /// Whether this trace's window holds the music's start. A trace filed from a later
+    /// window does not hold the seek, so its first order change is a natural one at row 0
+    /// rather than the seek's first published row 1.
+    boot: bool,
 }
 
 /// One trace row: `frame,ord,row,pat,loop,speed,tempo,zinfo,zplus,zframe`.
@@ -184,7 +237,48 @@ fn load(name: &str) -> Module {
     module
 }
 
+/// The manifest's `arguments`, read as text for the same reason `parse_coverage` is: a trace's
+/// recipe is the command that produced it, and two traces of one recipe share an anchor.
+fn parse_arguments(manifest: &str, name: &str) -> Vec<String> {
+    let key = "\"arguments\":";
+    let at = manifest
+        .find(key)
+        .unwrap_or_else(|| panic!("{name}'s manifest has no {key}"));
+    let rest = &manifest[at + key.len()..];
+    let open = rest
+        .find('[')
+        .unwrap_or_else(|| panic!("{name}'s args are not a list"));
+    let close = open
+        + rest[open..]
+            .find(']')
+            .unwrap_or_else(|| panic!("{name}'s args are not a list"));
+    rest[open + 1..close]
+        .split(',')
+        .map(|piece| piece.trim().trim_matches('"').to_string())
+        .filter(|piece| !piece.is_empty())
+        .collect()
+}
+
+/// A trace as read from the tree, before its recipe's anchor is known.
+struct Filed {
+    name: String,
+    module: &'static str,
+    states: Vec<Row>,
+    window: [i64; 2],
+    missing: Vec<(i64, i64)>,
+    /// The command's arguments: the recipe key two traces share.
+    arguments: Vec<String>,
+}
+
 /// Every filed trace, walked from the tree rather than listed.
+///
+/// **An anchor is per recipe.** A trace whose window begins at or before
+/// [`MUSIC_START_FRAME`] holds the music's start, and its own columns derive the anchor its
+/// recipe booted on (`second5`/`second5b` both derive 408; `second1` derives 400 because
+/// block 1 has no restart). A trace filed from a later window does **not** hold the seek:
+/// its own columns derive the last tick-counter reset before the window (a part's
+/// `_dis_setmframe(0)`), not the boot anchor, so it is simulated from its recipe's anchor —
+/// the port must play the rows the reference did to reach that window at all.
 fn traces() -> Vec<Trace> {
     let root = workspace().join("reference/music");
     let mut names: Vec<String> = std::fs::read_dir(&root)
@@ -195,17 +289,17 @@ fn traces() -> Vec<Trace> {
         .collect();
     names.sort();
     // The filed traces are the comparison's *input*, and the phase's headline check is that
-    // the port reproduces **all** of them. A walk that silently narrowed to three because a
+    // the port reproduces **all** of them. A walk that silently narrowed to fewer because a
     // directory went missing would still pass every assertion below; the floor is what makes
-    // that a failure. It is a floor, not a list, so a fifth trace is covered with no edit.
+    // that a failure. It is a floor, not a list, so a later trace is covered with no edit.
     assert!(
-        names.len() >= 4,
-        "the filed traces: {} under {} — the phase's four are expected",
+        names.len() >= 8,
+        "the filed traces: {} under {} — the phase's eight are expected",
         names.len(),
         root.display()
     );
 
-    names
+    let filed: Vec<Filed> = names
         .into_iter()
         .map(|name| {
             let dir = root.join(&name);
@@ -216,24 +310,97 @@ fn traces() -> Vec<Trace> {
             let states: Vec<Row> = csv.lines().skip(1).map(parse_row).collect();
             assert!(!states.is_empty(), "{name} has no samples");
             let (window, missing) = parse_coverage(&manifest, &name);
-            let start = start_frame(&states);
-            assert_eq!(
-                start, MUSIC_START_FRAME,
-                "{name}: the trace's own columns put the music's start at frame {start}, not \
-                 the boot anchor {MUSIC_START_FRAME} — a different recipe needs its own anchor \
-                 before this comparison means anything"
-            );
-            let module = identify(&name, &states, start);
-            let trace = Trace {
+            let arguments = parse_arguments(&manifest, &name);
+            let module = identify(&name, &states, window[0]);
+            Filed {
                 name,
                 module,
                 states,
                 window,
                 missing,
+                arguments,
+            }
+        })
+        .collect();
+
+    // Each recipe's anchor and start order, from the traces that hold the start. A recipe
+    // with two boot sessions (second5 and second5b) must derive the same anchor twice; that
+    // is what makes it a property of the boot rather than of a session.
+    let mut recipes: BTreeMap<String, (i64, u8)> = BTreeMap::new();
+    for trace in filed.iter().filter(|trace| trace.window[0] <= MUSIC_START_FRAME) {
+        let anchor = start_frame(&trace.states);
+        let start_order = trace
+            .states
+            .iter()
+            .find(|row| row.position.row != 0 || row.position.order != 0)
+            .map(|row| row.position.order)
+            .expect("the first published position");
+        let key = trace.arguments.join(",");
+        match recipes.get(&key) {
+            Some(&(seen, order)) => {
+                assert_eq!(
+                    anchor, seen,
+                    "{}: a second boot session of the same recipe derives anchor {anchor}, not \
+                     {seen}",
+                    trace.name
+                );
+                assert_eq!(
+                    start_order, order,
+                    "{}: the same recipe seeks a different order",
+                    trace.name
+                );
+            }
+            None => {
+                recipes.insert(key, (anchor, start_order));
+            }
+        }
+    }
+    assert!(!recipes.is_empty(), "no filed trace holds the music's start");
+
+    filed
+        .into_iter()
+        .map(|trace| {
+            let key = trace.arguments.join(",");
+            let &(anchor, start_order) = recipes.get(&key).unwrap_or_else(|| {
+                panic!(
+                    "{}: no filed trace of its recipe ({key}) holds the music's start, so the \
+                     recipe's anchor is unknown",
+                    trace.name
+                )
+            });
+            let boot = trace.window[0] <= MUSIC_START_FRAME;
+            let derived = start_frame(&trace.states);
+            if boot {
+                assert_eq!(
+                    derived, anchor,
+                    "{}: the trace's own columns put its recipe's music start at frame \
+                     {derived}, not {anchor}",
+                    trace.name
+                );
+            } else {
+                assert!(
+                    derived <= trace.window[0],
+                    "{}: the trace's own columns put the tick counter's last reset at frame \
+                     {derived}, after its window starts at {} — a window trace cannot begin \
+                     before the reset its columns assume",
+                    trace.name,
+                    trace.window[0]
+                );
+            }
+            let start = if boot { anchor } else { trace.window[0] };
+            let result = Trace {
+                name: trace.name,
+                module: trace.module,
+                states: trace.states,
+                window: trace.window,
+                missing: trace.missing,
                 start,
+                run_from: anchor,
+                start_order,
+                boot,
             };
-            trace.check_coverage();
-            trace
+            result.check_coverage();
+            result
         })
         .collect()
 }
@@ -275,8 +442,13 @@ fn identify(name: &str, states: &[Row], start: i64) -> &'static str {
 /// The frame the music starts on, derived from the trace's own columns the way
 /// `cargo xtask music analyse` derives it: the first row change is at frame `F` with
 /// `_np_zframe` at `Z`, and a tick is `2.5/tempo` seconds long, so the first tick was `Z`
-/// tick-lengths before `F`. The tool prints the same number for every filed trace, to 0.1
-/// frames.
+/// tick-lengths before `F`.
+///
+/// For a trace that holds the start this is its recipe's anchor and `music analyse` prints
+/// the same number, to 0.1 frames. For a trace filed from a later window it is the origin of
+/// the *last* reset the counter made before the window — a part's `_dis_setmframe(0)` — and
+/// is **not** a boot anchor; that is why a window trace is simulated from its recipe's
+/// anchor rather than from this.
 fn start_frame(states: &[Row]) -> i64 {
     let first = states
         .iter()
@@ -315,31 +487,60 @@ impl Trace {
         );
     }
 
-    /// Every frame the trace holds from the music's start on — the frames this comparison is
-    /// over, gaps and all: a frame the emulator never published stays absent rather than
-    /// being renumbered around.
+    /// Every frame the trace holds that the comparison holds the port to — the frames this
+    /// comparison is over, gaps and all: a frame the emulator never published stays absent
+    /// rather than being renumbered around. A trace that holds the start is compared from its
+    /// recipe's anchor; a later window from its own first frame.
     fn compared(&self) -> impl Iterator<Item = &Row> {
         self.states.iter().filter(|row| row.frame >= self.start)
     }
 }
 
-/// Drive the port for every frame from the trace's own music start, and collect what it
+/// Drive the port from the recipe's anchor to the trace's last frame, and collect what it
 /// published.
+///
+/// A trace that holds the start is simulated from the anchor directly — the seek the boot
+/// made. A trace filed from a later window is **phase-aligned to its own session** first:
+/// the boot's phase is session-dependent (D17), and the windows show it — `hiddenu` and
+/// `hiddenu2` are adjacent frames of the same recipe that read `_np_zframe` 4175 and 4185,
+/// ten ticks (about fifteen frames) apart. No fixed clock can sit on both, so a window trace's
+/// port run is shifted by the offset the trace's own first row change measures, and the
+/// content and the within-window placement (within [`JITTER_FRAMES`]) are what is asserted.
 fn run(trace: &Trace) -> BTreeMap<i64, Published> {
+    let unshifted = simulate(trace, trace.run_from);
+    let shift = phase_shift(trace, &unshifted);
+    assert!(
+        shift.abs() <= PHASE_ALIGN_FRAMES,
+        "{}: the session's phase is {shift} frames from the boot's — past the measured \
+         session spread of {PHASE_ALIGN_FRAMES}",
+        trace.name
+    );
+    if !trace.boot {
+        println!(
+            "  {}: the session's phase is {shift:+} frame(s) from the boot's",
+            trace.name
+        );
+    }
+    if shift == 0 {
+        unshifted
+    } else {
+        simulate(trace, trace.run_from + shift)
+    }
+}
+
+/// The port's published state at every frame from `from` to the trace's last, one poll a
+/// frame. Frames before the comparison's start are kept: the phase alignment below looks for
+/// a row change there.
+fn simulate(trace: &Trace, from: i64) -> BTreeMap<i64, Published> {
     let module = load(trace.module);
-    let start_order = trace
-        .compared()
-        .find(|row| row.position.row != 0 || row.position.order != 0)
-        .map(|row| row.position.order)
-        .expect("the first published position");
     let mut player = Player::new(module, PlayerOptions::default());
 
     let mut out = BTreeMap::new();
     let last = trace.states.last().expect("a last frame").frame;
-    let mut frame = trace.start;
+    let mut frame = from;
     loop {
-        if frame == trace.start {
-            player.play_song(start_order);
+        if frame == from {
+            player.play_song(trace.start_order);
         }
         player.poll();
         out.insert(
@@ -355,6 +556,52 @@ fn run(trace: &Trace) -> BTreeMap<i64, Published> {
         frame += 1;
     }
     out
+}
+
+/// The frame offset that puts the port's row boundaries on the session's, measured from the
+/// first row change the window publishes: its `(order, row → row)` change is unique within
+/// the order, and the nearest port change of the same shape is the same row. Zero for a trace
+/// that holds the seek, whose phase the anchor already fixes.
+fn phase_shift(trace: &Trace, port: &BTreeMap<i64, Published>) -> i64 {
+    if trace.boot {
+        return 0;
+    }
+    let mut previous = trace.states.first().expect("a first sample");
+    let mut wanted = None;
+    for row in trace.states.iter().skip(1) {
+        if row.position.order != previous.position.order || row.position.row != previous.position.row
+        {
+            wanted = Some((
+                row.frame,
+                previous.position.order,
+                previous.position.row,
+                row.position.row,
+            ));
+            break;
+        }
+        previous = row;
+    }
+    let (trace_frame, order, from_row, to_row) =
+        wanted.expect("a row change in the window's first sample");
+    let mut previous: Option<&Published> = None;
+    let mut best: Option<(i64, i64)> = None;
+    for (frame, published) in port {
+        if let Some(before) = previous {
+            if before.position.order == order
+                && before.position.row == from_row
+                && published.position.order == order
+                && published.position.row == to_row
+            {
+                let distance = (frame - trace_frame).abs();
+                if best.is_none_or(|(seen, _)| distance < seen) {
+                    best = Some((distance, *frame));
+                }
+            }
+        }
+        previous = Some(published);
+    }
+    let (_, port_frame) = best.expect("the port publishes the trace's first change");
+    trace_frame - port_frame
 }
 
 /// The distinct values of a sequence, in order — what "the same content" means here.
@@ -402,10 +649,26 @@ fn the_port_reproduces_every_filed_trace() {
         //    row short of, or a row past, the trace's last datum — a placement fact, which the
         //    placement check below owns. One leftover entry is tolerated there; two would be a
         //    value the port invented or lost.
+        //
+        //    A trace filed from a later window begins on a *frame*, not on a row boundary, so
+        //    the window's first frame can hold a row on one side that the other side's window
+        //    does not: `second3b`'s trace publishes row 19 at frame 10,200 and the port row 20,
+        //    with every later value equal. For a window trace (not a boot trace, whose seek
+        //    makes both publish the same zeroes) one such leading value is dropped from
+        //    whichever sequence is one row ahead before the content is compared; a row skipped
+        //    or invented anywhere else still fails.
         let content = |name: &str, key: fn(&Published, &Row) -> u8| {
-            let trace_sequence = distinct(interior.iter().map(|row| key(&row.published(), row)));
-            let port_sequence =
+            let mut trace_sequence =
+                distinct(interior.iter().map(|row| key(&row.published(), row)));
+            let mut port_sequence =
                 distinct(interior.iter().map(|row| key(&port[&row.frame], row)));
+            if !trace.boot && trace_sequence.first() != port_sequence.first() {
+                if trace_sequence.get(1) == port_sequence.first() {
+                    trace_sequence.remove(0);
+                } else if port_sequence.get(1) == trace_sequence.first() {
+                    port_sequence.remove(0);
+                }
+            }
             assert!(
                 trace_sequence.len().abs_diff(port_sequence.len()) <= 1,
                 "{}: the {name} sequences differ in length — {} against {}",
@@ -568,12 +831,13 @@ fn zplus_is_a_function_of_the_published_position() {
             }
         }
         // And the transitions are where the note says they are: at an order start. The first
-        // change in the trace is the seek (`_zplaysong`), which enters an order at row 0
-        // *without* publishing it — the position words stay at their stale zeroes until the
-        // first row advance — so the seek is where the row is 1, and every later order change
-        // is at row 0.
+        // change in a trace that holds the start is the seek (`_zplaysong`), which enters an
+        // order at row 0 *without* publishing it — the position words stay at their stale
+        // zeroes until the first row advance — so the seek is where the row is 1, and every
+        // later order change is at row 0. A trace filed from a later window does not hold
+        // the seek: every order change it can see is a natural one, at row 0.
         let mut last_order = None;
-        let mut seen_change = false;
+        let mut seen_change = !trace.boot || trace.start_order == 0;
         for row in trace.compared() {
             if let Some(order) = last_order {
                 if order != row.position.order {

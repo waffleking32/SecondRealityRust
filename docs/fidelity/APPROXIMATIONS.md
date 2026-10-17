@@ -624,7 +624,8 @@ measured is the behaviour** — a `[NN` line advances the ring NN rows and draws
 ## A12 — The music clock: the port's tick clock is exact, the reference's frame counter is not
 
 **Part:** the music, under every part that plays it (Task 3; the traces are
-`reference/music/{second5,second5b,second3,hiddenu}`).
+`reference/music/{second5,second5b,second3,hiddenu}` and Phase 4's
+`reference/music/{second1,second1b,second3b,hiddenu2}`).
 
 **Original:** the player's tick is `2.5/tempo` seconds of *the emulated machine's* time, and the
 traces are sampled once per frame of the emulator's own frame counter
@@ -634,8 +635,10 @@ emulator's host timing, which D17 measured as a term the API and `--set` do not 
 **Port:** `Player::poll` adds exactly `mix_rate/70.086` samples per logic tick and advances a whole
 tick whenever `mix_rate × 2.5/tempo` samples have accumulated — integer arithmetic, no float, no
 drift by construction. The port's ratio is 48 ticks a second at tempo 120; the reference's, measured
-from the traces' own `zframe` column, is 47.93 (`second5`), 48.04 (`hiddenu`) and 52.01
-(`second3`, tempo 130) — the same clock to 0.15 %, and not the same clock to the frame.
+from the traces' own `zframe` column, is 47.93 (`second5`), 48.04 (`hiddenu`), 48.06
+(`second1`) and 52.01 (`second3`, tempo 130) — the same clock to 0.15 %, and not the same clock
+to the frame. A window trace's rate measured over a few hundred frames is finer than that
+(47.83 in `second1b`'s 359 frames) and is not used as a long-run measurement.
 
 **Why this is registered rather than fixed:** it cannot be fixed. The two sessions of *one recipe*
 — `second5` and `second5b`, the same command against the same emulator at the same pinned cycles —
@@ -646,21 +649,35 @@ exact clock sits *between* them, and that is the best a fixed clock can do.
 
 **Measured difference.** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
 prints, for every trace in `reference/music/`, the share of the trace's frames whose published
-position matches the port's, and the worst displacement:
+position matches the port's, and the worst displacement. Phase 4's four are included; the three
+window runs are phase-aligned to their own session first (each prints its offset):
 
 ```
-4 filed trace(s)
-  hiddenu (MUSIC0): 5687 of 6088 frames agree (93.413 %); worst displacement 3 frame(s)
-  second3 (MUSIC1): 2144 of 2488 frames agree (86.174 %); worst displacement 2 frame(s)
-  second5 (MUSIC0): 771 of 887 frames agree (86.922 %); worst displacement 2 frame(s)
-  second5b (MUSIC0): 777 of 887 frames agree (87.599 %); worst displacement 2 frame(s)
+8 filed trace(s)
+  hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
+  hiddenu2: the session's phase is -16 frame(s) from the boot's
+  hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
+  second1 (MUSIC0): 3738 of 5538 frames agree (67.497 %); worst displacement 7 frame(s)
+  second1b: the session's phase is +1 frame(s) from the boot's
+  second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
+  second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
+  second3b: the session's phase is +1 frame(s) from the boot's
+  second3b (MUSIC1): 3179 of 4839 frames agree (65.695 %); worst displacement 6 frame(s)
+  second5 (MUSIC0): 769 of 883 frames agree (87.089 %); worst displacement 2 frame(s)
+  second5b (MUSIC0): 775 of 883 frames agree (87.769 %); worst displacement 2 frame(s)
 ```
 
-The frames that disagree are one per row change — the ±1-frame placement of a row boundary — and
-the *content* is not in doubt: the comparison test asserts, word by word, that the port publishes
-exactly the trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`,
-`loop` and `zplus`, and that every published value is one the trace publishes within 3 frames of
-that frame.
+On the Phase 3 windows the frames that disagree are one per row change — the ±1-frame placement
+of a row boundary. The Phase 4 windows are longer and show the drift the rate difference
+predicts: `second1`'s 5,538 compared frames reach **7** and `second3b`'s 4,839 reach **6**,
+because the reference's tick rate there is 48.06 and 52.06 a second where the port's is exactly
+48.00 and 52.00; over five thousand frames 0.1 % accumulates to several frames. The *content*
+is not in doubt: the comparison test asserts, word by word, that the port publishes exactly the
+trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`, `loop` and
+`zplus`, and that every published value is one the trace publishes within **7** frames of that
+frame — the measured worst (`second1`), still under one 6-tick row (8.76 frames). The windows'
+own phase offsets (−16, +1 and +1 frames) are the boot's session-to-session spread, measured in
+`music-clock.md` §2, not clock drift.
 
 **What is not an approximation here:** the ten-poll publication delay (`_np_*` is a ring buffer ten
 entries deep — `STMIK.300` + `0x2ac1`), the tick and row arithmetic (`+0x3d99`, `+0x4397`), the

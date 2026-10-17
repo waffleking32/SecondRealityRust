@@ -238,7 +238,8 @@ pub fn musplus_from(zplus: i32, row: i32) -> i32 {
 
 /// `dis_muscode()`'s answer: `_np_zinfo` (`DIS/DISINT.ASM:249`), which **is 0**, by D8's
 /// deferral — the value the reference's own word held in every sample of every filed trace
-/// (11,408 across the four traces; `docs/fidelity/music-clock.md` §6).
+/// (24,109 samples across the eight; Phase 3's four are 11,408 of them;
+/// `docs/fidelity/music-clock.md` §6).
 ///
 /// The parameter is the code the caller is waiting for, and the INDEMO build ignores it: the block
 /// loads `%ax` with `_np_zinfo` before it looks at anything else (`:249`), so

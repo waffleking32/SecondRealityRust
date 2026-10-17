@@ -606,8 +606,9 @@ row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and 
 
   The addend lives in a word the object's image carries as `0x0101` — the filler these objects
   use for slots the program clears before it runs: the segment's other BSS-like words read the
-  same way, `_np_zframe` among them, and every filed trace reads `_np_zframe` as 0 before the
-  music's first tick, so those slots do not survive into the running program. And the traces
+  same way, `_np_zframe` among them, and every trace that holds the music's start reads
+  `_np_zframe` as 0 before the music's first tick, so those slots do not survive into the
+  running program. And the traces
   agree the adjuster contributes nothing here: the published row changes of `second5`'s speed-6
   run are **exactly** six ticks apart (`cargo xtask music analyse --trace reference/music/second5`
   prints 61 gaps in 534 frames where the rule says 534.4, residual −0.4).
@@ -680,20 +681,31 @@ the impossible. So the comparison asserts what a port can be held to —
 2. **placement**: every published value is one the trace publishes at that frame or within
    3 frames of it;
 
-— and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints:
+— and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints (the
+Phase 4 traces are included; the window runs first print their session's phase offset):
 
 ```
-4 filed trace(s)
-  hiddenu (MUSIC0): 5687 of 6088 frames agree (93.413 %); worst displacement 3 frame(s)
-  second3 (MUSIC1): 2144 of 2488 frames agree (86.174 %); worst displacement 2 frame(s)
-  second5 (MUSIC0): 771 of 887 frames agree (86.922 %); worst displacement 2 frame(s)
-  second5b (MUSIC0): 777 of 887 frames agree (87.599 %); worst displacement 2 frame(s)
+8 filed trace(s)
+  hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
+  hiddenu2: the session's phase is -16 frame(s) from the boot's
+  hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
+  second1 (MUSIC0): 3738 of 5538 frames agree (67.497 %); worst displacement 7 frame(s)
+  second1b: the session's phase is +1 frame(s) from the boot's
+  second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
+  second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
+  second3b: the session's phase is +1 frame(s) from the boot's
+  second3b (MUSIC1): 3179 of 4839 frames agree (65.695 %); worst displacement 6 frame(s)
+  second5 (MUSIC0): 769 of 883 frames agree (87.089 %); worst displacement 2 frame(s)
+  second5b (MUSIC0): 775 of 883 frames agree (87.769 %); worst displacement 2 frame(s)
 ```
 
-The frames that disagree are the ±1-frame placement of a row boundary — one per row change —
-because the port's clock is exact and the reference's is not; the port sits *between* the two
-sessions (a frame early in `second5`, a frame late in `hiddenu`) which is the best a fixed clock
-can do. `docs/fidelity/APPROXIMATIONS.md` records the measurement and its cause.
+On the Phase 3 windows the frames that disagree are the ±1-frame placement of a row boundary —
+one per row change — because the port's clock is exact and the reference's is not; the port
+sits *between* the two sessions (a frame early in `second5`, a frame late in `hiddenu`) which is
+the best a fixed clock can do. The Phase 4 windows are longer and show the rate difference
+accumulating: `second1` reaches 7 frames and `second3b` 6, still under one row at their speeds;
+the content is asserted word by word, not by frames. `docs/fidelity/APPROXIMATIONS.md` A12
+records the measurement and its cause.
 
 ### The end-to-end play, shown
 
@@ -1582,8 +1594,9 @@ rule written as row ranges. The demo's own parts read the answer as a countdown 
 
 **`muscode` is 0, and the substitute keeps `_np_zinfo`'s shape.** D8's route 1 walked the object's
 symbols and read the word live: it is at segment offset `0x08F7` and it is **0 in every sample of
-every filed trace** (11,408 across the four, covering MUSIC0's orders 0 and 25…28 and 70…77 and
-MUSIC1's 0 and 42…48), so the port returns 0 (`music-clock.md` §6). `muscode_from` takes the
+every filed trace** (24,109 across the eight — Phase 3's four and Phase 4's — covering MUSIC0's
+orders 0…9, 12, 13, 25…31 and 70…77 and MUSIC1's 0, 42…48 and 75…93), so the port returns 0
+(`music-clock.md` §6). `muscode_from` takes the
 position and the wanted code and ignores both, so the phase that finds a mechanism for its other
 values replaces one body; the parts that wait on it — `GRID/MAIN.C:72` for 2, `:160` for 3,
 `HARD/B.C:138` for 1, `HARD/BP.C:263` for 0xff — therefore wait for ever here exactly as they do
@@ -1795,13 +1808,17 @@ a run is refused.
 frame across four sessions. It is where the player's tick clock starts, and the traces show
 what surrounds it: `second5` reads `ord 0 row 0 pat 0` from its first sample (frame 148) to
 frame **426**, `_np_zframe` 0 until 408, and the first published row is **427**. The words
-around it also say *why* it is the same frame in every recipe: the modules' own speed/tempo
-words change at 396 (MUSIC1 loaded by the initial `restartmus` at `:775`) and again at 408
-(MUSIC0, patched, by the block's restart at `:905`) — with **zero ticks in between**, which is
+around it also say *why* it is the same frame in every restart recipe: the modules' own
+speed/tempo words change at 396 (MUSIC1 loaded by the initial `restartmus` at `:775`) and
+again at 408 (MUSIC0, patched, by the block's restart at `:905`) — with **zero ticks in
+between**, which is
 the twelve frames `_zsoundon` (`:779`) and `_asmcopperinit` (`:781`) take before
 `_zpollmix = 1` (`:783`) puts the player under the copper's per-frame `zpollme`
 (`MAIN/COPPER.ASM:466`). The tick clock starts when the polling does, and the polling starts
-there in every session. (The readings *before* 396 — speed 6, tempo 125, from frame 148 on —
+there in every restart recipe. **`SECOND 1` is the exception Phase 4 filed**: block 1 never
+takes the block restart at `:905` (its row loads with `bx = -1`, no seek), so its initial
+start is its only one and it measures **399.6**, 8.4 frames earlier (`music-clock.md` §2,
+`reference/music/second1`). (The readings *before* 396 — speed 6, tempo 125, from frame 148 on —
 are the segment's own initialisers and not a loaded module, `music-clock.md` §2: nothing is
 loaded at all until 396, and 6/125 is what the object's statics hold.)
 

@@ -284,7 +284,7 @@ fn the_reference_tree_passes_with_the_traces_in_it() {
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("28 capture(s)"), "{text}");
+    assert!(text.contains("32 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a
@@ -482,8 +482,8 @@ fn the_analysis_prints_the_notes_numbers() {
 fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
     // The walk is the tree's, not a list: a trace filed later is covered without
     // anyone remembering to edit this test — a test whose name claims every
-    // filed trace and covers three of four is a test reporting coverage it does
-    // not have.
+    // filed trace and covers only some of them is a test reporting coverage it
+    // does not have.
     let mut names: Vec<String> = fs::read_dir(repo_root().join("reference/music"))
         .unwrap()
         .filter_map(|entry| {
@@ -496,7 +496,7 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 4, "the filed traces: {names:?}");
+    assert!(names.len() >= 8, "the filed traces: {names:?}");
 
     let mut samples = 0usize;
     for trace in &names {
@@ -526,16 +526,62 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
     );
 }
 
-/// **The anchor is a property of the boot, not of a session** (Task 1's Step 7):
-/// the row-implied anchor — the first row change, back-extrapolated by the tick
-/// counter's own value there at the tick clock's measured frames a tick — is the
-/// same in every session filed under `reference/music/`, and the `zframe`
-/// column's first non-zero frame is one frame plus the tick a row boundary is
-/// seen within apart from it (0.9 to 2.9 frames in the traces at hand — up to
-/// about two ticks, not the one tick the readings were once claimed to agree
-/// to). One recipe, no free parameter.
+/// **The anchor is a property of the boot, not of a session — and of the recipe.**
+/// Task 1's Step 7 filed four more traces, and they measure three things:
+///
+/// - A trace whose coverage begins at or before the music's start holds the
+///   start, and its row-implied anchor — the first row change, back-extrapolated
+///   by the tick counter's own value there at the tick clock's measured frames a
+///   tick — is the recipe's. The restart recipes (`SECOND 3`, `5`, `U`) agree on
+///   **408.0**, measured in Phase 3; `SECOND 1` has no block restart (`bx = -1`,
+///   `MAIN/U2.ASM:766-775`) and its clock starts at the initial `_zplaysong(0)`,
+///   measured at **399.6** in `reference/music/second1`. The boot restart
+///   reloads STMIK and zeroes the counter; the initial start does not.
+/// - Within a recipe the sessions agree to 0.1 frames — `second5` and `second5b`
+///   derive the same 408.0, which is what makes the number a property of the
+///   boot rather than of a session.
+/// - A trace filed from a later window (`second1b`, `second3b`, `hiddenu2`)
+///   does **not** hold the start: its derived anchor is the last tick-counter
+///   reset before the window (a part's `_dis_setmframe(0)`), back-extrapolated
+///   over thousands of ticks with a rate measured over a few hundred frames.
+///   It is not a boot anchor and is not compared to one; the test only requires
+///   that it not postdate the window it was derived from.
+///
+/// The `zframe` column's first non-zero frame is one frame plus the tick a row
+/// boundary is seen within apart from the anchor (0.9 to 2.9 frames in the
+/// Phase 3 traces); `second1`'s first non-zero sample caught **two** ticks
+/// (`zframe` 0 → 2 at frame 405), so its gap is 5.4 frames, and that is the
+/// recipe's bound. Both bounds are measurements, not choices.
 #[test]
 fn the_anchor_is_the_same_in_every_filed_session() {
+    /// The frame the music begins on, per recipe (`music-clock.md` §2).
+    const ANCHORS: &[(&str, f64)] = &[
+        // `SECOND 1`: the initial `_zplaysong(0)`, no restart. `second1`.
+        ("1", 399.6),
+        // The restart recipes: `restartmus` reloads STMIK and zeroes the counter.
+        ("3", 408.0),
+        ("5", 408.0),
+        ("U", 408.0),
+    ];
+    /// How far the `zframe` column's first non-zero frame may sit from the anchor.
+    const DIRECT_GAP: &[(&str, f64)] = &[
+        // `second1`'s 405 against 399.6 — the sample caught two ticks.
+        ("1", 5.4),
+        // The Phase 3 traces' measured range.
+        ("3", 2.9),
+        ("5", 2.9),
+        ("U", 2.9),
+    ];
+    const MUSIC_START_FRAME: i64 = 408;
+
+    let lookup = |table: &[(&str, f64)], recipe: &str| -> f64 {
+        *table
+            .iter()
+            .find(|(key, _)| *key == recipe)
+            .map(|(_, value)| value)
+            .unwrap_or_else(|| panic!("no measured value for recipe {recipe:?}"))
+    };
+
     // Walked from the tree, like the zplus check: a trace filed later is covered
     // without anyone remembering to edit this test.
     let mut names: Vec<String> = fs::read_dir(repo_root().join("reference/music"))
@@ -550,9 +596,12 @@ fn the_anchor_is_the_same_in_every_filed_session() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 4, "the filed traces: {names:?}");
+    assert!(names.len() >= 8, "the filed traces: {names:?}");
 
-    let mut anchors = Vec::new();
+    // recipe -> (trace, anchor, direct) for the traces that hold the start.
+    let mut boots: std::collections::BTreeMap<String, Vec<(String, f64, f64)>> =
+        std::collections::BTreeMap::new();
+    let mut windows = Vec::new();
     for trace in &names {
         let path = format!("reference/music/{trace}");
         let run = xtask(&["music", "analyse", "--trace", &path]);
@@ -577,34 +626,68 @@ fn the_anchor_is_the_same_in_every_filed_session() {
             .and_then(|rest| rest.split(' ').next())
             .and_then(|number| number.parse().ok())
             .unwrap_or_else(|| panic!("cannot read the zframe anchor from {trace}"));
-        // The two readings are one frame plus the tick a row boundary is seen
-        // within apart — 0.9 to 2.9 frames in the traces at hand, i.e. up to
-        // about two ticks (a tick is 1.35-1.46 frames here) — so that is the
-        // bound, and it is a bound on one tick plus one frame, not a claim that
-        // the two agree to within a tick.
-        assert!(
-            (direct - anchor).abs() <= 2.9,
-            "{trace}: the two readings are {} frames apart ({anchor} and {direct}), which is more \
-             than one tick plus the frame each reading is quantised to",
-            (direct - anchor).abs()
-        );
-        anchors.push(anchor);
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(repo_root().join(&path).join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        let window = &manifest["coverage"]["window"];
+        let first = window[0].as_i64().unwrap();
+        let recipe = manifest["arguments"]
+            .as_array()
+            .expect("a trace records its arguments")
+            .iter()
+            .map(|value| value.as_str().expect("an argument is a string"))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        if first <= MUSIC_START_FRAME {
+            // The two readings are one frame plus the tick a row boundary is
+            // seen within apart — a bound on one tick plus one frame, not a
+            // claim that the two agree to within a tick.
+            let bound = lookup(DIRECT_GAP, &recipe);
+            assert!(
+                (direct - anchor).abs() <= bound + 1e-9,
+                "{trace}: the two readings are {} frames apart ({anchor} and {direct}), past the \
+                 recipe's measured {bound}",
+                (direct - anchor).abs()
+            );
+            boots
+                .entry(recipe)
+                .or_default()
+                .push((trace.clone(), anchor, direct));
+        } else {
+            // A window trace's derivation is an extrapolation of the last reset,
+            // not a boot reading: it must at least lie at or before its window.
+            assert!(
+                anchor <= first as f64,
+                "{trace}: the derived anchor {anchor} postdates the window that produced it \
+                 (frame {first})"
+            );
+            windows.push((trace.clone(), recipe, anchor));
+        }
     }
-    let spread = anchors
-        .iter()
-        .cloned()
-        .fold(f64::NEG_INFINITY, f64::max)
-        - anchors.iter().cloned().fold(f64::INFINITY, f64::min);
-    assert!(
-        spread <= 0.5,
-        "the four sessions' anchors are {anchors:?} — spread {spread:.2} frames"
+    assert!(!boots.is_empty(), "no filed trace holds the music's start");
+
+    for (recipe, sessions) in &boots {
+        let anchors: Vec<f64> = sessions.iter().map(|(_, anchor, _)| *anchor).collect();
+        let spread = anchors.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - anchors.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!(
+            spread <= 0.5,
+            "recipe {recipe}'s sessions {sessions:?} — spread {spread:.2} frames"
+        );
+        let measured = lookup(ANCHORS, recipe);
+        for (trace, anchor, _) in sessions {
+            assert!(
+                (anchor - measured).abs() <= 0.5,
+                "{trace}: the recipe's anchor is {measured}, and {anchor} is not it: {sessions:?}"
+            );
+        }
+    }
+    println!(
+        "boot anchors: {boots:?}\nwindow extrapolations (not boot anchors): {windows:?}"
     );
-    for anchor in &anchors {
-        assert!(
-            (407.5..408.5).contains(anchor),
-            "the recipe's anchor is 408, and {anchor} is not it: {anchors:?}"
-        );
-    }
 }
 
 /// The analysis checks the trace against the digest its manifest records before

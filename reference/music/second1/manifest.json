@@ -1,0 +1,634 @@
+{
+  "version": 1,
+  "kind": "music-trace",
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "SECOND.EXE",
+  "arguments": [
+    "1"
+  ],
+  "cycles": 30000,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "keys": [
+    "KBD_left",
+    "KBD_enter"
+  ],
+  "coverage": {
+    "window": [
+      148,
+      5999
+    ],
+    "requested": 5852,
+    "first": 148,
+    "last": 5999,
+    "samples": 5797,
+    "per_frame": false,
+    "missing": [
+      [
+        407,
+        407
+      ],
+      [
+        464,
+        464
+      ],
+      [
+        466,
+        467
+      ],
+      [
+        476,
+        476
+      ],
+      [
+        502,
+        502
+      ],
+      [
+        511,
+        511
+      ],
+      [
+        513,
+        513
+      ],
+      [
+        521,
+        527
+      ],
+      [
+        529,
+        529
+      ],
+      [
+        531,
+        531
+      ],
+      [
+        541,
+        541
+      ],
+      [
+        544,
+        546
+      ],
+      [
+        548,
+        548
+      ],
+      [
+        572,
+        572
+      ],
+      [
+        3837,
+        3837
+      ],
+      [
+        3860,
+        3860
+      ],
+      [
+        3873,
+        3873
+      ],
+      [
+        3876,
+        3876
+      ],
+      [
+        3879,
+        3879
+      ],
+      [
+        3914,
+        3917
+      ],
+      [
+        3921,
+        3921
+      ],
+      [
+        3926,
+        3926
+      ],
+      [
+        3953,
+        3953
+      ],
+      [
+        4017,
+        4017
+      ],
+      [
+        5567,
+        5569
+      ],
+      [
+        5573,
+        5575
+      ],
+      [
+        5584,
+        5584
+      ],
+      [
+        5590,
+        5590
+      ],
+      [
+        5595,
+        5595
+      ],
+      [
+        5620,
+        5620
+      ],
+      [
+        5626,
+        5626
+      ],
+      [
+        5648,
+        5648
+      ],
+      [
+        5668,
+        5668
+      ],
+      [
+        5674,
+        5674
+      ],
+      [
+        5684,
+        5684
+      ],
+      [
+        5707,
+        5707
+      ],
+      [
+        5710,
+        5710
+      ],
+      [
+        5712,
+        5712
+      ],
+      [
+        5955,
+        5955
+      ]
+    ]
+  },
+  "trace": {
+    "file": "trace.csv",
+    "columns": [
+      "frame",
+      "ord",
+      "row",
+      "pat",
+      "loop",
+      "speed",
+      "tempo",
+      "zinfo",
+      "zplus",
+      "zframe"
+    ],
+    "rows": 5797,
+    "bytes": 165001,
+    "sha256": "dedcad459f5076fd8831372c7ddb106434b6fe344443d21e073f0a80a65061d8"
+  },
+  "object": {
+    "object": "upstream/SecondReality/MAIN/STMIK.300",
+    "sha256": "781ab66a72b0e04561e4c13a723d04c7c1a0cb636c11bc1e204a727973b9bf82",
+    "segment_name": "text_stmik300_text",
+    "segment_class": "CODE",
+    "segment_length": 29607,
+    "route": "OMF PUBDEF, resolved against the object's own SEGDEF and LNAMES records (`MAIN/STMIK.H:125-131`, `MAIN/STMIKA.INC:17-28`)",
+    "records": {
+      "0x80": 1,
+      "0x88": 5,
+      "0x8A": 1,
+      "0x90": 45,
+      "0x96": 2,
+      "0x98": 1,
+      "0xA0": 105,
+      "0xA2": 118
+    },
+    "words": {
+      "_np_loop": 2307,
+      "_np_mastermul": 2326,
+      "_np_mastervol": 2321,
+      "_np_ord": 2305,
+      "_np_pat": 2303,
+      "_np_row": 2301,
+      "_np_speed": 8194,
+      "_np_tempo": 2319,
+      "_np_zframe": 2299,
+      "_np_zinfo": 2295,
+      "_np_zplus": 2297,
+      "_zbufsize": 2215,
+      "_zmixspeed": 2261,
+      "_zoutputmode": 2178,
+      "_zpollmix": 2240,
+      "_zspeedadjust": 2253,
+      "_zspeedadjust2": 2257
+    }
+  },
+  "locate": {
+    "base": 20976,
+    "views": [
+      20976,
+      1069552
+    ],
+    "aliasing": "the needle's bytes are in 2 places and they are one memory: the whole 29607 bytes of the segment read through each base (0x0051F0, 0x1051F0) are byte-identical at frame 92 — the demo's DOS extender maps one physical page at several linear addresses, and the emulator's memory read goes through the page tables. The trace reads through the lowest, 0x0051F0.",
+    "segment": 0,
+    "offset": 20976,
+    "frame": 92,
+    "words": {
+      "_np_loop": 23283,
+      "_np_mastermul": 23302,
+      "_np_mastervol": 23297,
+      "_np_ord": 23281,
+      "_np_pat": 23279,
+      "_np_row": 23277,
+      "_np_speed": 29170,
+      "_np_tempo": 23295,
+      "_np_zframe": 23275,
+      "_np_zinfo": 23271,
+      "_np_zplus": 23273,
+      "_zbufsize": 23191,
+      "_zmixspeed": 23237,
+      "_zoutputmode": 23154,
+      "_zpollmix": 23216,
+      "_zspeedadjust": 23229,
+      "_zspeedadjust2": 23233
+    },
+    "needles": [
+      {
+        "offset": 2434,
+        "len": 32,
+        "sha256": "398cd0c5a49a30ed50133450c67e8f8687dfb8eafc45031f9a5bc20dc55c5314",
+        "block": 2426,
+        "rule": "the first run of 32 bytes with no byte repeated inside it, in LEDATA record order and at every byte offset within each record",
+        "found_at": 23410
+      },
+      {
+        "offset": 3190,
+        "len": 32,
+        "sha256": "3db4b150f0e96e0fc4f22412ff616cde5af2bc42d9e625702251843f5a519791",
+        "block": 3180,
+        "rule": "the first run of 32 bytes with no byte repeated inside it, in LEDATA record order and at every byte offset within each record",
+        "found_at": 24166
+      }
+    ],
+    "rerun_base": 20976,
+    "rerun_views": [
+      20976,
+      1069552
+    ],
+    "rerun_frame": 6070
+  },
+  "machine": {
+    "_np_mastermul": 0,
+    "_np_mastervol": 192,
+    "_zbufsize": 4096,
+    "_zmixspeed": 20000,
+    "_zoutputmode": 5,
+    "_zpollmix": 0,
+    "_zspeedadjust": 0,
+    "_zspeedadjust2": 0
+  },
+  "machine_moved": {
+    "_np_mastermul": 2240,
+    "_np_mastervol": 64,
+    "_zmixspeed": -25536,
+    "_zpollmix": 1
+  },
+  "check": {
+    "row": [
+      0,
+      63
+    ],
+    "ord": [
+      0,
+      9
+    ],
+    "pat": [
+      0,
+      19
+    ],
+    "speeds": [
+      6
+    ],
+    "tempos": [
+      125,
+      120
+    ],
+    "zinfo_min": 0,
+    "zinfo_max": 0,
+    "first_advance": 405,
+    "zframe_moves": 3758,
+    "zframe_total": 3838
+  },
+  "skipped": [
+    {
+      "from": 464,
+      "to": 464,
+      "counter_before": 463,
+      "counter_after": 465,
+      "why": "the guest's own frame counter was read as 463 and then as 465 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 466,
+      "to": 466,
+      "counter_before": 466,
+      "counter_after": 467,
+      "why": "the read that was opened on frame 466 was still open when the guest moved to 467, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 467,
+      "to": 467,
+      "counter_before": 467,
+      "counter_after": 468,
+      "why": "the read that was opened on frame 467 was still open when the guest moved to 468, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 476,
+      "to": 476,
+      "counter_before": 476,
+      "counter_after": 477,
+      "why": "the read that was opened on frame 476 was still open when the guest moved to 477, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 502,
+      "to": 502,
+      "counter_before": 502,
+      "counter_after": 503,
+      "why": "the read that was opened on frame 502 was still open when the guest moved to 503, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 513,
+      "to": 513,
+      "counter_before": 513,
+      "counter_after": 514,
+      "why": "the read that was opened on frame 513 was still open when the guest moved to 514, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 521,
+      "to": 522,
+      "counter_before": 522,
+      "counter_after": 523,
+      "why": "the read that was opened on frame 522 was still open when the guest moved to 523, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 523,
+      "to": 523,
+      "counter_before": 523,
+      "counter_after": 524,
+      "why": "the read that was opened on frame 523 was still open when the guest moved to 524, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 524,
+      "to": 524,
+      "counter_before": 524,
+      "counter_after": 525,
+      "why": "the read that was opened on frame 524 was still open when the guest moved to 525, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 525,
+      "to": 525,
+      "counter_before": 524,
+      "counter_after": 526,
+      "why": "the guest's own frame counter was read as 524 and then as 526 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 526,
+      "to": 526,
+      "counter_before": 526,
+      "counter_after": 527,
+      "why": "the read that was opened on frame 526 was still open when the guest moved to 527, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 527,
+      "to": 527,
+      "counter_before": 526,
+      "counter_after": 528,
+      "why": "the guest's own frame counter was read as 526 and then as 528 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 529,
+      "to": 529,
+      "counter_before": 529,
+      "counter_after": 530,
+      "why": "the read that was opened on frame 529 was still open when the guest moved to 530, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 531,
+      "to": 531,
+      "counter_before": 531,
+      "counter_after": 532,
+      "why": "the read that was opened on frame 531 was still open when the guest moved to 532, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 544,
+      "to": 544,
+      "counter_before": 544,
+      "counter_after": 545,
+      "why": "the read that was opened on frame 544 was still open when the guest moved to 545, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 545,
+      "to": 546,
+      "counter_before": 546,
+      "counter_after": 547,
+      "why": "the read that was opened on frame 546 was still open when the guest moved to 547, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 548,
+      "to": 548,
+      "counter_before": 548,
+      "counter_after": 549,
+      "why": "the read that was opened on frame 548 was still open when the guest moved to 549, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 572,
+      "to": 572,
+      "counter_before": 572,
+      "counter_after": 573,
+      "why": "the read that was opened on frame 572 was still open when the guest moved to 573, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3837,
+      "to": 3837,
+      "counter_before": 3837,
+      "counter_after": 3838,
+      "why": "the read that was opened on frame 3837 was still open when the guest moved to 3838, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3860,
+      "to": 3860,
+      "counter_before": 3860,
+      "counter_after": 3861,
+      "why": "the read that was opened on frame 3860 was still open when the guest moved to 3861, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3873,
+      "to": 3873,
+      "counter_before": 3873,
+      "counter_after": 3874,
+      "why": "the read that was opened on frame 3873 was still open when the guest moved to 3874, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3879,
+      "to": 3879,
+      "counter_before": 3878,
+      "counter_after": 3880,
+      "why": "the guest's own frame counter was read as 3878 and then as 3880 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 3914,
+      "to": 3914,
+      "counter_before": 3914,
+      "counter_after": 3915,
+      "why": "the read that was opened on frame 3914 was still open when the guest moved to 3915, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3915,
+      "to": 3915,
+      "counter_before": 3915,
+      "counter_after": 3916,
+      "why": "the read that was opened on frame 3915 was still open when the guest moved to 3916, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3916,
+      "to": 3916,
+      "counter_before": 3916,
+      "counter_after": 3917,
+      "why": "the read that was opened on frame 3916 was still open when the guest moved to 3917, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3921,
+      "to": 3921,
+      "counter_before": 3921,
+      "counter_after": 3922,
+      "why": "the read that was opened on frame 3921 was still open when the guest moved to 3922, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3926,
+      "to": 3926,
+      "counter_before": 3926,
+      "counter_after": 3927,
+      "why": "the read that was opened on frame 3926 was still open when the guest moved to 3927, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 3953,
+      "to": 3953,
+      "counter_before": 3952,
+      "counter_after": 3954,
+      "why": "the guest's own frame counter was read as 3952 and then as 3954 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 4017,
+      "to": 4017,
+      "counter_before": 4017,
+      "counter_after": 4018,
+      "why": "the read that was opened on frame 4017 was still open when the guest moved to 4018, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5567,
+      "to": 5567,
+      "counter_before": 5566,
+      "counter_after": 5568,
+      "why": "the guest's own frame counter was read as 5566 and then as 5568 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    },
+    {
+      "from": 5568,
+      "to": 5569,
+      "counter_before": 5569,
+      "counter_after": 5570,
+      "why": "the read that was opened on frame 5569 was still open when the guest moved to 5570, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5573,
+      "to": 5573,
+      "counter_before": 5573,
+      "counter_after": 5574,
+      "why": "the read that was opened on frame 5573 was still open when the guest moved to 5574, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5574,
+      "to": 5574,
+      "counter_before": 5574,
+      "counter_after": 5575,
+      "why": "the read that was opened on frame 5574 was still open when the guest moved to 5575, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5584,
+      "to": 5584,
+      "counter_before": 5584,
+      "counter_after": 5585,
+      "why": "the read that was opened on frame 5584 was still open when the guest moved to 5585, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5590,
+      "to": 5590,
+      "counter_before": 5590,
+      "counter_after": 5591,
+      "why": "the read that was opened on frame 5590 was still open when the guest moved to 5591, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5620,
+      "to": 5620,
+      "counter_before": 5620,
+      "counter_after": 5621,
+      "why": "the read that was opened on frame 5620 was still open when the guest moved to 5621, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5648,
+      "to": 5648,
+      "counter_before": 5648,
+      "counter_after": 5649,
+      "why": "the read that was opened on frame 5648 was still open when the guest moved to 5649, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5668,
+      "to": 5668,
+      "counter_before": 5668,
+      "counter_after": 5669,
+      "why": "the read that was opened on frame 5668 was still open when the guest moved to 5669, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5674,
+      "to": 5674,
+      "counter_before": 5674,
+      "counter_after": 5675,
+      "why": "the read that was opened on frame 5674 was still open when the guest moved to 5675, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5684,
+      "to": 5684,
+      "counter_before": 5684,
+      "counter_after": 5685,
+      "why": "the read that was opened on frame 5684 was still open when the guest moved to 5685, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5707,
+      "to": 5707,
+      "counter_before": 5707,
+      "counter_after": 5708,
+      "why": "the read that was opened on frame 5707 was still open when the guest moved to 5708, so the bytes belong to neither frame with certainty and were dropped"
+    },
+    {
+      "from": 5955,
+      "to": 5955,
+      "counter_before": 5954,
+      "counter_after": 5956,
+      "why": "the guest's own frame counter was read as 5954 and then as 5956 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    }
+  ]
+}
