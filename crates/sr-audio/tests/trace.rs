@@ -83,7 +83,7 @@ const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of mi
 /// before this test calls it a disagreement. **Measured, not chosen**: the two sessions of one
 /// recipe (`second5` and `second5b`) differ by one frame at eight of their row changes, and the
 /// port — whose clock is exact — sits between the sessions; the worst displacement any filed
-/// trace shows against the port is **7 frames**, in `second1`'s 5,542 compared frames, which is
+/// trace shows against the port is **7 frames**, in `second1`'s 5,538 compared frames, which is
 /// the number this constant is. That 7 is the exact clock's accumulated difference from the
 /// reference's own measured tick rate — 48.06 a second at tempo 120 against the port's 48.00
 /// (`music-clock.md` §2's `second1` row, §3's rule) — over a window twice as long as the ones
@@ -409,8 +409,9 @@ fn traces() -> Vec<Trace> {
 /// the trace holds from its first position change on.
 ///
 /// This is how `cargo xtask music analyse` identifies it, and for the same reason: a module's
-/// speed is not an identifier (MUSIC1 plays at speed 6 for orders 42…45 and at 3 from 47 on
-/// — `music-clock.md` §3), but its order list is.
+/// speed is not an identifier (in `second3`'s window MUSIC1 plays at speed 6 for orders 42…45
+/// and at 3 from 47 on, and `second3b` holds speed 6 again at order 86 — `music-clock.md` §3),
+/// but its order list is.
 fn identify(name: &str, states: &[Row], start: i64) -> &'static str {
     let compared: Vec<&Row> = states.iter().filter(|row| row.frame >= start).collect();
     let first_change = compared

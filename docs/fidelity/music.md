@@ -702,10 +702,11 @@ Phase 4 traces are included; the window runs first print their session's phase o
 On the Phase 3 windows the frames that disagree are the ±1-frame placement of a row boundary —
 one per row change — because the port's clock is exact and the reference's is not; the port
 sits *between* the two sessions (a frame early in `second5`, a frame late in `hiddenu`) which is
-the best a fixed clock can do. The Phase 4 windows are longer and show the rate difference
-accumulating: `second1` reaches 7 frames and `second3b` 6, still under one row at their speeds;
-the content is asserted word by word, not by frames. `docs/fidelity/APPROXIMATIONS.md` A12
-records the measurement and its cause.
+the best a fixed clock can do. The larger displacements are `second1`'s 7 frames and
+`second3b`'s 6 — the windows whose reference rate is 0.1 % from the port's exact one, not the
+longest (`hiddenu`'s 6,084 compared frames reach 3) — still under one row at their speeds; the
+content is asserted word by word, not by frames. `docs/fidelity/APPROXIMATIONS.md` A12 records
+the measurement and its cause.
 
 ### The end-to-end play, shown
 
@@ -1863,7 +1864,7 @@ second5: 778 of 894 frames agree exactly (87.025 %); worst displacement 2 frame(
 ```
 
 — against the same trace driven directly through a `Player` in
-`crates/sr-audio/tests/trace.rs` (771 of 887, 86.922 %, worst 2).
+`crates/sr-audio/tests/trace.rs` (769 of 883, 87.089 %, worst 2).
 
 The frames it walks are the trace's **own `trace.csv`** rows, not the manifest's coverage
 list — a deviation from the brief's wording, and the same set of frames read the other way

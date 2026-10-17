@@ -142,13 +142,26 @@ because the sample at 405 caught two ticks at once (`zframe` 0 → 2 between fra
 
 **The three window traces do not hold the start, and their printed "anchors" are
 extrapolations, not boot anchors.** Each back-extrapolates the last tick-counter reset before
-its window over thousands of ticks, using the frames a tick measured over the window's few
-hundred frames:
+its window over thousands of ticks, using the frames a tick measured over the window's own
+frames. The three readings, each from `cargo xtask music analyse --trace reference/music/<name>`,
+section 1, pasted as printed:
+
+`second1b`:
 
 ```
-  second1b: the anchor the rows imply: the first row change is at frame 7609 with `_np_zframe` 4939, and 4939 ticks at the measured 1.4653 frames a tick is 7237.1 frames — so that row began at frame 371.9 (± the tick the row boundary is within and the frame the change is seen on)
-  second3b: the anchor the rows imply: the first row change is at frame 10201 with `_np_zframe` 3323, and 3323 ticks at the measured 1.3462 frames a tick is 4473.4 frames — so that row began at frame 5727.6 (± the tick the row boundary is within and the frame the change is seen on)
-  hiddenu2: the anchor the rows imply: the first row change is at frame 6508 with `_np_zframe` 4191, and 4191 ticks at the measured 1.4596 frames a tick is 6117.3 frames — so that row began at frame 390.7 (± the tick the row boundary is within and the frame the change is seen on)
+  the anchor the rows imply: the first row change is at frame 7609 with `_np_zframe` 4939, and 4939 ticks at the measured 1.4653 frames a tick is 7237.1 frames — so that row began at frame 371.9 (± the tick the row boundary is within and the frame the change is seen on)
+```
+
+`second3b`:
+
+```
+  the anchor the rows imply: the first row change is at frame 10201 with `_np_zframe` 3323, and 3323 ticks at the measured 1.3462 frames a tick is 4473.4 frames — so that row began at frame 5727.6 (± the tick the row boundary is within and the frame the change is seen on)
+```
+
+`hiddenu2`:
+
+```
+  the anchor the rows imply: the first row change is at frame 6508 with `_np_zframe` 4191, and 4191 ticks at the measured 1.4596 frames a tick is 6117.3 frames — so that row began at frame 390.7 (± the tick the row boundary is within and the frame the change is seen on)
 ```
 
 `second3b`'s 5727.6 is consistent with the last `_dis_setmframe(0)` before its window —
@@ -156,11 +169,11 @@ PLZPART's at its own start (`PLZPART/PLZ.C:69`, the last such call before DOTS) 
 other two windows hold no reset inside their window and their projections land near their
 recipes' anchors (390.7 against 408, 371.9 against 399.6) rather than at a part start.
 **They therefore neither confirm nor contradict 408**: `hiddenu2`'s 390.7 is 17.3 frames below
-its recipe's 408 and `second1b`'s 371.9 is 27.7 below its recipe's 399.6, because a rate
-measured over a 360-frame window multiplied by 4,191…4,933 ticks carries the measurement's
-error with it. A window's columns cannot measure a boot anchor; the trace test
-(`crates/sr-audio/tests/trace.rs`) simulates the port from the recipe's anchor and
-phase-aligns it at the window instead.
+its recipe's 408 and `second1b`'s 371.9 is 27.7 below its recipe's 399.6, because the rate each
+window measures over its own frames (359 for `second1b`, 1,699 for `hiddenu2`) multiplied by
+4,939 and 4,191 ticks respectively carries the measurement's error with it. A window's columns
+cannot measure a boot anchor; the trace test (`crates/sr-audio/tests/trace.rs`) simulates the
+port from the recipe's anchor and phase-aligns it at the window instead.
 
 **What the windows do measure is the session phase spread.** `hiddenu` ends at frame 6499
 reading `_np_zframe` 4175 at ord 28 row 9; `hiddenu2` begins at 6500 reading 4185 at ord 28
@@ -413,7 +426,7 @@ does, and `cargo xtask music analyse`, section 5, prints each trace's own range:
 run, `zinfo runs: 1 … 0`. The windows are the 1,300-frame recipes (`second5`, `second5b`), the
 2,900-frame one (`second3`), the 6,500-frame one (`hiddenu`), and Phase 4's four
 (`second1` 148…5999, `second1b` 7600…7959, `second3b` 10200…15049, `hiddenu2` 6500…8199),
-covering MUSIC0's orders 0…9, 12, 13, 25…31 and 70…77, and MUSIC1's 42…48 and 75…93.
+covering MUSIC0's orders 0…9, 12, 13, 25…31 and 70…77, and MUSIC1's 0, 42…48 and 75…93.
 **These captures therefore do not measure what its other values are**, and `D8`'s ladder is
 answered only in its first step: route 1 (read the object's symbols, then the words live) was
 performed and produced a map and a trace, and the word it watches stayed 0. `D8` now records
@@ -568,15 +581,16 @@ player moved). The trace reads through the **lowest** view, and the manifest rec
 view, the proof, and the frame it was measured at. `music analyse --at` tries every view, so
 §1.7's address is placed in the view it was measured in.
 
-**Three of the four filed manifests are older than the tool that reads them, in three ways, and
+**Three of the Phase 3 manifests are older than the tool that reads them, in three ways, and
 they are left as they were: `second5`, `second3` and `hiddenu`** — the three taken before those
-fields existed (`second5b`, filed last, carries `coverage.before_sampling` and a
+fields existed (`second5b`, filed last in Phase 3, carries `coverage.before_sampling` and a
 `locate.aliasing` sentence with one `0x`). They carry no `coverage.before_sampling` (§7: the
 field that names the boundary run); their `locate.aliasing` sentence still contains a doubled
 `0x` that the tool no longer writes; and they carry no `machine_moved` either, so their
 `machine` map holds the reading at the locate and whatever the machine did later is not in
-their record. `second5b` — the same recipe as `second5` — is the one manifest that carries the
-moved words (four of them); `music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5`
+their record. `second5b` — the same recipe as `second5` — is the first manifest that carries
+the moved words (four of them), and the four Phase 4 manifests carry the same four (§5);
+`music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5`
 reads the mixing rate at 40000 in that recipe. None is repaired here: `reference/` is input-only,
 a *new* directory under `reference/music/` is the only thing `music trace` may write inside it,
 and hand-editing a filed manifest is what Phase 2's `reference backfill` exists to avoid being
@@ -625,6 +639,6 @@ Task 3 must say so in `music.md` rather than read it off stock ST3 semantics.
 | a window out of a manifest that is back to front does not panic the verifier | same |
 | two machine readings that disagree are **both recorded**, and a word above 32767 is printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | same |
 | the `zplus` rule against both modules' order lists, restart case included | same |
-| **the anchor is per recipe** — 408 for the restart recipes, 399.6 for `SECOND 1` — the two readings within one frame plus a tick of each other, and a window trace's extrapolation is not treated as one | `xtask/tests/music.rs` |
+| **the anchor is per recipe** — 408 for the restart recipes, 399.6 for `SECOND 1` — the two readings within each recipe's measured bound (0.9…2.9 frames for the restart traces, 5.4 for `second1`), and a window trace's extrapolation is not treated as one | `xtask/tests/music.rs` |
 | the machine's words recorded twice when they move, once when they do not, and printed both ways | `xtask/src/music.rs`'s own tests |
 | **the `zplus` rule re-derived over every trace in `reference/music/`, walked from the tree: 0 mismatches each** | `xtask/tests/music.rs` |

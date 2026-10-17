@@ -668,11 +668,12 @@ window runs are phase-aligned to their own session first (each prints its offset
 ```
 
 On the Phase 3 windows the frames that disagree are one per row change — the ±1-frame placement
-of a row boundary. The Phase 4 windows are longer and show the drift the rate difference
-predicts: `second1`'s 5,538 compared frames reach **7** and `second3b`'s 4,839 reach **6**,
-because the reference's tick rate there is 48.06 and 52.06 a second where the port's is exactly
-48.00 and 52.00; over five thousand frames 0.1 % accumulates to several frames. The *content*
-is not in doubt: the comparison test asserts, word by word, that the port publishes exactly the
+of a row boundary. The larger displacements are `second1`'s **7** over 5,538 compared frames
+and `second3b`'s **6** over 4,839 — not the longest windows (`hiddenu`'s 6,084 compared frames
+reach 3) but the ones whose reference rate is farthest from the exact one: 48.06 and 52.06 a
+second where the port runs exactly 48.00 and 52.00, so 0.1 % accumulates to several frames over
+thousands. The *content* is not in doubt: the comparison test asserts, word by word, that the port
+publishes exactly the
 trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`, `loop` and
 `zplus`, and that every published value is one the trace publishes within **7** frames of that
 frame — the measured worst (`second1`), still under one 6-tick row (8.76 frames). The windows'
