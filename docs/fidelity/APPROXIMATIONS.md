@@ -1017,18 +1017,34 @@ source fixes the draw order (the `dot` array), but which dot draws a given posit
 `dottaul` permutation, and the permutation's cursor `j` is **never initialized** (`MAIN.C:87`,
 `:200`): the value is whatever the stack held. The port fits the one value the source leaves free
 to the reference, **88** (the value the residues in this entry are measured with;
-`the_setup_is_deterministic_and_its_permutation_is_fixed` pins the setup around it); the residual
-is the release's own stack/permutation difference. Of the 512 values the task tried, 88 was the
-lowest; that search is the task's measurement, not a committed test.
+`the_setup_is_deterministic_and_its_permutation_is_fixed` pins the setup around it). The fit is
+committed as the ignored measurement test `the_initial_j_is_fitted_to_the_reference`, which
+replays all 512 values against the 10,900 frame:
+
+```bash
+cargo test --release -p secondreality --bin secondreality \
+    parts::minvball::tests::the_initial_j_is_fitted -- --ignored --nocapture
+# best five (pixels, j): [(67, 88), (341, 171), (353, 168), (354, 14), (356, 386)]
+```
+
+88 is the minimum; the residual is the release's own stack-`j` difference (the permutation itself
+is the RNG's and is reproduced). The compiled
+caller's `bx` — the other register the source does not fix — is measured as unobservable:
+`the_entry_bx_is_unobservable_at_the_keyframe` renders 10,900 under `0, 0xFFFF, 0x8000, 0x1234,
+0x4000, 0x5757` and asserts identical bytes.
 
 **Why it cannot be followed further.** The shipped part is
 `upstream/SecondReality/MAIN/DATA/MINVBALL.EXE`, a 7,395-byte PKLITE-packed self-extractor (the
 same shape as A17/A18's leads); the tree's `DOTS/DOTS.EXE` is the 10,372-byte development build
-of the ported source. The release's `dottaul` and its stack value are inside the packed image
-and need an unpacker to read. Everything the source states is implemented literally — the
-`mov ax,ax` stale-`bx` rotation, the `mov ds:[si+6],ax` shadow-row bug, the gravity integration
-skipped when the shadow is off screen (`ja @@2` jumps past it), the shadow colour 87 inside the
-background ramp, the exact cue window and the frame cap.
+of the ported source. The `dottaul` permutation is the RNG's and the port reproduces it — the
+25-pixel scatter is the evidence — so the only unreadable input is the release's **initial stack
+`j`**, inside the packed image. Everything the source states is implemented literally — the
+`mov ax,ax` stale-`bx` rotation, the corrupted-offset store (`mov ds:[si+6],ax` stores the low
+word of the dword the three ball restores left in `eax`, `ASM.ASM:186-195`, not the shadow row),
+the gravity integration skipped when the shadow is off screen (`ja @@2` jumps past it), the
+shadow colour 87 inside the background ramp, the exact cue window and the frame cap. The
+corrupted-offset store was corrected in fix round 1 and the four keyframes re-measured; the
+numbers in this entry are the post-fix measurement.
 
 **Measured difference, through the real binary.** 67/63/37/25 pixels at the four keyframes, with
 the shadow layer at 1856/1860, 2152/2159, 2175/2187 and 2168/2170 pixels shared (99.78 / 99.68 /

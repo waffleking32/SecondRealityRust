@@ -95,8 +95,11 @@ integration a frame, not one an inner repeat — matches at every keyframe
 residues are the frame-counter match). A `repeat` above one between two
 keyframes would advance the counter without a draw and move the ball rows.
 The reference's frame cap is reached at frame 2450, boot **12,947**; the
-trace's first cue reading (`musplus` -3) is boot **12,950**, so the cap ends
-the loop first in both the reference and the port.
+player publishes -3 from boot **10,368** (order 75 row 61, during the fade),
+and the first -3 the main loop's own check would see is boot **12,950**, so
+the cap ends the loop first in both the reference and the port. The `repeat`
+measurement covers 10,900-12,400; the 12,947 end is the mapping's prediction
+from the source's 2,450-frame cap, not a measured frame.
 
 ## 4. The drawing, and the bugs kept
 
@@ -118,12 +121,20 @@ Three features of the assembly are translated literally:
   the *previous dot's screen offset* from `Z*cos`; only its high word reaches
   `bp`, so the carried register changes `bp` by at most the borrow. The port
   carries `bx` across the 512 dots.
-- **`mov ds:[si+6],ax`** (`:194-196`) stores the shadow's *row* as the next
-  frame's shadow offset when the shadow is off screen. The next frame restores
-  from that row as a pixel offset. The port keeps the 64 KB video segment and
-  a matching `bgpic` for the reads and writes this produces
-  (`the_shadow_restore_bug_stores_the_row_as_the_next_offset`); only the
-  first 64,000 bytes are the displayed picture.
+- **`mov ds:[si+6],ax`** (`:194-196`) stores a clobbered register as the next
+  frame's shadow offset when the shadow is off screen. The three 32-bit
+  restores before it (`:186`, `:189`, `:192`) each load `eax` from
+  `bgpic[old2+640..644]`, so `ax` at `:195` is that dword's **low word** —
+  the first two background pixels of the old ball's third row — not the
+  shadow's row. (For the defined floor bytes the word is 0 or a pair of
+  indices 64-163, i.e. 0x4040-0xA3A3; past 64,000 it is the source's undefined
+  read.) The next frame restores from that word as a pixel offset. The
+  port keeps the 64 KB video segment and a matching `bgpic` for the reads and
+  writes this produces
+  (`the_shadow_restore_bug_stores_the_old_balls_third_row_word`); the largest
+  byte any write touches is **64,642**, and only the first 64,000 are
+  displayed. `bgpic`'s bytes past 64,000 are the source's undefined read and
+  the port's zero fill (D24).
 - **The gravity integration is inside the ball block and skipped when the
   shadow is off screen.** `ja @@2` (`:96`, `:105`) jumps past `yadd +=
   gravity`, so an off-screen dot's `y` holds still until its shadow returns.
@@ -140,8 +151,17 @@ The initial `j` is never assigned (`MAIN.C:87` declares it beside the
 initialized locals; `:200` reads it). The port starts it at **88**
 (`INITIAL_J`), fitted to the reference: the drawing is identical for every
 dot's position, and `j` only decides which dot draws a coincident position,
-so the reference's overlaps are the only evidence the value has. The residue
-§6 measures is what remains under that fit.
+so the reference's overlaps are the only evidence the value has. The fit is
+committed and reproducible:
+
+```bash
+cargo test --release -p secondreality --bin secondreality \
+    parts::minvball::tests::the_initial_j_is_fitted -- --ignored --nocapture
+# best five (pixels, j): [(67, 88), (341, 171), (353, 168), (354, 14), (356, 386)]
+```
+
+88 is the minimum of all 512 (`the_initial_j_is_fitted_to_the_reference`). The
+residue §6 measures is what remains under that fit.
 
 ## 5. The cue, `dis_indemo`, and the music
 
@@ -159,9 +179,14 @@ nothing here. The source's non-demo branch (`:285-289`, the mode set back to
 
 The part reads the cue as the first act of its main-loop tick, so it reads the
 words the engine's own poll published for that tick (D28: the original's check
-sits at the frame boundary and reads the previous frame's). The one-tick
-difference is not observable here: in the reference's run the cue is past the
-frame cap (below), and the port's cap ends the loop first too.
+sits at the frame boundary and reads the previous frame's). **The port
+declines D28's held-reading pattern here**, and records the decision: the only
+reading the difference could change is one in the window, and the reference's
+first main-loop -3 is boot 12,950, past the frame cap at 12,947 (below); the
+earlier -3s (boot 10,368-10,379) fall inside the fade, which does not check
+the cue. Holding the previous reading would move the check one tick later and
+change no picture in this part's run. The decision is a choice about this
+part, not a ruling on other parts' cues.
 
 **The music's seek and pre-roll.** The shell seeks `MUSIC1` to order **75**,
 the order `reference/music/second3b/trace.csv` holds at the part's start
@@ -212,11 +237,12 @@ ls -l upstream/SecondReality/MAIN/DATA/MINVBALL.EXE upstream/SecondReality/DOTS/
 ```
 
 The release's part is the packed one, while the tree's `DOTS/DOTS.EXE` is the
-development build of the source ported here (A17's lead applies).
-The source leaves `j` uninitialized, so the port fits the one permitted value
-to the reference (88, §4); the release's own `dottaul` assignment and stack
-value are inside the packed image and are not recoverable without an
-unpacker. The residual above is that unobservable overlap resolution, and it
+development build of the source ported here (A17's lead applies). The
+`dottaul` permutation is the RNG's and the port reproduces it — the 25-pixel
+scatter at 12,400 is the evidence — so the only unreadable input is the
+release's **initial stack `j`**, which is inside the packed image. The source
+leaves `j` uninitialized, so the port fits the one value the source permits to
+the reference (88, §4). The residual above is that unobservable overlap resolution, and it
 is recorded in `docs/fidelity/APPROXIMATIONS.md` A19. Everything the source
 *does* say — the projection, the depth tables, the two bugs, the y-integration
 skip, the Microsoft RNG, the cue and the frame cap — is implemented, and the
@@ -226,7 +252,7 @@ the reference's.
 ## 7. The real run
 
 ```bash
-cargo test -p secondreality --bin secondreality parts::minvball               # 16 unit tests
+cargo test -p secondreality --bin secondreality parts::minvball               # 17 unit tests (+1 ignored measurement)
 cargo test -p secondreality --test minvball                                    # 4 integration tests
 ```
 

@@ -141,6 +141,9 @@ fn the_run_is_numbered_in_its_own_frames_and_draws_320x200() {
         .map(|f| f["index"].as_u64().unwrap())
         .collect();
     assert_eq!(indices, [0, 130]);
+    // The 256-poll pre-roll's witness through the real binary: the engine's
+    // tick-0 poll publishes the trace's own reading at boot 10,368.
+    assert_eq!(frames[0]["music_position"], "75:61");
 
     // Tick 0 is the first fade wait: the picture is the floor ramp with the
     // DAC black (`MAIN.C:151-155`). Tick 130 is the main loop's first draw,

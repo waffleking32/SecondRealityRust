@@ -71,13 +71,15 @@
 //!
 //! The original does `repeat = dis_waitb()` and advances the physics `repeat`
 //! times per iteration; the port's engine gives one tick per call. The
-//! reference's own frames measure the difference as **zero**: the keyframes
-//! 10,900 / 11,200 / 11,800 / 12,400 are reproduced at frame counters
-//! 403 / 703 / 1303 / 1903, whose differences (300 / 600 / 600) are exactly
-//! the boot-index differences, and the four keyframes reproduce at those
-//! counters (67/63/37/25 pixels; `tests/minvball.rs`). A `repeat` above one
-//! between two keyframes would advance the frame counter without a draw and
-//! move the ball rows; the matches would fail.
+//! reference's own frames measure the difference as **zero over the measured
+//! interval**: the keyframes 10,900 / 11,200 / 11,800 / 12,400 are reproduced
+//! at frame counters 403 / 703 / 1303 / 1903, whose differences (300 / 600 /
+//! 600) are exactly the boot-index differences, and the four keyframes
+//! reproduce at those counters (67/63/37/25 pixels; `tests/minvball.rs`). A
+//! `repeat` above one between two keyframes would advance the frame counter
+//! without a draw and move the ball rows; the matches would fail. The run's
+//! end at 12,947 is the mapping's prediction from the source's 2,450-frame
+//! cap, not a measured frame.
 //!
 //! # The drawing, unit for unit
 //!
@@ -99,11 +101,17 @@
 //! # The bugs, preserved
 //!
 //! - **`mov ds:[si+6],ax`** (`ASM.ASM:194-196`) overwrites the stored shadow
-//!   offset with the *shadow row* when the shadow is off screen, instead of
-//!   leaving it alone. The next frame restores from that row as a pixel
-//!   offset, which is why the port keeps the 65,536-byte video segment and a
-//!   matching `bgpic`: offsets up to 64,648 are legal and only the first
-//!   64,000 are displayed.
+//!   offset when the shadow is off screen. The three 32-bit restores just
+//!   before it (`:186`, `:189`, `:192`) each leave `eax` holding the dword
+//!   read from `bgpic[old2+640..644]`, so `ax` is that dword's **low word** —
+//!   the first two background pixels of the old ball's third row — not the
+//!   shadow's row (0 or 0x4040-0xA3A3 over the defined floor bytes). The next
+//!   frame restores from that word as a pixel offset,
+//!   which is why the port keeps the 65,536-byte video segment and a matching
+//!   `bgpic`: the largest byte any write touches is 64,642 (a dword at
+//!   `old2+640` with `old2 = 63,999`), and only the first 64,000 are
+//!   displayed. `bgpic`'s bytes past 64,000 are the source's undefined read
+//!   and the port's zero fill (D24).
 //! - **The shadow colour 87 sits inside the background's grey ramp** (64-163).
 //!   It is written as it stands, over the floor.
 //! - **The C's `mov ax,ax`** (`ASM.ASM:65`) is a no-op where the rotation's
@@ -113,8 +121,10 @@
 //!   [`drawdots`].
 //! - **`j` is never initialized** (`MAIN.C:87`): the first event reads
 //!   `dottaul[j]` at whatever the stack held. The reference's overlaps pin it
-//!   to **88**; the port starts there ([`INITIAL_J`]) and the note records how
-//!   the value was measured.
+//!   to **88**; the port starts there ([`INITIAL_J`]), and the ignored
+//!   measurement test `the_initial_j_is_fitted_to_the_reference` replays all
+//!   512 values against the 10,900 frame and asserts 88 is the minimum (67
+//!   pixels; the next is 341).
 //!
 //! # The cue, and `dis_indemo`
 //!
@@ -122,10 +132,14 @@
 //! `if(dis_indemo())`. The port has no demo flag: the run is always "in
 //! demo" and the cue applies to standalone runs too. The part's `standalone`
 //! flag decides nothing here, which is the controller's ruling for the phase
-//! and the note records it. The reference's cue first reads -3 at boot 12,950
-//! (`reference/music/second3b/trace.csv`), three frames after the frame cap
-//! (12,947) has already ended the loop, so the cue never fires in the
-//! reference run; the port's cap wins there too.
+//! and the note records it. The player publishes -3 from boot 10,368
+//! (`reference/music/second3b/trace.csv`, order 75 row 61) — during the fade,
+//! which does not check the cue — and the first -3 the main loop's own check
+//! would see is boot **12,950**, three frames after the frame cap (12,947)
+//! has already ended the loop. The cue never fires in the reference run; the
+//! port's cap wins there too. The part declines D28's held-reading pattern
+//! (see the note §5): it reads the engine's tick-own poll, and the eligible
+//! reading is past the cap, so the one-tick difference changes no picture.
 
 use sr_engine::part::{Part, PartCtx, PartStatus};
 use sr_engine::Palette;
@@ -659,9 +673,14 @@ impl Minvball {
         PartStatus::Continuing
     }
 
-    /// `ASM.ASM:52-218`'s `drawdots` into the 64 KB video buffer, then the
-    /// visible 64,000 bytes to the surface.
-    fn draw(&mut self, ctx: &mut PartCtx) {
+    /// `ASM.ASM:52-218`'s `drawdots` into the 64 KB video buffer.
+    fn draw_video(&mut self) {
+        self.draw_video_with_entry(0);
+    }
+
+    /// [`draw_video`](Minvball::draw_video) with the caller's `bx` chosen, for
+    /// the unit test that measures the register's unobservability.
+    fn draw_video_with_entry(&mut self, entry_bx: u16) {
         drawdots(
             &mut self.dots,
             &self.bgpic,
@@ -674,30 +693,25 @@ impl Minvball {
             &self.depth1,
             &self.depth2,
             &self.depth3,
+            entry_bx,
         );
+    }
+
+    /// One drawing pass, then the visible 64,000 bytes to the surface.
+    fn draw(&mut self, ctx: &mut PartCtx) {
+        self.draw_video();
         let memory = ctx.surface.pixels_mut();
         memory[..VIDEO_BYTES].copy_from_slice(&self.video[..VIDEO_BYTES]);
     }
-}
 
-impl Part for Minvball {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
-    /// `MAIN.C:79-183`: the deterministic setup, the palette, the floor, the
-    /// tables and the fade's state. The source runs all of this before its
-    /// first `dis_waitb`; the port's `init` is the same place.
-    fn init(&mut self, ctx: &mut PartCtx) -> Result<(), sr_engine::part::PartError> {
-        // The run's player starts with the part and is seeked to order 75;
-        // the reference's player was already mid-order-75 at this part's tick
-        // 0. A player with no music (a unit-test rig, the test card) has no
-        // position to align; the part does not need one to run.
-        if let Some(music) = ctx.music() {
-            for _ in 0..MUSIC_PRE_ROLL {
-                music.poll();
-            }
-        }
+    /// The deterministic state `init` builds (`MAIN.C:92-169`), from the live
+    /// DAC's entries 164-254 and a fresh RNG.
+    ///
+    /// Factored out of [`init`](Minvball::init) so the `j`-fit measurement test
+    /// can build the state without a `PartCtx`. It resets the RNG first, so a
+    /// re-init of the same instance reproduces the source's seed-1 setup.
+    fn setup_state(&mut self, live: &Palette) {
+        self.rng = MsRand::new();
 
         // `:92-123`. The scramble consumes the same calls as the source even
         // though it moves nothing (every dot starts identical).
@@ -706,12 +720,12 @@ impl Part for Minvball {
         self.dots = dots;
         self.next = INITIAL_J;
 
-        // `:127-150`: build the palette, read it back, zero the DAC. The DAC
-        // before the part is what entries 164-254 keep, exactly as the
-        // source's read-back of the live hardware does.
+        // `:127-150`: build the palette, read it back. The DAC before the
+        // part is what entries 164-254 keep, exactly as the source's
+        // read-back of the live hardware does.
         let mut pal = [0u8; 768];
         for entry in 0..256usize {
-            let rgb = ctx.palette.entry(entry as u8);
+            let rgb = live.entry(entry as u8);
             pal[entry * 3..entry * 3 + 3].copy_from_slice(&rgb);
         }
         let built = Self::build_palette();
@@ -720,7 +734,6 @@ impl Part for Minvball {
         pal[255 * 3..255 * 3 + 3].copy_from_slice(&built[255 * 3..255 * 3 + 3]);
         self.pal = pal;
         self.pal2 = pal;
-        ctx.set_palette(Palette::new());
 
         // `:152-155`: the mode set's clear and rows 100-199's ramp.
         self.video.fill(0);
@@ -728,7 +741,9 @@ impl Part for Minvball {
             let row = 100 + a;
             self.video[row * 320..(row + 1) * 320].fill((a + 64) as u8);
         }
-        // `:168-169` `bgpic=halloc(64000); memcpy(bgpic,vram,64000)`.
+        // `:168-169` `bgpic=halloc(64000); memcpy(bgpic,vram,64000)`. The
+        // 1,536 bytes past 64,000 stay zero: the source's own reads there are
+        // out of the allocation, and D24 takes the defined fill.
         self.bgpic.fill(0);
         self.bgpic[..VIDEO_BYTES].copy_from_slice(&self.video[..VIDEO_BYTES]);
 
@@ -754,6 +769,32 @@ impl Part for Minvball {
         self.fade_tick = 0;
         self.phase = Phase::Fade;
         self.tick = 0;
+    }
+}
+
+impl Part for Minvball {
+    fn name(&self) -> &'static str {
+        NAME
+    }
+
+    /// `MAIN.C:79-183`: the deterministic setup, the palette, the floor, the
+    /// tables and the fade's state. The source runs all of this before its
+    /// first `dis_waitb`; the port's `init` is the same place.
+    fn init(&mut self, ctx: &mut PartCtx) -> Result<(), sr_engine::part::PartError> {
+        // The run's player starts with the part and is seeked to order 75;
+        // the reference's player was already mid-order-75 at this part's tick
+        // 0. A player with no music (a unit-test rig, the test card) has no
+        // position to align; the part does not need one to run.
+        if let Some(music) = ctx.music() {
+            for _ in 0..MUSIC_PRE_ROLL {
+                music.poll();
+            }
+        }
+
+        let live = *ctx.palette;
+        self.setup_state(&live);
+        // `:151`: the DAC zeroed after the read-back.
+        ctx.set_palette(Palette::new());
 
         // The mode set's picture is up before the fade's first wait.
         Self::set_display(ctx);
@@ -852,9 +893,9 @@ fn write_table(video: &mut [u8], at: u16, value: u32, bytes: usize) {
 /// The dot order is the array order; `bx` is the register the source carries
 /// from one dot's projection to the next, and its entry value is the caller's
 /// (the compiled `main`'s) — the source cannot say what it was. The port uses
-/// 0; the measured keyframes are identical for every entry value tried
-/// (`{0, 0xFFFF, 0x8000, 0x1234, 0x4000, 0x5757}` all leave the same 304
-/// pixels at 10,900), so the choice is unobservable in the reference.
+/// 0; `the_entry_bx_is_unobservable_at_the_keyframe` renders 10,900 under
+/// `{0, 0xFFFF, 0x8000, 0x1234, 0x4000, 0x5757}` and asserts identical bytes,
+/// so the choice is unobservable in the reference.
 ///
 /// The arity is the machine's: each parameter is one of the registers or
 /// memory pointers the assembly reads, and bundling them would have to hold
@@ -872,8 +913,9 @@ fn drawdots(
     depth1: &[u32; DEPTH_ENTRIES],
     depth2: &[u32; DEPTH_ENTRIES],
     depth3: &[u32; DEPTH_ENTRIES],
+    entry_bx: u16,
 ) {
-    let mut bx: u16 = 0;
+    let mut bx: u16 = entry_bx;
     for dot in dots.iter_mut() {
         let (x, shadow, bp) = project_xz(dot, bx, rotcos, rotsin);
         let on_shadow = (x as u16) <= 319 && (shadow as u16) <= 199;
@@ -912,14 +954,21 @@ fn drawdots(
                 bx = x as u16;
             }
         } else {
-            // `@@2` (`:185-202`): the shadow is off screen. Restore the ball,
-            // then the shadow at the old offset — and store the shadow's
-            // **row** as the new offset (`mov ds:[si+6],ax`, the bug).
+            // `@@2` (`:185-202`): the shadow is off screen. Three 32-bit
+            // restores of the old ball first (`:186`, `:189`, `:192`), each
+            // `mov eax,fs:[di]` — so by `:195 mov ds:[si+6],ax` AX is the
+            // **low word of the dword read from bgpic[old2+640..644]**, the
+            // first two background pixels of the old ball's third row, not
+            // the shadow's row. The port stores that word; `bgpic`'s bytes
+            // past 64,000 are the source's undefined read and the port's zero
+            // fill (D24).
+            let third = dot.old2.wrapping_add(640) as usize;
+            let stored = u16::from_le_bytes([bgpic[third], bgpic[third + 1]]);
             restore(video, bgpic, dot.old2, 4);
             restore(video, bgpic, dot.old2.wrapping_add(320), 4);
             restore(video, bgpic, dot.old2.wrapping_add(640), 4);
             restore(video, bgpic, dot.old1, 2);
-            dot.old1 = shadow as u16;
+            dot.old1 = stored;
             bx = x as u16;
         }
     }
@@ -1130,6 +1179,26 @@ mod tests {
         }
         // The main loop's first event reads `dottaul[88]` (`INITIAL_J`).
         assert_eq!(order[INITIAL_J], 97);
+
+        // `setup_state` resets the RNG, so re-initializing the same instance
+        // reproduces the whole deterministic setup (the shell builds a fresh
+        // part per start, but the reset is what makes the seed the source's).
+        let mut part = Minvball::new();
+        part.setup_state(&Palette::new());
+        let first_order = part.order.clone();
+        let first_dots: Vec<(i16, i16, i16, i16)> = part
+            .dots
+            .iter()
+            .map(|d| (d.x, d.y, d.z, d.yadd))
+            .collect();
+        part.setup_state(&Palette::new());
+        assert_eq!(part.order, first_order);
+        let second_dots: Vec<(i16, i16, i16, i16)> = part
+            .dots
+            .iter()
+            .map(|d| (d.x, d.y, d.z, d.yadd))
+            .collect();
+        assert_eq!(second_dots, first_dots);
     }
 
     // --- the cue and the exit ------------------------------------------------
@@ -1293,10 +1362,11 @@ mod tests {
     // --- the drawing ---------------------------------------------------------
 
     #[test]
-    fn the_shadow_restore_bug_stores_the_row_as_the_next_offset() {
-        // A dot whose x is off screen: `ASM.ASM:194-196` stores `ax`, the
-        // shadow's row, where the offset belongs. At rot = 128 (45°) the
-        // projection is 345, outside 0..319, and the shadow row is 158.
+    fn the_shadow_restore_bug_stores_the_old_balls_third_row_word() {
+        // A dot whose x is off screen: the three 32-bit restores at
+        // `ASM.ASM:186-193` leave EAX holding the dword at bgpic[old2+640],
+        // and `:195 mov ds:[si+6],ax` stores its low word. At rot = 128 (45°)
+        // the projection is 345, outside 0..319.
         let dot = Dot {
             x: 16384,
             z: 16384,
@@ -1306,8 +1376,14 @@ mod tests {
         assert_eq!((x, shadow, bp), (345, 158, 9000));
         let mut dots = [dot];
         let mut bgpic = vec![0u8; FRAME_MEMORY];
-        // A marker where the corrupted offset points: the next frame's
-        // restore must copy it into the video segment.
+        // The old ball's third row (old2 = 0, so bgpic[640..]) carries a
+        // marker word: that word is what the bug stores.
+        bgpic[640] = 0x34;
+        bgpic[641] = 0x12;
+        bgpic[642] = 0x99;
+        bgpic[643] = 0x88;
+        // And a second marker at the shadow's would-be row, to prove it is
+        // *not* what is stored.
         bgpic[158] = 0xAA;
         bgpic[159] = 0xBB;
         let mut video = vec![0u8; FRAME_MEMORY];
@@ -1315,22 +1391,26 @@ mod tests {
         let d2 = [0u32; DEPTH_ENTRIES];
         let d3 = [0u32; DEPTH_ENTRIES];
         drawdots(
-            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
+            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
         );
-        assert_eq!(dots[0].old1, 158, "the row is stored as the offset");
+        assert_eq!(
+            dots[0].old1, 0x1234,
+            "the low word of bgpic[old2+640..644], not the shadow row"
+        );
         assert_eq!(dots[0].old2, 0, "the off-screen ball keeps old2");
-        // The next frame restores from the row as a *pixel offset*: the two
-        // bytes there are the background's, and the row becomes the offset
-        // once more.
+        // The next frame restores at that word as a pixel offset and reads
+        // the background there; a marker at 0x1234 proves the offset is used.
+        bgpic[0x1234] = 0xCC;
+        bgpic[0x1235] = 0xDD;
         dots[0].x = 0;
         dots[0].z = 0;
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
+            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
         );
         assert_eq!(
-            &video[158..160],
-            &[0xAA, 0xBB],
-            "the restore used the row as an offset"
+            &video[0x1234..0x1236],
+            &[0xCC, 0xDD],
+            "the restore used the stored word as an offset"
         );
     }
 
@@ -1346,7 +1426,7 @@ mod tests {
         let mut video = vec![0u8; FRAME_MEMORY];
         let (d1, d2, d3) = Minvball::build_depth_tables();
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
+            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
         );
         let dot = dots[0];
         // bp = 9000; x = 160, shadow row = 58+100 = 158, ball row = 0+100.
@@ -1400,6 +1480,81 @@ mod tests {
         let position = music.position();
         assert_eq!(position.order, 77);
         assert!((28..=30).contains(&position.row), "row {}", position.row);
+    }
+
+    // --- the uninitialized `j`, and the entry register -----------------------
+
+    /// The RGB bytes the shell would compose from the part's video buffer and
+    /// its `pal` (the frames measured here are before the 2,300 palette
+    /// uploads, so `pal` is the live palette).
+    fn rendered_rgb(part: &Minvball) -> Vec<u8> {
+        let mut out = Vec::with_capacity(VIDEO_BYTES * 3);
+        for byte in &part.video[..VIDEO_BYTES] {
+            let at = *byte as usize * 3;
+            out.push(dac_expand(part.pal[at]));
+            out.push(dac_expand(part.pal[at + 1]));
+            out.push(dac_expand(part.pal[at + 2]));
+        }
+        out
+    }
+
+    /// Replay the main loop from frame 1 to `frame`, drawing every tick, with
+    /// the cursor at `j` and the caller's `bx`. The fade is not replayed: it
+    /// draws nothing, and the reference frames are main-loop frames.
+    fn replay(j: usize, frame: i32, entry_bx: u16) -> Vec<u8> {
+        let mut part = Minvball::new();
+        part.setup_state(&Palette::new());
+        part.next = j;
+        for _ in 1..=frame {
+            part.physics();
+            part.draw_video_with_entry(entry_bx);
+        }
+        rendered_rgb(&part)
+    }
+
+    #[test]
+    #[ignore = "measurement: the 512-value j fit; run with --release --ignored --nocapture"]
+    fn the_initial_j_is_fitted_to_the_reference() {
+        // The source never assigns `j` (`MAIN.C:87`, `:200`). The reference's
+        // 10,900 frame is the evidence: replay it under each of the 512
+        // cursors and assert the port's value is the minimum. This is the
+        // command the note and A19 name for the fitted number.
+        let reference =
+            std::fs::read("../../reference/parts/minvball/frame_010900.rgb").unwrap();
+        assert_eq!(reference.len(), VIDEO_BYTES * 3);
+        let mut scores: Vec<(usize, usize)> = (0..DOTNUM)
+            .map(|j| {
+                let rgb = replay(j, 403, 0);
+                let diff = rgb
+                    .chunks_exact(3)
+                    .zip(reference.chunks_exact(3))
+                    .filter(|(a, b)| a != b)
+                    .count();
+                (diff, j)
+            })
+            .collect();
+        scores.sort_unstable();
+        println!("best five (pixels, j): {:?}", &scores[..5]);
+        assert_eq!(
+            scores[0].1, INITIAL_J,
+            "the fitted cursor is the minimum over 0..512"
+        );
+    }
+
+    #[test]
+    fn the_entry_bx_is_unobservable_at_the_keyframe() {
+        // The compiled main's `bx` at the `drawdots` call is not in the
+        // source. The buggy rotation carries it into `bp` by the low-word
+        // borrow; the reference frame is identical under every plausible
+        // entry value.
+        let base = replay(INITIAL_J, 403, 0);
+        for entry in [0xFFFFu16, 0x8000, 0x1234, 0x4000, 0x5757] {
+            assert_eq!(
+                replay(INITIAL_J, 403, entry),
+                base,
+                "entry bx {entry:#06x}"
+            );
+        }
     }
 
     // --- the reference's mapping --------------------------------------------
