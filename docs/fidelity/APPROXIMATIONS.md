@@ -898,3 +898,55 @@ agree. The difference is in the part-facing `MusicPosition` words, not in the ru
 manifest carries the module, the start order and the start frame, and a per-frame `music_position`
 that is `0:0` on all four frames either way. `music.md` §12 has the trace's own two readings
 (`reference/music/second5` frame 396 = 3/130, frame 408 = 6/120).
+
+## A17 — MNTSCRL: the release's first wait lasts 71 ticks, the tree's waits for a music cue that its trace does not reach
+
+**Part:** MNTSCRL (`FOREST/READ2.PAS`), Phase 4. Registered under D24's third step: the part's
+*picture* matches the release exactly (all four reference keyframes are byte-identical once the
+first wait's length is the release's), but the release's **first wait** is a behaviour the tree's
+algorithm cannot produce, so the port keeps the tree's wait and this entry carries the measured
+difference.
+
+**Original:** `:153-159` busy-waits `dis_musplus() >= 0` after the fade-in and the font build, and
+`:196-203` fades out on `dis_musplus() == -11` exactly.
+
+**The release, measured from its own frames.** A part whose first wait is `W` ticks draws the
+reference's frame at boot `K` on its main-loop tick `K - 611 - W` (the fixed pre-roll is 127 ticks
+and tick 0 is boot 419, measured from the fade-in's frame means — `docs/fidelity/mntscrl.md` §6).
+Exactly one `W` in 0…200 reproduces the reference's 1100: **71** (0 of 192,000 bytes), and the
+same number reproduces 1700 and 2300 byte for byte without being refitted
+(`bins/secondreality/src/parts/mntscrl.rs`'s
+`the_reference_holds_seventy_one_frames_and_predicts_every_scroll_keyframe`). So the release's
+last held frame is boot **554**, its pre-roll runs 555-681 and its main loop starts at **682**.
+
+**Why the tree cannot produce it.** `reference/music/second3/trace.csv` holds `zplus = 0` from
+the part's start through order 44 and `zplus = 1` from order 45 (frame 1971), where `musplus =
+row - 64` is negative until row 64. The trace's first non-negative reading is frame **2488**
+(order 47 row 0) — **1,934** frames after the release's last held frame (554). Through the
+whole interval `musplus` is the constant **-32**, so no `musplus`-based condition can end a wait
+at tick 136: every threshold either exits at tick 65 or waits until tick **2,068**. The release's mechanism
+is not in the tree (it may be another music event, or a build that does not wait at all); what is
+measured is the *duration*, and a fixed 71-tick delay is not the tree's algorithm.
+
+**Port:** the tree's `musplus >= 0` wait, pre-polled by the 11 frames the reference's player had
+on the part (`docs/fidelity/mntscrl.md` §6). Under the real player the wait ends at part tick
+**2,068** (the dump's position there is `47:0`, the trace's frame 2488 through the port's one-frame
+lead) and the main loop starts at tick 2,196. The tree's `-11` cue then arrives inside
+(2,500, 2,650): the dump is still the full scroller at 2,500 (`48:42`) and black at 2,650
+(`50:16`), and the part has retired by then.
+
+**Measured difference.** Through the real binary, boot 500 (tick 81) is the reference's frame in
+both planes; 1100, 1700 and 2300 are still the held opening, differing from the reference's
+scroller in **118,843 / 118,924 / 119,056 bytes** = **39,658 / 39,684 / 39,738 pixels** =
+**61.97 / 62.01 / 62.09 %** of the 64,000-pixel frame
+(`bins/secondreality/tests/mntscrl.rs`'s
+`the_tree_wait_holds_through_the_reference_scroll_keyframes`, and the byte counts in the unit
+test `the_reference_comparison_at_the_tree_timeline_measures_the_wait_divergence`). With the
+release's 71-tick hold every one of the four compares at **0**.
+
+**Replaces:** nothing. **Leads for whoever takes it:** the tree's shipped copy is
+`upstream/SecondReality/MAIN/DATA/MNTSCRL.EXE` (77,047 bytes, PKLITE-packed), and
+`MAIN/PACKFINA.INC:56` names `MNTSCRL.EXE` in the demo's pack list. The pack is opaque, but the
+release's wait duration is measured here, and a future phase that can unpack the part can name
+the mechanism. The register's neighbour is A11 (ENDSCRL), the same class of tree-versus-release
+behaviour.

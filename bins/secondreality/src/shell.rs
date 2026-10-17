@@ -1318,8 +1318,13 @@ mod tests {
     fn a_mid_block_part_has_no_anchor_and_says_so() {
         // CRED starts in (1200, 1240] and ENDSCRL in (8840, 8940] — windows,
         // not frames. A number here would be a guess wearing a citation.
+        // MNTSCRL's first graphics frame is a *measured* window too — in
+        // (415, 420], `reference-indices.md` §11.5 — and the 419 its fade
+        // pins is the part's tick-0 index for the reference comparison, not
+        // an anchor a run starts at.
         assert_eq!(boot_anchor("cred"), None);
         assert_eq!(boot_anchor("endscrl"), None);
+        assert_eq!(boot_anchor("mntscrl"), None);
     }
 
     // --- the restart table --------------------------------------------------
@@ -1595,6 +1600,7 @@ mod tests {
             ("testcard", None),
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
+            ("mntscrl", Some((ModuleId::Music1, 42))),
             ("endlogo", Some((ModuleId::Music0, 25))),
             ("cred", Some((ModuleId::Music0, 26))),
             ("endscrl", Some((ModuleId::Music0, 43))),

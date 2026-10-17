@@ -504,14 +504,15 @@ mod tests {
         // The window drives the same `Sequence` a headless run dumps, so a
         // block is no longer refused outside `--headless`. What is still
         // refused, in either mode, is a block whose first part the port cannot
-        // start at: `SECOND 3` begins at MNTSCRL.
+        // start at: `SECOND 1` begins at ALKU.
         let cli = parse(&["--block", "5"]).unwrap();
         assert_eq!(cli.block, Some('5'));
         assert!(!cli.headless, "the window is the default mode");
         assert!(parse(&["--block", "2"]).is_ok());
+        assert!(parse(&["--block", "3"]).is_ok(), "MNTSCRL is ported");
 
-        let message = parse(&["--block", "3"]).unwrap_err();
-        assert!(message.contains("mntscrl is not ported yet"), "{message}");
+        let message = parse(&["--block", "1"]).unwrap_err();
+        assert!(message.contains("alku is not ported yet"), "{message}");
     }
 
     #[test]

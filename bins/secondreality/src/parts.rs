@@ -14,6 +14,7 @@ pub mod beglogo;
 pub mod cred;
 pub mod endlogo;
 pub mod endscrl;
+pub mod mntscrl;
 pub mod poslist;
 pub mod tunneli;
 
@@ -31,6 +32,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("beglogo", || Box::new(beglogo::Beglogo::new())),
         // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
+        // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).
+        ("mntscrl", || Box::new(mntscrl::Mntscrl::new())),
         // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
         ("endlogo", || Box::new(endlogo::Endlogo::new())),
         // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).

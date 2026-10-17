@@ -18,10 +18,6 @@
 
 /// One frame group's columns: each a count and then that many destination
 /// offsets, in the order the file carries them.
-// The decoder lands before its two consumers: MNTSCRL and RAYSCRL are the
-// parts that construct it, and they arrive in their own tasks. Until then the
-// binary's non-test build has no caller, and without this the build warns.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct PosList {
     /// The columns, in file order. A zero-count column is kept as an empty
@@ -30,8 +26,6 @@ pub(crate) struct PosList {
     pub columns: Vec<Vec<u16>>,
 }
 
-// Same reason as the struct's: no non-test caller until the parts land.
-#[allow(dead_code)]
 impl PosList {
     /// Parse a whole `.DAT` file. Every byte belongs to a column, so a stream
     /// that ends before a declared count's offsets is an error; an empty
