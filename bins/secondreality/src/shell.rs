@@ -492,6 +492,17 @@ pub fn music_for(block: char) -> Result<(ModuleId, u8), ShellError> {
 ///   whole ENDSCRL-start window (8841..8938), so 43 is the value the evidence best supports. The
 ///   derivation is recorded here because it is the only number in this function that is not
 ///   either a source constant or a trace reading.
+/// - **RAYSCRL** is block 3's fifth part, after MINVBALL, so it is not an entry point. The filed
+///   block-3 trace (`second3b`, frames 10200–15050) holds **MUSIC1 at order 86** — pattern 60 —
+///   from 12704 through 12961, and order 88 (pattern 35) from 12962. The part's start window is
+///   `(12900, 13000]` (`reference-indices.md` §15), so the order in force when the sequence
+///   reaches it is **86**; that is the value the port seeks to, **measured** from the trace. The
+///   seek is also load-bearing beyond the ordinal: order-list entry 87 is a `254` marker, and
+///   playing *through* it is what sets `zplus` bit 1 — the state the reference's player carries
+///   into order 88 (`zplus == 2`). A seek straight to 88 gives `zplus == 0`, and RAYSCRL's init
+///   wait (`dis_musplus() >= 0`, `WATER/DEMO.PAS:98-104`) would never pass. The part's own
+///   `init` then pre-polls the frames between order 86 and the published order 88 row 0 its
+///   tick 0 stands at (`MUSIC_PRE_ROLL`, `parts/rayscrl.rs`).
 ///
 /// `None` for a name the demo does not have at all — the test card, which is the port's own
 /// and not the demo's — because a run of that has no music to install, and `PartCtx::music()`
@@ -519,6 +530,7 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         "tunneli" => Some((ModuleId::Music1, 0)),
         "cred" => Some((ModuleId::Music0, 26)),
         "endscrl" => Some((ModuleId::Music0, 43)),
+        "rayscrl" => Some((ModuleId::Music1, 86)),
         _ => None,
     }
 }
@@ -1602,6 +1614,7 @@ mod tests {
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
+            ("rayscrl", Some((ModuleId::Music1, 86))),
             ("endlogo", Some((ModuleId::Music0, 25))),
             ("cred", Some((ModuleId::Music0, 26))),
             ("endscrl", Some((ModuleId::Music0, 43))),

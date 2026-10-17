@@ -16,6 +16,7 @@ pub mod endlogo;
 pub mod endscrl;
 pub mod mntscrl;
 pub mod poslist;
+pub mod rayscrl;
 pub mod tunneli;
 
 use sr_engine::part::Part;
@@ -34,6 +35,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
         // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).
         ("mntscrl", || Box::new(mntscrl::Mntscrl::new())),
+        // `WATER/DEMO.PAS`, block 3's fifth (`MAIN/U2.ASM:856-874`).
+        ("rayscrl", || Box::new(rayscrl::Rayscrl::new())),
         // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
         ("endlogo", || Box::new(endlogo::Endlogo::new())),
         // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).

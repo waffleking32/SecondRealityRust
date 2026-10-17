@@ -942,3 +942,45 @@ divergence. **Leads for whoever takes it:** the tree's shipped copy is
 `upstream/SecondReality/MAIN/DATA/MNTSCRL.EXE` (77,047 bytes, PKLITE-packed), and
 `MAIN/PACKFINA.INC:56` names `MNTSCRL.EXE` in the demo's pack list. What is measured here is the
 wait's duration; the packed image's own condition, if it has one, would need an unpacker.
+
+## A18 — RAYSCRL: the release's gates act seven ticks after the tree's condition
+
+**Part:** RAYSCRL (`WATER/DEMO.PAS`), Phase 4. The port follows the **release**, under D24 and
+the controller's ruling on this task: the reference is the authority, and the real run must match
+its four keyframes. This entry records the tree-versus-release difference the port does not
+reproduce.
+
+**Original:** three waits, each acting on the first tick its condition holds —
+`:98-104` `dis_musplus() >= 0`; `:135-143` `order != co` and `row >= 16`, with no `waitb`; and
+`:158-166` `dis_musplus() == -11`, the cue.
+
+**The release, measured.** Each of the three leaves **seven ticks after the condition first
+holds**, and the three measurements are independent:
+
+| gate | condition first holds | release leaves |
+|---|---|---|
+| init | boot **12962**, the published order 88 row 0 (`reference/music/second3b/trace.csv`) | the blit at boot **12969** (the 13000 keyframe is the fade's k=14 hold, 31 ticks on) |
+| stage 2 | boot **13609**, the published order 89 row 16 | the main loop's first `scr` at boot **13616** (the font phase: the 14000 keyframe is the 384th draw) |
+| cue | boot **14942** (`musplus == -11`; the port's player publishes the same state one poll on, 14943) | the fade's first upload at boot **14950** (the survey's partner capture, `reference-indices.md` §15.4's second command: `out/b4b-ray-sess1/frame_014950.rgb`, whose recovered palette is the first upload's) |
+
+All three are reproduced by one rule: the condition must be read true on seven consecutive
+ticks, and the gate acts on the tick after (`GATE_CONFIRM_TICKS = 7`). The values are not row
+thresholds or `musplus` offsets: the row stays 16 for eight frames and `-11` for eight, and the
+leaves fall inside those windows, not at their starts.
+
+**The tree's counterfactual, and its divergence.** `Rayscrl::confirm_ticks = 0` keeps the tree's
+immediate condition. The main loop then starts at boot **13610**, seven draws early, and the
+font strip has scrolled that much further by the keyframes:
+`the_trees_immediate_gate_draws_the_keyframes_early` measures **8,375** differing pixels at
+14000 and **11,958** at 14500 (of 64,000) against the reference.
+
+**Port (and measured difference, through the real binary).** With the seven-tick confirmation
+the four keyframes are exact where the tree's own assets are: 13000 and 13500 are byte-identical
+(13500 in both planes), and 14000/14500 differ by **3/42 pixels** — not from timing but from the
+release's embedded `MIEKKA.SCI` differing from the tree's at the handful of strip bytes those
+frames expose (`docs/fidelity/rayscrl.md` §6). The exact cue is kept: only `-11` triggers the
+fade, and it runs 65 uploads to black (`the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks`).
+
+**Leads for whoever takes it:** the shipped part is `upstream/SecondReality/MAIN/DATA/RAYSCRL.EXE`
+(90,351 bytes, PKLITE-packed, like MNTSCRL's). What is measured here is each wait's leave frame;
+the packed image's own conditions would need an unpacker.
