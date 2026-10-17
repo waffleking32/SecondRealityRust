@@ -196,7 +196,10 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
 
     // 13000: mid fade-in.
     assert_eq!(
-        differing_bytes(&frame_file(&dir, tick_of(13_000), "rgb"), &reference_frame(13_000, "rgb")),
+        differing_bytes(
+            &frame_file(&dir, tick_of(13_000), "rgb"),
+            &reference_frame(13_000, "rgb")
+        ),
         0,
         "boot 13000 (tick {})",
         tick_of(13_000)
@@ -227,7 +230,10 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
         "boot 13500's index plane"
     );
     assert_eq!(
-        differing_bytes(&frame_file(&dir, tick_of(13_500), "rgb"), &reference_frame(13_500, "rgb")),
+        differing_bytes(
+            &frame_file(&dir, tick_of(13_500), "rgb"),
+            &reference_frame(13_500, "rgb")
+        ),
         0,
         "boot 13500's RGB"
     );

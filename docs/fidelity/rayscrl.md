@@ -131,7 +131,9 @@ trace's own —
 
 (`the_music_is_the_block_three_position_at_every_keyframe`).
 
-**The release's gates act seven ticks after the tree's condition** — see
+**The release's gates act seven ticks after the tree's condition** on the
+port's clock — the cue's trace labels are eight, because the trace's player
+publishes that state one poll before the port's does; see
 `docs/fidelity/APPROXIMATIONS.md` A18. The tree's three waits fire on the first
 tick their condition holds; the release's leave timings, measured, are seven
 ticks later:
@@ -146,8 +148,8 @@ The port implements one rule for all three: `GATE_CONFIRM_TICKS = 7` — the
 condition is read true on seven consecutive ticks and the gate acts on the tick
 after (`the_releases_confirmation_starts_the_main_loop_seven_ticks_after_the_gate`).
 The tree's immediate condition is kept as the counterfactual and measured: with
-it the main loop starts at boot 13610, and the reference's 14000 and 14500
-frames differ by **8,375** and **11,958** pixels
+it the main loop starts at boot 13610 — six draws early — and the reference's
+14000 and 14500 frames differ by **8,375** and **11,958** pixels
 (`the_trees_immediate_gate_draws_the_keyframes_early`).
 
 **The cue is exactly -11.** `-10` and `-12` never trigger it
@@ -169,20 +171,29 @@ consequences, both kept:
   green and blue advance once. At the k=14 upload the displayed red is
   `2k+1 = 29` and green/blue are 14; that is exactly the reference's 13000
   frame, byte for byte (35 colours, mean **23.1535**).
-- **The last upload is one step short.** The 63rd upload (y=125) displays
-  green and blue at 62 and then steps the stored array to 63; the fade ends
-  with `pal` at 63 and the screen at 62. The reference's 13500 palette
+- **The last upload is one step short on the seven entries whose blue target
+  is 63.** The 63rd upload (y=125) displays those blues at 62 and then steps
+  the stored array to 63; every other channel sits at its MIEKKA target on
+  screen. The reference's 13500 palette
   (`reference/parts/rayscrl/manifest.json`) is MIEKKA's with exactly **seven**
-  blue channels at 62 instead of 63 — the entries whose target is 63
+  blue channels at 62 instead of 63 and no other channel short
   (`the_fade_in_is_one_hundred_twenty_seven_iterations_and_pins_tick_zero`).
 
 The fade-out (`:167-178`) is the same loop downward, 65 ticks, and it uploads
-`pal` — the stored 63s — so its first upload is one step *brighter* than the
-screen the main loop had been showing. The reference's first fade-out upload is
-that step: `out/b4b-ray-sess1/frame_014950.rgb`, from the survey's partner
-capture (`reference-indices.md` §15.4's second command, whose frame list carries
-`14950,15000,15050`; `out/` is gitignored, and the command is the one that
-reproduces it). The port's first upload lands on the same boot frame.
+`pal` — the array the fade-in left, not the palette the screen was showing. Its
+first upload therefore moves both ways: every entry with red > 0 is one step
+down on red (entry 39: 53 → 52, the `pf = 3` step has already run on it), and
+the seven blue-63 entries are one step up on blue (entry 39: 62 → 63, the
+stored value the last fade-in upload never showed). The reference's first
+fade-out upload is that palette: `out/b4b-ray-sess1/frame_014950.rgb`, from the
+survey's partner capture (`reference-indices.md` §15.4's second command, whose
+frame list carries `14950,15000,15050`; `out/` is gitignored, and the command is
+the one that reproduces it). The port's first upload lands on the same boot
+frame. Against that capture the port's fade-onset frame (dump tick 1988)
+matches the capture's palette at j = 1 but differs in **1,061 pixels**
+concentrated in rows 0–4 and a few in 36–45 — consistent with the same
+release-vs-tree `MIEKKA.SCI` difference (§6), here at the strip the 390 cap has
+scrolled in.
 
 **The aliasing bug.** `pal` and `tmppal` are `array[0..768]`, and the `pf = 3`
 step at x=255 touches index 768. In the original's data segment `pal[768]` is
@@ -203,8 +214,9 @@ The `x*3+3` write is the same test's first half.
 `the_assets_are_read_the_way_the_source_reads_them` compares every one of those
 numbers against the files: MIEKKA's palette at +10 (and MIEKKA's 64 entries
 that differ from BKG's), the font's first 13,600 bytes, the rebased background,
-the lists' column count and 20,858 positions. The largest destination offset in
-any list is **63,999**, inside the picture.
+the lists' column count, each list's file size (23,096 / 23,034 / 27,818) and
+position count (6,176 / 6,145 / 8,537), and the 20,858 total. The largest
+destination offset in any list is **63,999**, inside the picture.
 
 **The residual.** At 14000 and 14500 the port's RGB differs from the reference
 by **3** and **42** pixels of 64,000 (0.0047 % and 0.0656 %), all of them in
@@ -216,9 +228,10 @@ five sampled source positions the reference's byte is the tree's *previous*
 source column (`font[15*400+34]` for `+35`, `font[14*400+201]` for `+202`,
 `font[14*400+202]` for `+203`, `font[13*400+203]` for `+204`,
 `font[15*400+201]` for `+202`) — a patched or re-rendered strip in the shipped
-release. The tree's `MIEKKA.OBJ` carries the file's bytes exactly, so the port
-reads the asset the tree links; patching bytes the release alone holds would
-stop it being an original-format read. This is a measured difference, not a
+release. The tree's `MIEKKA.OBJ` carries the file's bytes exactly
+(`the_trees_miekka_object_carries_the_files_bytes` walks its LEDATA records and
+finds the file), so the port reads the asset the tree links; patching bytes the
+release alone holds would stop it being an original-format read. This is a measured difference, not a
 convention: the five pairs were recovered from the two keyframes' differing
 pixels.
 

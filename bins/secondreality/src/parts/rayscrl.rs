@@ -78,10 +78,12 @@
 //! `musplus >= 0` wait would never pass.
 //!
 //! **The tree's gates act too early.** Each of the tree's three waits fires on
-//! the first tick its condition holds. The release's fires seven ticks later:
-//! the blit is at boot 12969 (the published 88:0 stands from 12962), the main
-//! loop starts at 13616 (the published order-89 row 16 stands from 13609) and
-//! the fade's first upload is at 14950 (`musplus == -11` stands from 14942).
+//! the first tick its condition holds. The release's fires seven ticks later
+//! on the port's clock (the cue's trace labels are one poll ahead of the port's
+//! player): the blit is at boot 12969 (the published 88:0 stands from 12962),
+//! the main loop starts at 13616 (the published order-89 row 16 stands from
+//! 13609) and the fade's first upload is at 14950 (`musplus == -11` stands
+//! from 14942 there; the port's player publishes it at 14943).
 //! All three are reproduced by one measured rule, [`GATE_CONFIRM_TICKS`]: the
 //! condition must be read true on seven consecutive ticks, and the gate acts
 //! on the tick after. This is D24's single-constant branch — one rule, every
@@ -213,8 +215,9 @@ const STAGE2_ROW: u8 = 16;
 /// condition has been read true on this many consecutive ticks. The tree acts
 /// on the first true tick (`confirm_ticks` 0 in the counterfactual). Measured
 /// from the published 88:0 at boot 12962 and the blit at 12969, the row-16 at
-/// 13609 and the main loop at 13616, the -11 at 14942 and the fade's first
-/// upload at 14950. See the module docs and `docs/fidelity/rayscrl.md` §4.
+/// 13609 and the main loop at 13616, the -11 at 14942 (the port's player
+/// publishes it at 14943) and the fade's first upload at 14950. See the module
+/// docs and `docs/fidelity/rayscrl.md` §4.
 const GATE_CONFIRM_TICKS: u8 = 7;
 /// `MUSIC1` at order 86 is where the trace holds the sequence when the part's
 /// window opens; [`Rayscrl::init`] pre-polls to the published order 88 row 0
@@ -279,7 +282,8 @@ pub struct Rayscrl {
     /// the counterfactual tests.
     confirm_ticks: u8,
     phase: Phase,
-    /// The part's own tick, which is the shell's count for this part.
+    /// The part's tick counter, incremented at the top of `frame`: the call
+    /// that draws dump index `n` leaves this at `n + 1`.
     tick: u32,
     bkg_path: &'static str,
     miekka_path: &'static str,
@@ -826,7 +830,9 @@ mod tests {
         }
 
         fn sync(&mut self) -> i32 {
-            unreachable!("`DEMO.PAS` never syncs: its music calls are `dis_musplus` and `dis_muscode`")
+            unreachable!(
+                "`DEMO.PAS` never syncs: its music calls are `dis_musplus` and `dis_muscode`"
+            )
         }
 
         fn getmframe(&mut self) -> i32 {
@@ -1075,12 +1081,31 @@ mod tests {
             PartStatus::Finished
         );
         assert_eq!(part.phase, Phase::Done);
-        // And the init wait and the fade honour it too.
+        // The init wait, the fade and the main loop honour it too.
         let (mut rig, mut part) = started_with(Player::quiet(10));
         assert_eq!(
             part.frame(&mut rig.ctx_exit(0)),
             PartStatus::Finished,
             "the init wait"
+        );
+        let (mut rig, mut part) = started_with(Player::quiet(10));
+        run_to(&mut rig, &mut part, 20);
+        assert!(
+            matches!(part.phase, Phase::FadeIn { .. }),
+            "tick 20 is a fade tick"
+        );
+        assert_eq!(
+            part.frame(&mut rig.ctx_exit(part.tick)),
+            PartStatus::Finished,
+            "the fade"
+        );
+        let (mut rig, mut part) = started_with(Player::through_stage_two(700, None, 900));
+        run_to(&mut rig, &mut part, 720);
+        assert_eq!(part.phase, Phase::Main);
+        assert_eq!(
+            part.frame(&mut rig.ctx_exit(part.tick)),
+            PartStatus::Finished,
+            "the main loop"
         );
     }
 
@@ -1179,7 +1204,9 @@ mod tests {
             .count();
         assert_eq!(differing_entries, 64);
         assert!(
-            part.pal[..PALETTE_ENTRIES * 3].iter().all(|byte| *byte == 0),
+            part.pal[..PALETTE_ENTRIES * 3]
+                .iter()
+                .all(|byte| *byte == 0),
             "`:116` fills pal with zero"
         );
         assert_eq!(part.font.len(), FONT_LEN);
@@ -1195,29 +1222,65 @@ mod tests {
         let bkg = std::fs::read(TEST_BKG).unwrap();
         assert_eq!(bkg.len(), 64_778);
         assert_eq!(part.background.len(), BACKGROUND_LEN);
-        assert_eq!(&part.background[..VIDEO_BYTES], &bkg[778..778 + VIDEO_BYTES]);
+        assert_eq!(
+            &part.background[..VIDEO_BYTES],
+            &bkg[778..778 + VIDEO_BYTES]
+        );
         assert_eq!(
             &part.background[VIDEO_BYTES..],
             &bkg[778 + VIDEO_BYTES - 778..778 + VIDEO_BYTES]
         );
 
         // `:51-80`: three lists of 158*34 columns, 20,858 positions between
-        // them, and the largest destination inside the picture.
+        // them, and the largest destination inside the picture. The per-file
+        // byte sizes and position counts are the survey's
+        // (`reference-indices.md` §15's asset table is the note's source for
+        // them; the parser is what measures them here).
         assert_eq!(part.lists.len(), 3);
         let mut positions = 0usize;
+        let mut per_list = Vec::new();
         let mut max_offset = 0u16;
         for (index, list) in part.lists.iter().enumerate() {
             assert_eq!(list.columns.len(), FBUF_COLUMNS, "list {index}");
+            let mut count = 0usize;
             for column in &list.columns {
-                positions += column.len();
+                count += column.len();
                 if let Some(offset) = column.iter().max() {
                     max_offset = max_offset.max(*offset);
                 }
             }
+            per_list.push(count);
+            positions += count;
         }
+        for (((path, bytes), expected), measured) in TEST_POS
+            .iter()
+            .zip([23_096usize, 23_034, 27_818])
+            .zip([6_176usize, 6_145, 8_537])
+            .zip(per_list.iter())
+        {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().len() as usize,
+                bytes,
+                "{path}"
+            );
+            assert_eq!(*measured, expected, "{path}");
+        }
+        assert_eq!(per_list, [6_176, 6_145, 8_537], "WAT1/2/3's positions");
         assert_eq!(positions, 20_858, "WAT1-3's positions, the survey's count");
         assert_eq!(max_offset, 63_999);
         assert!((max_offset as usize) < VIDEO_BYTES);
+    }
+
+    #[test]
+    fn the_trees_miekka_object_carries_the_files_bytes() {
+        // The note's §6 absolute: `MIEKKA.OBJ` carries `MIEKKA.SCI`'s bytes
+        // exactly. The OMF reader walks the object's LEDATA records; their
+        // concatenation is the file the tree links.
+        let obj = std::fs::read("../../upstream/SecondReality/WATER/MIEKKA.OBJ").unwrap();
+        let embedded = sr_assets::omf::extract_ledata(&obj).unwrap();
+        let file = std::fs::read(TEST_MIEKKA).unwrap();
+        assert_eq!(embedded.len(), file.len());
+        assert_eq!(embedded, file);
     }
 
     #[test]
@@ -1236,7 +1299,8 @@ mod tests {
             music.poll();
         }
         assert_eq!(
-            music.position().order, 86,
+            music.position().order,
+            86,
             "268 polls is still the old pattern's publication"
         );
         // The engine's tick-0 poll is the 269th.
@@ -1279,11 +1343,7 @@ mod tests {
         assert_eq!(part.tick, 39);
         let mine = rendered_rgb(&rig);
         let theirs = reference(13_000, "rgb");
-        assert_eq!(
-            differing_bytes(&mine, &theirs),
-            0,
-            "boot 13000 (tick 38)"
-        );
+        assert_eq!(differing_bytes(&mine, &theirs), 0, "boot 13000 (tick 38)");
         // The reference's own description (`reference-indices.md` §15.1): 35
         // colours and mean byte 23.15. The port's frame is the same bytes, so
         // the same two numbers, computed here so the note can cite them.
@@ -1295,8 +1355,8 @@ mod tests {
             seen.len()
         };
         assert_eq!(colours(&theirs), 35);
-        let mean = theirs.iter().map(|byte| u64::from(*byte)).sum::<u64>() as f64
-            / theirs.len() as f64;
+        let mean =
+            theirs.iter().map(|byte| u64::from(*byte)).sum::<u64>() as f64 / theirs.len() as f64;
         assert!((mean - 23.1535).abs() < 0.0001, "mean {mean}");
         assert_eq!(colours(&mine), 35);
         // The stored array is one step past the last upload: gb 63 where the
@@ -1422,8 +1482,9 @@ mod tests {
         assert_eq!(rig.surface.pixels()[40], 7, "font 0 replays the background");
         assert_eq!(rig.surface.pixels()[50], 7);
 
-        // MNTSCRL's additive +128 would have made these 136; the colour key
-        // leaves them the background.
+        // MNTSCRL's additive +128 would have made the background 7 into 135;
+        // the colour key leaves it 128 as the font byte stands (and 7 where
+        // the byte is 0).
         part.fbuf[3] = 128;
         part.scr(&mut rig.ctx(0), 0);
         assert_eq!(rig.surface.pixels()[50], 128);
@@ -1442,8 +1503,15 @@ mod tests {
         assert_eq!(part.fbuf[9], 0xAB, "`:183` shifts one byte left");
         assert_eq!(part.fbuf[10], 0, "and the seam is refilled where x=0");
         assert_eq!(part.fbuf[FBUF_STRIDE], 0x11, "x=0 lands at 158, not 0");
-        assert_eq!(part.fbuf[FBUF_STRIDE + 33 * FBUF_STRIDE], 0x22, "x=33 at 5372");
-        assert_eq!(part.fbuf[FBUF_LEN], 5, "the byte past the array is scp's low byte");
+        assert_eq!(
+            part.fbuf[FBUF_STRIDE + 33 * FBUF_STRIDE],
+            0x22,
+            "x=33 at 5372"
+        );
+        assert_eq!(
+            part.fbuf[FBUF_LEN], 5,
+            "the byte past the array is scp's low byte"
+        );
         assert_eq!(part.scp, 6);
 
         // Index 0 never receives a sample: the refill's lowest write is 158.
@@ -1471,8 +1539,7 @@ mod tests {
         // release acts on the tick after seven confirming reads: the stage-2
         // tick that sees the seventh is 653, and the first draw is 654 —
         // boot 13616.
-        let (mut rig, mut part) =
-            started_with(Player::through_stage_two(647, None, 1_600));
+        let (mut rig, mut part) = started_with(Player::through_stage_two(647, None, 1_600));
         run_to(&mut rig, &mut part, 653);
         assert_eq!(part.phase, Phase::Stage2);
         run_to(&mut rig, &mut part, 654);
@@ -1484,21 +1551,20 @@ mod tests {
     #[test]
     fn the_trees_immediate_gate_draws_the_keyframes_early() {
         // The counterfactual: `confirm_ticks = 0` is the tree's first-true
-        // condition. The main loop then starts seven draws early, and the
-        // font strip has scrolled seven draws further by boot 14000. The
-        // reference at 14000 has 384 draws; the tree's policy has 391 (the
-        // probe's stage-2 onset is tick 647 and the first draw 648, so the
-        // frame at tick 1038 is draw 390).
+        // condition. The tree's first draw is boot 13610 (the stage-2 onset
+        // is tick 647, the transition 647, the draw 648); the release's is
+        // 13616, so the tree is **six draws early**. By boot 14000 the
+        // reference has 385 draws (indices 0-384) and the tree's policy has
+        // 391 (indices 0-390): the frame at tick 1038 is index 390, not 384.
         let tree = |tick: u32| -> Vec<u8> {
-            let (mut rig, mut part) =
-                started_with(Player::through_stage_two(647, None, 2_000));
+            let (mut rig, mut part) = started_with(Player::through_stage_two(647, None, 2_000));
             part.confirm_ticks = 0;
             run_to(&mut rig, &mut part, tick + 1);
             assert_eq!(part.phase, Phase::Main);
             rendered_rgb(&rig)
         };
         // The tree's first draw is boot 13610; the reference's is 13616. At
-        // 14000 the strip has scrolled seven draws further.
+        // 14000 the strip has scrolled six draws further.
         assert_eq!(
             differing_pixels(&tree(1_038), &reference(14_000, "rgb")),
             8_375,
@@ -1534,10 +1600,7 @@ mod tests {
     /// returning the index plane and, per video offset, the `(band, source
     /// column)` of the font byte that last wrote it (`None` for the
     /// background).
-    fn screen_provenance(
-        part: &Rayscrl,
-        draws: u32,
-    ) -> (Vec<u8>, Vec<Option<(usize, usize)>>) {
+    fn screen_provenance(part: &Rayscrl, draws: u32) -> (Vec<u8>, Vec<Option<(usize, usize)>>) {
         let mut fbuf = vec![0u8; FBUF_LEN + 1];
         let mut tags = vec![None; FBUF_LEN + 1];
         let mut screen = part.background[..VIDEO_BYTES].to_vec();
@@ -1635,7 +1698,9 @@ mod tests {
                 } else {
                     match index_of(&rig, rgb) {
                         Some(index) => index,
-                        None => panic!("the reference colour at boot {index} ({at}) is a palette entry"),
+                        None => {
+                            panic!("the reference colour at boot {index} ({at}) is a palette entry")
+                        }
                     }
                 };
                 recovered.push((band, scp, tree_byte, release));

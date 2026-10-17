@@ -955,22 +955,26 @@ reproduce.
 `:158-166` `dis_musplus() == -11`, the cue.
 
 **The release, measured.** Each of the three leaves **seven ticks after the condition first
-holds**, and the three measurements are independent:
+holds on the port's clock** — the cue's trace labels are eight, because the trace's player
+publishes that state one poll before the port's does; the port's own interval is seven — and the
+three measurements are independent:
 
 | gate | condition first holds | release leaves |
 |---|---|---|
 | init | boot **12962**, the published order 88 row 0 (`reference/music/second3b/trace.csv`) | the blit at boot **12969** (the 13000 keyframe is the fade's k=14 hold, 31 ticks on) |
-| stage 2 | boot **13609**, the published order 89 row 16 | the main loop's first `scr` at boot **13616** (the font phase: the 14000 keyframe is the 384th draw) |
+| stage 2 | boot **13609**, the published order 89 row 16 | the main loop's first `scr` at boot **13616** (the font phase: the 14000 keyframe is main-loop draw index 384) |
 | cue | boot **14942** (`musplus == -11`; the port's player publishes the same state one poll on, 14943) | the fade's first upload at boot **14950** (the survey's partner capture, `reference-indices.md` §15.4's second command: `out/b4b-ray-sess1/frame_014950.rgb`, whose recovered palette is the first upload's) |
 
 All three are reproduced by one rule: the condition must be read true on seven consecutive
 ticks, and the gate acts on the tick after (`GATE_CONFIRM_TICKS = 7`). The values are not row
-thresholds or `musplus` offsets: the row stays 16 for eight frames and `-11` for eight, and the
+thresholds or `musplus` offsets: the published row stays 16 for eight frames (13609–13616), and
+`-11` for the trace's nine (14942–14950; the port's player, one poll on, 1981–1988), so the
 leaves fall inside those windows, not at their starts.
 
 **The tree's counterfactual, and its divergence.** `Rayscrl::confirm_ticks = 0` keeps the tree's
-immediate condition. The main loop then starts at boot **13610**, seven draws early, and the
-font strip has scrolled that much further by the keyframes:
+immediate condition. The main loop then starts at boot **13610**, **six draws early** (13616 −
+13610), and by the keyframes the reference has 385 draws (indices 0–384) where the tree's policy
+has 391 (0–390):
 `the_trees_immediate_gate_draws_the_keyframes_early` measures **8,375** differing pixels at
 14000 and **11,958** at 14500 (of 64,000) against the reference.
 
