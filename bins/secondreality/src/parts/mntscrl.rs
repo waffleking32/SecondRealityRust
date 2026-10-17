@@ -192,7 +192,7 @@ const POS_PATHS: [&str; 3] = [
     "assets/FOREST/POS2.DAT",
     "assets/FOREST/POS3.DAT",
 ];
-/// `ROUTINES.ASM:20` `mov dx,237*31`: the columns the blitter walks.
+/// `ROUTINES.ASM:21` `mov dx,237*31`: the columns the blitter walks.
 const FONT_COLUMNS: usize = 237;
 const FONT_ROWS: usize = 31;
 const FONT_LEN: usize = FONT_COLUMNS * FONT_ROWS;
@@ -339,9 +339,9 @@ pub struct Mntscrl {
     tree_wait: bool,
     /// `:45` `sss`: the list `scr` is on this tick.
     sss: u8,
-    /// `:98` `fp`: the fade-out's step.
+    /// `:99` `fp`: the fade-out's step.
     fp: u8,
-    /// `:97` `fadeout`: set by the cue and never cleared.
+    /// `:98` `fadeout`: set by the cue and never cleared.
     fadeout: bool,
     /// `:95` `quit`: set on the fade-out's last tick.
     quit: bool,
@@ -637,7 +637,7 @@ impl Part for Mntscrl {
                     part: NAME,
                     message: format!(
                         "{path} holds {} columns; the blitter walks {FONT_LEN} (237*31, \
-                         FOREST/ROUTINES.ASM:20)",
+                         FOREST/ROUTINES.ASM:21)",
                         list.columns.len()
                     ),
                 });
@@ -1073,6 +1073,13 @@ mod tests {
         // `:119`'s +128 on every non-zero byte.
         let o2 = std::fs::read(TEST_O2).unwrap();
         assert_eq!(o2.len(), 21_258);
+        for (path, length) in TEST_POS.iter().zip([25_088usize, 25_064, 25_114]) {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().len() as usize,
+                length,
+                "{path}"
+            );
+        }
         for row in 0..FBUF_ROWS {
             for column in 0..O2_WIDTH {
                 let raw = o2[778 + row * O2_WIDTH + column];
@@ -1579,7 +1586,7 @@ mod tests {
         // is. Boot 500 is tick 81 (`REFERENCE_FIRST_INDEX`); the screen is the
         // background with the two bands' DAC entries black.
         let (mut rig, mut part) = started();
-        run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX);
+        run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX + 1);
         let indices = rendered_indices(&rig);
         assert_eq!(
             differing_bytes(&indices, &reference(500, "idx")),
@@ -1668,6 +1675,19 @@ mod tests {
             let release = render(640, index);
             assert_eq!(tree, release, "boot {index} is before the bound");
             assert_eq!(differing_bytes(&release, &reference(index, "rgb")), 0);
+        }
+
+        // The cap's own tick, so the note's number is test-produced: with the
+        // release's 71-tick wait the main loop starts at tick 263 and `scr(2)`
+        // falls on main ticks 1, 4, 7, …; `scp` starts at 133 and reaches 640
+        // on the 507th shift, which is tick 1,656. Tick 1,655 still reads
+        // 639; 1,656 reads 640 and appends the next row's first column.
+        {
+            let (mut rig, mut part) = started();
+            run_to(&mut rig, &mut part, 1_655 + 1); // through tick 1,655
+            assert_eq!(part.scp, 639, "the 506th shift");
+            run_to(&mut rig, &mut part, 1_656 + 1); // through tick 1,656
+            assert_eq!(part.scp, 640, "the 507th shift");
         }
 
         let target = reference(2300, "rgb");

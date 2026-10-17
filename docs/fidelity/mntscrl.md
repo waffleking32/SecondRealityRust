@@ -121,7 +121,7 @@ for an anchor at 419). The observable consequence is the dump's music
 position: at tick 81 (boot 500) it is `42:10`, exactly what
 `reference/music/second3/trace.csv` holds at frame 500
 (`the_music_is_eleven_polls_in_at_the_parts_first_tick`). Without the
-pre-roll the position would read `42:9`.
+pre-roll the position would read `42:8` (82 polls, trace frame 490).
 
 **The first wait is the release's 71 ticks.** The tree's `:153-159` waits for
 `dis_musplus() >= 0`, but no threshold of that shape can produce the
@@ -171,10 +171,12 @@ ends by tick 2,043; 2,050 and 2,100 are black and the run holds that screen
 ## 7. The `scp` bound: the release's 640 (D24's single constant, adopted)
 
 The tree's `:88` is `if scp < 639 then inc(scp)`, so its last appended column
-is 639. The release reads one column further. At boot 2300 — the first
-keyframe after the bound is reached (main tick 1,618, shift 506) — the port's
-frame under 639 differs in **401 bytes / 146 pixels**, and under **640** in
-**0**; 1100 and 1700 are before the bound and are identical under both. The
+is 639. The release reads one column further. The cap is first reached at
+part tick **1,656** — main tick 1,393, the **507th** `scr(2)`; tick 1,655
+still reads 639 and 1,656 reads 640, both asserted by the test below. Boot
+2300, 225 ticks further on, is the first keyframe after that: the port's frame
+under 639 differs in **401 bytes / 146 pixels**, and under **640** in **0**;
+1100 and 1700 are before the bound and are identical under both. The
 tree's own `fbuf` is `array[0..640*31]`: index 19,840, one past the 31 loaded
 rows, is exactly the element a stride-640 read at column 640 needs for row
 30, and `:119`'s loop covers it. The array's extra element exists for this
@@ -205,7 +207,8 @@ port writes 640. The measurement is
 - **The wait honours `dis_exit` in the port** even though `:153-159` does not
   test it: the port does not spin, so an exit request ends the wait on the
   tick it is seen (`exit_requested_ends_the_wait_on_that_tick`, and the
-  phase's Review Focus 1). The source's wait would hold until the cue.
+  phase's Review Focus 1). The source's own wait would hold until the tree's
+  `musplus >= 0` gate (trace frame 2488), not until the `-11` fade cue.
 
 ## 9. What is substituted
 

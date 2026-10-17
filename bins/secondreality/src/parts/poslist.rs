@@ -8,7 +8,7 @@
 //! `WATER/ROUTINES.ASM:20-36`) — and the writer emits exactly that shape:
 //! `blockwrite(f,tc,2)` followed, only when `tc > 0`, by the offsets as words
 //! (`WATER/DATGEN.PAS:73-88`). The column count is fixed by the caller's loop
-//! — `237*31` for FOREST (`FOREST/ROUTINES.ASM:20`), `158*34` for WATER
+//! — `237*31` for FOREST (`FOREST/ROUTINES.ASM:21`), `158*34` for WATER
 //! (`WATER/ROUTINES.ASM:20`) — so the parser reads columns until the bytes
 //! run out and the part checks the count.
 //!
@@ -154,8 +154,8 @@ mod tests {
     ];
 
     /// The columns both blitters' loops fix: the product is the font's shape,
-    /// not a two-dimensional layout of the file (`FOREST/ROUTINES.ASM:20` is
-    /// `mov dx,237*31`; `WATER/ROUTINES.ASM:20` is `mov dx,158*34`).
+    /// not a two-dimensional layout of the file (`FOREST/ROUTINES.ASM:21` is
+    /// `mov dx,237*31`; `WATER/ROUTINES.ASM:21` is `mov dx,158*34`).
     const FOREST_COLUMNS: usize = 237 * 31; // 7,347
     const WATER_COLUMNS: usize = 158 * 34; // 5,372
 
@@ -193,7 +193,7 @@ mod tests {
             assert_eq!(
                 found.columns, FOREST_COLUMNS,
                 "{path}: the parser measured {} columns; the blitter's loop reads \
-                 {FOREST_COLUMNS} (237*31, FOREST/ROUTINES.ASM:20)",
+                 {FOREST_COLUMNS} (237*31, FOREST/ROUTINES.ASM:21)",
                 found.columns
             );
         }

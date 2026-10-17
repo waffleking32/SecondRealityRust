@@ -148,7 +148,7 @@ fn the_music_is_eleven_polls_in_at_the_parts_first_tick() {
     // pre-polls those 11, and this is the observable consequence: at tick 81
     // (boot 500) the published position is `42:10`, which is what
     // `reference/music/second3/trace.csv` holds at frame 500. Without the
-    // pre-roll it would read `42:9`.
+    // pre-roll it would read `42:8` (82 polls, trace frame 490).
     let (dir, manifest) = dump("music", "0,81");
     let positions: Vec<&str> = manifest["frames"]
         .as_array()

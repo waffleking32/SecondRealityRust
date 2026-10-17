@@ -310,8 +310,9 @@ pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, Strin
 /// has bit 1.
 ///
 /// **Nothing the port can run today reaches either of them** — `--block 2`'s plan stops at
-/// GLENZ, which is not ported; `--block 3` cannot start (MNTSCRL is not ported); `--block 5`'s
-/// mask has bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside
+/// GLENZ, which is not ported; `--block 3` starts at MNTSCRL but stops at LNS&ZOOM, which is
+/// not ported; `--block 5`'s mask has bit 3 clear, so `:880` is skipped for it — but a run
+/// that *does* reach U2E inside
 /// blocks 2 or 3 needs a **mid-run** restart at that point in the sequence, and this
 /// one-row-per-run table has no place for one yet. That is the Phase 4 dependency the row for
 /// block 4 does not, by itself, express.
@@ -769,8 +770,8 @@ impl Sequence {
         // anchor *after* that frame, `boot_anchor` answers `Some(404)` (which waits, since
         // 404 < 408) or `None` (`pre` 0), and no part carries an anchor past 408. A
         // catch-up needs an entry point whose first frame is later than 408 — MNTSCRL's is
-        // in (415, 420], which is `SECOND 3`'s, and that block cannot start yet (MNTSCRL is
-        // not ported).
+        // in (415, 420], which is `SECOND 3`'s, but `boot_anchor("mntscrl")` is `None` (its
+        // start is a window, not a measured frame), so `pre` stays zero.
         //
         // If one ever runs, two things about it are worth knowing before it is debugged: a
         // catch-up longer than the ring (8192 samples) has its oldest samples dropped by the

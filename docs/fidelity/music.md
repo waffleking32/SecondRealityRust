@@ -1776,8 +1776,8 @@ is what makes "the site is inside `& 2`'s region" an assertion rather than a rea
 numbers' order — and pins it (nothing else in the suite looks at this site).
 
 **Nothing the port can run today reaches either** — `--block 2`'s plan stops at GLENZ, which
-is not ported; `--block 3` cannot start at all (MNTSCRL is not ported); `--block 5`'s mask has
-bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside blocks 2 or 3
+is not ported; `--block 3` starts at MNTSCRL but stops at LNS&ZOOM, which is not ported;
+`--block 5`'s mask has bit 3 clear, so `:880` is skipped for it — but a run that *does* reach U2E inside blocks 2 or 3
 needs a **mid-run** restart at that point in the sequence, and the port's one-row-per-run model
 has no place for one yet. That is a Phase 4 dependency, and
 `one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it, site by site:
