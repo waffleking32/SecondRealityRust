@@ -1620,6 +1620,9 @@ mod tests {
             ("mntscrl", Some((ModuleId::Music1, 42))),
             ("minvball", Some((ModuleId::Music1, 75))),
             ("rayscrl", Some((ModuleId::Music1, 86))),
+            // The hidden part: `SECOND U` restarts MUSIC0 at order 70
+            // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
+            ("ddstars", Some((ModuleId::Music0, 70))),
             ("endlogo", Some((ModuleId::Music0, 25))),
             ("cred", Some((ModuleId::Music0, 26))),
             ("endscrl", Some((ModuleId::Music0, 43))),

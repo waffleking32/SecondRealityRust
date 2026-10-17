@@ -12,6 +12,7 @@
 
 pub mod beglogo;
 pub mod cred;
+pub mod ddstars;
 pub mod endlogo;
 pub mod endscrl;
 pub mod minvball;
@@ -40,6 +41,10 @@ pub fn registry() -> &'static [PartEntry] {
         ("minvball", || Box::new(minvball::Minvball::new())),
         // `WATER/DEMO.PAS`, block 3's fifth (`MAIN/U2.ASM:856-874`).
         ("rayscrl", || Box::new(rayscrl::Rayscrl::new())),
+        // `DDSTARS/KOE.ASM` over `STARS.ASM`, block U's only part — the
+        // hidden one, and the only way `SECOND U` reaches it
+        // (`MAIN/U2.ASM:889-896`).
+        ("ddstars", || Box::new(ddstars::Ddstars::new())),
         // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
         ("endlogo", || Box::new(endlogo::Endlogo::new())),
         // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).
