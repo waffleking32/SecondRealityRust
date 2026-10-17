@@ -190,9 +190,14 @@ fn the_four_keyframes_and_their_support_frames_match_at_the_mapping() {
 
     // The music is the shell's only. The filed `hiddenu2` trace is
     // `SECOND U`'s own boot-relative music at frame 8000; the port's player
-    // at the mapped tick is three rows behind it, because the reference's
-    // restart lands before the tick mapping's zero. The part reads none of
-    // it — this records where the shell put it.
+    // at the mapped tick is three rows behind it. The arithmetic: the run's
+    // music clock starts at D27's frame 408, the tick mapping's zero is boot
+    // 414 (six frames later), and the hiddenu2 session's phase is **-16
+    // frames from the boot's** (`cargo test -p sr-audio --test trace --
+    // --nocapture`; docs/fidelity/music.md), so the trace's published state
+    // runs 414 - (408 - 16) = 22 frames ahead of the port's. Trace frame
+    // 8000 - 22 = 7978 reads 30:51, the port's position at tick 7586. The
+    // part reads none of it; this records where the shell put it.
     let position = manifest["frames"]
         .as_array()
         .unwrap()
@@ -203,16 +208,27 @@ fn the_four_keyframes_and_their_support_frames_match_at_the_mapping() {
     assert_eq!(position, "30:51");
     let trace = std::fs::read_to_string(repository_root().join("reference/music/hiddenu2/trace.csv"))
         .unwrap();
-    let row = trace
-        .lines()
-        .find(|line| line.starts_with("8000,"))
-        .expect("the trace holds frame 8000");
-    let fields: Vec<&str> = row.split(',').collect();
+    let position_at = |frame: u32| -> (String, String) {
+        let row = trace
+            .lines()
+            .find(|line| line.starts_with(&format!("{frame},")))
+            .unwrap_or_else(|| panic!("the trace holds frame {frame}"));
+        let fields: Vec<&str> = row.split(',').collect();
+        (fields[1].to_string(), fields[2].to_string())
+    };
+    // The mapping's 8000, and the frame 22 earlier that the port's clock
+    // answers for.
     assert_eq!(
-        (fields[1], fields[2]),
-        ("30", "54"),
+        position_at(8000),
+        ("30".to_string(), "54".to_string()),
         "the trace's boot-8000 position"
     );
+    assert_eq!(
+        position_at(7978),
+        ("30".to_string(), "51".to_string()),
+        "the port's position at the mapped tick"
+    );
+    assert_eq!(8000 - 7978, 22, "6 frames of clock start + 16 of session phase");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

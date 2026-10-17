@@ -96,7 +96,7 @@ without pinning it. `shell::boot_anchor("ddstars")` stays `None`, a run of
 this part numbers its own frames from zero, and its manifest says
 `index_origin: "part"`, `anchor: null`
 (`the_run_is_numbered_in_its_own_frames_and_draws_320x400`,
-`the_mapping_is_boot_equals_fourteen_plus_the_tick`).
+`the_mapping_is_boot_equals_four_hundred_fourteen_plus_the_tick`).
 
 The mapping is pinned by the pictures. The survey's `out/b5-su-sweep1`
 frames at 500, 700, 900, 1100, 1300, 1500, 1700, 2100, 3000, 5000 and 8000
@@ -193,19 +193,20 @@ copies       A-4 source rows, from `startxtp0/80`
 The band is bottom-anchored: its odd page rows are `2*(151-A)+1` through
 **293** for every `A`, and the two clears are the odd rows just above it,
 `2*(150-A)-1` and `2*(150-A)+1`; the closing clear is row 295. So the band's
-top moves up as `A` grows while its bottom stands still. Measured, the 1900
-keyframe's text occupies 28 odd rows at scanlines **239-293**, which is
-`A = 32` and source rows 1-28
-(`the_text_and_star_layers_are_on_opposite_row_parities`). The source's first
-pixel row with ink is row 11 (21 pixels; plane 0 has 12 of them), which is why
-the first *visible* line at 1900 is source row 11 at scanline 259, not the
-band's top at 239 (`the_text_strip_is_read_as_its_two_planes`).
+top moves up as `A` grows while its bottom stands still. At the 1900 tick the
+band the source clears/copies is 28 odd rows at scanlines **239-293**
+(`A = 32`, source rows 1-28; plane 2 marks all 28 —
+`the_text_and_star_layers_are_on_opposite_row_parities`). The reference's
+visible ink is on **15** of those rows, the first at **259**: the source's
+first pixel row with ink is row 11 (21 pixels; plane 0 has 12 of them)
+(`the_text_strip_is_read_as_its_two_planes`).
 
 The two marks are `starframe` 1200 (block 0: `startxtp0 = 80`, source row 1)
 and 3200 (block 1: `startxtp0 = 101*80`, source row 101). `A` opens over 99
 frames, holds at 99 while `close` is above it, and closes over 99. The one
 special path is `A = 2`'s 80-byte clear (`:528-537`), which crosses one 40-byte
-row pair and therefore touches an even (star) row; the port keeps it.
+row pair; the port keeps it. This is a `risetext` path, not the star clip of
+§6.
 
 ## 6. D24: the text is the divergence, and which artifact each decision follows
 
@@ -214,15 +215,23 @@ is the source build (`DDSTARS/MAKEFILE:2-3` links it and copies it there). The
 tree's star-clip tests are assembled out: the `cmp di,_nostar1/_nostar2`
 guards are commented out at `STARS.ASM:692-696`, `:711-716`, `:737-742` and
 `:756-762`, and `risetext` still computes `_nostar1/_nostar2` (`:438-445`,
-`:526`). The reference nevertheless shows the text.
+`:526`). The guards, with `_nostar1 = 80*(150-A)` (`:436-442`) and
+`_nostar2 = 11,879` (the band's end, `:525-526`), would skip every blit row
+whose 80-byte destination offset lies in `[80*(150-A), 11879]`. At the 1900
+tick (`A = 32`) that is the bottom half's rows 18-48, page rows **236-296**;
+the reference frame holds **1,025 star pixels** in exactly those rows. At
+`A = 99` the window also reaches into the top half (98 page rows from 102 to
+296). The reference nevertheless shows the text.
 
-**The port follows the reference, and the tree agrees with it at every
-measured frame.** It keeps the text visible and does **not** clip the stars —
-the tree's assembled-out state. The evidence is the four keyframes: 0
-differing bytes each (§8), so the packed release and the tree's pictured
-behavior are the same picture at 1900, 3000, 5000 and 8000. The only frame the
-clip could change is the `A = 2` clear, which crosses a star row; no filed
-frame holds it.
+**The port follows the reference, and the keyframes prove the packed build
+does too.** It keeps the text visible and does **not** clip the stars — the
+tree's assembled-out state — and the four keyframes reproduce with 0 differing
+bytes each (§8) *with those 1,025 clip-row pixels present*
+(`the_star_clip_is_assembled_out_and_the_keyframes_hold_its_pixels` counts
+them in the reference and in the port's page). The shipped build therefore
+does not have the clip either; a port that kept it would lose the band's star
+rows. The `A = 2` 80-byte clear is a separate `risetext` path, not this
+clip.
 
 **There is no `.idx` to follow.** The emulator refuses the indexed read for
 this screen (16-colour-named; `reference-indices.md` §22.5), so the reference
@@ -265,6 +274,10 @@ byte**:
   `ddstars_001486.rgb` and `ddstars_007586.rgb` are compared with
   `reference/parts/ddstars/frame_001900.rgb` and `frame_008000.rgb` (and the
   other two) and are identical.
+- `the_star_clip_is_assembled_out_and_the_keyframes_hold_its_pixels` counts
+  the reference's **1,025** star pixels in the 31 clip-window rows of the
+  1900 frame and the port's same count — the keyframes hold the pixels the
+  commented-out clip would have removed (§6).
 - The neighbours the port renders are the same pictures the survey recorded:
   §22.3's `K-1`/`K+1` hashes. `sha256sum` on the dump the command block below
   makes gives the prefixes `de6d1676`, `a1697853`, `f768ffbb`,
@@ -284,22 +297,36 @@ MUSIC0 at order 70 (`MAIN/U2.ASM:889-894`) — and `music_for_part("ddstars")`
 returns `(MUSIC0, 70)` through block U's plan; the integration test asserts the
 manifest's row. Where the shell put the player at the mapped tick is measured,
 not read by the part: at tick 7586 the port's published position is `30:51`,
-while the filed `hiddenu2` trace's boot-8000 frame stands at `30:54`. The three
-rows are the reference's restart landing before the mapping's zero; the part
-reads neither number, and the picture is identical either way
-(`the_four_keyframes_and_their_support_frames_match_at_the_mapping` asserts
-both).
+while the filed `hiddenu2` trace's boot-8000 frame stands at `30:54`. The
+22-frame arithmetic accounts for it: D27's music clock starts at **408**, the
+tick mapping's zero is boot **414** (six frames later), and the `hiddenu2`
+session's phase is **-16 frames from the boot's**
+(`cargo test -p sr-audio --test trace -- --nocapture` prints the phase; D27,
+`docs/fidelity/music.md` §8), so the trace's published state runs
+`414 - (408 - 16) = 22` frames ahead of the port's. Trace frame `8000 - 22 =
+7978` reads **30:51**, the port's position at tick 7586; the integration test
+asserts both trace frames and the difference
+(`the_four_keyframes_and_their_support_frames_match_at_the_mapping`). The part
+reads neither number, and the picture is identical either way.
 
 **A15's band.** `dis_sync` answers with the table's last code above the
-sixteenth key (`0x4200 < key <= 0x8E2E`) and refuses past it; the `hiddenu`
+sixteenth key (`0x4200 < key <= 0x8E2E`) and refuses past it. The `hiddenu`
 trace holds `(order << 8) | row > 0x4200` for **5,148 of its 6,351 frames
-(81.1 %)** (`docs/fidelity/music.md` §11). DDSTARS never calls it, but it is
-the reason that band is not a corner: the hidden part is the demo's longest
-single run — the reference was still densifying at frame 20,000
-(`reference-indices.md` §22.1) — and its music is the module that spends the
-most frames in the band. Any Phase-4 part placed here that waited on
-`dis_sync` would meet the answered band immediately, which is what A15
-registers.
+(81.1 %)** — the count the awk command in §10 prints over
+`reference/music/hiddenu/trace.csv`; `docs/fidelity/music.md` §11 reads the
+same file. DDSTARS never calls it, but it is the reason that band is not a
+corner: the part's loop has no cap and the reference is still running at frame
+20,000 (the sweep-2 capture §10 names; `reference-indices.md` §22.1), and its
+music is the module that spends the most frames in the band. Any Phase-4 part
+placed here that waited on `dis_sync` would meet the answered band
+immediately, which is what A15 registers.
+
+**The exit.** `STARS.ASM:772-776` draws the iteration, then calls DIS function
+2 and returns only if it is non-zero. The port polls `exit_requested` at the
+top of `frame`, so the tick that receives the flag is not drawn: the port is
+one frame short of the source at the exit. No filed frame is near an exit, and
+the part's picture is otherwise identical (`exit_requested_finishes_on_that_tick`
+pins the port's behavior).
 
 ## 10. Commands
 
@@ -327,6 +354,18 @@ cargo run -p secondreality -- --part ddstars --headless \
     --dump-frames 1485,1486,1487,2585,2586,2587,4585,4586,4587,7585,7586,7587 \
     --dump-dir out/ddstars-dump
 sha256sum out/ddstars-dump/ddstars_*.rgb
+
+# §9's band count: 5,148 of 6,351 frames above 0x4200
+awk -F, 'NR>1 && ($2*256+$3)>0x4200 {n++} END {print n, NR-1}' \
+    reference/music/hiddenu/trace.csv
+
+# §9's session phase (-16 frames) and the hiddenu2 agreement
+cargo test -p sr-audio --test trace -- --nocapture
+
+# §9's "still running at 20,000" capture (reference-indices.md §22.1)
+cargo xtask reference capture --arg U --boot autoexec \
+    --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 10000,12000,14000,16000,20000 --out out/b5-su-sweep2
 
 # the reference tree's own digests
 cargo xtask reference verify --tree reference

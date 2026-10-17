@@ -119,21 +119,22 @@
 //! `MAIN/DATA/DDSTARS.EXE` is the shipped, packed build and is not the tree's
 //! `KOE.OBJ`; the tree's star-clip tests are assembled out — the
 //! `cmp di,_nostar1/_nostar2` guards are commented out at `:692-696`,
-//! `:711-716`, `:737-742` and `:756-762` — yet the reference shows the text.
-//! The port keeps the text visible and **does not clip the stars**, which is
-//! the tree's assembled-out state, and the four filed keyframes reproduce
-//! with **0 differing bytes**, so the shipped build agrees with the tree's
-//! pictured behavior at every measured frame. The only frame the clip could
-//! change is the special `A = 2` clear (`:528-537`), whose 80-byte clear
-//! crosses into a star row; no filed frame holds it. `docs/fidelity/ddstars.md`
-//! §6 records the decision per artifact.
+//! `:711-716`, `:737-742` and `:756-762`. With them in, the guards would skip
+//! every blit row whose 80-byte destination offset lies in
+//! `[80*(150-A), 11879]`: at the 1900 tick (A = 32) the bottom half's rows
+//! 18-48, page rows 236-296, hold **1,025** star pixels of the reference
+//! frame, and at A = 99 the window reaches into both halves. The port keeps
+//! the text visible and **does not clip the stars**, and the four filed
+//! keyframes — with those stars present in the clip's rows — reproduce with
+//! **0 differing bytes**, so the shipped build does not have the clip either.
+//! The `A = 2` path is a separate 80-byte `risetext` clear (`:528-537`), not
+//! the clip. `docs/fidelity/ddstars.md` §6 records the decision per artifact.
 //!
 //! # No music calls, and why this part is the one the sync band matters to
 //!
 //! The part never reads the music: the block's cue is the shell's
 //! `MUSIC0` at order 70 (`MAIN/U2.ASM:889-894`), and `SECOND U` is the only
-//! way to reach it. The hidden run is also the longest single part in the
-//! demo — its loop has no cap and the reference was still densifying at
+//! way to reach it. Its loop has no cap: the reference is still running at
 //! frame 20,000 — so it is the part that spends the most time in
 //! `dis_sync`'s upper band: the filed `hiddenu` trace holds `(order << 8) |
 //! row > 0x4200` for 81.1 % of its frames (`docs/fidelity/music.md` §11).
@@ -1105,7 +1106,7 @@ mod tests {
         assert_eq!(part.starlimit, STAR_ADD as u16 - INIT_PASSES as u16);
         assert_eq!(part.ring.len(), RING_UNITS * UNIT_BYTES);
 
-        // A fresh ring, one star at z = 200, x = 0, y = -20.
+        // A fresh ring, one star at z = 100, x = 0, y = -20.
         part.ring.fill(0);
         one_visible_star(
             &mut part,
@@ -1381,9 +1382,10 @@ mod tests {
         // `out/b5-su-sweep1`, and `out/` is gitignored); the command that
         // makes it is §22.4's capture with `--frames 1700`.
         // The sweep's other frames pin the rest of the mapping: 500 at the
-        // 100-pass field, 900 before the star pause, 1100 and 1500 inside
-        // it, 2100 after the mark at 1500 lets the field fill in four
-        // entries a tick, and the late ones.
+        // 100-pass field; 900 still before the star pause; 1100 also before
+        // it (tick 686, starframe 687, inside `staradd`); 1500 inside it
+        // (tick 1086, starframe 1087); 2100 after the mark at 1500 lets the
+        // field fill in four entries a tick; and the late ones.
         let sweep = [500u32, 700, 900, 1100, 1300, 1500, 1700, 2100, 3000, 5000, 8000];
         let tick_of = |boot: u32| boot - REFERENCE_FIRST_INDEX;
         let last = tick_of(*sweep.last().unwrap());
@@ -1433,7 +1435,7 @@ mod tests {
     }
 
     #[test]
-    fn the_mapping_is_boot_equals_fourteen_plus_the_tick() {
+    fn the_mapping_is_boot_equals_four_hundred_fourteen_plus_the_tick() {
         // The four filed keyframes, by the mapping.
         assert_eq!(tick_of(1900), 1486);
         assert_eq!(tick_of(3000), 2586);
@@ -1511,6 +1513,75 @@ mod tests {
     }
 
     #[test]
+    fn the_star_clip_is_assembled_out_and_the_keyframes_hold_its_pixels() {
+        // The commented guards (`:692-696`, `:711-716`, `:737-742`,
+        // `:756-762`) skip a blit row whose 80-byte destination offset is in
+        // [`_nostar1`, `_nostar2`]. `_nostar1 = 80*(150-A)` (`:436-442`);
+        // the last text row is page row 293 (byte 80*146+40) for every A,
+        // and `_nostar2`, set after the closing clear's `add di,80; dec di`
+        // (`:525-526`), is 11,879.
+        let rows_for = |a: usize| -> (usize, usize, Vec<usize>) {
+            let nostar1 = 80 * (150 - a);
+            let nostar2 = 80 * 146 + 40 + 80 + 80 - 1;
+            // The top blit's offsets are 80r; the bottom's 8000 + 80r.
+            let rows = (0..100)
+                .map(|r| (80 * r, 2 * r, 8000 + 80 * r, 200 + 2 * r))
+                .flat_map(|(top, top_row, bottom, bottom_row)| {
+                    let mut rows = Vec::new();
+                    if (nostar1..=nostar2).contains(&top) {
+                        rows.push(top_row);
+                    }
+                    if (nostar1..=nostar2).contains(&bottom) {
+                        rows.push(bottom_row);
+                    }
+                    rows
+                })
+                .collect::<Vec<usize>>();
+            let mut rows = rows;
+            rows.sort_unstable();
+            (nostar1, nostar2, rows)
+        };
+        let (nostar1, nostar2, rows) = rows_for(32);
+        assert_eq!((nostar1, nostar2), (9440, 11_879));
+        // A = 32 skips only the bottom half: 31 rows, page rows 236-296.
+        assert_eq!(rows.len(), 31);
+        assert_eq!((rows[0], rows[30]), (236, 296));
+
+        // Frame 1900 holds 1,025 star pixels in exactly those rows; the
+        // port's unclipped page holds the same, and the keyframe test shows
+        // the whole frame is byte-identical. A port with the clip would
+        // lose them.
+        let stars = [(65u8, 81, 101), (97, 125, 150), (166, 210, 251)];
+        let theirs = reference(1900);
+        let count = |rgb: &[u8]| -> usize {
+            rows.iter()
+                .map(|y| {
+                    (0..320)
+                        .filter(|x| {
+                            let at = (y * 320 + x) * 3;
+                            stars.contains(&(rgb[at], rgb[at + 1], rgb[at + 2]))
+                        })
+                        .count()
+                })
+                .sum()
+        };
+        assert_eq!(count(&theirs), 1_025, "the reference's clip-row stars");
+
+        let (mut rig, mut part) = started();
+        let mut page = 0;
+        while part.tick <= tick_of(1900) {
+            page = part.advance(&mut rig.ctx(part.tick));
+        }
+        let mine = page_rgb(&part, page, &rig.palette);
+        assert_eq!(count(&mine), 1_025, "the port's unclipped page");
+
+        // At A = 99 the window reaches into the top half as well.
+        let (_, _, rows) = rows_for(99);
+        assert_eq!(rows.len(), 98);
+        assert_eq!((rows[0], rows[97]), (102, 296));
+    }
+
+    #[test]
     fn the_text_and_star_layers_are_on_opposite_row_parities() {
         // The blits write 40 bytes every 80, so stars land on even rows; the
         // text's first write is 40 bytes into the stride, so it lands on odd
@@ -1551,7 +1622,23 @@ mod tests {
             }
         }
         assert_eq!(star_rows, 200, "the two 100-row halves");
-        assert_eq!(text_rows, 28, "the 1900 band's source rows 1..28");
+        assert_eq!(
+            text_rows, 28,
+            "the band the source clears/copies is 28 rows; plane 2 marks all of them"
+        );
+        // The reference's visible ink is on 15 of those rows, starting at
+        // scanline 259.
+        let ink_rows: Vec<usize> = (239..=293)
+            .step_by(2)
+            .filter(|y| {
+                let offset = y * PAGE_ROW_BYTES;
+                part.pages[page].plane0[offset..offset + PAGE_ROW_BYTES]
+                    .iter()
+                    .chain(&part.pages[page].plane1[offset..offset + PAGE_ROW_BYTES])
+                    .any(|byte| *byte != 0)
+            })
+            .collect();
+        assert_eq!((ink_rows.len(), ink_rows.first()), (15, Some(&259)));
         // The band is bottom-anchored: A = 32 puts its top at 239 and its
         // bottom at 293 for every open height.
         assert_eq!((first_text, last_text), (Some(239), Some(293)));
