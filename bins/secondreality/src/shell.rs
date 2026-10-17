@@ -473,21 +473,24 @@ pub fn music_for(block: char) -> Result<(ModuleId, u8), ShellError> {
 ///   value the evidence names. That the order is not established is deliberate in the record,
 ///   not an oversight: a run of `--part tunneli` plays the right module and the right
 ///   movement of the track, from the top of it.
-/// - **CRED** runs in the full run (block 1) and in block 5. Block 5's entry restart is
-///   **MUSIC0 at order 25** (`:898-905`, guard `whattorun & 16` and not `& 8`); block 1's is
-///   the mid-run **MUSIC0 at order 18** (`:880-885`, guard `& 8` alone), and block 1 skips
-///   `:898-905` because bit 3 is set. Both sequences are MUSIC0. The filed block-5 traces
-///   (`second5`, `second5b`) put the published music at order **26** at CRED's tick 0
-///   (reference index 1212: `26:56` in both), so the port seeks to **26** — measured, not
-///   inferred. The full run's order at CRED is not measured by any filed trace.
-/// - **ENDSCRL** is CRED's successor in the same block-5 sequence, and the filed traces end
-///   at frame 1299, some 7,600 frames before ENDSCRL begins (~8917). Its order is therefore
-///   **derived, not measured**: advancing MUSIC0 from the block-5 restart (order 25 at frame
-///   408) with the port's own player — the one those traces verify at frames 1212 and 1299 —
-///   puts the engine at order **43** across the reference's whole ENDSCRL-start window
-///   (8841..8938), so 43 is the value the evidence best supports. The derivation is recorded
-///   here because it is the only number in this function that is not either a source constant
-///   or a trace reading.
+/// - **CRED** runs in **every block**: every `partsmask` byte carries bit 4 (blocks 1–5 are
+///   `0x1f`, `0x1e`, `0x1c`, `0x18`, `0x10`), and bit 3 is what decides which restart precedes
+///   it. Block 5 (bit 3 clear) takes the entry restart at `:898-905`, **MUSIC0 at order 25**;
+///   blocks 1–4 (bit 3 set) take the mid-run `:880-885` restart, **MUSIC0 at order 18**, and skip
+///   `:898-905` (for block 4 that restart is its entry-point one, immediately before U2E). Every
+///   sequence is MUSIC0. The filed
+///   block-5 traces (`second5`, `second5b`) put the published music at order **26** at CRED's
+///   tick 0 (reference index 1212: `26:56` in both), so the port seeks to **26** — measured, not
+///   inferred. The other blocks' order at CRED is not measured by any filed trace.
+/// - **ENDSCRL** is CRED's successor in those same sequences: blocks 1–4 reach it under
+///   `:880-885`'s MUSIC0@18 and block 5 under `:898-905`'s MUSIC0@25 (the sequence the filed
+///   traces cover). Those traces end at frame 1299, some 7,600 frames before ENDSCRL begins
+///   (~8917). Its order is therefore **derived, not measured**: advancing MUSIC0 from the
+///   block-5 restart (order 25 at frame 408) with the port's own player — the one those traces
+///   verify at frames 1212 and 1299 — puts the engine at order **43** across the reference's
+///   whole ENDSCRL-start window (8841..8938), so 43 is the value the evidence best supports. The
+///   derivation is recorded here because it is the only number in this function that is not
+///   either a source constant or a trace reading.
 ///
 /// `None` for a name the demo does not have at all — the test card, which is the port's own
 /// and not the demo's — because a run of that has no music to install, and `PartCtx::music()`

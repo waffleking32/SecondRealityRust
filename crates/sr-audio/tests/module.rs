@@ -175,8 +175,10 @@ fn word(bytes: &[u8], at: usize) -> u16 {
     u16::from_le_bytes([bytes[at], bytes[at + 1]])
 }
 
-/// The pattern pointer table, in paragraph units: `0x60 + ordNum + insNum * 2`
-/// (`STARTEMS.C:333-334`).
+/// The pattern pointer table's location, a **byte** offset: `0x60 + ordNum + insNum * 2`
+/// (`STARTEMS.C:333-334`; `parains` and `parapat` are `char far *` arithmetic). Each
+/// *entry* is a paragraph number — `parapat[a] << 4` gives the file offset
+/// (`STARTEMS.C:345-347`).
 fn pattern_table(loaded: &Loaded) -> Vec<u16> {
     let orders = usize::from(word(&loaded.bytes, 32));
     let instruments = usize::from(word(&loaded.bytes, 34));
@@ -422,8 +424,8 @@ fn the_pattern_blocks_tile_on_paragraph_boundaries() {
         let pointers = pattern_table(&loaded);
         // Where the two tables are: `ordNum` bytes of order list from 0x60, then `insNum`
         // instrument pointers, then `patNum` pattern pointers (`STARTEMS.C:333-334`). The
-        // blocks all come after them, which is what makes the pointers' paragraph units
-        // readable as file offsets at all.
+        // blocks all come after them, which is what makes the pointers' paragraph numbers
+        // readable as file offsets at all (`<< 4`).
         let orders = usize::from(word(&loaded.bytes, 32));
         let instruments = usize::from(word(&loaded.bytes, 34));
         let patterns_at = 0x60 + orders + 2 * instruments;

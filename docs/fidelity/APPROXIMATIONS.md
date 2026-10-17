@@ -875,6 +875,8 @@ confined to the two words: the published position is `0:0` on both sides (neithe
 ticked), so every cue a part could read is identical, and no part in either runnable block reads
 `speed`/`tempo`.
 **Measured difference:** the four frames 404–407 of a `--block 5` run differ in `speed` and
-`tempo` only (6/120 against 3/130), recorded in the run manifest and in
-`docs/decisions.md` D27; from frame 408 on the two agree. `music.md` §12 has the trace's own two
-readings (`reference/music/second5` frame 396 = 3/130, frame 408 = 6/120).
+`tempo` only (6/120 against 3/130), as `docs/decisions.md` D27 records; from frame 408 on the two
+agree. The difference is in the part-facing `MusicPosition` words, not in the run manifest: a
+manifest carries the module, the start order and the start frame, and a per-frame `music_position`
+that is `0:0` on all four frames either way. `music.md` §12 has the trace's own two readings
+(`reference/music/second5` frame 396 = 3/130, frame 408 = 6/120).

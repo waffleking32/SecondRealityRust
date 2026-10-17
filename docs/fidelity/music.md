@@ -1226,10 +1226,14 @@ walk calls the voice routine `+0x3765` for a channel with a sample and a nonzero
 `m_pos == 0xffff` at `+0x378e`/`+0x3791` — both jump to the routine's return before the sample or
 the centre is read. The second is the "volume 0" optimisation's marker: a channel that path frees
 has its position parked at `0xffff`, and the object's mixer then skips it entirely. The port's
-`voice_contribution` tests the same word, which matters for the *position* and not the sound: the
-freed channel's volume is 0, so no sample changes, but a port without the test would advance the
-position of a voice the object leaves alone. Measured on the shipped modules: 398 gate hits in
-MUSIC0 and 1,068 in MUSIC1 over 120,000 polls, every one at volume 0.
+`voice_contribution` tests the same word. At volume 0 the freed voice's immediate contribution is
+zero, so the gate changes nothing *while the channel stays silent* — but it is not value-free over
+a window: without it the port walks the position of a voice the object leaves alone, and a channel
+that later becomes audible without a note restart reads a different sample. The measured cost over
+MUSIC0's first 4,120 polls is 33 of the window's 2,351,396 samples above the silence entry:
+**972,036 with the gate off against 972,003 with it on** (`the_window_is_not_silent` prints the
+972,003; the gate is on in the tree). The gate fires 398 times in MUSIC0 and 1,068 in MUSIC1 over
+120,000 polls, every one at volume 0.
 
 ### 10.2 The voice: the arithmetic the port reproduces
 
@@ -1266,7 +1270,7 @@ the period is outside them (`cmp 0x958,%cx; jbe` at `+0x5863` then `mov 0x958,%c
 the two (`+0x5876`) so 0 still returns 0. The divisions above never see a period outside
 `[64, 32767]`, and `step` clamps the same way. **On the shipped modules the clamp is inaudible**:
 the probe measured periods above `0x7FFF` **2,408** times in MUSIC0 and **2,635** in MUSIC1, every
-one on a channel whose volume is 0 (a note-off parks `org_period` at `0xffff`, `player.rs:871`,
+one on a channel whose volume is 0 (a note-off parks `org_period` at `0xffff`, `player.rs:890-891`,
 and a vibrato adds its level to it), and the low bound never binds at all — the smallest non-zero
 period seen was `0x81`. The object also writes the clamped word back to `aorgspd`/`aspd`, but only
 when the module's flags word at `0x917` has bit 4 set (`+0x583d`, `+0x586e`, `+0x589a`); both
@@ -1394,7 +1398,7 @@ zero entries, the `mul` 64 ramp at 768…1279 (one level per two entries) and `0
 a frame's byte is the ramp's own one level per two of value — `⌊(value + 256)/2⌋`, ±64 byte
 levels for a ±128 signal — and flat outside it: `0x00` at or below −257 (the zero region) and
 `0xFF` from +256 (the tail). Over MUSIC0's first 4120 polls (`cargo test -p sr-audio --test mix --
---nocapture the_window_is_not_silent`): **972,036 samples above the silence entry, peak 32512,
+--nocapture the_window_is_not_silent`): **972,003 samples above the silence entry, peak 32512,
 256 distinct values**, and its first 120 polls: **3,719 of the window's samples are the silence
 entry, 115 distinct values, −15104 … 15360**. That is the release of record's own table doing
 what it does, and A14 carries the measurement.
@@ -1453,7 +1457,7 @@ the first five polls' sample counts: [570, 571, 571, 570, 571]
   (…)
 MUSIC0's first 120 polls: 68487 samples, 3719 of them the curve's silence (0), 115 distinct values, quietest -15104, loudest 15360
   (…)
-MUSIC0's first 4120 polls (2351396 samples): 972036 above the silence entry, peak 32512, 256 distinct values
+MUSIC0's first 4120 polls (2351396 samples): 972003 above the silence entry, peak 32512, 256 distinct values
   (…)
 64 rows at speed 6: 320178 samples, predicted 319872, difference 306 (0.0957 %), one tick is 833
   (…)
@@ -1480,7 +1484,7 @@ MUSIC1: 9 samples loop, 1 of them from 0 to the sample's end; 32 do not loop, 0 
   and a different order is a *different* stream, so the equality is not vacuous.
 - **The window is not silent.** Over the first 120 polls 3,719 of the 68,487 samples are the
   curve's silence entry (0 — the ramp's centre, the byte 0x80) and the rest take **115** distinct
-  values, −15104 … 15360; over 4120 polls — a minute — **972,036** of 2,351,396 samples are above
+  values, −15104 … 15360; over 4120 polls — a minute — **972,003** of 2,351,396 samples are above
   that entry, the peak is **32512** and the window reaches **256** distinct values, i.e. every
   byte from 0x00 to 0xFF. The mixer is producing signal through the table the machine holds, and
   that table is not a gate: a value of ±128 moves the byte ±64, so a voice is audible without
@@ -1777,8 +1781,8 @@ review showed it false for TUNNELI. What the demo's `whattorun` guards put in fo
 | part | the sequences that reach it | module and order at its start | how the value is known |
 |---|---|---|---|
 | TUNNELI | blocks 1 and 2 | **MUSIC1, 0** | the module is the restart's: block 1 takes `:813-818`'s `mov ax,1` / `mov bx,0` (its bit 0 is set) and block 2, whose bit 0 is clear, took `:772-775`'s other initial branch — also MUSIC1 at 0. **The order in force when TUNNELI begins is not established**: GLENZ has played since the restart and no block-1/2 music trace exists, so the restart's own order (0) is the value the evidence names |
-| CRED | block 5, and the full run (block 1) | **MUSIC0, 26** | the module is MUSIC0 in both sequences (block 5's entry restart at `:898-905` is order 25; block 1's mid-run `:880-885` is order 18 and it skips `:898-905`). The block-5 traces `second5`/`second5b` put the published music at **26:56 at reference index 1212**, CRED's tick 0 — measured |
-| ENDSCRL | block 5, and block 1 | **MUSIC0, 43** | the filed traces end at frame 1299, ~7,600 frames before ENDSCRL begins (~8917), so this is **derived, not measured**: advancing MUSIC0 from the block-5 restart (order 25 at frame 408) with the port's own player puts the engine at order 43 across the reference's whole ENDSCRL-start window (8841..8938) |
+| CRED | **every block** — every `partsmask` carries bit 4 (`0x1f`, `0x1e`, `0x1c`, `0x18`, `0x10`) | **MUSIC0, 26** | the module is MUSIC0 in every sequence: block 5 (bit 3 clear) takes the entry restart at `:898-905` (order 25), and blocks 1–4 (bit 3 set) take the mid-run `:880-885` restart at order 18 and skip `:898-905`. The block-5 traces `second5`/`second5b` put the published music at **26:56 at reference index 1212**, CRED's tick 0 — measured |
+| ENDSCRL | **every block**, the same two restart sites | **MUSIC0, 43** | blocks 1–4 reach it under `:880-885`'s MUSIC0@18 and block 5 under `:898-905`'s MUSIC0@25 — the sequence the filed traces cover. Those traces end at frame 1299, ~7,600 frames before ENDSCRL begins (~8917), so this is **derived, not measured**: advancing MUSIC0 from the block-5 restart (order 25 at frame 408) with the port's own player puts the engine at order 43 across the reference's whole ENDSCRL-start window (8841..8938) |
 
 `music_for_part`'s doc in `shell.rs` carries the same table and the same two caveats; its test
 asserts a row for every name `--part` accepts. The test card, which is the port's own part and

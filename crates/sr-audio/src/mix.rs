@@ -164,7 +164,7 @@ pub fn centre(level: u8) -> u16 {
 /// the port does not model it.)
 ///
 /// **Inaudible on the shipped modules.** Periods above `0x7FFF` do occur — a note-off parks
-/// `org_period` at `0xffff` (`player.rs:871-872`) and a vibrato adds its level to it — but only
+/// `org_period` at `0xffff` (`player.rs:890-891`) and a vibrato adds its level to it — but only
 /// on channels whose volume is 0, so no audible sample changes: the review's probe measured
 /// 2,408 such periods in MUSIC0 and 2,635 in MUSIC1, every one at volume 0, and the low bound
 /// never binds at all (the smallest non-zero period seen was `0x81`). `music.md` §10 records it.
@@ -665,7 +665,7 @@ impl Mixer {
 ///   (`stopped` is only ever set together with `speed = 0`).
 /// - `m_pos == 0xffff` at `+0x378e`/`+0x3791` (`mov 0x44(%bp),%si`; `cmp $0xffff,%si`; `je` to
 ///   the same return). The "volume 0" optimisation frees a channel by parking its position
-///   there (`effects.rs:297`), and the object's mixer then skips it; a port without the test
+///   there (`effects.rs:292`), and the object's mixer then skips it; a port without the test
 ///   would mix its (silent) sample *and advance its position*, which is a divergence no
 ///   shipped module lets you hear and one a later `G`/`O` note on the freed channel would.
 ///
@@ -919,7 +919,7 @@ mod tests {
     #[test]
     fn a_voice_freed_at_position_ffff_is_not_advanced() {
         // `+0x378e`/`+0x3791`: the object's voice routine compares `m_pos` with 0xffff and
-        // jumps to its return, so a channel the "volume 0" path freed (`effects.rs:297` parks
+        // jumps to its return, so a channel the "volume 0" path freed (`effects.rs:292` parks
         // the position there) is in neither the sums nor the position walk. The port's
         // `frame` advances only a voice `voice_contribution` accepted, so the assertion is
         // the channel's position: without the gate it moves.
