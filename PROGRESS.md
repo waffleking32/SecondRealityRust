@@ -12,7 +12,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
-| 3 | Music engine | **complete — untagged** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. **The tag waits for the review of the fix wave** | [03-music.md](docs/plans/03-music.md) | — |
+| 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The human listen is still the user's and is not claimed here | [03-music.md](docs/plans/03-music.md) | `phase-3` |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
@@ -41,9 +41,9 @@ staged runs in a scratch tree (5 → 6 → 7 under the plan's command, 11 more u
 in all) and checking every code change for behaviour-neutrality. Its words: "claims that do not
 reproduce are the exception here, not the rule".
 
-**Phase 3 (music) is complete on `phase-3-music`, and deliberately untagged** — its exit criteria
-are met and its evidence is recorded below, but the `phase-3` tag waits for the final whole-branch
-review (the plan's Task 9 Step 5; Phase 1's and Phase 2's practice). Its plan is
+**Phase 3 (music) is done on `phase-3-music`, and tagged `phase-3`** — its exit criteria are met,
+its evidence is recorded below, and the final whole-branch review ran and its findings were fixed
+and re-reviewed (the plan's Task 9 Step 5; Phase 1's and Phase 2's practice). Its plan is
 `docs/plans/03-music.md`, its per-task ledger (git-ignored scratch) is
 `.superpowers/sdd/03-music/progress.md`, its two notes are `docs/fidelity/music.md` and
 `docs/fidelity/music-clock.md`, and its decisions are **D26**, **D27**, **D28** and **D29**. The
@@ -1564,18 +1564,19 @@ a kind it does not know is **refused by name**, not walked past (measured in Tas
 #### The whole-branch review, the fix wave, and the tag
 
 **The review ran** over `53eb9c1..66ab915` in four slices and returned **0 Critical / 10 Important /
-30 Minor**. The adjudicated fix wave is the commit after `66ab915`; its per-finding record is
-`.superpowers/sdd/03-music/fix-wave-report.md` (git-ignored, like the ledger). The tag still waits —
-now for the **re-review of the fix wave's commits** — on Phase 1's and Phase 2's ruling that a tag
-which has to be moved is worse than a tag applied a few commits later. The phase's row reads
-`complete — untagged` until that re-review is clean.
+30 Minor**. The adjudicated fix wave is `316f2c0`, corrected by `c2e8266` and `7e80935`; its
+per-finding record is `.superpowers/sdd/03-music/fix-wave-report.md` (git-ignored, like the ledger).
+The fix wave was re-reviewed, and that re-review found six further false or stale claims — including
+four the wave itself had introduced — each corrected and re-checked before the tag. The tag goes on
+here, on Phase 1's and Phase 2's ruling that a tag which has to be moved is worse than a tag applied
+a few commits later.
 
 ## Phase log
 
-### Phase 3 — Music engine (complete — untagged)
+### Phase 3 — Music engine (done, `phase-3`)
 
-Nine tasks on branch `phase-3-music`, from `53eb9c1` to `b5e6f25` (56 commits; this close-out's own
-commits follow). **802 tests pass, zero failures, three ignored, zero warnings** (Phase 2 closed at
+Nine tasks on branch `phase-3-music`, from `53eb9c1` to this commit (63 commits).
+**806 tests pass, zero failures, three ignored, zero warnings** (Phase 2 closed at
 590, three ignored), and both clippy commands exit 0. Every number in the evidence section above was
 re-run at the committed state.
 
