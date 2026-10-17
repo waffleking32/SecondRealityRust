@@ -12,7 +12,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 0 | Foundation & harness | **done** | [00-foundation.md](docs/plans/00-foundation.md) | `phase-0` |
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
-| 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The human listen is still the user's and is not claimed here | [03-music.md](docs/plans/03-music.md) | `phase-3` |
+| 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
 | 4 | Music-synced tier A | not started | — | — |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
@@ -1484,9 +1484,15 @@ a kind it does not know is **refused by name**, not walked past (measured in Tas
   construction (the mixer's arithmetic is hand-computed from the module's bytes in `tests/mix.rs`),
   by internal invariants (determinism, non-silence, the samples-per-tick relation, the loop/one-shot
   census), by the object's own bytes read out of `STMIK.300`'s rebuilt image, and by a person's ears.
-  The listen itself is **still outstanding and is the user's**: it asks whether the music sounds
-  like the demo's and whether ENDLOGO holds about as long as it sounds like it should. Nothing here
-  reports it, and no test in the tree can stand in for it — Phase 0's single human look found a bug
+  **The listen is the user's and has now happened**: they ran the demo with `--audio-dump` and
+  report the music "sounds amazing" — the first question, whether it sounds like the demo's, answered
+  by the only instrument that can answer it. Their real-device runs skipped; the same WAV plays
+  perfectly on the Windows host outside the VM, and the skip follows the players rather than the file
+  (VLC and the default player both skip it differently, while the browser's audio is clean), so the
+  cause is the VirtualBox guest's audio path, not the port — recorded here rather than fixed in the
+  port, because there is nothing in the port to fix. The second question — does ENDLOGO hold about as
+  long as it sounds like it should — was not separately reported, and nothing here claims it. No test
+  in the tree can stand in for a listen — Phase 0's single human look found a bug
   (the SDL texture-format misread, `03a3b11`) that no test in the repository could see.
 - **The `--block 5` half of ENDLOGO's acceptance is a recorded comparison, not an assertion.** The
   automated keyframe test (`bins/secondreality/tests/endlogo.rs`) dumps under **`--part endlogo`
@@ -1638,8 +1644,10 @@ modelled. `zinfo` is 0 in every sample and its other values are unmeasured. `zpl
 and everything about a `255` are the object's code read out rather than the reference's behaviour
 measured. `GATE_ALIGNMENT_TICKS` is an alignment whose value equals the difference the acceptance
 absorbs, so the acceptance cannot falsify it. `dis_sync`'s far tier is refused and cannot be
-answered. **And the human listen is still outstanding and is the user's**: does it sound like the
-demo's music, and does ENDLOGO hold about as long as it sounds like it should.
+answered. **The human listen is done and is recorded above**: the user heard the music through
+`--audio-dump` and reports it "sounds amazing"; their real-device skips are the VM's audio path, not
+the port (the same WAV is perfect on the host). The ENDLOGO-duration question was not separately
+reported.
 
 ### Phase 2 — Shell + easy tier (done, tag `phase-2`)
 
