@@ -1408,3 +1408,36 @@ tool's planar *memory* read — 100 character rows and the zeros past them —
 not the displayed (row-doubled) picture, so it is a different geometry from
 the port's plane and is not compared. Its palette is 63 in every entry, so it
 could not validate a stride in any case. `docs/fidelity/lnszoom.md` §7.2.
+
+## A26 — 3DSINFLD: the render's vblank count is a fixed two, the reference's occasionally returns one (registered)
+
+**Part:** 3DSINFLD (`COMAN/MAIN.C` over `COMAN/ASM.ASM` and the generated
+`COMAN/THELOOP.INC`, Phase 5).
+
+The source's `frame += (frepeat = dis_waitb())` (`MAIN.C:105`, `:111`) takes
+whatever the DIS's INDEMO wait returns — the number of copper frames since
+the previous call (`DIS/DISINT.ASM:161-183`). The port's model is a fixed
+**two** (`VBLANKS_PER_ITERATION`), plus the frame-4 body's two waits
+(`MAIN.C:69-73`). It reproduces every keyframe byte for byte at measured
+ticks, but it drifts against the reference's own clock: the four keyframes
+are the port's ticks **464, 966, 1470 and 1772** and the reference's frames
+**15500, 16000, 16500 and 16800**, so the implied origin is **15036, 15034,
+15030 and 15028** — 2, 4 and 2 frames of drift across the 500-, 500- and
+300-frame spans. In iteration terms the reference renders 500 / ((966-464)/2)
+= **1.992** frames an iteration across the first span, where the port's two
+is about 0.4 % slow.
+
+The pictures do not depend on the count: the camera and wave cursors advance
+once an iteration, the palette is static, and `startrise` moves once a
+vblank, which the model reproduces at one a tick. The comparison is
+byte-identical at all four keyframes
+(`tests/coman.rs::the_four_keyframes_at_the_measured_ticks`, 0 differing
+pixels each), and `docs/fidelity/3dsinfld.md` §6 states the origin per
+keyframe rather than as an anchor.
+
+**Not adopted, and why the other side is not readable.** A variable model
+would need the release's render time, and neither the tree nor the reference
+records it: the block-3 music traces carry `ord`/`row`/`zframe`, not the
+part's waits, and `waitb_1`'s non-INDEMO arm is a literal 1 marked `TEMP!`
+(`:178-179`) while the INDEMO arm returns the count. The port keeps the
+model the pictures pin.

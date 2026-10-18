@@ -641,6 +641,19 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // row; no entry pre-roll is needed because the part ignores the
         // player.
         "panicend" => Some((ModuleId::Music1, 37)),
+        // 3DSINFLD is block 3's sixth part, after RAYSCRL. The filed block-3
+        // traces cross MUSIC1's order 91 -> 93 boundary at 15038
+        // (`second3d`; `second3b` at 15031) — order 92 is the `254` marker —
+        // and the part's start window is (15000, 15100] with no start frame
+        // of its own. Its gate (`COMAN/MAIN.C:56`) opens when `musplus` stops
+        // being negative, which is the order-93 row-0 crossing, so the order
+        // in force when the sequence reaches the part is **91** where the
+        // window opens and 93 at the gate. The row is **derived, not
+        // measured**: the window spans the crossing and the part marks no
+        // frame. 91 is the order the trace holds across the window's start;
+        // the part's `init` pre-polls the rest of order 91, the marker at 92
+        // and the published lag to the gate (`parts/coman.rs`).
+        "3dsinfld" => Some((ModuleId::Music1, 91)),
         _ => None,
     }
 }
@@ -1766,6 +1779,10 @@ mod tests {
             // `second2`'s `37:53..37:55` across the part's start window
             // (8780, 8790]; the part never reads the player.
             ("panicend", Some((ModuleId::Music1, 37))),
+            // The order the block-3 trace holds across the part's start
+            // window (15000, 15100]; derived, because the window spans the
+            // 91 -> 93 crossing and the part marks no start frame.
+            ("3dsinfld", Some((ModuleId::Music1, 91))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70
             // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
             ("ddstars", Some((ModuleId::Music0, 70))),
@@ -2614,9 +2631,10 @@ mod tests {
             ('1', Some("u2a")),
             ('2', Some("glenz")),
             // Block 3's chain now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL →
-            // RAYSCRL and stops at COMAN's `3dsinfld`, the first name the
-            // registry still lacks (LNS&ZOOM was the stop before Phase 5's Task 5).
-            ('3', Some("3dsinfld")),
+            // RAYSCRL → COMAN and stops at JPLOGO, the first name the registry
+            // still lacks (COMAN's `3dsinfld` was the stop before Phase 5's
+            // Task 8).
+            ('3', Some("jplogo")),
             ('4', Some("u2e")),
             ('5', None),
             ('U', None),

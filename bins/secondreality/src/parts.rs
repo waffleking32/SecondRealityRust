@@ -12,6 +12,7 @@
 
 pub mod alku;
 pub mod beglogo;
+pub mod coman;
 pub mod cred;
 pub mod ddstars;
 pub mod endlogo;
@@ -72,6 +73,9 @@ pub fn registry() -> &'static [PartEntry] {
         // inherits TECHNO's screen and collapses it to a dot
         // (`MAIN/U2.ASM:75`, `:826-827`).
         ("panicend", || Box::new(panicend::Panicend::new())),
+        // `COMAN/MAIN.C` over `ASM.ASM` and the generated `THELOOP.INC` — the
+        // 3D sinus field, block 3's sixth part (`MAIN/U2.ASM:856-874`).
+        ("3dsinfld", || Box::new(coman::Coman::new())),
     ]
 }
 
