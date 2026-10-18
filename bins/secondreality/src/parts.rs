@@ -16,6 +16,7 @@ pub mod cred;
 pub mod ddstars;
 pub mod endlogo;
 pub mod endscrl;
+pub mod lnszoom;
 pub mod minvball;
 pub mod mntscrl;
 pub mod pam;
@@ -44,6 +45,9 @@ pub fn registry() -> &'static [PartEntry] {
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
         // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).
         ("mntscrl", || Box::new(mntscrl::Mntscrl::new())),
+        // `LENS/MAIN.C` over `ASM.ASM` — the face wipe, the lens and the
+        // rotazoomer, block 3's second (`MAIN/U2.ASM:856-874`).
+        ("lnszoom", || Box::new(lnszoom::Lnszoom::new())),
         // `PLZPART/PLZ.C` over `VECT.C`, block 3's third (`MAIN/U2.ASM:856-874`).
         ("plzpart", || Box::new(plzpart::Plzpart::new())),
         // `DOTS/MAIN.C`, block 3's fourth (`MAIN/U2.ASM:856-874`).

@@ -1367,3 +1367,44 @@ repeats; the port cannot choose the split without the original's cycle costs.
 **Decision.** The port keeps the steady state (the boundary); the residual is
 registered with the split measurements. `docs/fidelity/plzpart.md` §4 carries
 the mechanism and the table. The diagnostic renders are under `out/`.
+
+## A25 — LNS&ZOOM: the release's face picture differs from the tree's `LENS.EXB` (registered), and the part 3 hand-over costs one frame more than the source's waits (adopted)
+
+**Part:** LNS&ZOOM (`LENS/MAIN.C` over `LENS/ASM.ASM`), Phase 5.
+
+**The picture (registered).** The port reads the tree's `LENS.EXB` in its
+original format — palette at +16, 64,000 pixels at +784 — and the wipe
+converges on it byte for byte. The reference's held face (2700's `.idx`)
+differs from that picture in **2,058 pixels**, all in the forehead (rows
+33..91, columns 129..211), every one a small palette-index change. The
+release embedded a later revision of the picture that is not in the tree (the
+`.LBM` source art is not the linked asset). D24's procedure: the difference is
+measured, and its consequences are pinned. The keyframes' residuals are
+exactly this picture seen through each act — 2,058 pixels at 2700 (3.2156 %,
+max delta 53), 1,935 behind the lens's bubble at 3400 (3.0234 %, max 48),
+0 at 4200 (the sampled region misses the forehead), 1,396 through the
+rotazoomer at 4900 (2.18125 %, max 41) and 0 on the white exit at 5650 — and
+patching the tree's picture with the reference's 2700 index plane makes 3400,
+4200 and 4900 **byte-identical**
+(`parts::lnszoom::tests::the_forehead_asset_difference_is_the_whole_residual`
+proves it). The numbers are pinned by `tests/lnszoom.rs`. "Verified" for
+LNS&ZOOM means a faithful port with this asset divergence registered, not a
+matching forehead.
+
+**The hand-over (adopted).** The source's explicit waits between the last
+lens draw (`MAIN.C:174`) and the first rotazoomer frame are seven — the lens
+loop's exit wait, the five-frame hold (`:179-182`) and the `waitb()` before
+`inittwk` (`:199`). The reference's pictures require eight: its 4200 is the
+path's frame 552 at boot 4200 and its 4900 frame 1252 at 4900, both exactly
+`T3 + frame` with `T3 = 3648`, while the lens's last draw is at 3640
+(`T2 = 2926`, pinned by the trace's `48:44` at 2925 and the lens's frame 474
+at 3400). The rotpic90 rotation (65,536 byte moves) and `inittwk`'s 64 KB
+`rep stosw` cost the release a vblank, so the port charges the setup two
+frames (`ROT_SETUP_FRAMES`). The adoption is measured, not read off the
+source, and the note's tick table states it.
+
+**5650's index plane (not adopted).** The reference's 5650 `.idx` is the
+tool's planar *memory* read — 100 character rows and the zeros past them —
+not the displayed (row-doubled) picture, so it is a different geometry from
+the port's plane and is not compared. Its palette is 63 in every entry, so it
+could not validate a stride in any case. `docs/fidelity/lnszoom.md` §7.2.

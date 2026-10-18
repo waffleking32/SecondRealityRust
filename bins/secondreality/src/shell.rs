@@ -616,6 +616,14 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // head start and its two gates are the part's (`parts/plzpart.rs`), because a
         // seek cannot cross the marker that is now in the past.
         "plzpart" => Some((ModuleId::Music1, 62)),
+        // LNS&ZOOM is block 3's second part, after MNTSCRL. The filed block-3 trace
+        // (`second3`) holds **MUSIC1 at order 45** at the part's start: frame 2452 reads
+        // `45:59` pattern 33 with `_np_zframe` 0 — the part's own `_dis_setmframe(0)`
+        // (`LENS/MAIN.C:106`) — and 2456 reads `45:60`. The seek starts at the order in
+        // force, 45; the part's `init` pre-polls the polls between row 0 and the measured
+        // `45:59` (`parts/lnszoom.rs`'s `MUSIC_PRE_ROLL`), which also puts the inter-act
+        // gate's `48:44` on the trace's boot 2925.
+        "lnszoom" => Some((ModuleId::Music1, 45)),
         "minvball" => Some((ModuleId::Music1, 75)),
         "rayscrl" => Some((ModuleId::Music1, 86)),
         _ => None,
@@ -1727,6 +1735,9 @@ mod tests {
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
+            // The order in force at the part's start window (2452, 2456]:
+            // `second3` frame 2452 is `45:59`, the part's `_dis_setmframe(0)`.
+            ("lnszoom", Some((ModuleId::Music1, 45))),
             // The order in force at the part's start window (5720, 5730]; the
             // `_dis_setmframe(0)` reset at 5723 is the part's tick 0.
             ("plzpart", Some((ModuleId::Music1, 62))),
@@ -2579,7 +2590,10 @@ mod tests {
         let expected: &[(char, Option<&str>)] = &[
             ('1', Some("u2a")),
             ('2', Some("glenz")),
-            ('3', Some("lnszoom")),
+            // Block 3's chain now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL →
+            // RAYSCRL and stops at COMAN's `3dsinfld`, the first name the
+            // registry still lacks (LNS&ZOOM was the stop before Phase 5's Task 5).
+            ('3', Some("3dsinfld")),
             ('4', Some("u2e")),
             ('5', None),
             ('U', None),
