@@ -14,7 +14,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
 | 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
-| 5 | Mid tier | **complete — untagged** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stops at U2E, block 2 still at GLENZ and block 1 at U2A. Evidence below; the final whole-branch review runs first and **the tag is withheld** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | — |
+| 5 | Mid tier | **done** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stops at U2E, block 2 still at GLENZ and block 1 at U2A. Evidence below. The final whole-branch review ran (fable, `e4f467e..7dae540`): **With fixes** — 0 Critical / 3 Important / 8 Minor — its findings are applied in `96ff6cc` and the scoped re-review is clean; **the tag is applied at this commit** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | `phase-5` |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
 | 8 | Vault | not started | — | — |
@@ -22,16 +22,17 @@ Phase status board. **Read this first if you are resuming work.**
 
 ## Where to pick up
 
-**Phase 5 (mid tier) is complete — untagged — on `phase-5-mid-tier`.** Its exit criterion
-(spec §10 — PLZPART, TECHNO, LENS, PANIC, JPLOGO, COMAN verified) is met, every criterion was
-re-run at the committed state, and the evidence is recorded below. Its plan is
+**Phase 5 (mid tier) is done, tagged `phase-5` at this commit, on `phase-5-mid-tier`.** Its exit
+criterion (spec §10 — PLZPART, TECHNO, LENS, PANIC, JPLOGO, COMAN verified) is met, every
+criterion was re-run at the committed state, and the evidence is recorded below. Its plan is
 `docs/plans/05-mid-tier.md`, its per-task ledger (git-ignored scratch) is
 `.superpowers/sdd/05-mid-tier/progress.md`, its six notes are
 `docs/fidelity/{plzpart,lnszoom,techno,panicend,3dsinfld,jplogo}.md`, and its decisions are
-**D31** (with D24, D25 and D29 binding). **Nothing is tagged here**: the final whole-branch review
-runs first, and the tag goes on only after its findings are applied (Phase 1/2/3/4's practice).
-The branch starts at `phase-4` (`e4f467e`): its first commit is the phase's plan, its second the
-three new music traces, and the rest the phase's ten tasks and their fix rounds.
+**D31** (with D24, D25 and D29 binding). **The final whole-branch review ran** (see its record
+below): its findings are applied in `96ff6cc` and the scoped re-review is clean, so the tag goes
+on here, per Phase 1/2/3/4's practice. The branch starts at `phase-4` (`e4f467e`): its first
+commit is the phase's plan, its second the three new music traces, and the rest the phase's ten
+tasks and their fix rounds.
 
 **Phase 4 (music-synced tier A) is done, tagged `phase-4` at this commit** on
 `phase-4-music-synced-tier-a`. Its exit criterion (spec §10 — ALKU, PAM, DDSTARS, DOTS,
@@ -2192,7 +2193,7 @@ rather than smoothed over.
 ```text
 $ cargo test --workspace
 (…)
-test result: ok. 355 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 17.25s
+test result: ok. 357 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 50.56s
 (…)
 test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 (…)
@@ -2370,9 +2371,9 @@ elides the other 43 targets' lines.)
 
 #### The phase's records, and what this close-out changed
 
-- `PROGRESS.md`'s Phase 5 row is **complete — untagged**, with the evidence above and the hand-off
-  list; the tag is deliberately withheld until the final whole-branch review's findings are
-  applied (Phase 1/2/3/4's practice).
+- `PROGRESS.md`'s Phase 5 row is **done** (it read complete — untagged at the close-out), with the
+  evidence above, the hand-off list and the review's record below; the tag is applied at this
+  commit (Phase 1/2/3/4's practice).
 - `docs/decisions.md` gains **D31** — the `music_fresh` seam's contract, PLZPART's `.INC` data
   filed verbatim, and the block-3 chain's no-loader-gap stance. D13's "`--block 3` cannot start at
   all" is corrected in place to the state the wiring produced. Nothing else in `decisions.md`
@@ -2406,19 +2407,58 @@ elides the other 43 targets' lines.)
 - `docs/fidelity/part-sequence.md` needed no change: the phase changed no block's contents, and its
   statements about the run order and the restart sites remain true.
 - The plan file (`docs/plans/05-mid-tier.md`) is not edited: it is the phase's historical argument.
-  Nothing is tagged in this task.
+
+#### The whole-branch review, the fix wave, and the tag
+
+**The review ran** over `e4f467e..7dae540` (base..head) on **fable** and returned **With fixes:
+0 Critical / 3 Important / 8 Minor**. The three Important findings were all A23's evidence:
+(1) the record's "every RATA translation word is zero" was a false absolute — the close-up control
+points (segments 15–26) are `dx = dy = 0, dz = 300`, constant; (2) the projection/extent fit
+rested on `out/` captures a fresh clone cannot re-run; and (3) the 8500 residual's 9.90 points of
+port-only page-slot spill was described as a measured release divergence when it is an unresolved
+port-side artifact. **The fix wave is `96ff6cc`**: A23's RATA claim is replaced with the measured
+control points and a deriving unit test, the six-frame band capture is committed under
+`reference/parts/plzpart/band/` with
+`the_projection_fit_is_the_committed_release_bands` reproducing the 213/100 vs 142/66 fit and the
+8500 phase (frames 136, page 4, start 0x0028, music 68:46), the page-slot spill is recorded as
+unresolved and every "verified" sentence that could be read as a matching cube is qualified, and
+the minors — PANICEND's 46/47 row, COMAN's row-57 comments, A27's scratch-sweep numbers, A1's
+"displayed area" wording, the two whitespace findings, the unreachable unswapped cube branch, and
+the reference tree's pinned counts (36 captures / 122 files) — are closed. A **scoped re-review**
+confirmed every finding addressed with **no new Critical or Important**.
+
+**On PLZPART, "verified" means a faithful port with A24's plasma tear and A23's registered cube
+divergences, not a matching cube.** The 8500 keyframe is **26.161 %**: 9.90 points of port-only
+page-slot spill — the port's own 200-row draw wraps through the 0x5500-byte page slot, and which of
+the release's page timing, clear or draw path keeps its frame clean was not captured, so the spill
+is an unresolved port-side artifact — and 16.10 points of both-set shade/pose. The 9500 close-up is
+**99.483 %** because the tree carries no camera data for frames 9100–9600 (the control points those
+frames interpolate are the constant `dz = 300` above). That close-up is the phase's **largest open
+fidelity question**.
+
+**Three Minors are parked by the controller for the next doc pass**: A27's new "640×200" geometry
+label should read 320×400; three stale prose residues — the "fourteen captures" phrasing at
+`plzpart.rs:251` and `:1762-1763` and `APPROXIMATIONS.md:1254`, and the unmarked x-scale sweep at
+`plzpart.md:306` and `APPROXIMATIONS.md:1290`; and the new band-fit corpus under
+`reference/parts/plzpart/band/` is ruled acceptable as a **third kind of reference** (a fit
+corpus), whose D19 amendment is due in that same pass. None of the three changes a number this
+record asserts.
+
+**The tag is applied at this commit**, per Phase 1/2/3/4's practice.
 
 ## Phase log
 
-### Phase 5 — Mid tier (complete — untagged)
+### Phase 5 — Mid tier (done, tag `phase-5`)
 
-Eleven tasks on branch `phase-5-mid-tier`, from `phase-4` (`e4f467e`) to this close-out (21
-commits; the first is the phase's plan, the second the three new music traces, and the last the
-final review's fix wave). **1,070 tests
+Eleven tasks on branch `phase-5-mid-tier`, from `phase-4` (`e4f467e`) to this close-out (23
+commits; the first is the phase's plan, the second the three new music traces, and the
+penultimate the final review's fix wave). **1,070 tests
 pass, zero failures, seven ignored, zero warnings** (Phase 4 closed at 935, seven ignored), and
 both clippy commands exit 0. Every number in the evidence section above was re-run at the
-committed state. **Nothing is tagged**: the final whole-branch review runs first and its findings
-are applied before the tag, per Phase 1/2/3/4's practice.
+committed state. **The final whole-branch review ran** (fable, `e4f467e..7dae540`): **With
+fixes** — 0 Critical / 3 Important / 8 Minor — fixed in `96ff6cc` and confirmed by a scoped
+re-review with no new Critical or Important. **The tag is applied at this commit**, per
+Phase 1/2/3/4's practice.
 
 **What was built.** Six parts under `bins/secondreality/src/parts/`, each a transliteration of its
 source into the `Part` API: **PLZPART** (the 320×400 plasma — the `.INC` tables in their original
