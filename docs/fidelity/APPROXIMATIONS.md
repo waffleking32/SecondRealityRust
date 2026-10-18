@@ -1150,3 +1150,40 @@ entry `dw 0BE72h,06D53h,00002h,0132Eh,0797Fh,00000h ;ALKU.EXE`
 (`MAIN/PACKFINA.INC:47`). The tree holds ALKU's sources and no built
 `ALKU/ALKU.EXE`, so the comparison is against the shipped frames only.
 `docs/fidelity/alku.md` §8 carries the frame-by-frame reading.
+
+## A21 — PAM: the reference's 7900 index plane is the next part's white field, not PAM's screen (registered, not adopted)
+
+**Part:** PAM (`PAM/OUTTAA.C`), Phase 4. **Original:** the reference's 7900
+frame carries both `.rgb` and `.idx`. The RGB is the flat `(251,251,251)`
+wash; the index plane is 64,000 bytes of **15**, and the frame's manifest
+palette entry 15 is `[62,62,62]`, which widens to 251.
+
+**Why that plane cannot be PAM's frame.** PAM's 7900 screen is its last drawn
+animation frame (0-based frame 39, 64 distinct indices) under the near-white
+63rd palette copy. The reference's plane is index 15 everywhere, which is
+**BEGLOGO's `WHITE_FIELD`** (`BEG/BEG.C:18-21` fills A-space with 15 before its
+own DAC writes; `bins/secondreality/src/parts/beglogo.rs`). The capture's
+indexed read runs after the RGB frame and costs about twenty rendered frames
+(D15); the reference's 7900 is inside the window before BEGLOGO's 320×400
+mode change in (7920, 7930] (`reference-indices.md` §6.5), so the read caught
+BEGLOGO's field while PAM's 63rd copy was still in the DAC. The coherence
+check cannot tell: every index of the white palette widens to one colour, the
+blind spot `reference-indices.md` §1.6 records.
+
+**Port:** the port draws the source's screen — animation frame 39 under
+palette copy 63 — whose RGB is byte-identical.
+
+**Measured difference.** RGB: **0 of 64,000 pixels** at 7710, 7760, 7830 and
+7900 (`cargo test -p secondreality --test pam -- --nocapture`). Index plane at
+7900: **60,375 of 64,000** pixels differ, max delta **194** (the frame's
+highest index 209 less 15); `cargo xtask compare --reference
+reference/parts/pam --rendered out/pam-port` reports it as 94.3359 % in its
+mixed mode. The port's plane equals `OUT.ANI`'s frame 39, asserted by
+`the_7900_index_plane_is_the_next_parts_white_field_not_pams_frame`.
+
+**Decision (D24's procedure, step 2).** The tree cannot produce the reference's
+plane at this index because the plane is not this part's screen; the port keeps
+its own drawing and the comparison at 7900 is RGB. Registered, not adopted.
+The lead is `BEG/BEG.C:18-21` and the reference's own
+`reference/parts/pam/manifest.json` palette override; `docs/fidelity/pam.md`
+§6 carries the frame-by-frame reading.

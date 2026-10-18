@@ -144,6 +144,35 @@ fn a_block_the_port_cannot_start_at_is_a_command_line_error_in_either_mode() {
 }
 
 #[test]
+fn a_part_anchored_at_a_boot_index_refuses_a_dump_before_it() {
+    // PAM's first drawn frame is the reference's 7710 (`reference-indices.md`
+    // §6.1), so a run that starts there walks away from 7709 — the same
+    // `first_unreachable` rule a block's anchor enforces. The run to check it
+    // never has to start.
+    let dir = scratch("pam-anchor");
+    let out = run(&[
+        "--headless",
+        "--part",
+        "pam",
+        "--dump-frames",
+        "7709",
+        "--dump-dir",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(USAGE),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("7709"),
+        "the refusal names the index: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn a_part_the_port_has_not_reached_is_a_command_line_error() {
     // The demo's own parts are named in the refusal: "glenz is not ported yet"
     // is a different answer from "glenzz is not a part", and a script can act

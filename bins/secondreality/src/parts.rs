@@ -18,6 +18,7 @@ pub mod endlogo;
 pub mod endscrl;
 pub mod minvball;
 pub mod mntscrl;
+pub mod pam;
 pub mod poslist;
 pub mod rayscrl;
 pub mod tunneli;
@@ -34,6 +35,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("testcard", || Box::new(TestCard::new())),
         // `ALKU/MAIN.C`, block 1's entry (`MAIN/U2.ASM:790-792`).
         ("alku", || Box::new(alku::Alku::new())),
+        // `PAM/OUTTAA.C`, block 1's third part (`MAIN/U2.ASM:793-799`).
+        ("pam", || Box::new(pam::Pam::new())),
         // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).
         ("beglogo", || Box::new(beglogo::Beglogo::new())),
         // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).

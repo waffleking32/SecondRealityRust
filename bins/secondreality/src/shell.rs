@@ -73,8 +73,9 @@ pub const BLOCKS: &[(char, u8)] = &[
 ///
 /// **This is only where a part begins when a run starts at that part.** A part
 /// the demo reaches mid-run begins wherever the parts before it left off, which
-/// is the chain's business, not this table's. Three parts have a measured
-/// anchor and they are all block entries:
+/// is the chain's business, not this table's. Four parts have a measured
+/// anchor — three block entries at 404, and one mid-block part whose first
+/// frame the reference names exactly:
 ///
 /// - `alku`, `beglogo` and `endlogo`, at **404**. `SECOND 1` runs ALKU first
 ///   (`MAIN/U2.ASM:790-792`), `SECOND 2` sets mode 13h + `inittwk` at
@@ -85,19 +86,38 @@ pub const BLOCKS: &[(char, u8)] = &[
 ///   BEGLOGO's first act is the white fill, which is what the screen holds
 ///   from there (§3.3 measures 410 and 429 byte-identical to 430); ENDLOGO's
 ///   white is up by 415 and holds (§19).
+/// - `pam`, at **[`PAM_ANCHOR`] (7710)**. Block 1's third part
+///   (`MAIN/U2.ASM:793-799`) is not an entry point, but its first drawn frame
+///   is measured: the flat wash at 7710 is byte-identical in three sessions
+///   and is the 63rd palette copy over the opening frame
+///   (`reference-indices.md` §6.1, §6.4), while 7700 is still U2A's landscape.
 ///
-/// Everything else returns `None`, and the three mid-block parts are why:
-/// TUNNELI, CRED and ENDSCRL begin after an unported predecessor or a music
-/// gate, and their starts are known only as **windows** — CRED's boundary is in
-/// (1200, 1240] and ENDSCRL's in (8840, 8940] (§20, §21). A number here would
-/// be a guess wearing a citation, and a run that starts at one of them is not
+/// Everything else returns `None`, and the mid-block parts without an anchor
+/// are why: TUNNELI, CRED and ENDSCRL begin after an unported predecessor or a
+/// music gate, and their starts are known only as **windows** — CRED's boundary
+/// is in (1200, 1240] and ENDSCRL's in (8840, 8940] (§20, §21); MNTSCRL's is
+/// the (415, 420] window §11.5 measures. A number here would be a guess wearing
+/// a citation, and a run that starts at one of them is not
 /// reference-comparable, which is what `None` makes it say.
 pub fn boot_anchor(part: &str) -> Option<u32> {
     match part {
         "alku" | "beglogo" | "endlogo" => Some(FIRST_GRAPHICS_FRAME),
+        "pam" => Some(PAM_ANCHOR),
         _ => None,
     }
 }
+
+/// PAM's first drawn frame in the reference's numbering: the flat
+/// `(251,251,251)` wash that is the 63rd palette copy over the opening frame.
+///
+/// **Measured, not a window.** `reference-indices.md` §6.1 found it by content
+/// — 7700 is still U2A's landscape and 7710 is the wash — and §6.4 records it
+/// byte-identical in three sessions; the frames either side (7709, 7711) are
+/// the same bytes too. PAM is block 1's third part (`MAIN/U2.ASM:793-799`), so
+/// its music recipe is the block's own `_zplaysong(0)`, whose clock starts at
+/// [`BLOCK_ONE_MUSIC_START_FRAME`]: a run starting here pre-polls the 7,310
+/// frames between the two (`MusicStart::for_part`).
+pub const PAM_ANCHOR: u32 = 7710;
 
 /// The smallest of `wanted` that a run starting at `start` can never reach.
 ///
@@ -268,7 +288,10 @@ pub fn music_start_frame_for(part: &str) -> u32 {
 ///   frame being drawn: `Player::poll` is the only thing that moves it, and N polls in a
 ///   row leave it exactly where N polls spread over N frames would. A `SECOND 3` run is
 ///   this case — MNTSCRL's first graphics frame is in (415, 420] while the music starts at
-///   408 — and so is every run whose entry point is not the demo's own start.
+///   408 — and so is every run whose entry point is not the demo's own start. **PAM is
+///   the port's measured case of it**: `--part pam` draws from 7710 while block 1's clock
+///   starts at 400, so it pre-polls 7,310 frames (`PAM_ANCHOR`,
+///   `reference-indices.md` §6.1).
 /// - A run whose numbering is **its own** (`index_is_reference` is false — `--part X`,
 ///   `--part testcard`) has no reference frame to synchronise to: its music starts with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -840,16 +863,16 @@ impl Sequence {
         // block-1 recipe starts at 400, so a `SECOND 1` run pre-polls four frames (the
         // player had ticked through 400-403 before the run's first drawn frame); the
         // restart recipes' entries — BEGLOGO and ENDLOGO at 404 against 408 — wait four
-        // frames instead. A catch-up past an anchor later than the recipe's start needs
-        // an entry point whose first frame is measured — MNTSCRL's is in (415, 420],
-        // which is `SECOND 3`'s, but `boot_anchor("mntscrl")` is `None` (its start is a
-        // window, not a measured frame), so no such run exists yet.
+        // frames instead. **PAM is the long catch-up**: `boot_anchor("pam")` is the
+        // measured 7710 against block 1's 400, so a `--part pam` run pre-polls 7,310
+        // frames before its first tick.
         //
-        // If one ever runs, two things about it are worth knowing before it is debugged: a
-        // catch-up longer than the ring (8192 samples) has its oldest samples dropped by the
-        // ring's own overflow policy — the same policy an undrained device meets — so a
-        // pre-polled run that also dumped its audio would begin slightly clipped; and the
-        // pre-poll is `poll` after `poll`, not a jump, because the music's advance is what
+        // Two things about a catch-up are worth knowing before it is debugged: one longer
+        // than the ring (8192 samples) has its oldest samples dropped by the ring's own
+        // overflow policy — the same policy an undrained device meets — so a pre-polled
+        // run that also dumped its audio would begin slightly clipped (PAM's 7,310 polls
+        // are such a run, and the headless dump sets no audio device); and the pre-poll is
+        // `poll` after `poll`, not a jump, because the music's advance is what
         // `Player::poll` does and nothing else moves it.
         for _ in 0..start.pre {
             crate::audio::lock(&player).poll();
@@ -1389,6 +1412,15 @@ mod tests {
     }
 
     #[test]
+    fn a_mid_block_part_whose_first_frame_is_measured_has_an_anchor() {
+        // PAM is block 1's third part and not an entry point, but its first
+        // drawn frame is the reference's own 7710 — a measured frame, not a
+        // window (`reference-indices.md` §6.1, §6.4).
+        assert_eq!(boot_anchor("pam"), Some(7710));
+        assert_eq!(PAM_ANCHOR, 7710);
+    }
+
+    #[test]
     fn a_mid_block_part_has_no_anchor_and_says_so() {
         // CRED starts in (1200, 1240] and ENDSCRL in (8840, 8940] — windows,
         // not frames. A number here would be a guess wearing a citation.
@@ -1675,6 +1707,7 @@ mod tests {
             // `SECOND 1`'s first parts run before any restart, under the initial
             // `_zplaysong(0)` (`MAIN/U2.ASM:766-775`).
             ("alku", Some((ModuleId::Music0, 0))),
+            ("pam", Some((ModuleId::Music0, 0))),
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
@@ -2248,6 +2281,13 @@ mod tests {
         assert_eq!(
             MusicStart::for_part("pam", Some(404)),
             MusicStart { frame: 404, waiting: 0, pre: 4 }
+        );
+        // **The catch-up run the port now has**: a `--part pam` run starts at
+        // the reference's 7710, 7,310 frames after the block-1 clock's start,
+        // and pre-polls all of them.
+        assert_eq!(
+            MusicStart::for_part("pam", Some(PAM_ANCHOR)),
+            MusicStart { frame: PAM_ANCHOR, waiting: 0, pre: 7310 }
         );
         // The restart recipes keep 408: BEGLOGO and ENDLOGO wait four frames.
         assert_eq!(
