@@ -1237,7 +1237,7 @@ not this divergence.
 own screen boundary; the release's value is adopted. `docs/fidelity/plzpart.md`
 §10 records the reading.
 
-## A23 — PLZPART: the release's cube projection is centred and 3/2 taller, and it draws the full screen, not the tree's 134 rows (adopted); its close-up camera translation is a release-side divergence (registered)
+## A23 — PLZPART: the release's cube projection is centred and 3/2 taller, and it draws the full screen, not the tree's 134 rows (adopted); its close-up camera data is absent from the tree (registered)
 
 **Part:** PLZPART (`PLZPART/VECT.C`, `PLZA.ASM`, `SPLINE.ASM`), Phase 5.
 **Original:** a 320×200 textured cube on a six-page flip whose music gate the
@@ -1254,13 +1254,24 @@ parses, word for word. A faithful port of the tree draws a 134-row cube with
 and `out/plz-diag-cube2`, the documented `SECOND 3` recipe at cycles 30000;
 the filed 8500/9500 are reproduced byte-identically in the same session) show:
 
-- **The extent.** Cube content reaches row 181 at boot 8500 and 199 at 9500;
-  the release draws the full 200-row screen. The port adopts
-  `CUBE_DRAWN_ROWS = 200` and a clear mirroring the draw (`CLEAR_LINES =
-  201`, the tree's 135/134 scaled to the clip). The page slots are 0x5500
-  bytes (136 rows), so a full-height draw crosses into the next slot — the
-  planar wrap the hardware has; the next page redraws the slot before it is
-  displayed.
+- **The extent.** The discriminating evidence is the lower band's face
+  continuation: at 8500 the 134-row render fills the band below row 133 with
+  the wrapped top face carried through the page slot, and its content reaches
+  row 199 anyway; the band-silhouette fits below are the second line. Cube
+  content reaches row 181 at boot 8500 and 199 at 9500, so the release draws
+  the full 200-row screen. The port adopts `CUBE_DRAWN_ROWS = 200` and a clear
+  mirroring the draw (`CLEAR_LINES = 201`, the tree's 135/134 scaled to the
+  clip).
+- **The page-slot wrap (registered, not adopted).** The slots are 0x5500 bytes
+  (136 rows), so a full-height draw crosses into the next slot. The committed
+  full-extent render shows the wrap — the wrapped top face and background
+  spill at rows 0–32 and 182–199 and inside the band — where the reference's
+  8500 frame is clean (its content spans rows 33–181). The release's page
+  timing/clear relationship therefore differs from the port's; the spill is
+  measured as the 6,333 port-only pixels (9.90 points, 2,805 of the 3,137
+  delta-247 pixels) in the 8500 residual, and is registered. The earlier claim
+  that the next page redraws the slot before display is contradicted by the
+  committed render and is not made.
 - **The phase.** The entry pre-roll is **8 polls**: the `musplus() >= 13`
   gate passes at manifest 2641 = boot 8364 (the trace's first order-68 row
   13), the first draw is boot 8365, and at the 8500 keyframe the part is at
@@ -1289,19 +1300,41 @@ pins 213/100, `the_cube_draws_the_releases_full_screen` pins 200/201, and
 `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` pins the gate
 at 2641 — each fails if reverted (mutation checks in the task report).
 
+**The 8500 residual's attribution.** 16,743 pixels of 64,000 differ: 6,333
+port-only (9.90 points; 2,805 of the frame's 3,137 delta-247 pixels are the
+spill), 105 reference-only (0.16 points), and 10,305 both-set and differing
+(16.10 points). 8,677 of the both-set differences are ≤ 20 (deltas 4/8/12 the
+most common, 5,084/1,802/713); 332 more are at 247. The port-only part is the
+page-slot spill registered above; the both-set part is shade/pose.
+`the_cube_keyframes_are_measured_and_recorded` pins the counts.
+
 **The residual that remains is registered, not adopted.** The close-up frames
-9100–9600 need a frame-dependent screen translation the tree's camera data
-cannot carry: every RATA translation word in those segments is zero. The 9500
-keyframe therefore stands at **99.483 %**. The keyframe values are pinned
-exactly by `the_cube_keyframes_are_measured_and_recorded`: 8500 **26.161 %**
-(max delta 247), 9500 **99.483 %** (max 255). The plasma keyframes are
-unaffected (11.209/5.848/4.052 %).
+9100–9600 need frame-dependent camera data the tree does not carry: every
+RATA translation word in those segments is zero. This is **absent release
+camera data**, not a translation the port can apply. A global alignment (a
+wider search than the projection fit's [−40, 40]) confirms translation cannot
+explain the frame: the recorded best shift moves the reference by (−32, +83)
+(the port by (+32, −83)); over the 288×117 overlap
+the silhouette masks XOR in 10.33 % of the region (10.47 % with the reviewer's
+border convention; IoU 0.897), and 99.95 % of the 30,214 common pixels still
+differ (max delta 255, mode 194, 9,226 of the common pixels). The 9500
+keyframe therefore stands at **99.483 %**. The keyframe values are pinned to
+0.001 points (percentages) and exactly (max deltas) by
+`the_cube_keyframes_are_measured_and_recorded`: 8500 **26.161 %** (max delta
+247), 9500 **99.483 %** (max 255), with the 8500 decomposition and the 9500
+aligned counts pinned beside them. The plasma keyframes are unaffected
+(11.209/5.848/4.052 %).
 
 **Decision (D24's procedure).** The extent, the projection and the entry
 phase are single-value release divergences and are adopted; the close-up
 camera path is a multi-value data difference the tree cannot supply and is
-registered. The diagnostic captures are under `out/`; `reference/` stays
-input-only.
+registered, and the page-slot spill is a port-vs-release page-timing/clear
+difference that is registered. The far-keyframe residual is registered at
+**26.161 %**: 9.90 points port-only page spill and 16.10 points both-set
+shade/pose, with 0.16 points reference-only. "Verified" for PLZPART means a
+faithful port with A24's plasma tear and these cube divergences registered —
+not a matching cube. The diagnostic captures are under `out/`; `reference/`
+stays input-only.
 
 ## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
 

@@ -551,14 +551,14 @@ impl Tables {
 
     /// The sine segment as the C reads it.
     ///
-    /// `sinit[0..1024]` is the file's first 2,048 bytes. The file's remaining
+    /// `sinit[0..1024]` is the file's first 2,048 bytes; the file's remaining
     /// 527 bytes are the stray repeat `INCLUDE.ASM:33-36` also links
-    /// (`KAKKA5` is 0xA0F bytes), and `kosinit[k] = sinit[k+512]` can reach
-    /// `sinit[1535]`. Past byte 2,575 the linker puts the next paragraph's data:
-    /// one padding byte, then `PLZFILL5_DATA`'s `vmem` (a far pointer
-    /// `MK_FP(0xa000,0)`) and `buu`, the RATA words (`PLZPART.MAP:25-26`,
-    /// `:270`). The port keeps that continuation byte for byte; it is only read
-    /// for `k > 775`, and the keyframes' `k` stay below it.
+    /// (`KAKKA5` is 0xA0F bytes). `kosinit = sinit + 512` adds 512 **bytes**
+    /// (256 words), so `kosinit[k]` with `k <= 1023` reads at most word
+    /// 1,279 — inside the file's 1,287 words. Past byte 2,575 the linker put
+    /// one padding byte, then `PLZFILL5_DATA`'s `vmem` and `buu`
+    /// (`PLZPART.MAP:25-26`, `:270`); the port keeps that continuation byte
+    /// for byte, though no read of the cube reaches it.
     fn build_sinit(&self, values: &[i32]) -> Vec<i16> {
         let mut bytes = Vec::with_capacity(SINIT_WORDS * 2);
         bytes.extend(values.iter().map(|&v| v as u8));
@@ -809,7 +809,7 @@ pub struct Plzpart {
     /// `PLZFILL.C:22,24`: the eight edge-list slots and the rotation cursor.
     clrtau: Vec<[i32; 2]>,
     clrptr: usize,
-    /// `VECT.C:101-108`: the object, its projected points and the draw list.
+    /// `VECT.C:74-92`: the object, its projected points and the draw list.
     points: [[i32; 3]; 8],
     xx: [[i32; 3]; 8],
     xxx: [[i32; 2]; 8],
@@ -1140,8 +1140,9 @@ fn apply_plasma_view(state: &CopperState, ctx: &mut PartCtx) {
 }
 
 /// The periodic mask tables (`PLZA.ASM:13-20`), flattened so that
-/// `end_mask[x-1]` at `x = 0` reads the byte before `end_mask` — the same
-/// `0x0F` the periodic table would give.
+/// `end_mask[x-1]` at `x = 0` reads the byte before `end_mask` —
+/// `start_mask`'s last entry, `0x08` (its final `1000b`), not the `0x0F` the
+/// periodic pattern would give at `x = 3`.
 fn build_masks() -> Vec<u8> {
     let mut masks = vec![0u8; MASK_TABLE_LEN];
     let start = [0b1111u8, 0b1110, 0b1100, 0b1000];
@@ -1891,8 +1892,8 @@ impl Plzpart {
         }
     }
 
-    /// The clock at a texture address: `dist1[dd*16 + bx]` (unsigned) and then
-    /// the texture byte at `bx + dist` (`PLZA.ASM:130-166`).
+    /// The clock at a texture address: `dist1[dd*256 + bx]` (unsigned) and
+    /// then the texture byte at `bx + dist` (`PLZA.ASM:130-166`).
     fn texture_sample(&self, bx: u16) -> u8 {
         // `dseg = disttaus[color] + dd*16` adds **16 paragraphs** (256 bytes)
         // to the segment, so the warp shifts `dist1` by `dd` 256-byte rows.
@@ -2343,11 +2344,13 @@ mod tests {
 
     #[test]
     fn the_cube_draws_the_releases_full_screen() {
-        // The tree's development build clips at row 134 (`PLZA.ASM:77`), but
-        // the fourteen captures show cube content to row 181 at boot 8500 and
-        // 199 at 9500, so the release draws the full 320x200 screen; the
-        // clear mirrors the draw (the tree's 134-row clip walks 135/134
-        // lines). Reverting either value must fail here.
+        // The tree's development build clips at row 134 (`PLZA.ASM:77`); the
+        // discriminating capture evidence is the lower band's face
+        // continuation (the 134-row render fills it with the wrapped top face
+        // through the page slot, and its content reaches row 199 anyway) and
+        // the band-silhouette fits, so the release draws the full 320x200
+        // screen. The clear mirrors the draw (the tree's 134-row clip walks
+        // 135/134 lines). Reverting either value must fail here.
         assert_eq!(CUBE_DRAWN_ROWS, 200);
         assert_eq!(CLEAR_LINES, CUBE_DRAWN_ROWS + 1);
     }
@@ -2665,9 +2668,9 @@ mod tests {
     #[test]
     fn the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick() {
         // The reference's published row 13 of order 68 first appears at boot
-        // 8364 (second3a's trace), i.e. part tick 8364 - 5723 = 2641 (the
-        // part's 1-based `tick`; 0-based 2640). The
-        // player is seeked to order 62 when the part starts; the published
+        // 8364 (second3a's trace), i.e. manifest index 8364 - 5723 = 2641
+        // (the dump's 0-based numbering; the part's 1-based `tick` is 2642).
+        // The player is seeked to order 62 when the part starts; the published
         // words are eleven polls behind the trace's position, so the entry
         // pre-roll is what puts the gate's first pass at the reference tick.
         // This poll is the measurement, not a preference.

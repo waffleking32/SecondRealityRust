@@ -248,8 +248,12 @@ exercises slots 1 and 2 through the engine's order, and
 | 8500 | 2777 | **26.161 %** | 247 |
 | 9500 | 3777 | **99.483 %** | 255 |
 
-The tests assert those values exactly (not within a tolerance): the run is
-deterministic.
+The tests pin the percentages to 0.001 points and the max deltas exactly: the
+run is deterministic. **"Verified" for this part means a faithful port with
+the divergences below registered, not a matching cube**: the plasma's
+CPU-timing tear (A24), the 8500 residual's page spill and shade (26.161 %,
+attributed below), and the 9500 close-up's absent release camera data
+(99.483 %) are the recorded differences.
 
 **The phase.** The music gate is the trace's: with the entry pre-roll of
 **8 polls** the `musplus() >= 13` gate passes at manifest 2641 = boot 8364,
@@ -263,15 +267,26 @@ a diagnostic render of the corrected phase at the tree's 134-row extent
 measured 25.467 %, and the release extent measures 26.161 %.)
 
 **The extent.** The tree's development build clips the cube's rasteriser at
-row 134 (`PLZA.ASM:77`), which is why the port's early renders stopped there
-and showed the next page buffer's top face in the lower band. The release
-draws the full screen: the captures' cube content reaches row 181 at 8500 and
-199 at 9500. The port adopts `CUBE_DRAWN_ROWS = 200` and a clear that mirrors
-the draw (`CLEAR_LINES = 201`, the tree's 135/134 scaled to the clip), so the
-displayed window's lower rows are the same draw's face continuation rather
-than the wrapped top face. The page slots are 0x5500 bytes (136 rows), so a
-200-row draw crosses into the next slot; that is the hardware's own planar
-wrap and the next page redraws the slot before it is displayed.
+row 134 (`PLZA.ASM:77`). The discriminating evidence that the release does
+not is the lower band's face continuation — at 8500 the 134-row render fills
+the band below row 133 with the wrapped top face carried through the page
+slot, and its content reaches row 199 anyway — together with the
+band-silhouette fits below, not a bare content bottom row. The captures' cube
+content reaches row 181 at 8500 and 199 at 9500, so the port adopts
+`CUBE_DRAWN_ROWS = 200` and a clear that mirrors the draw (`CLEAR_LINES =
+201`, the tree's 135/134 scaled to the clip).
+
+**The page-slot wrap is a registered port-vs-release difference.** The page
+slots are 0x5500 bytes (136 rows), so a 200-row draw crosses into the next
+slot. The committed full-extent render shows that wrap: the wrapped top face
+and background spill remain at rows 0–32 and 182–199 and inside the band,
+where the reference's 8500 frame is clean (its content spans rows 33–181). The
+port's display of page 4 at start 0x0028 exposes the spill; the release's
+does not, so the release's page timing/clear relationship differs from this
+port's. It is registered, not asserted away: the spill is the 6,333 port-only
+pixels (2,805 of the 3,137 delta-247 pixels) in the attribution below. The
+earlier reading that the next page redraws the slot before it is displayed is
+contradicted by the committed render and is not claimed.
 
 **The projection.** The tree's build is unambiguous: `VECT.OBJ` compiles
 `sar eax,0x16` in `count_const`, `imul eax,eax,0x8e` (142) and `add ax,0x42`
@@ -299,10 +314,28 @@ The fit is flat over y scale 206–216 at origin 100 (the earlier sweep);
 213 is the 3/2 value. The full-frame comparison at the release extent is the
 keyframe verdict, not the projection fit.
 
-**The close-ups.** The 9100–9600 frames need a frame-dependent screen
-translation the tree's camera data cannot carry: every RATA translation word
-in those segments is zero. The 9500 keyframe's 99.483 % is that registered
-camera-data divergence (A23, registered), not an unexplained port error.
+**The 8500 residual's attribution.** The 26.161 % is 16,743 pixels of 64,000:
+6,333 are port-only (set in the port, unset in the reference: 9.90 points),
+105 reference-only (0.16 points), and 10,305 both-set and differing (16.10
+points). 2,805 of the port-only pixels are the spill's bright delta-247 pixels
+(2,805 of the frame's 3,137 delta-247 pixels); the both-set differences are
+the shading/pose family at mostly small deltas — 8,677 of the 10,305 are ≤ 20,
+with 4/8/12 the most common (5,084/1,802/713) and 332 more at 247.
+`the_cube_keyframes_are_measured_and_recorded` computes and pins this
+decomposition.
+
+**The close-ups.** The 9100–9600 frames need frame-dependent camera data the
+tree does not carry: every RATA translation word in those segments is zero.
+That is **absent release camera data**, not a translation the port can apply.
+A global alignment (a wider search than the projection fit's [−40, 40])
+confirms that translation cannot explain the frame: the recorded best shift
+moves the reference by (−32, +83) (the port by (+32, −83));
+over the 288×117 overlap the silhouette masks XOR in 10.33 % of the region
+(10.47 % with the reviewer's border convention; IoU 0.897), and 99.95 % of the
+30,214 common pixels still differ (max delta 255, mode 194, 9,226 of the
+common pixels). The 9500 keyframe's 99.483 % is that registered data
+divergence (A23, registered), not an unexplained port error.
+`the_cube_keyframes_are_measured_and_recorded` pins the aligned counts.
 
 **What was found and fixed on the way:**
 
@@ -310,7 +343,9 @@ camera-data divergence (A23, registered), not an unexplained port error.
   (36 written lines plus 100 repeated), not 37. The parser expands
   `REPT`/`ENDM` (1,088 words); the fix does not change the 8500/9500
   residuals (frames 136/1136 use segments 6/21, inside the 37 explicit
-  points), but a run past frame ~1984 would have indexed past the table.
+  points), but a run past frame 1920 — segment 34 is the first whose `getspl`
+  fraction reads past the 37 explicit control points — would have indexed
+  past the table.
   `getspl_interpolates_the_camera_spline_at_the_keyframes` pins the repeated
   tail (`[0,0,499,0,0,0,255,511]` at frames 3000/6000).
 - **The `dist1` warp scale.** `dseg = disttaus[color] + dd*16` adds 16
@@ -335,13 +370,16 @@ diagnostic captures are under `out/`; `reference/` is input-only.
 - **The seek.** `shell::music_for_part("plzpart") = (Music1, 62)`: order 62 is
   where `reference/music/second3a/trace.csv` holds the sequence when the
   part's start window opens.
-- **The entry pre-roll is 9 polls**, guarded on `ctx.music_fresh()`. The
-  player's published words lag the reference's when the part starts; with nine
-  pre-polls the cube gate (`musplus() >= 13`) passes at the reference's boot
-  8364. The test measures it with the real player, not a
-  constant: nine pre-polls, the tick-0 engine poll, then the first poll whose
-  `musplus` reaches 13 (0-based 2640 = the part's 1-based 2641 = boot 8364).
-  A mid-chain start has already run through those polls and takes none.
+- **The entry pre-roll is 8 polls**, guarded on `ctx.music_fresh()`. The
+  player's published words lag the reference's when the part starts; with
+  eight pre-polls the cube gate (`musplus() >= 13`) passes at the reference's
+  boot 8364. The test measures it with the real player, not a constant: eight
+  pre-polls, the tick-0 engine poll, then the first poll whose `musplus`
+  reaches 13 at **manifest 2641** = boot 8364 (the dump's 0-based numbering;
+  the part's 1-based tick is 2642). The corrected-phase manifest then reads
+  the trace's published position at boot 8500, **68:46**, matching
+  `reference/music/second3a/trace.csv`; the nine-poll phase read 68:47. A
+  mid-chain start has already run through those polls and takes none.
 - **The plasma's gate** (`PLZ.C:68`) is the same position: the seek has
   already put an entry run where the reference's `musplus >= 0` was waiting,
   and the `254` at MUSIC1 order 61 that gave the reference `zplus == 2` is
@@ -349,11 +387,12 @@ diagnostic captures are under `out/`; `reference/` is input-only.
   source's `musplus() >= 0`.
 - **The cube's exit** is `-4 <= musplus < 0` (`VECT.C:119-120`), long after
   the two keyframes.
-- **A publication-phase note.** At boot 8500 the trace's published position is
-  `68:46`; the port's is `68:47` (manifest of the keyframe dump), one row
-  early. The gate frame itself is the same (row 13 at 8364), so this is the
-  DIS's publication instant, not the seek or the pre-roll; the note records it
-  rather than hiding it. No keyframe's pixels depend on it.
+
+**What "verified" means for this part.** With the music row matching the trace
+at 68:46, the part's remaining differences are the registered ones — A24's
+plasma tear, the cube's 26.161 % page spill + shade, and the 99.483 %
+close-up. "Verified" means a faithful port with those divergences registered,
+not a matching cube.
 
 ## 9. The preserved bugs
 
@@ -389,9 +428,11 @@ diagnostic captures are under `out/`; `reference/` is input-only.
 - **The cube's projection is the release's, not the tree's (§7, A23).** The
   release's y scale (213) and origin (100) are measured against fourteen
   captures and adopted; the tree's `VECT.OBJ` compiles 142/66. The remaining
-  close-up camera translation is a release-side data difference the tree
-  cannot supply, so the 9500 keyframe is registered (94.706 %) rather than
-  explained away.
+  8500 residual — 26.161 %, of which 9.90 points is the port-only page-slot
+  spill and 16.10 points both-set shade/pose — and the close-up's camera data,
+  which the tree does not carry (the 9500 keyframe is registered at 99.483 %),
+  are recorded, not explained away. "Verified" for this part means a faithful
+  port with these divergences registered.
 - **The plasma's tear timing (§4, A24).** The reference frame's per-pass
   parameter latch depends on the original's execution time; the port's fixed
   tick draws the loop's phase-locked steady state. The split-position
@@ -404,11 +445,12 @@ cargo test -p secondreality --bin secondreality parts::plzpart
 cargo test -p secondreality --test plzpart -- --nocapture
 ```
 
-The 19 unit tests cover the data, the map, the plasma expression, the
+The 22 unit tests cover the data, the map, the plasma expression, the
 timetable, the release exit, `dtau`/the split walk, the split/pan parity, the
-spline, the projection, `count_const`, the mask underflow, the beam wrap, the
-clear, the synthetic rasteriser cases and the music gate. The three
-integration tests cover the registry and the two screens, the music row, the
-three plasma keyframes (bounded) and the two cube keyframes (measured and
-pinned). The five RGB reference files are `reference/parts/plzpart/{plasma,cube}/`;
+spline (including the `REPT` tail), the projection, `count_const`, the mask
+underflow, the beam wrap, the clear, the texture warp, the synthetic
+rasteriser cases, the wait walks and the music gate. The three integration
+tests cover the registry and the two screens, the music row, the three plasma
+keyframes (bounded), and the two cube keyframes (measured and pinned, with the
+8500 decomposition and the 9500 aligned measurement pinned beside them). The five RGB reference files are `reference/parts/plzpart/{plasma,cube}/`;
 `cargo xtask reference verify --tree reference` checks the tree.
