@@ -626,6 +626,13 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         "lnszoom" => Some((ModuleId::Music1, 45)),
         "minvball" => Some((ModuleId::Music1, 75)),
         "rayscrl" => Some((ModuleId::Music1, 86)),
+        // TECHNO is block 2's fourth part. `second2`'s trace holds MUSIC1 at
+        // order **18** across the part's start window — frame 4797 reads
+        // `18:60`, pattern 3, the row `KOE.C:214`'s `setmframe(0)` leaves in
+        // place — and the order in force when the sequence reaches it is 18.
+        // The seek starts at 18; the entry run's pre-roll is the part's
+        // (`parts/techno.rs`), which lands the published row at the trace's 60.
+        "techno" => Some((ModuleId::Music1, 18)),
         _ => None,
     }
 }
@@ -1743,6 +1750,8 @@ mod tests {
             ("plzpart", Some((ModuleId::Music1, 62))),
             ("minvball", Some((ModuleId::Music1, 75))),
             ("rayscrl", Some((ModuleId::Music1, 86))),
+            // `second2`'s `18:60` at 4797, the part's start window.
+            ("techno", Some((ModuleId::Music1, 18))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70
             // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
             ("ddstars", Some((ModuleId::Music0, 70))),

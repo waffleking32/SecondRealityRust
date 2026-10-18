@@ -23,6 +23,7 @@ pub mod pam;
 pub mod plzpart;
 pub mod poslist;
 pub mod rayscrl;
+pub mod techno;
 pub mod tunneli;
 
 use sr_engine::part::Part;
@@ -64,6 +65,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("cred", || Box::new(cred::Cred::new())),
         // `ENDSCRL/MAIN.C`, block 5's last (`MAIN/U2.ASM:914-917`).
         ("endscrl", || Box::new(endscrl::Endscrl::new())),
+        // `TECHNO/KOE.C`, the interference, the bars and the troll.
+        ("techno", || Box::new(techno::Techno::new())),
     ]
 }
 
