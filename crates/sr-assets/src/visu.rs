@@ -1,11 +1,13 @@
 //! VISU's packed scene formats: the master `.00M`, the scene list `.0AA`, the
 //! animation stream `.0AB`, and the object files `.00N`.
 //!
-//! The vector engine's own tool wrote these (`VISU/C/MAIN.C` and `SAVE.C`) and
-//! the two parts read them back (`VISU/C/U2A.C:148-219`, `U2E.C:208-263`).
-//! None of them has a magic, so each is *loaded by construction*: the caller
-//! knows which of the four it holds, and this module's four functions are the
-//! doors.
+//! The vector engine's own tool wrote these: the `.00M` master, the `.0AA`
+//! scene list and the `.00N` block files from `VISU/C/MAIN.C` and `SAVE.C`,
+//! and the `.0AB` stream from `VISU/C/READVUE.C:149-255`. The two parts read
+//! them back (`VISU/C/U2A.C:148-219`, `U2E.C:208-263`, and the animation
+//! decoders at `U2A.C:336-430`, `U2E.C:445-539`). None of them has a magic, so
+//! each is *loaded by construction*: the caller knows which of the four it
+//! holds, and this module's four functions are the doors.
 //!
 //! ## The master, `.00M`
 //!
@@ -31,17 +33,25 @@
 //! ## The animation stream, `.0AB`
 //!
 //! One frame after another, each ended by `0xFF b` with `b <= 0x7F`, which
-//! sets the frame's field of vision to `b << 8` (`U2A.C:359-367`) — the parts
-//! pass the high byte to `vid_cameraangle`, so [`Frame::fov`] is `b`.
-//! `0xFF 0xFF` ends the stream: the original calls `resetscene()` and sets its
-//! exit flag (`:368-372`). A command is one byte, optionally extended by a
-//! `0xC0`-flagged byte carrying the object's high six bits; its low nibble is
-//! the object number and its bits 6..7 toggle that object on or off. Bits 4..5
-//! select the size of a *pflag* byte — zero, one, two or three bytes — and the
-//! pflag's bits 0..1, 2..3 and 4..5 select the size of the x, y and z deltas
-//! (0, 1, 2 or 4 bytes), bit 6 whether the nine matrix deltas are words or
-//! bytes, and bits 7..15 which of those nine entries move (`:373-466`). The
-//! deltas are signed and the caller adds them; this module only decodes.
+//! sets the frame's field of vision to `b << 8` (`U2A.C:348`, `U2E.C:457`).
+//! The parts pass that 16-bit value to `vid_cameraangle` (`U2A.C:287`,
+//! `U2E.C:397`), so [`Frame::fov`] is its high byte and a consumer reconstructs
+//! the angle as `u16::from(fov) << 8`. `0xFF 0xFF` ends the stream: the
+//! original calls `resetscene()` and sets its exit flag (`U2A.C:351-355`).
+//! The frame it terminates carries `end: true`, `fov: 0` and no commands; an
+//! empty command list alone does not mean END, because U2A frames 1..=15 and
+//! 30 of U2E's drawable frames are legitimately commandless. A command is one
+//! byte, optionally extended by a `0xC0`-flagged byte carrying the object's
+//! high six bits; its low nibble is the object number and its bits 6..7 toggle
+//! that object on or off. Bits 4..5 select the size of a *pflag* byte — zero,
+//! one, two or three bytes — and the pflag's bits 0..1, 2..3 and 4..5 select
+//! the size of the x, y and z deltas (0, 1, 2 or 4 bytes), bit 6 whether the
+//! nine matrix deltas are words or bytes, and bits 7..15 which of those nine
+//! entries move (`U2A.C:382-428`). A `0xFF` followed by a byte above `0x7F`
+//! other than `0xFF` is not a terminator: the original falls through with that
+//! byte and decodes it as a command (`U2A.C:343-361`), which
+//! [`read_animation`] mirrors. The deltas are signed and the caller adds them;
+//! this module only decodes.
 //!
 //! An object number at or past `conum` is an error: the original returns 3
 //! rather than reading past `co[]` (`U2A.C:337-340`, `U2E.C:491-494`).
@@ -248,11 +258,17 @@ pub fn read_scene_list(bytes: &[u8]) -> Result<SceneList, AssetError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// The high byte of the field of vision this frame's `0xFF b` terminator
-    /// sets. The `0xFF 0xFF` frame that ends a stream sets none, and holds 0;
-    /// the original exits before drawing it.
+    /// sets; reconstruct the 16-bit angle as `u16::from(fov) << 8`, which is
+    /// what the parts hand to `vid_cameraangle`. The `0xFF 0xFF` frame that
+    /// ends a stream sets none, and holds 0; the original exits before drawing
+    /// it.
     pub fov: u8,
-    /// The commands in file order.
+    /// The commands in file order. Empty in the END frame.
     pub ops: Vec<Op>,
+    /// True only for the stream's terminating `0xFF 0xFF` frame, which is
+    /// always the last one. An empty [`ops`](Frame::ops) does **not** mean
+    /// END: many drawable frames carry no commands.
+    pub end: bool,
 }
 
 /// One command in an `.0AB` frame.
@@ -351,8 +367,13 @@ pub fn read_animation(bytes: &[u8], conum: usize) -> Result<Animation, AssetErro
                 }
                 if next == 0xFF {
                     // resetscene() and xit in the original; the stream ends
-                    // and this partial frame is never drawn.
-                    frames.push(Frame { fov: 0, ops });
+                    // and this frame is never drawn. READVUE.C:253-254 writes
+                    // it with no commands.
+                    frames.push(Frame {
+                        fov: 0,
+                        end: true,
+                        ops: Vec::new(),
+                    });
                     return Ok(Animation { frames });
                 }
                 // The original falls through with the byte it just read, and
@@ -418,7 +439,11 @@ pub fn read_animation(bytes: &[u8], conum: usize) -> Result<Animation, AssetErro
             });
         };
 
-        frames.push(Frame { fov, ops });
+        frames.push(Frame {
+            fov,
+            end: false,
+            ops,
+        });
     }
 }
 
@@ -668,12 +693,14 @@ fn read_faces(poly: &[u8], poly_at: usize) -> Result<Vec<Face>, AssetError> {
         at += record_len;
     }
     // endblock pads a block to a four-byte boundary. Records begin at 2 and
-    // have even lengths, so a whole block leaves 0 or 2 bytes; anything that
-    // cannot be a record is malformed.
-    if poly.len() - at > 3 {
+    // have even lengths, so the writer's whole block leaves exactly 0 or 2
+    // bytes; 1 or 3 is not a padding the writer makes, and 4 or 5 cannot hold
+    // a six-byte record.
+    let trailing = poly.len() - at;
+    if trailing != 0 && trailing != 2 {
         return Err(unsupported(format!(
-            "the POLY block has {} trailing byte(s) that are too short to be a face record",
-            poly.len() - at
+            "the POLY block has {trailing} trailing byte(s); the writer pads it to 0 or 2 and \
+             nothing else is a face record"
         )));
     }
     Ok(faces)

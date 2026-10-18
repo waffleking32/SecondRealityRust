@@ -18,11 +18,13 @@
 //! - `VISU/C/MAIN.C:252-321` — the tool writes the `.00M`: eight zero words, a
 //!   768-byte palette at offset 16, then the object count and the object
 //!   numbers at the offset stored in the header's bytes 4..8; byte 15 is the
-//!   city flag (`'C'` or `'R'`, `:290-292`).
+//!   city flag (`'C'` or `'R'`, `:290-292`). `MAIN.C` also writes the `.0AA`
+//!   and its two `0xFFFF` words (`:269-280`), and `READVUE.C:149-255` writes
+//!   the `.0AB` command stream and its closing `0xFF 0xFF` (`:253-254`).
 //! - `VISU/C/U2A.C:148-219` and `U2E.C:208-263` — the parts read it all back:
 //!   `scene0[15]` picks the city, `LONGAT(scene0+4)` locates the object list,
 //!   each `.0AA` entry names a `.0AB`, and the `.0AB` stream is decoded one
-//!   frame at a time (`U2A.C:355-470`).
+//!   frame at a time (`U2A.C:336-430`, `U2E.C:445-539`).
 //!
 //! **The list base is measured, not guessed.** `C.H`'s `polylist` comment calls
 //! each word after the first two a "pointer to polygon N inside polydata", and
@@ -175,6 +177,7 @@ fn the_command_encoding_reads_extensions_toggles_sizes_and_signs() {
 
     assert_eq!(animation.frames.len(), 2, "the END-terminated frame included");
     assert_eq!(animation.frames[0].fov, 0x11);
+    assert!(!animation.frames[0].end);
     let ops = &animation.frames[0].ops;
     assert_eq!(ops.len(), 4);
     assert_eq!((ops[0].object, ops[0].toggle, ops[0].dx), (0, None, 2));
@@ -187,6 +190,31 @@ fn the_command_encoding_reads_extensions_toggles_sizes_and_signs() {
     assert_eq!(ops[3].object, 0x10);
     assert_eq!(ops[3].dx, -2, "a four-byte signed delta");
     assert_eq!(animation.frames[1].fov, 0, "the END frame has no fov");
+    assert!(animation.frames[1].end);
+    assert!(animation.frames[1].ops.is_empty());
+}
+
+/// `0xFF` is a terminator only when the byte after it is `<= 0x7F` (a frame)
+/// or `0xFF` (END). Anything else falls through as the command byte, which is
+/// `U2A.C:343-361`'s `if`/`else if` with no `else`. The shipped streams never
+/// contain it — `READVUE.C` cannot emit a command byte `0xFF` — so this is
+/// built by hand; `0x80` here is "object 0 on" and `0xFF 0x22` ends the frame.
+#[test]
+fn a_0xff_byte_that_is_not_a_terminator_falls_through_as_a_command() {
+    let animation = read_animation(&[0xFF, 0x80, 0xFF, 0x22, 0xFF, 0xFF], 1).unwrap();
+
+    assert_eq!(animation.frames.len(), 2);
+    assert_eq!(animation.frames[0].fov, 0x22);
+    assert!(!animation.frames[0].end);
+    assert_eq!(animation.frames[0].ops.len(), 1);
+    assert_eq!(
+        (
+            animation.frames[0].ops[0].object,
+            animation.frames[0].ops[0].toggle,
+        ),
+        (0, Some(true))
+    );
+    assert!(animation.frames[1].end);
 }
 
 #[test]
@@ -241,10 +269,29 @@ fn the_u2a_animation_pins_its_frames_commands_and_toggles() {
             // 0xFF 0xFF ends the stream without setting a field of vision;
             // the original exits before drawing this frame.
             assert_eq!(frame.fov, 0, "the END-terminated frame");
+            assert!(frame.end, "the last frame is the END frame");
             assert!(frame.ops.is_empty(), "the END frame carries no commands");
         } else {
             assert_eq!(frame.fov, 0x22, "frame {index}");
+            assert!(!frame.end, "frame {index} is not the END frame");
         }
+    }
+    assert_eq!(
+        animation.frames.iter().filter(|frame| frame.end).count(),
+        1,
+        "exactly one END frame"
+    );
+    // Frames 1..=15 are commandless and are not END frames: an empty op list
+    // is not a terminator.
+    for index in 1..=15 {
+        assert!(
+            animation.frames[index].ops.is_empty(),
+            "frame {index} carries no commands"
+        );
+        assert!(
+            !animation.frames[index].end,
+            "commandless frame {index} is not the END frame"
+        );
     }
 
     // Frame 0: one camera command, from the movement the shipped stream
@@ -301,10 +348,31 @@ fn the_u2e_animation_pins_its_frames_and_commands() {
     for (index, frame) in animation.frames.iter().enumerate() {
         if index == last {
             assert_eq!(frame.fov, 0, "the END-terminated frame");
+            assert!(frame.end, "the last frame is the END frame");
+            assert!(frame.ops.is_empty(), "the END frame carries no commands");
         } else {
             assert_eq!(frame.fov, 0x1C, "frame {index}");
+            assert!(!frame.end, "frame {index} is not the END frame");
         }
     }
+    assert_eq!(
+        animation.frames.iter().filter(|frame| frame.end).count(),
+        1,
+        "exactly one END frame"
+    );
+    // Thirty of U2E's drawable frames carry no commands; none is an END.
+    assert_eq!(
+        animation.frames[..last]
+            .iter()
+            .filter(|frame| frame.ops.is_empty())
+            .count(),
+        30,
+        "the commandless drawable frames"
+    );
+    assert!(
+        animation.frames[..last].iter().all(|frame| !frame.end),
+        "only the last frame is END"
+    );
 }
 
 #[test]
@@ -499,4 +567,40 @@ fn truncated_and_inconsistent_object_blocks_are_errors() {
     let at = block_at(&bad, b"ORD0").0;
     bad[at..at + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
     assert!(read_object(&bad).is_err());
+}
+
+/// The writer's `endblock` pads a block to four bytes; a face record starts at
+/// the `POLY` block's byte 2 and has an even length, so a whole block can end
+/// with 0 or 2 trailing bytes and nothing else. One or three trailing bytes
+/// are a malformed block, not padding.
+#[test]
+fn a_poly_block_with_one_or_three_trailing_bytes_is_an_error() {
+    fn block(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(8 + data.len());
+        bytes.extend_from_slice(tag);
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(data);
+        bytes
+    }
+
+    for tail in [1usize, 3] {
+        // The leading zero word, then 1 or 3 bytes that cannot be a record.
+        let mut poly = vec![0u8, 0];
+        poly.extend(std::iter::repeat_n(0xAA, tail));
+        // A minimal list: its own count, a centre and the final 0.
+        let ord0 = [3u16.to_le_bytes(), 0u16.to_le_bytes(), 0u16.to_le_bytes()].concat();
+        let object = [
+            block(b"VERS", &0x0100u16.to_le_bytes()),
+            block(b"POLY", &poly),
+            block(b"ORD0", &ord0),
+            block(b"END ", &[]),
+        ]
+        .concat();
+
+        let error = read_object(&object).unwrap_err();
+        assert!(
+            error.to_string().contains("trailing"),
+            "{tail} trailing byte(s): {error}"
+        );
+    }
 }
