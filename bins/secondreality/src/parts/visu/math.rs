@@ -38,7 +38,13 @@ pub const VF_FAR: u16 = 32;
 /// The shipped `vid_window`'s half-width, `clip_x[1] - add_x` = 319 - 159:
 /// `_vid_cameraangle` starts from exactly that difference
 /// (`AVID.ASM:60-63`), and both shipped parts use the same window
-/// (`U2A.C:247`).
+/// (`U2A.C:247`, `U2E.C:351`).
+///
+/// This is a constant because the corrected `camera_angle(angle, aspect)`
+/// signature has no `Projection` to take the difference from. It is exact
+/// for both shipped parts; a later part that installed a different window
+/// would get a wrong `mul_x`, and Task 5 (which wires the driver) must
+/// record that limitation.
 const HALF_WIDTH: i32 = 160;
 
 /// `_avistan`: `AVISTAN.INC`'s 256 words, "Visual angle tangent table (256
@@ -454,6 +460,20 @@ mod tests {
     }
 
     #[test]
+    fn camera_angle_clamps_the_half_angle() {
+        // `cmp bx,8*64 / jae` raises a zero/near-zero angle to 512, so the
+        // index is 8 and the table entry 5210: `160*5210>>8 = 3256`,
+        // `3256*225>>8 = 2861` (`AVID.ASM:68-76`). U2A's first drawn frame
+        // passes fov = 0, so this end is shipped-reachable.
+        assert_eq!(camera_angle(0, 225), (3256, 2861));
+        // `cmp bx,16384 / jb / mov bx,16383` caps the half-angle at 16383,
+        // index 255, entry 1, so both multipliers truncate to 0. Without the
+        // cap the index would run off the 256-word table.
+        assert_eq!(camera_angle(32768, 225), (0, 0));
+        assert_eq!(camera_angle(65535, 225), (0, 0));
+    }
+
+    #[test]
     fn avistan_is_the_shipped_256_word_cotangent_table() {
         assert_eq!(AVISTAN.len(), 256);
         // AVISTAN.INC line 2: the zero angle saturates at 32767.
@@ -461,11 +481,11 @@ mod tests {
         assert_eq!(AVISTAN[1], 32767);
         // AVISTAN.INC line 2 (indices 0-11), word 8: `... 5956, 5210, ...`.
         assert_eq!(AVISTAN[8], 5210);
-        // AVISTAN.INC line 11 (indices 108-119), word 4: the entry the U2E
-        // pair selects ((0x1C00 >> 1) >> 6 == 56).
+        // AVISTAN.INC line 6 (indices 48-59), word 8: the entry the U2E
+        // pair selects ((0x1C00 >> 1) >> 6 == 56): `... 729, 715, ...`.
         assert_eq!(AVISTAN[56], 715);
-        // AVISTAN.INC line 13 (indices 132-143), word 4: the entry the U2A
-        // pair selects ((0x2200 >> 1) >> 6 == 68).
+        // AVISTAN.INC line 7 (indices 60-71), word 8: the entry the U2A
+        // pair selects ((0x2200 >> 1) >> 6 == 68): `... 587, 577, ...`.
         assert_eq!(AVISTAN[68], 577);
         // AVISTAN.INC line 23: the 90-degree entry.
         assert_eq!(AVISTAN[255], 1);
@@ -487,6 +507,18 @@ mod tests {
         assert_eq!(dest.m[0], 0);
         assert_eq!(dest.m[4], UNIT);
         assert_eq!(dest.m[8], UNIT);
+
+        // The asm reads the matrix with `imul dword ptr`, not a signed word
+        // (`ACALC.ASM:52-63`). A 0x8000 entry is +32768: 32768*UNIT = 2^29,
+        // `sar 14` = 32768. Read as a signed word it would be -32768*UNIT =
+        // -2^29, and the result -32768.
+        let apply = Matrix {
+            m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
+            ..Default::default()
+        };
+        let mut dest = identity();
+        apply_matrix(&mut dest, &apply);
+        assert_eq!(dest.m[0], 32768);
     }
 
     #[test]
@@ -640,6 +672,53 @@ mod tests {
         assert_eq!(out.x, -338);
         assert_eq!(out.y, 0);
         assert_eq!(out.vf, 0);
+    }
+
+    #[test]
+    fn project_uses_each_axis_add_and_keeps_far_z() {
+        // Distinct, nonzero adds: y takes add_y and x takes add_x. With
+        // x=10, y=20, z=500 and mul 500, x = 10+100 = 110 and y = 20+40 =
+        // 60; swapping the adds would give 140 and 30.
+        let p = Projection {
+            mul_x: 500,
+            mul_y: 500,
+            add_x: 100,
+            add_y: 40,
+            clip_x: [-1000, 1000],
+            clip_y: [-1000, 1000],
+            clip_z: [100, 1000],
+        };
+        let src = Rotated {
+            x: 10,
+            y: 20,
+            z: 500,
+            normal: 0,
+        };
+        let mut out = PVert::default();
+        project(&src, &mut out, &p);
+        assert_eq!((out.x, out.y, out.vf), (110, 60, 0));
+
+        // A far vertex is flagged but its z is *not* substituted
+        // (`ACALC.ASM:779-781` only sets the flag): with x=3 and z=1001,
+        // x = 3*1000/1001 = 2; clamping z to 1000 would give 3.
+        let p = Projection {
+            mul_x: 1000,
+            mul_y: 1,
+            add_x: 0,
+            add_y: 0,
+            clip_x: [-1000, 1000],
+            clip_y: [-1000, 1000],
+            clip_z: [100, 1000],
+        };
+        let src = Rotated {
+            x: 3,
+            y: 0,
+            z: 1001,
+            normal: 0,
+        };
+        let mut out = PVert::default();
+        project(&src, &mut out, &p);
+        assert_eq!((out.x, out.y, out.vf), (2, 0, VF_FAR));
     }
 
     #[test]
