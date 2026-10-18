@@ -72,6 +72,9 @@ pub struct PartCtx<'a> {
     timeline: &'a mut PaletteTimeline,
     copper: &'a mut CopperRegistry,
     music: Option<MusicRef<'a>>,
+    /// True only for the init context of the first part started after the
+    /// run's music was installed; see [`music_fresh`](PartCtx::music_fresh).
+    music_fresh: bool,
 }
 
 impl PartCtx<'_> {
@@ -86,7 +89,7 @@ impl PartCtx<'_> {
     /// hold the same `&mut` fields and be built at the same call site, which
     /// changes nothing about the borrow (and a `&mut Engine` parameter — the
     /// shape the lint is steering towards — is exactly what does not compile
-    /// here). Six of the eleven are the engine's own fields in the order
+    /// here). Six of the twelve are the engine's own fields in the order
     /// `Engine::tick` splits them.
     #[allow(clippy::too_many_arguments)]
     pub fn new<'a>(
@@ -101,6 +104,7 @@ impl PartCtx<'_> {
         bands: u16,
         standalone: bool,
         exit_requested: bool,
+        music_fresh: bool,
     ) -> PartCtx<'a> {
         PartCtx {
             surface,
@@ -114,6 +118,7 @@ impl PartCtx<'_> {
             timeline,
             copper,
             music,
+            music_fresh,
         }
     }
 
@@ -162,6 +167,27 @@ impl PartCtx<'_> {
     /// [`Music`]: crate::music::Music
     pub fn music(&mut self) -> Option<MusicRef<'_>> {
         self.music.as_deref_mut()
+    }
+
+    /// Whether the run's music was installed for this part alone — true only
+    /// for the init context of the **entry part** of a run, false for every
+    /// later part in the chain.
+    ///
+    /// [`Engine::set_music`](crate::engine::Engine::set_music) marks the
+    /// player fresh; the next [`Engine::start`](crate::engine::Engine::start)
+    /// hands `true` to that part's init context and clears it. So the first
+    /// part a `--part` or block run starts — the one the shell starts after
+    /// installing the music — is fresh, and every part the chain reaches
+    /// afterwards is not: its stretch of the player's timeline has already
+    /// run. A part that makes the player catch up to a boot frame (MINVBALL's
+    /// 256 polls, RAYSCRL's 268, MNTSCRL's 11) or anchors a counter to one
+    /// (PAM's `frame_count = 2`) does so only when this is `true`; a part
+    /// reached mid-chain polls nothing and starts its counter at zero.
+    ///
+    /// Band and copper contexts are never fresh: the flag belongs to the
+    /// `init` that follows `set_music` and to nothing else.
+    pub fn music_fresh(&self) -> bool {
+        self.music_fresh
     }
 
     /// Ask the engine to quit (`dis_exit()`).

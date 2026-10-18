@@ -1399,6 +1399,7 @@ mod tests {
                 1,
                 true,
                 exit,
+                false,
             )
         }
 

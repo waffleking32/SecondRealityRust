@@ -866,6 +866,7 @@ mod tests {
                 1,
                 true,
                 false,
+                false,
             )
         }
 
@@ -882,6 +883,7 @@ mod tests {
                 0,
                 1,
                 true,
+                false,
                 false,
             )
         }

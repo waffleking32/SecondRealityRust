@@ -348,12 +348,15 @@ impl Pam {
 
         self.f = 0;
         // `OUTTAA.C:39-48`: the palette copies are built before the gate
-        // (`:36-37`), and the setup is *after* it. A run whose gate is already
-        // open at its start — the anchored run, whose 7710 is two copper
-        // frames into the first wait — has that setup behind it, so it runs
-        // here with the counter the source reads at the anchor. A run whose
-        // gate is still closed keeps the predecessor's screen and performs the
-        // setup when the gate opens (with `frame_count=0`).
+        // (`:36-37`), and the setup is *after* it. An **entry** run whose gate
+        // is already open at its start — the anchored run, whose 7710 is two
+        // copper frames into the first wait — has that setup behind it, so it
+        // runs here with the counter the source reads at the anchor. A part
+        // reached mid-chain can also find the gate already open, because the
+        // part before it drove the player past the gate's row; then the setup
+        // has *not* run, and the source's own `frame_count=0` applies. A run
+        // whose gate is still closed keeps the predecessor's screen and
+        // performs the setup when the gate opens (also `frame_count=0`).
         let open_at_start = match ctx.music() {
             Some(music) => music.sync() >= SYNC_CODE,
             None => return Err(PartError {
@@ -364,7 +367,12 @@ impl Pam {
             }),
         };
         if open_at_start {
-            self.setup(ctx, FRAME_COUNT_AT_ANCHOR);
+            let frame_count = if ctx.music_fresh() {
+                FRAME_COUNT_AT_ANCHOR
+            } else {
+                0
+            };
+            self.setup(ctx, frame_count);
             self.phase = Phase::Loop;
         } else {
             self.phase = Phase::Sync;
@@ -575,7 +583,24 @@ mod tests {
             }
         }
 
+        /// A band's context: never fresh, as the engine's band contexts are.
         fn ctx_at(&mut self, tick: u32, exit: bool) -> PartCtx<'_> {
+            self.ctx_with(tick, exit, false)
+        }
+
+        /// The init context of an entry-point run — the part the run's music
+        /// was installed for.
+        fn init_ctx(&mut self, tick: u32) -> PartCtx<'_> {
+            self.ctx_with(tick, false, true)
+        }
+
+        /// The init context of a part reached mid-chain, with the player
+        /// already running.
+        fn init_ctx_chain(&mut self, tick: u32) -> PartCtx<'_> {
+            self.ctx_with(tick, false, false)
+        }
+
+        fn ctx_with(&mut self, tick: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
             self.player.at = tick as usize;
             PartCtx::new(
                 &mut self.surface,
@@ -589,6 +614,7 @@ mod tests {
                 1,
                 true,
                 exit,
+                music_fresh,
             )
         }
 
@@ -665,7 +691,7 @@ mod tests {
     fn started_with(player: Player) -> (Rig, Pam) {
         let mut rig = Rig::new(player);
         let mut part = Pam::at(TEST_ANI, TEST_PAL);
-        part.init(&mut rig.ctx(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -755,6 +781,23 @@ mod tests {
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(part.f, 1, "the first step is four ticks after the gate");
         assert_eq!(rig.page(0), part.frames[0], "the first step drew frame 0");
+    }
+
+    #[test]
+    fn a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero() {
+        // Reached mid-chain, an open gate means the part before this one
+        // drove the player past the gate's row — not that the run is the
+        // anchored entry whose setup already ran. The source's post-gate
+        // setup has not run, so its `frame_count=0` is the counter, not the
+        // anchor's 2.
+        let mut rig = Rig::new(Player::constant(SYNC_CODE));
+        let mut part = Pam::at(TEST_ANI, TEST_PAL);
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
+        assert_eq!(part.phase, Phase::Loop, "the open gate starts the loop");
+        assert_eq!(
+            part.shared.borrow().frame_count, 0,
+            "a mid-chain start is not the anchored 7710 start"
+        );
     }
 
     #[test]

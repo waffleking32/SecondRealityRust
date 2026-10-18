@@ -59,6 +59,11 @@ pub struct Engine {
     /// the original's music engine is a program of its own, and the parts are
     /// separate EXEs that come and go around it.
     music: Option<Box<dyn Music>>,
+    /// Set by [`set_music`](Engine::set_music), consumed by the next
+    /// [`start`](Engine::start): the entry part's init is the only context
+    /// that sees it. False means the part is reached mid-chain, with the
+    /// player already running.
+    music_fresh: bool,
     frame_counter: u32,
     exit_requested: bool,
 }
@@ -73,6 +78,7 @@ impl Engine {
             timeline: PaletteTimeline::new(Palette::new()),
             copper: CopperRegistry::new(),
             music: None,
+            music_fresh: false,
             frame_counter: 0,
             exit_requested: false,
         }
@@ -122,8 +128,14 @@ impl Engine {
     /// on `sr-engine` and this crate has no dependencies at all, so the
     /// adapter that maps a `Player` onto [`Music`] belongs to the binary that
     /// uses both (Task 7). See [`crate::music`]'s module comment.
+    ///
+    /// Installing a player also arms the mid-chain seam: the **next**
+    /// [`start`](Engine::start) is the entry part of a run, so its init
+    /// context reports [`PartCtx::music_fresh`] as `true`; every later part
+    /// in the chain reports `false`. Calling this again re-arms it.
     pub fn set_music(&mut self, music: Box<dyn Music>) {
         self.music = Some(music);
+        self.music_fresh = true;
     }
 
     /// The run's music, for a caller that only wants to read it — the window's
@@ -154,6 +166,10 @@ impl Engine {
         // The part's frame 0 is its own, whatever ran in this engine before.
         self.frame_counter = 0;
         self.exit_requested = false;
+        // The entry part is the one `set_music` was for; consuming the flag
+        // here is what makes every later `start` a mid-chain start.
+        let music_fresh = self.music_fresh;
+        self.music_fresh = false;
         let bands = part.band_count();
         let mut ctx = PartCtx::new(
             &mut self.surface,
@@ -167,6 +183,7 @@ impl Engine {
             bands,
             true,
             false,
+            music_fresh,
         );
         let started = part.init(&mut ctx);
         // `init`'s context is dropped here too, so its exit request is read
@@ -238,6 +255,9 @@ impl Engine {
                     // a copper callback stays visible in the later ones — the
                     // flag is sticky, not per-call.
                     self.exit_requested,
+                    // A band is never the entry init: no drawing context is
+                    // fresh.
+                    false,
                 );
                 (part.frame(&mut ctx), ctx.exit_requested)
             };
@@ -297,6 +317,9 @@ impl Engine {
                 bands,
                 true,
                 self.exit_requested,
+                // Copper callbacks run inside a tick, after the entry start:
+                // never fresh.
+                false,
             );
             f(&mut ctx);
             ctx.exit_requested
@@ -774,6 +797,58 @@ mod tests {
             log.0.borrow().as_slice(),
             ["music:position", "music:poll"],
             "the status line's read, then the new part's first tick"
+        );
+    }
+
+    #[test]
+    fn the_music_is_fresh_only_for_the_first_part_after_set_music() {
+        // The seam a part reached mid-chain reads: the run's player is
+        // installed once, before the entry part's `start`, and every later
+        // part in the chain starts with it already running. A second
+        // `set_music` is a new player and re-arms the flag.
+        #[derive(Clone, Default)]
+        struct Freshness(Rc<RefCell<Vec<bool>>>);
+
+        struct ReportsFreshness { log: Freshness }
+
+        impl Part for ReportsFreshness {
+            fn name(&self) -> &'static str { "reports-freshness" }
+            fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+                self.log.0.borrow_mut().push(ctx.music_fresh());
+                Ok(())
+            }
+            fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+                // A band's context is never fresh: the flag belongs to the
+                // init that follows `set_music` and nothing else.
+                self.log.0.borrow_mut().push(ctx.music_fresh());
+                PartStatus::Continuing
+            }
+        }
+
+        let log = Freshness::default();
+        let mut first = ReportsFreshness { log: log.clone() };
+        let mut second = ReportsFreshness { log: log.clone() };
+        let mut third = ReportsFreshness { log: log.clone() };
+        let mut e = Engine::new(8, 4, View::new(8, 4));
+        let mut f = IndexedFrame::new(8, 4);
+
+        e.set_music(Box::new(NoMusic));
+        e.start(&mut first).unwrap();
+        e.tick(&mut first, &mut f);
+        e.start(&mut second).unwrap();
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            [true, false, false],
+            "the part started after set_music is fresh; its bands and the next \
+             part in the chain are not"
+        );
+
+        e.set_music(Box::new(NoMusic));
+        e.start(&mut third).unwrap();
+        assert_eq!(
+            log.0.borrow().as_slice(),
+            [true, false, false, true],
+            "a second set_music re-arms the flag for the next start"
         );
     }
 

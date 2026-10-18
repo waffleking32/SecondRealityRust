@@ -783,13 +783,18 @@ impl Part for Minvball {
     /// tables and the fade's state. The source runs all of this before its
     /// first `dis_waitb`; the port's `init` is the same place.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), sr_engine::part::PartError> {
-        // The run's player starts with the part and is seeked to order 75;
-        // the reference's player was already mid-order-75 at this part's tick
-        // 0. A player with no music (a unit-test rig, the test card) has no
-        // position to align; the part does not need one to run.
-        if let Some(music) = ctx.music() {
-            for _ in 0..MUSIC_PRE_ROLL {
-                music.poll();
+        // The run's player starts with the entry part and is seeked to order
+        // 75; the reference's player was already mid-order-75 at this part's
+        // tick 0. A part reached mid-chain starts on a player that has already
+        // run through this stretch, so the catch-up belongs to the entry run
+        // (`music_fresh`) alone. A player with no music (a unit-test rig, the
+        // test card) has no position to align; the part does not need one to
+        // run.
+        if ctx.music_fresh() {
+            if let Some(music) = ctx.music() {
+                for _ in 0..MUSIC_PRE_ROLL {
+                    music.poll();
+                }
             }
         }
 
@@ -994,6 +999,9 @@ mod tests {
     struct Player {
         script: Vec<i32>,
         at: usize,
+        /// `poll` calls made; the entry pre-roll's 256 are what the mid-chain
+        /// test proves absent.
+        polls: u32,
     }
 
     impl Player {
@@ -1001,16 +1009,23 @@ mod tests {
             Player {
                 script: vec![0; last_tick as usize + 1],
                 at: 0,
+                polls: 0,
             }
         }
 
         fn scripted(script: Vec<i32>) -> Player {
-            Player { script, at: 0 }
+            Player {
+                script,
+                at: 0,
+                polls: 0,
+            }
         }
     }
 
     impl Music for Player {
-        fn poll(&mut self) {}
+        fn poll(&mut self) {
+            self.polls += 1;
+        }
 
         fn position(&self) -> MusicPosition {
             MusicPosition::default()
@@ -1060,24 +1075,28 @@ mod tests {
             }
         }
 
+        /// A band's context: never fresh, as the engine's band contexts are.
         fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.player.at = frame as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.timeline,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                true,
-                false,
-            )
+            self.ctx_with(frame, false, false)
         }
 
         fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, true, false)
+        }
+
+        /// The init context of an entry-point run — the part the run's music
+        /// was installed for.
+        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, true)
+        }
+
+        /// The init context of a part reached mid-chain, with the player
+        /// already running.
+        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, false)
+        }
+
+        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
             self.player.at = frame as usize;
             PartCtx::new(
                 &mut self.surface,
@@ -1090,7 +1109,8 @@ mod tests {
                 0,
                 1,
                 true,
-                true,
+                exit,
+                music_fresh,
             )
         }
     }
@@ -1098,7 +1118,7 @@ mod tests {
     fn started_with(player: Player) -> (Rig, Minvball) {
         let mut rig = Rig::new(player);
         let mut part = Minvball::new();
-        part.init(&mut rig.ctx(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -1482,6 +1502,17 @@ mod tests {
         let position = music.position();
         assert_eq!(position.order, 77);
         assert!((28..=30).contains(&position.row), "row {}", position.row);
+    }
+
+    #[test]
+    fn a_mid_chain_start_does_not_pre_roll_the_music() {
+        // A part the block's chain reaches is handed a player that has
+        // already run through this stretch; 256 more polls would replay it.
+        // The pre-roll is the entry run's (`music_fresh`) alone.
+        let mut rig = Rig::new(Player::quiet(0));
+        let mut part = Minvball::new();
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
+        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
     }
 
     // --- the uninitialized `j`, and the entry register -----------------------

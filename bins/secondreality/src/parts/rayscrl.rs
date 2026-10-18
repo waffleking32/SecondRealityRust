@@ -498,11 +498,15 @@ impl Part for Rayscrl {
         }
 
         // The reference's player was already at order 88 row 0 on the tick this
-        // part's tick 0 stands at (`MUSIC_PRE_ROLL`); an unanchored run starts
-        // the player with the part, so the difference is made here.
-        for _ in 0..MUSIC_PRE_ROLL {
-            if let Some(music) = ctx.music() {
-                music.poll();
+        // part's tick 0 stands at (`MUSIC_PRE_ROLL`); an unanchored entry run
+        // starts the player with the part, so the difference is made here. A
+        // part reached mid-chain finds the player already past this stretch,
+        // so the catch-up is the entry run's (`music_fresh`) alone.
+        if ctx.music_fresh() {
+            for _ in 0..MUSIC_PRE_ROLL {
+                if let Some(music) = ctx.music() {
+                    music.poll();
+                }
             }
         }
 
@@ -900,24 +904,28 @@ mod tests {
             }
         }
 
+        /// A band's context: never fresh, as the engine's band contexts are.
         fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.player.seek_tick(frame);
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.timeline,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                true,
-                false,
-            )
+            self.ctx_with(frame, false, false)
         }
 
         fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, true, false)
+        }
+
+        /// The init context of an entry-point run — the part the run's music
+        /// was installed for.
+        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, true)
+        }
+
+        /// The init context of a part reached mid-chain, with the player
+        /// already running.
+        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, false)
+        }
+
+        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
             self.player.seek_tick(frame);
             PartCtx::new(
                 &mut self.surface,
@@ -930,7 +938,8 @@ mod tests {
                 0,
                 1,
                 true,
-                true,
+                exit,
+                music_fresh,
             )
         }
     }
@@ -938,7 +947,7 @@ mod tests {
     fn started_with<M: RigMusic + 'static>(player: M) -> (Rig<M>, Rayscrl) {
         let mut rig = Rig::new(player);
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
-        part.init(&mut rig.ctx(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -957,7 +966,7 @@ mod tests {
         lock(&player).play_song(86);
         let mut rig = Rig::new(PlayerMusic::new(player, 0));
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
-        part.init(&mut rig.ctx(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -1312,7 +1321,7 @@ mod tests {
         let mut rig = Rig::new(Player::quiet(0));
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, [path, TEST_POS[1], TEST_POS[2]]);
         let error = part
-            .init(&mut rig.ctx(0))
+            .init(&mut rig.init_ctx(0))
             .expect_err("65,000 is outside the 64,000-byte picture");
         assert!(
             error.message.contains(&shown),
@@ -1377,6 +1386,17 @@ mod tests {
             music.poll();
         }
         assert_eq!((music.position().order, music.position().row), (88, 1));
+    }
+
+    #[test]
+    fn a_mid_chain_start_does_not_pre_roll_the_music() {
+        // A part the block's chain reaches is handed a player that has
+        // already run through this stretch; 268 more polls would replay it.
+        // The pre-roll is the entry run's (`music_fresh`) alone.
+        let mut rig = Rig::new(Player::quiet(0));
+        let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
+        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
     }
 
     // --- the fade ------------------------------------------------------------

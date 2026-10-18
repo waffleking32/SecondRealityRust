@@ -568,11 +568,16 @@ impl Part for Mntscrl {
         }
 
         // The reference's player was 11 polls old when this part's tick 0 ran
-        // (`REFERENCE_FIRST_INDEX` - `MUSIC_START_FRAME`); an unanchored run
-        // starts it with the part, so the head start is made here.
-        if let Some(music) = ctx.music() {
-            for _ in 0..MUSIC_PRE_ROLL {
-                music.poll();
+        // (`REFERENCE_FIRST_INDEX` - `MUSIC_START_FRAME`); an unanchored entry
+        // run starts it with the part, so the head start is made here. A part
+        // reached mid-chain starts on a player that has already run through
+        // these frames, so the head start is the entry run's
+        // (`music_fresh`) alone.
+        if ctx.music_fresh() {
+            if let Some(music) = ctx.music() {
+                for _ in 0..MUSIC_PRE_ROLL {
+                    music.poll();
+                }
             }
         }
 
@@ -955,24 +960,28 @@ mod tests {
             }
         }
 
+        /// A band's context: never fresh, as the engine's band contexts are.
         fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.player.at = frame as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.timeline,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                true,
-                false,
-            )
+            self.ctx_with(frame, false, false)
         }
 
         fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, true, false)
+        }
+
+        /// The init context of an entry-point run — the part the run's music
+        /// was installed for.
+        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, true)
+        }
+
+        /// The init context of a part reached mid-chain, with the player
+        /// already running.
+        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
+            self.ctx_with(frame, false, false)
+        }
+
+        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
             self.player.at = frame as usize;
             PartCtx::new(
                 &mut self.surface,
@@ -985,7 +994,8 @@ mod tests {
                 0,
                 1,
                 true,
-                true,
+                exit,
+                music_fresh,
             )
         }
     }
@@ -994,7 +1004,7 @@ mod tests {
     fn started_with(player: Player) -> (Rig, Mntscrl) {
         let mut rig = Rig::new(player);
         let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
-        part.init(&mut rig.ctx(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -1179,7 +1189,7 @@ mod tests {
         let mut rig = Rig::new(Player::sentinel());
         let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, [path, TEST_POS[1], TEST_POS[2]]);
         let error = part
-            .init(&mut rig.ctx(0))
+            .init(&mut rig.init_ctx(0))
             .expect_err("65,000 is outside the 64,000-byte picture");
         assert!(
             error.message.contains(&shown),
@@ -1297,6 +1307,18 @@ mod tests {
         assert_eq!(rig.view.start_addr, 0);
         assert!(!rig.view.double_scan);
         assert!(rig.view.split.is_none());
+    }
+
+    #[test]
+    fn a_mid_chain_start_does_not_pre_roll_the_music() {
+        // A part the block's chain reaches is handed a player that has
+        // already run through the 11 frames between the music clock's start
+        // and this part's tick 0. The head start is the entry run's
+        // (`music_fresh`) alone.
+        let mut rig = Rig::new(Player::sentinel());
+        let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
+        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
     }
 
     #[test]
