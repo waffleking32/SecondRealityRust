@@ -306,24 +306,18 @@ pub fn window(x1: i32, x2: i32, y1: i32, y2: i32, z1: i32, z2: i32) -> Projectio
 /// then `mul_y` from the aspect (a 16-bit word in the original,
 /// `ADATA.ASM:40`).
 ///
-/// The table index is `half_fov >> 6`: the asm's `shr bx,6-1` / `and
-/// bx,not 1` followed by a word read at that byte offset (`AVID.ASM:77-80`).
-/// The shipped pairs are `(0x2200, 225) -> (145, 127)` for U2A and
-/// `(0x1C00, 225) -> (194, 170)` for U2E — the two parts' reconstructed
-/// stream fovs (`fov = a << 8`, `U2A.C:348`, `U2E.C:457`) with the aspect
-/// both pass — and they are the values the phase plan pins.
-///
-/// **This differs from the asm by design, and Tasks 5-7 must not re-halve
-/// it:** `_vid_cameraangle` first halves its argument (`shr bx,1`,
-/// `AVID.ASM:65`) before indexing and clamps the halved angle to
-/// `8*64 ..= 16383` (`:68-76`). The plan's pairs index with the fov as
-/// passed, so this function applies the clamp bounds to `half_fov` but does
-/// not halve it again. A literal transcription with U2A's 0x2200 would give
-/// `(360, 316)`.
-pub fn camera_angle(half_fov: u16, aspect: i32) -> (i32, i32) {
-    // `cmp bx,8*64 / jae / mov bx,8*64` and `cmp bx,16384 / jb / mov
-    // bx,16383` (`AVID.ASM:68-76`).
-    let half = (half_fov as i32).clamp(8 * 64, 16383);
+/// `angle` is the part's full field-of-view angle — the animation stream's
+/// `fov` byte shifted up by 8 (`fov = a << 8`, `U2A.C:348`, `U2E.C:457`).
+/// The asm halves it (`shr bx,1`, `AVID.ASM:65`), clamps the half-angle to
+/// `8*64 ..= 16383` (`:68-76`), and indexes `_avistan` with
+/// `(bx >> 5) & !1` as a byte offset into the word table — word index
+/// `half >> 6` (`:77-80`) — before the unsigned `mul`/`shrd 8` and the
+/// aspect multiply. The shipped pairs are `(0x2200, 225) -> (360, 316)` for
+/// U2A and `(0x1C00, 225) -> (446, 391)` for U2E.
+pub fn camera_angle(angle: u16, aspect: i32) -> (i32, i32) {
+    // `shr bx,1 ;divide by 2 for half of angle` (`AVID.ASM:65`) and the
+    // `cmp bx,8*64` / `cmp bx,16384` clamps (`:68-76`).
+    let half = i32::from(angle >> 1).clamp(8 * 64, 16383);
     // `shr bx,6-1 / and bx,not 1` then a word read: the table index is
     // `half >> 6` (`AVID.ASM:77-80`).
     let tan = AVISTAN[(half >> 6) as usize];
@@ -342,8 +336,8 @@ pub fn camera_angle(half_fov: u16, aspect: i32) -> (i32, i32) {
 /// up/down/left/right flags from the full 32-bit results.
 ///
 /// `calc_project` reads a 32-bit `vlist` source and writes a separate
-/// `pvlist`; `src` is the rotated vertex and `out` the projected one (the
-/// brief's `project(&mut PVert, ..)` has no access to `z`).
+/// `pvlist`; `src` is the rotated vertex and `out` the projected one (a
+/// `pvlist` has no `z`, so the source cannot be the projected vertex).
 pub fn project(src: &Rotated, out: &mut PVert, p: &Projection) {
     let mut z = src.z;
     let mut vf = 0u16;
@@ -383,11 +377,17 @@ fn projected(v: i32, mul: i32, z: i32) -> i32 {
     ((v as i64 * mul as i64) / z as i64) as i32
 }
 
-/// The `and ax,bp` of `calc_project` (`ACALC.ASM:810-814`): the AND of every
-/// vertex's flags, starting from `0xFFFF`, so an empty list returns `0xFFFF`
-/// (the function returns without entering its loop).
-pub fn project_all(v: &mut [PVert], _p: &Projection) -> u16 {
-    v.iter().fold(0xFFFF, |acc, vertex| acc & vertex.vf)
+/// `calc_project` over a list (`ACALC.ASM:759-817`): project every rotated
+/// vertex into `out` and return the `and ax,bp` of their flags, starting
+/// from `0xFFFF` (`:810-814`). An empty list returns `0xFFFF`; the original
+/// skips its loop for a zero count. Processes `min` of the two lengths.
+pub fn project_all(rotated: &[Rotated], out: &mut [PVert], p: &Projection) -> u16 {
+    let mut vf = 0xFFFF;
+    for (src, dst) in rotated.iter().zip(out.iter_mut()) {
+        project(src, dst, p);
+        vf &= dst.vf;
+    }
+    vf
 }
 
 /// `_calc_singlez` (`ACALC.ASM:585-612`): the transformed z of one *local*
@@ -444,10 +444,13 @@ mod tests {
 
     #[test]
     fn camera_angle_matches_the_two_shipped_pairs() {
-        // U2A's stream fov is 0x22 (`a << 8`) and U2E's is 0x1C; both pass
-        // aspect 225.
-        assert_eq!(camera_angle(0x2200, 225), (145, 127));
-        assert_eq!(camera_angle(0x1C00, 225), (194, 170));
+        // The stream bytes are the full angles: U2A's 0x22 -> 0x2200
+        // (47.8 degrees) and U2E's 0x1C -> 0x1C00 (39.4 degrees), both with
+        // aspect 225. `_vid_cameraangle` halves the angle before indexing
+        // (`shr bx,1`, `AVID.ASM:65`), so 0x2200 selects table word 68 (577)
+        // and 0x1C00 selects word 56 (715).
+        assert_eq!(camera_angle(0x2200, 225), (360, 316));
+        assert_eq!(camera_angle(0x1C00, 225), (446, 391));
     }
 
     #[test]
@@ -459,11 +462,11 @@ mod tests {
         // AVISTAN.INC line 2 (indices 0-11), word 8: `... 5956, 5210, ...`.
         assert_eq!(AVISTAN[8], 5210);
         // AVISTAN.INC line 11 (indices 108-119), word 4: the entry the U2E
-        // pair selects (0x1C00 >> 6 == 112).
-        assert_eq!(AVISTAN[112], 311);
+        // pair selects ((0x1C00 >> 1) >> 6 == 56).
+        assert_eq!(AVISTAN[56], 715);
         // AVISTAN.INC line 13 (indices 132-143), word 4: the entry the U2A
-        // pair selects (0x2200 >> 6 == 136).
-        assert_eq!(AVISTAN[136], 232);
+        // pair selects ((0x2200 >> 1) >> 6 == 68).
+        assert_eq!(AVISTAN[68], 577);
         // AVISTAN.INC line 23: the 90-degree entry.
         assert_eq!(AVISTAN[255], 1);
     }
@@ -723,38 +726,65 @@ mod tests {
     }
 
     #[test]
-    fn project_all_ands_every_vertex_flag() {
-        let p = shipped_window();
-        let mut v = [
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_LEFT,
-            },
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_UP,
-            },
-        ];
-        assert_eq!(project_all(&mut v, &p), 0);
+    fn project_all_projects_and_ands_every_vertex_flag() {
+        // mul 500 with z = 500 is the identity for these vertices; the clips
+        // are the boundary test's.
+        let p = Projection {
+            mul_x: 500,
+            mul_y: 500,
+            add_x: 0,
+            add_y: 0,
+            clip_x: [-10, 10],
+            clip_y: [-20, 20],
+            clip_z: [100, 1000],
+        };
 
-        let mut v = [
-            PVert {
+        // One vertex inside and one right-and-down: the AND is 0.
+        let rotated = [
+            Rotated {
                 x: 0,
                 y: 0,
-                vf: VF_UP,
+                z: 500,
+                normal: 0,
             },
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_UP | VF_LEFT,
+            Rotated {
+                x: 11,
+                y: 21,
+                z: 500,
+                normal: 0,
             },
         ];
-        assert_eq!(project_all(&mut v, &p), VF_UP);
+        let mut out = [PVert::default(); 2];
+        assert_eq!(project_all(&rotated, &mut out, &p), 0);
+        assert_eq!(out[0], PVert { x: 0, y: 0, vf: 0 });
+        assert_eq!(
+            out[1],
+            PVert {
+                x: 11,
+                y: 21,
+                vf: VF_DOWN | VF_RIGHT
+            }
+        );
+
+        // Two vertices that both share VF_DOWN: the AND keeps it.
+        let rotated = [
+            Rotated {
+                x: 0,
+                y: 21,
+                z: 500,
+                normal: 0,
+            },
+            Rotated {
+                x: 11,
+                y: 21,
+                z: 500,
+                normal: 0,
+            },
+        ];
+        assert_eq!(project_all(&rotated, &mut out, &p), VF_DOWN);
 
         // The asm starts `ax` at 0xFFFF and skips the loop for an empty list.
-        assert_eq!(project_all(&mut [], &p), 0xFFFF);
+        assert_eq!(project_all(&[], &mut [], &p), 0xFFFF);
     }
 
     #[test]
