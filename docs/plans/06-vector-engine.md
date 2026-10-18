@@ -129,7 +129,7 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 - [ ] **Step 3: Implement the maths**, transcribing `ACALC.ASM`'s integer paths exactly. Compute products in `i64` and reproduce each shift (`shrd`/`sar`) at the width the original used; do not "simplify" `mulmatrices` into the 64-bit path.
 - [ ] **Step 4: Run the unit tests and commit.**
 
-**Acceptance:** every quirk above has a test that fails on the clean implementation and passes on the transliteration; `camera_angle` returns the shipped 145/127 and 194/170.
+**Acceptance:** every quirk above has a test that fails on the clean implementation and passes on the transliteration; `camera_angle` returns 360/316 and 446/391, and its 512..16383 clamp is pinned at both ends.
 
 ---
 
