@@ -632,6 +632,23 @@ impl Part for Mntscrl {
                 part: NAME,
                 message: format!("{path}: {error}"),
             })?;
+            // `scr` indexes the surface and the background with every offset
+            // (:515); past the 64,000-byte picture the background read panics.
+            // The bound belongs here, where the file is still named, not in
+            // the blitter's hot path.
+            for (column, offsets) in list.columns.iter().enumerate() {
+                for &offset in offsets {
+                    if offset as usize >= VIDEO_BYTES {
+                        return Err(PartError {
+                            part: NAME,
+                            message: format!(
+                                "{path}: column {column} holds offset {offset}, outside the \
+                                 {VIDEO_BYTES}-byte picture"
+                            ),
+                        });
+                    }
+                }
+            }
             if list.columns.len() != FONT_LEN {
                 return Err(PartError {
                     part: NAME,
@@ -1136,6 +1153,50 @@ mod tests {
         assert_eq!(positions, 15_592, "POS1-3's positions, the survey's count");
         assert_eq!(max_offset, 63_870, "the largest destination offset");
         assert!((max_offset as usize) < VIDEO_BYTES);
+    }
+
+    #[test]
+    fn an_offset_past_the_picture_is_refused_not_indexed() {
+        // `scr` indexes the surface and the background with each column's
+        // offsets (:515): the picture is `VIDEO_BYTES` = 64,000 bytes, so a
+        // 65,000 offset would panic there rather than draw. The file carries
+        // the blitter's full column count too, or the count check would
+        // answer instead of the offset bound.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // column 0: one offset
+        bytes.extend_from_slice(&65_000u16.to_le_bytes());
+        for _ in 1..FONT_LEN {
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // an empty column
+        }
+        let file = std::env::temp_dir().join(format!(
+            "sr-mntscrl-{}-offset.dat",
+            std::process::id()
+        ));
+        std::fs::write(&file, &bytes).unwrap();
+        let shown = file.to_string_lossy().into_owned();
+        let path: &'static str = Box::leak(shown.clone().into_boxed_str());
+
+        let mut rig = Rig::new(Player::sentinel());
+        let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, [path, TEST_POS[1], TEST_POS[2]]);
+        let error = part
+            .init(&mut rig.ctx(0))
+            .expect_err("65,000 is outside the 64,000-byte picture");
+        assert!(
+            error.message.contains(&shown),
+            "the error names the file: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("column 0"),
+            "the error names the column: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("65000"),
+            "the error names the offset: {}",
+            error.message
+        );
+        let _ = std::fs::remove_file(&shown);
     }
 
     #[test]

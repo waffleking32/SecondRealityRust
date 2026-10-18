@@ -168,7 +168,7 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   after either branch of that `if`; the fade only touches entries 64-255,
   which the picture never indexes.
 - **The exit path skips the source's three closing calls.** `:147-152` runs
-  after either ending of the do-while — the `a=319` completion *and*
+  after either ending of the `for` loop (`:87`) — the `a=319` completion *and*
   `dis_exit` — so a prompt exit in the source still performs
   `if(f>7) dofade(...)`, `fonapois()` and `close_copper()`. The port's `frame`
   returns `Finished` at the top of the tick that sees `ctx.exit_requested`

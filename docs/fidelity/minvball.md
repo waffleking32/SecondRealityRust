@@ -71,19 +71,22 @@ frame is the measured window `(10,300, 10,400]`
 (`reference-indices.md` §14.5), a run of this part numbers its own frames from
 zero, and the manifest says `index_origin: "part"`, `anchor: null`
 (`the_run_is_numbered_in_its_own_frames_and_draws_320x200`). The mapping's
-two ends are pinned by the tests:
+evidence is the fit's own:
 
 - tick 0 is the fade's first wait at boot **10,368**; the main loop starts at
   tick **130**, frame counter 1 at boot **10,498**
   (`the_mapping_is_boot_equals_ten_thousand_three_hundred_sixty_eight_plus_tick`);
 - the reference's four keyframes are reproduced at frame counters
   **403, 703, 1303, 1903**, i.e. ticks **532, 832, 1432, 2032**
-  (`the_four_keyframes_match_the_reference_at_the_mapping`).
-- the survey's 12,900 frame is the fade-out's flat grey: the sessions record
-  `(239,239,239)` and `(231,231,231)` — the c=59 and c=57 uploads
-  (`reference-indices.md` §14.5). Under this mapping boot 12,900 is frame
-  counter 2403, whose upload is pal2(2402), the c=59 step; the sibling
-  session's c=57 is the same curve one frame on (a start one frame earlier).
+  (`the_four_keyframes_match_the_reference_at_the_mapping`) — the fit's own
+  evidence, not an independent check.
+
+**The independent pin is the survey's 12,900 flat-grey frame**: the sessions
+record `(239,239,239)` and `(231,231,231)` — the c=59 and c=57 uploads
+(`reference-indices.md` §14.5). Under this mapping boot 12,900 is frame
+counter 2403, whose upload is pal2(2402), the c=59 step; the sibling
+session's c=57 is the same curve one frame on (a start one frame earlier).
+A different capture and a different observable, it pins the mapping to ±1.
 
 **`repeat` is one, and the difference is zero.** The original advances the
 physics `repeat` times per iteration; the port advances it once per tick. The

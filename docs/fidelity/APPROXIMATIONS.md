@@ -1092,8 +1092,9 @@ at 5859 in **2,706**. With the shipped entries 1719 and 2719 are
 byte-identical, and 5859's residual is the phase below: **2,358** pixels in
 the in-process script (`cargo test -p secondreality --bin secondreality
 parts::alku` — the unit test
-`the_scrolling_keyframes_port_phase_differs_only_in_the_text_xor_pixels` and
-the phase scan's shift +0 row) and **2,353** through the real binary
+`the_scrolling_keyframes_port_phase_differs_only_in_the_text_xor_pixels`;
+the phase scan's shift +0 row is the ignored `the_5859_phase_sensitivity`,
+run with `--ignored`) and **2,353** through the real binary
 (`cargo test -p secondreality --test alku -- --nocapture`).
 
 **Port:** reads `HOI.U` (the curated picture) and overrides those three
