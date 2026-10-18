@@ -608,6 +608,14 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // DOTS starts in the middle of block 3, after PLZPART. The trace's order
         // when the part's start window opens (boot 10,300..10,368) is 75; it
         // advances to 77 at 10,380, twelve frames into the part's fade.
+        // PLZPART is block 3's third part. `second3a` holds the transition: the
+        // published words go from order 60 row 63 at boot 5720 to **order 62 row 0 at
+        // 5723**, where the part's own `_dis_setmframe(0)` (`PLZPART/PLZ.C:69`) zeroes
+        // `_np_zframe`; the natural advance over the `254` at MUSIC1 order 61 is what
+        // lands 62:0 zplus 2. The seek starts at 62, the order in force; the entry run's
+        // head start and its two gates are the part's (`parts/plzpart.rs`), because a
+        // seek cannot cross the marker that is now in the past.
+        "plzpart" => Some((ModuleId::Music1, 62)),
         "minvball" => Some((ModuleId::Music1, 75)),
         "rayscrl" => Some((ModuleId::Music1, 86)),
         _ => None,
@@ -1719,6 +1727,9 @@ mod tests {
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
+            // The order in force at the part's start window (5720, 5730]; the
+            // `_dis_setmframe(0)` reset at 5723 is the part's tick 0.
+            ("plzpart", Some((ModuleId::Music1, 62))),
             ("minvball", Some((ModuleId::Music1, 75))),
             ("rayscrl", Some((ModuleId::Music1, 86))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70

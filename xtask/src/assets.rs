@@ -1033,8 +1033,8 @@ mod tests {
         // are records **about** the tree, not rows of it.
         assert_eq!(
             rows.len(),
-            151,
-            "150 curated files and A5's one recovered file"
+            158,
+            "157 curated files and A5's one recovered file"
         );
         assert_eq!(rows[0].path, "ALKU/FONA.UH");
         assert_eq!(rows[0].parts, vec!["ALKU".to_string()]);

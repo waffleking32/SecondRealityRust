@@ -1208,3 +1208,58 @@ its own drawing and the comparison at 7900 is RGB. Registered, not adopted.
 The lead is `BEG/BEG.C:18-21` and the reference's own
 `reference/parts/pam/manifest.json` palette override; `docs/fidelity/pam.md`
 §6 carries the frame-by-frame reading.
+
+## A22 — PLZPART: the plasma exits at the release's fourth palette table, not the tree's fifth (adopted)
+
+**Part:** PLZPART (`PLZPART/PLZ.C`), Phase 5. **Original:** `plz()` advances
+`curpal` through `pals[6][768]` and exits when `curpal == 5 && cop_drop > 64`
+(`PLZ.C:94`; `PLZ.OBJ` disassembles to `cmpw $5`).
+
+**Why the tree's 5 cannot be the release's.** The tree's exit would fire four
+switches in, at boot **8769** — 429 frames past the reference's last plasma
+screen. The reference's plasma-to-cube hand-off is at boot ~8315: the cube's
+music gate (`musplus() >= 13`) passes at boot 8364 and the 320×400 screen is
+gone from (8310, 8340] (`reference-indices.md` §13.7). A vendored tree that
+runs four switches is a development snapshot, not the shipped part.
+
+**Port:** `EXIT_PALETTE_RELEASE = 4`; the fourth switch starts the
+`cop_drop` walk and the exit follows 65 ticks later.
+`the_release_exit_index_is_the_measured_one` asserts the switch ticks
+975/2010/2527 and the exit at 2592 = boot 8315 inside the capture's window.
+The tree's 5 stays in the file as `EXIT_PALETTE_TREE` for the test.
+
+**Measured difference.** The port's plasma screen is gone by the reference's
+cube keyframes, as the reference's is; the plasma keyframe residuals (11.209 %,
+5.848 %, 4.052 % at boots 6000/7000/7600) are §4 of `docs/fidelity/plzpart.md`,
+not this divergence.
+
+**Decision (D24's procedure).** The tree's value contradicts the reference's
+own screen boundary; the release's value is adopted. `docs/fidelity/plzpart.md`
+§10 records the reading.
+
+## A23 — PLZPART: the cube's keyframes differ, and the root cause is open (registered, not adopted)
+
+**Part:** PLZPART (`PLZPART/VECT.C`, `PLZA.ASM`, `SPLINE.ASM`), Phase 5.
+**Original:** a 320×200 textured cube on a six-page flip whose music gate the
+reference pins to boot 8364.
+
+**The divergence.** RGB at boot 8500: **44.352 %** of pixels, max channel
+delta **243**; at boot 9500: **92.866 %**, max delta **255**
+(`cargo test -p secondreality --test plzpart -- --nocapture`). The reference's
+cube is byte-identical at these indices in four capture sessions
+(`reference-indices.md` §13.5), so this is not a capture-phase artifact.
+
+**Pinned so far.** The music gate is the reference's (boot 8364, nine-poll
+entry pre-roll) and the first draw is boot 8365. The page/display parity, the spline phase (offset probes during
+development), the projection constants (142 and the double +160, pinned by
+`the_cube_projection_adds_three_hundred_twenty_and_sixty_six`) and the
+extent/clear pair were each measured and ruled out. What was fixed on the way
+is in `docs/fidelity/plzpart.md` §7: the ctau hull, the clear's page base, the
+gate-frame swap and the span divisor/sign mask.
+
+**Decision (D24's procedure).** Not adopted and not explained: the tree's own
+data and arithmetic do not yet reproduce the release's frames, and no measured
+D24 difference in `RATA.INC`/`SPLINE.INC` has been demonstrated. The residual
+stays registered so the phase's close-out and any later task see it. The
+integration test pins the measured percentages; a change to them must update
+this entry and §7 of the note.
