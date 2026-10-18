@@ -204,8 +204,9 @@ fn a_recorded_refusal_that_starts_decoding_is_a_failed_check() {
     // and this one is in the category that says the premise broke.
     assert!(
         output.contains(
-            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 headerless with \
-             no decoder, 0 refused on record, 1 refused on record that now decode, 1 finding(s)"
+            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 Visu scene file(s), \
+             0 headerless with no decoder, 0 refused on record, 1 refused on record that now \
+             decode, 1 finding(s)"
         ),
         "{output}"
     );
@@ -226,8 +227,9 @@ fn the_decode_summary_adds_up_when_a_recorded_file_cannot_be_read() {
     assert!(output.contains("FAIL GONE.TXT"), "{output}");
     assert!(
         output.contains(
-            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 headerless with \
-             no decoder, 0 refused on record, 1 that could not be decoded, 1 finding(s)"
+            "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 Visu scene file(s), \
+             0 headerless with no decoder, 0 refused on record, 1 that could not be decoded, 1 \
+             finding(s)"
         ),
         "{output}"
     );
@@ -242,6 +244,33 @@ fn every_asset_in_the_tree_decodes() {
     assert_eq!(run.code, 0, "the real tree checks out:\n{}", run.output());
     let output = run.output();
     assert!(output.contains("ALKU/FONA.UH"), "{output}");
+    // The decode census, pinned: every picture, animation and palette, the 51
+    // files of the vector engine's packed scene set (U2A's six and U2E's 45,
+    // read by construction because none has a magic), and the one recorded
+    // refusal. The parts add up to the total by construction of the line, and
+    // a file that leaves one bucket for another without the record changing
+    // is exactly what this pin is here to catch.
+    assert!(
+        output.contains(
+            "decode: 158 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene \
+             file(s), 44 headerless with no decoder, 1 refused on record, 0 finding(s)"
+        ),
+        "{output}"
+    );
+    // And the two streams' own totals, through the same run the summary is
+    // about: the reader tests pin them again, one file at a time.
+    assert!(
+        output.contains(
+            "VISU/C/SCENE/U2A.0AB: VISU animation: 522 frame(s), 1272 command(s), fov 0x22"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "VISU/C/SCENE/U2E.0AB: VISU animation: 1802 frame(s), 4047 command(s), fov 0x1C"
+        ),
+        "{output}"
+    );
     // A1's record: 149 curated files in the main table and one recovered file
     // in the table A5 added. The count is the phase's, and a tree that gains or
     // loses a file without the record changing has a problem this test cannot

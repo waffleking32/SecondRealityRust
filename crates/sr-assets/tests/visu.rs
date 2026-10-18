@@ -1,0 +1,502 @@
+//! VISU's packed scene formats: the master `.00M`, the scene list `.0AA`, the
+//! animation stream `.0AB`, and the object files `.00N`.
+//!
+//! Every file these tests read is a curated copy under `assets/`, verified
+//! byte-for-byte against `upstream/SecondReality/` by task A1. The formats are
+//! the original's own writer's:
+//!
+//! - `VISU/C/SAVE.C:40-90` — `saveobject` writes `VERS`, `NAME`, `VERT`,
+//!   `NORM`, `POLY`, one `ORD0` and any number of `ORDE` blocks, each with a
+//!   four-byte tag and a little-endian `u32` length, and pads each block to a
+//!   four-byte boundary (`endblock`, `:16-32`).
+//! - `VISU/VISU.C:25-96` — `vis_loadobject` walks those blocks: `VERS` is read
+//!   and only *printed* if it is not 1.00, `NAME` is a C string used as is,
+//!   `VERT` holds a `u16` count and a `u16` spare then that many 16-byte
+//!   `vlist`s, `NORM` a `u16` count and a `u16` basic-normal count then that
+//!   many 8-byte `nlist`s, `POLY` is the polygon data block, and `ORD0`/`ORDE`
+//!   become `o->pl[0]`/`o->pl[plnum++]`.
+//! - `VISU/C/MAIN.C:252-321` — the tool writes the `.00M`: eight zero words, a
+//!   768-byte palette at offset 16, then the object count and the object
+//!   numbers at the offset stored in the header's bytes 4..8; byte 15 is the
+//!   city flag (`'C'` or `'R'`, `:290-292`).
+//! - `VISU/C/U2A.C:148-219` and `U2E.C:208-263` — the parts read it all back:
+//!   `scene0[15]` picks the city, `LONGAT(scene0+4)` locates the object list,
+//!   each `.0AA` entry names a `.0AB`, and the `.0AB` stream is decoded one
+//!   frame at a time (`U2A.C:355-470`).
+//!
+//! **The list base is measured, not guessed.** `C.H`'s `polylist` comment calls
+//! each word after the first two a "pointer to polygon N inside polydata", and
+//! the runtime adds the list word to the `polydata` base `vis_drawobject` hands
+//! `draw_polylist` (`VISU.C:124`). The shipped files settle where that base is:
+//! every `ORD0`/`ORDE` in every object begins with the offset 2, and every
+//! object's `POLY` content begins with the one zero word the decoder skips, so
+//! the first record sits at byte 2 of the block's content. The U2A.001 first
+//! record is an 8-gon — 4 bytes of header, 2 of normal index, 16 of vertices —
+//! and the next list word is 24, exactly 2 + 22. Read relative to the first
+//! record instead, the 2 would point inside that record and the 24 would miss
+//! every record start; there is no base other than the block's content start
+//! under which all 405 shipped lists resolve, which
+//! [`every_shipped_object_resolves_its_lists_and_matches_its_own_vertex_count`]
+//! asserts file by file.
+//!
+//! The record layout is the one the data shows, not `CD.H`'s comment: the
+//! comment says "4+2*n", but the files are 6+2*n — `sides`, `flags`, a
+//! 16-bit `color`, a 16-bit normal index, then `n` 16-bit vertex indices.
+//! U2A.001's first two records are 22 and 14 bytes long, and only 6+2*n puts
+//! the second record where the list's second offset (24) names it.
+
+use std::path::Path;
+
+use sr_assets::visu::{read_animation, read_master, read_object, read_scene_list};
+use sr_assets::AssetError;
+
+/// The scene directory, read the way the other `sr-assets` integration tests
+/// read `assets/`: relative to the crate directory `cargo test` runs in.
+const SCENE: &str = "../../assets/VISU/C/SCENE";
+
+fn asset(name: &str) -> Vec<u8> {
+    let path = Path::new(SCENE).join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+/// Every shipped object file: `<scene>.NNN` for U2A's 001-003 and U2E's
+/// 001-042, in name order.
+fn shipped_objects() -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(SCENE).unwrap_or_else(|e| panic!("cannot read {SCENE}: {e}")) {
+        let path = entry.expect("directory entry").path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a UTF-8 asset name")
+            .to_owned();
+        let Some((_, extension)) = name.rsplit_once('.') else {
+            continue;
+        };
+        if extension.len() == 3 && extension.chars().all(|c| c.is_ascii_digit()) {
+            out.push((name, std::fs::read(&path).expect("a readable asset")));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// A block's data as `(offset in the file, bytes)`, found by walking the block
+/// chain exactly as `vis_loadobject` does. The reader does not expose the
+/// counts inside `VERT`/`NORM`, so the test reads them from the file itself.
+fn block_at<'a>(bytes: &'a [u8], tag: &[u8; 4]) -> (usize, &'a [u8]) {
+    let mut at = 0usize;
+    loop {
+        assert!(
+            at + 8 <= bytes.len(),
+            "no {:?} block",
+            String::from_utf8_lossy(tag)
+        );
+        let length =
+            u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]])
+                as usize;
+        let end = at + 8 + length;
+        assert!(end <= bytes.len(), "block at {at} runs past the file");
+        if &bytes[at..at + 4] == tag {
+            return (at + 8, &bytes[at + 8..end]);
+        }
+        at = end;
+    }
+}
+
+fn block_data<'a>(bytes: &'a [u8], tag: &[u8; 4]) -> &'a [u8] {
+    block_at(bytes, tag).1
+}
+
+#[test]
+fn the_u2a_master_reads_its_city_palette_and_object_numbers() {
+    let bytes = asset("U2A.00M");
+    assert_eq!(bytes.len(), 796);
+    let master = read_master(&bytes).unwrap();
+
+    assert_eq!(master.city, 0, "U2A.00M byte 15 is not 'C' or 'R'");
+    assert_eq!(master.objects, [1, 2, 3, 1, 1]);
+    // `conum` counts the camera as object 0, which is why the file carries
+    // conum-1 numbers (`U2A.C:170-172` starts `c` at 1).
+    assert_eq!(master.objects.len() + 1, 6);
+
+    // The palette is the file's own 768 bytes at 16..784, six-bit values
+    // copied through Palette::set_entry.
+    for i in 0..256usize {
+        let at = 16 + i * 3;
+        assert_eq!(
+            master.palette.entry(i as u8),
+            [bytes[at], bytes[at + 1], bytes[at + 2]],
+            "palette entry {i}"
+        );
+    }
+}
+
+#[test]
+fn the_u2e_master_reads_fifty_eight_objects_and_its_duplicates() {
+    let bytes = asset("U2E.00M");
+    assert_eq!(bytes.len(), 900);
+    let master = read_master(&bytes).unwrap();
+
+    assert_eq!(master.city, 0);
+    let expected: Vec<u16> = (1..=42)
+        .chain([9, 9, 9, 9, 6, 25, 32, 32, 35, 35, 32, 32, 32, 4, 32])
+        .collect();
+    assert_eq!(master.objects, expected);
+    assert_eq!(master.objects.len() + 1, 58, "conum counts the camera");
+}
+
+/// The city flag is byte 15 and only the two letters mean a city
+/// (`MAIN.C:290-292`, `U2A.C:168-169`); the shipped scenes carry neither.
+#[test]
+fn the_city_flag_is_read_from_byte_fifteen() {
+    let mut bytes = asset("U2A.00M");
+    for (byte, city) in [(b'C', 1), (b'R', 2), (0, 0), (b'c', 0), (0xFF, 0)] {
+        bytes[15] = byte;
+        assert_eq!(read_master(&bytes).unwrap().city, city, "byte 15 = {byte:#04x}");
+    }
+}
+
+/// The command encoding's uncommon branches, built by hand because the two
+/// shipped streams only use some of them together: a `0xC0` extension naming
+/// the object's high bits, the on/off toggle, pflags of one, two and three
+/// bytes, a word matrix and a four-byte position delta.
+#[test]
+fn the_command_encoding_reads_extensions_toggles_sizes_and_signs() {
+    let stream = [
+        0x10, 0x01, 0x02, // object 0, one-byte pflag, dx = +2
+        0xC1, 0x82, // extension 0x1_, then object 0x12 with its on bit set
+        0x30, 0xC0, 0x00, 0x00, 0xFE, 0xFF, // three-byte pflag, word-matrix entry 0 = -2
+        0x20, 0x03, 0x00, 0xFE, 0xFF, 0xFF, 0xFF, // two-byte pflag, 4-byte dx = -2
+        0xFF, 0x11, // end of frame, fov 0x11
+        0xFF, 0xFF, // end of stream
+    ];
+    let animation = read_animation(&stream, 0x13).unwrap();
+
+    assert_eq!(animation.frames.len(), 2, "the END-terminated frame included");
+    assert_eq!(animation.frames[0].fov, 0x11);
+    let ops = &animation.frames[0].ops;
+    assert_eq!(ops.len(), 4);
+    assert_eq!((ops[0].object, ops[0].toggle, ops[0].dx), (0, None, 2));
+    assert_eq!((ops[1].object, ops[1].toggle), (0x12, Some(true)));
+    // The `0x30` and `0x20` commands carry no extension, so the object's high
+    // nibble is the 0x10 the previous command set, exactly as
+    // `onum=(onum&0xff0)|(a&0xf)` leaves it (`U2A.C:383`).
+    assert_eq!(ops[2].object, 0x10);
+    assert_eq!(ops[2].dm[0], Some(-2), "a word-matrix delta");
+    assert_eq!(ops[3].object, 0x10);
+    assert_eq!(ops[3].dx, -2, "a four-byte signed delta");
+    assert_eq!(animation.frames[1].fov, 0, "the END frame has no fov");
+}
+
+#[test]
+fn the_scene_lists_name_scene_one_and_stop_at_their_sentinel() {
+    for name in ["U2A.0AA", "U2E.0AA"] {
+        let bytes = asset(name);
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(read_scene_list(&bytes).unwrap().scenes, [1], "{name}");
+    }
+
+    // A zero first word ends the list as surely as 0xFFFF does
+    // (`U2A.C:210`'s `while(*ip)`), and neither sentinel is stored.
+    assert_eq!(
+        read_scene_list(&[2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0])
+            .unwrap()
+            .scenes,
+        [2, 3]
+    );
+    assert_eq!(
+        read_scene_list(&[2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0])
+            .unwrap()
+            .scenes,
+        [2]
+    );
+    // The sentinel pair is two words, and a pair that is cut in half is a
+    // truncated file, not a shorter list.
+    assert!(read_scene_list(&[2, 0, 1]).is_err());
+    assert!(read_scene_list(&[]).is_err());
+}
+
+#[test]
+fn the_u2a_animation_pins_its_frames_commands_and_toggles() {
+    let animation = read_animation(&asset("U2A.0AB"), 6).unwrap();
+
+    assert_eq!(
+        animation.frames.len(),
+        522,
+        "the END-terminated frame included"
+    );
+    assert_eq!(
+        animation
+            .frames
+            .iter()
+            .map(|frame| frame.ops.len())
+            .sum::<usize>(),
+        1272
+    );
+
+    let last = animation.frames.len() - 1;
+    for (index, frame) in animation.frames.iter().enumerate() {
+        if index == last {
+            // 0xFF 0xFF ends the stream without setting a field of vision;
+            // the original exits before drawing this frame.
+            assert_eq!(frame.fov, 0, "the END-terminated frame");
+            assert!(frame.ops.is_empty(), "the END frame carries no commands");
+        } else {
+            assert_eq!(frame.fov, 0x22, "frame {index}");
+        }
+    }
+
+    // Frame 0: one camera command, from the movement the shipped stream
+    // applies to the matrix's position, with five matrix entries changed.
+    let first = &animation.frames[0];
+    assert_eq!(first.ops.len(), 1);
+    let camera = &first.ops[0];
+    assert_eq!(camera.object, 0);
+    assert_eq!(camera.toggle, None);
+    assert_eq!((camera.dx, camera.dy, camera.dz), (-221, -323, 7088));
+    assert_eq!(
+        camera.dm.iter().filter(|delta| delta.is_some()).count(),
+        5,
+        "five of the nine matrix entries move in frame 0"
+    );
+
+    // Frame 16 switches object 2 on and moves it down.
+    let toggle_on = animation.frames[16]
+        .ops
+        .iter()
+        .find(|op| op.object == 2 && op.toggle == Some(true))
+        .expect("frame 16 turns object 2 on");
+    assert_eq!(toggle_on.dy, -9178);
+
+    let toggles = |index: usize| -> Vec<(usize, bool)> {
+        animation.frames[index]
+            .ops
+            .iter()
+            .filter_map(|op| op.toggle.map(|on| (op.object, on)))
+            .collect()
+    };
+    assert_eq!(toggles(259), [(1, true), (4, true)]);
+    assert_eq!(toggles(270), [(5, true)]);
+    assert_eq!(toggles(514), [(1, false)]);
+    assert_eq!(toggles(517), [(5, false)]);
+    assert_eq!(toggles(519), [(4, false)]);
+    assert_eq!(toggles(520), [(5, true)]);
+}
+
+#[test]
+fn the_u2e_animation_pins_its_frames_and_commands() {
+    let animation = read_animation(&asset("U2E.0AB"), 58).unwrap();
+
+    assert_eq!(animation.frames.len(), 1802);
+    assert_eq!(
+        animation
+            .frames
+            .iter()
+            .map(|frame| frame.ops.len())
+            .sum::<usize>(),
+        4047
+    );
+    let last = animation.frames.len() - 1;
+    for (index, frame) in animation.frames.iter().enumerate() {
+        if index == last {
+            assert_eq!(frame.fov, 0, "the END-terminated frame");
+        } else {
+            assert_eq!(frame.fov, 0x1C, "frame {index}");
+        }
+    }
+}
+
+#[test]
+fn the_u2a_object_pins_its_counts_and_its_first_face() {
+    let object = read_object(&asset("U2A.001")).unwrap();
+
+    assert_eq!(object.version, 0x0100);
+    assert_eq!(object.name, b"\"s01\"", "the file's quotes are kept");
+    assert_eq!(object.vertices.len(), 159);
+    assert_eq!(object.normals.len(), 269);
+    assert_eq!(object.polys.len(), 124);
+    assert_eq!(object.lists.len(), 9, "ORD0 plus eight ORDE blocks");
+
+    let face = &object.polys[0];
+    assert_eq!(face.sides, 8);
+    assert_eq!(face.flags, 0x1C00, "the record's high byte, in bits 8..16");
+    assert_eq!(face.color, 32);
+    assert_eq!(face.normal, 0);
+    assert_eq!(face.vertices, [4, 5, 6, 7, 0, 1, 2, 3]);
+    assert_eq!(face.offset, 2, "after the POLY block's leading 0 word");
+
+    // Both list words of U2A.001's ORD0 are sorted on a different vertex; the
+    // centre word is the vertex the original sorts the list by.
+    assert_eq!(object.lists[0].center, 150);
+    assert_eq!(object.lists[0].offsets.len(), 124);
+    assert_eq!(object.lists[8].center, 158);
+    assert_eq!(object.lists[8].offsets.len(), 124);
+}
+
+#[test]
+fn the_u2e_object_pins_its_counts_and_its_first_face() {
+    let object = read_object(&asset("U2E.001")).unwrap();
+
+    assert_eq!(object.version, 0x0100);
+    assert_eq!(object.name, b"\"_platform\"");
+    assert_eq!(object.vertices.len(), 29);
+    assert_eq!(object.normals.len(), 1);
+    assert_eq!(object.polys.len(), 5);
+    assert_eq!(object.lists.len(), 9);
+
+    let face = &object.polys[0];
+    assert_eq!(face.sides, 4);
+    assert_eq!(face.flags, 0x0800);
+    assert_eq!(face.color, 16);
+    assert_eq!(face.vertices, [0, 1, 2, 3]);
+    assert_eq!(face.offset, 2);
+}
+
+/// The base derivation, stated as the two offsets that distinguish it: the
+/// first face is the block's byte 2, the second is 2 plus the first record's
+/// `6 + 2*8` bytes, and the `ORD0` list says the same two numbers.
+#[test]
+fn the_lists_index_from_the_poly_blocks_first_content_byte() {
+    let object = read_object(&asset("U2A.001")).unwrap();
+
+    let first = &object.polys[0];
+    let second = &object.polys[1];
+    assert_eq!(first.sides, 8);
+    assert_eq!(first.offset, 2);
+    assert_eq!(
+        usize::from(second.offset),
+        2 + (6 + 2 * usize::from(first.sides))
+    );
+
+    let ord0 = &object.lists[0];
+    assert_eq!(ord0.offsets[0], first.offset);
+    assert_eq!(ord0.offsets[1], second.offset);
+
+    // And every record in the file is one of the offsets the block's content
+    // start names — not one of the offsets a base at the first record would.
+    let offsets: Vec<u16> = object.polys.iter().map(|face| face.offset).collect();
+    for offset in &ord0.offsets {
+        assert!(
+            offsets.binary_search(offset).is_ok(),
+            "ORD0's offset {offset} is not a face of the block-content base"
+        );
+    }
+}
+
+/// The census the shipped tree holds, and the two properties the objects were
+/// read for: every list word names a face, and every `VERT` block's own count
+/// is the number of vertices the reader produced.
+#[test]
+fn every_shipped_object_resolves_its_lists_and_matches_its_own_vertex_count() {
+    let objects = shipped_objects();
+    assert_eq!(objects.len(), 45, "U2A's three object files and U2E's 42");
+
+    let mut vertices = 0usize;
+    let mut normals = 0usize;
+    let mut faces = 0usize;
+    let mut lists = 0usize;
+    for (name, bytes) in &objects {
+        let object = read_object(bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        let vnum =
+            u16::from_le_bytes([block_data(bytes, b"VERT")[0], block_data(bytes, b"VERT")[1]]);
+        assert_eq!(
+            object.vertices.len(),
+            vnum as usize,
+            "{name}: VERT's own count"
+        );
+        assert_eq!(object.lists.len(), 9, "{name}");
+        assert!(
+            object.polys.iter().all(|face| face.sides <= 16),
+            "{name}: a face with more than 16 sides"
+        );
+
+        let offsets: Vec<u16> = object.polys.iter().map(|face| face.offset).collect();
+        for (index, list) in object.lists.iter().enumerate() {
+            for offset in &list.offsets {
+                assert!(
+                    offsets.binary_search(offset).is_ok(),
+                    "{name}: list {index} names offset {offset}, which is not a face"
+                );
+            }
+        }
+
+        vertices += object.vertices.len();
+        normals += object.normals.len();
+        faces += object.polys.len();
+        lists += object.lists.len();
+    }
+
+    assert_eq!(
+        (vertices, normals, faces, lists),
+        (2285, 1598, 1206, 405),
+        "the shipped objects' totals"
+    );
+}
+
+/// `VISU.C:49-53` prints "Version not 1.00" and loads the file anyway: the
+/// value is data, not a gate.
+#[test]
+fn a_version_that_is_not_one_hundred_is_stored_not_refused() {
+    let mut bytes = asset("U2A.001");
+    assert_eq!(&bytes[0..4], b"VERS");
+    bytes[8..10].copy_from_slice(&0x0200u16.to_le_bytes());
+
+    let object = read_object(&bytes).unwrap();
+    assert_eq!(object.version, 0x0200);
+    assert_eq!(
+        object.vertices.len(),
+        159,
+        "the rest of the file still loads"
+    );
+}
+
+#[test]
+fn a_truncated_animation_or_a_command_for_a_missing_object_is_an_error() {
+    let full = asset("U2A.0AB");
+    for cut in [0, 1, full.len() - 2, full.len() - 1] {
+        assert!(
+            read_animation(&full[..cut], 6).is_err(),
+            "a stream cut at {cut} of {} bytes",
+            full.len()
+        );
+    }
+
+    // A command byte of 0x06 names object 6 with no extensions and no pflag;
+    // with conum 6 the loader's `if(onum>=conum) return(3)` is the outcome.
+    let error = read_animation(&[0x06, 0xFF, 0x22, 0xFF, 0xFF], 6).unwrap_err();
+    assert!(
+        matches!(&error, AssetError::Unsupported { what, .. } if what.contains("object 6")),
+        "{error}"
+    );
+    // The last object the scene has is object 5, and it is accepted.
+    assert!(read_animation(&[0x05, 0xFF, 0x22, 0xFF, 0xFF], 6).is_ok());
+}
+
+#[test]
+fn truncated_masters_and_scene_lists_are_errors() {
+    let master = asset("U2A.00M");
+    for cut in [0, 15, 783, master.len() - 2] {
+        assert!(
+            read_master(&master[..cut]).is_err(),
+            "a master cut at {cut}"
+        );
+    }
+    assert!(read_scene_list(&asset("U2A.0AA")[..3]).is_err());
+}
+
+#[test]
+fn truncated_and_inconsistent_object_blocks_are_errors() {
+    let full = asset("U2A.001");
+    for cut in [0, 3, 7, 40, full.len() - 2] {
+        assert!(read_object(&full[..cut]).is_err(), "an object cut at {cut}");
+    }
+
+    // A list count that claims more words than its block holds is a truncated
+    // list, and must not be read past the block.
+    let mut bad = full.clone();
+    let at = block_at(&bad, b"ORD0").0;
+    bad[at..at + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
+    assert!(read_object(&bad).is_err());
+}

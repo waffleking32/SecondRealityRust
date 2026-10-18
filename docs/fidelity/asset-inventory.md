@@ -654,3 +654,17 @@ recorded file that is missing, a file that has no row, and a digest that does no
 exits **0** on this tree with `150 file(s) recorded, 150 in the tree, 0 finding(s)`. It is the
 loop above plus the two things the loop cannot see: that the record's numbers are the file's,
 and that nothing was added to the tree without a row.
+
+`--decode` is the command's other half: it opens every asset with the port's own decoders and
+reports what each one is, so a file the port cannot read fails here as well as in a part. The
+formats with a magic are opened by it, and the headerless ones by the construction their names
+document — `.PAL`, `.ANI`, and, since Phase 6's packed scene readers, the vector engine's
+51-file scene set under `VISU/C/SCENE`: `.00M`, `.0AA`, `.0AB` and `.001`–`.042`, read through
+`sr_assets::visu` with the animation's object count taken from its own master. On this tree the
+run prints
+
+```text
+decode: 158 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene file(s), 44 headerless with no decoder, 1 refused on record, 0 finding(s)
+```
+
+and `xtask/tests/assets.rs` pins that line (`cargo xtask assets verify --decode` reproduces it).

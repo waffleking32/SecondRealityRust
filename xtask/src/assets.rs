@@ -61,17 +61,24 @@
 //! happening — a decoder that grew lenient leaves the file's digest unchanged,
 //! so `--tree` cannot see it and this is the only check that can.
 //!
-//! **Two headerless formats are opened by construction, and only because their
+//! **Some headerless formats are opened by construction, and only because their
 //! names are the construction the crate documents.** `sr_assets` says of
 //! `Format::Pal` and `Format::Ani` that they have no magic and are "loaded by
 //! construction": the extension is the door, and once it is chosen the file
 //! must hold what the name says — a `.PAL` that is not 768 six-bit bytes, or an
-//! `.ANI` whose record stream does not parse, is a finding. Everything else
-//! with no magic is reported as what it is and not decoded: `.U`, `.1BM` and
-//! `.EGA` hold bare screens and mask planes whose geometry only the part that
-//! loads them knows ([`sr_assets::raw_surface`] is their door), and no decoder
-//! may invent one. Three files of 64,000 bytes in this tree have three
-//! different geometries — size is not evidence.
+//! `.ANI` whose record stream does not parse, is a finding. The vector
+//! engine's scene set is the same shape of absence: `VISU/C/SCENE/<scene>`
+//! with `.00M`, `.0AA`, `.0AB` or a three-digit object number has no magic at
+//! all, and the directory plus the name are what `VISU/C/MAIN.C` and `SAVE.C`
+//! give it. Those 51 files are read through `sr_assets::visu`'s four readers —
+//! the `.0AB` with the object count from its own `.00M`, because that is where
+//! the part gets it (`U2A.C:168-172`) — and a file that does not parse is a
+//! finding like any other. Everything else with no magic is reported as what
+//! it is and not decoded: `.U`, `.1BM` and `.EGA` hold bare screens and mask
+//! planes whose geometry only the part that loads them knows
+//! ([`sr_assets::raw_surface`] is their door), and no decoder may invent one.
+//! Three files of 64,000 bytes in this tree have three different geometries —
+//! size is not evidence.
 //!
 //! **`--sheet` writes outside the tree, always.** `assets/` is input-only: a
 //! PNG written among the assets would be a file with no provenance row, which
@@ -85,6 +92,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use sha2::{Digest, Sha256};
+use sr_assets::visu::{read_animation, read_master, read_object, read_scene_list};
 use sr_assets::{load, load_frames, pal, sniff, Format, Image};
 use sr_engine::{dac_expand, Palette};
 
@@ -520,6 +528,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
     let mut pictures = 0usize;
     let mut animations = 0usize;
     let mut palettes = 0usize;
+    let mut scenes = 0usize;
     let mut headerless = 0usize;
     let mut refused = 0usize;
     // The two ways a row leaves the categories above: a recorded refusal that
@@ -544,7 +553,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
                 continue;
             }
         };
-        let inspected = match inspect(&row.path, &bytes) {
+        let inspected = match inspect_in_tree(tree, &row.path, &bytes) {
             Ok(inspected) => inspected,
             Err(message) => {
                 findings += 1;
@@ -557,6 +566,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             Kind::Picture(_) => pictures += 1,
             Kind::Frames { .. } => animations += 1,
             Kind::Palette { .. } => palettes += 1,
+            Kind::Scene(_) => scenes += 1,
             Kind::Headerless => headerless += 1,
             // A refusal that stops happening is counted as the finding it is,
             // below, not as a refusal.
@@ -607,8 +617,8 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
     }
     println!(
         "decode: {} asset(s) — {pictures} picture(s), {animations} animation(s), {palettes} \
-         palette(s), {headerless} headerless with no decoder, {refused} refused on record\
-         {buckets}, {findings} finding(s)",
+         palette(s), {scenes} Visu scene file(s), {headerless} headerless with no decoder, \
+         {refused} refused on record{buckets}, {findings} finding(s)",
         rows.len()
     );
     if let Some(directory) = sheets {
@@ -675,6 +685,10 @@ enum Kind {
     Palette {
         entries: usize,
     },
+    /// One of the vector engine's four packed scene formats. It is data, not a
+    /// picture, and its name in `VISU/C/SCENE` is the only thing that says
+    /// which of the four it is.
+    Scene(Scene),
     /// No magic to go on, and no decoder takes it: a bare screen or mask plane
     /// whose geometry its own part supplies.
     Headerless,
@@ -694,6 +708,69 @@ struct Picture {
     width: u32,
     height: u32,
     palette: PaletteUse,
+}
+
+/// What one file of the vector engine's scene set turned out to be, and the
+/// numbers its own reader produced.
+///
+/// The set has no magic, so the name is the construction: `VISU/C/SCENE` names
+/// the tool's output directory (`VISU/C/MAIN.C:243-321`, `SAVE.C:40-90`), and
+/// the extension names the piece — `.00M` the master, `.0AA` the scene list,
+/// `.0AB` an animation stream and a three-digit object number the object file
+/// the scene tool wrote (`U2A.C:148-219`).
+#[derive(Debug)]
+enum Scene {
+    Master {
+        /// 0, 1 (`'C'`) or 2 (`'R'`), the city flag of `MAIN.C:290-292`.
+        city: u8,
+        /// The file's `conum`: the camera is object 0, so this is one more
+        /// than the numbers the master lists.
+        objects: usize,
+    },
+    List {
+        scenes: usize,
+    },
+    Animation {
+        frames: usize,
+        ops: usize,
+        /// The first frame's field of vision, the stream's whole run.
+        fov: u8,
+    },
+    Object {
+        name: String,
+        vertices: usize,
+        normals: usize,
+        faces: usize,
+        lists: usize,
+    },
+}
+
+impl fmt::Display for Scene {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Scene::Master { city, objects } => write!(
+                f,
+                "VISU scene master: city {city}, {objects} object(s) (the camera first), palette \
+                 256 entries"
+            ),
+            Scene::List { scenes } => write!(f, "VISU scene list: {scenes} scene(s)"),
+            Scene::Animation { frames, ops, fov } => write!(
+                f,
+                "VISU animation: {frames} frame(s), {ops} command(s), fov 0x{fov:02X}"
+            ),
+            Scene::Object {
+                name,
+                vertices,
+                normals,
+                faces,
+                lists,
+            } => write!(
+                f,
+                "VISU object {name}: {vertices} vertices, {normals} normals, {faces} faces, \
+                 {lists} lists"
+            ),
+        }
+    }
 }
 
 /// How much palette a picture's own file carries. A `.16` file carries 16
@@ -736,6 +813,7 @@ impl fmt::Display for Kind {
             Kind::Palette { entries } => {
                 write!(f, "VGA palette, {entries} entries, six bits per component")
             }
+            Kind::Scene(scene) => write!(f, "{scene}"),
             Kind::Headerless => f.write_str(
                 "not decoded: no magic to go on, and no decoder takes a headerless file without \
                  the geometry its part knows",
@@ -796,6 +874,115 @@ fn inspect(path: &str, bytes: &[u8]) -> Result<Inspected, String> {
         },
         None => headerless(path, bytes),
     }
+}
+
+/// Open one asset, with the tree it came from.
+///
+/// The scene set is checked first: its animation stream needs its own `.00M`
+/// for the object count, and that is a sibling file. Everything else keeps the
+/// magic-or-name rule.
+fn inspect_in_tree(tree: &Path, path: &str, bytes: &[u8]) -> Result<Inspected, String> {
+    match scene_inspected(tree, path, bytes)? {
+        Some(inspected) => Ok(inspected),
+        None => inspect(path, bytes),
+    }
+}
+
+/// The directory the scene tool wrote into, relative to the curated tree's
+/// root. The vector engine's four formats have no magic at all: this directory
+/// and the file's name are what says which one a file is.
+const VISU_SCENE_DIR: &str = "VISU/C/SCENE/";
+
+/// Read a `VISU/C/SCENE` file through `sr_assets::visu`, or `None` when the
+/// path is not one of them.
+///
+/// The names are exact, not a guess: `MAIN.C:243-321` writes `<scene>.00M`,
+/// `.0AA` and `.0AB`, and `SAVE.C:44` writes `<scene>.%03i` for the objects.
+/// A `.0AB` is read with the object count of the `<scene>.00M` beside it,
+/// because that is where the part gets it (`U2A.C:168-172`); a missing master
+/// is a finding for the animation, not a reason to guess a count.
+fn scene_inspected(tree: &Path, path: &str, bytes: &[u8]) -> Result<Option<Inspected>, String> {
+    let Some(name) = path.strip_prefix(VISU_SCENE_DIR) else {
+        return Ok(None);
+    };
+    // Files of the set sit directly in the directory; a subdirectory's file
+    // is not one of the tool's outputs.
+    if name.contains('/') {
+        return Ok(None);
+    }
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return Ok(None);
+    };
+    let extension = extension.to_ascii_lowercase();
+    let is_object = extension.len() == 3
+        && extension
+            .chars()
+            .all(|character| character.is_ascii_digit());
+
+    let scene = match extension.as_str() {
+        "00m" => {
+            let master = read_master(bytes).map_err(|error| {
+                format!("its name says VISU scene master, so it has to be one: {error}")
+            })?;
+            Scene::Master {
+                city: master.city,
+                // The file holds conum-1 numbers; object 0 is the camera.
+                objects: master.objects.len() + 1,
+            }
+        }
+        "0aa" => {
+            let list = read_scene_list(bytes).map_err(|error| {
+                format!("its name says VISU scene list, so it has to be one: {error}")
+            })?;
+            Scene::List {
+                scenes: list.scenes.len(),
+            }
+        }
+        "0ab" => {
+            let master_path = tree.join(VISU_SCENE_DIR).join(format!("{stem}.00M"));
+            let master_bytes = fs::read(&master_path).map_err(|error| {
+                format!(
+                    "its name says VISU animation, and the object count it is decoded with is in \
+                     {}: {error}",
+                    master_path.display()
+                )
+            })?;
+            let master = read_master(&master_bytes)
+                .map_err(|error| format!("{}: {error}", master_path.display()))?;
+            let animation = read_animation(bytes, master.objects.len() + 1).map_err(|error| {
+                format!("its name says VISU animation, so it has to be one: {error}")
+            })?;
+            Scene::Animation {
+                frames: animation.frames.len(),
+                ops: animation.frames.iter().map(|frame| frame.ops.len()).sum(),
+                fov: animation.frames.first().map_or(0, |frame| frame.fov),
+            }
+        }
+        _ if is_object => {
+            let object = read_object(bytes).map_err(|error| {
+                format!("its name says VISU object, so it has to be one: {error}")
+            })?;
+            Scene::Object {
+                name: String::from_utf8_lossy(&object.name).into_owned(),
+                vertices: object.vertices.len(),
+                normals: object.normals.len(),
+                faces: object.polys.len(),
+                lists: object.lists.len(),
+            }
+        }
+        _ => return Ok(None),
+    };
+
+    Ok(Some(Inspected {
+        kind: Kind::Scene(scene),
+        // Scene data is not a picture. Its bytes still make a tile so the
+        // sheets keep one per curated file, but the label says what it is.
+        tile: Some(bytes_tile(
+            path,
+            bytes,
+            "VISU scene data, not a picture; the bytes are shown as grey",
+        )),
+    }))
 }
 
 /// The formats with a magic: a picture or an animation, and either way the
@@ -981,6 +1168,12 @@ fn through_indices(pixels: &[u8]) -> Vec<u8> {
 /// A file with no decoder, at the width a screen is: its first bytes as grey.
 /// The label says it is bytes, because that is what it is.
 fn byte_view(path: &str, bytes: &[u8]) -> Tile {
+    bytes_tile(path, bytes, "no decoder takes this file")
+}
+
+/// The same view for a file a decoder *does* take but which is not a picture:
+/// the label says what the bytes are instead of claiming nothing reads them.
+fn bytes_tile(path: &str, bytes: &[u8], note: &str) -> Tile {
     let width = BYTE_VIEW_WIDTH.min(bytes.len().max(1));
     let height = bytes.len().div_ceil(width).clamp(1, BYTE_VIEW_ROWS);
     let shown = (width * height).min(bytes.len());
@@ -999,7 +1192,7 @@ fn byte_view(path: &str, bytes: &[u8]) -> Tile {
         width: width as u32,
         height: height as u32,
         rgb,
-        label: format!("{path} (bytes at {width} wide{cut}: no decoder takes this file)"),
+        label: format!("{path} (bytes at {width} wide{cut}: {note})"),
     }
 }
 
@@ -1209,6 +1402,11 @@ mod tests {
         .unwrap_or_else(|e| panic!("cannot read assets/{path}: {e}"))
     }
 
+    /// The root those files are read from.
+    fn asset_tree() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets")
+    }
+
     #[test]
     fn a_picture_is_opened_by_its_magic_and_reported_with_its_palette() {
         let inspected = inspect("ALKU/FONA.UH", &asset("ALKU/FONA.UH")).unwrap();
@@ -1300,6 +1498,98 @@ mod tests {
         // The byte view is the demo's screen width, so a bare screen lands at
         // its own geometry rather than somewhere arbitrary.
         assert_eq!((tile.width, tile.height), (320, 200));
+    }
+
+    #[test]
+    fn a_visu_scene_file_is_read_by_its_name_and_reported() {
+        // The four packed scene formats have no magic: `VISU/C/SCENE/` and
+        // `<scene>.{00M,0AA,0AB,NNN}` are the construction the scene tool's
+        // own writer gives them. Each one's own reader produces the numbers.
+        let tree = asset_tree();
+
+        let master = inspect_in_tree(
+            &tree,
+            "VISU/C/SCENE/U2A.00M",
+            &asset("VISU/C/SCENE/U2A.00M"),
+        )
+        .unwrap();
+        let Kind::Scene(Scene::Master { city, objects }) = master.kind else {
+            panic!("{}", master.kind);
+        };
+        assert_eq!((city, objects), (0, 6), "the camera is object 0");
+
+        let list = inspect_in_tree(
+            &tree,
+            "VISU/C/SCENE/U2A.0AA",
+            &asset("VISU/C/SCENE/U2A.0AA"),
+        )
+        .unwrap();
+        let Kind::Scene(Scene::List { scenes }) = list.kind else {
+            panic!("{}", list.kind);
+        };
+        assert_eq!(scenes, 1);
+
+        let animation = inspect_in_tree(
+            &tree,
+            "VISU/C/SCENE/U2A.0AB",
+            &asset("VISU/C/SCENE/U2A.0AB"),
+        )
+        .unwrap();
+        let Kind::Scene(Scene::Animation { frames, ops, fov }) = animation.kind else {
+            panic!("{}", animation.kind);
+        };
+        assert_eq!((frames, ops, fov), (522, 1272, 0x22));
+
+        let object = inspect_in_tree(
+            &tree,
+            "VISU/C/SCENE/U2A.001",
+            &asset("VISU/C/SCENE/U2A.001"),
+        )
+        .unwrap();
+        let Kind::Scene(Scene::Object {
+            name,
+            vertices,
+            normals,
+            faces,
+            lists,
+        }) = &object.kind
+        else {
+            panic!("{}", object.kind);
+        };
+        assert_eq!(name, "\"s01\"");
+        assert_eq!((*vertices, *normals, *faces, *lists), (159, 269, 124, 9));
+
+        // Scene data is not a picture, but it still makes a tile so the
+        // per-part sheets hold one per curated file; the label says what the
+        // bytes are instead of claiming nothing reads them.
+        let tile = object.tile.unwrap();
+        assert!(
+            tile.label.contains("VISU scene data, not a picture"),
+            "{}",
+            tile.label
+        );
+    }
+
+    #[test]
+    fn a_scene_name_that_lies_is_a_finding_and_a_scene_name_outside_the_directory_is_not_one() {
+        let tree = asset_tree();
+        let error = inspect_in_tree(&tree, "VISU/C/SCENE/U2A.001", b"not an object").unwrap_err();
+        assert!(error.contains("VISU object"), "{error}");
+
+        // The `.0AB` count comes from its `.00M`: the master is read first,
+        // and the animation's own bytes are then refused.
+        let error = inspect_in_tree(&tree, "VISU/C/SCENE/U2A.0AB", &[0u8; 4]).unwrap_err();
+        assert!(error.contains("VISU animation"), "{error}");
+
+        // A `.001` somewhere else is not the scene tool's object: the
+        // directory is part of the construction, so the generic headerless
+        // report stands.
+        let inspected = inspect_in_tree(&tree, "SOMEWHERE/U2A.001", b"whatever").unwrap();
+        assert!(
+            matches!(inspected.kind, Kind::Headerless),
+            "{}",
+            inspected.kind
+        );
     }
 
     #[test]

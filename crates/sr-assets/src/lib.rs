@@ -9,7 +9,9 @@
 //! never an image, and exists to prove the tree complete. [`font`] (A7) is the
 //! last of them and the only one that is not a decoder: it is the strip view a
 //! part draws its text through, and the geometry it slices with is the part's,
-//! read off its own text routine.
+//! read off its own text routine. [`visu`] reads the vector engine's four
+//! packed scene formats — plain data, with no picture and no magic, so its
+//! four functions are their doors.
 //!
 //! Three rules hold across every decoder here, and each one has cost a colour or
 //! a pixel somewhere before:
@@ -39,6 +41,7 @@ pub mod omf;
 pub mod origin;
 pub mod pal;
 pub mod rix;
+pub mod visu;
 
 use std::path::{Path, PathBuf};
 
@@ -105,6 +108,10 @@ pub enum Format {
     Fli,
     Ani,
     Omf,
+    /// The vector engine's four packed scene formats — `.00M`, `.0AA`, `.0AB`
+    /// and `.00N`. None has a magic, so [`sniff`] never returns this;
+    /// [`visu`]'s four readers are the doors.
+    Visu,
 }
 
 impl std::fmt::Display for Format {
@@ -118,6 +125,7 @@ impl std::fmt::Display for Format {
             Format::Fli => "FLI",
             Format::Ani => "ANI",
             Format::Omf => "OMF object",
+            Format::Visu => "VISU scene",
         })
     }
 }
@@ -243,6 +251,12 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
             what: "a build container, not a picture: omf::extract_ledata(bytes) is its door"
                 .to_string(),
         }),
+        Format::Visu => Err(AssetError::Unsupported {
+            format,
+            what: "scene data, not a picture: visu::read_master, read_scene_list, \
+                   read_animation and read_object are its doors"
+                .to_string(),
+        }),
     }
 }
 
@@ -266,6 +280,12 @@ pub fn load_frames(bytes: &[u8], format: Format) -> Result<Vec<Image>, AssetErro
         Format::Origin | Format::Iff | Format::Rix3 => Ok(vec![load(bytes, format)?]),
         Format::Fli => anim::decode_fli(bytes),
         Format::Ani => anim::decode_ani(bytes),
+        Format::Visu => Err(AssetError::Unsupported {
+            format,
+            what: "scene data, not a container of frames: visu::read_animation(bytes, conum) is \
+                   its door"
+                .to_string(),
+        }),
         _ => Err(AssetError::Unsupported {
             format,
             what: "not a container of frames: pal::decode, raw_surface and omf::extract_ledata \
