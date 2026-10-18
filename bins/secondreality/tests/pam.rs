@@ -230,6 +230,13 @@ fn the_7900_index_plane_is_the_next_parts_white_field_not_pams_frame() {
         frames[39].pixels(),
         "the port's plane is animation frame 39"
     );
+    // The two numbers A21 quotes about that plane, asserted here so the note
+    // can cite this test (D25): its distinct-index count and its highest
+    // index, which is the max delta against the reference's 15.
+    let frame39 = frames[39].pixels();
+    let distinct: std::collections::BTreeSet<u8> = frame39.iter().copied().collect();
+    assert_eq!(distinct.len(), 64, "the animation frame's distinct indices");
+    assert_eq!(frame39.iter().copied().max(), Some(209), "its highest index");
 
     // The measured divergence, as `cargo xtask compare` reports it: indices
     // differ where the animation frame is not index 15, and the widest index

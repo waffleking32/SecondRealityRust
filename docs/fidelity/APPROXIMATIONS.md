@@ -1178,7 +1178,8 @@ palette copy 63 — whose RGB is byte-identical.
 7900: **60,375 of 64,000** pixels differ, max delta **194** (the frame's
 highest index 209 less 15); `cargo xtask compare --reference
 reference/parts/pam --rendered out/pam-port` reports it as 94.3359 % in its
-mixed mode. The port's plane equals `OUT.ANI`'s frame 39, asserted by
+mixed mode. The port's plane equals `OUT.ANI`'s frame 39 — 64 distinct
+indices, highest 209, both asserted by
 `the_7900_index_plane_is_the_next_parts_white_field_not_pams_frame`.
 
 **Decision (D24's procedure, step 2).** The tree cannot produce the reference's

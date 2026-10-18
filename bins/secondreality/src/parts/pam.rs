@@ -60,9 +60,18 @@
 //!
 //! **The anchor is 7710** — the flat `(251,251,251)` wash that is the
 //! reference's first PAM frame (`reference-indices.md` §6.1, three sessions).
-//! The first wait's four frames end at 7712, so the source's `frame_count`
-//! reads 2 at the anchor (`docs/fidelity/pam.md` §4 derives the 2 from the
-//! reference's support frames), which is [`FRAME_COUNT_AT_ANCHOR`].
+//! The source's setup (`:40-45`) comes *after* the gate; the anchored run's
+//! gate is open at its start, so that setup is behind it, and the first
+//! wait's four frames end at 7712. The counter therefore reads 2 at the
+//! anchor (`docs/fidelity/pam.md` §4 derives the 2 from the reference's
+//! support frames), which is [`FRAME_COUNT_AT_ANCHOR`].
+//!
+//! A run whose gate is **closed** at its start is the source's ordinary case:
+//! the predecessor's screen stays up through the gate, the setup runs on the
+//! tick the gate opens (clearing the screen and zeroing the counter), and the
+//! first step is four copper frames later. The anchored run never takes that
+//! path; `the_sync_gate_holds_until_code_ten_then_sets_up_and_waits_four_ticks`
+//! drives it.
 //!
 //! # The palette
 //!
@@ -176,9 +185,11 @@ struct CopperState {
 }
 
 impl CopperState {
+    /// The counter starts at zero and is set by [`Pam::setup`]: `init_copper`
+    /// runs after the gate and zeroes it (`OUTTAA.C:44-45`).
     fn new() -> CopperState {
         CopperState {
-            frame_count: FRAME_COUNT_AT_ANCHOR,
+            frame_count: 0,
             pending: None,
         }
     }
@@ -197,7 +208,9 @@ impl CopperState {
 /// Where the part is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
-    /// `OUTTAA.C:39`: waiting for `dis_sync()` to reach code 10.
+    /// `OUTTAA.C:39`: waiting for `dis_sync()` to reach code 10. The
+    /// source's post-gate setup has not run yet, so the predecessor's screen
+    /// is still up and no copper is installed.
     Sync,
     /// `OUTTAA.C:46-64`: the 45-step loop, at `f` steps taken.
     Loop,
@@ -332,6 +345,42 @@ impl Pam {
             });
         }
 
+        self.f = 0;
+        // `OUTTAA.C:39-48`: the palette copies are built before the gate
+        // (`:36-37`), and the setup is *after* it. A run whose gate is already
+        // open at its start — the anchored run, whose 7710 is two copper
+        // frames into the first wait — has that setup behind it, so it runs
+        // here with the counter the source reads at the anchor. A run whose
+        // gate is still closed keeps the predecessor's screen and performs the
+        // setup when the gate opens (with `frame_count=0`).
+        let open_at_start = match ctx.music() {
+            Some(music) => music.sync() >= SYNC_CODE,
+            None => return Err(PartError {
+                part: NAME,
+                message: "this part waits on dis_sync() (PAM/OUTTAA.C:39) and the run has \
+                          no music to wait on"
+                    .into(),
+            }),
+        };
+        if open_at_start {
+            self.setup(ctx, FRAME_COUNT_AT_ANCHOR);
+            self.phase = Phase::Loop;
+        } else {
+            self.phase = Phase::Sync;
+        }
+        Ok(())
+    }
+
+    /// `OUTTAA.C:40-45`: the source's post-gate setup — `tw_waitvr` (folded
+    /// into the frame count), `tw_setpalette(&pal[768*63])`,
+    /// `tw_opengraph`'s clear and mode, `init_uframe` and `init_copper` with
+    /// `frame_count` zeroed.
+    ///
+    /// `frame_count` is the counter the setup leaves: **0** when the gate
+    /// opens after the run's start (the source's `:45`), and
+    /// [`FRAME_COUNT_AT_ANCHOR`] for the anchored run, whose setup is the two
+    /// copper frames before its first tick.
+    fn setup(&mut self, ctx: &mut PartCtx, frame_count: u16) {
         // `TWEAK.ASM:27-34`: the mode set clears video memory (the source's
         // `rep stosw` walks 64 KB through all four planes); both pages start
         // black, which is the base frames 0 and 1 are decoded against.
@@ -349,6 +398,7 @@ impl Pam {
         {
             let mut shared = self.shared.borrow_mut();
             *shared = CopperState::new();
+            shared.frame_count = frame_count;
         }
         let slot2 = Rc::clone(&self.shared);
         // `COPPER.ASM:37-58`: `copper3` (a bare `retf`) in slots 1 and 0,
@@ -357,10 +407,6 @@ impl Pam {
         ctx.set_copper(0, Box::new(|_ctx: &mut PartCtx| {}));
         ctx.set_copper(1, Box::new(|_ctx: &mut PartCtx| {}));
         ctx.set_copper(2, Box::new(move |ctx: &mut PartCtx| slot2.borrow_mut().slot2(ctx)));
-
-        self.f = 0;
-        self.phase = Phase::Sync;
-        Ok(())
     }
 
     /// `close_copper` (`COPPER.ASM:14-35`): the DIS's three slots are
@@ -422,9 +468,13 @@ impl Part for Pam {
             if code < SYNC_CODE {
                 return PartStatus::Continuing;
             }
-            // The gate's own tick is the loop's first: the source's spin ends
-            // and the body's wait runs in the same frame.
+            // `OUTTAA.C:40-48`: the source's spin ends and the *setup* runs
+            // (`tw_waitvr`, the palette, the mode set, `init_copper`,
+            // `frame_count=0`); the loop's first wait then takes its four
+            // ticks. The setup tick is not a step.
+            self.setup(ctx, 0);
             self.phase = Phase::Loop;
+            return PartStatus::Continuing;
         }
         // `OUTTAA.C:48` `while(frame_count<4);`: the wait is a tick-consuming
         // check, and `frame_count` is incremented by copper slot 2 after this
@@ -649,24 +699,60 @@ mod tests {
         FRAME_COUNT_AT_ANCHOR as u32 + 4 * (f - 1)
     }
 
+    /// One 64,000-pixel animation frame through one palette, widened the way
+    /// the engine widens it: what the beam composes when the surface holds
+    /// `frame` and the live DAC is `palette`.
+    fn plain_rgb(frame: &[u8], palette: &Palette) -> Vec<u8> {
+        let mut out = Vec::with_capacity(frame.len() * 3);
+        for index in frame {
+            let entry = palette.entry(*index);
+            out.push(dac_expand(entry[0]));
+            out.push(dac_expand(entry[1]));
+            out.push(dac_expand(entry[2]));
+        }
+        out
+    }
+
     // --- the brief's four tests ---------------------------------------------
 
     #[test]
-    fn the_sync_gate_holds_until_code_ten_and_then_takes_the_first_step() {
-        // `OUTTAA.C:39`: code 9 is still waiting; code 10 is the block-1
-        // table's answer from order 13 row 1 (`ordersync1`), which the trace
-        // holds at boot 7710. The wait consumes ticks, never spins.
+    fn the_sync_gate_holds_until_code_ten_then_sets_up_and_waits_four_ticks() {
+        // `OUTTAA.C:36-48`: the palette copies are built *before* the gate,
+        // but the mode set, the near-white palette and `init_copper` happen
+        // only after it — so a run whose gate is closed keeps the
+        // predecessor's screen, and its counter starts at zero when the gate
+        // opens. Code 9 is the table's "before order 13"; code 10 is the
+        // block-1 answer from order 13 row 1 (`ordersync1`), the trace's row
+        // at boot 7710. The wait consumes ticks, never spins.
         let (mut rig, mut part) = started_with(Player::scripted(vec![9, 9, 9, SYNC_CODE]));
+        // What the predecessor left: the part must not touch it during the
+        // gate.
+        rig.surface.clear(7);
+        rig.palette = Palette::new();
+        rig.palette.set_entry(1, [1, 2, 3]);
         assert_eq!(part.phase, Phase::Sync);
-        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
-        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
-        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
+        for _ in 0..3 {
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing);
+        }
         assert_eq!(part.f, 0, "no step while the gate is closed");
-        assert!(rig.page(0).iter().all(|pixel| *pixel == 0), "the screen is the cleared page");
-        // The gate's tick and the step are the same tick when frame_count
-        // already reads 4: the copper counted through the wait.
+        assert!(
+            rig.surface.pixels().iter().all(|pixel| *pixel == 7),
+            "the predecessor's screen stays up"
+        );
+        assert_eq!(rig.palette.entry(1), [1, 2, 3], "and its DAC");
+        // Tick 3 is code 10: the source's post-gate setup, `frame_count=0`,
+        // and the loop's first wait frame — not a step.
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
-        assert_eq!(part.f, 1, "code 10 starts the loop");
+        assert_eq!(part.f, 0, "the setup tick does not step");
+        assert_eq!(rig.palette, part.palettes[OPENING_COPY], "the near-white setup palette");
+        assert!(rig.surface.pixels().iter().all(|pixel| *pixel == 0), "the mode set cleared");
+        // Four copper frames after the gate opens: ticks 4-6 read 1, 2 and 3.
+        for tick in 4..=6 {
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing, "tick {tick}");
+            assert_eq!(part.f, 0, "tick {tick} is still waiting");
+        }
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
+        assert_eq!(part.f, 1, "the first step is four ticks after the gate");
         assert_eq!(rig.page(0), part.frames[0], "the first step drew frame 0");
     }
 
@@ -712,10 +798,10 @@ mod tests {
     #[test]
     fn the_first_step_uses_wfade_one_half_wash_not_the_opening_sixty_three() {
         // The source writes `[100]` and initialises 59; only 1-45 are indexed.
-        assert_eq!(WFADE.len(), 59);
+        assert_eq!(WFADE.len(), 59, "the source's `[100]` has 59 initialisers");
         assert_eq!(WFADE[0], 63, "the pre-loop `tw_setpalette(&pal[768*63])`");
         assert_eq!(WFADE[1], 32, "the first step's copy is the half wash");
-        assert_eq!(WFADE.len() - 1, 58, "the source declares more entries than it uses");
+        assert_eq!(LOOP_STEPS as usize, 45, "the loop's bound is the used maximum");
         assert_eq!(WFADE[45], 63, "the closing hold's copy");
         let (mut rig, mut part) = started();
         assert_eq!(rig.palette, part.palettes[OPENING_COPY], "the opening white");
@@ -885,7 +971,7 @@ mod tests {
         // boot = 7710 + tick. The reference's indices are the anchor's own
         // space, so the ticks are 0, 50, 120 and 190.
         let (mut rig, mut part) = started();
-        let wanted: [u32; 11] = [0, 1, 49, 50, 51, 119, 120, 121, 189, 190, 191];
+        let wanted: [u32; 13] = [0, 1, 2, 3, 49, 50, 51, 119, 120, 121, 189, 190, 191];
         let mut frames = std::collections::BTreeMap::new();
         while rig.tick <= *wanted.last().unwrap() {
             let tick = rig.tick;
@@ -894,6 +980,21 @@ mod tests {
                 frames.insert(tick, frame);
             }
         }
+        // The first step's tick composes frame 0 under the *opening* copy 63
+        // (white); the next tick shows `wfade[1] = 32`. That is the copper's
+        // retrace delay, and it is why a step's palette is visible one tick
+        // after its drawing.
+        assert_eq!(
+            frames[&2],
+            plain_rgb(&part.frames[0], &part.palettes[OPENING_COPY]),
+            "the first step's tick still shows the opening copy 63"
+        );
+        assert_eq!(
+            frames[&3],
+            plain_rgb(&part.frames[0], &part.palettes[usize::from(WFADE[1])]),
+            "the next tick shows wfade[1] = 32"
+        );
+        assert_ne!(frames[&2], frames[&3], "the palette moves one tick later");
         for (tick, index) in [(0u32, 7710u32), (50, 7760), (120, 7830), (190, 7900)] {
             let differing = differing_pixels(&frames[&tick], &reference(index));
             println!(

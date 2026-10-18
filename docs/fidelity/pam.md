@@ -24,6 +24,15 @@ integration test in `bins/secondreality/tests/pam.rs`.
 - **`:39` the music wait** — `while(dis_sync()<10 && !dis_exit());`. The
   block-1 clock (`_zplaysong(0)`, fitted at 400) reaches `ordersync1`'s code
   10 at order 13 row 1; the trace at boot 7710 holds exactly that.
+- **The gate precedes the setup.** `:36-37` builds the palette copies before
+  the wait, but the mode set, the near-white palette and
+  `init_copper`/`frame_count=0` are *after* it (`:40-45`). The anchored run's
+  gate is already open at 7710, so its setup is the two copper frames before
+  the anchor (§4); a run whose gate is still closed at its start keeps the
+  predecessor's screen, performs the setup when the gate opens, and takes its
+  first step four ticks later. The unit test
+  `the_sync_gate_holds_until_code_ten_then_sets_up_and_waits_four_ticks`
+  drives that path.
 - **`:40-45` the setup** — `tw_waitvr()`, `tw_setpalette(&pal[768*63])` (the
   near-white copy), `tw_opengraph()` (mode 13h with chain-4 off, which clears
   the 64 KB window through all four planes), `init_uframe(FP_SEG(memblock))`,
@@ -131,14 +140,16 @@ The tick mapping is not an assumption. The reference's own support frames
   7880-7920 are the white hold the scan measured (§6.1).
 
 What the tick mapping is **not** is a claim that every intermediate frame is
-four ticks apart in the original: §6.1 itself says the 45 steps span 215
-frames because `ulosta_frame` takes time beyond its four-frame wait. The
-port's clock is the fixed one the task specifies; the evidence above is the
-filed keyframes and the support frames, and they all match. One unfiled scan
-sample does not: the scan's 7720 hash `10bb3b95…` is found at the port's
-7721-7723 (`out/pam-timeline`, §8), a one-frame phase difference in a sample
-that is neither a keyframe nor from the reference's session. The scan's
-7870 `644acaf3…` matches the port at 7870.
+four ticks apart in the original: §6.1 measures the animation's *window* as
+(7705, 7920] — 215 frames, which includes the pre-loop setup and the closing
+white hold — while the step loop itself is 45 four-frame waits plus the time
+each `ulosta_frame` takes. The port's clock is the fixed four-tick one the
+task specifies; the evidence above is the filed keyframes and the support
+frames, and they all match. One unfiled scan sample does not: the scan's 7720
+hash `10bb3b95…` is found at the port's 7721-7723 (`out/pam-timeline`, §8), a
+one-frame phase difference in a sample that is neither a keyframe nor from
+the reference's session. The scan's 7870 `644acaf3…` matches the port at
+7870.
 
 ## 5. The music: the block-1 pre-roll, measured
 
@@ -175,9 +186,11 @@ change is on the same frame
 ```
 
 `(13, 1)` is `sync_from`'s code **10**, so the gate `dis_sync()<10` opens on
-the run's first tick. The `zframe` is one poll ahead of the trace's sample
-because the engine's poll for the tick is the 7,311th; the published *row*,
-which is what the gate reads, is the trace's.
+the run's first tick. The `zframe` column is the player's tick counter, and
+its sampling boundary differs: the trace samples at the frame (5005 at 7705,
+5008 at 7710) while the port reads after a tick's poll (5004 after 7,305
+polls, 5008 after 7,310), so the two may sit one tick either side. The
+published *row* — what the gate reads — agrees at both.
 
 The 7,310-poll catch-up is longer than the player's 8,192-sample ring, so the
 ring drops its oldest samples as it fills — the `install_music` comment's
@@ -204,13 +217,15 @@ boot 7830: 0/64000 px differ (0.0000 %)
 boot 7900: 0/64000 px differ (0.0000 %)
 ```
 
-Every one is byte-identical in **RGB**. The support readings are the
-record's own: 7711 = 7710; 7759 ≠ 7760 and 7761 = 7760; 7829 = 7830 = 7831;
-7899 = 7900 = 7901. The hashes (`sha256sum out/pam-port/pam_00*.rgb`) match
-§6.3's recorded values entry for entry: 7759 `23fa5096…` (the record's
-`23fa5096…`), 7761 `5d558081…`, 7829/7831 `e1967ed2…`, 7899/7901
-`1fef46de…`, and the keyframes are `1fef46de…`, `5d558081…`, `e1967ed2…`,
-`1fef46de…`.
+Every one is byte-identical in **RGB**. The relations the record measured
+hold: 7711 = 7710 (the record's leftover; 7709 is unreachable); 7759 ≠ 7760
+and 7761 = 7760; 7829 = 7830 = 7831. The record's support set for the held
+7900 is the scan's 7890 and 7910; the port's dump carries its own extra hold
+check at 7899 and 7901, and those are the same white. The hashes
+(`sha256sum out/pam-port/pam_00*.rgb`) match §6.3's recorded values entry for
+entry: 7759 `23fa5096…`, 7761 `5d558081…`, 7829/7831 `e1967ed2…`; the
+keyframes are `1fef46de…`, `5d558081…`, `e1967ed2…`, `1fef46de…`, and the
+port's own 7899/7901 are `1fef46de…` as well.
 
 Because the anchor makes 7709 unreachable, the dump carries 7710's `K+1`
 only; 7759 and 7761 cover 7760, and the held keyframes carry their triples.
@@ -222,8 +237,10 @@ its manifest's palette entry 15 is `[62,62,62]` — PAM's 63rd copy, widened to
 251. Index 15 is BEGLOGO's `WHITE_FIELD` (`BEG/BEG.C:18-21` fills A-space with
 15 before its own DAC writes), and the reference's 7900 is inside the window
 where the indexed read runs late: D15's read costs about twenty rendered
-frames, and the next part's white field is up in the same white palette before
-BEGLOGO's 320×400 mode change in (7920, 7930] (§6.5). The coherence check
+frames, and BEGLOGO's white field is up while PAM's 63rd copy is still the
+DAC — the manifest's `[62,62,62]` is PAM's wash, not BEGLOGO's own white —
+before BEGLOGO's 320×400 mode change in (7920, 7930] (§6.5). The coherence
+check
 cannot see the difference on a collapsed palette (`reference-indices.md` §1.6,
 the blind spot that lets a wrong plane pass when every index widens to one
 colour). So the reference's 7900 RGB is byte-identical to the port's — both
