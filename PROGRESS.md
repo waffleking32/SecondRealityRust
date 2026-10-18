@@ -13,7 +13,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
-| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
+| 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
@@ -22,15 +22,15 @@ Phase status board. **Read this first if you are resuming work.**
 
 ## Where to pick up
 
-**Phase 4 (music-synced tier A) is complete — untagged** on `phase-4-music-synced-tier-a` at
-`9c457e2` plus this close-out's record. Its exit criterion (spec §10 — ALKU, PAM, DDSTARS, DOTS,
+**Phase 4 (music-synced tier A) is done, tagged `phase-4` at this commit** on
+`phase-4-music-synced-tier-a`. Its exit criterion (spec §10 — ALKU, PAM, DDSTARS, DOTS,
 MNTSCRL, RAYSCRL verified) is met, every criterion was re-run at the committed state, and the
 evidence is recorded below. Its plan is `docs/plans/04-music-synced-tier-a.md`, its per-task ledger
 (git-ignored scratch) is `.superpowers/sdd/04-music-synced-tier-a/progress.md`, its six notes are
 `docs/fidelity/{alku,pam,ddstars,minvball,mntscrl,rayscrl}.md`, and its decisions are **D30** (with
-D24, D25 and D29 binding). **The final whole-branch review has not run yet; the tag is deliberately
-withheld until it does and its findings are applied** — Phase 1/2/3's practice, because a tag that
-has to be moved is worse than a tag applied a few commits later. The branch starts at `phase-3`
+D24, D25 and D29 binding). **The final whole-branch review ran** (see its record below): its
+findings are applied in `f18823f` and the scoped re-review is clean, so the tag goes on here, per
+Phase 1/2/3's practice. The branch starts at `phase-3`
 (`3d42b88`): its first commit is Phase 3's human-listen record, its second the Phase 4 plan, and
 the rest the phase's ten tasks and their fix rounds.
 
@@ -1965,9 +1965,27 @@ Both exit 0.)
   §1, restart sites §2, block masks §4) and the phase added no sequence fact. The six part notes
   are complete, each with its original/port/substitution/measurement sections and its commands.
 
+#### The whole-branch review, the fix wave, and the tag
+
+**The review ran** over `02d3e77..7d6248c` (base..head) on **fable** and returned **With fixes:
+0 Critical / 2 Important / 4 Minor**. The two Important findings were both record defects, not
+behaviour: (1) the per-part entry pre-polls — MINVBALL's **256**, RAYSCRL's **268**, MNTSCRL's
+**11** — and PAM's open-gate `frame_count = 2` assume an entry-point run and are wrong for a part
+reached mid-chain with the player already running; the assumption is now recorded in all four
+notes and scheduled in the Phase 5 hand-off (a `PartCtx` signal, or the pre-roll moved into the
+shell's entry path), with the chain test to come when the intervening parts land; and (2)
+MINVBALL's mapping row is regraded from "yes" to **half**: its `10,368 + tick` is pinned to ±1 by
+the survey's 12,900 flat-grey frame — the fade-out's `c=59` upload, frame counter 2402/2403, a
+different capture and a different observable — while the four keyframes the integration test
+holds are the fit's own evidence. The falsification count is now **11 independent / 6 half /
+5 none**. The fix wave is `f18823f`, and a scoped re-review confirmed every finding addressed with
+**no new Critical or Important**. One residual is parked for the next doc pass: `alku.md:171`'s
+"do-while" for a `for` in the source description, non-load-bearing and not a measurement.
+**The tag is applied at this commit**, per Phase 1/2/3's practice.
+
 ## Phase log
 
-### Phase 4 — Music-synced tier A (complete — untagged)
+### Phase 4 — Music-synced tier A (done, tag `phase-4`)
 
 Ten tasks on branch `phase-4-music-synced-tier-a`, from `phase-3` (`3d42b88`) to this close-out
 (20 commits; the first is Phase 3's human-listen record and the second the phase's plan).
@@ -2007,8 +2025,9 @@ scratch, so a fresh clone cannot re-run them. The four part-relative mappings ar
 anchors (D30), and the mid-block parts are unreachable through their blocks until Phase 5/6 port
 the parts before them. All of it is in the evidence section's negatives, item by item.
 
-**The final whole-branch review has not run.** The tag is withheld until it does and its findings
-are applied — Phase 1/2/3's practice.
+**The final whole-branch review ran** (fable, `02d3e77..7d6248c`): **With fixes** — 0 Critical /
+2 Important / 4 Minor — fixed in `f18823f` and confirmed by a scoped re-review with no new
+Critical or Important. **The tag is applied at this commit**, per Phase 1/2/3's practice.
 
 ### Phase 3 — Music engine (done, `phase-3`)
 
