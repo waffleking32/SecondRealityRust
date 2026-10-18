@@ -18,8 +18,9 @@
 //! - `VISU/C/MAIN.C:252-321` — the tool writes the `.00M`: eight zero words, a
 //!   768-byte palette at offset 16, then the object count and the object
 //!   numbers at the offset stored in the header's bytes 4..8; byte 15 is the
-//!   city flag (`'C'` or `'R'`, `:290-292`). `MAIN.C` also writes the `.0AA`
-//!   and its two `0xFFFF` words (`:269-280`), and `READVUE.C:149-255` writes
+//!   city flag (`'C'` or `'R'`, `MAIN.C:317-320`). `MAIN.C` also writes the
+//!   `.0AA` and its two `0xFFFF` words (`MAIN.C:286-295`), and
+//!   `READVUE.C:149-255` writes
 //!   the `.0AB` command stream and its closing `0xFF 0xFF` (`:253-254`).
 //! - `VISU/C/U2A.C:148-219` and `U2E.C:208-263` — the parts read it all back:
 //!   `scene0[15]` picks the city, `LONGAT(scene0+4)` locates the object list,
@@ -149,7 +150,7 @@ fn the_u2e_master_reads_fifty_eight_objects_and_its_duplicates() {
 }
 
 /// The city flag is byte 15 and only the two letters mean a city
-/// (`MAIN.C:290-292`, `U2A.C:168-169`); the shipped scenes carry neither.
+/// (`MAIN.C:317-320`, `U2A.C:168-169`); the shipped scenes carry neither.
 #[test]
 fn the_city_flag_is_read_from_byte_fifteen() {
     let mut bytes = asset("U2A.00M");
@@ -571,10 +572,11 @@ fn truncated_and_inconsistent_object_blocks_are_errors() {
 
 /// The writer's `endblock` pads a block to four bytes; a face record starts at
 /// the `POLY` block's byte 2 and has an even length, so a whole block can end
-/// with 0 or 2 trailing bytes and nothing else. One or three trailing bytes
-/// are a malformed block, not padding.
+/// with 0 or 2 trailing bytes and nothing else. One, three, four or five
+/// trailing bytes are a malformed block, not padding (four and five cannot
+/// hold the six-byte minimum record).
 #[test]
-fn a_poly_block_with_one_or_three_trailing_bytes_is_an_error() {
+fn a_poly_block_whose_trailing_bytes_are_not_the_writers_padding_is_an_error() {
     fn block(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(8 + data.len());
         bytes.extend_from_slice(tag);
@@ -583,8 +585,8 @@ fn a_poly_block_with_one_or_three_trailing_bytes_is_an_error() {
         bytes
     }
 
-    for tail in [1usize, 3] {
-        // The leading zero word, then 1 or 3 bytes that cannot be a record.
+    for tail in [1usize, 3, 4, 5] {
+        // The leading zero word, then bytes that cannot be a record.
         let mut poly = vec![0u8, 0];
         poly.extend(std::iter::repeat_n(0xAA, tail));
         // A minimal list: its own count, a centre and the final 0.

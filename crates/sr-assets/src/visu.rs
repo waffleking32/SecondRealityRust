@@ -14,7 +14,7 @@
 //! `MAIN.C:252-321` writes eight zero words, then the 768-byte material
 //! palette at 16, then — at the offset stored in the header's bytes 4..8 — the
 //! object count and that many minus one object numbers. Byte 15 is the city
-//! flag (`:290-292`, `'C'` or `'R'`, zero otherwise), read back as
+//! flag (`MAIN.C:317-320`, `'C'` or `'R'`, zero otherwise), read back as
 //! `scene0[15]` by both parts (`U2A.C:168-169`, `U2E.C:224-225`), and the
 //! palette is copied out at 16 by both (`U2A.C:243-246`, `U2E.C:337`).
 //!
@@ -150,7 +150,7 @@ fn u32_at(bytes: &[u8], at: usize) -> Result<u32, AssetError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Master {
     /// Byte 15: `'C'` is 1, `'R'` is 2, anything else is 0
-    /// (`VISU/C/MAIN.C:290-292`, read back at `U2A.C:168-169`).
+    /// (`VISU/C/MAIN.C:317-320`, read back at `U2A.C:168-169`).
     pub city: u8,
     /// The 768 bytes at 16, six bits per component.
     pub palette: Palette,
