@@ -126,7 +126,7 @@ const PAL2: [u8; 48] = [
     0, 0, 0, 10, 7, 10, 20, 15, 20, 30, 23, 30, 40, 31, 40, 50, 38, 50, 60, 46, 60, 30, 23, 30,
 ];
 
-/// The byte-reversal `flip8` table (`KOEA.ASM:425-437`), built from its rule
+/// The byte-reversal `flip8` table (`KOEA.ASM:425-438`), built from its rule
 /// rather than transcribed.
 fn flip8_table() -> [u8; 256] {
     let mut table = [0u8; 256];
@@ -2365,7 +2365,7 @@ mod tests {
         // `power0`'s row 0 is all zeros, so every row's `ax` is 0 and the
         // window is always `circles[7]`. Make each source byte carry its
         // own row: the `push si` / `pop si` and `add si,80` of
-        // `KOEA.ASM:800-825` then show as the drawn row.
+        // `KOEA.ASM:790,812-814` then show as the drawn row.
         t.circles[7] = (0..32_768usize).map(|i| (i / 80) as u8).collect();
         t.interference_draw();
         for row in 0..200usize {

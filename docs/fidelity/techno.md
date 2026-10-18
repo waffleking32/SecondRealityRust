@@ -343,12 +343,22 @@ differing pixels at 8100 that the committed build does not reproduce (8100
 is byte-identical).
 
 The shrink is live for the last ~45 frames of the screen, and no committed
-keyframe samples it: 8100 is frame 3301, before `count < 333` begins. The
-live capture `out/techno-troll-map2/frame_008150.rgb` is the evidence. The
-port at tick 3352 (boot 8151 by the 4799 fit; the capture's own session
-names the file 8150) is byte-identical with `pan = xpos & 7` and differs by
-4,951 pixels with the troll's `(xpos & 3)*2` form;
-`doit3s_pan_is_the_low_three_bits_of_xpos` pins the formula.
+keyframe samples it: 8100 is frame 3301, before `count < 333` begins. A
+logged capture covers it and is calibrated by its own 8100:
+
+```bash
+$ cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" \
+    --cycles 30000 --frames 8100,8150,8160,8170,8180,8190 --out out/techno-shrink-capture
+```
+
+Its 8100 is byte-identical to `reference/parts/techno/interference/frame_
+008100.rgb` (0 differing bytes, `cmp`). At `tick = boot - 4799` the port's
+8150/8160/8170/8180/8190 dumps (ticks 3351/3361/3371/3381/3391) are all
+byte-identical to the capture. The troll's `(xpos & 3)*2` form differs by
+7,993 pixels at 8160, 13,172 at 8170 and 4,781 at 8190 (and happens to
+agree at 8150 and 8180, where `xpos` bit 2 is clear). The differential
+command is the same dump plus the same `cmp`;
+`doit3s_pan_is_the_low_three_bits_of_xpos` pins the formula itself.
 
 ## 6. The troll (`KOE.C:588-727`)
 
@@ -399,7 +409,7 @@ Each is required behaviour, not a defect:
   512 bytes. The port's `set_pal_area` writes `2*count + start` bytes;
   `the_palette_upload_is_two_bytes_a_colour_and_truncates_at_512` pins both
   the 512 and the general rule (start 4, count 2 → 8 bytes at offset 4).
-- **`setborder` is dead** (`KOE.C:66-80`): it returns before its assembly.
+- **`setborder` is dead** (`KOE.C:68-80`): it returns before its assembly.
   The port keeps no border work; the calls are represented by nothing.
 - **`flash(-2)`** (`KOE.C:82-103`): returns `pal1` without capturing or
   uploading. `mode16` writes the 48 bytes into `flash_pal` and uploads
@@ -622,12 +632,13 @@ verdict: ok — 35 capture(s), 116 file(s), 26963022 bytes
 
 ## 10. What is not modelled
 
-- **The Scroll Lock border test**: `setborder` is dead (`KOE.C:66-80`) and
+- **The Scroll Lock border test**: `setborder` is dead (`KOE.C:68-80`) and
   nothing else reads `shiftstatus`. The port draws no border.
 - **The intro's DOS mode restore** (`if(!dis_indemo()) { mov ax,3; int 10h }`):
   the shell owns what happens after a part; `Techno` returns `Finished`.
-- **`_PIC1`/`_PIC2`/`_COMBG`** (the brief's "unlinked" symbols): absent from
-  the source tree entirely (§7).
+- **`_PIC1`/`_PIC2`/`_COMBG`**: the objects are in the tree but are
+  commented out of the link (`TECHNO/MAKEFILE:6-7`) or omitted from it
+  (`COMAN/MAKEFILE:3-4`), so nothing is modelled (§7).
 - **The copper**: the source registers no callbacks, and the port registers
   none.
 
@@ -666,8 +677,16 @@ The unit tests in `src/parts/techno.rs` pin, by name:
   `45 - 3y`, clamped at 63.
 - `the_sections_land_on_the_reference_ticks` — the complete transition
   vector of §8.3 with the real player.
-- `the_two_geometries_are_the_parts_two_screens` — 320×200 through tick
-  3396, 320×400 and the 640-byte line offset after the mode change.
+- `the_two_geometries_are_the_parts_two_screens` — 320×200 on frames
+  0..=3395, the view 320×400 from frame 3396 and the 640-byte line offset
+  (the first 320×400 dump is 3397; §1.2, §8.3).
+- `the_second_pass_reads_the_sine_as_a_byte_offset` — `sinuspower = 1`,
+  each row's 44 plane-3 bytes against the word `bp/2`, more than one
+  circle selected.
+- `doit3s_pan_is_the_low_three_bits_of_xpos` — `xpos & 7`, with bit 2 set
+  (4, 5, 13).
+- `rotate1s_last_sixty_four_bytes_are_untouched` and
+  `flash_minus_two_uploads_nothing` — the two dead paths.
 
 The integration test `tests/techno.rs` drives the real binary from the
 repository root for the registry row, the manifest's numbering and music
