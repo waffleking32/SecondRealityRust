@@ -1993,8 +1993,10 @@ impl Techno {
 // can be written against the source's own globals; it is always `Some` after
 // `ResetMode`.
 impl Techno {
+    /// A part whose asset root is the unit tests' `../../`, so the handoff
+    /// test beside PANICEND can drive it to `Done` on a real player.
     #[cfg(test)]
-    fn at(root: &'static str) -> Techno {
+    pub(crate) fn at(root: &'static str) -> Techno {
         let mut part = Techno::new();
         part.root = root;
         part

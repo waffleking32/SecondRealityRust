@@ -633,6 +633,14 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // The seek starts at 18; the entry run's pre-roll is the part's
         // (`parts/techno.rs`), which lands the published row at the trace's 60.
         "techno" => Some((ModuleId::Music1, 18)),
+        // PANICEND is block 2's fifth part, after TECHNO, and the part that
+        // never reads the player. The filed `second2` trace holds MUSIC1 at
+        // order **37** across the part's start window (8780, 8790]: 8780 is
+        // `37:53` pattern 16, 8785 `37:54` and 8790 `37:55`, tempo 130. The
+        // order in force when the sequence reaches it is 37, so that is the
+        // row; no entry pre-roll is needed because the part ignores the
+        // player.
+        "panicend" => Some((ModuleId::Music1, 37)),
         _ => None,
     }
 }
@@ -1462,6 +1470,9 @@ mod tests {
         assert_eq!(boot_anchor("minvball"), None);
         assert_eq!(boot_anchor("rayscrl"), None);
         assert_eq!(boot_anchor("ddstars"), None);
+        // PANICEND begins in the (8780, 8790] window, not at a frame; the
+        // handoff's ticks 10/18 give the mapping boot = 8782 + tick.
+        assert_eq!(boot_anchor("panicend"), None);
     }
 
     // --- the restart table --------------------------------------------------
@@ -1752,6 +1763,9 @@ mod tests {
             ("rayscrl", Some((ModuleId::Music1, 86))),
             // `second2`'s `18:60` at 4797, the part's start window.
             ("techno", Some((ModuleId::Music1, 18))),
+            // `second2`'s `37:53..37:55` across the part's start window
+            // (8780, 8790]; the part never reads the player.
+            ("panicend", Some((ModuleId::Music1, 37))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70
             // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
             ("ddstars", Some((ModuleId::Music0, 70))),

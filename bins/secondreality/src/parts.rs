@@ -20,6 +20,7 @@ pub mod lnszoom;
 pub mod minvball;
 pub mod mntscrl;
 pub mod pam;
+pub mod panicend;
 pub mod plzpart;
 pub mod poslist;
 pub mod rayscrl;
@@ -67,6 +68,10 @@ pub fn registry() -> &'static [PartEntry] {
         ("endscrl", || Box::new(endscrl::Endscrl::new())),
         // `TECHNO/KOE.C`, the interference, the bars and the troll.
         ("techno", || Box::new(techno::Techno::new())),
+        // `PANIC/SHUTDOWN.C`, block 2's fifth part: the fake ending that
+        // inherits TECHNO's screen and collapses it to a dot
+        // (`MAIN/U2.ASM:75`, `:826-827`).
+        ("panicend", || Box::new(panicend::Panicend::new())),
     ]
 }
 
