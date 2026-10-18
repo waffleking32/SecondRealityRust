@@ -1222,7 +1222,7 @@ music gate (`musplus() >= 13`) passes at boot 8364 and the 320×400 screen is
 gone from (8310, 8340] (`reference-indices.md` §13.7). A vendored tree that
 runs four switches is a development snapshot, not the shipped part.
 
-**Port:** `EXIT_PALETTE_RELEASE = 4`; the fourth switch starts the
+**Port:** `EXIT_PALETTE_RELEASE = 4`; the third switch starts the
 `cop_drop` walk and the exit follows 65 ticks later.
 `the_release_exit_index_is_the_measured_one` asserts the switch ticks
 975/2010/2527 and the exit at 2592 = boot 8315 inside the capture's window.
@@ -1237,53 +1237,71 @@ not this divergence.
 own screen boundary; the release's value is adopted. `docs/fidelity/plzpart.md`
 §10 records the reading.
 
-## A23 — PLZPART: the release's cube projection is centred and 3/2 taller than the tree's build (adopted), and its close-up camera translation is a release-side divergence (registered)
+## A23 — PLZPART: the release's cube projection is centred and 3/2 taller, and it draws the full screen, not the tree's 134 rows (adopted); its close-up camera translation is a release-side divergence (registered)
 
 **Part:** PLZPART (`PLZPART/VECT.C`, `PLZA.ASM`, `SPLINE.ASM`), Phase 5.
 **Original:** a 320×200 textured cube on a six-page flip whose music gate the
 reference pins to boot 8364.
 
 **The tree's build is unambiguous.** `VECT.OBJ` compiles `imul eax,eax,0x8e`
-(142) and `add ax,0x42` (66) for `yyy`, and `sar eax,0x16` for the matrix's
-`>>15+7`; `SPLINE.OBJ` and `INCLUDE.OBJ` carry the RATA/SPLINE/sinit data the
-port parses, word for word. A faithful port of the tree draws the cube with
+(142) and `add ax,0x42` (66) for `yyy`, `sar eax,0x16` for the matrix's
+`>>15+7`, and `PLZA.ASM:77`'s `cmp yy,134` clips the rasteriser at 134 rows;
+`SPLINE.OBJ` and `INCLUDE.OBJ` carry the RATA/SPLINE/sinit data the port
+parses, word for word. A faithful port of the tree draws a 134-row cube with
 `yyy = yy*142/zz + 66`.
 
 **The release does not.** Fourteen diagnostic captures (`out/plz-diag-cube`
 and `out/plz-diag-cube2`, the documented `SECOND 3` recipe at cycles 30000;
-the filed 8500/9500 are reproduced byte-identically in the same session) pin a
-different projection: the six consecutive silhouettes 8400–8800 match the
-port's at `yy = yy*213/zz + 100` with a best shift within 2 px of (0,0) and a
-mask XOR of 0.44–0.79 %, where the tree's 142/66 needs 3.0–10.6 % after a
-shift; 8900 and 9000 match at 0.73 % and 0.07 %. The x pair is unchanged (an x-scale sweep's
-minimum is 256; mean mask 0.63 % against 0.72/0.96 at 253/259). The y-scale fit
-is flat over 210–214 and the origin is pinned to ±1 px; the port adopts
-**213/100** (213 = 142 × 3/2; 100 is the screen's vertical centre).
-`the_cube_projection_is_the_releases_centred_scale` pins the adopted pair.
+the filed 8500/9500 are reproduced byte-identically in the same session) show:
 
-**The residual that remains is registered, not adopted.** With the release's
-projection the 8500 keyframe aligns geometrically (0.6 % silhouette) and its
-RGB differs in **32.106 %** of pixels, dominated by per-pixel deltas of
-4/8/12 — one, two and three 6-bit DAC levels, i.e. a shade/pose difference of
-a few levels across the face. The close-ups 9100–9600 require a
-**frame-dependent screen translation** (up to tens of pixels) that the tree's
-camera data cannot carry: every translation word in the RATA block those
-frames use is zero. The 9500 keyframe therefore stays at **94.706 %**. No
-faithful camera path can be derived from the captures without the release's
-data, so the close-up divergence is registered rather than adopted.
+- **The extent.** Cube content reaches row 181 at boot 8500 and 199 at 9500;
+  the release draws the full 200-row screen. The port adopts
+  `CUBE_DRAWN_ROWS = 200` and a clear mirroring the draw (`CLEAR_LINES =
+  201`, the tree's 135/134 scaled to the clip). The page slots are 0x5500
+  bytes (136 rows), so a full-height draw crosses into the next slot — the
+  planar wrap the hardware has; the next page redraws the slot before it is
+  displayed.
+- **The phase.** The entry pre-roll is **8 polls**: the `musplus() >= 13`
+  gate passes at manifest 2641 = boot 8364 (the trace's first order-68 row
+  13), the first draw is boot 8365, and at the 8500 keyframe the part is at
+  **frames 136, page 4, start 0x0028**. Nine polls were one frame early (the
+  previous commit records 32.106 % at 8500 there); a diagnostic render of the
+  corrected phase at the tree's 134-row extent measures 25.467 %, and the
+  release extent measures 26.161 %.
+- **The projection.** The release's `yyy` is `yy*213/zz + 100`: scale 213 =
+  142 × 3/2, origin 100 = the screen's vertical centre (the tree's 66 leaves
+  the cube 34 px high). The x pair is unchanged (256; an x-scale sweep's
+  minimum).
 
-**Measured difference.** `cargo test -p secondreality --test plzpart --
---nocapture`: cube 8500 **32.106 %** (max delta 243), 9500 **94.706 %** (max
-255); the plasma keyframes are unaffected (11.209/5.848/4.052 %).
-`docs/fidelity/plzpart.md` §7 carries the fixes (the `REPT 100` expansion, the
-`dist1` warp scale, the ctau hull, the clear page base, the gate-frame swap,
-the span divisor/sign mask) and the ruled-out causes (page parity, spline
-phase, texture rect, the tree's constants).
+**The comparison rule** (the numbers below): a pixel is set iff any RGB
+channel is nonzero; the shift is the integer (dx, dy) in [−40, 40]
+minimising the differing-mask fraction, reported as a percentage. The
+projection fit is measured on the **cube band, rows 0–133, at the tree's
+134-row extent** — the release extent's full-height draw crosses the
+0x5500-byte page slots and leaves a background spill the reference's frame
+does not show, so the full frame measures that spill, not the projection.
+With the band rule and a [−20, 20] shift range the six silhouette frames
+8400–8800 give 0.30/0.50/0.57/0.35/0.49/0.58 % (mean **0.47 %**) at 213/100
+and 3.83/11.38/2.97/7.20/5.53/7.40 % (mean **6.38 %**) at the tree's
+142/66. The y-scale fit is flat over 206–216 at origin 100; 213 is the 3/2
+value. `the_cube_projection_is_the_releases_centred_scale`
+pins 213/100, `the_cube_draws_the_releases_full_screen` pins 200/201, and
+`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` pins the gate
+at 2641 — each fails if reverted (mutation checks in the task report).
 
-**Decision (D24's procedure).** The projection constants are a single-value
-release divergence and are adopted; the close-up camera path is a multi-value
-data difference the tree cannot supply and is registered. The diagnostic
-captures are under `out/`; `reference/` stays input-only.
+**The residual that remains is registered, not adopted.** The close-up frames
+9100–9600 need a frame-dependent screen translation the tree's camera data
+cannot carry: every RATA translation word in those segments is zero. The 9500
+keyframe therefore stands at **99.483 %**. The keyframe values are pinned
+exactly by `the_cube_keyframes_are_measured_and_recorded`: 8500 **26.161 %**
+(max delta 247), 9500 **99.483 %** (max 255). The plasma keyframes are
+unaffected (11.209/5.848/4.052 %).
+
+**Decision (D24's procedure).** The extent, the projection and the entry
+phase are single-value release divergences and are adopted; the close-up
+camera path is a multi-value data difference the tree cannot supply and is
+registered. The diagnostic captures are under `out/`; `reference/` stays
+input-only.
 
 ## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
 

@@ -22,12 +22,14 @@
 //! is drawing the 320×200 cube. The manifest carries each frame's own size.
 //!
 //! **The cube's two keyframes are D24 measurements.** The release's cube
-//! projection was measured from fourteen captured frames and adopted
-//! (y scale 213, origin 100; the tree's build compiles 142/66); with it the
-//! far keyframe 8500 aligns geometrically to 0.6 % of silhouette and the RGB
-//! residual is 32.1 % of pixels, most of them one to three DAC steps. 9500 is
-//! a close-up whose camera translation the tree's data do not carry (D24,
-//! APPROXIMATIONS A23), so it stays 94.7 %. The test records both verdicts.
+//! draws the full 200-row screen (the tree clips at 134), its projection is
+//! centred and 3/2 taller (y scale 213, origin 100; the tree compiles
+//! 142/66), and the entry pre-roll is 8 polls (the gate is the trace's boot
+//! 8364). With all three the 8500 keyframe differs in 26.161 % of pixels
+//! (max delta 247); 9500 is a close-up whose frame-dependent camera
+//! translation the tree's zero translation words cannot carry (D24,
+//! APPROXIMATIONS A23, registered), so it stays 99.483 %. The test asserts
+//! both percentages and max deltas exactly.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -165,25 +167,26 @@ fn the_run_is_numbered_in_its_own_frames_and_declares_both_screens() {
 fn the_plasma_keyframes_are_close_at_the_derived_mapping() {
     // boot 6000/7000/7600 are the reference's plasma keyframes; the mapping
     // makes them ticks 277/1277/1877. The plasma's own sub-frame retrace
-    // spread is why these are bounds and not byte equality: the reference
-    // frame is a tear across two parameter phases (the note's §4), so no
-    // fixed-phase port can be byte-identical. The bounds sit above the
-    // measured values (11.2 %, 5.8 %, 4.1 %; max channel delta 16/21/17).
+    // spread is a CPU-timing tear across two parameter phases (the note's
+    // §4, A24), so a fixed-phase port cannot be byte-identical; the measured
+    // values are pinned exactly below (11.209/5.848/4.052 %, max 16/21/17),
+    // because the run is deterministic.
     let (dir, _) = dump("plasma", "277,1277,1877");
-    for (boot, bound) in [(6000u32, 15.0f64), (7000, 10.0), (7600, 8.0)] {
+    for (boot, pixels, max_delta) in [
+        (6000u32, 11.209f64, 16u8),
+        (7000, 5.848, 21),
+        (7600, 4.052, 17),
+    ] {
         let tick = tick_of(boot);
         let rendered = frame_file(&dir, tick, "rgb");
         let expected = reference_frame("plasma", boot);
-        let (percent, max_delta) = compare(&rendered, &expected);
-        println!("plasma {boot} (tick {tick}): {percent:.3}% pixels, max delta {max_delta}");
+        let (percent, delta) = compare(&rendered, &expected);
+        println!("plasma {boot} (tick {tick}): {percent:.3}% pixels, max delta {delta}");
         assert!(
-            percent < bound,
-            "plasma boot {boot} differs in {percent:.3}% of pixels (bound {bound}%)"
+            (percent - pixels).abs() <= 0.001,
+            "plasma boot {boot} differs in {percent:.3}% of pixels, not the recorded {pixels:.3}%"
         );
-        assert!(
-            max_delta <= 32,
-            "plasma boot {boot} has a channel delta of {max_delta}"
-        );
+        assert_eq!(delta, max_delta, "plasma boot {boot}'s max channel delta");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -193,27 +196,30 @@ fn the_cube_keyframes_are_measured_and_recorded() {
     // boot 8500/9500 are the reference's cube keyframes: ticks 2777/3777.
     // The cube's gate is pinned to boot 8364 by the music (the published
     // order-68 row 13; `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`
-    // measures nine pre-polls), so the animation's frame count is the
-    // reference's. With the release's measured projection (A23) the far
-    // frame 8500 aligns geometrically, but its RGB still differs in 32.1 % of
-    // pixels (one to three DAC steps each); 9500's close-up camera
-    // translation is a release-side difference, 94.7 %. This test records the
-    // verdicts and does not assert they are small; `docs/fidelity/plzpart.md`
-    // §7 carries the evidence.
+    // measures eight pre-polls), so the animation's frame count is the
+    // reference's. With the release's extent, projection and phase (A23) the
+    // 8500 keyframe differs in 26.161 % of pixels (max delta 247); 9500's
+    // close-up camera translation is a release-side difference, 99.483 %.
+    // The values are asserted exactly; `docs/fidelity/plzpart.md` §7 carries
+    // the evidence.
     let (dir, _) = dump("cube", "2777,3777");
     let mut verdicts = Vec::new();
-    for (boot, recorded) in [(8500u32, 32.11f64), (9500, 94.71)] {
+    for (boot, recorded, expected_delta) in [(8500u32, 26.161f64, 247u8), (9500, 99.483, 255)] {
         let tick = tick_of(boot);
         let rendered = frame_file(&dir, tick, "rgb");
         let expected = reference_frame("cube", boot);
         let (percent, max_delta) = compare(&rendered, &expected);
         println!("cube {boot} (tick {tick}): {percent:.3}% pixels, max delta {max_delta}");
-        // Pin the measured value so a change is visible and has to update the
-        // record. A percentage this large is a divergence, not a tolerance.
+        // Pin the measured values exactly (the run is deterministic): a change
+        // must update the record, not slip inside a tolerance.
         assert!(
-            (percent - recorded).abs() < 2.0,
-            "cube boot {boot} now differs in {percent:.3}% of pixels; the recorded \
-             value is {recorded:.2}%"
+            (percent - recorded).abs() <= 0.001,
+            "cube boot {boot} differs in {percent:.3}% of pixels, not the recorded \
+             {recorded:.3}%"
+        );
+        assert_eq!(
+            max_delta, expected_delta,
+            "cube boot {boot}'s max channel delta"
         );
         verdicts.push((boot, percent, max_delta));
     }

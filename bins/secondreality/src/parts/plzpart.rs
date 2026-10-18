@@ -109,8 +109,9 @@
 //!   last 4 bytes land in the 96-byte row's stride gap. Invisible, and kept.
 //! - **`do_clear`'s zero-count mask underflow.** `PLZA.ASM:350-363` indexes
 //!   `end_mask` with `x-1`; at `x = 0` that is the byte *before* the table,
-//!   which is `start_mask`'s last entry `0x0F` — the same value the periodic
-//!   table would give. The port reads the same flat table.
+//!   which is `start_mask`'s last entry `0x08` (the table's final `1000b`) —
+//!   not the `0x0F` the periodic pattern would give at `x = 3`. The port
+//!   reads the same flat table.
 //! - **The palette-leak banding.** `fadepal` is 1,536 bytes: 768 high (colour)
 //!   and 768 low (fraction) bytes (`COPPER.ASM:184,238-252`).
 //!   `memset(fadepal,0,768)` (`PLZ.C:81`) clears the colour half and leaves the
@@ -168,8 +169,10 @@ const PTAU_LEN: usize = 129;
 const SPLINE_WORDS: usize = 1_024;
 /// `SPLINE.ASM:15-16`: `buu`, the camera control points, 136 × 8 words.
 const RATA_WORDS: usize = 1_088;
-/// How many words of the sine segment the cube can read: `kosinit[k]` is
-/// `sinit[k + 512]` for `k` up to 1,023, so 1,536 words at most.
+/// The sine segment's size in words. `kosinit = sinit + 512` is 512 **bytes**
+/// (256 words), so the greatest word the cube reads is `1023 + 256 = 1,279`,
+/// inside the file's 1,287 words; the segment is padded to 1,536 words for the
+/// plasma's table-base layout.
 const SINIT_WORDS: usize = 1_536;
 
 /// The table bases, from `PLZPART.MAP`: `_psini 027D:0000`, `_lsini4
@@ -243,21 +246,26 @@ const PAGE_PAN: [u8; 6] = [4, 0, 4, 0, 4, 0];
 const PAGE_VMEM: [u16; 6] = [0x0000, 0x5500, 0xAA00, 0x0000, 0x5500, 0xAA00];
 /// `PLZFILL.C:22,67`: the clear's eight rotation slots.
 const CLR_SLOTS: usize = 8;
-/// `PLZA.ASM:77`: `cmp yy,134` — the cube's drawn rows.
-const CUBE_DRAWN_ROWS: i32 = 134;
-/// `PLZA.ASM:305`: the clear walks 134+1 lines; the mask loop 134.
-const CLEAR_LINES: i32 = 135;
+/// The release draws the cube to the foot of the 320×200 screen. The tree's
+/// development build clips at `cmp yy,134` (`PLZA.ASM:77`), which leaves the
+/// cube's lower band undrawn; the fourteen captures show content to row 181
+/// at 8500 and 199 at 9500, so the release's extent is the full screen.
+const CUBE_DRAWN_ROWS: i32 = 200;
+/// The clear mirrors the draw's extent: the tree's `ycnt=134`/mask 134 walk
+/// 135/134 lines for its 134-row clip, so the release's 200-row clip walks
+/// 201/200.
+const CLEAR_LINES: i32 = 201;
 
 /// `ASMYT.ASM`'s two 200-entry periodic mask tables: `start_mask = 1111b,
 /// 1110b, 1100b, 1000b` and `end_mask = 0001b, 0011b, 0111b, 1111b`
 /// (`PLZA.ASM:13-20`), flattened so `do_clear`'s `end_mask[x-1]` at x = 0 reads
-/// the byte before `end_mask` — `start_mask`'s last entry — exactly as the
-/// original does.
+/// the byte before `end_mask` — `start_mask`'s last entry, `0x08` — exactly
+/// as the original does.
 const MASK_TABLE_LEN: usize = 1_600;
 const START_MASK_AT: usize = 0;
 const END_MASK_AT: usize = 800;
 
-/// `VECT.C:101-106`: the object's points and faces.
+/// `VECT.C:74-92`: the object's points and faces.
 const CUBE_POINTS: [[i32; 3]; 8] = [
     [125, 125, 125],
     [125, -125, 125],
@@ -299,13 +307,13 @@ const REFERENCE_FIRST_INDEX: u32 = 5723;
 /// the ticks the reference spent before it.
 const PLASMA_WAIT_WALKS: u32 = 68;
 /// The entry run's head start, in polls: the shell seeks MUSIC1 to order 62
-/// (`music_for_part`), and the player's published words are eleven polls behind
-/// the reference's when the part starts. Nine pre-polls put the reference's
-/// `musplus() >= 13` (its cube gate) on boot 8364 (part tick 2641), which is
-/// the trace's first order-68 row 13. Measured by
+/// (`music_for_part`), and the player's published words lag the reference's
+/// when the part starts. Eight pre-polls put the reference's
+/// `musplus() >= 13` (its cube gate) on manifest 2641 = boot 8364, the
+/// trace's first order-68 row 13; nine are one poll early. Measured by
 /// `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`, guarded on
 /// `ctx.music_fresh()` like the Phase-4 parts' pre-rolls.
-const MUSIC_PRE_ROLL: u32 = 9;
+const MUSIC_PRE_ROLL: u32 = 8;
 /// `VECT.C:116`: `while(dis_musplus()<13 ...)`.
 const CUBE_GATE: i32 = 13;
 /// `VECT.C:119-120`: break when `-4 <= musplus < 0`.
@@ -1201,8 +1209,8 @@ impl Part for Plzpart {
 
         // The entry run's head start. The shell seeks MUSIC1 to order 62
         // (`music_for_part`); the player's published words are eleven polls
-        // behind the reference's, and nine pre-polls put the cube's
-        // `musplus() >= 13` gate on boot 8364 (part tick 2641, the trace's
+        // behind the reference's, and eight pre-polls put the cube's
+        // `musplus() >= 13` gate on manifest 2641 = boot 8364 (the trace's
         // first order-68 row 13). A mid-chain start has already run through
         // those polls, so it takes none.
         self.fresh = ctx.music_fresh();
@@ -1709,13 +1717,15 @@ impl Plzpart {
             self.xx[index] = [xx, yy, zz];
             let xxx = xx.wrapping_mul(256) / zz + 160 + 160;
             // The release's vertical projection origin and scale, measured
-            // against fourteen captured frames (D24, APPROXIMATIONS A23): the
-            // tree's development build compiles 142/66 (`VECT.OBJ`:
-            // `imul eax,eax,0x8e; add ax,0x42`), but the release's cube sits
-            // 1.5x taller and is centred on the screen. With 213/100 the six
-            // consecutive captures 8400-8800 align within 2 px of (0,0) at
-            // 0.44-0.79 % (8900/9000 at 0.73/0.07 %); with 142/66 the same
-            // frames differ by 3.0-10.6 % after a shift.
+            // against fourteen captured frames at the corrected phase and
+            // extent (D24, APPROXIMATIONS A23): the tree's development build
+            // compiles 142/66 (`VECT.OBJ`: `imul eax,eax,0x8e; add ax,0x42`),
+            // but the release's cube sits 1.5x taller and is centred on the
+            // screen. On the cube band (rows 0-133, the tree extent, to
+            // exclude the full-extent page-slot spill) the six silhouette
+            // frames 8400-8800 differ by a mean 0.47 % at 213/100 and 6.38 %
+            // at 142/66; 213 is the 3/2 value and the scale fit is flat over
+            // 206-216 at origin 100.
             let yyy = yy.wrapping_mul(213) / zz + 100;
             self.xxx[index] = [xxx, yyy];
         }
@@ -2074,7 +2084,7 @@ impl Plzpart {
         for line in 0..(CLEAR_LINES - 1) as usize {
             let new = self.clrtau[new_slot * 256 + line];
             // `end_mask[x-1]` — at x = 0 the 16-bit displacement wraps to the
-            // byte before end_mask, which is start_mask's last 0x0F.
+            // byte before end_mask, which is start_mask's last 0x08.
             let x = (new[0] as u16).wrapping_sub(1);
             let mask = self.masks[(END_MASK_AT as u16).wrapping_add(x) as usize];
             self.write_plane_byte(offset.wrapping_add(x >> 2), mask, 0);
@@ -2332,6 +2342,17 @@ mod tests {
     }
 
     #[test]
+    fn the_cube_draws_the_releases_full_screen() {
+        // The tree's development build clips at row 134 (`PLZA.ASM:77`), but
+        // the fourteen captures show cube content to row 181 at boot 8500 and
+        // 199 at 9500, so the release draws the full 320x200 screen; the
+        // clear mirrors the draw (the tree's 134-row clip walks 135/134
+        // lines). Reverting either value must fail here.
+        assert_eq!(CUBE_DRAWN_ROWS, 200);
+        assert_eq!(CLEAR_LINES, CUBE_DRAWN_ROWS + 1);
+    }
+
+    #[test]
     fn the_cube_projection_is_the_releases_centred_scale() {
         let mut part = Plzpart::new();
         part.cxx = 256; // an 8.8 identity in x
@@ -2565,6 +2586,46 @@ mod tests {
     }
 
     #[test]
+    fn the_texture_warp_shifts_dist1_by_dd_paragraphs() {
+        // `PLZFILL.C:122` `dseg = disttaus[color] + dd*16` adds 16 paragraphs
+        // (256 bytes) to the segment, so `[fs:bx]` reads `dist1[dd*256 + bx]`.
+        // With a nonzero dist row a regression to `dd*16` samples a different
+        // byte and changes the texture address.
+        let mut part = Plzpart::new();
+        let mut kuva = vec![0u8; 16_384];
+        for (index, value) in kuva.iter_mut().enumerate() {
+            *value = index as u8;
+        }
+        part.kuva1 = kuva;
+        let mut dist = vec![0u8; 32_768];
+        dist[0x0102] = 5; // dd = 0
+        dist[0x0102 + 256] = 9; // dd = 1 (the paragraph shift)
+        dist[0x0102 + 16] = 200; // where the old `dd*16` bug would read
+        part.dist1 = dist;
+        part.from_texture = 0;
+        part.dseg_row = 0;
+        // The identity texture makes the sample the low byte of bx + dist:
+        // 0x0102 + 5 = 0x0107 -> 0x07.
+        assert_eq!(part.texture_sample(0x0102), 0x07);
+        part.dseg_row = 1;
+        // dd = 1 reads dist1[0x0102 + 256] = 9: 0x0102 + 9 = 0x010B -> 0x0B.
+        assert_eq!(part.texture_sample(0x0102), 0x0B);
+        // The old `dd*16` bug would have read 200: 0x0102 + 200 = 0x01CA.
+        assert_ne!(part.texture_sample(0x0102), 0xCA);
+    }
+
+    #[test]
+    fn the_plasma_wait_walks_are_the_measured_sixty_eight() {
+        // The 6000-frame fit over the entry head start: the reference's filed
+        // 6000 frame (tick 277) is reproduced by 68 pre-walks. The walk sweep
+        // 64/66/68/70/72 gives 41.62/31.40/11.21/18.29/35.14 % differing
+        // pixels (`docs/fidelity/plzpart.md` §4), a clear minimum at 68, so
+        // the frame's parameters are 277 + 68 = 345 walks in.
+        assert_eq!(PLASMA_WAIT_WALKS, 68);
+        assert_eq!(277 + PLASMA_WAIT_WALKS, 345);
+    }
+
+    #[test]
     fn the_clear_erases_a_moved_quad() {
         let mut part = Plzpart::new();
         part.video = vec![0; VIDEO_BYTES];
@@ -2636,14 +2697,14 @@ mod tests {
             tick += 1;
             assert!(tick < 3000, "the gate never passes");
         }
-        // The part's `tick` is 1-based (the first `frame` call is tick 1), so
-        // the 0-based poll counted here is one less: tick 2640 is the frame
-        // whose `self.tick` is 2641, boot 5723 + 2641 = 8364.
+        // The 0-based poll counted here is the dump's manifest index, whose
+        // mapping is boot = 5723 + index: 2641 is boot 8364, the trace's
+        // first order-68 row 13.
         assert_eq!(
-            tick, 2640,
-            "the cube gate passes at 0-based tick {tick}, not the reference's \
+            tick, 2641,
+            "the cube gate passes at manifest {tick}, not the reference's \
              boot 8364 (MUSIC_PRE_ROLL = {MUSIC_PRE_ROLL})"
         );
-        assert_eq!(MUSIC_PRE_ROLL, 9);
+        assert_eq!(MUSIC_PRE_ROLL, 8);
     }
 }

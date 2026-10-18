@@ -38,8 +38,8 @@ the exception.
 Parsed sizes and edges (test `the_inc_fragments_parse_to_their_original_sizes_and_edges`):
 `PSINI` is 16,384 `db` bytes (first three 64, last four 62/63/63/63);
 `LSINI4`/`LSINI16` are 8,192 `dw` words each (first two 512/513; last 510);
-`SINIT` is 2,575 bytes; `PTAU` 129 values; `SPLINE` 1,024 words; `RATA` 296
-words = 37 control points of 8.
+`SINIT` is 2,575 bytes; `PTAU` 129 values; `SPLINE`, 1,024 words; `RATA`,
+1,088 words = 136 control points of 8 (36 written lines plus `REPT 100`).
 
 **The map, not the assembler's placeholders, fixes the table bases.**
 `ASMYT.ASM:46-61`'s `0xC100`/`0xC200`/`0xC300`/`0xC400` sit inside `plzline`'s
@@ -188,9 +188,15 @@ the frame wait (`while(frame_count<1)`), `frames += frame_count`,
   `count_const_keeps_the_c_precedence_shifts` pins both. The projection is
   `xxx = (xx*256)/zz + 160 + 160` and `yyy = (yy*213)/zz + 100`: the x pair
   is the tree's, and the y scale/origin are the **release's**, measured from
-  fourteen captured frames (D24; the tree's own `VECT.OBJ` compiles
-  `imul eax,eax,0x8e` and `add ax,0x42` — 142/66).
+  fourteen captured frames at the corrected phase and extent (D24; the tree's
+  own `VECT.OBJ` compiles `imul eax,eax,0x8e` and `add ax,0x42` — 142/66).
   `the_cube_projection_is_the_releases_centred_scale` pins the port's pair.
+- **The rasteriser extent is the release's.** The tree's `do_block` clips at
+  `cmp yy,134` (`PLZA.ASM:77`), but the captures show cube content to row 181
+  at boot 8500 and 199 at 9500: the release draws the full 200-row screen, so
+  `CUBE_DRAWN_ROWS` is 200 and the clear mirrors it (`CLEAR_LINES` 201, the
+  tree's 135/134 scaled to the clip). `the_cube_draws_the_releases_full_screen`
+  pins both.
 - **The rasteriser** (`PLZA.ASM:59-259`): the face's four projected points are
   split into two edges by the topmost vertex; per scanline `do_block` fills
   the span, writes the end bytes with the periodic start/end masks and the
@@ -239,78 +245,90 @@ exercises slots 1 and 2 through the engine's order, and
 
 | boot | tick | differing pixels | max channel delta |
 |---|---|---|---|
-| 8500 | 2777 | **32.106 %** | 243 |
-| 9500 | 3777 | **94.706 %** | 255 |
+| 8500 | 2777 | **26.161 %** | 247 |
+| 9500 | 3777 | **99.483 %** | 255 |
 
-The cube gate is pinned: the published order-68 row 13 first stands at boot
-8364 (`reference/music/second3a/trace.csv`), and the part's `musplus() >= 13`
-gate with the measured nine-poll entry pre-roll passes on boot 8364
-(`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`: the 0-based
-tick is 2640, the part's 1-based 2641). The first drawn frame is the gate's
-successor, boot 8365. The reference's cube frames are byte-identical across
-four capture sessions (`reference-indices.md` §13.5), so the difference is not
-a capture phase.
+The tests assert those values exactly (not within a tolerance): the run is
+deterministic.
 
-**The release's projection is not the tree's, and the difference is
-measured.** The tree's own build is unambiguous: `VECT.OBJ` compiles
+**The phase.** The music gate is the trace's: with the entry pre-roll of
+**8 polls** the `musplus() >= 13` gate passes at manifest 2641 = boot 8364,
+the frame the published order-68 row 13 first stands on
+(`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` asserts
+2641), and the first draw is boot 8365. At the 8500 keyframe the part's state
+is therefore **frames 136, page 4, display start 0x0028** — the release's
+own. (The earlier nine-poll pre-roll put the gate one frame early; the
+8500 residual was 32.106 % at the wrong phase (the previous commit's record);
+a diagnostic render of the corrected phase at the tree's 134-row extent
+measured 25.467 %, and the release extent measures 26.161 %.)
+
+**The extent.** The tree's development build clips the cube's rasteriser at
+row 134 (`PLZA.ASM:77`), which is why the port's early renders stopped there
+and showed the next page buffer's top face in the lower band. The release
+draws the full screen: the captures' cube content reaches row 181 at 8500 and
+199 at 9500. The port adopts `CUBE_DRAWN_ROWS = 200` and a clear that mirrors
+the draw (`CLEAR_LINES = 201`, the tree's 135/134 scaled to the clip), so the
+displayed window's lower rows are the same draw's face continuation rather
+than the wrapped top face. The page slots are 0x5500 bytes (136 rows), so a
+200-row draw crosses into the next slot; that is the hardware's own planar
+wrap and the next page redraws the slot before it is displayed.
+
+**The projection.** The tree's build is unambiguous: `VECT.OBJ` compiles
 `sar eax,0x16` in `count_const`, `imul eax,eax,0x8e` (142) and `add ax,0x42`
 (66) in `rotate`, and `SPLINE.OBJ`/`INCLUDE.OBJ` carry the RATA/SPLINE/sinit
-data the port parses (compared word for word). A faithful port of that build
-draws the cube at 142/66. The release draws it elsewhere. Fourteen
-diagnostic captures pin the release's constants. They were taken with the
-documented `SECOND 3` recipe (the command is `reference-indices.md` §13.6's,
-with `--out out/plz-diag-cube --frames
-8400,8450,8500,8600,8700,8800,9200,9500` and `--out out/plz-diag-cube2
---frames 8900,9000,9100,9300,9400,9600`); the filed 8500/9500 come back
-byte-identical in the same session. The comparisons below are the silhouette
-mask XOR over rows 0–133 at the best integer shift:
+data the port parses (compared word for word). The release's captured frames
+pin a different pair: `yyy = yy*213/zz + 100` (the y scale 213 = 142 × 3/2,
+the origin 100 the screen's vertical centre; the tree's 66 leaves the cube
+34 px high). The x pair is unchanged (`256`; an x-scale sweep's minimum).
+The comparison rule: a pixel is set iff any RGB channel is nonzero; the
+shift is the integer (dx, dy) in [−40, 40] that minimises the fraction of
+differing mask pixels, reported as a percentage. The projection evidence is
+measured on the **cube band, rows 0–133, at the tree's 134-row extent** (the
+release extent's full-height draw crosses the 0x5500-byte page slots, so the
+full frame carries a background spill the reference's frame does not show;
+the full-frame numbers would measure that spill, not the projection). With
+the band rule and a [−20, 20] shift range, the six silhouette frames
+8400–8800 give:
 
-- the silhouettes of the six consecutive frames 8400–8800 match the port's
-  at a **y scale of 213 and an origin of 100** with a best shift within 2 px
-  of (0,0) and a mask XOR of 0.44–0.79 %; at the tree's 142/66 the same frames need a
-  3.0–10.6 % mask after a shift;
-- 8900 and 9000 match at 0.73 % and 0.07 %;
-- the x pair is unchanged: an x-scale sweep (250/253/256/259/262) has its
-  minimum at 256 (mean mask 0.63 % against 0.72/0.96 at 253/259).
+| y scale/origin | 8400 | 8450 | 8500 | 8600 | 8700 | 8800 | mean |
+|---|---|---|---|---|---|---|---|
+| 213/100 | 0.30 | 0.50 | 0.57 | 0.35 | 0.49 | 0.58 | **0.47 %** |
+| 142/66 (the tree) | 3.83 | 11.38 | 2.97 | 7.20 | 5.53 | 7.40 | **6.38 %** |
 
-The fit is flat between y scale 210 and 214 (0.48–0.50 % mean mask), and the
-y origin is pinned to ±1 px; the port uses **213/100** (213 = 142 × 3/2, and
-100 is the screen's vertical centre where the tree's 66 leaves the cube
-34 px high). `VECT.OBJ` cannot have compiled these: they are a release
-divergence (D24), adopted in the port and recorded in A23.
+The fit is flat over y scale 206–216 at origin 100 (the earlier sweep);
+213 is the 3/2 value. The full-frame comparison at the release extent is the
+keyframe verdict, not the projection fit.
 
-With the release's constants the 8500 keyframe's *geometry* matches (0.6 %
-silhouette), and its 32.106 % RGB residual is one to three DAC steps per
-pixel: the per-pixel delta histogram is dominated by 4/8/12 (one, two and
-three 6-bit levels), i.e. a shade/pose difference of a few levels across the
-face, not a wrong picture. The close-ups are different: 9100–9600 need a
-frame-dependent screen translation (up to tens of pixels) that the tree's
-camera data do not carry — every RATA translation word in that block is zero
-— so 9500 stays 94.706 %. That is the registered camera-data divergence of
-A23, not an unexplained port error.
+**The close-ups.** The 9100–9600 frames need a frame-dependent screen
+translation the tree's camera data cannot carry: every RATA translation word
+in those segments is zero. The 9500 keyframe's 99.483 % is that registered
+camera-data divergence (A23, registered), not an unexplained port error.
 
-What was found and fixed on the way:
+**What was found and fixed on the way:**
 
 - **`RATA.INC`'s `REPT 100`.** The tree's spline has 136 control points
-  (36 written lines plus 100 repeated), not the 37 a plain `dw` reader sees;
-  the parser now expands `REPT`/`ENDM` (1,088 words) and a long run no longer
-  indexes past the table. `getspl_interpolates_the_camera_spline_at_the_keyframes`
-  pins the REPT region (`[0,0,499,0,0,0,255,511]` at frames 3000/6000).
+  (36 written lines plus 100 repeated), not 37. The parser expands
+  `REPT`/`ENDM` (1,088 words); the fix does not change the 8500/9500
+  residuals (frames 136/1136 use segments 6/21, inside the 37 explicit
+  points), but a run past frame ~1984 would have indexed past the table.
+  `getspl_interpolates_the_camera_spline_at_the_keyframes` pins the repeated
+  tail (`[0,0,499,0,0,0,255,511]` at frames 3000/6000).
 - **The `dist1` warp scale.** `dseg = disttaus[color] + dd*16` adds 16
-  *paragraphs* (256 bytes), not 16 bytes; the texture sample is
-  `dist1[dd*256 + bx]`.
+  *paragraphs* (256 bytes), not 16 bytes: the texture sample is
+  `dist1[dd*256 + bx]`, and `the_texture_warp_shifts_dist1_by_dd_paragraphs`
+  fails if it reverts.
+- **The entry pre-roll** (8, above) and **the rasteriser extent** (200,
+  above), each with a test that fails on reversion.
 - The ctau union hull, `do_clear`'s page base, the gate-frame `swappage`, and
   the span divisor/edx sign mask (the last four described in the code and
   A23).
 
-Ruled out by measurement: the page/display parity (a
-`--dump-frames 2775,2776,2777,2778,2779,2780` sweep differs by 38.7–44.6 % at
-8500 regardless of page, and the release constants then align the display at
-offset 0), the spline phase (offset probes did not lower the residual at both
-keyframes), the texture rect (transpose/mirror/rotate variants), and the
-tree's own constants and data (verified against `VECT.OBJ`/`SPLINE.OBJ`/
-`INCLUDE.OBJ`). The diagnostic captures are under `out/`; `reference/` is
-input-only.
+Ruled out by measurement: the page/display parity (the corrected phase puts
+the keyframe on the release's own page 4/start 0x0028), the spline phase
+(offset probes did not lower the residual at both keyframes), the texture
+rect (transpose/mirror/rotate variants), and the tree's own constants and
+data (verified against `VECT.OBJ`/`SPLINE.OBJ`/`INCLUDE.OBJ`). The
+diagnostic captures are under `out/`; `reference/` is input-only.
 
 ## 8. The music
 
@@ -341,7 +359,7 @@ input-only.
 
 - The 84-byte `plzline` overrun into the 96-byte stride gap.
 - `do_clear`'s zero-count mask underflow: `end_mask[x-1]` at `x = 0` reads the
-  byte before the table, `start_mask`'s last `0x0F`
+  byte before the table, `start_mask`'s last `0x08` (its final `1000b`)
   (`do_clears_mask_underflow_reads_the_byte_before_end_mask`).
 - The palette-leak banding: `memset(fadepal,0,768)` of 1,536 clears the colour
   half and leaves the fractions.
