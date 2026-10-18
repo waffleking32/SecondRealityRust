@@ -192,12 +192,10 @@ fn a_part_the_port_has_not_reached_is_a_command_line_error() {
 /// graphics frame, and where a `--block 5` run begins (`shell::boot_anchor`).
 const BLOCK5_ANCHOR: u32 = 404;
 
-/// One frame of a filed trace: the published position at a reference index.
-///
-/// `reference/music/second5` is a `SECOND 5` session — the recipe a `--block 5` run is
-/// comparable with — and its `trace.csv` holds a row a frame, exactly the frames the trace
-/// *has* (the manifest's gaps are missing rows, not zero rows).
-fn trace_position(name: &str, frame: u32) -> (u8, u8) {
+/// The published position a trace holds at a reference index, or `None` when
+/// that session does not cover the frame (a trace's gaps are missing rows, not
+/// zero rows).
+fn trace_position_opt(name: &str, frame: u32) -> Option<(u8, u8)> {
     let path = repository_root().join("reference/music").join(name).join("trace.csv");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -210,10 +208,52 @@ fn trace_position(name: &str, frame: u32) -> (u8, u8) {
         let order = number(&mut fields);
         let row = number(&mut fields);
         if index == frame {
-            return (order as u8, row as u8);
+            return Some((order as u8, row as u8));
         }
     }
-    panic!("{name} holds no frame {frame}")
+    None
+}
+
+/// One frame of a filed trace: the published position at a reference index.
+///
+/// `reference/music/second5` is a `SECOND 5` session — the recipe a `--block 5` run is
+/// comparable with — and its `trace.csv` holds a row a frame, exactly the frames the trace
+/// *has* (the manifest's gaps are missing rows, not zero rows).
+fn trace_position(name: &str, frame: u32) -> (u8, u8) {
+    trace_position_opt(name, frame).unwrap_or_else(|| panic!("{name} holds no frame {frame}"))
+}
+
+/// The position as the manifest spells it — `order:row`.
+fn position_string((order, row): (u8, u8)) -> String {
+    format!("{order}:{row}")
+}
+
+/// The four `SECOND 3` music traces, which together tile the block's boot
+/// timeline: `second3` covers 144..2899, `second3a` 2900..10199, `second3b`
+/// 10200..15049 and `second3d` 15000..17799.
+const BLOCK3_TRACES: &[&str] = &["second3", "second3a", "second3b", "second3d"];
+
+/// The published position block 3's traces hold at a boot frame, from whichever
+/// session covers it. The sessions overlap only at their seams (15000..15049 is
+/// in both `second3b` and `second3d`), and where two hold the frame they must
+/// agree — a boot frame the sessions disagree about would make the chain's
+/// comparison pick a winner rather than read an answer.
+fn block3_trace_position(frame: u32) -> (u8, u8) {
+    let mut found: Option<(&str, (u8, u8))> = None;
+    for name in BLOCK3_TRACES {
+        if let Some(position) = trace_position_opt(name, frame) {
+            match found {
+                Some((other, known)) => assert_eq!(
+                    known, position,
+                    "{name} and {other} disagree about boot frame {frame}"
+                ),
+                None => found = Some((name, position)),
+            }
+        }
+    }
+    found
+        .unwrap_or_else(|| panic!("no block-3 trace holds boot frame {frame}"))
+        .1
 }
 
 fn repository_root() -> PathBuf {
@@ -241,6 +281,18 @@ fn block_dump(name: &str, block: &str, frames: &str) -> (PathBuf, serde_json::Va
 /// A `--block 5` headless run that dumps the frames asked for, and the manifest it wrote.
 fn block5_dump(name: &str, frames: &str) -> (PathBuf, serde_json::Value) {
     block_dump(name, "5", frames)
+}
+
+/// One dumped frame's published music position, by its index, as the manifest spells it.
+fn frame_position(frames: &[serde_json::Value], index: u32) -> String {
+    let frame = frames
+        .iter()
+        .find(|frame| frame["index"].as_u64() == Some(u64::from(index)))
+        .unwrap_or_else(|| panic!("the dump holds no frame {index}"));
+    frame["music_position"]
+        .as_str()
+        .unwrap_or_else(|| panic!("frame {index} has no music position"))
+        .to_string()
 }
 
 #[test]
@@ -322,6 +374,147 @@ fn a_block_three_run_starts_at_mntscrl_with_its_own_numbering() {
     assert_eq!(frame["part"], "mntscrl");
     assert!(dir.join("mntscrl_001100.idx").is_file());
     assert!(dir.join("mntscrl_001100.rgb").is_file());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// MNTSCRL's tick 0 draws at the reference's boot frame 419: the part's fade-in pins the
+/// mapping (`docs/fidelity/mntscrl.md` §2, `reference-indices.md` §11.1). `--block 3` begins
+/// there, so chain tick `t` names the reference's boot `419 + t` — the translation that
+/// turns a filed keyframe into a chain index.
+const MNTSCRL_CHAIN_ORIGIN: u32 = 419;
+
+#[test]
+fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_roll() {
+    // **Where the indices come from.** `--block 3` begins at MNTSCRL, whose tick 0 draws at
+    // boot 419 (see [`MNTSCRL_CHAIN_ORIGIN`]). The chain's own counter starts there, so a
+    // part's filed keyframe at boot `K` is chain tick `K - 419`:
+    //
+    //   part        keyframe  chain   the note's mapping
+    //   MNTSCRL        1,100    681   boot =   419 + tick  (mntscrl.md §2)
+    //   LNS&ZOOM       2,700  2,281   boot = 2,452 + tick  (lnszoom.md §7.1)
+    //   PLZPART        6,000  5,581   boot = 5,723 + tick  (plzpart.md §2; plasma)
+    //   PLZPART        8,500  8,081   boot = 5,723 + tick  (the vect/cube screen)
+    //   MINVBALL      10,900 10,481   boot = 10,368 + tick (minvball.md §3)
+    //   RAYSCRL       13,000 12,581   boot = 12,962 + tick (rayscrl.md §2)
+    //   3DSINFLD      15,500 15,081   boot = 15,036 + tick (3dsinfld.md §6, derived)
+    //   JPLOGO        17,300 16,881   boot = 17,065 + tick (jplogo.md §3)
+    //
+    // Three of those are asked for one to three ticks later — PLZPART 8,082, MINVBALL
+    // 10,482, JPLOGO 16,884 — because a port part hands over with no loader gap, so at the
+    // same chain index its player is a frame or two off the reference's boot counter. The
+    // shifted index is the first tick whose position the trace holds at `index + 419`; it is
+    // the same part either way, and the position assertion below is what says so.
+    //
+    // **The seam.** MINVBALL and RAYSCRL are the two parts reached mid-chain, and the chain
+    // is the only run in which a mid-chain start happens. Their `init` pre-rolls (256 and
+    // 268 polls) are for `--part` runs; if they fired here the player would arrive already
+    // advanced and the trace positions below would not be reachable. The frames at 9,942
+    // (PLZPART's last) and 9,943 (MINVBALL's first) are the handoff; 12,537 is inside
+    // RAYSCRL's gate and 12,546 is the tick its `musplus >= 0` confirmation opens on.
+    //
+    // One run to chain 16,884 — tens of seconds in a debug build — and only the listed
+    // frames are written; the chain is not played to its end.
+    let (dir, manifest) = block_dump(
+        "chain3",
+        "3",
+        "681,2281,5581,8082,9942,9943,9944,9946,10482,12537,12546,12581,15081,16884",
+    );
+
+    // The run's numbering: block 3 begins at a part whose first drawn frame is a window, so
+    // the indices are the run's own and the manifest says so; the music is the block's own
+    // restart, MUSIC1 at order 42 with its clock starting with the run.
+    assert_eq!(manifest["part"], "mntscrl");
+    assert_eq!(manifest["index_origin"], "part");
+    assert_eq!(manifest["anchor"], serde_json::Value::Null);
+    assert_eq!(manifest["music"]["module"], "MUSIC1");
+    assert_eq!(manifest["music"]["start_order"], 42);
+    assert_eq!(manifest["music"]["start_frame"], 0);
+
+    // Every part of the demo's block-3 plan appears, at the chain index above, with the
+    // geometry the part's own note records: PLZPART's plasma is 320x400 and its vect screen
+    // 320x200, JPLOGO is 320x400, and the rest are mode 13h's 320x200.
+    let expected: &[(u32, &str, u16, u16)] = &[
+        (681, "mntscrl", 320, 200),
+        (2281, "lnszoom", 320, 200),
+        (5581, "plzpart", 320, 400),
+        (8082, "plzpart", 320, 200),
+        (9942, "plzpart", 320, 200),
+        (9943, "minvball", 320, 200),
+        (9944, "minvball", 320, 200),
+        (9946, "minvball", 320, 200),
+        (10482, "minvball", 320, 200),
+        (12537, "rayscrl", 320, 200),
+        (12546, "rayscrl", 320, 200),
+        (12581, "rayscrl", 320, 200),
+        (15081, "3dsinfld", 320, 200),
+        (16884, "jplogo", 320, 400),
+    ];
+    let frames = manifest["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), expected.len(), "every asked-for frame was dumped");
+    for (frame, (index, part, width, height)) in frames.iter().zip(expected) {
+        assert_eq!(frame["index"], *index);
+        assert_eq!(
+            frame["part"], *part,
+            "chain frame {index} belongs to {part}, not {}",
+            frame["part"]
+        );
+        assert_eq!(frame["width"], *width, "chain frame {index}'s width");
+        assert_eq!(frame["height"], *height, "chain frame {index}'s height");
+        assert!(
+            dir.join(frame["idx"].as_str().unwrap()).is_file(),
+            "chain frame {index} wrote the .idx it names"
+        );
+        assert!(
+            dir.join(frame["rgb"].as_str().unwrap()).is_file(),
+            "chain frame {index} wrote the .rgb it names"
+        );
+    }
+
+    // Each mapped index's published position is the trace's at the reference frame the
+    // chain tick names (`index + 419`): the chain's music is the original's, part for part.
+    for index in [681u32, 2281, 5581, 8082, 9944, 10482, 12537, 12581, 15081, 16884] {
+        let boot = index + MNTSCRL_CHAIN_ORIGIN;
+        let (order, row) = block3_trace_position(boot);
+        assert_eq!(
+            frame_position(frames, index),
+            position_string((order, row)),
+            "chain frame {index}: the trace at boot {boot} holds {order}:{row}"
+        );
+    }
+
+    // **MINVBALL's mid-chain entry.** Its pre-roll is 256 polls — what
+    // `--part minvball` runs to land the reference's 75:61 at tick 0 — and it must not fire
+    // here: the player has run continuously through PLZPART, and a 256-poll jump would be
+    // most of an order ahead. The handoff shows the continuous position instead: PLZPART's
+    // last frame publishes 75:60 and MINVBALL's first publishes 75:60, one poll later on
+    // the same row. The reference's MINVBALL start (boot 10,368) is 75:61, and the run
+    // reaches it at chain 9,946 — three ticks in, its 130-tick fade covering the difference
+    // between the port's gapless handoff and the reference's loader gap.
+    assert_eq!(frame_position(frames, 9942), "75:60", "PLZPART's last frame");
+    assert_eq!(frame_position(frames, 9943), "75:60", "MINVBALL's first frame");
+    assert_eq!(
+        frame_position(frames, 9946),
+        position_string(block3_trace_position(10_368)),
+        "MINVBALL reaches the trace's start position"
+    );
+    assert_eq!(block3_trace_position(10_368), (75, 61));
+
+    // **RAYSCRL's mid-chain entry.** Its pre-roll is 268 polls — the span from order 86's
+    // row 0 to order 88's row 0, which is the part's own `--part` catch-up. It must not
+    // fire here either: at chain 12,537 — still inside RAYSCRL's init gate — the player is
+    // at 86:62, the trace's position six frames before the reference's start (`second3b`,
+    // boot 12,956), and only at 12,546 does the part's own `musplus >= 0` gate (seven
+    // confirming reads) open on 88:0, the trace's position at boot 12,962, the reference's
+    // RAYSCRL start. A 268-poll pre-roll on top of 86:62 would advance the player most of a
+    // further order, out of order 86 entirely: it could not publish 86:62 at the gate.
+    assert_eq!(frame_position(frames, 12537), "86:62", "the seek order, not past it");
+    assert_eq!(
+        frame_position(frames, 12546),
+        position_string(block3_trace_position(12_962)),
+        "RAYSCRL's gate opens on the trace's start position"
+    );
+    assert_eq!(block3_trace_position(12_962), (88, 0));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -384,13 +384,15 @@ pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, Strin
 /// shape is not `:880`'s; it fires for every block with bit 0, and every such mask also
 /// has bit 1.
 ///
-/// **Nothing the port can run today reaches either of them** — `--block 2`'s plan stops at
-/// GLENZ, which is not ported; `--block 3` starts at MNTSCRL but stops at LNS&ZOOM, which is
-/// not ported; `--block 5`'s mask has bit 3 clear, so `:880` is skipped for it — but a run
-/// that *does* reach U2E inside
-/// blocks 2 or 3 needs a **mid-run** restart at that point in the sequence, and this
-/// one-row-per-run table has no place for one yet. That is the Phase 4 dependency the row for
-/// block 4 does not, by itself, express.
+/// **Nothing the port can run today reaches either of them.** `--block 2`'s plan stops at
+/// GLENZ, which is not ported, so TECHNO and PANICEND — block 2's fourth and fifth parts —
+/// are unreachable through a block until GLENZ lands (Phase 7). `--block 3` now runs its
+/// whole tier (MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO) but
+/// stops at U2E, which is not ported, so the plan stops before `:880-885` fires. `--block
+/// 5`'s mask has bit 3 clear, so `:880` is skipped for it. A run that *does* reach U2E
+/// inside blocks 2 or 3 needs a **mid-run** restart at that point in the sequence, and this
+/// one-row-per-run table has no place for one yet. That is the Phase 4 dependency the row
+/// for block 4 does not, by itself, express.
 #[derive(Debug, Clone, Copy)]
 // The four fields below are the row's *evidence* — which `whattorun` bits guard it and
 // where `MAIN/U2.ASM` says so — and nothing at run time reads them: the test beside the
@@ -1492,9 +1494,18 @@ mod tests {
         assert_eq!(boot_anchor("minvball"), None);
         assert_eq!(boot_anchor("rayscrl"), None);
         assert_eq!(boot_anchor("ddstars"), None);
-        // PANICEND begins in the (8780, 8790] window, not at a frame; the
-        // handoff's ticks 10/18 give the mapping boot = 8782 + tick.
+        // Phase 5's six parts are all windows or mappings too, never a measured
+        // first drawn frame: LNS&ZOOM's first frame is in (2452, 2456],
+        // PLZPART's in (5720, 5730], TECHNO's first rings are the
+        // content-probed 4797 with its preamble spanning 4794..4800,
+        // PANICEND's first frame is in (8780, 8790], 3DSINFLD's in
+        // (15000, 15100] and JPLOGO's in (17000, 17100].
+        assert_eq!(boot_anchor("lnszoom"), None);
+        assert_eq!(boot_anchor("plzpart"), None);
+        assert_eq!(boot_anchor("techno"), None);
         assert_eq!(boot_anchor("panicend"), None);
+        assert_eq!(boot_anchor("3dsinfld"), None);
+        assert_eq!(boot_anchor("jplogo"), None);
     }
 
     // --- the restart table --------------------------------------------------
@@ -2636,9 +2647,11 @@ mod tests {
         // not go on to (`stopped_at`, which the window's status line prints as
         // "holding; <name> is not ported yet").
         //
-        // This is the block-level claim Task 9 adds the end-to-end runs for: `--block 1`
-        // plays ALKU and stops at U2A, and `--block 3` plays MNTSCRL and stops at
-        // LNS&ZOOM, in the plans the demo itself has.
+        // This is the block-level claim the end-to-end runs rest on: `--block 1` plays
+        // ALKU and stops at U2A, and `--block 3` runs its whole tier — MNTSCRL, LNS&ZOOM,
+        // PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO — and stops at U2E, in the plans the
+        // demo itself has. Block 2 still stops at GLENZ, which leaves TECHNO and PANICEND
+        // unreachable through a block until GLENZ lands (Phase 7).
         let expected: &[(char, Option<&str>)] = &[
             ('1', Some("u2a")),
             ('2', Some("glenz")),
