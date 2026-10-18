@@ -136,14 +136,28 @@ plasma verdicts:
 | 7000 | 1277 | **5.848 %** | 21 |
 | 7600 | 1877 | **4.052 %** | 17 |
 
-The reference's plasma is a **tear**: it is presented at a sub-frame retrace,
-and adjacent rows can belong to two different parameter phases. The evidence
-is in the reference's own frames: at 6000, the even rows and the odd rows'
-planes 1/3 follow walk T while the odd rows' planes 0/2 and rows 90+ follow
-T+1. No fixed-phase port can be byte-identical to a frame that mixes two
-phases; the three numbers above are the residual of that, with every colour
-delta within a sixteenth of the palette (16/21/17 of 255). The timetable and
-palette events match the reference's, so the residual is phase, not palette.
+The reference's plasma is a **tear**, and the mechanism is measured. `plz()`'s
+loop has no frame wait (`PLZ.C:74-122`); it runs unthrottled, and the copper's
+once-per-vblank `moveplz`/`pompota` can land between the loop's four plane
+passes. `setplzparas` latches `k`/`l` at each pass's start, so the screen is
+torn at whichever pass boundary the retrace lands. Forcing the port's walk to
+land before each pass (a temporary diagnostic) gives this residual table:
+
+| split before pass | 0 | 1 | 2 | 3 | boundary (the port) |
+|---|---|---|---|---|---|
+| 6000 | **4.15 %** | 5.23 | **4.38** | 8.42 | 11.21 |
+| 7000 | 19.48 | 15.68 | 12.09 | 8.59 | **5.85** |
+| 7600 | 26.19 | 19.47 | 14.12 | 8.28 | **4.05** |
+
+The 6000 frame's tear sits before pass 0 or 2; 7000 and 7600 sit at the
+boundary. Which boundary the retrace lands on depends on the original's
+per-frame execution time (the fade/drop work changes it), i.e. on the machine,
+not the algorithm; the port's fixed 70.086 Hz tick latches once per tick, the
+loop's phase-locked steady state. No fixed split matches all three (split 3
+gives 8.42/8.59/8.28), so the port keeps the boundary and registers the
+timing tear as A24. Every colour delta is within a sixteenth of the palette
+(16/21/17 of 255), and the timetable/palette events match, so the residual is
+the tear, not palette.
 
 ## 5. The cube
 
@@ -172,8 +186,11 @@ the frame wait (`while(frame_count<1)`), `frames += frame_count`,
   The matrix keeps the C's precedence (`>>15+7` is `>>22`, and `cyx`/`cyy`/
   `czx`/`czy` subtract inside the final shift);
   `count_const_keeps_the_c_precedence_shifts` pins both. The projection is
-  `xxx = (xx*256)/zz + 160 + 160`, `yyy = (yy*142)/zz + 66`
-  (`the_cube_projection_adds_three_hundred_twenty_and_sixty_six`).
+  `xxx = (xx*256)/zz + 160 + 160` and `yyy = (yy*213)/zz + 100`: the x pair
+  is the tree's, and the y scale/origin are the **release's**, measured from
+  fourteen captured frames (D24; the tree's own `VECT.OBJ` compiles
+  `imul eax,eax,0x8e` and `add ax,0x42` — 142/66).
+  `the_cube_projection_is_the_releases_centred_scale` pins the port's pair.
 - **The rasteriser** (`PLZA.ASM:59-259`): the face's four projected points are
   split into two edges by the topmost vertex; per scanline `do_block` fills
   the span, writes the end bytes with the periodic start/end masks and the
@@ -216,47 +233,84 @@ exercises slots 1 and 2 through the engine's order, and
 `the_cube_beam_wraps_at_sixty_four_kilobytes_of_plane_bytes` and
 `the_face_palette_is_shaded_at_its_own_block` cover the slot-2 palette path.
 
-## 7. The cube at the keyframes — an open divergence
+## 7. The cube at the keyframes — D24 measurements
 
 `cargo test -p secondreality --test plzpart -- --nocapture` prints:
 
 | boot | tick | differing pixels | max channel delta |
 |---|---|---|---|
-| 8500 | 2777 | **44.352 %** | 243 |
-| 9500 | 3777 | **92.866 %** | 255 |
+| 8500 | 2777 | **32.106 %** | 243 |
+| 9500 | 3777 | **94.706 %** | 255 |
 
 The cube gate is pinned: the published order-68 row 13 first stands at boot
 8364 (`reference/music/second3a/trace.csv`), and the part's `musplus() >= 13`
 gate with the measured nine-poll entry pre-roll passes on boot 8364
 (`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`: the 0-based
 tick is 2640, the part's 1-based 2641). The first drawn frame is the gate's
-successor, boot 8365, and the source advances `frames` by one per draw, so the
-animation's frame count is the reference's. The reference's cube frames are
-byte-identical across four capture sessions (`reference-indices.md` §13.5),
-so the difference is not a capture phase.
+successor, boot 8365. The reference's cube frames are byte-identical across
+four capture sessions (`reference-indices.md` §13.5), so the difference is not
+a capture phase.
 
-What was found and fixed while chasing it:
+**The release's projection is not the tree's, and the difference is
+measured.** The tree's own build is unambiguous: `VECT.OBJ` compiles
+`sar eax,0x16` in `count_const`, `imul eax,eax,0x8e` (142) and `add ax,0x42`
+(66) in `rotate`, and `SPLINE.OBJ`/`INCLUDE.OBJ` carry the RATA/SPLINE/sinit
+data the port parses (compared word for word). A faithful port of that build
+draws the cube at 142/66. The release draws it elsewhere. Fourteen
+diagnostic captures pin the release's constants. They were taken with the
+documented `SECOND 3` recipe (the command is `reference-indices.md` §13.6's,
+with `--out out/plz-diag-cube --frames
+8400,8450,8500,8600,8700,8800,9200,9500` and `--out out/plz-diag-cube2
+--frames 8900,9000,9100,9300,9400,9600`); the filed 8500/9500 come back
+byte-identical in the same session. The comparisons below are the silhouette
+mask XOR over rows 0–133 at the best integer shift:
 
-- the ctau entries were stored as max-start/min-end (the intersection) instead
-  of the union hull, which turned `do_clear` inside out and left the sliver's
-  trails (`the_clear_erases_a_moved_quad`);
-- `do_clear`'s row and mask-loop bases were missing the drawn page's high
-  offset byte, so pages 0x5500/0xAA00 cleared into page 0;
-- the gate frame now performs the loop's first `swappage` in the same frame
-  period (`VECT.C:116-117`), so the displayed page is the one just drawn;
-- the span divisor and the edx sign-correction mask were wrong and are fixed.
+- the silhouettes of the six consecutive frames 8400–8800 match the port's
+  at a **y scale of 213 and an origin of 100** with a best shift within 2 px
+  of (0,0) and a mask XOR of 0.44–0.79 %; at the tree's 142/66 the same frames need a
+  3.0–10.6 % mask after a shift;
+- 8900 and 9000 match at 0.73 % and 0.07 %;
+- the x pair is unchanged: an x-scale sweep (250/253/256/259/262) has its
+  minimum at 256 (mean mask 0.63 % against 0.72/0.96 at 253/259).
 
-What was measured and ruled out: the page/display parity (a
+The fit is flat between y scale 210 and 214 (0.48–0.50 % mean mask), and the
+y origin is pinned to ±1 px; the port uses **213/100** (213 = 142 × 3/2, and
+100 is the screen's vertical centre where the tree's 66 leaves the cube
+34 px high). `VECT.OBJ` cannot have compiled these: they are a release
+divergence (D24), adopted in the port and recorded in A23.
+
+With the release's constants the 8500 keyframe's *geometry* matches (0.6 %
+silhouette), and its 32.106 % RGB residual is one to three DAC steps per
+pixel: the per-pixel delta histogram is dominated by 4/8/12 (one, two and
+three 6-bit levels), i.e. a shade/pose difference of a few levels across the
+face, not a wrong picture. The close-ups are different: 9100–9600 need a
+frame-dependent screen translation (up to tens of pixels) that the tree's
+camera data do not carry — every RATA translation word in that block is zero
+— so 9500 stays 94.706 %. That is the registered camera-data divergence of
+A23, not an unexplained port error.
+
+What was found and fixed on the way:
+
+- **`RATA.INC`'s `REPT 100`.** The tree's spline has 136 control points
+  (36 written lines plus 100 repeated), not the 37 a plain `dw` reader sees;
+  the parser now expands `REPT`/`ENDM` (1,088 words) and a long run no longer
+  indexes past the table. `getspl_interpolates_the_camera_spline_at_the_keyframes`
+  pins the REPT region (`[0,0,499,0,0,0,255,511]` at frames 3000/6000).
+- **The `dist1` warp scale.** `dseg = disttaus[color] + dd*16` adds 16
+  *paragraphs* (256 bytes), not 16 bytes; the texture sample is
+  `dist1[dd*256 + bx]`.
+- The ctau union hull, `do_clear`'s page base, the gate-frame `swappage`, and
+  the span divisor/edx sign mask (the last four described in the code and
+  A23).
+
+Ruled out by measurement: the page/display parity (a
 `--dump-frames 2775,2776,2777,2778,2779,2780` sweep differs by 38.7–44.6 % at
-8500 — no page is the reference's), the spline phase (offset probes during
-development did not lower the residual at both keyframes together), the
-projection constants (142 and the double +160 are the source's and are
-pinned by `the_cube_projection_adds_three_hundred_twenty_and_sixty_six`), and
-the extent/clear pair (now exact). The remaining suspects are the tree's
-`RATA.INC`/`SPLINE.INC` camera data against the release's (D24), or a
-still-unfound rasteriser difference; the divergence is recorded as
-`APPROXIMATIONS.md` A23, **registered, not adopted**. The integration test
-pins the measured percentages so a future change cannot silently move them.
+8500 regardless of page, and the release constants then align the display at
+offset 0), the spline phase (offset probes did not lower the residual at both
+keyframes), the texture rect (transpose/mirror/rotate variants), and the
+tree's own constants and data (verified against `VECT.OBJ`/`SPLINE.OBJ`/
+`INCLUDE.OBJ`). The diagnostic captures are under `out/`; `reference/` is
+input-only.
 
 ## 8. The music
 
@@ -314,9 +368,16 @@ pins the measured percentages so a future change cannot silently move them.
   switches at ticks 975/2010/2527 and the exit at 2592 = boot 8315, inside the
   capture's `(8310, 8340]` window). The port adopts 4, D24's single-value
   rule; `APPROXIMATIONS.md` A22 records the measurement.
-- **The cube's keyframe residual (§7)** is registered as A23, not adopted: the
-  difference is measured, the reference is deterministic, and the root cause
-  is still open.
+- **The cube's projection is the release's, not the tree's (§7, A23).** The
+  release's y scale (213) and origin (100) are measured against fourteen
+  captures and adopted; the tree's `VECT.OBJ` compiles 142/66. The remaining
+  close-up camera translation is a release-side data difference the tree
+  cannot supply, so the 9500 keyframe is registered (94.706 %) rather than
+  explained away.
+- **The plasma's tear timing (§4, A24).** The reference frame's per-pass
+  parameter latch depends on the original's execution time; the port's fixed
+  tick draws the loop's phase-locked steady state. The split-position
+  measurements are in §4.
 
 ## 11. The tests and the run
 

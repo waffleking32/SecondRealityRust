@@ -21,11 +21,13 @@
 //! 6000) the part is drawing the 320×400 plasma; at tick 2777 (boot 8500) it
 //! is drawing the 320×200 cube. The manifest carries each frame's own size.
 //!
-//! **The cube's two keyframes do not match.** The plasma's three are close;
-//! the cube's 8500 and 9500 are 44.4 % and 92.9 % of pixels different
-//! (`docs/fidelity/plzpart.md` §7 records the measurement and the fixes that
-//! did not close it). The test records the verdicts instead of pretending
-//! otherwise: the note and the task report carry the unresolved divergence.
+//! **The cube's two keyframes are D24 measurements.** The release's cube
+//! projection was measured from fourteen captured frames and adopted
+//! (y scale 213, origin 100; the tree's build compiles 142/66); with it the
+//! far keyframe 8500 aligns geometrically to 0.6 % of silhouette and the RGB
+//! residual is 32.1 % of pixels, most of them one to three DAC steps. 9500 is
+//! a close-up whose camera translation the tree's data do not carry (D24,
+//! APPROXIMATIONS A23), so it stays 94.7 %. The test records both verdicts.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -192,12 +194,15 @@ fn the_cube_keyframes_are_measured_and_recorded() {
     // The cube's gate is pinned to boot 8364 by the music (the published
     // order-68 row 13; `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`
     // measures nine pre-polls), so the animation's frame count is the
-    // reference's. The frames still differ: 44.4 % and 92.9 % of pixels, max
-    // delta 243/255. This test records those verdicts; it does not assert
-    // they are small. `docs/fidelity/plzpart.md` §7 lists what was ruled out.
+    // reference's. With the release's measured projection (A23) the far
+    // frame 8500 aligns geometrically, but its RGB still differs in 32.1 % of
+    // pixels (one to three DAC steps each); 9500's close-up camera
+    // translation is a release-side difference, 94.7 %. This test records the
+    // verdicts and does not assert they are small; `docs/fidelity/plzpart.md`
+    // §7 carries the evidence.
     let (dir, _) = dump("cube", "2777,3777");
     let mut verdicts = Vec::new();
-    for (boot, recorded) in [(8500u32, 44.35f64), (9500, 92.87)] {
+    for (boot, recorded) in [(8500u32, 32.11f64), (9500, 94.71)] {
         let tick = tick_of(boot);
         let rendered = frame_file(&dir, tick, "rgb");
         let expected = reference_frame("cube", boot);

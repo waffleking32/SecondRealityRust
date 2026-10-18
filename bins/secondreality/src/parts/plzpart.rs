@@ -17,7 +17,8 @@
 //! bytes), `LSINI4.INC` and `LSINI16.INC` (8,192 `dw` words each);
 //! `INCLUDE.ASM:33-36` includes `SINIT.INC` (the 2,048-byte sine table and a
 //! 527-byte repeat) as the word array `sinit[1024]`, with `kosinit=sinit+512`;
-//! `SPLINE.ASM:15-21` includes `RATA.INC` (37 control points, 296 `dw` words)
+//! `SPLINE.ASM:15-21` includes `RATA.INC` (136 control points, 1,088 `dw`
+//! words — 36 written lines plus `REPT 100`)
 //! and `SPLINE.INC` (1,024 `dw` coefficients); `PLZ.C:41-42` includes
 //! `PTAU.INC` (129 `db` values).
 //!
@@ -165,8 +166,8 @@ const SINIT_BYTES: usize = 2_575;
 const PTAU_LEN: usize = 129;
 /// `SPLINE.ASM:19-20`: 1,024 `dw` coefficients.
 const SPLINE_WORDS: usize = 1_024;
-/// `SPLINE.ASM:15-16`: `buu`, the camera control points, 37 × 8 words.
-const RATA_WORDS: usize = 296;
+/// `SPLINE.ASM:15-16`: `buu`, the camera control points, 136 × 8 words.
+const RATA_WORDS: usize = 1_088;
 /// How many words of the sine segment the cube can read: `kosinit[k]` is
 /// `sinit[k + 512]` for `k` up to 1,023, so 1,536 words at most.
 const SINIT_WORDS: usize = 1_536;
@@ -359,10 +360,34 @@ fn parse_inc(text: &str) -> Result<Vec<i32>, String> {
     let mut symbols: HashMap<String, i32> = HashMap::new();
     let mut values = Vec::new();
     let mut saw_keyword = false;
+    // `REPT n` … `ENDM` (RATA.INC's 100 repeated control points). The block's
+    // values are emitted once by the lines themselves and then repeated n-1
+    // times here.
+    let mut repeats: Vec<(usize, usize)> = Vec::new();
     for (line_number, raw) in text.lines().enumerate() {
         let line = raw.split(';').next().unwrap_or("");
         let trimmed = line.trim();
         if trimmed.is_empty() {
+            continue;
+        }
+        let upper = trimmed.to_ascii_uppercase();
+        if upper.starts_with("REPT") {
+            let count = trimmed
+                .split_whitespace()
+                .last()
+                .and_then(|token| token.parse::<usize>().ok())
+                .ok_or_else(|| format!("line {}: REPT needs a count", line_number + 1))?;
+            repeats.push((count, values.len()));
+            continue;
+        }
+        if upper.starts_with("ENDM") {
+            let (count, start) = repeats
+                .pop()
+                .ok_or_else(|| format!("line {}: ENDM without REPT", line_number + 1))?;
+            let block = values[start..].to_vec();
+            for _ in 1..count {
+                values.extend_from_slice(&block);
+            }
             continue;
         }
         if let Some((name, value)) = trimmed.split_once('=') {
@@ -1390,10 +1415,11 @@ impl Plzpart {
             (state.k, state.l)
         };
         let surface = ctx.surface.pixels_mut();
-        // The reference's filed plasma frames are **tears**: its 6000 frame
-        // mixes two consecutive `moveplz` walks across its rows (the port's
-        // fixed-phase draw reproduces neither, and no reference session
-        // reproduces another — reference-indices.md 13.5/13.6, D24's A22).
+        // The reference's filed plasma frames are **tears**: `plz()`'s loop
+        // has no frame wait, so the copper's once-per-vblank `moveplz` can
+        // latch a second parameter generation between the four passes (the
+        // split table is in A24). The port's fixed tick draws the loop's
+        // phase-locked steady state: one generation for all four passes.
         for (start, params, planes) in [
             (0usize, k, [1usize, 3]),
             (1, l, [1, 3]),
@@ -1682,7 +1708,15 @@ impl Plzpart {
             let zz = (zz.wrapping_add(self.dis) as i16) as i32;
             self.xx[index] = [xx, yy, zz];
             let xxx = xx.wrapping_mul(256) / zz + 160 + 160;
-            let yyy = yy.wrapping_mul(142) / zz + 66;
+            // The release's vertical projection origin and scale, measured
+            // against fourteen captured frames (D24, APPROXIMATIONS A23): the
+            // tree's development build compiles 142/66 (`VECT.OBJ`:
+            // `imul eax,eax,0x8e; add ax,0x42`), but the release's cube sits
+            // 1.5x taller and is centred on the screen. With 213/100 the six
+            // consecutive captures 8400-8800 align within 2 px of (0,0) at
+            // 0.44-0.79 % (8900/9000 at 0.73/0.07 %); with 142/66 the same
+            // frames differ by 3.0-10.6 % after a shift.
+            let yyy = yy.wrapping_mul(213) / zz + 100;
             self.xxx[index] = [xxx, yyy];
         }
     }
@@ -1850,7 +1884,9 @@ impl Plzpart {
     /// The clock at a texture address: `dist1[dd*16 + bx]` (unsigned) and then
     /// the texture byte at `bx + dist` (`PLZA.ASM:130-166`).
     fn texture_sample(&self, bx: u16) -> u8 {
-        let dist = self.dist1[self.dseg_row * 16 + bx as usize];
+        // `dseg = disttaus[color] + dd*16` adds **16 paragraphs** (256 bytes)
+        // to the segment, so the warp shifts `dist1` by `dd` 256-byte rows.
+        let dist = self.dist1[self.dseg_row * 256 + bx as usize];
         let texture = match self.from_texture {
             0 => &self.kuva1,
             1 => &self.kuva2,
@@ -2288,10 +2324,15 @@ mod tests {
         assert_eq!(spline_at(0), [0, 432, 499, 499, 699, 499, 0, 0]);
         assert_eq!(spline_at(136), [0, 0, 499, 709, 489, 289, 9, 0]);
         assert_eq!(spline_at(1136), [0, 0, 299, 677, 522, 322, 255, 0]);
+        // The `REPT 100` tail (RATA.INC) holds the camera at dis 500 with all
+        // three angles zero and the light at `ls_kx 255`, `ls_ky 511`; a
+        // parser that dropped the repeat would index past its 37 points here.
+        assert_eq!(spline_at(3000), [0, 0, 499, 0, 0, 0, 255, 511]);
+        assert_eq!(spline_at(6000), [0, 0, 499, 0, 0, 0, 255, 511]);
     }
 
     #[test]
-    fn the_cube_projection_adds_three_hundred_twenty_and_sixty_six() {
+    fn the_cube_projection_is_the_releases_centred_scale() {
         let mut part = Plzpart::new();
         part.cxx = 256; // an 8.8 identity in x
         part.cyy = 256;
@@ -2303,11 +2344,13 @@ mod tests {
         // (125,125,125) with the identity matrix and dis 320:
         // xx = 125, yy = 125, zz = 125+320 = 445.
         assert_eq!(part.xx[0], [125, 75, 445]);
-        // xxx = (125*256)/445 + 160+160 = 71 + 320 = 391.
-        // yyy = (75*142)/445 + 66 = 23 + 66.
-        assert_eq!(part.xxx[0], [391, (75 * 142) / 445 + 66]);
+        // The release's projection: x = xx*256/zz + 320 (the tree's literal
+        // 160+160), y = yy*213/zz + 100 (measured; see APPROXIMATIONS A23 —
+        // the tree's development build compiles 142 and 66).
+        assert_eq!(part.xxx[0][0], (125 * 256) / 445 + 160 + 160);
+        assert_eq!(part.xxx[0][1], (75 * 213) / 445 + 100);
         assert_eq!(part.xxx[0][0], 391);
-        assert_eq!(part.xxx[0][1], 89);
+        assert_eq!(part.xxx[0][1], 135);
     }
 
     #[test]

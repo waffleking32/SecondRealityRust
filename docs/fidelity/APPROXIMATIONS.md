@@ -1237,29 +1237,82 @@ not this divergence.
 own screen boundary; the release's value is adopted. `docs/fidelity/plzpart.md`
 §10 records the reading.
 
-## A23 — PLZPART: the cube's keyframes differ, and the root cause is open (registered, not adopted)
+## A23 — PLZPART: the release's cube projection is centred and 3/2 taller than the tree's build (adopted), and its close-up camera translation is a release-side divergence (registered)
 
 **Part:** PLZPART (`PLZPART/VECT.C`, `PLZA.ASM`, `SPLINE.ASM`), Phase 5.
 **Original:** a 320×200 textured cube on a six-page flip whose music gate the
 reference pins to boot 8364.
 
-**The divergence.** RGB at boot 8500: **44.352 %** of pixels, max channel
-delta **243**; at boot 9500: **92.866 %**, max delta **255**
-(`cargo test -p secondreality --test plzpart -- --nocapture`). The reference's
-cube is byte-identical at these indices in four capture sessions
-(`reference-indices.md` §13.5), so this is not a capture-phase artifact.
+**The tree's build is unambiguous.** `VECT.OBJ` compiles `imul eax,eax,0x8e`
+(142) and `add ax,0x42` (66) for `yyy`, and `sar eax,0x16` for the matrix's
+`>>15+7`; `SPLINE.OBJ` and `INCLUDE.OBJ` carry the RATA/SPLINE/sinit data the
+port parses, word for word. A faithful port of the tree draws the cube with
+`yyy = yy*142/zz + 66`.
 
-**Pinned so far.** The music gate is the reference's (boot 8364, nine-poll
-entry pre-roll) and the first draw is boot 8365. The page/display parity, the spline phase (offset probes during
-development), the projection constants (142 and the double +160, pinned by
-`the_cube_projection_adds_three_hundred_twenty_and_sixty_six`) and the
-extent/clear pair were each measured and ruled out. What was fixed on the way
-is in `docs/fidelity/plzpart.md` §7: the ctau hull, the clear's page base, the
-gate-frame swap and the span divisor/sign mask.
+**The release does not.** Fourteen diagnostic captures (`out/plz-diag-cube`
+and `out/plz-diag-cube2`, the documented `SECOND 3` recipe at cycles 30000;
+the filed 8500/9500 are reproduced byte-identically in the same session) pin a
+different projection: the six consecutive silhouettes 8400–8800 match the
+port's at `yy = yy*213/zz + 100` with a best shift within 2 px of (0,0) and a
+mask XOR of 0.44–0.79 %, where the tree's 142/66 needs 3.0–10.6 % after a
+shift; 8900 and 9000 match at 0.73 % and 0.07 %. The x pair is unchanged (an x-scale sweep's
+minimum is 256; mean mask 0.63 % against 0.72/0.96 at 253/259). The y-scale fit
+is flat over 210–214 and the origin is pinned to ±1 px; the port adopts
+**213/100** (213 = 142 × 3/2; 100 is the screen's vertical centre).
+`the_cube_projection_is_the_releases_centred_scale` pins the adopted pair.
 
-**Decision (D24's procedure).** Not adopted and not explained: the tree's own
-data and arithmetic do not yet reproduce the release's frames, and no measured
-D24 difference in `RATA.INC`/`SPLINE.INC` has been demonstrated. The residual
-stays registered so the phase's close-out and any later task see it. The
-integration test pins the measured percentages; a change to them must update
-this entry and §7 of the note.
+**The residual that remains is registered, not adopted.** With the release's
+projection the 8500 keyframe aligns geometrically (0.6 % silhouette) and its
+RGB differs in **32.106 %** of pixels, dominated by per-pixel deltas of
+4/8/12 — one, two and three 6-bit DAC levels, i.e. a shade/pose difference of
+a few levels across the face. The close-ups 9100–9600 require a
+**frame-dependent screen translation** (up to tens of pixels) that the tree's
+camera data cannot carry: every translation word in the RATA block those
+frames use is zero. The 9500 keyframe therefore stays at **94.706 %**. No
+faithful camera path can be derived from the captures without the release's
+data, so the close-up divergence is registered rather than adopted.
+
+**Measured difference.** `cargo test -p secondreality --test plzpart --
+--nocapture`: cube 8500 **32.106 %** (max delta 243), 9500 **94.706 %** (max
+255); the plasma keyframes are unaffected (11.209/5.848/4.052 %).
+`docs/fidelity/plzpart.md` §7 carries the fixes (the `REPT 100` expansion, the
+`dist1` warp scale, the ctau hull, the clear page base, the gate-frame swap,
+the span divisor/sign mask) and the ruled-out causes (page parity, spline
+phase, texture rect, the tree's constants).
+
+**Decision (D24's procedure).** The projection constants are a single-value
+release divergence and are adopted; the close-up camera path is a multi-value
+data difference the tree cannot supply and is registered. The diagnostic
+captures are under `out/`; `reference/` stays input-only.
+
+## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
+
+**Part:** PLZPART (`PLZPART/PLZ.C` over `PLZPART/COPPER.ASM`), Phase 5.
+**Original:** `plz()`'s frame loop has **no frame wait** (`PLZ.C:74-122`); it
+runs unthrottled, and the copper's once-per-vblank `moveplz`/`pompota` can
+land between — or inside — the loop's four plane passes. `setplzparas` latches
+the `k`/`l` parameters into the patched code at the start of each pass, so the
+screen is torn at whatever pass boundary the retrace lands on. Which boundary
+that is depends on the original's per-frame execution time (the fade/drop work
+changes it), i.e. on the machine, not on the algorithm.
+
+**Port:** the engine is a fixed 70.086 Hz tick and draws the four passes with
+one parameter generation, the loop's phase-locked steady state (the copper's
+walk runs at the tick's end). `PLZ.C`'s own arithmetic, timetable, palette
+accumulators and the split/pan walk are transliterated exactly; only the
+intra-frame interrupt landing is not modelled.
+
+**Measured difference.** `cargo test -p secondreality --test plzpart`:
+11.209 %, 5.848 % and 4.052 % at boots 6000/7000/7600 (max channel delta
+16/21/17). The tear was measured directly by forcing the walk to land before
+each pass (a temporary diagnostic): the 6000 frame's residual by split
+position is 4.15/5.23/4.38/8.42/11.21 % (before passes 0/1/2/3, and at the
+frame boundary), i.e. the 6000 reference frame's tear sits before pass 0 or 2;
+7000 and 7600 sit at the boundary (5.85/4.05 %). No fixed split matches all
+three: split 3 gives 8.42/8.59/8.28 and the boundary 11.21/5.85/4.05. The
+reference's own sessions agree within 0.09–3.08 % because a session's timing
+repeats; the port cannot choose the split without the original's cycle costs.
+
+**Decision.** The port keeps the steady state (the boundary); the residual is
+registered with the split measurements. `docs/fidelity/plzpart.md` §4 carries
+the mechanism and the table. The diagnostic renders are under `out/`.
