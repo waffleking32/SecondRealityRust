@@ -1051,3 +1051,98 @@ the shadow layer at 1856/1860, 2152/2159, 2175/2187 and 2168/2170 pixels shared 
 99.45 / 99.91 %), and every keyframe reproduced at exactly one frame counter
 (403/703/1303/1903; the `K±1` neighbours are different pictures, asserted by the test, so the
 mapping is not a loose fit).
+
+## A20 — ALKU: the linked hzpic's three palette entries (adopted), and the text batches' phase (registered)
+
+**Part:** ALKU (`ALKU/MAIN.C` over `ALKU/ASMYT.ASM`), Phase 4. Two entries in
+one, because both are about one asset family and one frame: a D24 adoption of
+three palette bytes and a residual the port's fixed tick cannot carry.
+
+**The original — the palette.** `hzpic` is not `HOI.U`: `ALKU/INCLUDE.ASM:7-12`
+assembles `HOI.IN0` + `HOI.IN1` as the symbol, and the linked payload differs
+from `assets/ALKU/HOI.U` in exactly nine bytes — palette entries 1, 2 and 3
+(`docs/fidelity/asset-inventory.md` §E.18):
+
+| entry | the linked hzpic (shipped) | `HOI.U` |
+|---|---|---|
+| 1 | `(10, 10, 10)` | `(2, 2, 3)` |
+| 2 | `(30, 30, 30)` | `(5, 5, 7)` |
+| 3 | `(63, 63, 63)` | `(6, 6, 9)` |
+
+The picture *bytes* are identical. **Measured:** the three entries are the
+text palette's three levels — `fade2`'s entries 1, 2 and 3 become its entries
+64, 128 and 192 (`MAIN.C:194-208`), which every glyph pixel uses
+(`MAIN.C:173-181` gives it 0x40/0x80/0xC0). With `HOI.U`'s own entries the
+reference's 1719 differs in **1,595** of 128,000 pixels and 2719 in **4,171**;
+at 5859 in **2,706**. With the shipped entries 1719 and 2719 are
+byte-identical and 5859's 2,358 pixels are the phase residual below.
+
+**Port:** reads `HOI.U` (the curated picture) and overrides those three
+entries with the shipped values, a named constant in `parts/alku.rs`
+(`SHIPPED_PALETTE_ENTRIES`). **This is D24's adopt-the-release case**: the
+difference is one data constant (nine bytes), the picture is byte-identical,
+and every other difference in the part is accounted for — the cards are
+*exactly* the reference's at the shipped values and visibly dark at the
+curated ones. The derivation test is
+`the_curated_palette_entries_leave_the_reference_different` (ignored):
+
+```bash
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_curated_palette_entries_leave_the_reference_different \
+    -- --ignored --nocapture
+```
+
+which prints:
+
+```text
+boot 900: 0 of 128000 pixels differ with the curated entries
+boot 1719: 1595 of 128000 pixels differ with the curated entries
+boot 2719: 4171 of 128000 pixels differ with the curated entries
+boot 5859: 2706 of 128000 pixels differ with the curated entries
+```
+
+**The original — the text batches' phase.** The fifth text batch is the empty
+`case 4` (`MAIN.C:129-131`): it zeroes `tbuf`, calls `ffonapois` (which clears
+the old text's top two bits) and then waits. Its `fmaketext` — which would
+rebuild the XOR list from the zeroed buffer and keep the text erased — runs
+only when `aa<320-12 = 308` (`:141`). The port's trace-faithful phase reaches
+that batch at `aa=308` and skips it, so the stale XOR list re-adds the old
+text on the following scrolls; the `textin` fade that is in progress at boot
+5859 then makes it visible, where the reference's session reached the batch
+at `aa=306` (and/or its fade was elsewhere) and its 5859 is bare. **Measured:**
+the port's 5859 differs in **2,353 of 128,000 pixels (1.8383 %)** through the
+real binary (`cargo test -p secondreality --test alku -- --nocapture`), all
+inside rows 150-243 and columns 40-279 — the old text's glyph region — and
+**350 of the 400 rows are byte-identical**. The phase sensitivity, with the
+four gates fixed and the batches' transitions moved
+(`the_5859_phase_sensitivity`, ignored):
+
+```bash
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_5859_phase_sensitivity -- --ignored --nocapture
+```
+
+whose 37 rows include (others elided):
+
+```text
+shift  -9:     0 pixels differ; a=311 p=1 f=0 stage=Main(Tail { scrl: 322 })
+shift  +0:  2358 pixels differ; a=311 p=1 f=22 stage=Main(Outer)
+shift +10:     0 pixels differ; a=311 p=1 f=20 stage=Main(Outer)
+```
+
+At the reference session's phase the frame is byte-identical
+(`the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`),
+so the pixels, the palette, the pan and the text are the source's; the phase
+is the port's fixed tick giving `fmaketext`/`faddtext` zero CPU cost where the
+original's 1993 loops took frames, plus the session's music clock (the trace's
+own `second1` fit has a 5.4-frame spread between its two readings). The port
+cannot reproduce either, and this entry registers the difference.
+
+**What is not established, and must not be implied.** The direction: the
+reference session's phase is one boot, not a property of the release, and the
+residual is confined to frames where a text fade and a batch overlap. The
+lead to the released bytes is `MAIN/DATA/ALKU.EXE`, PKLITE-packed, its pack
+entry `dw 0BE72h,06D53h,00002h,0132Eh,0797Fh,00000h ;ALKU.EXE`
+(`MAIN/PACKFINA.INC:47`). The tree holds ALKU's sources and no built
+`ALKU/ALKU.EXE`, so the comparison is against the shipped frames only.
+`docs/fidelity/alku.md` §8 carries the frame-by-frame reading.

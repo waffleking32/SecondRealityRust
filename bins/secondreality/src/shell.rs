@@ -73,15 +73,18 @@ pub const BLOCKS: &[(char, u8)] = &[
 ///
 /// **This is only where a part begins when a run starts at that part.** A part
 /// the demo reaches mid-run begins wherever the parts before it left off, which
-/// is the chain's business, not this table's. Two parts have a measured
-/// anchor and they are both block entries:
+/// is the chain's business, not this table's. Three parts have a measured
+/// anchor and they are all block entries:
 ///
-/// - `beglogo` and `endlogo`, at **404**. `SECOND 2` sets mode 13h + `inittwk`
-///   at `MAIN/U2.ASM:806-808` and `SECOND 5` does the same at `:906-908`, and
-///   the boot's first graphics frame is 404 in five runs of five
-///   (`reference-indices.md` §1.12). BEGLOGO's own first act is the white
-///   fill, which is what the screen holds from there (§3.3 measures 410 and
-///   429 byte-identical to 430); ENDLOGO's white is up by 415 and holds (§19).
+/// - `alku`, `beglogo` and `endlogo`, at **404**. `SECOND 1` runs ALKU first
+///   (`MAIN/U2.ASM:790-792`), `SECOND 2` sets mode 13h + `inittwk` at
+///   `MAIN/U2.ASM:806-808` and `SECOND 5` does the same at `:906-908`, and the
+///   boot's first graphics frame is 404 in five runs of five
+///   (`reference-indices.md` §1.12). ALKU opens on the black screen its own
+///   `tw_setpalette(fade1)` leaves (§4.3's 900 is every pixel `(0,0,0)`);
+///   BEGLOGO's first act is the white fill, which is what the screen holds
+///   from there (§3.3 measures 410 and 429 byte-identical to 430); ENDLOGO's
+///   white is up by 415 and holds (§19).
 ///
 /// Everything else returns `None`, and the three mid-block parts are why:
 /// TUNNELI, CRED and ENDSCRL begin after an unported predecessor or a music
@@ -91,7 +94,7 @@ pub const BLOCKS: &[(char, u8)] = &[
 /// reference-comparable, which is what `None` makes it say.
 pub fn boot_anchor(part: &str) -> Option<u32> {
     match part {
-        "beglogo" | "endlogo" => Some(FIRST_GRAPHICS_FRAME),
+        "alku" | "beglogo" | "endlogo" => Some(FIRST_GRAPHICS_FRAME),
         _ => None,
     }
 }
@@ -222,6 +225,33 @@ impl ModuleId {
 /// entry point part company.
 pub const MUSIC_START_FRAME: u32 = 408;
 
+/// The music's own clock for a **block-1** run: the initial `_zplaysong(0)`,
+/// which no block restart precedes (`MAIN/U2.ASM:766-775`; the restart sites
+/// are `:856` onwards).
+///
+/// **Measured, and it is not the restart recipes' 408.** `second1` — a
+/// `SECOND 1` session — fits its first row change at frame 420 with
+/// `_np_zframe` 14, and 14 ticks at the trace's own 1.4583 frames a tick is
+/// 20.4 frames, so the row began at **399.6**; the `zframe` column's direct
+/// reading is 405, 5.4 frames later (the same tick, seen at the next whole
+/// frame sample; `cargo xtask music analyse --trace reference/music/second1`,
+/// `docs/fidelity/music-clock.md` §2). A start frame is an integer in the
+/// run's numbering, so the port uses the fitted value's nearest whole frame,
+/// **400**. A `SECOND 1` run draws from 404, four frames after it, so the run
+/// pre-polls those four frames ([`MusicStart::pre`]) rather than waiting.
+pub const BLOCK_ONE_MUSIC_START_FRAME: u32 = 400;
+
+/// The recipe a run's first part begins under: the block-1 start for the three
+/// parts before any block restart (`alku`, `u2a`, `pam` — `MAIN/U2.ASM:790-799`,
+/// gated on `whattorun & 1`), and the restart recipes' frame for everything
+/// else. `part` is the plan's *first* name, which is the entry point.
+pub fn music_start_frame_for(part: &str) -> u32 {
+    match part {
+        "alku" | "u2a" | "pam" => BLOCK_ONE_MUSIC_START_FRAME,
+        _ => MUSIC_START_FRAME,
+    }
+}
+
 /// How a run reaches the music's own clock.
 ///
 /// The original does one of two things, and which one depends on where the run's own
@@ -254,21 +284,42 @@ pub struct MusicStart {
 
 impl MusicStart {
     /// The music's start for a run whose first drawn frame carries the reference index
-    /// `anchor`, or `None` for a run with a numbering of its own.
+    /// `anchor`, or `None` for a run with a numbering of its own — under the **restart
+    /// recipes'** frame, [`MUSIC_START_FRAME`]. [`for_part`](MusicStart::for_part) is what
+    /// a run uses, because a block-1 entry starts under a different one.
     pub fn new(anchor: Option<u32>) -> MusicStart {
+        MusicStart::at(anchor, MUSIC_START_FRAME)
+    }
+
+    /// The music's start for a run whose plan begins at `part`: its recipe's frame
+    /// ([`music_start_frame_for`]) and the anchor that run draws from.
+    pub fn for_part(part: &str, anchor: Option<u32>) -> MusicStart {
+        let start_frame = music_start_frame_for(part);
+        if start_frame == MUSIC_START_FRAME {
+            // The restart recipes' rule is the default `new` states.
+            MusicStart::new(anchor)
+        } else {
+            MusicStart::at(anchor, start_frame)
+        }
+    }
+
+    /// The measured rule, with the recipe's start frame as its parameter: a run that
+    /// begins at or before it waits for it; one that begins after it pre-polls the
+    /// frames it missed.
+    fn at(anchor: Option<u32>, start_frame: u32) -> MusicStart {
         match anchor {
-            Some(anchor) if anchor < MUSIC_START_FRAME => MusicStart {
-                frame: MUSIC_START_FRAME,
-                waiting: MUSIC_START_FRAME - anchor,
+            Some(anchor) if anchor < start_frame => MusicStart {
+                frame: start_frame,
+                waiting: start_frame - anchor,
                 pre: 0,
             },
-            Some(anchor) if anchor > MUSIC_START_FRAME => MusicStart {
+            Some(anchor) if anchor > start_frame => MusicStart {
                 frame: anchor,
                 waiting: 0,
-                pre: anchor - MUSIC_START_FRAME,
+                pre: anchor - start_frame,
             },
             Some(_) => MusicStart {
-                frame: MUSIC_START_FRAME,
+                frame: start_frame,
                 waiting: 0,
                 pre: 0,
             },
@@ -771,7 +822,10 @@ impl Sequence {
         source: MusicSource,
     ) -> Result<(), ShellError> {
         let player = source(module).map_err(|message| ShellError::Music { message })?;
-        let start = MusicStart::new(self.anchor);
+        // The plan's first name is the entry point, and it decides the recipe: a
+        // block-1 part starts under the initial `_zplaysong(0)` (frame 400), every
+        // other entry under its restart's frame (408).
+        let start = MusicStart::for_part(self.current, self.anchor);
         crate::audio::lock(&player).play_song(order);
         // **The frames the music missed before this run began.** A run whose first drawn
         // frame is *after* the music's own start pre-polls the frames in between, because
@@ -781,13 +835,14 @@ impl Sequence {
         // *before* the music's start has nothing to catch up on — its player waits
         // (`MusicStart::waiting`) rather than running early.
         //
-        // **`pre` is zero for every run the port can make today**, and that is arithmetic
-        // rather than a hope: `pre` is `anchor - MUSIC_START_FRAME` and exists only for an
-        // anchor *after* that frame, `boot_anchor` answers `Some(404)` (which waits, since
-        // 404 < 408) or `None` (`pre` 0), and no part carries an anchor past 408. A
-        // catch-up needs an entry point whose first frame is later than 408 — MNTSCRL's is
-        // in (415, 420], which is `SECOND 3`'s, but `boot_anchor("mntscrl")` is `None` (its
-        // start is a window, not a measured frame), so `pre` stays zero.
+        // **`pre` for the entries the port has today**: ALKU's anchor is 404 and its
+        // block-1 recipe starts at 400, so a `SECOND 1` run pre-polls four frames (the
+        // player had ticked through 400-403 before the run's first drawn frame); the
+        // restart recipes' entries — BEGLOGO and ENDLOGO at 404 against 408 — wait four
+        // frames instead. A catch-up past an anchor later than the recipe's start needs
+        // an entry point whose first frame is measured — MNTSCRL's is in (415, 420],
+        // which is `SECOND 3`'s, but `boot_anchor("mntscrl")` is `None` (its start is a
+        // window, not a measured frame), so no such run exists yet.
         //
         // If one ever runs, two things about it are worth knowing before it is debugged: a
         // catch-up longer than the ring (8192 samples) has its oldest samples dropped by the
@@ -1325,8 +1380,9 @@ mod tests {
 
     #[test]
     fn a_block_entry_anchor_is_the_boots_first_graphics_frame() {
-        // Both block entries the port can start from are anchored at 404:
-        // the demo's first graphics frame under the D17 recipe.
+        // The three block entries the port can start from are anchored at
+        // 404: the demo's first graphics frame under the D17 recipe.
+        assert_eq!(boot_anchor("alku"), Some(404));
         assert_eq!(boot_anchor("beglogo"), Some(404));
         assert_eq!(boot_anchor("endlogo"), Some(404));
     }
@@ -1615,6 +1671,9 @@ mod tests {
         // traces' `26:56` at reference index 1212), and the test card with no music at all.
         let expected: &[(&str, Option<(ModuleId, u8)>)] = &[
             ("testcard", None),
+            // `SECOND 1`'s first parts run before any restart, under the initial
+            // `_zplaysong(0)` (`MAIN/U2.ASM:766-775`).
+            ("alku", Some((ModuleId::Music0, 0))),
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
@@ -2013,6 +2072,125 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_block_one_run_starts_under_the_initial_play_song_and_matches_second1() {
+        // **The block-1 recipe's measurement, against the trace that fits it.** A
+        // `SECOND 1` plan begins at ALKU at 404; the music's own clock starts at the
+        // initial `_zplaysong(0)`, measured at 399.6 and used as 400 — four frames
+        // before the run draws — so the run pre-polls four frames. The consequence is
+        // measured, not assumed: every published position `second1` holds is compared.
+        let plan = block_plan('1').unwrap();
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            plan,
+            stub_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(run.anchor(), Some(404), "block 1 draws from the boot's 404");
+        // The fitted 400 is before the run's first frame, so the clock is caught up to
+        // 404 by four pre-polls; `frame` is where it stands in the run's numbering.
+        assert_eq!(
+            run.music_start_frame(),
+            Some(404),
+            "the run's own start, with the four 400-403 frames pre-polled"
+        );
+
+        let trace = trace("second1");
+        let last = trace.iter().map(|(frame, _, _)| *frame).max().unwrap();
+        let start = run.index();
+        let wanted: std::collections::BTreeMap<u32, (u8, u8)> = trace
+            .iter()
+            .filter(|(frame, _, _)| *frame >= start)
+            .map(|(frame, position, _)| (*frame, *position))
+            .collect();
+        let mut port: std::collections::BTreeMap<u32, (u8, u8)> =
+            std::collections::BTreeMap::new();
+        while run.frame_index().is_none_or(|index| index < last) {
+            if run.tick() == SequenceStatus::Finished {
+                break;
+            }
+            let index = run.index() - 1;
+            if wanted.contains_key(&index) {
+                let position = run.music_position().expect("block 1 has a player");
+                port.insert(index, (position.order, position.row));
+            }
+        }
+        assert_eq!(port.len(), wanted.len(), "every frame the trace holds was visited");
+
+        // The *change frames*: where the port's position first differs from its previous
+        // one, against the trace's own. The four pre-polls put the port a few frames
+        // ahead of the trace's direct reading, so the measured displacement is printed
+        // and bounded rather than assumed zero.
+        let changes = |values: &std::collections::BTreeMap<u32, (u8, u8)>| {
+            let mut out: std::collections::BTreeMap<(u8, u8), u32> =
+                std::collections::BTreeMap::new();
+            let mut previous = None;
+            for (frame, position) in values {
+                if previous.is_some() && previous != Some(*position) {
+                    out.entry(*position).or_insert(*frame);
+                }
+                previous = Some(*position);
+            }
+            out
+        };
+        let port_changes = changes(&port);
+        let trace_changes = changes(&wanted);
+        let mut by_delta: std::collections::BTreeMap<i64, usize> =
+            std::collections::BTreeMap::new();
+        for (position, frame) in &port_changes {
+            if let Some(at) = trace_changes.get(position) {
+                if *frame > start && *at > start {
+                    *by_delta
+                        .entry(i64::from(*frame) - i64::from(*at))
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+        println!(
+            "second1: {} position change(s) compared; the port's frame minus the trace's:              {:?}",
+            by_delta.values().sum::<usize>(),
+            by_delta
+        );
+        // The code transitions are what ALKU's gates read; compare them directly.
+        let codes = |values: &std::collections::BTreeMap<u32, (u8, u8)>| {
+            let mut out: std::collections::BTreeMap<i32, u32> =
+                std::collections::BTreeMap::new();
+            for (frame, (order, row)) in values {
+                out.entry(sr_engine::music::sync_from(*order, *row)).or_insert(*frame);
+            }
+            out
+        };
+        let port_codes = codes(&port);
+        let trace_codes = codes(&wanted);
+        let mut code_delta: std::collections::BTreeMap<i64, i64> =
+            std::collections::BTreeMap::new();
+        for (code, frame) in &port_codes {
+            if let Some(at) = trace_codes.get(code) {
+                if *frame > start && *at > start {
+                    code_delta.insert(i64::from(*code), i64::from(*frame) - i64::from(*at));
+                }
+            }
+        }
+        println!("second1: code transition deltas (port minus trace): {code_delta:?}");
+        assert!(
+            by_delta.keys().all(|delta| (-3..=9).contains(delta)),
+            "a position change outside the pre-poll's measured displacement is a shifted              clock, not the fitted start: {by_delta:?}"
+        );
+        assert!(
+            code_delta.values().all(|delta| (-3..=9).contains(delta)),
+            "a start code outside the pre-poll's measured displacement: {code_delta:?}"
+        );
+        // And the values, in order, are the trace's.
+        assert_eq!(
+            distinct(port.values().copied()),
+            distinct(wanted.values().copied()),
+            "the run's positions, in order, are not the trace's"
+        );
+    }
+
     // --- the music's own start ----------------------------------------------
 
     #[test]
@@ -2049,6 +2227,54 @@ mod tests {
         // there, and nothing polls it until the frame the original's first tick falls on.
         assert_eq!(MusicStart::new(Some(404)).waiting, 4);
         assert_eq!(MusicStart::new(Some(404)).pre, 0);
+
+        // **The block-1 recipe**: `SECOND 1` never takes a block restart, so its
+        // player's clock starts at the initial `_zplaysong(0)`, measured at
+        // 399.6 and used as 400. A run anchored at 404 is four frames *after*
+        // it, and pre-polls them.
+        assert_eq!(BLOCK_ONE_MUSIC_START_FRAME, 400);
+        // `frame` is where the clock stands *in the run's numbering*: four
+        // pre-polls put it at the run's own 404.
+        assert_eq!(
+            MusicStart::for_part("alku", Some(404)),
+            MusicStart { frame: 404, waiting: 0, pre: 4 }
+        );
+        assert_eq!(
+            MusicStart::for_part("u2a", Some(404)),
+            MusicStart { frame: 404, waiting: 0, pre: 4 }
+        );
+        assert_eq!(
+            MusicStart::for_part("pam", Some(404)),
+            MusicStart { frame: 404, waiting: 0, pre: 4 }
+        );
+        // The restart recipes keep 408: BEGLOGO and ENDLOGO wait four frames.
+        assert_eq!(
+            MusicStart::for_part("beglogo", Some(404)),
+            MusicStart { frame: 408, waiting: 4, pre: 0 }
+        );
+        assert_eq!(
+            MusicStart::for_part("endlogo", Some(404)),
+            MusicStart { frame: 408, waiting: 4, pre: 0 }
+        );
+    }
+
+    #[test]
+    fn every_part_of_the_plan_starts_under_its_blocks_music_recipe() {
+        // `MAIN/U2.ASM:790-799` runs ALKU, U2A and PAM before any restart; every
+        // other entry point is one of the restart sites.
+        for part in ["alku", "u2a", "pam"] {
+            assert_eq!(music_start_frame_for(part), BLOCK_ONE_MUSIC_START_FRAME, "{part}");
+        }
+        for part in ["beglogo", "glenz", "tunneli", "techno", "panicend", "mntscrl",
+                     "lnszoom", "plzpart", "minvball", "rayscrl", "3dsinfld", "jplogo",
+                     "u2e", "ddstars", "endlogo", "cred", "endscrl", "testcard"] {
+            assert_eq!(music_start_frame_for(part), MUSIC_START_FRAME, "{part}");
+        }
+        // The table covers every part in the demo's order.
+        for (part, _) in PART_ORDER {
+            assert!(music_start_frame_for(part) == BLOCK_ONE_MUSIC_START_FRAME
+                || music_start_frame_for(part) == MUSIC_START_FRAME);
+        }
     }
 
     #[test]
@@ -2133,6 +2359,10 @@ mod tests {
             // music's fade. `pam` is the demo's own part and no block *starts* at it, which
             // is why it is played from the demo's beginning (MUSIC0 at order 0).
             "pam" => Some(Box::new(Stub { name: "pam", fill: None, retires: Some(0) })),
+            // `--block 1`'s first part, for the test that watches the *block-1* music:
+            // it draws nothing and never retires, so the run ticks to the trace's last
+            // frame with the numbering its anchor gave it.
+            "alku" => Some(Box::new(Stub { name: "alku", fill: None, retires: None })),
             // `--block 5`'s plan, for the test that watches the *music*: the three
             // scrollers draw nothing and never retire, so the run ticks to the trace's
             // last frame with the numbering the block gave it.

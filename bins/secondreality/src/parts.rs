@@ -10,6 +10,7 @@
 //! (`shell::PART_ORDER`) has used, and which the port has therefore still to
 //! port, is the shell's table to say.
 
+pub mod alku;
 pub mod beglogo;
 pub mod cred;
 pub mod ddstars;
@@ -31,6 +32,8 @@ pub type PartEntry = (&'static str, fn() -> Box<dyn Part>);
 pub fn registry() -> &'static [PartEntry] {
     &[
         ("testcard", || Box::new(TestCard::new())),
+        // `ALKU/MAIN.C`, block 1's entry (`MAIN/U2.ASM:790-792`).
+        ("alku", || Box::new(alku::Alku::new())),
         // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).
         ("beglogo", || Box::new(beglogo::Beglogo::new())),
         // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).

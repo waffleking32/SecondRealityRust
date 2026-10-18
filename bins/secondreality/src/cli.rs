@@ -464,8 +464,9 @@ mod tests {
     #[test]
     fn a_run_that_starts_at_zero_reaches_every_index_asked_of_it() {
         // The refusal rule itself is `shell::first_unreachable`, tested there
-        // against an anchor: no part that carries one can be run yet, so there
-        // is no command line here that reaches it.
+        // against an anchor. (`--part alku` carries one now, so a block or part
+        // run asking for an index below 404 is refused by `--block 5`'s case
+        // above.)
         assert!(parse(&["--headless", "--dump-dir", "d", "--dump-frames", "0"]).is_ok());
         assert!(parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
                         "--dump-frames", "0,9000"])
@@ -504,15 +505,16 @@ mod tests {
         // The window drives the same `Sequence` a headless run dumps, so a
         // block is no longer refused outside `--headless`. What is still
         // refused, in either mode, is a block whose first part the port cannot
-        // start at: `SECOND 1` begins at ALKU.
+        // start at: `SECOND 4` begins at U2E, which is not ported.
         let cli = parse(&["--block", "5"]).unwrap();
         assert_eq!(cli.block, Some('5'));
         assert!(!cli.headless, "the window is the default mode");
         assert!(parse(&["--block", "2"]).is_ok());
         assert!(parse(&["--block", "3"]).is_ok(), "MNTSCRL is ported");
+        assert!(parse(&["--block", "1"]).is_ok(), "ALKU is ported");
 
-        let message = parse(&["--block", "1"]).unwrap_err();
-        assert!(message.contains("alku is not ported yet"), "{message}");
+        let message = parse(&["--block", "4"]).unwrap_err();
+        assert!(message.contains("u2e is not ported yet"), "{message}");
     }
 
     #[test]
