@@ -2113,7 +2113,9 @@ tick-map test that calibrates the exact value so the fadeset lands at 467.
 
 **Evidence for 467, the first visible frame: two independent sessions.** The probe
 `cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles
-30000 --frames 456..473 --out out/u2e-dense-{a,b}` gives 456…466 black (`ea0787f6…`) and
+30000 --frames 456,457,458,459,460,461,462,463,464,465,466,467,468,469,470,471,472,473` (run
+twice, into `out/u2e-dense-a` and `out/u2e-dense-b`; `reference-indices.md` §18.7 carries the
+full command) gives 456…466 black (`ea0787f6…`) and
 467…473 the band in both sessions, identical hashes frame for frame. The plan's specified
 10-frame grid (`--frames 404,410,420,430,440,450,460,470,480,490,500`) cannot start at 404 on
 this host: the capture's demo-start detection returns at frame 419–420 (the emulator has run

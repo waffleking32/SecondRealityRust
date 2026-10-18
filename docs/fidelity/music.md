@@ -682,17 +682,19 @@ the impossible. So the comparison asserts what a port can be held to —
    7 frames of it;
 
 — and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints (Phase
-4's and Phase 5's traces are included; the six window runs first print their session's phase
-offset):
+4's, Phase 5's and Phase 6's traces are included; the nine window runs first print their
+session's phase offset):
 
 ```
-11 filed trace(s)
+14 filed trace(s)
   hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
   hiddenu2: the session's phase is -16 frame(s) from the boot's
   hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
   second1 (MUSIC0): 3738 of 5538 frames agree (67.497 %); worst displacement 7 frame(s)
   second1b: the session's phase is +1 frame(s) from the boot's
   second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
+  second1c: the session's phase is +1 frame(s) from the boot's
+  second1c (MUSIC0): 1609 of 1692 frames agree (95.095 %); worst displacement 1 frame(s)
   second2: the session's phase is -5 frame(s) from the boot's
   second2 (MUSIC1): 3207 of 4590 frames agree (69.869 %); worst displacement 4 frame(s)
   second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
@@ -702,6 +704,10 @@ offset):
   second3b (MUSIC1): 3179 of 4839 frames agree (65.695 %); worst displacement 6 frame(s)
   second3d: the session's phase is +4 frame(s) from the boot's
   second3d (MUSIC1): 2716 of 2792 frames agree (97.278 %); worst displacement 2 frame(s)
+  second3e: the session's phase is +1 frame(s) from the boot's
+  second3e (MUSIC0): 3857 of 3992 frames agree (96.618 %); worst displacement 1 frame(s)
+  second4: the session's phase is +1 frame(s) from the boot's
+  second4 (MUSIC0): 3822 of 3892 frames agree (98.201 %); worst displacement 1 frame(s)
   second5 (MUSIC0): 769 of 883 frames agree (87.089 %); worst displacement 2 frame(s)
   second5b (MUSIC0): 775 of 883 frames agree (87.769 %); worst displacement 2 frame(s)
 ```
