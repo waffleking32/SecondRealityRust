@@ -14,8 +14,9 @@ per side, scaled with the picture.
 **Why:** the engine composes the active display only (spec §4.2, plan decision 8). The
 border must still appear, but its exact thickness depends on CRTC timings the port does
 not model.
-**Measured difference:** 8 source pixels per side at every geometry. To be re-measured
-against the original when PANIC is ported (Phase 5).
+**Measured difference:** 8 source pixels per side at every geometry. The filed reference captures
+are the 320×200 active area, with no overscan border in them to measure, so the padding's exact
+thickness stays unmeasured; the Phase 9 fidelity pass owns closing it against the original.
 
 ## A2 — An RLE row that decodes wider than its header's width is clipped
 

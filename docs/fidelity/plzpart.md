@@ -44,7 +44,7 @@ Parsed sizes and edges (test `the_inc_fragments_parse_to_their_original_sizes_an
 **The map, not the assembler's placeholders, fixes the table bases.**
 `ASMYT.ASM:46-61`'s `0xC100`/`0xC200`/`0xC300`/`0xC400` sit inside `plzline`'s
 own instructions; `setplzparas` (`ASMYT.ASM:74-95`) patches each one to a
-table address. `PLZPART.MAP:368-369,391` gives `_psini 027D:0000`,
+table address. `PLZPART.MAP:368-369,387,391` gives `_psini 027D:0000`,
 `_lsini4 027D:4000`, `_lsini16 027D:8000`, `_plzline 027D:C000`
 (test `the_table_bases_are_the_maps_not_the_assembly_placeholders`). The port
 builds the flat 0xC000-byte segment the map describes and evaluates the patched
@@ -437,6 +437,14 @@ not a matching cube.
   parameter latch depends on the original's execution time; the port's fixed
   tick draws the loop's phase-locked steady state. The split-position
   measurements are in §4.
+
+**One model omission, recorded here rather than as a D24 divergence.** The source polls
+`dis_exit()` at every loop boundary — `PLZ.C:68` and `:76` for the plasma, `VECT.C:116` and
+`:117` for the cube — and the port's `frame` consults neither. The omission is unobservable in
+this phase: the engine's exit flag is sticky and the shell retires any part at the end of the
+tick the flag was set in (`Sequence::tick`), so ESC ends the part on the same tick with or
+without the poll. It would matter only for a part that could abandon work inside a tick; this
+one's `frame` does a phase's bounded work and returns.
 
 ## 11. The tests and the run
 

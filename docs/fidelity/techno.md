@@ -448,8 +448,8 @@ binary and there is nothing to model.
 |---|---|---|
 | stage 1 start | `KOE.C:213` | `musplus < -4` |
 | interference end | `KOEA.ASM:900-905` | `getmframe >= 925` |
-| first bars wait | `KOE.C:275-281` | `musrow & 7 == 7` |
-| second stage start | `KOE.C:284` | `musplus < -3` |
+| first bars wait | `KOE.C:277-281` | `musrow & 7 == 7` |
+| second stage start | `KOE.C:275` | `musplus < -3` |
 | doit3 shrink | `KOE.C:495-501` | `getmframe > 2520` (and `count < 333`) |
 | troll order wait | `KOE.C:638-648` | `order > 35 || (order == 35 && row > 48)` |
 | troll exit | `KOE.C:705-726` | `-6 < musplus < 16` |

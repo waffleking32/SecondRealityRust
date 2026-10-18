@@ -771,7 +771,9 @@ Recorded here so a later phase inherits the reasoning rather than re-deriving it
    `PartCtx` is additive and breaks no part.
 6. **The overscan border is a fixed pad in the presenter**, not a modelled overscan region — 8
    source pixels per side, scaled with the picture. It is the first entry in
-   `docs/fidelity/APPROXIMATIONS.md`, and Phase 5 must re-measure it when PANIC lands.
+   `docs/fidelity/APPROXIMATIONS.md`; PANIC landed in Phase 5, and the filed captures are the
+   displayed area only (item 8 below), so they carry no border to measure — **A1** records the
+   padding as still unmeasured and the Phase 9 fidelity pass as its owner.
 7. **`xtask` is invoked as `cargo xtask`** through a `.cargo/config.toml` alias.
 8. **The composed frame is the displayed area only** — no full-frame overscan synthesis.
    `IndexedFrame` is exactly `view.width × view.height`, and `Engine::tick` resizes it from the
@@ -2025,7 +2027,7 @@ their provenance into `assets/PLZPART/`, hashed by `cargo xtask assets verify --
 run time by a part-local `db`/`dw` reader — not converted into Rust constants at build time.
 `TILE.INC` and `TILEPAL.INC` sit in the tree and are **not** copied: the shipped `PLZPART.PRJ` names
 neither. The assembler's placeholders `0xC100`/`0xC200`/`0xC300`/`0xC400` are not the table bases —
-`PLZPART.MAP:368-369,391` gives `_psini 027D:0000`, `_lsini4 027D:4000`, `_lsini16 027D:8000`,
+`PLZPART.MAP:368-369,387,391` gives `_psini 027D:0000`, `_lsini4 027D:4000`, `_lsini16 027D:8000`,
 `_plzline 027D:C000`, and the port builds the flat `0xC000`-byte segment the map describes. The
 parsed shapes are asserted (`16,384` `db`; `8,192`+`8,192` `dw`; `2,575` bytes; `129` values;
 `1,024` and `1,088` words — the last with `REPT 100` expanded). The consequence is a deliberate one:
