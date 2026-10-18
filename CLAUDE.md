@@ -68,11 +68,11 @@ cargo run --release --bin secondreality -- --part alku
 
 **ESC** ends the part that is playing and the shell starts the next one — the original's exit flag
 (`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`). The six Phase-4
-parts read it (`ctx.exit_requested`) where their sources call `dis_exit`, and in their wait loops,
-which must not spin; a part that sees it can end on that tick without drawing. For a part that does
-not poll, the engine carries the flag and the *shell* retires the part at the end of the tick it was
-set in. Once the run has nothing left to play, ESC closes the window, where the original's shell
-returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
+parts read it (`ctx.exit_requested`) where their sources consult the exit flag, and in their wait
+loops, which must not spin; a part that sees it can end on that tick without drawing. For a part
+that does not poll, the engine carries the flag and the *shell* retires the part at the end of the
+tick it was set in. Once the run has nothing left to play, ESC closes the window, where the
+original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
 `ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
 a key.

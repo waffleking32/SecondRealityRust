@@ -13,7 +13,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
-| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 byte-identical; the residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500, plus PAM's 7900 index plane, A21); all six wait on the music as the originals do, with the release's timings in A17/A18. Blocks 1, 3 and U start their first ported part and stop at the first unported one; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
+| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
@@ -1593,8 +1593,10 @@ a few commits later.
 
 **Exit criterion (spec §10): ALKU, PAM, DDSTARS, DOTS, MNTSCRL, RAYSCRL verified.** All six are.
 Every number below was **re-run at the committed state** (`9c457e2`, branch
-`phase-4-music-synced-tier-a`) in one pass; this close-out's own commit adds records only, so the
-state the commands ran against is the phase's tip. The blocks are pastes of those runs: `(…)` marks
+`phase-4-music-synced-tier-a`); this close-out's own commit adds records only, so the state the
+commands ran against is the phase's tip. The workspace suite was re-run after the record edits and
+its `test result:` lines in the verification block below are that run's. The blocks are pastes of
+those runs: `(…)` marks
 an elision, and an `exit:` line is the shell's reading of a command's exit code rather than a line
 of its output.
 
@@ -1755,7 +1757,7 @@ load-bearing for a keyframe the phase claims. The absences are recorded rather t
 ```text
 $ cargo test --workspace
 (…)
-test result: ok. 239 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.51s
+test result: ok. 239 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.55s
 (…)
 test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 (…)
