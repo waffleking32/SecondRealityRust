@@ -113,8 +113,9 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 ///
 /// `SECOND 3` reaches U2E after JPLOGO and the shell restarts MUSIC0 at order 18 there
 /// (`MAIN/U2.ASM:880-885`). `second3e`'s session is `second4`'s — the same restart fired on a
-/// block-4 boot — shifted by exactly 17,442 frames at every order boundary, so its clock
-/// starts at 408.2 + 17,442 = 17,850 (`docs/fidelity/music-clock.md` §2.1). A trace after a
+/// block-4 boot — shifted by 17,441–17,442 frames at the order boundaries (17,442 at the
+/// 18000/18100 rows this start is measured from), so its clock starts at
+/// 408.2 + 17,442 = 17,850 ±1 (`docs/fidelity/music-clock.md` §2.1). A trace after a
 /// restart is simulated from the restart, not from its recipe's boot anchor: the player never
 /// seeks mid-song, so it could not reach the window at all.
 const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[("second3e", "MUSIC0", 17_850, 18)];
@@ -138,8 +139,9 @@ const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of mi
 const JITTER_FRAMES: i64 = 7;
 
 /// How far a window trace's session may sit from its recipe's boot phase before this test
-/// refuses to align it. The six window shifts measure **−16 (`hiddenu2`), −5 (`second2`),
-/// +1 (`second1b`, `second3b`), +2 (`second3a`) and +4 (`second3d`) frames** (printed by
+/// refuses to align it. The nine window shifts measure **−16 (`hiddenu2`), −5 (`second2`),
+/// +1 (`second1b`, `second3b`, `second1c`, `second4`, `second3e`), +2 (`second3a`) and
+/// +4 (`second3d`) frames** (printed by
 /// `the_port_reproduces_every_filed_trace`): the two `SECOND U` sessions, `hiddenu` (frames
 /// 146…6499) and `hiddenu2` (6500…8199), read `_np_zframe` 4175 and 4185 at adjacent frames —
 /// ten ticks, about fifteen frames — which is the largest session phase spread the tree

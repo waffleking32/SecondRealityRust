@@ -3872,7 +3872,7 @@ things follow that the rows use: the reference in `reference/parts/u2e/` is **us
 reaches U2E** (the screens are byte-identical), and its **indices are `SECOND 4` boot indices**, so a
 `SECOND 3` or full-run diff must use the indices of *that* boot.
 
-### 18.7 The part's first drawn frame, measured (Phase 6)
+### 18.7 The part's first visible frame, and the derived run anchor (Phase 6)
 
 U2E had no start index before Phase 6; it has one now. On the `SECOND 4` boot the loader's
 screen is the flat black `ea0787f6…` through frame 466, and **467** is the first frame with a
@@ -3892,10 +3892,16 @@ The plan's coarser grid (`--frames 404,410,420,430,440,450,460,470,480,490,500`)
 at 404 on this host — the capture's demo-start detection returns at frame 419–420, and the
 command was refused twice with `the emulator reached frame 419/420 before frame 404 could be
 captured`. Run from 420, both sessions agree with the dense scan at every sampled index: 420…
-460 are `ea0787f6…`, 470 is the band. The anchor the port numbers a `--block 4` run from is
-therefore **467**, and the intro's earlier palette steps are invisible over the black screen
-(they change entries the flat black does not use). `docs/decisions.md` D33 records the model
-and the two-retrace cadence.
+460 are `ea0787f6…`, 470 is the band.
+
+**467 is the first *visible* frame, not the run's first tick.** `U2E.C:285-335` runs 33
+fade-in waits and then 16 further waits before `fadeset` writes the displayed page, and that
+write precedes the fadeset's own `dis_waitb()`; the band is drawn after **49** pre-visible
+waits. The run anchor is therefore the derived **467 − 49 = 418** (the candidate **417**
+counts the fadeset's own wait before the write instead of after it), and Task 7's tick-map
+test calibrates the exact value so the fadeset lands at 467. The intro's earlier palette
+steps are invisible over the black screen (they change entries the flat black does not use).
+`docs/decisions.md` D33 records the model and the two-retrace cadence.
 
 ## 19. ENDLOGO
 

@@ -2054,11 +2054,10 @@ stop at GLENZ keeps TECHNO and PANICEND unreachable through a block until Phase 
 
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
-Decided: the VISU engine lives in `bins/secondreality/src/parts/visu/` — the module root
-`visu.rs` beside that directory, the layout `bins/secondreality/src/parts.rs` + `parts/`
-already uses (the plan's "`mod.rs`" is that root) — with `math.rs` and `draw.rs` as its two
-layers. The packed scene/object readers live in `crates/sr-assets/src/visu.rs` as plain data.
-No new crate.
+Decided: the VISU engine lives in the module directory `bins/secondreality/src/parts/visu/` —
+`mod.rs` (the skeleton that declares and re-exports the other two, and later the scene
+driver), `math.rs` and `draw.rs` — as the plan's Tasks 3 and 5 file lists have it. The packed
+scene/object readers live in `crates/sr-assets/src/visu.rs` as plain data. No new crate.
 
 **Why.** Plan 02 states the stance this follows: "No new crate: the shell is a module in the
 binary, the parts are modules beside it" (`docs/plans/02-shell.md:20`). Code shared by two parts
@@ -2082,12 +2081,14 @@ carry the licence/manifest/test-layout work for one consumer.
 ## D33 — The two parts' tick models, and U2E's first drawn frame (2026-10-18)
 
 Decided: **U2A** advances one animation-stream frame per logic tick and flips one page per
-tick (`VISU/C/U2A.C:105-130`'s `copper2`, one `vid_setswitch(-1, clr)` a retrace; the loop at
-`:280-324` takes one stream frame a pass); its drawing begins at gate 1, `order>10 && row>46`
-(`:238`), whose first satisfying frame is measured at **6988** — `second1c`, order 11 row
-47, pattern 8, `_np_zframe` 4513. Its gate 2, `order>11 && row>54` (`:276`), first holds at
-**7618** — `second1b`, order 12 row 55, pattern 11, `_np_zframe` 4945 — the condition the
-source normally does not reach because the gate cuts the part first.
+tick (`VISU/C/U2A.C:105-130`'s `copper2`, one `vid_setswitch(-1, clr)` a retrace; the block at
+`:330-344` advances `currframe` by `repeat` and parses one stream frame per pass); its drawing
+begins at gate 1, `order>10 && row>46` (`:238`), whose first satisfying frame is measured at
+**6988** — `second1c`, order 11 row 47, pattern 8, `_np_zframe` 4513. Its gate 2,
+`order>11 && row>54` (`:276`), first holds at **7618** — `second1b`, order 12 row 55, pattern
+11, `_np_zframe` 4945. That is a **music-only value**: U2A's animation stream ends first
+(~7510), so the reference reaches gate 2 in the trace but the part normally retires at the
+stream's END before it.
 
 **U2E** advances one animation-stream frame per **two** logic ticks (`currframe += repeat*2`,
 `VISU/C/U2E.C:435-444`) and skips its first draw (`firstframe` at `:105`, tested at `:386`);
@@ -2096,30 +2097,44 @@ its drawing begins at gate `order>18` (`:365`), whose first satisfying frame is 
 `dis_waitb` waits**: 33 fade-in steps, 16 waits, one wait each side of the `fadeset`/CRTC 9
 writes, 16 waits, 33 fade-out steps (`VISU/C/U2E.C:285-335`), each wait one frame
 (`DIS/DISC.ASM:42-47`'s `int 0fch` fn 1 is `copperwaitborder`, a vertical-retrace wait,
-`MAIN/COPPER.ASM:72-81`). Its first **drawn** frame in the reference is **467** (`--arg 4`
-boot): the loader's flat black `ea0787f6…` holds through frame 466, and 467 is the first frame
-with a second colour — a white band at columns 68–252 on black, 185 white and 135 black pixels
-in every row (37,000 white, 27,000 black overall), `6eb4e4cd…` — the frame the intro's
-`fadeset` draws. `boot_anchor("u2e") = Some(467)`.
+`MAIN/COPPER.ASM:72-81`).
 
-**Evidence for the anchor, two independent sessions.** The probe
+**U2E's run anchor is the intro's start, not the first visible frame.** The measured first
+*visible* frame is **467** (`--arg 4` boot): the loader's flat black `ea0787f6…` holds
+through 466, and 467 is the first frame with a second colour — a white band at columns 68–252
+on black, 185 white and 135 black pixels in every row (37,000 white, 27,000 black overall),
+the `fadeset`'s pattern. The part's ticks begin earlier: `U2E.C:285-335` runs **33 fade-in
+waits then 16 further waits** before `fadeset` writes the displayed page, and that write
+precedes the fadeset's own `dis_waitb()`; the band is therefore drawn after **49** pre-visible
+waits, and the run anchor is the derived **467 − 49 = 418**. The alternative **417** counts
+the fadeset's own wait before the write instead of after it; the two differ by that
+off-by-one. `boot_anchor("u2e")` takes the derived intro anchor, not 467, and Task 7 owns a
+tick-map test that calibrates the exact value so the fadeset lands at 467.
+
+**Evidence for 467, the first visible frame: two independent sessions.** The probe
 `cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles
 30000 --frames 456..473 --out out/u2e-dense-{a,b}` gives 456…466 black (`ea0787f6…`) and
-467…473 the letterbox in both sessions, identical hashes frame for frame. The plan's specified
+467…473 the band in both sessions, identical hashes frame for frame. The plan's specified
 10-frame grid (`--frames 404,410,420,430,440,450,460,470,480,490,500`) cannot start at 404 on
 this host: the capture's demo-start detection returns at frame 419–420 (the emulator has run
 past 404 before the first grab; the same command refused twice with "reached frame 419/420
 before frame 404"). Run from 420, the grid agrees with the dense scan — 460 is still
 `ea0787f6…` and 470 is `6eb4e4cd…` — and both grid sessions are identical at every sampled
-index. The manifest's `arguments` is `["4"]` in every probe.
+index. The manifest's `arguments` is `["4"]` in every probe. The measurement is of the first
+visible frame; the anchor above is derived from the intro's structure, not a second
+measurement.
 
-**Cost if wrong.** One tick of cadence error shifts every moving keyframe: U2E moves one
-stream frame per two ticks, so a mis-set cadence is a uniform ±1 on all four filed U2E
-keyframes (1000/1600/2600/3600), and U2A's ring flips every tick, so its one moving keyframe
-(7300) moves by one index. A wrong anchor moves the whole `--block 4` run: every dumped index
-names a different frame, and `xtask compare` (which pairs by index within ±1) fails on all
-four. The gates are the first thing each part's own tests pin, and the measured frames above
-are what the parts' wait phases are built from.
+**Cost if wrong.** The anchor sets the run's numbering and the intro's phase, not the
+keyframes' reachability: U2E's gate polls the music and leaves at order 19 frame 699 whichever
+anchor the run uses, so the four filed keyframes (1000/1600/2600/3600) pass even with the
+wrong anchor once the gate is reached. What a wrong anchor changes is the intro: with the run
+starting at 467 (the visible frame rather than the intro's start), the fadeset would be drawn
+at ~517, the reference's 500 would still be the invisible fade-in (black), and its 530 would
+be the band rather than the post-fade hold. A wrong **cadence** is a different failure and a
+larger one: one stream frame per tick rather than one per two ticks advances the stream by
+hundreds of frames by index 3600, so all four moving keyframes are wrong, not by ±1. A
+one-frame **phase** offset is the only case that is a uniform ±1. The intro tick map — not
+the keyframe comparison — is what pins the anchor.
 
 ## D34 — The mid-run `MUSIC0@18` restart: four engine ticks of waiting, verified by the two sessions' shift (2026-10-18)
 
@@ -2135,19 +2150,24 @@ graphics frame, and the whole traced window is that one restarted player's sessi
 columns derive the restarted clock's first tick at **408.2** (the restart recipes' 408). It
 publishes order 19 at frame 699 and the plan's four frames as 19:34 at 1000, 20:38 at 1600,
 22:25 at 2600 and 24:11 at 3600. `second3e` is a `SECOND 3` boot, restarted at the U2E
-boundary after JPLOGO: it holds the *same* session shifted by **exactly 17,442 frames** —
-every order boundary (699↔18140, 1259↔18701, 1820↔19261, 2380↔19822, 2940↔20382,
-3501↔20943, 4131↔21573) and the 18000/18100 rows, 18:16 and 18:27, which are `second4`'s
-558 and 658. The mid-run restart's clock therefore starts at 408.2 + 17,442 = **17,850.2**,
-and the boundary's first graphics frame is four frames earlier at **17,846.2**. At the chain's
+boundary after JPLOGO: it holds the *same* session shifted by **17,441–17,442 frames** (the
+frame sampling; 17,442 at the 18000/18100 rows and their `second4` partners 558/658, and at
+five of the seven order boundaries) — every order boundary (699↔18140, 1259↔18701,
+1820↔19261, 2380↔19822, 2940↔20382, 3501↔20943, 4131↔21573) and the 18000/18100 rows, 18:16
+and 18:27, which are `second4`'s 558 and 658. The mid-run restart's clock therefore starts at
+408.2 + 17,442 = **17,850.2** (±1 frame), and the boundary's first graphics frame is four
+frames earlier at **17,846.2**. At the chain's
 mapping (chain tick 0 = boot 419, D31 §3) that is chain **17,427**, and the restarted music's
 first tick lands on chain 17,431 = boot 17,850. The trace shows the modelled 4 and no other
 offset.
 
 **Recorded with the decision: the restart does not zero `_np_zframe`.** `second3e` reads
-**9,099** at 18000, which is the count carried from PLZPART's `_dis_setmframe(0)` at 5,723:
-12,127 frames at MUSIC1's tempo-130 rate (0.7420 ticks/frame) plus 150 frames at MUSIC0's
-tempo-120 rate (0.6852) give 8,996 + 103 = 9,099, with no reset in between. So `restartmus`'s
+**9,099** at 18000, which is the count carried from PLZPART's `_dis_setmframe(0)` at 5,723.
+The measured trail from the previous window: `second3d` reads **8,961 at 17,799**; then 47
+frames at MUSIC1's tempo-130 rate (~35 ticks), the **4 wait frames** of the `restartmus`/
+`_zplaysong` boundary (0 ticks — the player is not polled across them), and 150 frames at
+MUSIC0's tempo-120 rate (~103 ticks) give **8,961 + 35 + 0 + 103 = 9,099**, with no reset in
+between. So `restartmus`'s
 `_zplaysong(18)` does not reset the published tick counter; the port's fresh player starts its
 own counter at 0, which differs in that word only. Neither vector part reads it (both gates use
 `int 0fch` fn 6's order/row, U2A.C:238, U2E.C:365) and the trace test compares position
@@ -2155,5 +2175,5 @@ and `zplus`, not `zframe`.
 
 **Cost if wrong.** A `waiting` of 0 or 8 moves the whole restarted session by four frames;
 U2E's four keyframes then sit one 2-tick stream step out and the block-3 chain test's position
-assertions at the mapping fail. The 17,442-frame shift is independent evidence — it comes from
-two different boots' order boundaries, not from the gate measurement it verifies.
+assertions at the mapping fail. The 17,441–17,442-frame shift is independent evidence — it
+comes from two different boots' order boundaries, not from the gate measurement it verifies.

@@ -357,8 +357,10 @@ $ awk -F, '$1 == 7618' reference/music/second1b/trace.csv
 ```
 
 so gate 2's first satisfying frame is **7618** (order 12 row 55, pattern 11, `_np_zframe`
-4945) — the gate the source normally does not reach, measured. `second1c`'s orders advance at
-6576 (11) and 7136 (12), and it holds MUSIC0 orders 9…12.
+4945). That is a **music-only value**: U2A's animation stream ends first (~7510), so the
+reference reaches gate 2 in the trace but the part normally retires at the stream's END
+before it. `second1c`'s orders advance at 6016 (10), 6576 (11) and 7136 (12), and it holds
+MUSIC0 orders 9…12.
 
 **U2E (block 4's boot; block 3 after the restart).** The gate is `order>18`
 (`VISU/C/U2E.C:358-366`), so the first satisfying frame is the first that publishes order 19:
@@ -422,19 +424,23 @@ $ awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second3e/t
 ```
 
 The two are one restart recipe: `second4`'s restart is the block-4 boot's, fired at the boot's
-first graphics frame, and `second3e`'s is the shell's at the U2E boundary 17,442 frames later.
-`second4`'s own columns derive that session's clock start at **408.2** (the restart recipes'
-408), so `second3e`'s restarted clock starts at **408.2 + 17,442 = 17,850.2**, and the
+first graphics frame, and `second3e`'s is the shell's at the U2E boundary, **17,442 frames
+later at the rows measured here** (the seven order boundaries sample 17,441–17,442, a whole
+frame each). `second4`'s own columns derive that session's clock start at **408.2** (the
+restart recipes' 408), so `second3e`'s restarted clock starts at **408.2 + 17,442 = 17,850.2**
+(±1 frame), and the
 boundary's first graphics frame is four frames earlier at **17,846.2** — §2's 404→408
 relation. That is D34's waiting=4 verified at the chain's mapping: chain tick 0 is boot 419
 (MNTSCRL's tick 0, D31 §3), so the boundary is chain **17,427** and the restarted music's
 first tick is chain 17,431 = boot 17,850.
 
 **What `_np_zframe` does across the restart, measured.** `second3e` reads **9099** at frame
-18000, which is not a fresh count: `restartmus` does not zero the word. 9099 is what the
-counter carried from the last `_dis_setmframe(0)` before the restart — PLZPART's, at 5,723:
-12,127 frames at MUSIC1's tempo-130 rate (0.7420 ticks a frame) plus 150 frames at MUSIC0's
-tempo-120 rate (0.6852) give 8,996 + 103 = 9,099. No later part reset it. The restart's phase
+18000, which is not a fresh count: `restartmus` does not zero the word. The measured trail
+from the previous window: `second3d` reads **8,961 at 17,799**; then 47 frames at MUSIC1's
+tempo-130 rate (~35 ticks), the **4 wait frames** of the `restartmus`/`_zplaysong` boundary
+(0 ticks — the player is not polled across them), and 150 frames at MUSIC0's tempo-120 rate
+(~103 ticks) give **8,961 + 35 + 0 + 103 = 9,099**. No later part reset it. The restart's
+phase
 is therefore carried by the order/row words the parts read, not by `zframe`; a port player
 that starts its own counter at 0 at the restart differs in that word only, which neither
 vector part's gate reads (both read order/row through `int 0fch` fn 6).
