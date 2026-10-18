@@ -91,9 +91,9 @@ composed with the previous tick's upload — the original's line-20 write and
 its retrace upload, seen one frame later. The unit test
 `all_three_copper_slots_are_installed_and_each_does_its_job` drives all three
 slots through the engine's order, and
-`the_fade_applier_adds_the_delta_to_the_16_bit_accumulator` pins slot 0's
-`add al`/`adc ah` arithmetic (a `+240` and a `−240` delta on a 60-high
-accumulator gives `0x3CF0`).
+`the_fade_applier_uploads_the_post_add_palette` pins slot 0's `add al`/`adc
+ah` arithmetic on a two-high accumulator (`+100` and `−240` deltas give
+`0x032C` and `0x3B10`, and `cop_pal` is the post-add palette).
 
 ## 4. The tick is the copper's frame
 
@@ -164,9 +164,20 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   rows survive.
 - **The final fade only when `f>7`** (`:148`): `63/SCRLF` is 7. The port runs
   the 64-step `dofade(palette2,palette)` when `f` is above it and retires
-  immediately otherwise, as the source does, and `fonapois()` (`:150`) runs on
-  both paths; the fade only touches entries 64-255, which the picture never
-  indexes.
+  immediately otherwise, as the source does, and `fonapois()` (`:150`) runs
+  after either branch of that `if`; the fade only touches entries 64-255,
+  which the picture never indexes.
+- **The exit path skips the source's three closing calls.** `:147-152` runs
+  after either ending of the do-while — the `a=319` completion *and*
+  `dis_exit` — so a prompt exit in the source still performs
+  `if(f>7) dofade(...)`, `fonapois()` and `close_copper()`. The port's `frame`
+  returns `Finished` at the top of the tick that sees `ctx.exit_requested`
+  (`parts/alku.rs:1307-1309`) and runs none of the three: the prompt-exit /
+  no-spin rule ends the part on that tick rather than fading it. Nothing
+  visible is misjudged by this — the engine clears the copper on the next
+  start, `fonapois` only clears the text's top two bits (`:250-270`), and no
+  reference frame is near an exit — but it is recorded as a deviation, not
+  claimed as equivalence.
 - **The `while(frame_count<9);` spin** is the 9-tick cadence (§4), never a
   loop.
 

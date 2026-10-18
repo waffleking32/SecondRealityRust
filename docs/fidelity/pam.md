@@ -139,6 +139,21 @@ The tick mapping is not an assumption. The reference's own support frames
   (§6.1); `T_41 = 7872`, so the closing `wfade[41] = 63` is up from 7873, and
   7880-7920 are the white hold the scan measured (§6.1).
 
+**The 2 is calibrated for the anchored entry point.** `init`'s
+`open_at_start` branch treats every gate-already-open start as this anchored
+7710 start and sets the counter to 2. That is right for `--part pam`, the only
+route that reaches the part today (block 1 stops at U2A); a block-1 chain that
+reaches PAM after U2A with the player already running meets the source's
+ordinary case instead: the gate is open at the part's own start because the
+chain is continuous, yet the source still runs its post-gate setup
+(`OUTTAA.C:40-45`) on that tick, which zeroes
+`frame_count`, and its first step is four copper frames later. The port would
+set 2 and step one animation frame two ticks early. Telling the two cases
+apart needs the seam `PROGRESS.md`'s Phase 5 hand-off schedules (a `PartCtx`
+signal that the player was already running, or the entry pre-roll moved into
+the shell's per-part entry path); it becomes testable when U2A lands. Nothing
+in the present comparisons meets it — no ported chain reaches PAM.
+
 What the tick mapping is **not** is a claim that every intermediate frame is
 four ticks apart in the original: §6.1 measures the animation's *window* as
 (7705, 7920] — 215 frames, which includes the pre-loop setup and the closing
@@ -195,7 +210,10 @@ published *row* — what the gate reads — agrees at both.
 The 7,310-poll catch-up is longer than the player's 8,192-sample ring, so the
 ring drops its oldest samples as it fills — the `install_music` comment's
 long-catch-up case, now real. Nothing about the position depends on the ring;
-the headless dump asks for no audio device.
+the headless dump asks for no audio device. The catch-up itself is the
+`--part pam` entry's: a block-1 chain's player has been continuous since ALKU
+and applies no per-part catch-up, so a chain changes the counter question §4
+records, not this one.
 
 ## 6. The reference comparison, and 7900's index plane
 

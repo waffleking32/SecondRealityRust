@@ -1080,7 +1080,12 @@ text palette's three levels — `fade2`'s entries 1, 2 and 3 become its entries
 (`MAIN.C:173-181` gives it 0x40/0x80/0xC0). With `HOI.U`'s own entries the
 reference's 1719 differs in **1,595** of 128,000 pixels and 2719 in **4,171**;
 at 5859 in **2,706**. With the shipped entries 1719 and 2719 are
-byte-identical and 5859's 2,358 pixels are the phase residual below.
+byte-identical, and 5859's residual is the phase below: **2,358** pixels in
+the in-process script (`cargo test -p secondreality --bin secondreality
+parts::alku` — the unit test
+`the_scrolling_keyframes_port_phase_differs_only_in_the_text_xor_pixels` and
+the phase scan's shift +0 row) and **2,353** through the real binary
+(`cargo test -p secondreality --test alku -- --nocapture`).
 
 **Port:** reads `HOI.U` (the curated picture) and overrides those three
 entries with the shipped values, a named constant in `parts/alku.rs`

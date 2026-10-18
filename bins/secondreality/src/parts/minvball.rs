@@ -55,12 +55,14 @@
 //! tick 130          the main loop's first iteration (frame 1)
 //! ```
 //!
-//! The reference's own keyframes pin the mapping **boot = 10,368 + tick**:
-//! the four filed frames are reproduced by frame counters 403, 703, 1303 and
-//! 1903 at ticks 532, 832, 1432 and 2032 (`tests/minvball.rs`), and the
-//! survey's 12,900 flat-grey frame is frame counter 2403 at boot 12,900 —
-//! inside the 2400-2439 every-entry fade, the c=59 upload the 239 session
-//! records. 10,368 is the part's first frame inside the measured
+//! The mapping **boot = 10,368 + tick** is pinned to ±1 by the survey's
+//! 12,900 flat-grey frame: it is the fade-out's `c=59` upload, which puts
+//! frame counter 2402/2403 at boot 12,900 (the sibling session's `c=57` is
+//! the same curve one frame on) — a different capture and a different
+//! observable. The four filed frames are reproduced by frame counters
+//! 403, 703, 1303 and 1903 at ticks 532, 832, 1432 and 2032
+//! (`tests/minvball.rs`), but those counters are the fit's own evidence, not
+//! an independent check. 10,368 is the part's first frame inside the measured
 //! window `(10,300, 10,400]` (`reference-indices.md` §14.5), and
 //! 10,368 + 130 = 10,498 is the first main-loop draw. **This is a mapping,
 //! not an anchor**: `shell::boot_anchor("minvball")` stays `None`, a run of

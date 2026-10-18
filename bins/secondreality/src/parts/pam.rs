@@ -52,11 +52,12 @@
 //!
 //! One tick is one copper frame: `copper2` increments `frame_count` once a
 //! retrace (`COPPER.ASM:60-81`), so `while(frame_count<4);` is a four-tick
-//! wait and a step draws one animation frame every four ticks. The original's
-//! 45 steps cover 215 frames rather than 180 because `ulosta_frame` itself
-//! takes time; the port's clock is the fixed one — see `docs/fidelity/pam.md`
-//! §4 for the measurement that makes the four-tick cadence reproduce the
-//! reference's own keyframes.
+//! wait and a step draws one animation frame every four ticks. The reference's
+//! animation *window* is 215 frames — (7705, 7920] — but that window includes
+//! the pre-loop setup and the closing white hold; the step loop itself is the
+//! 45 four-tick waits plus whatever time each `ulosta_frame` takes. The port's
+//! clock is the fixed four-tick one — see `docs/fidelity/pam.md` §3-§4 for the
+//! measurement that makes the cadence reproduce the reference's own keyframes.
 //!
 //! **The anchor is 7710** — the flat `(251,251,251)` wash that is the
 //! reference's first PAM frame (`reference-indices.md` §6.1, three sessions).

@@ -200,6 +200,18 @@ ticks then carry the player into order 77 (the trace's position at boot
 not check the cue. With no player (a unit-test rig) the pre-roll is skipped;
 the part does not need music to run.
 
+**The 256 is calibrated for an entry-point run.** It stands for a run that
+starts the player with the part — `--part minvball`, whose shell seeks
+`MUSIC1` to order 75 — and not for a part reached mid-chain with the player
+already running. The first runnable block-3 chain (Phase 5's LNS&ZOOM/PLZPART)
+reaches this part with the player continuous since MNTSCRL; the player is
+then already at the reference's position, and `init`'s 256 pre-polls would
+advance it 256 polls past it. A mid-chain start therefore requires the entry
+pre-roll to be skipped, through the seam `PROGRESS.md`'s Phase 5 hand-off
+schedules (a `PartCtx` signal that the player was already running, or moving
+the pre-roll into the shell's per-part entry path). No chain can run until the
+intervening parts land.
+
 ## 6. The keyframes, and the measured residue
 
 The reference files four RGB-only frames (`reference/parts/minvball/`: the

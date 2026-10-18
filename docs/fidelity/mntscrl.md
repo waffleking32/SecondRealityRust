@@ -123,6 +123,15 @@ position: at tick 81 (boot 500) it is `42:10`, exactly what
 (`the_music_is_eleven_polls_in_at_the_parts_first_tick`). Without the
 pre-roll the position would read `42:8` (82 polls, trace frame 490).
 
+**The 11 is calibrated for an entry-point run.** It stands for `--part
+mntscrl` or `--block 3`, where the block restart starts MUSIC1 with the part;
+block 3 begins here, so both present routes take that path. If a future chain
+reached MNTSCRL with the player already running, the 11 would have to be
+skipped, because the player would already be at the reference's position. The
+seam is scheduled in `PROGRESS.md`'s Phase 5 hand-off (a `PartCtx` signal that
+the player was already running, or the pre-roll moved into the shell's
+per-part entry path); no current run meets the mid-chain case.
+
 **The first wait is the release's 71 ticks.** The tree's `:153-159` waits for
 `dis_musplus() >= 0`, but no threshold of that shape can produce the
 release's timing. The release's last held frame is boot **554** and its

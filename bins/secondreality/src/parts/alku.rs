@@ -1922,7 +1922,7 @@ mod tests {
         assert_eq!(
             differing_pixels(&frame, &reference(5859)),
             0,
-            "boot 5859 at the reference session's batch phase"
+            "boot 5859 with the batch transitions moved"
         );
     }
 

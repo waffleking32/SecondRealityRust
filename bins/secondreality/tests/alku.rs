@@ -24,7 +24,7 @@
 //! by a text fade, because the reference's session reaches the empty batch's
 //! `fmaketext` and the port's trace-faithful phase does not (the unit test
 //! `the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`
-//! reproduces the reference byte for byte at that session's phase).
+//! reproduces the reference byte for byte with the batch transitions moved).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -170,7 +170,7 @@ fn the_four_keyframes_against_the_reference() {
 
     // The moving keyframe: the picture band, the pan and the palette are the
     // reference's. The residual is the old text's XOR pixels made visible by a
-    // text fade (the unit test at the reference session's phase reproduces it
+    // text fade (the unit test with the batch transitions moved reproduces it
     // byte for byte); every differing pixel is inside the text's glyph region.
     let key = frame_file(&dir, 5859);
     let expected = reference_frame(5859);
@@ -237,7 +237,7 @@ fn a_block_one_run_starts_at_alku_and_is_the_same_run() {
 fn the_runs_music_is_the_block_one_recipes_at_the_keyframes() {
     // The manifest's published position is the ring's, one sample a frame, and
     // the trace's is the same word from a `SECOND 1` session. The port's four
-    // pre-polls put it 2-4 frames ahead of the trace's row changes (the shell's
+    // pre-polls leave it 2-4 frames behind the trace's row changes (the shell's
     // `a_block_one_run_starts_under_the_initial_play_song_and_matches_second1`
     // compares all 638 of them), so a keyframe may sit one row either side;
     // the order must agree.

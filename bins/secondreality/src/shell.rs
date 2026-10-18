@@ -2163,9 +2163,10 @@ mod tests {
         assert_eq!(port.len(), wanted.len(), "every frame the trace holds was visited");
 
         // The *change frames*: where the port's position first differs from its previous
-        // one, against the trace's own. The four pre-polls put the port a few frames
-        // ahead of the trace's direct reading, so the measured displacement is printed
-        // and bounded rather than assumed zero.
+        // one, against the trace's own. The four pre-polls leave the port's music a few
+        // frames behind the trace's direct reading — its change frames are 2-4 later, as
+        // the printed distribution shows — so the measured displacement is printed and
+        // bounded rather than assumed zero.
         let changes = |values: &std::collections::BTreeMap<u32, (u8, u8)>| {
             let mut out: std::collections::BTreeMap<(u8, u8), u32> =
                 std::collections::BTreeMap::new();

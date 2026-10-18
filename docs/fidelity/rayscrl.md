@@ -131,6 +131,16 @@ trace's own —
 
 (`the_music_is_the_block_three_position_at_every_keyframe`).
 
+**The 268 is calibrated for an entry-point run.** It stands for `--part
+rayscrl`, whose shell seeks `MUSIC1` to order 86 and starts the player with
+the part; a part reached mid-chain with the player already running (the first
+runnable block-3 chain, after MINVBALL) has the player already at the
+reference's position, and `init`'s 268 pre-polls would advance it 268 polls
+past it. A mid-chain start therefore requires the pre-roll to be skipped,
+through the seam `PROGRESS.md`'s Phase 5 hand-off schedules (a `PartCtx`
+signal that the player was already running, or the pre-roll moved into the
+shell's per-part entry path).
+
 **The release's gates act seven ticks after the tree's condition** on the
 port's clock — the cue's trace labels are eight, because the trace's player
 publishes that state one poll before the port's does; see

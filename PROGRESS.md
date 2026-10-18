@@ -13,7 +13,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
-| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
+| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
@@ -1694,7 +1694,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 (ALKU's music line is the block-1 recipe at the keyframes: the port and the trace agree on the
 order everywhere and on the row at three of four; 2719 is one row apart (`4:7` against `4:8`),
-which is the block-1 clock's 2–4-frame lead and the trace's sample instant (A12), and the test
+which is the block-1 clock's 2–4-frame lag and the trace's sample instant (A12), and the test
 allows one row either side. The four keyframe frames themselves are the reference's — the music
 does not touch ALKU's picture.)
 
@@ -1727,21 +1727,23 @@ purpose or by a different instrument, **not** the evidence the constant was deri
 | MINVBALL's `repeat` | one tick per frame in the port; the reference's `repeat` measured **1** over 10,900–12,400 | the four keyframes' frame counters differ by **300, 600, 600**, exactly the boot differences; the y state — one `drawdots` integration a frame — matches at every keyframe (`the_repeat_difference_is_zero_at_the_keyframes`) | a `repeat` above one between two keyframes advances the counter without a draw and moves the ball rows; the residues would grow | **yes over 10,900–12,400** — four reference frames and their support neighbours; **the 12,947 end is a prediction** from the source's 2,450-frame cap, not a measured frame |
 | A20 — ALKU's text-batch phase | no constant: the port runs the source's trace-faithful batch phase, and its `fmaketext`/`faddtext` cost zero CPU | `MAIN.C:138`/`:102`, and the phase scan moves the batch transitions while the four gates stay fixed: shift −9 gives **0** pixels, shift +0 gives **2,358**, shift +10 gives **0** at 5859 | the old text's XOR pixels appear or vanish at 5859; the picture band, pan and palette are unchanged | **none** — the phase is the original's CPU time in `fmaketext`/`faddtext`/`prt` plus the session's music clock, neither of which the port models; the scan is a counterfactual, and the reference's own direction is not established (one session). The note says so (`alku.md` §8, §11); the scan is `the_5859_phase_sensitivity` |
 | the `PosList` format | u16 count, then that many u16 offsets; a zero count writes nothing | `FOREST/ROUTINES.ASM:21-35` and `WATER/ROUTINES.ASM:21-36` agree; the six real files parse to **237×31 columns / 15,592 positions** and **158×34 / 20,858**; a synthetic truncated stream is refused | a field error fails the parse or shifts every offset; the blitter writes the wrong columns and the keyframes fail | **yes** — two independent parts' files and the survey's totals agree, and each part's asset test compares every byte of the other payloads as well (`the_forest_lists_measure_as_the_survey_says`, `the_water_lists_measure_as_the_survey_says`) |
-| the four part-relative mappings (D30) | MNTSCRL `419 + tick`; RAYSCRL `12962 + tick`; MINVBALL `10368 + tick`; DDSTARS `414 + tick` — none is a `boot_anchor` | MNTSCRL: the fade's frame means (6.08 at 425, 8.91 at 430, 10.25 at 435, 10.53 at 440) place tick 0 at 419. RAYSCRL: the published 88:0 at 12962, the blit at 12969, the fade's k=14 hold, and the font phase (14000 = draw 384). MINVBALL: the fade's first wait at 10,368 and the keyframes' frame counters 403/703/1303/1903. DDSTARS: the text band's open height at 1900 (28 rows ⇒ `A = 32` ⇒ `starframe 1487`), the stars' pages (tick 1485), and 11 survey frames | one tick and every index shifts: each part's four keyframes land on different frames and fail | **yes for each mapping's value** — each part's `the_four_keyframes…` integration test holds four keyframes with support neighbours, and for DDSTARS an 11-frame survey sweep (a different capture); **the start is not a frame**, which is why none is an anchor (D30) |
+| the four part-relative mappings (D30) | MNTSCRL `419 + tick`; RAYSCRL `12962 + tick`; MINVBALL `10368 + tick`; DDSTARS `414 + tick` — none is a `boot_anchor` | MNTSCRL: the fade's frame means (6.08 at 425, 8.91 at 430, 10.25 at 435, 10.53 at 440) place tick 0 at 419. RAYSCRL: the published 88:0 at 12962, the blit at 12969, the fade's k=14 hold, and the font phase (14000 = draw 384). MINVBALL: the fade's first wait at 10,368 and the keyframes' frame counters 403/703/1303/1903. DDSTARS: the text band's open height at 1900 (28 rows ⇒ `A = 32` ⇒ `starframe 1487`), the stars' pages (tick 1485), and 11 survey frames | one tick and every index shifts: each part's four keyframes land on different frames and fail | **half for MINVBALL, yes for the rest** — MINVBALL's `10,368 + tick` is pinned to **±1** by the survey's 12,900 flat-grey frame: it is the fade-out's `c=59` upload, which puts frame counter 2402/2403 at boot 12,900 (the sibling session's `c=57` is the same curve one frame on) — a different capture and a different observable — while the four keyframes `the_four_keyframes…` holds are the fit's own evidence, not an independent check. DDSTARS keeps its 11-frame survey sweep (a different capture), and MNTSCRL and RAYSCRL are checked at keyframes beyond those that fixed them. **The start is not a frame**, which is why none is an anchor (D30) |
 
 **The count, measured rather than assumed.** The table has twenty-one rows, and they divide three
 ways (one row, the cue row, is counted by part):
 
-- **Twelve are checked by something independent of their own derivation**: the 9-tick scroll, the pan
-  arithmetic, PAM's cadence and counter, the Microsoft LCG, the DDSTARS LCG, the ring and its `+17`
-  write, the text clip, A18's seven ticks (with the caveat that all three gates are the same
-  sessions), the `scp` bound, `repeat` (over its measured window), the `PosList` format, and the
-  four mappings' values.
-- **Five are half-checked, and the halves are named**: ALKU/PAM's gates (the keyframes check the
+- **Eleven are checked by something independent of their own derivation**: the 9-tick scroll, the
+  pan arithmetic, PAM's cadence and counter, the Microsoft LCG, the DDSTARS LCG, the ring and its
+  `+17` write, the text clip, A18's seven ticks (with the caveat that all three gates are the same
+  sessions), the `scp` bound, `repeat` (over its measured window), and the `PosList` format.
+- **Six are half-checked, and the halves are named**: ALKU/PAM's gates (the keyframes check the
   gates they land in, not an intermediate one), the block-1 clock and PAM's pre-roll (the row is a
   six-tick observable and the pre-roll is arithmetic from a fit), A17 (the keyframes check the
   value, not the unknown mechanism), the mid-run positions (the trace is both derivation and
-  check), and RAYSCRL's cue (a scratch capture outside the reference tree).
+  check), RAYSCRL's cue (a scratch capture outside the reference tree), and the four mappings
+  (MINVBALL's ±1 pin is the survey's 12,900 `c=59` observation, while the keyframe test it also
+  runs is the fit's own evidence; DDSTARS has the independent survey sweep, and MNTSCRL/RAYSCRL
+  are checked at frames beyond their fit — the row is graded by its weakest value).
 - **Five have no independent check at all**: MNTSCRL's cue (no reference frame after it),
   MINVBALL's cue window (the reference's own break falls past the frame cap), ALKU's `tptr`
   off-by-one (A20's phase cannot separate it), MINVBALL's `j` (inside the packed release), and
@@ -1898,6 +1900,21 @@ Both exit 0.)
   vector engine); MINVBALL and RAYSCRL wait behind LNS&ZOOM and PLZPART (Phase 5). Their mappings
   are exact at the reference keyframes but their block positions in a real chain are not measured
   until the intervening parts are ported and the chain can run.
+- **The part-level music pre-polls assume an entry-point run, and the mid-chain seam is scheduled.**
+  MINVBALL's `init` pre-polls the run's player **256** times (`MUSIC_PRE_ROLL`), RAYSCRL's **268**
+  and MNTSCRL's **11**, because an unanchored run starts the player with the part and the
+  reference's player was already that far in. That is true for `--part` and for MNTSCRL as block
+  3's entry, and false for a part reached mid-chain with the player already running: the first
+  runnable block-3 chain (Phase 5's LNS&ZOOM/PLZPART) reaches MINVBALL and RAYSCRL with the player
+  continuous since MNTSCRL, and their inits would advance it 256/268 polls past the reference's
+  position (a poll a tick, so hundreds of ticks of music). PAM has the same shape at its open
+  gate: `init` treats every gate-already-open start as the anchored 7710 start and sets
+  `frame_count = 2`, while a
+  block-1 chain reaching PAM after U2A meets the source's ordinary post-gate setup, which sets 0,
+  and PAM would step one animation frame two ticks early. The seam is a `PartCtx` signal that the
+  player was already running (or moving the entry pre-roll into the shell's per-part entry path);
+  the chain test with the real player comes when the intervening parts land. The assumption is
+  recorded in all four notes; no Phase 4 code changes.
 - **The block-2 → block-3 alignment wait is still unmodelled.** `MAIN/U2.ASM:829-853` waits on
   `muscode` between PANICEND and MNTSCRL on a full run; MNTSCRL's release timing was measured from
   `SECOND 3`, whose entry restarts MUSIC1 at order 42 instead. A full run through block 2 will need
