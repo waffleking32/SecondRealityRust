@@ -13,7 +13,9 @@
 //!    150..249, the display start set to row 100, the CRTC halved to 200
 //!    lines (`09h = 41h`) and the line offset set to `0xA0` words (1280
 //!    pixels, two memory rows), then eleven `copyline` passes that walk the
-//!    band inward until only row 200 is left.
+//!    band inward until only row 200 is left — the last pass and its two
+//!    closing copies (`:104-105`) share one inter-wait segment, before the
+//!    line loop's first wait (`:118`).
 //! 2. **The line and the dot** (`:116-129`): 47 frames of eight symmetric
 //!    `tw_putpixel(x, 200, 0)` writes walking in from both edges, then
 //!    `tw_putpixel(160, 200, 1)`.
@@ -329,18 +331,24 @@ impl Part for Panicend {
                 self.dac.copy_from_slice(&self.fadepals[20 * 768..21 * 768]);
                 self.view_offset = LINE_OFFSET_AFTER;
             }
-            // The eleven `a` passes, each uploading `fadepals[63-a]`.
+            // The eleven `a` passes, each uploading `fadepals[63-a]`. The
+            // source's two closing copies (`SHUTDOWN.C:104-105`) are in the
+            // same inter-wait segment as the last pass: they run after the
+            // `a = 3` copies and before the line loop's first `dis_waitb()`
+            // (`:118`), so they belong to the tick that displays `a = 3`.
             s @ COLLAPSE_FIRST_STEP..=COLLAPSE_LAST_STEP => {
                 let a = COLLAPSE_A[(s - COLLAPSE_FIRST_STEP) as usize];
                 let at = (63 - a) as usize * 768;
                 self.dac.copy_from_slice(&self.fadepals[at..at + 768]);
                 self.collapse(ctx.surface, a);
+                if s == COLLAPSE_LAST_STEP {
+                    copyline(ctx.surface, 0, 202 * PLANE_ROW);
+                    copyline(ctx.surface, 0, 198 * PLANE_ROW);
+                }
             }
-            // The two closing copies and the line's first iteration; the GC
-            // is back in write mode 0 and the map mask is 1111.
+            // The line loop's first iteration; the GC is back in write mode 0
+            // and the map mask is 1111.
             LINE_FIRST_STEP => {
-                copyline(ctx.surface, 0, 202 * PLANE_ROW);
-                copyline(ctx.surface, 0, 198 * PLANE_ROW);
                 self.line_iteration(ctx.surface, LINE_START);
             }
             // The rest of the line loop.
@@ -556,8 +564,9 @@ mod tests {
         );
         let mut part = Panicend::new();
         rig.init(&mut part);
-        // Ticks 0..=13 are the mode change and the eleven collapse passes;
-        // tick 14 is the final copies and the line's first iteration.
+        // Ticks 0..=13 are the mode change and the eleven collapse passes
+        // (the last of which includes the source's two closing copies);
+        // tick 14 is the line's first iteration.
         for _ in 0..=14 {
             assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
         }
@@ -941,9 +950,16 @@ mod tests {
             );
         };
         // Tick 10 is the a = 7 collapse pass, with fadepals[56] uploaded in
-        // the same iteration; tick 18 is the final row plus five line
-        // iterations, none of which reaches x = 40.
+        // the same iteration; tick 13 is the a = 3 pass and its two closing
+        // copies (the source's `SHUTDOWN.C:104-105` segment), which leave
+        // only row 200 — the same bytes as 8800; tick 18 is that row plus
+        // five line iterations, none of which reaches x = 40.
         compare(&frames[10], &reference("frame_008792.rgb"), "8792 at tick 10");
+        compare(
+            &frames[13],
+            &reference("frame_008800.rgb"),
+            "8800 at tick 13 (the closing copies)",
+        );
         compare(&frames[18], &reference("frame_008800.rgb"), "8800 at tick 18");
         // The mapping is pinned by its neighbours: tick 9 is a different
         // picture and ticks 17..19 are the held line (8799 = 8800 = 8801).

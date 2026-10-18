@@ -52,7 +52,8 @@ machine's default DAC, so its ticks 10 and 18 differ from 8792 and 8800 by
 (`cargo test -p secondreality --test panicend -- --nocapture`), which is the
 measured form of that limitation.
 
-The three reference files are the tree's:
+The four reference files (three frames and the 9000 index plane) are the
+tree's:
 
 ```text
 $ sha256sum reference/parts/panicend/frame_008792.rgb \
@@ -74,26 +75,36 @@ picture — it is `copyline`'s (§4).
 
 ## 2. What the part does, tick by tick
 
-`SHUTDOWN.C` is a straight line of acts punctuated by `dis_waitb()`. Each
-wait is one frame in the port, so the part's `frame()` is one wait:
+`SHUTDOWN.C` is a straight line of acts punctuated by `dis_waitb()`. The
+source executes **121 waits**: one at `:66`, one at `:83`, one at `:90`, the
+collapse loop's eleven at `:93`, the line loop's 47 at `:118` and the
+pulse's 60 at `:132`. The port gives each segment between waits its own
+tick, including the empty segment between the consecutive `:90` and `:93`
+waits — tick 2 displays the mode-change state and tick 3 is the first
+collapse pass — so ticks 0-120 are the part's 121 drawn frames and tick 121
+is `sleep(1)`'s retirement:
 
 | tick | source | acts |
 |---|---|---|
 | *init* | `:30-55` | `dis_partstart`; `getpal` (§3) |
 | 0 | `:61-65` | black row 0; build the 64 fade tables; the 100-row 4:1 copy; `tw_setstart(100*160)` |
 | 1 | `:66-84` | CRTC `09h = 41h`; GC `05h = 41h`; map mask `0x0F`; `fadepals[3]`; entry 0 white; `tw_setstart(0)` |
-| 2 | `:84-90` | `fadepals[20]`; CRTC `13h = 0xA0` |
-| 3-13 | `:91-102` | the eleven collapse passes, `a = 32, 26, 21, 17, 14, 11, 9, 7, 5, 4, 3`, each uploading `fadepals[63-a]` |
-| 14 | `:104-127` | the closing copies of rows 202 and 198; GC `05h = 40h`; the line's first iteration (`x = 20`) |
+| 2 | `:84-90` | `fadepals[20]`; CRTC `13h = 0xA0` (the empty segment before `:93`) |
+| 3-12 | `:91-102` | the first ten collapse passes |
+| 13 | `:91-105` | the last pass (`a = 3`) **and** the two closing copies of rows 202 and 198 |
+| 14 | `:106-127` | GC `05h = 40h`; the line's first iteration (`x = 20`) |
 | 15-60 | `:116-127` | the rest of `for(x=20;x<=160;x+=3)`: 47 iterations |
 | 61 | `:129-135` | `tw_putpixel(160,200,1)`; the pulse's first value |
 | 62-120 | `:130-136` | the rest of the 60-frame cosine pulse |
 | 121 | `:136` | `sleep(1)`: the part returns `Finished`; the shell holds its last frame |
 
-The source's `for(a=32;a>2;a=a*5/6)` is C integer arithmetic and ends at 3
-(`32,26,21,17,14,11,9,7,5,4,3`); `the_part_ignores_the_exit_flag_and_completes_its_finite_acts`
-asserts the last tick is `FINISHED_STEP` (121), built from the same constants
-the match uses.
+The collapse's `a` values are `32, 26, 21, 17, 14, 11, 9, 7, 5, 4, 3` —
+`for(a=32;a>2;a=a*5/6)` in C integer arithmetic, which ends at 3. The two
+closing copies are in the last pass's inter-wait segment, after the `a = 3`
+copies and before the line loop's first `dis_waitb()` (`:118`);
+`the_part_ignores_the_exit_flag_and_completes_its_finite_acts` asserts the
+last tick is `FINISHED_STEP` (121), built from the same constants the match
+uses.
 
 ### The display
 
@@ -174,16 +185,19 @@ dest[8k+4 .. 8k+7] = src[8k+4 .. 8k+7]
 
 This is why the reference's collapsed line is **234 pixels at x = 40..276
 with x = 273..275 black** rather than the troll's own 233 at 44..276: the
-pair duplication moves the left edge four pixels in and punches a three-pixel
-hole near the right edge. A straight byte copy produces 233 at 44..276 and
-fails 8792 and 8800; the port reproduces the reference exactly.
+pair duplication moves the left edge four pixels **outward** (from 44 to 40)
+by repeating the first four-pixel group, and repeats the picture's last
+partial group — byte 149's one lit pixel out of four — into the destination
+group, which is where the three-pixel hole at 273..275 comes from. A
+straight byte copy produces 233 at 44..276 and fails 8792 and 8800; the port
+reproduces the reference exactly.
 `copyline_moves_eighty_words_and_stores_the_second_byte_of_each_pair_twice`
 pins the rule and the 160-plane-byte/640-pixel count on a synthetic row.
 
-Copies may overlap their own sources (the `a = 32` pass's last third-loop
-copy reads planar bytes that overlap its destination); the port runs the word
-moves in increasing order against the memory as it stands, which is what
-`rep movsw` with DF clear does.
+Copies may overlap their own sources: the `b = a/2` copy of the `a = 32`
+pass (from plane byte 32,080 to 32,000) has a source span that overlaps its
+destination. The port runs the word moves in increasing order against the
+memory as it stands, which is what `rep movsw` with DF clear does.
 
 ## 5. The fade tables, and the palette the part leaves
 
@@ -209,36 +223,50 @@ drawn through (1,1,1) and everything else is index 0.
 
 ## 6. The collapse and the two keyframes
 
-Each pass copies row 0 (black) over rows `200 ± 2b` for `b = a/2..a`, then
-copies the picture's rows `80 + 400b/a` into rows `200 - a/2 + 2b` for
-`b = 0..a-1`, with 160 planar bytes a copy. The visible screen reads only
-even memory rows (§2), so odd destination rows are invisible until a later
-copy reads them back as a source.
+Each pass copies row 0 (black) over rows `200 ± 2b` for `b = ⌊a/2⌋..a`,
+then runs, for `b = 0..a-1`, `copyline` from plane byte
+`80 + (400b/a)·160` — **picture row `400b/a`, at that row's byte 80** — to
+plane byte `200·160 + (b − ⌊a/2⌋)·320`, which is memory row
+**`200 + 2(b − ⌊a/2⌋)`**. The destinations are therefore all even, and
+`a = 7` writes rows 194, 196, …, 206 while `a = 3` writes 198, 200, 202.
+
+The display reads only even memory rows (§2), so the first copy's rows
+150..249 — the 4:1 decimation — are visible only in the pre-collapse
+segments; its odd rows are read as *sources* by the third loop, and their
+first halves land in the destination's invisible half. The destination's
+visible half is built from the source row's picture half (`copyline`'s pair
+duplication, §4).
 
 The reference's two handoff frames are two states of that walk:
 
 - **8792 = the `a = 7` pass's state**, with `fadepals[56]` uploaded in the
-  same iteration: the surviving band is rows 97..103.
-- **8800 = the state after the closing copies**, with `fadepals[60]`: rows
-  198 and 202 are blacked, row 200 survives, and the line loop's iterations
-  up to tick 19 have written only x = 20..38 and x = 282..300, so the
-  234-pixel line at x = 40..276 is untouched. A straight-line copy of the
-  picture rows would leave a different width and fail the comparison (§4).
+  same iteration: rows 194..206 are written, and the displayed band is
+  rows 97..103.
+- **8800 = the `a = 3` pass's state**, with `fadepals[60]`: its third loop
+  writes rows 198, 200 and 202, and the two closing copies of rows 202 and
+  198 (`SHUTDOWN.C:104-105`, in the same inter-wait segment) black the outer
+  two, leaving row 200. The line loop's iterations up to tick 19 have
+  written only x = 20..38 and x = 282..300, so the 234-pixel line at
+  x = 40..276 is untouched. A straight-line copy of the picture rows would
+  leave a different width and fail the comparison (§4).
 
-The handoff test compares the composed 320×200 frames at ticks 10 and 18 and
-asserts **0 differing bytes**; it also asserts tick 9 differs from 8792 and
+The handoff test compares the composed 320×200 frames at ticks 10, 13 and
+18 and asserts **0 differing bytes** at each: tick 13 is the closing-copy
+state, which is the same bytes as 8800, and it is the frame the reference
+captures at 8795. The test also asserts tick 9 differs from 8792 and
 ticks 17 and 19 equal 8800, which is the reference's own held-window
 observation (`8799 = 8800 = 8801`, `reference-indices.md` §10.3).
 
 ## 7. The numbering: `boot = 8782 + tick`
 
-The handoff test puts the `a = 7` state at tick 10 and the held line at
-tick 18, and the reference numbers those two states 8792 and 8800. The
-mapping is therefore **boot = 8782 + tick**. 8782 lies in the reference's
-start window `(8780, 8790]` (`reference-indices.md` §10: the 320×400 screen
-is gone after 8780 and the collapse is visible from 8792). It is a mapping,
-not an anchor: `boot_anchor("panicend")` stays `None` and a `--part panicend`
-run's manifest says `index_origin: "part"`, `anchor: null`.
+The handoff test puts the `a = 7` state at tick 10, the closing-copy state
+at tick 13, and the held line at tick 18; the reference numbers those 8792,
+8795 and 8800. The mapping is therefore **boot = 8782 + tick**. 8782 lies in
+the reference's start window `(8780, 8790]` (`reference-indices.md` §10: the
+320×400 screen is gone after 8780, the collapse is visible from 8792, and
+8795-8799 are the held line). It is a mapping, not an anchor:
+`boot_anchor("panicend")` stays `None` and a `--part panicend` run's
+manifest says `index_origin: "part"`, `anchor: null`.
 
 9000 is deep inside the loader's hold after the part's `sleep(1)`; under the
 mapping it is tick 218, and the part itself has retired at tick 121. The
@@ -265,8 +293,9 @@ test result: ok. 3 passed; 0 failed
 
 | keyframe | evidence | frame | comparing test | differing |
 |---|---|---|---|---|
-| 8792 | handoff | 320×200 RGB | `the_handoff_matches_the_collapse_8792_and_the_line_8800` | 0 |
-| 8800 | handoff | 320×200 RGB | the same test | 0 |
+| 8792 | handoff | 320×200 RGB | `the_handoff_matches_the_collapse_8792_and_the_line_8800` (tick 10) | 0 |
+| 8795 (8799-8801 hold) | handoff | 320×200 RGB | the same test (tick 13, the closing copies) | 0 |
+| 8800 | handoff | 320×200 RGB | the same test (tick 18) | 0 |
 | 9000 | standalone | 320×200 RGB + `.idx` | `the_standalone_run_matches_the_self_contained_dot_9000_exactly` | 0 |
 
 **There is no D24 divergence and nothing new for `APPROXIMATIONS.md`.** Two
@@ -316,9 +345,9 @@ is why the part is listed as shell-retired rather than exit-aware.
   overwritten at `:84` (§5).
 - `copyline` moves 80 words and, in write mode 1, stores the pair's second
   planar byte to both destination planar bytes (§4).
-- The collapse ends at `a = 3`; the only rows the closing copies clear are
-  202 and 198; the last pass's third loop writes odd rows (197, 199, 201)
-  that the display does not read (§6).
+- The collapse ends at `a = 3`; its third loop writes even rows 198, 200 and
+  202, and the two closing copies clear 198 and 202, leaving only row 200
+  (§6).
 - Nothing beyond memory row 0 is cleared, and the fade tables are computed
   over all 768 bytes with `b` starting at 3.
 - No exit poll and no copper callbacks (the source registers none).
@@ -345,7 +374,8 @@ In `src/parts/panicend.rs`:
 - `the_reference_frames_are_the_collapse_and_the_line_they_describe` — the
   reference shape numbers this note quotes.
 - `the_handoff_matches_the_collapse_8792_and_the_line_8800` — TECHNO's port
-  to `Done`, then this part, at ticks 10 and 18, plus the neighbour checks.
+  to `Done`, then this part, at ticks 10, 13 and 18, plus the neighbour
+  checks.
 
 In `tests/panicend.rs`:
 

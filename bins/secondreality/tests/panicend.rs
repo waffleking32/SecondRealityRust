@@ -170,7 +170,12 @@ fn the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so() {
     // different frames. Recording the difference here is the honest half of
     // the evidence split: a zero would mean the comparison had not run.
     let (dir, _) = dump("handoff-limitation", "10,18");
-    for (tick, index) in [(10u32, 8792u32), (18, 8800)] {
+    // The numbers are 7x234x3 (the collapse's seven 234-pixel rows, three
+    // channels) and 234x3 (the line's one row): the standalone screen has
+    // none of the inherited pixels, so exactly the reference's non-black
+    // pixels differ. Asserting the values, not `> 0`, keeps a change in
+    // either the standalone screen or the reference from passing silently.
+    for (tick, index, expected) in [(10u32, 8792u32, 4914usize), (18, 8800, 702)] {
         let differing = differing_bytes(
             &frame_file(&dir, tick, "rgb"),
             &reference_frame(index, "rgb"),
@@ -179,9 +184,9 @@ fn the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so() {
             "tick {tick} vs {index}: {differing} of {} bytes differ",
             320 * 200 * 3
         );
-        assert!(
-            differing > 0,
-            "tick {tick} is meant to be the standalone run's own screen, not {index}"
+        assert_eq!(
+            differing, expected,
+            "tick {tick} vs {index}: the standalone screen's own difference"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
