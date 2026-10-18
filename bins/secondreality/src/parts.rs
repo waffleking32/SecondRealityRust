@@ -17,6 +17,7 @@ pub mod cred;
 pub mod ddstars;
 pub mod endlogo;
 pub mod endscrl;
+pub mod jplogo;
 pub mod lnszoom;
 pub mod minvball;
 pub mod mntscrl;
@@ -76,6 +77,10 @@ pub fn registry() -> &'static [PartEntry] {
         // `COMAN/MAIN.C` over `ASM.ASM` and the generated `THELOOP.INC` — the
         // 3D sinus field, block 3's sixth part (`MAIN/U2.ASM:856-874`).
         ("3dsinfld", || Box::new(coman::Coman::new())),
+        // `JPLOGO/JP.C` over `ASM.ASM`, the generated `ZOOM.INC` and
+        // `READP.C` — the jelly logo, block 3's last part
+        // (`MAIN/U2.ASM:856-874`).
+        ("jplogo", || Box::new(jplogo::Jplogo::new())),
     ]
 }
 

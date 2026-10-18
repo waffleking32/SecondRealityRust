@@ -654,6 +654,15 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // the part's `init` pre-polls the rest of order 91, the marker at 92
         // and the published lag to the gate (`parts/coman.rs`).
         "3dsinfld" => Some((ModuleId::Music1, 91)),
+        // JPLOGO is block 3's seventh and last part, after 3DSINFLD. The
+        // filed `second3d` trace holds **MUSIC1 order 96** across the part's
+        // whole start window (frames 17000..17100 are rows 50..62 of pattern
+        // 71); the counter steps over the `254` at order 97 into order 98 at
+        // frame 17109, nine frames *after* the window. The part's `init`
+        // pre-polls 483 frames, the count that puts the player's row
+        // boundaries on the trace's from its first frame on
+        // (`parts/jplogo.rs`).
+        "jplogo" => Some((ModuleId::Music1, 96)),
         _ => None,
     }
 }
@@ -1783,6 +1792,9 @@ mod tests {
             // window (15000, 15100]; derived, because the window spans the
             // 91 -> 93 crossing and the part marks no start frame.
             ("3dsinfld", Some((ModuleId::Music1, 91))),
+            // `second3d` holds order 96 across JPLOGO's whole start window
+            // (17000, 17100]; the `254` at 97 is crossed at 17109.
+            ("jplogo", Some((ModuleId::Music1, 96))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70
             // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
             ("ddstars", Some((ModuleId::Music0, 70))),
@@ -2631,10 +2643,10 @@ mod tests {
             ('1', Some("u2a")),
             ('2', Some("glenz")),
             // Block 3's chain now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL →
-            // RAYSCRL → COMAN and stops at JPLOGO, the first name the registry
-            // still lacks (COMAN's `3dsinfld` was the stop before Phase 5's
-            // Task 8).
-            ('3', Some("jplogo")),
+            // RAYSCRL → COMAN → JPLOGO and stops at U2E, the first name the
+            // registry still lacks (JPLOGO was the stop before Phase 5's Task
+            // 9).
+            ('3', Some("u2e")),
             ('4', Some("u2e")),
             ('5', None),
             ('U', None),

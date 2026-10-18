@@ -1441,3 +1441,50 @@ records it: the block-3 music traces carry `ord`/`row`/`zframe`, not the
 part's waits, and `waitb_1`'s non-INDEMO arm is a literal 1 marked `TEMP!`
 (`:178-179`) while the INDEMO arm returns the count. The port keeps the
 model the pictures pin.
+
+## A27 — JPLOGO: the `doit` counter's fixed one-vblank step, and the 17700 filing (registered)
+
+**Part:** JPLOGO (`JPLOGO/JP.C` over `ASM.ASM`, the generated `ZOOM.INC` and
+`READP.C`), Phase 5.
+
+The source's `frame += c` (`JP.C:77`) adds the number of copper frames the
+iteration took: `dis_waitb` returns the frames since the previous call
+(`DIS/DISINT.ASM:161-183`). A `doit` iteration redraws up to 400 rows with
+the unrolled `ZOOM.INC` routines and can take several; how many depends on
+the host's speed, and a jump past 511 freezes `y1`/`y2` at whatever the
+previous iteration used (`JP.C:78-83`). The port models **one vblank an
+iteration** (`frame += 1`), which is the reference's own cadence at the filed
+keyframes: 17300 is tick 235 and 17500 tick 435, 0 differing pixels each.
+
+The picture does not depend on the count while the band is changing (every
+iteration redraws nearly every row), but the *hold* does, through the
+palimpsest guard (`lasty`/`lasts`, `JP.C:96-99`): how far the counter jumps
+decides which pre-settle rows an earlier state leaves behind. The census
+records the consequence (`reference-indices.md` §17.3, §17.5):
+
+- 17300's filed picture is 4/4; 17500's is 2/4;
+- 17700's *state* is settled 2/4 (`ec3de2bb…`) while the filed picture
+  (`91d6ce6b…`) is presented by **0/4**; twelve captures hold ten distinct
+  byte-images at 17700 and seven re-capture probes did not draw the filed
+  one.
+
+The port reproduces the settled state: its 17700 is byte-identical to the
+census's `-sess2`/`jp-sess` state — `sha256sum` of
+`--dump-frames 635`'s RGB is the census's
+`ec3de2bb823772bf275387ab122e12e17b1d27a140ec9be8a71faa7d1bd3cb37` — and
+its residual against the filed
+picture is exactly that session's — **51,445 px of 128,000, 40.1914 %, max
+channel delta 255** (`tests/jplogo.rs` asserts the number; `cargo xtask
+compare --reference reference/parts/jplogo --rendered out/b4b-jp-sess2`
+prints the same). This is D24's register: the filing is outside its own
+census and no faithful deterministic model can be asked to reproduce a
+state the reference itself took twelve captures to spread over ten
+pictures. The port keeps the fast-session model and records the residual
+rather than fitting a jump to the filing.
+
+**Not adopted, and why the other side is not readable.** The reference
+records the picture, not the iteration durations; the copper frame counter
+is not in any trace, and the part's `waitb` returns a value no filed
+capture carries. A cost model built from the `ZOOM.INC` instruction counts
+would need the emulator's cycles-per-instruction and VGA wait states, none
+of which the tree records.
