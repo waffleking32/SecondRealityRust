@@ -28,6 +28,7 @@ pub mod poslist;
 pub mod rayscrl;
 pub mod techno;
 pub mod tunneli;
+pub mod visu;
 
 use sr_engine::part::Part;
 use sr_engine::testcard::TestCard;
