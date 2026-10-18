@@ -3872,6 +3872,31 @@ things follow that the rows use: the reference in `reference/parts/u2e/` is **us
 reaches U2E** (the screens are byte-identical), and its **indices are `SECOND 4` boot indices**, so a
 `SECOND 3` or full-run diff must use the indices of *that* boot.
 
+### 18.7 The part's first drawn frame, measured (Phase 6)
+
+U2E had no start index before Phase 6; it has one now. On the `SECOND 4` boot the loader's
+screen is the flat black `ea0787f6…` through frame 466, and **467** is the first frame with a
+second colour: a white band at columns 68–252 on black, 185 white and 135 black pixels in every
+row (37,000 white, 27,000 black), `6eb4e4cd…` — the frame the intro's `fadeset` draws. The
+probe, run twice in independent sessions:
+
+```bash
+cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 456,457,458,459,460,461,462,463,464,465,466,467,468,469,470,471,472,473 \
+    --out out/u2e-dense-a
+# the same command into out/u2e-dense-b: every index's sha256 is identical, 456…466 the
+# loader black and 467…473 the band.
+```
+
+The plan's coarser grid (`--frames 404,410,420,430,440,450,460,470,480,490,500`) cannot start
+at 404 on this host — the capture's demo-start detection returns at frame 419–420, and the
+command was refused twice with `the emulator reached frame 419/420 before frame 404 could be
+captured`. Run from 420, both sessions agree with the dense scan at every sampled index: 420…
+460 are `ea0787f6…`, 470 is the band. The anchor the port numbers a `--block 4` run from is
+therefore **467**, and the intro's earlier palette steps are invisible over the black screen
+(they change entries the flat black does not use). `docs/decisions.md` D33 records the model
+and the two-retrace cadence.
+
 ## 19. ENDLOGO
 
 Part 18 of the sequence and the first part of `SECOND 5`'s block. `SECOND 5` is

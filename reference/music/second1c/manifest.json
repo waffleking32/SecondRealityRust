@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "kind": "music-trace",
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "SECOND.EXE",
+  "arguments": [
+    "1"
+  ],
+  "cycles": 30000,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "keys": [
+    "KBD_left",
+    "KBD_enter"
+  ],
+  "coverage": {
+    "window": [
+      5900,
+      7599
+    ],
+    "requested": 1700,
+    "first": 5900,
+    "last": 7599,
+    "samples": 1699,
+    "per_frame": false,
+    "missing": [
+      [
+        5958,
+        5958
+      ]
+    ]
+  },
+  "trace": {
+    "file": "trace.csv",
+    "columns": [
+      "frame",
+      "ord",
+      "row",
+      "pat",
+      "loop",
+      "speed",
+      "tempo",
+      "zinfo",
+      "zplus",
+      "zframe"
+    ],
+    "rows": 1699,
+    "bytes": 51110,
+    "sha256": "c763da7d21308d8c8bade503ca077bc67f554bb0547e081273e6184de9b3130d"
+  },
+  "object": {
+    "object": "upstream/SecondReality/MAIN/STMIK.300",
+    "sha256": "781ab66a72b0e04561e4c13a723d04c7c1a0cb636c11bc1e204a727973b9bf82",
+    "segment_name": "text_stmik300_text",
+    "segment_class": "CODE",
+    "segment_length": 29607,
+    "route": "OMF PUBDEF, resolved against the object's own SEGDEF and LNAMES records (`MAIN/STMIK.H:125-131`, `MAIN/STMIKA.INC:17-28`)",
+    "records": {
+      "0x80": 1,
+      "0x88": 5,
+      "0x8A": 1,
+      "0x90": 45,
+      "0x96": 2,
+      "0x98": 1,
+      "0xA0": 105,
+      "0xA2": 118
+    },
+    "words": {
+      "_np_loop": 2307,
+      "_np_mastermul": 2326,
+      "_np_mastervol": 2321,
+      "_np_ord": 2305,
+      "_np_pat": 2303,
+      "_np_row": 2301,
+      "_np_speed": 8194,
+      "_np_tempo": 2319,
+      "_np_zframe": 2299,
+      "_np_zinfo": 2295,
+      "_np_zplus": 2297,
+      "_zbufsize": 2215,
+      "_zmixspeed": 2261,
+      "_zoutputmode": 2178,
+      "_zpollmix": 2240,
+      "_zspeedadjust": 2253,
+      "_zspeedadjust2": 2257
+    }
+  },
+  "locate": {
+    "base": 20976,
+    "views": [
+      20976,
+      1069552
+    ],
+    "aliasing": "the needle's bytes are in 2 places and they are one memory: the whole 29607 bytes of the segment read through each base (0x0051F0, 0x1051F0) are byte-identical at frame 89 — the demo's DOS extender maps one physical page at several linear addresses, and the emulator's memory read goes through the page tables. The trace reads through the lowest, 0x0051F0.",
+    "segment": 0,
+    "offset": 20976,
+    "frame": 89,
+    "words": {
+      "_np_loop": 23283,
+      "_np_mastermul": 23302,
+      "_np_mastervol": 23297,
+      "_np_ord": 23281,
+      "_np_pat": 23279,
+      "_np_row": 23277,
+      "_np_speed": 29170,
+      "_np_tempo": 23295,
+      "_np_zframe": 23275,
+      "_np_zinfo": 23271,
+      "_np_zplus": 23273,
+      "_zbufsize": 23191,
+      "_zmixspeed": 23237,
+      "_zoutputmode": 23154,
+      "_zpollmix": 23216,
+      "_zspeedadjust": 23229,
+      "_zspeedadjust2": 23233
+    },
+    "needles": [
+      {
+        "offset": 2434,
+        "len": 32,
+        "sha256": "398cd0c5a49a30ed50133450c67e8f8687dfb8eafc45031f9a5bc20dc55c5314",
+        "block": 2426,
+        "rule": "the first run of 32 bytes with no byte repeated inside it, in LEDATA record order and at every byte offset within each record",
+        "found_at": 23410
+      },
+      {
+        "offset": 3190,
+        "len": 32,
+        "sha256": "3db4b150f0e96e0fc4f22412ff616cde5af2bc42d9e625702251843f5a519791",
+        "block": 3180,
+        "rule": "the first run of 32 bytes with no byte repeated inside it, in LEDATA record order and at every byte offset within each record",
+        "found_at": 24166
+      }
+    ],
+    "rerun_base": 20976,
+    "rerun_views": [
+      20976,
+      1069552
+    ],
+    "rerun_frame": 7663
+  },
+  "machine": {
+    "_np_mastermul": 0,
+    "_np_mastervol": 192,
+    "_zbufsize": 4096,
+    "_zmixspeed": 20000,
+    "_zoutputmode": 5,
+    "_zpollmix": 0,
+    "_zspeedadjust": 0,
+    "_zspeedadjust2": 0
+  },
+  "machine_moved": {
+    "_np_mastermul": 2240,
+    "_np_mastervol": 64,
+    "_zmixspeed": -25536,
+    "_zpollmix": 1
+  },
+  "check": {
+    "row": [
+      0,
+      63
+    ],
+    "ord": [
+      9,
+      12
+    ],
+    "pat": [
+      6,
+      11
+    ],
+    "speeds": [
+      6
+    ],
+    "tempos": [
+      120
+    ],
+    "zinfo_min": 0,
+    "zinfo_max": 0,
+    "first_advance": 5901,
+    "zframe_moves": 1160,
+    "zframe_total": 1164
+  },
+  "skipped": [
+    {
+      "from": 5958,
+      "to": 5958,
+      "counter_before": 5957,
+      "counter_after": 5959,
+      "why": "the guest's own frame counter was read as 5957 and then as 5959 with no reading of the frames between, so they were never the current frame and no sample could be taken at them"
+    }
+  ]
+}

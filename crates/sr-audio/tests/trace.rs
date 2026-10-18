@@ -11,17 +11,20 @@
 //! which frames exist and which are the emulator's own gaps — is recomputed from the trace
 //! file and checked against the manifest.
 //!
-//! **Six of the eleven filed traces are windows, not boots.** `second1b`, `second3b` and
-//! `hiddenu2` were filed for Phase 4's parts and `second2`, `second3a` and `second3d` for
-//! Phase 5's; each begins thousands of frames after the music's start. A window trace's own
-//! columns derive the last tick-counter reset before it, not a boot anchor, so the port is
+//! **Nine of the fourteen filed traces are windows, not boots.** `second1b`, `second3b` and
+//! `hiddenu2` were filed for Phase 4's parts, `second2`, `second3a` and `second3d` for
+//! Phase 5's, and `second1c`, `second4` and `second3e` for Phase 6's; each begins thousands of
+//! frames after the music's start. A window trace's own columns derive the last tick-counter
+//! reset before it, not a boot anchor, so the port is
 //! simulated from its recipe's anchor — the seek the boot made — and **phase-aligned to the
 //! session** at the window's first row change, because the boot's phase is session-dependent
 //! (D17) and the two `SECOND U` sessions differ by ten ticks at frames 6499/6500. It is then
 //! held to the trace from the window's first frame. That is the only way a later window can be
-//! reached by a player that never seeks mid-song. `SECOND 2` has no boot trace at all, so its
-//! seek and anchor come from the shell's own start path and the recipes that share it
-//! ([`BOOTLESS_RECIPES`]).
+//! reached by a player that never seeks mid-song. `SECOND 2` and `SECOND 4` have no boot trace
+//! at all, so their seek and anchor come from the shell's own start path and the recipes that
+//! share it ([`BOOTLESS_RECIPES`]); `second3e` begins after a **mid-run** restart, which the
+//! player cannot reach by playing on, so it is simulated from the restart itself
+//! ([`RESTART_TRACES`]).
 //!
 //! `second1` is a boot trace but on a different recipe: `SECOND 1` has no block restart, so
 //! its clock starts eight frames earlier than the restart recipes' 408 (see
@@ -91,7 +94,30 @@ const MUSIC_START_FRAME: i64 = 408;
 /// take, whose boot anchor is the measured 408 (`music-clock.md` §2). The comparison is
 /// still held to the trace's own frames and phase-aligned like every window trace; these
 /// values only say where the simulation begins.
-const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[("2", MUSIC_START_FRAME, 0)];
+///
+/// **`SECOND 4`'s only trace is `second4` (500..4399), and its start is the restart, not the
+/// boot's initial play.** A block-4 boot's first show part is U2E, so the shell reaches the
+/// `MAIN/U2.ASM:880-885` `restartmus(0, 18, 45000)` at the boot's first graphics frame and
+/// the whole window is that restarted MUSIC0 session at order **18**. Its own columns derive
+/// the session's clock start at 408.2 — the restart recipes' anchor — so this is the one
+/// bootless recipe whose anchor is a filed measurement rather than a shared shell path
+/// (`music-clock.md` §2.1).
+const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
+    ("2", MUSIC_START_FRAME, 0),
+    ("4", MUSIC_START_FRAME, 18),
+];
+
+/// Traces whose window begins after a **mid-run** restart, with the session that restart
+/// installed: the trace, its module, the frame the restarted clock starts on and the order it
+/// seeks.
+///
+/// `SECOND 3` reaches U2E after JPLOGO and the shell restarts MUSIC0 at order 18 there
+/// (`MAIN/U2.ASM:880-885`). `second3e`'s session is `second4`'s — the same restart fired on a
+/// block-4 boot — shifted by exactly 17,442 frames at every order boundary, so its clock
+/// starts at 408.2 + 17,442 = 17,850 (`docs/fidelity/music-clock.md` §2.1). A trace after a
+/// restart is simulated from the restart, not from its recipe's boot anchor: the player never
+/// seeks mid-song, so it could not reach the window at all.
+const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[("second3e", "MUSIC0", 17_850, 18)];
 
 /// The port's logic tick, in millihertz (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). A
 /// tick is `2.5/tempo` seconds, so it is `175215/(tempo × 1000)` frames long: the conversion
@@ -314,8 +340,8 @@ fn traces() -> Vec<Trace> {
     // directory went missing would still pass every assertion below; the floor is what makes
     // that a failure. It is a floor, not a list, so a later trace is covered with no edit.
     assert!(
-        names.len() >= 11,
-        "the filed traces: {} under {} — the phase's eleven are expected",
+        names.len() >= 14,
+        "the filed traces: {} under {} — the phase's fourteen are expected",
         names.len(),
         root.display()
     );
@@ -382,24 +408,34 @@ fn traces() -> Vec<Trace> {
         .into_iter()
         .map(|trace| {
             let key = trace.arguments.join(",");
-            let (anchor, start_order) = match recipes.get(&key) {
-                Some(&found) => found,
-                // A recipe the tree has no boot trace of: its window traces carry no seek,
-                // so the start order and the simulation's anchor come from the shell path
-                // and the recipes that share it ([`BOOTLESS_RECIPES`]). A recipe with
-                // neither is refused rather than compared from a guessed start.
+            let (module, anchor, start_order) = match RESTART_TRACES
+                .iter()
+                .find(|(name, ..)| *name == trace.name)
+            {
+                Some(&(_, module, anchor, start_order)) => (module, anchor, start_order),
                 None => {
-                    let &(_, anchor, start_order) = BOOTLESS_RECIPES
-                        .iter()
-                        .find(|(recipe, _, _)| *recipe == key.as_str())
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "{}: no filed trace of its recipe ({key}) holds the music's \
-                                 start, so the recipe's anchor is unknown",
-                                trace.name
-                            )
-                        });
-                    (anchor, start_order)
+                    // A recipe the tree has no boot trace of: its window traces carry no
+                    // seek, so the start order and the simulation's anchor come from the
+                    // shell path and the recipes that share it ([`BOOTLESS_RECIPES`]). A
+                    // recipe with neither is refused rather than compared from a guessed
+                    // start.
+                    let (anchor, start_order) = match recipes.get(&key) {
+                        Some(found) => *found,
+                        None => {
+                            let &(_, anchor, start_order) = BOOTLESS_RECIPES
+                                .iter()
+                                .find(|(recipe, _, _)| *recipe == key.as_str())
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "{}: no filed trace of its recipe ({key}) holds the \
+                                         music's start, so the recipe's anchor is unknown",
+                                        trace.name
+                                    )
+                                });
+                            (anchor, start_order)
+                        }
+                    };
+                    (trace.module, anchor, start_order)
                 }
             };
             let boot = trace.window[0] <= MUSIC_START_FRAME;
@@ -424,7 +460,7 @@ fn traces() -> Vec<Trace> {
             let start = if boot { anchor } else { trace.window[0] };
             let result = Trace {
                 name: trace.name,
-                module: trace.module,
+                module,
                 states: trace.states,
                 window: trace.window,
                 missing: trace.missing,

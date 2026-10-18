@@ -2051,3 +2051,109 @@ by the positions themselves: **75:60 → 75:60** at the PLZPART→MINVBALL hando
 **75:61** three ticks in; **86:62** at 12,537 and **88:0** at 12,546 for RAYSCRL. Block 3 still
 stops at U2E, so the `MAIN/U2.ASM:880-885` mid-run MUSIC0@18 restart is not reached, and block 2's
 stop at GLENZ keeps TECHNO and PANICEND unreachable through a block until Phase 7.
+
+## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
+
+Decided: the VISU engine lives in `bins/secondreality/src/parts/visu/` — the module root
+`visu.rs` beside that directory, the layout `bins/secondreality/src/parts.rs` + `parts/`
+already uses (the plan's "`mod.rs`" is that root) — with `math.rs` and `draw.rs` as its two
+layers. The packed scene/object readers live in `crates/sr-assets/src/visu.rs` as plain data.
+No new crate.
+
+**Why.** Plan 02 states the stance this follows: "No new crate: the shell is a module in the
+binary, the parts are modules beside it" (`docs/plans/02-shell.md:20`). Code shared by two parts
+has a precedent one directory over: the POS/WAT column decoder is `parts/poslist.rs`
+(`bins/secondreality/src/parts/poslist.rs:1-20`, declared at
+`bins/secondreality/src/parts.rs:27`), and only the byte layout is shared while the two
+blitters stay in their own parts — the same split the two vector parts need (they share the
+maths, pipeline and driver; each keeps its own scene driver and gates). D3
+(`docs/decisions.md:28`) keeps the software VGA model and the per-part modules in the binary,
+and D16 (`docs/decisions.md:752-786`) keeps presentation out of `sr-engine`; demo-specific 3D
+maths, tables and hacks are above the engine, not engine material. The readers are a different
+kind of code — offsets and lengths checked against a file, no demo semantics — and `sr-assets`
+already owns the format readers the binary loads through (`load_path`, the image and font
+decoders); Task 2's tests pin every shipped `.00M/.0AA/.0AB/.00N` there.
+
+**Cost if wrong.** Moving one module behind a crate boundary: mechanical, with the `mod`/`use`
+paths and the two parts' `use` lines the only consumers. The readers would move if a second
+binary ever needed them; nothing in this phase does, and a crate added speculatively would
+carry the licence/manifest/test-layout work for one consumer.
+
+## D33 — The two parts' tick models, and U2E's first drawn frame (2026-10-18)
+
+Decided: **U2A** advances one animation-stream frame per logic tick and flips one page per
+tick (`VISU/C/U2A.C:105-130`'s `copper2`, one `vid_setswitch(-1, clr)` a retrace; the loop at
+`:280-324` takes one stream frame a pass); its drawing begins at gate 1, `order>10 && row>46`
+(`:238`), whose first satisfying frame is measured at **6988** — `second1c`, order 11 row
+47, pattern 8, `_np_zframe` 4513. Its gate 2, `order>11 && row>54` (`:276`), first holds at
+**7618** — `second1b`, order 12 row 55, pattern 11, `_np_zframe` 4945 — the condition the
+source normally does not reach because the gate cuts the part first.
+
+**U2E** advances one animation-stream frame per **two** logic ticks (`currframe += repeat*2`,
+`VISU/C/U2E.C:435-444`) and skips its first draw (`firstframe` at `:105`, tested at `:386`);
+its drawing begins at gate `order>18` (`:365`), whose first satisfying frame is measured at
+**699** in the block-4 boot — `second4`, order 19 row 0, pattern 51. Its intro is **100
+`dis_waitb` waits**: 33 fade-in steps, 16 waits, one wait each side of the `fadeset`/CRTC 9
+writes, 16 waits, 33 fade-out steps (`VISU/C/U2E.C:285-335`), each wait one frame
+(`DIS/DISC.ASM:42-47`'s `int 0fch` fn 1 is `copperwaitborder`, a vertical-retrace wait,
+`MAIN/COPPER.ASM:72-81`). Its first **drawn** frame in the reference is **467** (`--arg 4`
+boot): the loader's flat black `ea0787f6…` holds through frame 466, and 467 is the first frame
+with a second colour — a white band at columns 68–252 on black, 185 white and 135 black pixels
+in every row (37,000 white, 27,000 black overall), `6eb4e4cd…` — the frame the intro's
+`fadeset` draws. `boot_anchor("u2e") = Some(467)`.
+
+**Evidence for the anchor, two independent sessions.** The probe
+`cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles
+30000 --frames 456..473 --out out/u2e-dense-{a,b}` gives 456…466 black (`ea0787f6…`) and
+467…473 the letterbox in both sessions, identical hashes frame for frame. The plan's specified
+10-frame grid (`--frames 404,410,420,430,440,450,460,470,480,490,500`) cannot start at 404 on
+this host: the capture's demo-start detection returns at frame 419–420 (the emulator has run
+past 404 before the first grab; the same command refused twice with "reached frame 419/420
+before frame 404"). Run from 420, the grid agrees with the dense scan — 460 is still
+`ea0787f6…` and 470 is `6eb4e4cd…` — and both grid sessions are identical at every sampled
+index. The manifest's `arguments` is `["4"]` in every probe.
+
+**Cost if wrong.** One tick of cadence error shifts every moving keyframe: U2E moves one
+stream frame per two ticks, so a mis-set cadence is a uniform ±1 on all four filed U2E
+keyframes (1000/1600/2600/3600), and U2A's ring flips every tick, so its one moving keyframe
+(7300) moves by one index. A wrong anchor moves the whole `--block 4` run: every dumped index
+names a different frame, and `xtask compare` (which pairs by index within ±1) fails on all
+four. The gates are the first thing each part's own tests pin, and the measured frames above
+are what the parts' wait phases are built from.
+
+## D34 — The mid-run `MUSIC0@18` restart: four engine ticks of waiting, verified by the two sessions' shift (2026-10-18)
+
+Decided: at the U2E boundary the shell installs a fresh MUSIC0 seeked to order 18
+(`MAIN/U2.ASM:880-885`), the row for block '4'; its guard `whattorun & 8` is implied by U2E's
+presence in any block plan (D31's block shapes). The new player waits
+`MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME = 4` engine ticks before advancing — the restart
+recipes' measured 404→408 relation — recorded as `RunMusic.start.waiting == 4`.
+
+**Evidence: two boots, one session.** `second4` is a `SECOND 4` boot, whose first show part is
+U2E: the shell reaches the `MUSIC0@18` restart before any other part, at the boot's first
+graphics frame, and the whole traced window is that one restarted player's session. Its own
+columns derive the restarted clock's first tick at **408.2** (the restart recipes' 408). It
+publishes order 19 at frame 699 and the plan's four frames as 19:34 at 1000, 20:38 at 1600,
+22:25 at 2600 and 24:11 at 3600. `second3e` is a `SECOND 3` boot, restarted at the U2E
+boundary after JPLOGO: it holds the *same* session shifted by **exactly 17,442 frames** —
+every order boundary (699↔18140, 1259↔18701, 1820↔19261, 2380↔19822, 2940↔20382,
+3501↔20943, 4131↔21573) and the 18000/18100 rows, 18:16 and 18:27, which are `second4`'s
+558 and 658. The mid-run restart's clock therefore starts at 408.2 + 17,442 = **17,850.2**,
+and the boundary's first graphics frame is four frames earlier at **17,846.2**. At the chain's
+mapping (chain tick 0 = boot 419, D31 §3) that is chain **17,427**, and the restarted music's
+first tick lands on chain 17,431 = boot 17,850. The trace shows the modelled 4 and no other
+offset.
+
+**Recorded with the decision: the restart does not zero `_np_zframe`.** `second3e` reads
+**9,099** at 18000, which is the count carried from PLZPART's `_dis_setmframe(0)` at 5,723:
+12,127 frames at MUSIC1's tempo-130 rate (0.7420 ticks/frame) plus 150 frames at MUSIC0's
+tempo-120 rate (0.6852) give 8,996 + 103 = 9,099, with no reset in between. So `restartmus`'s
+`_zplaysong(18)` does not reset the published tick counter; the port's fresh player starts its
+own counter at 0, which differs in that word only. Neither vector part reads it (both gates use
+`int 0fch` fn 6's order/row, U2A.C:238, U2E.C:365) and the trace test compares position
+and `zplus`, not `zframe`.
+
+**Cost if wrong.** A `waiting` of 0 or 8 moves the whole restarted session by four frames;
+U2E's four keyframes then sit one 2-tick stream step out and the block-3 chain test's position
+assertions at the mapping fail. The 17,442-frame shift is independent evidence — it comes from
+two different boots' order boundaries, not from the gate measurement it verifies.

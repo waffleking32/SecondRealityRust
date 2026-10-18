@@ -23,10 +23,14 @@ traces below are committed under `reference/music/`:
 | `reference/music/second2` | `cargo xtask music trace --arg 2 --cycles 30000 --frames 4700..9300 --out reference/music/second2` | TECHNO's and PANICEND's start windows, in block 2's own session (Phase 5) |
 | `reference/music/second3a` | `cargo xtask music trace --arg 3 --cycles 30000 --frames 2900..10200 --out reference/music/second3a` | LENS's and PLZPART's start windows; joins `second3` to `second3b` (Phase 5) |
 | `reference/music/second3d` | `cargo xtask music trace --arg 3 --cycles 30000 --frames 15000..17800 --out reference/music/second3d` | COMAN's and JPLOGO's start windows (Phase 5); ends before the `:880-885` MUSIC0 restart |
+| `reference/music/second1c` | `cargo xtask music trace --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 5900..7600 --out reference/music/second1c` | U2A's gate 1 (order 11 row 47) and gate 2 (order 12 row 55), in block 1's session (Phase 6) |
+| `reference/music/second4` | `cargo xtask music trace --arg 4 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 500..4400 --out reference/music/second4` | the block-4 boot's MUSIC0@18 restart and U2E's order-19 gate (Phase 6) |
+| `reference/music/second3e` | `cargo xtask music trace --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 18000..22000 --out reference/music/second3e` | the mid-run MUSIC0@18 restart and U2E's opening, on block 3's session (Phase 6) |
 
-The Phase 5 traces (and the four Phase 4 ones) were captured with the same recipe as the first
-four: the defaults `--boot autoexec --keys "KBD_left KBD_enter"` (D17) and
-`--cycles 30000`, recorded in each manifest. Their windows are the plan's, not widened to join
+The Phase 6 traces were captured with the same recipe as the first four, written out in their
+rows above: `--boot autoexec --keys "KBD_left KBD_enter"` (D17) and `--cycles 30000`,
+recorded in each manifest. The Phase 4 and Phase 5 traces use the same defaults and state
+them once here. Their windows are the plan's, not widened to join
 the existing traces: D19's deferred-read cost grows with the span.
 
 **`second3d` is the plan's 15000..18000 narrowed to 15000..17800** (Phase 5's plan correction).
@@ -61,6 +65,9 @@ cargo xtask music analyse --trace reference/music/hiddenu2
 cargo xtask music analyse --trace reference/music/second2
 cargo xtask music analyse --trace reference/music/second3a
 cargo xtask music analyse --trace reference/music/second3d
+cargo xtask music analyse --trace reference/music/second1c
+cargo xtask music analyse --trace reference/music/second4
+cargo xtask music analyse --trace reference/music/second3e
 ```
 
 ## 1. What the trace reads, and what it guarantees
@@ -138,9 +145,20 @@ words — and the sessions below show how little it moves within a recipe.
 | `second2` | 4700..9299 | MUSIC1 | 9 (a window) | *1108.9* — an extrapolation, not a boot anchor | 4700 |
 | `second3a` | 2900..10199 | MUSIC1 | 10 (a window) | *2450.8* — an extrapolation, not a boot anchor | 2900 |
 | `second3d` | 15000..17799 | MUSIC1 | 11 (a window) | *5723.6* — an extrapolation, not a boot anchor | 15000 |
+| `second1c` | 5900..7599 | MUSIC0 | 12 (a window) | *399.7* — an extrapolation; block 1's clock is 399.6 | 5900 |
+| `second4` | 500..4399 | MUSIC0 | 13 (a window) | **408.2** — the block-4 boot's own MUSIC0@18 restart (§2.1) | 500 |
+| `second3e` | 18000..21999 | MUSIC0 | 14 (a window) | *4718.9* — a mixed-tempo extrapolation that is **not** the restart's start (§2.1) | 18000 |
 
 Each row's frames are the manifest's own coverage (`first..last`), and its module the one
 `music analyse` identifies from the trace's `(ord, pat)` pairs.
+
+`second4`'s 408.2 is the one window row whose derivation is a real clock start rather than an
+extrapolation: the block-4 boot's first show part is U2E, so the `MAIN/U2.ASM:880-885` MUSIC0@18
+restart fires at the boot's first graphics frame, and the trace's whole window lies in that
+restarted player's session. `second3e`'s 4718.9 is **not** an anchor of any kind: the
+extrapolation multiplies all 9,106 ticks it reads at MUSIC0's tempo-120 rate, but the session
+began under MUSIC1 at tempo 130, so the number is meaningless; §2.1 measures the restart's
+start by the shift between the two sessions instead.
 
 **The anchor is a property of the boot recipe, not of a session — and there is more than one
 recipe.** The restart recipes agree on **408**: `second5` and `second5b` are the same recipe
@@ -148,8 +166,12 @@ twice and derive the same 408.0, and `second3` and `hiddenu` derive 408.1. `SECO
 exception, and it is a measurement: **it derives 399.6, 8.4 frames before 408.** Block 1 never
 takes a block restart — its row of `MAIN/U2.ASM:766-775` loads the module with `bx = -1`, "no
 seek", and the play is the initial `_zplaysong(0)` at `:785-787` — while `SECOND 3`, `5` and
-`U` reload STMIK at their own restart (`:856-863`, `:898-905`, `:889-894`), which zeroes the
-tick counter about eight frames later. `music analyse`'s two readings for `second1`, section 1:
+`U` take their own `restartmus`/`_zplaysong` paths at their starts (`:856-863`, `:898-905`,
+`:889-894`). The eight-frame difference is a property of those recipes' start paths, not a
+counter reset: **a restart does not zero `_np_zframe`** — `second3e` reads 9,099 at frame 18000, the
+count carried since PLZPART's `_dis_setmframe(0)` at 5,723, through the U2E restart at ~17,846
+(§2.1). A recipe's *first* play at boot is what starts from the static zero, which is why the
+column reads 0 at the anchor in every boot trace. `music analyse`'s two readings for `second1`, section 1:
 
 ```
   the anchor the rows imply: the first row change is at frame 420 with `_np_zframe` 14, and 14 ticks at the measured 1.4583 frames a tick is 20.4 frames — so that row began at frame 399.6 (± the tick the row boundary is within and the frame the change is seen on)
@@ -160,10 +182,10 @@ The direct reading is 5.4 frames from the rows' rather than the Phase 3 traces' 
 because the sample at 405 caught two ticks at once (`zframe` 0 → 2 between frames 404 and 405)
 — the same host-timing term D17 measures, not a second clock.
 
-**The six window traces do not hold the start, and their printed "anchors" are
+**The window traces do not hold the start, and their printed "anchors" are
 extrapolations, not boot anchors.** Each back-extrapolates the last tick-counter reset before
 its window over thousands of ticks, using the frames a tick measured over the window's own
-frames. The six readings, each from `cargo xtask music analyse --trace reference/music/<name>`,
+frames. The nine readings, each from `cargo xtask music analyse --trace reference/music/<name>`,
 section 1, pasted as printed:
 
 `second1b`:
@@ -202,6 +224,24 @@ section 1, pasted as printed:
   the anchor the rows imply: the first row change is at frame 15006 with `_np_zframe` 6888, and 6888 ticks at the measured 1.3476 frames a tick is 9282.4 frames — so that row began at frame 5723.6 (± the tick the row boundary is within and the frame the change is seen on)
 ```
 
+`second1c`:
+
+```
+  the anchor the rows imply: the first row change is at frame 5901 with `_np_zframe` 3769, and 3769 ticks at the measured 1.4596 frames a tick is 5501.3 frames — so that row began at frame 399.7 (± the tick the row boundary is within and the frame the change is seen on)
+```
+
+`second4`:
+
+```
+  the anchor the rows imply: the first row change is at frame 506 with `_np_zframe` 67, and 67 ticks at the measured 1.4603 frames a tick is 97.8 frames — so that row began at frame 408.2 (± the tick the row boundary is within and the frame the change is seen on)
+```
+
+`second3e`:
+
+```
+  the anchor the rows imply: the first row change is at frame 18009 with `_np_zframe` 9106, and 9106 ticks at the measured 1.4595 frames a tick is 13290.1 frames — so that row began at frame 4718.9 (± the tick the row boundary is within and the frame the change is seen on)
+```
+
 `second3b`'s 5727.6 and `second3d`'s 5723.6 are the same reset — PLZPART's
 `_dis_setmframe(0)` at its own start (`PLZPART/PLZ.C:69`) — and `second3a` shows that reset
 inside its own window at frame 5723 (`_np_zframe` reads 0). `second3a`'s 2450.8 is LNS's
@@ -212,6 +252,19 @@ has no boot trace at all: its seek is the shell's own start, `restartmus(1, 0, 4
 trace test starts its simulation at the restart recipes' measured 408 and phase-aligns it like
 every window (`BOOTLESS_RECIPES` in `crates/sr-audio/tests/trace.rs`). **The recipe's boot
 anchor is not measured here**, and this note does not claim 408 for it.
+
+Phase 6's three windows read differently by kind. **`second1c`'s 399.7 lands on block 1's
+399.6** — a window whose session never reset, projected onto a rate measured over its own
+frames, 0.1 frame from the recipe's boot anchor. **`second4`'s 408.2 is a real start, not an
+extrapolation**: the block-4 boot's first show part is U2E, so the `MAIN/U2.ASM:880-885`
+restart fires at the boot's first graphics frame and the whole window is that one restarted
+player's session at one tempo; its reset is the `_zplaysong(18)` itself. **`second3e`'s 4718.9
+is meaningless** and is recorded only because the tool prints it: the extrapolation applies
+MUSIC0's tempo-120 rate to ticks earned partly under MUSIC1 at tempo 130, and the counter was
+not zeroed at the restart anyway (§2.1 measures the restart's start by the shift between
+`second4` and `second3e` instead). The trace test treats all three as windows and simulates
+each from a start that is a real clock: recipes 1 and 4 from their boot/restart anchors, and
+`second3e` from the restart's measured 17,850 through the trace's own restart table.
 
 `second1b` and `hiddenu2` hold no reset inside their window and their projections land near
 their recipes' anchors (390.7 against 408, 371.9 against 399.6) rather than at a part start.
@@ -279,6 +332,117 @@ awk -F, '$1 >= 17000 && $1 <= 17100' reference/music/second3d/trace.csv
 
 The orders for LNS&ZOOM, PLZPART, TECHNO, PANICEND and JPLOGO are measured at their start
 windows; COMAN's single value is the one derivation in the table, and it is named as one.
+
+### The orders in force at U2A's and U2E's starts, and the U2E restart's clock
+
+Phase 6's two vector parts gate on absolute positions, and the three Phase 6 traces measure
+them. Every frame below is a `frame` column the file itself carries.
+
+**U2A (block 1, `SECOND 1`).** The gate is `order>10 && row>46` (`VISU/C/U2A.C:229-239`), so
+the first frame that satisfies it is the first that publishes order 11 row 47:
+
+```
+$ awk -F, '$2 == 11 && $3 == 47' reference/music/second1c/trace.csv | head -1
+6988,11,47,8,0,6,120,0,0,4513
+```
+
+Gate 1 passes at **frame 6988** (order 11 row 47, pattern 8, `_np_zframe` 4513) in
+`second1c` (frames 5900..7599, 1,699 samples, one gap at 5958). Gate 2's condition
+`order>11 && row>54` first holds at order 12 row 55, 19 frames after `second1c`'s window
+closes; `second1b` (7600..7959) holds it:
+
+```
+$ awk -F, '$1 == 7618' reference/music/second1b/trace.csv
+7618,12,55,11,0,6,120,0,0,4945
+```
+
+so gate 2's first satisfying frame is **7618** (order 12 row 55, pattern 11, `_np_zframe`
+4945) — the gate the source normally does not reach, measured. `second1c`'s orders advance at
+6576 (11) and 7136 (12), and it holds MUSIC0 orders 9…12.
+
+**U2E (block 4's boot; block 3 after the restart).** The gate is `order>18`
+(`VISU/C/U2E.C:358-366`), so the first satisfying frame is the first that publishes order 19:
+
+```
+$ awk -F, '$2 == 19' reference/music/second4/trace.csv | head -1
+699,19,0,51,0,6,120,0,0,199
+```
+
+**frame 699** (order 19 row 0, pattern 51), in `second4` — the block-4 boot's own session.
+The plan's four sampling frames, as the file carries them:
+
+```
+$ awk -F, '$1 == 1000 || $1 == 1600 || $1 == 2600 || $1 == 3600' reference/music/second4/trace.csv
+1000,19,34,51,0,6,120,0,0,405
+1600,20,38,49,0,6,120,0,0,816
+2600,22,25,52,0,6,120,0,0,1501
+3600,24,11,47,0,6,120,0,0,2187
+```
+
+The row cadence, from `cargo xtask music analyse --trace reference/music/second4`, section 3:
+
+```
+  frames 506..3772 at speed 6 tempo 120: 373 gap(s) — 8 frame(s) x91, 9 frame(s) x282
+  frames 3781..3934 at speed 7 tempo 120: 15 gap(s) — 10 frame(s) x12, 11 frame(s) x3
+  frames 3945..4120 at speed 8 tempo 120: 15 gap(s) — 11 frame(s) x5, 12 frame(s) x10
+  frames 4131..4395 at speed 6 tempo 120: 30 gap(s) — 8 frame(s) x7, 9 frame(s) x22, 10 frame(s) x1
+```
+
+— one row is 8.76 frames at speed 6, 10.22 at 7 and 11.68 at 8. At speed 6 the orders start
+every 560–561 frames (699, 1259, 1820, 2380, 2940, 3501), and order 25 starts at 4131 after
+the order-24 speed excursion. `second4` holds MUSIC0 orders 18…25.
+
+**The mid-run restart's clock (`second3e`).** `second3e` opens at 18000, inside the MUSIC0@18
+session the shell installed at the U2E boundary (`MAIN/U2.ASM:880-885`), and holds the same
+orders 18…25. Its first sample and the plan's two comparison frames:
+
+```
+$ awk -F, '$1 == 18000 || $1 == 18100' reference/music/second3e/trace.csv
+18000,18,16,50,0,6,120,0,0,9099
+18100,18,27,50,0,6,120,0,0,9168
+```
+
+**18:16 at 18000 and 18:27 at 18100**; `second4` publishes the same two positions 17,442
+frames earlier, at 558 and 658. Every order boundary of the two sessions differs by the same
+17,441–17,442 frames:
+
+| boundary | `second4` | `second3e` | difference |
+|---|---|---|---|
+| order 19 | 699 | 18140 | 17,441 |
+| order 20 | 1259 | 18701 | 17,442 |
+| order 21 | 1820 | 19261 | 17,441 |
+| order 22 | 2380 | 19822 | 17,442 |
+| order 23 | 2940 | 20382 | 17,442 |
+| order 24 | 3501 | 20943 | 17,442 |
+| order 25 | 4131 | 21573 | 17,442 |
+
+```
+$ awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second4/trace.csv
+$ awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second3e/trace.csv
+```
+
+The two are one restart recipe: `second4`'s restart is the block-4 boot's, fired at the boot's
+first graphics frame, and `second3e`'s is the shell's at the U2E boundary 17,442 frames later.
+`second4`'s own columns derive that session's clock start at **408.2** (the restart recipes'
+408), so `second3e`'s restarted clock starts at **408.2 + 17,442 = 17,850.2**, and the
+boundary's first graphics frame is four frames earlier at **17,846.2** — §2's 404→408
+relation. That is D34's waiting=4 verified at the chain's mapping: chain tick 0 is boot 419
+(MNTSCRL's tick 0, D31 §3), so the boundary is chain **17,427** and the restarted music's
+first tick is chain 17,431 = boot 17,850.
+
+**What `_np_zframe` does across the restart, measured.** `second3e` reads **9099** at frame
+18000, which is not a fresh count: `restartmus` does not zero the word. 9099 is what the
+counter carried from the last `_dis_setmframe(0)` before the restart — PLZPART's, at 5,723:
+12,127 frames at MUSIC1's tempo-130 rate (0.7420 ticks a frame) plus 150 frames at MUSIC0's
+tempo-120 rate (0.6852) give 8,996 + 103 = 9,099. No later part reset it. The restart's phase
+is therefore carried by the order/row words the parts read, not by `zframe`; a port player
+that starts its own counter at 0 at the restart differs in that word only, which neither
+vector part's gate reads (both read order/row through `int 0fch` fn 6).
+
+**The screens agree as the music does.** `reference-indices.md` §18.1's byte identity holds
+across the two boots: `out/review-b4b/s3-after`'s 18000 and 18100 are `befaf38a…`, the same
+bytes as the `SECOND 4` boot's opening hold (`out/b4b-u2e-sweep2`'s 530 = 590 = 660). The
+positions above are that one screen at the same phase in the two sessions.
 
 ## 3. The tick rate, and the rule behind it
 
@@ -476,9 +640,9 @@ So, **as the port's rule**:
   predecessor is a `254` the player never played — reads 0.
 
 `cargo xtask music analyse` re-derives it from each trace's own order sequence and prints the
-count of samples it had to be right about — **0 mismatch(es) in every filed trace**, 38,803
-samples across the eleven (`1150`, `1152`, `2755`, `6351`, `5797`, `359`, `4846`, `1699`,
-`4597`, `7298`, `2799`), each
+count of samples it had to be right about — **0 mismatch(es) in every filed trace**, 48,400
+samples across the fourteen (`1150`, `1152`, `2755`, `6351`, `5797`, `359`, `4846`, `1699`,
+`4597`, `7298`, `2799`, plus Phase 6's `1699`, `3899`, `3999`), each
 trace's own line carrying its own count. A trace filed from a later window begins mid-song, so
 the order it begins on has no entry transition inside the window: `hiddenu2` starts on MUSIC0
 order 28 reading **2**, the crossing of the `254` at order 27, and `music analyse` seeds that
@@ -517,14 +681,15 @@ computed from `zplus` 0/1/2 for `dis_muscode` — and that is a reading of the s
 measurement of this rule; the rule above is the object's, checked against every sample of every
 filed trace.
 
-`zinfo` is **0 in every filed trace** — the eleven manifests record the same word the trace
+`zinfo` is **0 in every filed trace** — the fourteen manifests record the same word the trace
 does, and `cargo xtask music analyse`, section 5, prints each trace's own range: one line per
 run, `zinfo runs: 1 … 0`. The windows are the 1,300-frame recipes (`second5`, `second5b`), the
 2,900-frame one (`second3`), the 6,500-frame one (`hiddenu`), Phase 4's four
-(`second1` 148…5999, `second1b` 7600…7959, `second3b` 10200…15049, `hiddenu2` 6500…8199) and
-Phase 5's three (`second2` 4700…9299, `second3a` 2900…10199, `second3d` 15000…17799),
-covering MUSIC0's orders 0…9, 12, 13, 25…31 and 70…77, and MUSIC1's 0, 18…98 (the `254`
-entries stepped over, §10).
+(`second1` 148…5999, `second1b` 7600…7959, `second3b` 10200…15049, `hiddenu2` 6500…8199),
+Phase 5's three (`second2` 4700…9299, `second3a` 2900…10199, `second3d` 15000…17799) and
+Phase 6's three (`second1c` 5900…7599, `second4` 500…4399, `second3e` 18000…21999),
+covering MUSIC0's orders 0…31 (9…12 in `second1c`, 18…25 in `second4` and `second3e`) and
+70…77, and MUSIC1's 0, 18…98 (the `254` entries stepped over, §10).
 **These captures therefore do not measure what its other values are**, and `D8`'s ladder is
 answered only in its first step: route 1 (read the object's symbols, then the words live) was
 performed and produced a map and a trace, and the word it watches stayed 0. `D8` now records
@@ -554,6 +719,9 @@ trace's line as the tool prints it:
 | `second2` | `frames 4700..9299 of the requested 4700..9299: 4597 sample(s), 3 frame(s) missing (4796, 8192, 8781) — this trace is NOT per-frame (…)` |
 | `second3a` | `frames 2900..10199 of the requested 2900..10199: 7298 sample(s), 2 frame(s) missing (5722, 8315) — this trace is NOT per-frame (…)` |
 | `second3d` | `frames 15000..17799 of the requested 15000..17799: 2799 sample(s), 1 frame(s) missing (17056) — this trace is NOT per-frame (…)` |
+| `second1c` | `frames 5900..7599 of the requested 5900..7599: 1699 sample(s), 1 frame(s) missing (5958) — this trace is NOT per-frame (…)` |
+| `second4` | `frames 500..4399 of the requested 500..4399: 3899 sample(s), 1 frame(s) missing (4320) — this trace is NOT per-frame (…)` |
+| `second3e` | `frames 18000..21999 of the requested 18000..21999: 3999 sample(s), 1 frame(s) missing (21761) — this trace is NOT per-frame (…)` |
 
 **A count of the absent frames belongs to that line and not to this sentence.** Among the
 Phase 3 four, `second5b` misses four where the other three miss three, and its two kinds are
@@ -567,16 +735,19 @@ point is session-dependent** — 409 (`second5`, `second5b`), 417 (`second3`), 4
 and all of them sit at the same point in the demo, the boot's first graphics frame (the
 reference's own captures put that at 404, D17).
 
-**The Phase 4 and Phase 5 windows have no boundary run.** Their segments were located at
-frames 88…104 (Phase 4), frame 90 (`second2`, `second3a`) and frame 92 (`second3d`), before
+**The Phase 4, 5 and 6 windows have no boundary run.** Their segments were located at
+frames 88…104 (Phase 4), frame 90 (`second2`, `second3a`), frame 92 (`second3d`), frames 89
+(`second1c`, `second4`) and frame 87 (`second3e`), before
 each window began, so the coverage lines start at the requested first frame. Their
 absent frames are the read-latency kind D19 describes, scattered through the run: `second1`
 misses 55 (45 carry a `skipped` entry — a read that arrived late or a counter that stepped —
 and the other ten are frames the tool's re-taken read moved past, which the coverage recomputes
 and the manifest lists without a `skipped` entry), `second1b` 1 (frame 7920, the counter went
 7919 → 7921), `second3b` 4 (10365, 11563, 13574..13575), `hiddenu2` 1 (7335), `second2` 3
-(4796, 8192, 8781), `second3a` 2 (5722, 8315) and `second3d` 1 (17056, the counter went
-17055 → 17057). None of them
+(4796, 8192, 8781), `second3a` 2 (5722, 8315), `second3d` 1 (17056, the counter went
+17055 → 17057), `second1c` 1 (5958, the counter went 5957 → 5959), `second4` 1 (4320, the
+counter went 4319 → 4321) and `second3e` 1 (21761, the counter went 21760 → 21762). None of
+them
 is the boot's first graphics frame: `second1`'s are spread from 407 to 5955, which is what a
 window nearly twice as long as Phase 3's costs in deferred reads.
 
@@ -588,7 +759,7 @@ without publishing") — is consistent with the Phase 3 traces and with where th
 is **not** measured here. `second5`'s 1220 has the same shape at the point the reference's own
 index table puts the ENDLOGO → CRED change in (1180, 1440]
 (`reference/parts/endlogo/manifest.json`, `reference/parts/cred/manifest.json`, both
-`--arg 5`), and is not measured either. The Phase 4 and Phase 5 windows' absent frames need no
+`--arg 5`), and is not measured either. The Phase 4, 5 and 6 windows' absent frames need no
 such hypothesis: their manifests say which read was dropped, and they sit where the host missed
 it.
 
