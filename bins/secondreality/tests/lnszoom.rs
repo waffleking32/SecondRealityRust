@@ -19,11 +19,14 @@
 //!
 //! **The residual is one asset difference (D24, APPROXIMATIONS A25).** The
 //! tree's `LENS.EXB` picture differs from the release's in 2,058 pixels of the
-//! forehead (rows 33..91, columns 129..211): the port's four visible frames
-//! differ by exactly those pixels, and patching the tree's picture with the
-//! reference's 2700 index plane makes 3400, 4200 and 4900 byte-identical
-//! (`docs/fidelity/lnszoom.md` §7). The pinned numbers below are that
-//! divergence measured: 3.2156 %, 3.0234 %, 0.0000 %, 2.18125 % and 0.0000 %.
+//! forehead (rows 33..91, columns 129..211). Each act shows the part of that
+//! change it samples: 2,058 pixels at 2700 (the whole picture), 1,935 at 3400
+//! (the forehead behind the lens's bubble) and 1,396 at 4900 (the zoomed
+//! rotazoomer); 4200's sampled region misses it entirely (0 differing).
+//! Patching the tree's picture with the reference's 2700 index plane makes
+//! 3400, 4200 and 4900 byte-identical (`docs/fidelity/lnszoom.md` §7). The
+//! pinned numbers below are that divergence measured: 3.2156 %, 3.0234 %,
+//! 0.0000 %, 2.18125 % and 0.0000 %.
 //!
 //! **5650's `.idx` is not a picture.** The reference's plane is the tool's
 //! 320×200 planar read of the rotazoomer's last frame under a white palette:

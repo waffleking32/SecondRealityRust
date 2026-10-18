@@ -43,8 +43,9 @@ Parts 1 and 2 are mode 13h: 320×200, one byte a pixel, row stride 320
 
 Part 3 changes the video mode under itself. `inittwk` (`ASM.ASM:185-238`)
 clears the palette, sets CRTC 9 to 0, takes the address counter to byte mode
-(`CRTC 0x14 = 0`, `0x17 = 0xe317`), sets the sequencer's memory mode and map
-mask (`0x0604`, `0x0f02`), clears 64 KB with `rep stosw`, and then
+(CRTC `0x14 = 0`; CRTC `0x17`'s data byte `0xE3`, written as the `out dx,ax`
+word `0xe317`), sets the sequencer's memory mode (index 4, data 6) and map
+mask (index 2, data `0x0F`), clears 64 KB with `rep stosw`, and then
 
 ```asm
 ;set 4 x vertical
@@ -123,6 +124,10 @@ dis_setmframe(0);
 The `if` is missing its `()`, so it tests the function pointer — non-zero —
 and the wait always runs. **Preserved**: the port waits unconditionally while
 `musplus < -6` and does not model the dead guard.
+`the_missing_call_in_the_part1_guard_is_preserved` feeds `musplus = -32`
+(`zplus` 0, the value a corrected `if(musplus > -30)` would skip the wait on)
+for three ticks and pins that the part waits, then passes at -6; a corrected
+guard fails the test.
 
 The loop runs while `frame < 300`; while `frame < 80` it makes six copies of
 the two-edge walk (`:109-127`). Each copy writes **one** picture byte per row
@@ -174,8 +179,9 @@ signed offsets, and the interior copy (`dorow3`) is only the middle.
 `uframe < 96` uploads `fade2 + ((uframe-32)/2)*576` to entries 64..255
 (`:146-151`), so the overlays fade in over the lens's first 96 frames. The
 loop ends at `uframe = 715`; a five-frame hold runs to 720 (`:179-182`). The
-`a > 3` clamp (`:176`) is kept: `frame` advances by `min(waitb(), 3)` while
-`uframe` advances by the whole count — they agree at one frame a tick.
+`a > 3` clamp (`:176`) is preserved but **unreachable**: the port runs one
+frame a tick, so `frame` and `uframe` advance 1:1 and the clamp never bites
+(the original's `frame` advanced by `min(waitb(), 3)`).
 
 The lens keyframe's residual (§7) is the only thing this act gets wrong, and
 it is the picture asset, not the lens.
@@ -192,9 +198,11 @@ setpalarea(fade+64*64*3,0,64);
 inittwk();
 ```
 
-- `rotpic90 = back`: the rotated texture is written over the picture buffer,
-  while the source `rotpic` is the separate heap copy. **Preserved** (the port
-  keeps two buffers and builds the rotation from `rotpic`).
+- `rotpic90 = back`: the original writes the rotated texture over the picture
+  buffer, while the source `rotpic` is the separate heap copy. The port keeps
+  the two buffers separate and builds the rotation from `rotpic`; the
+  aliasing is **unobservable**, because nothing reads `back` after part 3
+  begins — the wipe and the lens are its only readers and both are done.
 - The `setpalarea` at `:200` uploads 64 entries of `fade`'s first white-step
   block and `inittwk`'s DAC clear **erases it immediately**. **Preserved**:
   the port uploads it and then sets the whole palette black.
@@ -255,10 +263,10 @@ mov	cs:yadd,eax
 comes **after** the displacement table has been patched and **before** the
 row loop. The in-row sample steps therefore keep the uncorrected `xa/ya << 6`
 and only the row-to-row base advance is scaled by 307/256. Applying the
-aspect before the table (the obvious reading) is a different animation: it
-misses the reference's 4200 by 40 % of its pixels. The port's order is the
-source's; `the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps` pins
-the table against the corrected row advance.
+aspect before the table (the obvious reading) is a different animation and
+does not reproduce the reference's 4200; the source's order does, and
+`the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps` pins the table
+against the corrected row advance.
 
 The row loop runs `ZOOMYW = 100` rows. Each row adds the corrected vector to
 `ypos`/`xpos`, takes the low bytes of their integer parts as `(y, x)`, and
@@ -331,8 +339,8 @@ where the reference's did:
 | 1189–1193 | 3641–3645 | the five-frame hold |
 | 1194–1195 | 3646–3647 | the rotpic90 rotation and `inittwk` |
 | 1196 | 3648 | part 3 frame 0 (path frame 0) |
-| 3195 | 5647 | part 3 frame 1999 |
-| 3196 | 5648 | the loop exits; the white palette |
+| 3195 | 5647 | part 3's 2000th iteration (frame 1999); it also sets the white palette |
+| 3196 | 5648 | the first hold tick: the white screen |
 | 3198 | 5650 | the reference's white keyframe |
 
 `the_real_player_puts_the_acts_on_the_reference_ticks` asserts the two
@@ -418,7 +426,9 @@ The unit tests in `src/parts/lnszoom.rs` pin, by name:
   passes the first, -21 blocks and -20 passes the second.
 - `the_wipe_runs_three_hundred_frames_and_draws_only_the_first_eighty` — the
   300-frame loop, the first 80 drawing, and the convergence on the picture.
-- `the_lens_is_seven_hundred_fifteen_frames_and_a_five_frame_hold`.
+- `the_lens_is_seven_hundred_fifteen_frames_and_a_five_frame_hold`, which
+  also pins the erased `setpalarea` (the palette is black after `inittwk`)
+  and the first white-step upload.
 - `the_rotazoomer_is_two_thousand_frames_and_exits_on_the_white_palette`.
 - `the_music_break_ends_the_part_with_the_white_palette` and
   `exit_requested_finishes_the_act_on_that_tick` — the two exits.

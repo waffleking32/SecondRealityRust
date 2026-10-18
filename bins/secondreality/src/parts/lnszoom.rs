@@ -16,8 +16,9 @@
 //! Parts 1 and 2 are mode 13h: 320×200, one byte a pixel, row stride 320.
 //! Part 3 calls `inittwk` (`ASM.ASM:185-238`), which clears the DAC, takes
 //! CRTC 9 to 0 (a 400-line display), puts the address counter in byte mode
-//! (`CRTC 0x14 = 0`, `0x17 = 0xe317`), sets the sequencer's memory mode and map
-//! mask (`0x0604`, `0x0f02`), clears 64 KB with `rep stosw`, and then sets
+//! (CRTC `0x14 = 0`; CRTC `0x17`'s data byte `0xE3`, written as the `out dx,ax`
+//! word `0xe317`), sets the sequencer's memory mode (index 4, data 6) and map
+//! mask (index 2, data `0x0F`), clears 64 KB with `rep stosw`, and then sets
 //! **maximum scan line 3** — four scanlines a character row. With mode 13h's
 //! 400-line vertical total that leaves 100 character rows, each drawn twice in
 //! the emulator's 320×200 frame (DOSBox's `is_double_scanned_mode` halves the
@@ -94,10 +95,16 @@
 //! - **The 1,536-byte overrun** (`:302`): `memcpy(back+64000, back+64000-1536,
 //!   1536)` copies the picture's last 1,536 bytes into the buffer past its end
 //!   (the `FILLER` pad). The lens's 16-bit source addresses reach it.
-//! - **`rotpic90=back`** (`:191`): the rotated texture is written over the
-//!   picture buffer, while `rotpic` is the separate heap copy.
-//! - **The `a>3` clamp** (`:176`): `frame` advances by `min(waitb(), 3)` while
-//!   `uframe` advances by the whole count.
+//! - **`rotpic90=back`** (`:191`): the original writes the rotated texture over
+//!   the picture buffer, while `rotpic` is the separate heap copy. The port
+//!   keeps the two buffers separate and builds the rotation from `rotpic`;
+//!   the aliasing is **unobservable**, because nothing reads `back` after
+//!   part 3 begins — the wipe and the lens are its only readers, and both are
+//!   done by then.
+//! - **The `a>3` clamp** (`:176`): the original advances `frame` by
+//!   `min(waitb(), 3)` while `uframe` advances by the whole count. The port
+//!   runs one frame a tick, so both advance 1:1 and the clamp is
+//!   unreachable.
 //! - **`rotatez` is dead** (`ASM.ASM:419-564`): identical to `rotate` except
 //!   that it adds `256` to `xadd` and subtracts it from `yadd` each row; it is
 //!   never called.
@@ -176,8 +183,10 @@ const PATH2_FRAMES: usize = 2000;
 
 /// `MAIN.C:300` `memcpy(palette, lensexb+16, 768)`.
 const PALETTE_BYTES: usize = 768;
-/// The three overlay banks: `MAIN.C:308-325`.
-const OVERLAYS: [(u8, u8, u8); 3] = [(0, 5, 15), (0, 7, 26), (0, 9, 37)];
+/// The three overlay banks `MAIN.C:308-325` reads from `LENS.EX0`+4. The
+/// values are the file's; the constant is the expectation `init` validates
+/// the bytes against.
+const EXPECTED_OVERLAYS: [(u8, u8, u8); 3] = [(0, 5, 15), (0, 7, 26), (0, 9, 37)];
 /// `MAIN.C:331-347`: 64 ramp blocks and 16 white-step blocks.
 const FADE_BLOCKS: usize = 64 + 16;
 /// One fade block: 64 entries × 3.
@@ -260,7 +269,8 @@ enum Phase {
     /// `:380`: the `musplus < -20` wait between part 1 and part 2.
     LensWait,
     /// `:144-178`: the lens; `uframe` is the loop's counter, `frame` the
-    /// path's (they diverge only through the `a>3` clamp in the original).
+    /// path's (they would diverge only through the `a>3` clamp, unreachable
+    /// at one frame a tick).
     Lens { uframe: u32, frame: u32 },
     /// `:179-182`: the five-frame hold.
     LensHold { uframe: u32 },
@@ -376,14 +386,23 @@ impl Lnszoom {
         ctx.view.split = None;
     }
 
+    /// `LENS.EX0`+4's nine bytes: the three overlay RGB triples.
+    fn ex0_overlays(&self) -> [(u8, u8, u8); 3] {
+        [
+            (self.ex0[4], self.ex0[5], self.ex0[6]),
+            (self.ex0[7], self.ex0[8], self.ex0[9]),
+            (self.ex0[10], self.ex0[11], self.ex0[12]),
+        ]
+    }
+
     /// `MAIN.C:300-325`: the base palette and the three overlay banks.
-    fn build_palette(&self, base: &Palette) -> Vec<u8> {
+    fn build_palette(&self, base: &Palette, overlays: [(u8, u8, u8); 3]) -> Vec<u8> {
         let mut palette = vec![0u8; PALETTE_BYTES];
         for index in 0..256 {
             let rgb = base.entry(index as u8);
             palette[index * 3..index * 3 + 3].copy_from_slice(&rgb);
         }
-        for (i, (r, g, b)) in OVERLAYS.iter().enumerate() {
+        for (i, (r, g, b)) in overlays.iter().enumerate() {
             let bank = (i + 1) * 64 * 3;
             for at in (0..64 * 3).step_by(3) {
                 for (channel, delta) in [*r, *g, *b].iter().enumerate() {
@@ -758,6 +777,16 @@ impl Part for Lnszoom {
                 ),
             });
         }
+        let overlays = self.ex0_overlays();
+        if overlays != EXPECTED_OVERLAYS {
+            return Err(PartError {
+                part: NAME,
+                message: format!(
+                    "{EX0_PATH} carries the overlay triples {overlays:?}; the source's build \
+                     carries {EXPECTED_OVERLAYS:?}"
+                ),
+            });
+        }
         self.tables = [
             self.read(EX1_PATH)?,
             self.read(EX2_PATH)?,
@@ -833,7 +862,7 @@ impl Part for Lnszoom {
         let tail = self.back[from..VIDEO_BYTES].to_vec();
         self.back[VIDEO_BYTES..].copy_from_slice(&tail);
 
-        self.palette = self.build_palette(&image.palette);
+        self.palette = self.build_palette(&image.palette, overlays);
         let (fade, fade2) = self.build_fades();
         self.fade = fade;
         self.fade2 = fade2;
@@ -1347,6 +1376,37 @@ mod tests {
     }
 
     #[test]
+    fn the_missing_call_in_the_part1_guard_is_preserved() {
+        // `if(dis_musplus>-30)` tests the function pointer, which is non-zero,
+        // so the wait runs for every input. -32 (`zplus` 0, the DIS's no-plus
+        // value) is the one input a corrected `if(musplus > -30)` would skip
+        // the wait on; the source waits, and this test fails for a "fixed"
+        // guard.
+        let mut script = vec![(45, 59, -32); 20];
+        for entry in script.iter_mut().skip(3) {
+            *entry = (45, 59, -7);
+        }
+        for entry in script.iter_mut().skip(6) {
+            *entry = (45, 59, -6);
+        }
+        let (mut rig, mut part) = started_with(Player::scripted(script));
+        run_to(&mut rig, &mut part, 3);
+        assert_eq!(
+            part.phase,
+            Phase::Gate,
+            "three ticks at -32 must not skip the wait"
+        );
+        run_to(&mut rig, &mut part, 6);
+        assert_eq!(part.phase, Phase::Gate, "three ticks at -7");
+        run_to(&mut rig, &mut part, 7);
+        assert_eq!(
+            part.phase,
+            Phase::Wipe { frame: 0 },
+            "-6 passes at tick 6, the wait's exit"
+        );
+    }
+
+    #[test]
     fn the_lens_is_seven_hundred_fifteen_frames_and_a_five_frame_hold() {
         // A scripted player whose `-5` passes the second gate at once: the
         // lens begins the tick after part 1's loop leaves.
@@ -1367,6 +1427,32 @@ mod tests {
         assert_eq!(part.phase, Phase::RotSetup { stage: 0 });
         run_to(&mut rig, &mut part, 1_024);
         assert_eq!(part.phase, Phase::Rot { frame: 0 });
+        // `:200`'s `setpalarea(fade+64*64*3,0,64)` is uploaded and then erased
+        // by `inittwk`'s DAC clear: the block is not black, the palette is.
+        assert!(
+            part.fade[64 * FADE_BLOCK..65 * FADE_BLOCK]
+                .iter()
+                .any(|value| *value != 0),
+            "the erased upload carries a real block"
+        );
+        assert!(
+            (0..=255).all(|index| rig.palette.entry(index) == [0, 0, 0]),
+            "`inittwk` leaves the palette black"
+        );
+        // The rotazoomer's first iteration uploads the first white step
+        // (`fade+(64+frame)*64*3` with frame = 1, `:268-271`) to entries 0..63;
+        // the rest of the palette stays at `inittwk`'s black.
+        run_to(&mut rig, &mut part, 1_025);
+        assert_eq!(part.phase, Phase::Rot { frame: 1 });
+        for index in 0..64usize {
+            let at = 65 * FADE_BLOCK + index * 3;
+            assert_eq!(
+                rig.palette.entry(index as u8),
+                [part.fade[at], part.fade[at + 1], part.fade[at + 2]],
+                "entry {index} is the first white step"
+            );
+        }
+        assert_eq!(rig.palette.entry(64), [0, 0, 0]);
     }
 
     #[test]
@@ -1553,6 +1639,7 @@ mod tests {
         let mut part = Lnszoom::new();
         part.root = "../../";
         part.ex0 = driver.read(EX0_PATH).unwrap();
+        let overlays = part.ex0_overlays();
         part.tables = [
             driver.read(EX1_PATH).unwrap(),
             driver.read(EX2_PATH).unwrap(),
@@ -1565,7 +1652,7 @@ mod tests {
         let from = VIDEO_BYTES - OVERRUN_BYTES;
         let tail = part.back[from..VIDEO_BYTES].to_vec();
         part.back[VIDEO_BYTES..].copy_from_slice(&tail);
-        part.palette = part.build_palette(&image.palette);
+        part.palette = part.build_palette(&image.palette, overlays);
         let (fade, fade2) = part.build_fades();
         part.fade = fade;
         part.fade2 = fade2;
@@ -1658,7 +1745,8 @@ mod tests {
         let part = assets();
         let image = Lnszoom::at("../../").read_image(EXB_PATH).unwrap();
         // The overlays add EX0's triples to the base, clamped at 63.
-        for (i, (r, g, b)) in OVERLAYS.iter().enumerate() {
+        assert_eq!(part.ex0_overlays(), EXPECTED_OVERLAYS);
+        for (i, (r, g, b)) in part.ex0_overlays().iter().enumerate() {
             for entry in 0..64 {
                 let base = image.palette.entry(entry as u8);
                 let at = (i + 1) * 64 * 3 + entry * 3;
