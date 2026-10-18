@@ -135,7 +135,8 @@ therefore either ends the wait at tick 65 (X ≤ -32) or never at tick 135
 (X > -32). The port runs the measured duration instead: `RELEASE_WAIT_TICKS`
 = 71, named and cited, occupying ticks 65 through 135. This is the
 controller's D24 ruling — the reference is the authority and the real run
-must match its four keyframes. A single reference run cannot distinguish a
+must match its four keyframes — and it is registered as **A17** in
+`APPROXIMATIONS.md`. A single reference run cannot distinguish a
 constant from a release-side condition the frames do not expose; the constant
 is the fitted value the evidence supports, and the mechanism remains unknown.
 

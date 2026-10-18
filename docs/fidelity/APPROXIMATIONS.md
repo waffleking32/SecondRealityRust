@@ -414,10 +414,10 @@ prints both numbers per frame).
 
 ## A9 — ALKU: two rows of the font strip the routine reads are not in the file
 
-**Part:** ALKU (`ALKU/MAIN.C` over `ALKU/FONA.UH`), Phase 5 — carried into the
+**Part:** ALKU (`ALKU/MAIN.C` over `ALKU/FONA.UH`), Phase 4 — carried into the
 register here because this is where a font strip is next touched: Phase 1's task
 A7 found it (`docs/plans/01-assets.md`, A7's Interfaces block) and its ledger
-says Phase 2 owns the entry.
+says the entry belongs to the phase that ports the part.
 
 **The original.** `ALKU/MAIN.C:169` with `:218` and `:225` scan **32** rows, and
 `y2w=y+32` (`:274`, `:429`) draws 32 — of a strip that is **1,500×30**: the
@@ -448,7 +448,10 @@ cell's last two rows — the strip's 30 and 31 — are blank in those columns), 
 drew no *visible* ink from the padding there. What no screen can show is the other half: padding
 bits a black palette hides. Those are recorded in the linked image — `MAIN/DATA/ALKU.EXE`, PKLITE-
 packed like every part EXE in that directory — so the honest state is **"not measured here", not
-"unmeasurable"**, and Phase 5 (ALKU) is the task that owns settling it.
+"unmeasurable"**. Phase 4 ported ALKU and settled the part's drawing: it draws the 30 rows the file
+holds and not the two past it (`docs/fidelity/alku.md` §7, §11), and its two held font-card
+keyframes (1719, 2719) are byte-identical with that strip (`docs/fidelity/alku.md` §8). The padding
+bits a black palette hides remain unmeasured; the lead is the packed `MAIN/DATA/ALKU.EXE`.
 
 ## A10 — CRED: three of the five keyframes are the shipped build's credits, not the tree's
 
@@ -863,14 +866,16 @@ position's evidence, not ALKU's.)
 **Measured difference:** none for the answered domain — the word before the table and the last
 code field are the same in every build the tree holds, and the port returns them. For the refused
 region (`> 0x8E2E`) there is no measured difference either, and that is the honest statement of the
-gap: no caller in the tree is *shown* to call `dis_sync()` there (both callers are block 1's, and
-how far MUSIC0's order list has got while they run is not measured until they are ported). The
-answered band, by contrast, is measured — occupied for 81.1 % of `hiddenu`'s frames.
+gap: **Phase 4 ported both callers and measured their windows**, and neither reaches the refused
+region — ALKU's gates are crossed at boot 1537/2097/2509/3069/3630 over `second1`, whose highest
+published order is **9**, and PAM's gate is crossed at `(13, 1)` on boot 7710 (`second1b`), so the
+highest key either caller asks about is `0x0D01` — below even the table's last key `0x4200`, and far
+below `0x8E2E`. The answered band, by contrast, is measured — occupied for 81.1 % of `hiddenu`'s
+frames.
 
-**Revisit when a part is ported that syncs late (Phase 4):** if one of the two callers turns out to
-call `dis_sync()` above `0x8E2E`, the returned word there is linker-set and cannot be answered by
-anything the tree holds; the part would see a panic rather than the reference's arbitrary number,
-which is the one case this entry cannot close.
+**What this entry still cannot close:** a part that syncs above `0x8E2E` would receive a refusal
+(a panic naming the position) where the release returns a linker-set word. No caller in the tree is
+shown to do so — the two Phase-4 callers stay in orders ≤ 13 — and the case remains hypothetical.
 
 ## A16 — The boot's twelve-frame music transient: a run installs its own module at its start, not the boot's
 

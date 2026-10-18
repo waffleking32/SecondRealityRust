@@ -13,7 +13,7 @@ Phase status board. **Read this first if you are resuming work.**
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
-| 4 | Music-synced tier A | not started | — | — |
+| 4 | Music-synced tier A | **complete — untagged** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 byte-identical; the residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500, plus PAM's 7900 index plane, A21); all six wait on the music as the originals do, with the release's timings in A17/A18. Blocks 1, 3 and U start their first ported part and stop at the first unported one; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review is pending, so **the tag is withheld** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | — (review pending) |
 | 5 | Mid tier | not started | — | — |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
@@ -21,6 +21,18 @@ Phase status board. **Read this first if you are resuming work.**
 | 9 | Assembly & fidelity pass | not started | — | — |
 
 ## Where to pick up
+
+**Phase 4 (music-synced tier A) is complete — untagged** on `phase-4-music-synced-tier-a` at
+`9c457e2` plus this close-out's record. Its exit criterion (spec §10 — ALKU, PAM, DDSTARS, DOTS,
+MNTSCRL, RAYSCRL verified) is met, every criterion was re-run at the committed state, and the
+evidence is recorded below. Its plan is `docs/plans/04-music-synced-tier-a.md`, its per-task ledger
+(git-ignored scratch) is `.superpowers/sdd/04-music-synced-tier-a/progress.md`, its six notes are
+`docs/fidelity/{alku,pam,ddstars,minvball,mntscrl,rayscrl}.md`, and its decisions are **D30** (with
+D24, D25 and D29 binding). **The final whole-branch review has not run yet; the tag is deliberately
+withheld until it does and its findings are applied** — Phase 1/2/3's practice, because a tag that
+has to be moved is worse than a tag applied a few commits later. The branch starts at `phase-3`
+(`3d42b88`): its first commit is Phase 3's human-listen record, its second the Phase 4 plan, and
+the rest the phase's ten tasks and their fix rounds.
 
 **Phase 2 is complete** — its exit criteria are met, its evidence is recorded below, and **the
 `phase-2` tag is applied at this commit.** The work is on branch **`phase-2-shell`**, not yet merged
@@ -1577,7 +1589,407 @@ four the wave itself had introduced — each corrected and re-checked before the
 here, on Phase 1's and Phase 2's ruling that a tag which has to be moved is worse than a tag applied
 a few commits later.
 
+### Phase 4's evidence (close-out, Task 10, 2026-10-17)
+
+**Exit criterion (spec §10): ALKU, PAM, DDSTARS, DOTS, MNTSCRL, RAYSCRL verified.** All six are.
+Every number below was **re-run at the committed state** (`9c457e2`, branch
+`phase-4-music-synced-tier-a`) in one pass; this close-out's own commit adds records only, so the
+state the commands ran against is the phase's tip. The blocks are pastes of those runs: `(…)` marks
+an elision, and an `exit:` line is the shell's reading of a command's exit code rather than a line
+of its output.
+
+| part | reference keyframes | planes compared | the verdict |
+|---|---|---|---|
+| ALKU | 900, 1719, 2719, 5859 | RGB only — all four (176 × 400 = 70,400 > 65,536, so the oracle refuses the indexed read, `reference-indices.md` §1.6) | **0 of 128,000** pixels at 900/1719/2719; **2,353 (1.8383 %)** at 5859, all inside the old text's glyph region — A20's batch phase; 350 of 400 rows byte-identical |
+| PAM | 7710, 7760, 7830, 7900 | RGB all four; 7900 also carries `.idx` | **0 of 64,000** at all four RGB; 7900's index plane differs in **60,375/64,000**, max delta **194** — the plane is BEGLOGO's white field, not PAM's screen (**A21**, registered not adopted) |
+| DDSTARS | 1900, 3000, 5000, 8000 | RGB only — the emulator names the screen 16-colour and refuses the indexed read (§22.5) | **0 differing bytes** at all four |
+| DOTS (`minvball`) | 10900, 11200, 11800, 12400 | RGB only — every keyframe is a moving frame | **67 / 63 / 37 / 25** px of 64,000 (0.1047 / 0.0984 / 0.0578 / 0.0391 %), the release's coincident-dot overlay and the fitted `j` (**A19**) |
+| MNTSCRL | 500, 1100, 1700, 2300 | 500 indexed + RGB; the other three RGB only | **0 differing bytes** at all four; 500 byte-identical in both planes |
+| RAYSCRL | 13000, 13500, 14000, 14500 | 13500 indexed + RGB; the other three RGB only | **0** at 13000 and 13500 (13500 in both planes); **3** and **42** px at 14000 and 14500, all in the font-overlay region — the release's `MIEKKA.SCI` differs from the tree's (§6 of the note), not a timing difference |
+
+The six commands and what they printed. The four parts whose keyframe tests print no per-frame line
+assert the verdicts in the test body — MNTSCRL's `the_four_keyframes_match_the_reference` asserts 0
+bytes at 500 in both planes and at 1100/1700/2300 in RGB, MINVBALL's
+`the_four_keyframes_match_the_reference_at_the_mapping` asserts the exact residues above (so a
+change that moves them fails), RAYSCRL's and DDSTARS's tests assert their counts the same way — so
+the harness's `test … ok` is the printed verdict for those. The `should panic` lines are the
+truncated-frame tests' own expected output, not failures.
+
+```text
+$ cargo test -p secondreality --test alku -- --nocapture
+(…)
+running 4 tests
+test the_run_is_numbered_in_boot_frames_and_draws_320x400 ... ok
+5859: 2353/128000 px differ (1.8383 %), all in rows 150-243, columns 40-279
+test the_four_keyframes_against_the_reference ... ok
+second1 at the keyframes: [(900, "0:56", "0:56"), (1719, "2:21", "2:21"), (2719, "4:7", "4:8"), (5859, "9:46", "9:46")]
+test the_runs_music_is_the_block_one_recipes_at_the_keyframes ... ok
+test a_block_one_run_starts_at_alku_and_is_the_same_run ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.64s
+
+$ cargo test -p secondreality --test pam -- --nocapture
+(…)
+running 3 tests
+test the_run_is_numbered_in_boot_frames_and_plays_block_ones_music ... ok
+7900 index plane: 60375/64000 px differ, max delta 194
+test the_7900_index_plane_is_the_next_parts_white_field_not_pams_frame ... ok
+boot 7710: 0/64000 px differ (0.0000 %)
+boot 7760: 0/64000 px differ (0.0000 %)
+boot 7830: 0/64000 px differ (0.0000 %)
+boot 7900: 0/64000 px differ (0.0000 %)
+test the_four_keyframes_match_the_reference_with_their_support_frames ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.36s
+
+$ cargo test -p secondreality --test mntscrl -- --nocapture
+(…)
+running 8 tests
+(… the `a_truncated_frame_is_refused_rather_than_counted` panic text is that `#[should_panic]` test's expected output …)
+test a_truncated_frame_is_refused_rather_than_counted - should panic ... ok
+test a_block_three_run_starts_here_and_is_numbered_the_same_way ... ok
+test the_held_opening_is_the_references_frame_500_in_both_planes ... ok
+test the_music_is_eleven_polls_in_at_the_parts_first_tick ... ok
+test the_run_is_numbered_in_its_own_frames_and_draws_320x200 ... ok
+test the_releases_first_wait_is_seventy_one_ticks ... ok
+test the_four_keyframes_match_the_reference ... ok
+test the_real_players_cue_fades_the_part_out_and_the_run_holds_black ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.07s
+
+$ cargo test -p secondreality --test minvball -- --nocapture
+(…)
+running 4 tests
+(… the same expected `#[should_panic]` output …)
+test a_truncated_frame_is_refused_rather_than_counted - should panic ... ok
+test the_run_is_numbered_in_its_own_frames_and_draws_320x200 ... ok
+test the_four_keyframes_match_the_reference_at_the_mapping ... ok
+test the_run_reaches_the_frame_cap_and_retires ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.92s
+
+$ cargo test -p secondreality --test rayscrl -- --nocapture
+(…)
+running 4 tests
+(… the same expected `#[should_panic]` output …)
+test a_truncated_frame_is_refused_rather_than_counted - should panic ... ok
+test the_run_is_numbered_in_its_own_frames_and_draws_320x200 ... ok
+test the_music_is_the_block_three_position_at_every_keyframe ... ok
+test the_four_keyframes_match_the_reference_at_the_mapping ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s
+
+$ cargo test -p secondreality --test ddstars -- --nocapture
+(…)
+running 3 tests
+(… the same expected `#[should_panic]` output …)
+test a_truncated_frame_is_refused_rather_than_counted - should panic ... ok
+test the_run_is_numbered_in_its_own_frames_and_draws_320x400 ... ok
+test the_four_keyframes_and_their_support_frames_match_at_the_mapping ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.72s
+```
+
+(ALKU's music line is the block-1 recipe at the keyframes: the port and the trace agree on the
+order everywhere and on the row at three of four; 2719 is one row apart (`4:7` against `4:8`),
+which is the block-1 clock's 2–4-frame lead and the trace's sample instant (A12), and the test
+allows one row either side. The four keyframe frames themselves are the reference's — the music
+does not touch ALKU's picture.)
+
+#### The falsification list (the plan's Step 2)
+
+Every constant and rule this phase introduced, in Phase 2/3's table shape: the value, how it was
+derived, what a one-unit error would change, and the strongest **independent** check that exists for
+it. "Independent" means the same thing it did in Phase 3 — a measurement produced for another
+purpose or by a different instrument, **not** the evidence the constant was derived from.
+
+| constant or rule | value | how it was derived | a one-unit error would… | independent check |
+|---|---|---|---|---|
+| MNTSCRL's and RAYSCRL's cue `dis_musplus() == -11` exactly | exact equality, not `< -10` and not `<= -11` | `FOREST/READ2.PAS:200`, `WATER/DEMO.PAS:158-166`; both unit tests drive -10 and -12 and only -11 fires the 65-tick fade; the real player reaches -11 at MNTSCRL `45:53` (tick 1,979) and RAYSCRL boot 14942/14943, where the release's seven confirming reads put the first upload at 14950 | starts the fade one row (~11 ticks) early or late, or never: RAYSCRL's fade-onset palette is a step out; MNTSCRL's four keyframes are all before its cue | **RAYSCRL: half** — the survey's partner capture `out/b4b-ray-sess1/frame_014950.rgb` is the release's first fade-out upload (the port's onset matches its palette at j = 1 but differs in 1,061 px, the release's `MIEKKA` strip), and `out/` is git-ignored scratch, so a fresh clone cannot re-run it. **MNTSCRL: none** — no reference frame after its cue; the source's own `cmp dx,-11` and the player's published position are the evidence |
+| MINVBALL's cue `-4 < musplus < 0` (the open interval) | -3, -2 or -1; not -4 and not 0 | `DOTS/MAIN.C:191-195`; `the_cue_window_is_the_open_interval_minus_four_to_zero` drives -4, -5, 0 and -1 and asserts only the open window breaks; `a_skipped_cue_leaves_the_part_continuing_and_drawing` covers a window stepped past | `>= -4` breaks one row early; `<= 0` breaks at 0, the common reading, and would end the part on its first main-loop tick | **none that exercises the break** — the reference's first main-loop -3 is boot **12,950**, past the frame cap at **12,947**; the -3s at 10,368–10,379 are inside the fade, which does not check the cue; all four keyframes are before both. The source line and the trace's reading are the evidence, not a measurement of the break |
+| ALKU's `dis_sync() < 1/<2/<3/<4` gates and PAM's `< 10` | 1, 2, 3, 4, 10 | `ALKU/MAIN.C:59`, `:66`, `:72`, `:79`; `PAM/OUTTAA.C:39`; `second1`'s code transitions are 1 at **1537**, 2 at **2097**, 3 at **2509**, 4 at **3069** (5 at 3630), and `second1b`'s 7710 is `(13, 1)` = code **10**. A card holds 428 ticks (64 fade + 300 + 64) | a threshold one code higher delays a card or the picture by that code's span (~560 frames in block 1) or never opens it; one lower opens it at the previous code | **partial** — the reference's cards at 1719/2719 are exact, so the gates that place them are checked, and PAM's four keyframes are exact; but an intermediate error can move card 2 without moving either ALKU keyframe (with `<1` at the second gate, card 2 starts at 1965 instead of 2097, and 2719 is still card 3's hold). The trace's transitions are the derivation instrument |
+| ALKU's `a&1` / `tptr` off-by-one | batch 0 waits for code **5**, not 4 | `MAIN.C:138` `dis_sync() < 4+tptr` with `:102`'s `switch(tptr++)`: case 0 leaves `tptr` at 1; `the_picture_fade_hands_over_to_a_batch_gated_on_code_five` asserts 5 | fixing it to 4 runs batch 0 at code 4 (3069) instead of 5 (3630) — ~561 frames earlier — and the text's phase at 5859 changes | **none** — 5859 is the only frame where the batches show, and its residual is A20's CPU-timing phase; the phase scan shows the picture exact at other phases, so the frames cannot separate the off-by-one from A20. The source's post-increment is the evidence |
+| ALKU's 9-tick scroll | `SCRLF = 9` | `MAIN.C:399-401` `while(frame_count<9); frame_count-=9`; `the_scroll_advances_one_step_every_nine_ticks` pins the first step on the ninth tick and the second on the eighteenth, `(a=1,p=1)` then `(a=2,p=0)` | an 8- or 10-tick cadence puts a different `a`/`p` at 5859; the picture band and the refresh column move | **yes, at one frame** — the 5859 reference frame: 350 of 400 rows byte-identical and every differing pixel inside the text region, so the pan and the picture band are the reference's (`the_four_keyframes_against_the_reference` asserts both) |
+| ALKU's pan arithmetic | `cop_start = a/4 + p*88`, `cop_scrl = (a&3)*2`; `start_addr = 4·cop_start`, `pan = cop_scrl/2` | `MAIN.C:403`; the AC register's unit is half a pixel; `the_pan_is_the_crtc_start_and_pel_panning` pins 20 `(a,p)` pairs and the first displayed pixel `a + p*352` | a one-byte or one-pixel error shifts or shears the window; at 5859 the picture band stops matching | **yes** — the 5859 reference frame's band and pan (above), plus the unit test's `source_index` for the first pixel |
+| PAM's 4-tick cadence and `FRAME_COUNT_AT_ANCHOR = 2` | 4 ticks a step; the counter reads 2 at boot 7710 | `OUTTAA.C:46` `while(frame_count<4); frame_count=0`; the reference's own support frames force the boundary — 7759 ≠ 7760 and 7761 = 7760 put step 13 at 7760, so `T_1 = 7712` and the counter at 7710 is 2 (`reference-indices.md` §6.3) | a 3- or 5-tick cadence shifts every step, and the four keyframes land on different animation frames; a counter of 1 or 3 moves the first step a tick | **yes** — the reference's support triples (7759/7760/7761, 7829/7830/7831, 7899/7900/7901) are a different observable from the source's `4`, and the keyframes fail under either alternative (`the_four_keyframes_match_the_reference_with_their_support_frames`) |
+| the block-1 music clock and PAM's pre-roll | `BLOCK_ONE_MUSIC_START_FRAME = 400`; 7,310 polls for PAM | `second1`'s first row change (frame 420, `_np_zframe` 14) fits **399.6** (direct reading 405, a 5.4-frame sample-instant gap); 7710 − 400 = 7,310; `the_block_one_pre_roll_puts_the_player_at_the_traces_7710_position` polls the real MUSIC0 and reads `(13, 1)`, zframe 5008, at 7,310 polls — the trace's row at 7710 | 399/401 or 7,309/7,311 puts the player one tick off; the row stays `(13, 1)` for six ticks so the gate still reads 10, but the published position/zframe at the keyframe differs; a 408 clock would wait four frames instead of pre-polling four, so the player is four ticks behind at the run's first drawn frame | **half** — `second1b` is a different session from the 400 fit and confirms the row at 7705/7710, but the row is a coarse observable (six ticks) and the pre-roll is arithmetic from the 399.6 fit, so a ±2-poll error is invisible to both |
+| MINVBALL's Microsoft C LCG | multiplier **214,013**, increment **2,531,011**, modulus 2³², seed 1, returning `(seed >> 16) & 0x7FFF` | `DOTS/MAKEFILE:10-16` (`cl /qc /AL`, Microsoft C 6.0 large model) and the linked `DOTS.EXE`'s “MS Run-Time Library” string; first ten values 41, 18,467, 6,334, 26,500, 19,169, 15,724, 11,478, 29,358, 26,962, 24,464 | Borland's generator (seed 1, `0x015A4E35`) is a different stream and places the scatter's dots elsewhere; the 12,400 frame would not be 25 px from the reference | **yes** — the reference's 12,400 scatter is reproduced to **25 px** with the Microsoft stream, and the Borland counterfactual does not place the dots (`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`, `the_four_keyframes_match_the_reference_at_the_mapping`) |
+| MINVBALL's initial `j` | **88** | the source never assigns it (`MAIN.C:87`, `:200`); the ignored fit replays all 512 cursors against the 10,900 frame and 88 is the minimum — best five `[(67, 88), (341, 171), (353, 168), (354, 14), (356, 386)]` | `j = 171` raises the 10,900 residue from 67 to 341 px; the other keyframes' residues grow | **no independent check** — the release's stack value is inside the packed `MINVBALL.EXE`; the fit at 10,900 is the only evidence. The other three keyframes (63/37/25 px) show the value generalizes but are not independent of the same objective; `the_entry_bx_is_unobservable_at_the_keyframe` shows the other uninitialised register is unobservable |
+| DDSTARS's LCG | multiplier **`0x343FD`**, increment **`0x269EC3`**, seed 0, returning bits 32–47 of the *product* (the `mul`'s `dx`), not the new state's high word | `STARS.ASM:33-42`; first twelve returns 0, 126, 25208, 45290, 7958, 4852, 38525, 27318, 39895, 10061, 34431, 60585; first table entries `(255,-512,-386)`, `(254,120,-278)`, `(253,278,244)`, `(252,125,182)` | a stream one step out moves every star; the four keyframes' 0-byte match fails | **yes** — all four reference keyframes are byte-identical, and the 11-frame survey sweep at the mapping (a second capture, git-ignored scratch) is 0 bytes at each tick (`the_rng_is_the_originals_lcg_and_its_first_values_are_the_sequence`, `the_four_keyframes_match_the_reference_at_the_mapping`) |
+| DDSTARS's ring and the `+17` second write | 64 units of 8 KB, never cleared; `staradd2` writes unit `u` and `(u + 17) & 63` | `STARS.ASM:260-267`, `:378-397`; `the_ring_wraps_every_sixty_four_ticks_and_never_clears` finds the planted bit after a whole ring; `the_second_star_pass_writes_the_same_bits_into_the_plus_seventeen_unit` pins the pair | without the `+17` write the survey's 1700 frame differs in **729 px / 2,187 RGB bytes**; a 63-unit ring or a cleared unit loses the persistence | **yes** — the survey's 1700 frame is a different capture from the four keyframes and is byte-identical only with both writes (`the_plus_seventeen_write_is_what_the_survey_frame_shows`, ignored; `out/` scratch) |
+| DDSTARS's text clip (D24) | the tree's commented-out guards are **not** applied; the text stays visible | `STARS.ASM:692-696`, `:711-716`, `:737-742`, `:756-762` are commented out; the reference shows text and holds **1,025** star pixels in the 31 clip-window rows at 1900 | applying the clip would remove those rows' stars and the 1900 keyframe would differ | **yes** — `the_star_clip_is_assembled_out_and_the_keyframes_hold_its_pixels` counts the reference's 1,025 pixels in the clip rows and the port's same count; the artifact question is decided by the frames, since `MAIN/DATA/DDSTARS.EXE` is packed |
+| A17 — MNTSCRL's first wait | **71 ticks** | the release's last held frame is boot **554** and its pre-roll's first `scr` **555**; tick 0 at 419 gives ticks 65–135; the trace's position is order 42 row 16, `zplus` 0, `musplus` −32 on **both** sides, so no `musplus` threshold can end it there | one tick early/late and the scroll starts a tick out; the 1100/1700/2300 keyframes move 2.4–3.1 % of pixels a frame and fail | **half** — the four keyframes (not the boundary frames the value was fitted to) are byte-identical at 71, and the tree's own `musplus >= 0` is measured at **118,843 / 118,924 / 119,056** bytes against the reference's 1100/1700/2300; but the mechanism is unknown, and a single reference run cannot distinguish a duration from a release-side condition its frames do not expose |
+| A18 — RAYSCRL's gate confirmation | **`GATE_CONFIRM_TICKS = 7`** | three intervals measured independently: init 12962 → blit 12969; stage 2 13609 → first draw 13616; cue 14942/14943 → first upload 14950; the published row stays 16 for eight frames and −11 for the trace's nine, so the leaves fall inside the windows, not at their starts | 6 or 8 moves the main loop or the fade one tick; the tree's immediate condition starts the main loop six draws early and the 14000/14500 frames differ by **8,375 / 11,958** px | **yes, with a caveat** — the three gates are different observables (a trace row window, the font phase, the fade-onset palette) and all give 7, and the tree's counterfactual is measured by `the_trees_immediate_gate_draws_the_keyframes_early`; but all three are read from the same reference sessions, and the cue's evidence is a scratch capture |
+| MNTSCRL's `scp` bound | **640** (release), where the tree's `READ2.PAS:88` says 639 | D24's single-constant branch: under 639 boot 2300 differs in **401 bytes / 146 px**, under 640 in **0**; 1100/1700 are before the bound and identical under both; the array's extra element at 19,840 is exactly what a stride-640 read at column 640 needs for row 30 | the tree's 639 loses the 507th shift's appended column and 2300 fails; a bound of 641 would append a column the array does not hold | **yes** — the 2300 reference frame, with 1100/1700 showing the difference is the bound's and not something else's (`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`) |
+| the mid-run music positions and pre-rolls | MNTSCRL **11** polls (tick 0 at 419, clock 408); RAYSCRL **MUSIC1@86**, **268** polls; MINVBALL **MUSIC1@75**, **256** polls | MNTSCRL: 419 − 408, and the dump at tick 81 (boot 500) reads `42:10`, the trace's frame 500. RAYSCRL: `second3b` holds order 86 through 12961 and 88 from 12962; order 87 is a `254` marker that sets `zplus` bit 1, and `play_song(86)` publishes 88:0 on poll 269. MINVBALL: `second3b` holds `75:61` at 10,368, and a player seeked to 75 reaches it on poll 257 | one poll early/late puts the published position one row off (a row holds ~6 ticks); for RAYSCRL, seeking 85 or 87 changes the order/`zplus` and the init gate, and seeking straight to 88 clears `zplus` so the gate never passes | **half** — each position is checked against the trace at the part's tick 0 (MNTSCRL `the_music_is_eleven_polls_in_at_the_parts_first_tick`, RAYSCRL `the_music_is_the_block_three_position_at_every_keyframe`, MINVBALL's manifest `75:61`), but the trace is also the derivation instrument, and no keyframe's pixels depend on the position |
+| MINVBALL's `repeat` | one tick per frame in the port; the reference's `repeat` measured **1** over 10,900–12,400 | the four keyframes' frame counters differ by **300, 600, 600**, exactly the boot differences; the y state — one `drawdots` integration a frame — matches at every keyframe (`the_repeat_difference_is_zero_at_the_keyframes`) | a `repeat` above one between two keyframes advances the counter without a draw and moves the ball rows; the residues would grow | **yes over 10,900–12,400** — four reference frames and their support neighbours; **the 12,947 end is a prediction** from the source's 2,450-frame cap, not a measured frame |
+| A20 — ALKU's text-batch phase | no constant: the port runs the source's trace-faithful batch phase, and its `fmaketext`/`faddtext` cost zero CPU | `MAIN.C:138`/`:102`, and the phase scan moves the batch transitions while the four gates stay fixed: shift −9 gives **0** pixels, shift +0 gives **2,358**, shift +10 gives **0** at 5859 | the old text's XOR pixels appear or vanish at 5859; the picture band, pan and palette are unchanged | **none** — the phase is the original's CPU time in `fmaketext`/`faddtext`/`prt` plus the session's music clock, neither of which the port models; the scan is a counterfactual, and the reference's own direction is not established (one session). The note says so (`alku.md` §8, §11); the scan is `the_5859_phase_sensitivity` |
+| the `PosList` format | u16 count, then that many u16 offsets; a zero count writes nothing | `FOREST/ROUTINES.ASM:21-35` and `WATER/ROUTINES.ASM:21-36` agree; the six real files parse to **237×31 columns / 15,592 positions** and **158×34 / 20,858**; a synthetic truncated stream is refused | a field error fails the parse or shifts every offset; the blitter writes the wrong columns and the keyframes fail | **yes** — two independent parts' files and the survey's totals agree, and each part's asset test compares every byte of the other payloads as well (`the_forest_lists_measure_as_the_survey_says`, `the_water_lists_measure_as_the_survey_says`) |
+| the four part-relative mappings (D30) | MNTSCRL `419 + tick`; RAYSCRL `12962 + tick`; MINVBALL `10368 + tick`; DDSTARS `414 + tick` — none is a `boot_anchor` | MNTSCRL: the fade's frame means (6.08 at 425, 8.91 at 430, 10.25 at 435, 10.53 at 440) place tick 0 at 419. RAYSCRL: the published 88:0 at 12962, the blit at 12969, the fade's k=14 hold, and the font phase (14000 = draw 384). MINVBALL: the fade's first wait at 10,368 and the keyframes' frame counters 403/703/1303/1903. DDSTARS: the text band's open height at 1900 (28 rows ⇒ `A = 32` ⇒ `starframe 1487`), the stars' pages (tick 1485), and 11 survey frames | one tick and every index shifts: each part's four keyframes land on different frames and fail | **yes for each mapping's value** — each part's `the_four_keyframes…` integration test holds four keyframes with support neighbours, and for DDSTARS an 11-frame survey sweep (a different capture); **the start is not a frame**, which is why none is an anchor (D30) |
+
+**The count, measured rather than assumed.** The table has twenty-one rows, and they divide three
+ways (one row, the cue row, is counted by part):
+
+- **Twelve are checked by something independent of their own derivation**: the 9-tick scroll, the pan
+  arithmetic, PAM's cadence and counter, the Microsoft LCG, the DDSTARS LCG, the ring and its `+17`
+  write, the text clip, A18's seven ticks (with the caveat that all three gates are the same
+  sessions), the `scp` bound, `repeat` (over its measured window), the `PosList` format, and the
+  four mappings' values.
+- **Five are half-checked, and the halves are named**: ALKU/PAM's gates (the keyframes check the
+  gates they land in, not an intermediate one), the block-1 clock and PAM's pre-roll (the row is a
+  six-tick observable and the pre-roll is arithmetic from a fit), A17 (the keyframes check the
+  value, not the unknown mechanism), the mid-run positions (the trace is both derivation and
+  check), and RAYSCRL's cue (a scratch capture outside the reference tree).
+- **Five have no independent check at all**: MNTSCRL's cue (no reference frame after it),
+  MINVBALL's cue window (the reference's own break falls past the frame cap), ALKU's `tptr`
+  off-by-one (A20's phase cannot separate it), MINVBALL's `j` (inside the packed release), and
+  A20's phase itself.
+
+This is broader than the plan's Step 2 named: it asked for the cue forms, the cadences, the stage
+bounds, the pan, the LCGs, the release waits and the fitted values, and the table adds the `scp`
+bound, the mid-run positions, `repeat`, the `PosList` format and the four mappings because each is
+load-bearing for a keyframe the phase claims. The absences are recorded rather than smoothed over.
+
+#### The verification commands, re-run
+
+```text
+$ cargo test --workspace
+(…)
+test result: ok. 239 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.51s
+(…)
+test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+(…)
+exit: 0
+
+$ cargo clippy --workspace -- -D warnings
+exit: 0
+$ cargo clippy --workspace --all-targets -- -D warnings
+exit: 0
+
+$ cargo xtask reference verify --tree reference
+(…)
+verdict: ok — 32 capture(s), 113 file(s), 26511402 bytes
+exit: 0
+
+$ cargo xtask assets verify --decode
+(…)
+decode: 151 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 88 headerless with no decoder, 1 refused on record, 0 finding(s)
+verdict: ok
+exit: 0
+
+$ cargo xtask assets verify --tree --decode
+(…)
+tree: 151 file(s) recorded, 151 in the tree, 0 finding(s)
+decode: 151 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 88 headerless with no decoder, 1 refused on record, 0 finding(s)
+verdict: ok
+exit: 0
+```
+
+(The two `test result:` lines shown are the two targets that carry ignored tests; `(…)` elides the
+other 37 targets' lines. **935 tests pass, zero fail, seven are ignored**, summed from the run's 39
+`test result:` lines, and the run prints no `warning:` line. The seven ignored are the same three
+Phase 2 left — `sr-assets/tests/omf.rs`'s write-into-`assets/` regenerator and CRED's two record
+tests — plus four Phase-4 measurements: ALKU's curated-palette counterfactual and 5859 phase scan,
+MINVBALL's `j` fit, and DDSTARS's `+17` survey check. The three CRED/DDSTARS ones read git-ignored
+scratch captures, so a fresh clone cannot re-run them; the ALKU two and MINVBALL's fit read
+committed files. `reference verify` covers **32 captures / 113 files / 26,511,402 bytes** where
+Phase 3 closed at 28 / 109 / 26,128,467: the four new music traces are the phase's one new kind of
+reference, and the verifier recomputes each trace's coverage from the file's own frames. `assets/`
+is unchanged at 151 files plus `PROVENANCE.md`.
+
+**The `assets` command's spelling.** The brief's `cargo xtask assets verify --decode` exists and was
+run as written; `--decode` alone decodes every asset but does **not** re-hash the tree, so the
+stronger `--tree --decode` (Phase 3's form) was run as well and prints the extra `tree:` line above.
+Both exit 0.)
+
+#### What could not be confirmed — the phase's own negatives
+
+- **Which cues rest on which evidence, and which on synthetic sequences only.** The new traces are
+  `second1` (ALKU: the code transitions 1537/2097/2509/3069/3630 and the 638-position block-1
+  comparison), `second1b` (PAM: `(13, 1)` at 7710 and the row change at 7705), `second3b` (RAYSCRL:
+  the order-86/88 seek and the four published positions; MINVBALL: `75:61` at 10,368 and the
+  seek), and `hiddenu2` (DDSTARS: the position at 8000, which the part never reads — the trace
+  places it in demo time). MNTSCRL's cue evidence is the **Phase 3** trace `second3` (the
+  `42:10` pre-roll position and the tree's counterfactual frame 2488). Every part's cue **window**
+  is additionally driven by a scripted `Music` in its unit tests: the exact `-11`, the open
+  interval, the skipped cue, the exit-while-waiting, and the stage transitions are synthetic,
+  because a scripted player is the only way to drive a cue the reference run does not reach.
+  MINVBALL's cue is never reached in the reference run at all (the frame cap at 12,947 precedes
+  the first main-loop -3 at 12,950); DDSTARS has no cue.
+- **DOTS's `repeat` and the tick model.** The original advances the physics `repeat` times per
+  iteration, where `dis_waitb`'s return can exceed one; the port advances once per tick. The
+  reference measures the difference as **zero over 10,900–12,400** (frame counters 300/600/600
+  apart, the y state matching), but the end at 12,947 is the mapping's prediction from the source's
+  2,450-frame cap, not a measured frame. A `repeat` above one between two keyframes would move the
+  ball rows; nothing measures whether one occurred outside the keyframe span.
+- **DDSTARS's D24 text divergence.** The tree's star-clip guards are commented out and the
+  reference shows text; the port follows the reference and the source's assembled-out state. The
+  four keyframes are 0 bytes and the 1900 frame holds the 1,025 clip-window star pixels the guards
+  would have removed. The shipped `MAIN/DATA/DDSTARS.EXE` is packed, so which build put the frames
+  on screen is not readable from the files — the frames decide, and they decide against the clip.
+- **A9's font shift.** The port reads `FONA.UH` and draws the 30 rows the file holds; the shift
+  `[783:]` is invisible (all 76 ink runs are the same glyph bytes one column over, byte 783 is
+  zero). The two rows past the strip are uninitialised linker padding: their visible half is blank
+  in the reference's held cards, and the half a black palette hides remains unmeasured. The
+  resolution is cited, not re-derived; the lead is the packed `MAIN/DATA/ALKU.EXE`.
+- **Which keyframes are RGB-only, and why.** **ALKU**'s four are RGB-only because 176 × 400 =
+  70,400 exceeds one plane's 65,536 bytes, so the oracle refuses the indexed read (§1.6) — the
+  comparison is RGB and the 6→8-bit widening is load-bearing. **DDSTARS**'s four are RGB-only
+  because the emulator names the 320×400 screen 16-colour and refuses the indexed read (§22.5); the
+  port composes its own index from planes 0–2 and the set/reset text bit. **MINVBALL**'s four are
+  RGB-only because every keyframe moves, so the indexed read (taken 20+ rendered frames late) would
+  not be honest. **MNTSCRL** files `.idx` at 500 (held) and not at the three moving scroll frames;
+  **RAYSCRL** files it at 13500 (held) and not at the three moving ones. **PAM** files it only at
+  7900, and that plane is BEGLOGO's white field — A21 — so the index comparison there is
+  registered, not adopted, while the RGB is byte-identical.
+- **The same-format caveat.** Every comparison is same-format: `.idx` against `.idx` where both
+  sides have one, `.rgb` against `.rgb` otherwise. There is **no cross-format claim**, and where the
+  reference is RGB-only the port's index plane is not checked at all — PAM's 7900 is the case where
+  the RGB agrees and the planes do not (A21). `cargo xtask compare` is not used for the four
+  part-relative parts: it pairs by the manifest's reference index, and a run numbered from zero is
+  not that index; the integration tests compare bytes at the mapped tick, which is stricter than
+  `compare`'s ±1 pairing because there is no session phase to search.
+- **The part-relative block-3/U dumps, and the stop at the first unported part.** `--block 3` and
+  `--block U` runs are `index_origin: "part"`, `anchor: null`, so their dumped indices are not
+  reference indices; their shell tests assert the first part, the music row and the numbering, and
+  the keyframe tests run `--part <name>` and compare at the mapping. More sharply: because a block
+  **stops at the first part it has not written**, `--block 1` stops at U2A (so PAM is unreachable
+  through block 1), `--block 3` stops at LNS&ZOOM (so MINVBALL and RAYSCRL are unreachable through
+  block 3), and only ALKU, MNTSCRL and DDSTARS start a block run. The three mid-block parts'
+  acceptance is `--part`, not a block run; the block plans are untruncated and a test derives each
+  stop from the registry.
+- **The release's mechanisms are unknown, and the phase says so.** MNTSCRL's 71-tick wait and
+  RAYSCRL's seven-tick confirmation are measured durations/behaviours; a single reference run
+  cannot distinguish them from release-side conditions its frames do not expose. The packed
+  `MNTSCRL.EXE`, `RAYSCRL.EXE` and `MINVBALL.EXE` are the leads. A17/A18/A19 record each.
+- **The fits, named as fits.** MINVBALL's `j = 88` is a fit over the release's uninitialised stack,
+  not a read value; A20's 5859 phase is the original's CPU time, not modelled; PAM's 7,310-poll
+  pre-roll is arithmetic from the 399.6 fit; the block-1 clock's 399.6 sits 5.4 frames from the
+  trace's direct 405. None of these is re-anchored to make a diff pass; the fits that exist are
+  the ones the source leaves free.
+- **RAYSCRL's 14000/14500 residual is an asset, not a timing, difference.** The 3 and 42 px are all
+  in the font-overlay region the strip has scrolled into; the reference's bytes are the tree's
+  previous source column at five sampled positions, and the tree's `MIEKKA.OBJ` carries the file's
+  bytes exactly. Patching bytes only the release holds would stop it being an original-format read.
+- **The `#[ignore]`d record tests.** Phase 2's three remain (CRED's two and `omf.rs`'s regenerator),
+  and Phase 4 adds four measurements. Three of the seven need git-ignored scratch (`out/`), so a
+  fresh clone cannot re-run them; they are disclosed where they live (`cred.md` §3,
+  `ddstars.md` §10). The suite's green does not cover them.
+- **The block-3/U pixel comparisons are not asserted end to end.** Block 1's block-vs-part equality
+  is asserted for ALKU (`a_block_one_run_starts_at_alku_and_is_the_same_run`), but block 3 stops
+  before its mid-block parts and block U's part is part-numbered; there is no block-level pixel
+  comparison for MNTSCRL/DDSTARS beyond the part runs and the shell manifests.
+- **A15's refused band is still unentered.** The two `dis_sync()` callers Phase 4 ported stay in
+  orders ≤ 13 (second1's highest published order is 9; PAM's gate is at `(13,1)`), so the
+  `> 0x8E2E` refusal remains a hypothetical case; A15 records it, now with the callers measured.
+- **DDSTARS's exit is one frame short by construction.** The port polls `exit_requested` at the top
+  of `frame`, so the tick that receives the flag is not drawn, where the source draws the iteration
+  before its DIS function 2 check. No filed frame is near an exit.
+- **The suite green is not a claim that every keyframe is exact.** Seventeen of the twenty-four
+  keyframes are byte-identical; the seven residuals are named, attributed and asserted at their
+  measured counts (A19, A20, the `MIEKKA` asset), and PAM's index plane is A21's registered
+  divergence.
+
+#### What Phase 4 leaves Phase 5, in one place
+
+- **The mid-block parts are not reachable through their blocks yet.** PAM waits behind U2A (Phase 6,
+  vector engine); MINVBALL and RAYSCRL wait behind LNS&ZOOM and PLZPART (Phase 5). Their mappings
+  are exact at the reference keyframes but their block positions in a real chain are not measured
+  until the intervening parts are ported and the chain can run.
+- **The block-2 → block-3 alignment wait is still unmodelled.** `MAIN/U2.ASM:829-853` waits on
+  `muscode` between PANICEND and MNTSCRL on a full run; MNTSCRL's release timing was measured from
+  `SECOND 3`, whose entry restarts MUSIC1 at order 42 instead. A full run through block 2 will need
+  the wait's own evidence.
+- **The mid-run restarts remain unmodelled.** `:813-818` (MUSIC1 at order 0, `SECOND 1` only) and
+  `:880-885` (MUSIC0 at order 18, before U2E) are reachable only once U2E/U2A and the block-2 parts
+  exist; the one-row-per-run model still has no place for them (D13, `music.md` §12).
+- **The packed release is still the only route to A17/A18/A19's mechanisms.** Unpacking
+  `MNTSCRL.EXE`, `RAYSCRL.EXE`, `MINVBALL.EXE` or `ALKU.EXE` would turn each fitted constant into a
+  readable condition (and settle A9's padding and MINVBALL's stack `j`); no unpacker was written.
+- **A20's phase and the original's CPU cost are not modelled.** A fidelity pass that models the
+  cost of `fmaketext`/`faddtext`/`prt` (or a capture at a different session phase) is the lead;
+  until then 5859 is a measured residual.
+- **The DDSTARS text decision is the frames', not the packed build's.** The reference and the
+  tree's assembled-out state agree; a later unpacker that finds the shipped clip active would
+  reopen D24 on this part, and the 1,025-pixel count is the discriminator.
+- **A15's far band and `zinfo`'s non-zero values remain unmeasured.** A Phase-5 part that syncs
+  above `0x8E2E` would meet the refusal; a part waiting on a non-zero `zinfo` would wait for ever
+  against the port as it does against the reference. Neither has a caller yet.
+- **The phase's instruments are reusable.** The `music trace` windows (four new), the per-recipe
+  `MusicStart` rule (D30), the `PosList` decoder, the D19 support-frame shape and the per-part
+  "mapping, not anchor" pattern are what Phase 5's six parts will use; a new part with a measured
+  first frame gets an anchor, and one that begins in a window does not.
+- **`GATE_ALIGNMENT_TICKS` stays Phase 3's.** No Phase-4 part inherits it; each carries its own
+  measured timing (A17/A18) or a stated reason the one-tick difference is invisible (MINVBALL,
+  D30). Phase 5 parts must make the same choice, not inherit a number.
+
+#### The phase's records, and what this close-out changed
+
+- `docs/decisions.md` gains **D30** — the block-1 clock at 400 and the per-recipe `MusicStart`, the
+  anchor-only-for-a-measured-first-frame policy, and the no-inherited-cue-alignment rule. The
+  phase's other release-versus-tree resolutions are D24's procedure applied per part, registered as
+  A17–A21; D30 is the only new decision entry, and nothing else in `decisions.md` needed changing.
+- `docs/fidelity/APPROXIMATIONS.md`: **A9's part label is corrected from Phase 5 to Phase 4** (the
+  spec's phase table puts ALKU in Phase 4, and Phase 4 is where it was ported), and A9's closing
+  sentence now says what Phase 4 settled (the 30-row drawing) and what it did not (the hidden
+  padding bits). A15's "not measured until they are ported" is corrected to the measured windows.
+  A17–A21 are the phase's approximations, each with its `**Part:** … Phase 4` line, and
+  `minvball.md`'s misdirected "A17's lead" now points at A19's.
+- `CLAUDE.md`'s `## Running it` is corrected (controller ruling R5): the port now has **twelve**
+  registry names (the test card plus ALKU, PAM, BEGLOGO, TUNNELI, MNTSCRL, MINVBALL, RAYSCRL,
+  DDSTARS, ENDLOGO, CRED and ENDSCRL), block 1 starts ALKU and stops at U2A, block 3 starts MNTSCRL
+  and stops at LNS&ZOOM, block U runs DDSTARS, and blocks 2 and 5 are unchanged. The ESC sentence
+  was corrected where it said no part polls the exit flag — the six Phase-4 parts read it where
+  their sources call `dis_exit` and in their non-spinning waits — and the Ctrl and title-bar
+  statements are unchanged and still accurate.
+- `docs/fidelity/part-sequence.md` needed no change: Task 9 checked it against the code (run order
+  §1, restart sites §2, block masks §4) and the phase added no sequence fact. The six part notes
+  are complete, each with its original/port/substitution/measurement sections and its commands.
+
 ## Phase log
+
+### Phase 4 — Music-synced tier A (complete — untagged)
+
+Ten tasks on branch `phase-4-music-synced-tier-a`, from `phase-3` (`3d42b88`) to this close-out
+(20 commits; the first is Phase 3's human-listen record and the second the phase's plan).
+**935 tests pass, zero failures, seven ignored, zero warnings** (Phase 3 closed at 806, three
+ignored), and both clippy commands exit 0. Every number in the evidence section above was re-run at
+the committed state.
+
+**What was built.** Six parts under `bins/secondreality/src/parts/`, each a transliteration of its
+source into the `Part` API: **ALKU** (three copper slots, the 640×200 picture windowed by CRTC start
+and AC pan, the four `dis_sync` gates and the 9-tick scroll), **PAM** (the two-page 42-frame ANI
+flip, the 4-tick cadence, the 64-copy palette wash), **MNTSCRL** and **RAYSCRL** (the shared `PosList`
+decoder and two different blitters — additive with a +128 bias, colour-keyed — plus their
+music-gated starts and `-11` fades), **MINVBALL** (Microsoft C's `rand`, the 512-dot projection, the
+two assembly bugs, the frame cap) and **DDSTARS** (the 1024-star LCG, the 64-unit ring with the
+`+17` second write, the text wipe, the two pages and planes). The shell gained the six names in
+their blocks, `music_for_part`'s rows, `boot_anchor`'s measured anchors, and
+`BLOCK_ONE_MUSIC_START_FRAME`. Four new music traces were filed (`second1`, `second1b`,
+`second3b`, `hiddenu2`) and the trace test learned to phase-align a window. The phase's decisions
+are **D30**; its approximations are **A17–A21**.
+
+**The phase's method was the reference's own frames, and D24 decided four of the six parts.** Every
+part is accepted against four reference keyframes with D19's support frames, at a mapping the note
+states and the test asserts; every cue is driven both by a scripted player and, where the run
+reaches it, by the real player against a filed trace. Where the release and the tree disagree,
+D24's procedure ran per part: MNTSCRL's 71-tick wait and 640 `scp` bound, RAYSCRL's seven-tick
+gates, and MINVBALL's Microsoft RNG follow the release (A17–A19), PAM's 7900 index plane is
+registered rather than adopted (A21), and ALKU's three palette entries are adopted with the curated
+entries' counterfactual measured (A20). The result is 17 of the 24 keyframes byte-identical, with
+every residual asserted at its measured count.
+
+**What it could not confirm, in one place.** The release's mechanisms (A17/A18/A19) are fitted to
+frames the packed EXEs cannot confirm; MINVBALL's `j` is inside that packed image; A20's phase is
+the original's CPU time, not modelled; MNTSCRL's cue has no reference frame after it; MINVBALL's
+cue break is never reached (the cap precedes it); ALKU's `tptr` off-by-one is not separable from
+A20; the padding rows of A9 stay unmeasured; and three of the seven ignored tests read git-ignored
+scratch, so a fresh clone cannot re-run them. The four part-relative mappings are mappings, not
+anchors (D30), and the mid-block parts are unreachable through their blocks until Phase 5/6 port
+the parts before them. All of it is in the evidence section's negatives, item by item.
+
+**The final whole-branch review has not run.** The tag is withheld until it does and its findings
+are applied — Phase 1/2/3's practice.
 
 ### Phase 3 — Music engine (done, `phase-3`)
 

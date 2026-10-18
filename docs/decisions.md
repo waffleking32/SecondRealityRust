@@ -1933,3 +1933,59 @@ command, and the correction is findable by one.
 **What this costs if it is not followed**, measured in this phase: nine reviews across seven tasks,
 the majority of their findings in records rather than in code, and one task's fix round spent
 entirely on the copies of a claim the task had already corrected once.
+
+## D30 — Phase 4's decisions: a second music clock for block 1, anchors only where a first frame is measured, and no inherited cue alignment (2026-10-17)
+
+D27 gave a run one music clock (408) and one wait/pre-poll rule, and D28 gave a part that reads
+the music a one-tick relationship to the copper's poll. Phase 4 ported the first parts that
+**wait** on the music, and three rules the parts follow were decided rather than measured. Each is
+a decision about the port's model, not a divergence from the original; the divergences the phase
+did find are **A17–A21**, not this entry.
+
+**1. Block 1's clock starts at 400, not 408, and `MusicStart` takes the recipe.** D27's 408 is the
+clock measured for the restart recipes — the filed `second3`, `second5`, `second5b` and `hiddenu`
+sessions. `SECOND 1` is a different recipe and never takes a block restart: `MAIN/U2.ASM:766-775`
+loads MUSIC0 with `bx = -1`, `:786`'s unconditional `_zplaysong(0)` starts it, and nothing restarts
+before ALKU/PAM. The trace of that recipe, `reference/music/second1` (frames 148–5999, Phase 4's
+Task 1), fits its first row change (frame 420, `_np_zframe` 14) to a start at **399.6** — the direct
+`zframe` reading is 405, 5.4 frames later, the sample instant of D17/A12 — and `second1b` confirms
+the row at 7710. The shell now carries `BLOCK_ONE_MUSIC_START_FRAME = 400`, and
+`music_start_frame_for(part)` returns it for the three block-1 parts (`alku`, `u2a`, `pam`) and 408
+for everything else; `MusicStart::for_part` therefore pre-polls four frames for a block-1 run that
+draws from 404 and 7,310 for a PAM run anchored at 7710. The rule is D27's, not a new one: a run
+beginning after its recipe's first tick catches up deterministically. The new fact is that there are
+**two recipes**, and a run must use the one its entry point takes; a block-1 run under 408 would
+wait four frames instead of pre-polling four — four ticks of player position at its first drawn
+frame. The check is the block-1 trace comparison
+(`a_block_one_run_starts_under_the_initial_play_song_and_matches_second1`: all 638 position
+changes visited, the port's change-frame distribution
+`{-2: 1, -1: 1, 0: 3, 1: 1, 2: 217, 3: 285, 4: 118, 5: 10, 6: 1, 8: 1}`) and PAM's 7,310-poll
+test (the trace's `(13, 1)` at 7710, `the_block_one_pre_roll_puts_the_player_at_the_traces_7710_position`).
+
+**2. A part gets an anchor only where the reference names its first frame; a window stays a
+window.** `boot_anchor` returns `Some(404)` for ALKU/BEGLOGO/ENDLOGO (the boot's first graphics
+frame, five of five sessions, `reference-indices.md` §1.12) and `Some(7710)` for PAM (the flat
+wash, byte-identical in three sessions, §6.1/§6.4). It returns `None` for the other four Phase-4
+parts, because the reference bounds their starts without pinning them: MNTSCRL's tick 0 at 419 is a
+fade-curve mapping (its fade's frame means, §11.1), RAYSCRL's first drawn frame is in
+(12900, 13000], MINVBALL's in (10300, 10400], and DDSTARS's earliest evidence is a probe at 415
+with the screen already up and no filed start frame (§22). Those runs number their own frames from
+zero, and their manifests say `index_origin: "part"`, `anchor: null`. The rule: **a mapping may be
+exact at every reference keyframe without being a claim about the first frame** — each note states
+its mapping (`boot = 419 + tick` for MNTSCRL, `12962 + tick` for RAYSCRL, `10368 + tick` for
+MINVBALL, `414 + tick` for DDSTARS) and each integration test asserts it — and a guessed anchor
+would make every index of the run wrong in a way the keyframes could not catch. Consequence for the
+shell: block-3 and block-U dumps are not reference-comparable by index; the part tests compare
+bytes at the mapped tick.
+
+**3. No Phase-4 part inherits `GATE_ALIGNMENT_TICKS` or D28's held reading; each cue's timing is
+its own measured value.** Phase 3 recorded that constant as a fact about its boot and `second5`,
+and D28's held reading as the alignment ENDLOGO's frame comparison needed. The six parts read the
+engine's tick-own poll (D28's one-tick relationship) and their timing is carried by their own
+measurements: MNTSCRL runs the release's 71-tick wait (**A17**), RAYSCRL the release's seven
+confirming reads (**A18**), and MINVBALL explicitly declines the held reading because the only
+readings the difference could change are inside its fade (the trace's `-3` at 10,368–10,379) and
+the next is boot 12,950, past the frame cap at 12,947 — so the one-tick difference changes no
+picture in its run (`docs/fidelity/minvball.md` §5). ALKU's and PAM's gates sit far from their
+keyframes; their traces and the four keyframes are the check. What the reference's checks actually
+read is D28's one-tick relationship, and where the release's timing differs, A17/A18 register it.

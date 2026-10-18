@@ -237,7 +237,7 @@ ls -l upstream/SecondReality/MAIN/DATA/MINVBALL.EXE upstream/SecondReality/DOTS/
 ```
 
 The release's part is the packed one, while the tree's `DOTS/DOTS.EXE` is the
-development build of the source ported here (A17's lead applies). The
+development build of the source ported here (A19's lead applies). The
 `dottaul` permutation is the RNG's and the port reproduces it — the 25-pixel
 scatter at 12,400 is the evidence — so the only unreadable input is the
 release's **initial stack `j`**, which is inside the packed image. The source

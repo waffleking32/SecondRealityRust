@@ -51,23 +51,28 @@ in any new crate manifest.
 
 ## Running it
 
-`cargo run --bin secondreality` opens a window and plays a run. The port has six parts: the
-Phase 0 test card, and the demo's own **BEGLOGO**, **TUNNELI**, **ENDLOGO**, **CRED** and
-**ENDSCRL**. Any other part the demo runs is refused by name — `--part glenz` says "glenz is not
-ported yet" rather than starting something else.
+`cargo run --bin secondreality` opens a window and plays a run. The port has twelve parts: the
+Phase 0 test card, and the demo's own **ALKU**, **PAM**, **BEGLOGO**, **TUNNELI**, **MNTSCRL**,
+**MINVBALL**, **RAYSCRL**, **DDSTARS**, **ENDLOGO**, **CRED** and **ENDSCRL**. Any other part the
+demo runs is refused by name — `--part glenz` says "glenz is not ported yet" rather than starting
+something else.
 
 ```bash
+cargo run --release --bin secondreality -- --block 1     # ALKU, then it stops: U2A is unported
+cargo run --release --bin secondreality -- --block 3     # MNTSCRL, then it stops: LNS&ZOOM is unported
 cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> ENDSCRL
 cargo run --release --bin secondreality -- --block 2     # BEGLOGO, then it stops: GLENZ is unported
-cargo run --release --bin secondreality -- --part beglogo
+cargo run --release --bin secondreality -- --block U     # DDSTARS (the hidden part)
+cargo run --release --bin secondreality -- --part alku
 ```
 
 **ESC** ends the part that is playing and the shell starts the next one — the original's exit flag
-(`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`), except that **no
-part the port has yet polls it**: the engine carries the flag and the *shell* retires the part at
-the end of the tick it was set in, so a part that reads `ctx.exit_requested` for itself would be the
-first to notice the difference. Once the run has nothing left to play, ESC closes the window, where
-the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
+(`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`). The six Phase-4
+parts read it (`ctx.exit_requested`) where their sources call `dis_exit`, and in their wait loops,
+which must not spin; a part that sees it can end on that tick without drawing. For a part that does
+not poll, the engine carries the flag and the *shell* retires the part at the end of the tick it was
+set in. Once the run has nothing left to play, ESC closes the window, where the original's shell
+returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
 `ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
 a key.
