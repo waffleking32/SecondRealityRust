@@ -96,9 +96,9 @@ const PULSE_FRAMES: u32 = 60;
 
 /// The tick numbers the source's straight line of waits produces. Tick 0 is
 /// the copy and the first wait; ticks 1 and 2 are the mode change's two
-/// waits; 3..=13 are the eleven collapse passes; 14 is the final copies and
-/// the line's first iteration; the pulse starts with the dot's tick and the
-/// part is over at 121 (`sleep(1)`).
+/// waits; 3..=13 are the eleven collapse passes, the last of which also runs
+/// the two closing copies; 14 is the line's first iteration; the pulse starts
+/// with the dot's tick and the part is over at 121 (`sleep(1)`).
 const COLLAPSE_FIRST_STEP: u32 = 3;
 const COLLAPSE_LAST_STEP: u32 = COLLAPSE_FIRST_STEP + COLLAPSE_A.len() as u32 - 1;
 const LINE_FIRST_STEP: u32 = COLLAPSE_LAST_STEP + 1;

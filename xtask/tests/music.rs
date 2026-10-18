@@ -284,7 +284,7 @@ fn the_reference_tree_passes_with_the_traces_in_it() {
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("35 capture(s)"), "{text}");
+    assert!(text.contains("36 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a

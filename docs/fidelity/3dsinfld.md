@@ -239,7 +239,7 @@ and `memset(vram,0,64000)` clear the video memory.
 		if(a>-8 && a<0) break;
 		while(frepeat--)
 		{
-			if(a>-30 && a<0) 
+			if(a>-30 && a<0)
 			{
 				if(startrise<160) startrise+=1;
 			}

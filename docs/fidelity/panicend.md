@@ -93,7 +93,7 @@ is `sleep(1)`'s retirement:
 | 3-12 | `:91-102` | the first ten collapse passes |
 | 13 | `:91-105` | the last pass (`a = 3`) **and** the two closing copies of rows 202 and 198 |
 | 14 | `:106-127` | GC `05h = 40h`; the line's first iteration (`x = 20`) |
-| 15-60 | `:116-127` | the rest of `for(x=20;x<=160;x+=3)`: 47 iterations |
+| 15-60 | `:116-127` | the rest of `for(x=20;x<=160;x+=3)`: 46 iterations (the loop's 47th is tick 14's first) |
 | 61 | `:129-135` | `tw_putpixel(160,200,1)`; the pulse's first value |
 | 62-120 | `:130-136` | the rest of the 60-frame cosine pulse |
 | 121 | `:136` | `sleep(1)`: the part returns `Finished`; the shell holds its last frame |

@@ -27,7 +27,9 @@
 //! 142/66), and the entry pre-roll is 8 polls (the gate is the trace's boot
 //! 8364). With all three the 8500 keyframe differs in 26.161 % of pixels
 //! (max delta 247); 9500 is a close-up whose camera data the tree does not
-//! carry — every RATA translation word in its segments is zero (D24,
+//! carry — the RATA control points those frames interpolate (15–26) are all
+//! `dx = dy = 0, dz = 300`, constant, so there is no frame-dependent
+//! translation to apply (D24,
 //! APPROXIMATIONS A23, registered) — so it stays 99.483 %. The test pins both
 //! percentages to 0.001 points and both max deltas exactly, and pins the
 //! 8500 residual's decomposition and the 9500 aligned measurement beside
@@ -340,7 +342,20 @@ fn the_cube_keyframes_are_measured_and_recorded() {
     // max deltas exactly; the 8500 decomposition and the 9500 aligned
     // measurement are pinned beside them. `docs/fidelity/plzpart.md` §7
     // carries the evidence.
-    let (dir, _) = dump("cube", "2777,3777");
+    let (dir, manifest) = dump("cube", "2777,3777");
+    // The corrected phase's music row: the trace's published position at
+    // boot 8500 is 68:46 (`docs/fidelity/plzpart.md` §8). The nine-poll
+    // pre-roll read 68:47 there.
+    let frame_2777 = manifest["frames"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|frame| frame["index"] == 2777)
+        .expect("the dump holds tick 2777");
+    assert_eq!(
+        frame_2777["music_position"], "68:46",
+        "the published music position at boot 8500"
+    );
     let mut verdicts = Vec::new();
     for (boot, recorded, expected_delta) in [(8500u32, 26.161f64, 247u8), (9500, 99.483, 255)] {
         let tick = tick_of(boot);
@@ -387,6 +402,12 @@ fn the_cube_keyframes_are_measured_and_recorded() {
             assert_eq!(
                 a.both_histogram[12], 713,
                 "delta 12 among the both-set pixels"
+            );
+            // The 332 both-set pixels at delta 247, pinned exactly (the note's
+            // "332 more at 247"): the bound below is for every other delta.
+            assert_eq!(
+                a.both_histogram[247], 332,
+                "delta 247 among the both-set pixels"
             );
             for delta in 0..256 {
                 if delta != 4 && delta != 8 && delta != 12 {

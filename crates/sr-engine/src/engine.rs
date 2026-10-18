@@ -834,7 +834,23 @@ mod tests {
 
         e.set_music(Box::new(NoMusic));
         e.start(&mut first).unwrap();
+        // Copper callbacks run inside a tick, after the entry start, so they
+        // are never the fresh context either — a callback cannot mistake a
+        // retrace for the part's start.
+        let copper = Freshness::default();
+        for slot in 0..3 {
+            let copper = copper.clone();
+            e.set_copper_for_test(
+                slot,
+                Box::new(move |ctx: &mut PartCtx| copper.0.borrow_mut().push(ctx.music_fresh())),
+            );
+        }
         e.tick(&mut first, &mut f);
+        assert_eq!(
+            copper.0.borrow().as_slice(),
+            [false, false, false],
+            "every copper slot's context reports `music_fresh == false`"
+        );
         e.start(&mut second).unwrap();
         assert_eq!(
             log.0.borrow().as_slice(),

@@ -769,8 +769,10 @@ enum Phase {
     PlasmaEndWait,
     /// `VECT.C:114-116`: the mode set, then the cube's music gate.
     CubeGate,
-    /// `VECT.C:117-128`: `calculate(1); draw(15); clear();` a tick.
-    Cube { swapped: bool },
+    /// `VECT.C:117-128`: `calculate(1); draw(15); clear();` a tick. The page
+    /// for this iteration is already swapped (the gate's `swappage` is the
+    /// loop's first), so there is no unswapped state to enter with.
+    Cube,
     /// `VECT.C:119-120`: the cube's exit.
     Done,
 }
@@ -858,6 +860,23 @@ pub struct Plzpart {
     from_texture: usize,
     dseg_row: usize,
     ctau_row: i32,
+    /// A23's band-fit probe. **Test-only and `None` in every real run**: the
+    /// projection/extent measurement needs the tree's 134-row development
+    /// extent (`PLZA.ASM:77`) and the counterfactual 142/66 projection to
+    /// compare against the release, and neither may change what a run draws.
+    #[cfg(test)]
+    fit_probe: Option<FitProbe>,
+}
+
+/// The two values A23's projector-fit test varies: the rasteriser's row
+/// extent and the vertical projection pair. A real run keeps the release's
+/// adopted `200` rows and `213/100`.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct FitProbe {
+    rows: i32,
+    y_scale: i32,
+    y_origin: i32,
 }
 
 /// Where the copper's pending palette upload reads from (`cop_pal`).
@@ -936,7 +955,39 @@ impl Plzpart {
             from_texture: 0,
             dseg_row: 0,
             ctau_row: 0,
+            #[cfg(test)]
+            fit_probe: None,
         }
+    }
+
+    /// The rows the rasteriser draws: the release's adopted 200, or the
+    /// tree's 134 in A23's projection-fit probe.
+    fn drawn_rows(&self) -> i32 {
+        #[cfg(test)]
+        if let Some(probe) = self.fit_probe {
+            return probe.rows;
+        }
+        CUBE_DRAWN_ROWS
+    }
+
+    /// The clear mirrors the draw: `CLEAR_LINES` is the draw's extent plus
+    /// one, so the probe's 134 rows walk the tree's 135/134.
+    fn clear_lines(&self) -> i32 {
+        #[cfg(test)]
+        if let Some(probe) = self.fit_probe {
+            return probe.rows + 1;
+        }
+        CLEAR_LINES
+    }
+
+    /// The vertical projection pair: the release's measured 213/100, or the
+    /// probe's counterfactual.
+    fn projection(&self) -> (i32, i32) {
+        #[cfg(test)]
+        if let Some(probe) = self.fit_probe {
+            return (probe.y_scale, probe.y_origin);
+        }
+        (213, 100)
     }
 }
 
@@ -1292,10 +1343,10 @@ impl Part for Plzpart {
                     // period — the page being drawn next tick must already be
                     // the one the copper puts on screen.
                     self.swap_page();
-                    self.phase = Phase::Cube { swapped: true };
+                    self.phase = Phase::Cube;
                 }
-                Phase::Cube { swapped } => {
-                    return self.cube_tick(ctx, swapped);
+                Phase::Cube => {
+                    return self.cube_tick(ctx);
                 }
                 Phase::Done => return PartStatus::Finished,
             }
@@ -1542,20 +1593,10 @@ impl Plzpart {
         self.clrtau.iter_mut().for_each(|entry| *entry = [640, 0]);
     }
 
-    /// `VECT.C:117-128`: one pass of the cube's loop.
-    fn cube_tick(&mut self, ctx: &mut PartCtx, swapped: bool) -> PartStatus {
-        let mut swapped = swapped;
-        if !swapped {
-            // `a=dis_musplus(); if(a>=-4 && a<0) break;`
-            let reading = ctx.music().map_or(-32, |music| music.musplus());
-            if (CUBE_EXIT_LOW..0).contains(&reading) {
-                self.phase = Phase::Done;
-                return PartStatus::Finished;
-            }
-            self.swap_page();
-            swapped = true;
-            self.phase = Phase::Cube { swapped };
-        }
+    /// `VECT.C:117-128`: one pass of the cube's loop. The caller enters only
+    /// after the gate's `swappage`, which is the source loop's first; the
+    /// iteration's exit check and next swap are at the end.
+    fn cube_tick(&mut self, ctx: &mut PartCtx) -> PartStatus {
         let count = self.copper.borrow().frame_count;
         if count < 1 {
             // `while(frame_count<1);` — one tick in the port.
@@ -1581,7 +1622,7 @@ impl Plzpart {
             return PartStatus::Finished;
         }
         self.swap_page();
-        self.phase = Phase::Cube { swapped: true };
+        self.phase = Phase::Cube;
         PartStatus::Continuing
     }
 
@@ -1694,6 +1735,7 @@ impl Plzpart {
     /// product is an `imulw`, its low word shifted, the sums 16-bit, and the
     /// projection `xxx = (xx*256)/zz + 160 + 160`.
     fn rotate(&mut self) {
+        let (y_scale, y_origin) = self.projection();
         let add16 = |a: i32, b: i32| -> i32 { (a.wrapping_add(b) as i16) as i32 };
         let term = |value: i32, coefficient: i32| -> i32 {
             ((value.wrapping_mul(coefficient) as i16) as i32) >> 1
@@ -1724,10 +1766,10 @@ impl Plzpart {
             // but the release's cube sits 1.5x taller and is centred on the
             // screen. On the cube band (rows 0-133, the tree extent, to
             // exclude the full-extent page-slot spill) the six silhouette
-            // frames 8400-8800 differ by a mean 0.47 % at 213/100 and 6.38 %
-            // at 142/66; 213 is the 3/2 value and the scale fit is flat over
-            // 206-216 at origin 100.
-            let yyy = yy.wrapping_mul(213) / zz + 100;
+            // frames 8400-8800 differ by a total 0.46 % at 213/100 and
+            // 9.99 % at 142/66; 213 is the 3/2 value and the scale fit is
+            // flat over 206-216 at origin 100 (an earlier scratch sweep).
+            let yyy = yy.wrapping_mul(y_scale) / zz + y_origin;
             self.xxx[index] = [xxx, yyy];
         }
     }
@@ -1920,10 +1962,11 @@ impl Plzpart {
         let mut lines = ycount;
         let mut to = self.to_row;
         let mut ctau = self.ctau_row;
+        let drawn_rows = self.drawn_rows();
         loop {
-            if self.ryy >= 0 && self.ryy < CUBE_DRAWN_ROWS {
+            if self.ryy >= 0 && self.ryy < drawn_rows {
                 self.block_line(to as u16, ctau);
-            } else if self.ryy >= CUBE_DRAWN_ROWS {
+            } else if self.ryy >= drawn_rows {
                 break;
             }
             to = to.wrapping_add(CUBE_ROW_BYTES as i32);
@@ -2053,7 +2096,8 @@ impl Plzpart {
         // carries the page (0x5500/0xAA00), which is what aims the fill at
         // the buffer the draw used.
         let mut dx = (PAGE_VMEM[self.page] & 0xFF00) | u16::from(self.video[0]);
-        for line in 0..CLEAR_LINES as usize {
+        let clear_lines = self.clear_lines();
+        for line in 0..clear_lines as usize {
             let old = self.clrtau[old_slot * 256 + line];
             let new = self.clrtau[new_slot * 256 + line];
             if old[0] != 640 {
@@ -2082,7 +2126,7 @@ impl Plzpart {
         // `PLZA.ASM:345-368`: the two edge bytes of each span. `les di,[vmem]`
         // starts the pointer at the drawn page, then `add di,160` a line.
         let mut offset = PAGE_VMEM[self.page];
-        for line in 0..(CLEAR_LINES - 1) as usize {
+        for line in 0..(clear_lines - 1) as usize {
             let new = self.clrtau[new_slot * 256 + line];
             // `end_mask[x-1]` — at x = 0 the 16-bit displacement wraps to the
             // byte before end_mask, which is start_mask's last 0x08.
@@ -2342,6 +2386,31 @@ mod tests {
         assert_eq!(spline_at(6000), [0, 0, 499, 0, 0, 0, 255, 511]);
     }
 
+    /// The close-up claim, derived from the committed `RATA.INC` rather than
+    /// asserted in prose: the control points the 9100–9600 frames interpolate
+    /// carry **no frame-dependent translation**. Boot 9100 is animation frame
+    /// 736 and boot 9600 frame 1236 (the gate is boot 8364, frames 0), whose
+    /// spline segments are 15 and 23; a segment interpolates its own point
+    /// plus the next three, so points 15..=26 cover the close-up. Every one of
+    /// them is `dx = dy = 0, dz = 300`. The spline's shifted sum reads
+    /// `dis = 299` at frame 1136, segment 21, because the coefficients sum to
+    /// 32,767 — pinned by the keyframe test above.
+    #[test]
+    fn the_close_up_segments_carry_no_frame_dependent_translation() {
+        let t = tables();
+        let segment_of = |frames: i32| ((4 * 256 + frames * 4) & 0xFFFF) >> 8;
+        assert_eq!(segment_of(9100 - 8364), 15, "boot 9100's segment");
+        assert_eq!(segment_of(9500 - 8364), 21, "boot 9500's segment");
+        assert_eq!(segment_of(9600 - 8364), 23, "boot 9600's segment");
+        for point in 15..=26usize {
+            assert_eq!(
+                &t.rata[point * 8..point * 8 + 3],
+                &[0, 0, 300],
+                "control point {point}'s dx, dy, dz"
+            );
+        }
+    }
+
     #[test]
     fn the_cube_draws_the_releases_full_screen() {
         // The tree's development build clips at row 134 (`PLZA.ASM:77`); the
@@ -2375,6 +2444,241 @@ mod tests {
         assert_eq!(part.xxx[0][1], (75 * 213) / 445 + 100);
         assert_eq!(part.xxx[0][0], 391);
         assert_eq!(part.xxx[0][1], 135);
+    }
+
+    /// A23's projection/extent fit over the **committed** band capture
+    /// (`reference/parts/plzpart/band/`), at the tree's 134-row development
+    /// extent (`PLZA.ASM:77`: `cmp [yy], 134d / jge @@end`). The probe
+    /// renders the two projection pairs through the real engine and player;
+    /// the comparison is A23's rule: a pixel is set iff any RGB channel is
+    /// nonzero, the shift is the integer `(dx, dy)` in `[-20, 20]` that
+    /// minimises the differing-mask fraction over the 134-row band, and the
+    /// frame's percentage is XOR over the band's pixels. The adopted release
+    /// pair must be far better than the tree's at every frame, and the
+    /// numbers below are this test's own.
+    #[test]
+    fn the_projection_fit_is_the_committed_release_bands() {
+        use crate::audio::{lock, test_player, PlayerMusic};
+        use crate::shell::ModuleId;
+        use sr_engine::{Engine, IndexedFrame, View, MAX_HEIGHT, MAX_WIDTH};
+
+        const BOOTS: [u32; 6] = [8400, 8450, 8500, 8600, 8700, 8800];
+        const BAND_ROWS: usize = 134;
+        const SHIFT: i32 = 20;
+
+        /// A frame's mask as 200 rows of five 64-bit words (320 bits a row).
+        type Mask = Vec<[u64; 5]>;
+
+        fn mask_of(set: &[bool]) -> Mask {
+            let mut rows = vec![[0u64; 5]; 200];
+            for y in 0..200usize {
+                for x in 0..320usize {
+                    if set[y * 320 + x] {
+                        rows[y][x / 64] |= 1u64 << (x % 64);
+                    }
+                }
+            }
+            rows
+        }
+
+        /// The port's frame masks at the six boots, rendered with the probe's
+        /// projection pair at the tree's 134-row extent.
+        fn render(y_scale: i32, y_origin: i32) -> Vec<Mask> {
+            let player = test_player(ModuleId::Music1).expect("MUSIC1 loads");
+            lock(&player).play_song(62);
+            let mut engine = Engine::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200));
+            engine.set_music(Box::new(PlayerMusic::new(player, 0)));
+            let mut part = Plzpart::new();
+            // The unit test's working directory is the crate's.
+            part.table_directory = "../../assets/PLZPART";
+            part.fit_probe = Some(FitProbe {
+                rows: BAND_ROWS as i32,
+                y_scale,
+                y_origin,
+            });
+            engine.start(&mut part).expect("the part starts");
+            let mut frame = IndexedFrame::new(engine.view().width, engine.view().height);
+            let mut masks = Vec::new();
+            for tick in 0..=BOOTS[BOOTS.len() - 1] - REFERENCE_FIRST_INDEX {
+                // The 8500 keyframe's phase state. The tick's compose uses
+                // the display start slot 1 wrote at the end of the previous
+                // tick, so the drawn page and the beam's start are read
+                // before this tick runs; the animation count is the tick's
+                // own.
+                let before = (tick == 8500 - REFERENCE_FIRST_INDEX)
+                    .then(|| (part.page, part.copper.borrow().display_start));
+                engine.tick(&mut part, &mut frame);
+                if let Some((page, display_start)) = before {
+                    // 136 animation frames in, drawing page 4 with the beam
+                    // at page 4's start 0x0028, and the published music row
+                    // the trace holds there (`68:46`). The tick's own
+                    // swap_page moves the next draw to page 5.
+                    assert_eq!(part.frames, 136, "frames at tick 2777");
+                    assert_eq!(page, 4, "the page the 8500 frame composes");
+                    assert_eq!(PAGE_START[4], 0x0028, "page 4's display start");
+                    assert_eq!(display_start, 0x0028, "the beam's start at 8500");
+                    assert_eq!(part.page, 5, "the next draw's page");
+                    let position = engine.music().expect("the player").position();
+                    assert_eq!(
+                        (position.order, position.row),
+                        (68, 46),
+                        "the published music position at tick 2777"
+                    );
+                }
+                if BOOTS
+                    .iter()
+                    .any(|&boot| boot - REFERENCE_FIRST_INDEX == tick)
+                {
+                    assert_eq!((frame.width, frame.height), (320, 200));
+                    // The frame's palette is in force from scanline 0 (one
+                    // band); the original is RGB, so the mask widens the
+                    // index through it exactly as the dump does.
+                    let palette = *frame.palettes.palette_at(0);
+                    let set: Vec<bool> = frame
+                        .pixels
+                        .iter()
+                        .map(|&index| palette.entry(index) != [0, 0, 0])
+                        .collect();
+                    masks.push(mask_of(&set));
+                }
+            }
+            masks
+        }
+
+        /// The reference's own mask, from the committed RGB capture.
+        fn reference_mask(boot: u32) -> Mask {
+            let path = root().join(format!(
+                "reference/parts/plzpart/band/frame_{boot:06}.rgb"
+            ));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+            assert_eq!(bytes.len(), 320 * 200 * 3, "a full 320x200 RGB frame");
+            let set: Vec<bool> = bytes
+                .chunks_exact(3)
+                .map(|pixel| pixel.iter().any(|&channel| channel != 0))
+                .collect();
+            mask_of(&set)
+        }
+
+        /// `row` shifted so output bit `x` is the input's bit `x + dx`; bits
+        /// shifted past either edge are dropped. A row is five words because
+        /// 320 = 5 × 64, so no word carries a partial edge.
+        fn shift_row(row: &[u64; 5], dx: i32) -> [u64; 5] {
+            let mut out = [0u64; 5];
+            if dx >= 0 {
+                // out bit x = in bit x+dx: a right shift by dx.
+                let shift = dx as usize;
+                let (word, bit) = (shift / 64, shift % 64);
+                for (i, slot) in out.iter_mut().enumerate() {
+                    let source = i + word;
+                    if source < 5 {
+                        *slot = row[source] >> bit;
+                        if bit != 0 && source + 1 < 5 {
+                            *slot |= row[source + 1] << (64 - bit);
+                        }
+                    }
+                }
+            } else {
+                // out bit x = in bit x-dx: a left shift by -dx.
+                let shift = (-dx) as usize;
+                let (word, bit) = (shift / 64, shift % 64);
+                for (i, slot) in out.iter_mut().enumerate().skip(word) {
+                    let source = i - word;
+                    *slot = row[source] << bit;
+                    if bit != 0 && source > 0 {
+                        *slot |= row[source - 1] >> (64 - bit);
+                    }
+                }
+            }
+            out
+        }
+
+        /// `(differing mask pixels, dx, dy)` for the best shift, comparing
+        /// the port at `(x, y)` with the reference at `(x + dx, y + dy)` and
+        /// treating the reference's out-of-frame pixels as unset.
+        fn fit(port: &Mask, reference: &Mask) -> (usize, i32, i32) {
+            let mut best = (usize::MAX, 0, 0);
+            for dy in -SHIFT..=SHIFT {
+                for dx in -SHIFT..=SHIFT {
+                    let mut differing = 0usize;
+                    for (y, row_port) in port.iter().take(BAND_ROWS).enumerate() {
+                        let ry = y as i32 + dy;
+                        let row = if (0..200).contains(&ry) {
+                            shift_row(&reference[ry as usize], dx)
+                        } else {
+                            [0u64; 5]
+                        };
+                        for word in 0..5 {
+                            differing += (row_port[word] ^ row[word]).count_ones() as usize;
+                        }
+                    }
+                    if differing < best.0 {
+                        best = (differing, dx, dy);
+                    }
+                }
+            }
+            best
+        }
+
+        let reference: Vec<Mask> = BOOTS.iter().map(|&boot| reference_mask(boot)).collect();
+        let band_pixels = BAND_ROWS * 320;
+        // This test's own measurements: the differing-mask count per frame and
+        // the total over the six. The release pair is the one the port adopts;
+        // the tree's development pair is the counterfactual it was chosen
+        // over.
+        let expected: [(&str, i32, i32, [usize; 6], usize); 2] = [
+            (
+                "213/100 (the release)",
+                213,
+                100,
+                [130, 214, 244, 151, 209, 248],
+                1196,
+            ),
+            (
+                "142/66 (the tree)",
+                142,
+                66,
+                [2284, 5849, 3353, 5749, 4876, 3585],
+                25696,
+            ),
+        ];
+        let mut means = Vec::new();
+        for (name, y_scale, y_origin, counts, expected_total) in expected {
+            let masks = render(y_scale, y_origin);
+            let mut total = 0usize;
+            for (index, (&boot, (port, reference))) in BOOTS
+                .iter()
+                .zip(masks.iter().zip(&reference))
+                .enumerate()
+            {
+                let (differing, dx, dy) = fit(port, reference);
+                let percent = 100.0 * differing as f64 / band_pixels as f64;
+                println!(
+                    "{name}: boot {boot}: {percent:.2}% ({differing}/{band_pixels} px), \
+                     shift ({dx}, {dy})"
+                );
+                assert_eq!(
+                    differing, counts[index],
+                    "{name}: boot {boot}'s differing mask pixels"
+                );
+                total += differing;
+            }
+            assert_eq!(total, expected_total, "{name}: the six-band total");
+            let measured = 100.0 * total as f64 / (band_pixels * BOOTS.len()) as f64;
+            println!("{name}: mean {measured:.2}%");
+            means.push(measured);
+        }
+        assert!(
+            means[0] < means[1] / 5.0,
+            "the release pair ({:.4}) must beat the tree's ({:.4}) by a wide margin",
+            means[0],
+            means[1]
+        );
+        // The adopted constants themselves: the release pair and the release
+        // extent are what a real run uses.
+        let part = Plzpart::new();
+        assert_eq!(part.projection(), (213, 100));
+        assert_eq!(part.drawn_rows(), 200);
+        assert_eq!(part.clear_lines(), 201);
     }
 
     #[test]

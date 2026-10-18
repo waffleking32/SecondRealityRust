@@ -627,7 +627,7 @@ $ cargo xtask reference verify --tree reference
 ok   parts/techno/interference: 4 frame(s), 4 file(s)
 ok   parts/techno/troll: 3 frame(s), 4 file(s)
 ...
-verdict: ok — 35 capture(s), 116 file(s), 26963022 bytes
+verdict: ok — 36 capture(s), 122 file(s), 28115022 bytes
 ```
 
 ## 10. What is not modelled

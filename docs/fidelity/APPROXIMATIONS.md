@@ -15,7 +15,7 @@ per side, scaled with the picture.
 border must still appear, but its exact thickness depends on CRTC timings the port does
 not model.
 **Measured difference:** 8 source pixels per side at every geometry. The filed reference captures
-are the 320×200 active area, with no overscan border in them to measure, so the padding's exact
+are the displayed area, with no overscan border in them to measure, so the padding's exact
 thickness stays unmeasured; the Phase 9 fidelity pass owns closing it against the original.
 
 ## A2 — An RLE row that decodes wider than its header's width is clipped
@@ -1267,36 +1267,55 @@ the filed 8500/9500 are reproduced byte-identically in the same session) show:
   (136 rows), so a full-height draw crosses into the next slot. The committed
   full-extent render shows the wrap — the wrapped top face and background
   spill at rows 0–32 and 182–199 and inside the band — where the reference's
-  8500 frame is clean (its content spans rows 33–181). The release's page
-  timing/clear relationship therefore differs from the port's; the spill is
+  8500 frame is clean (its content spans rows 33–181). **Which side's page
+  timing, clear or draw path makes the difference is not measured**: no
+  capture of the release's flip frames was taken, so this is recorded as an
+  unresolved port-side artifact, not as a release divergence. The spill is
   measured as the 6,333 port-only pixels (9.90 points, 2,805 of the 3,137
-  delta-247 pixels) in the 8500 residual, and is registered. The earlier claim
-  that the next page redraws the slot before display is contradicted by the
-  committed render and is not made.
+  delta-247 pixels) in the 8500 residual, and is registered as such. The
+  earlier claim that the next page redraws the slot before display is
+  contradicted by the committed render and is not made.
 - **The phase.** The entry pre-roll is **8 polls**: the `musplus() >= 13`
   gate passes at manifest 2641 = boot 8364 (the trace's first order-68 row
   13), the first draw is boot 8365, and at the 8500 keyframe the part is at
-  **frames 136, page 4, start 0x0028**. Nine polls were one frame early (the
-  previous commit records 32.106 % at 8500 there); a diagnostic render of the
-  corrected phase at the tree's 134-row extent measures 25.467 %, and the
-  release extent measures 26.161 %.
+  **frames 136, page 4, start 0x0028**;
+  `the_projection_fit_is_the_committed_release_bands` asserts that state
+  (frames 136, drawing page 4, display start 0x0028, music 68:46). Nine polls
+  were one frame early (the previous commit records 32.106 % at 8500 there);
+  a scratch diagnostic render of the corrected phase at the tree's 134-row
+  extent measured 25.467 % (git-ignored, not reproducible from a clone), and
+  the release extent's 26.161 % is test-pinned.
 - **The projection.** The release's `yyy` is `yy*213/zz + 100`: scale 213 =
   142 × 3/2, origin 100 = the screen's vertical centre (the tree's 66 leaves
   the cube 34 px high). The x pair is unchanged (256; an x-scale sweep's
   minimum).
 
 **The comparison rule** (the numbers below): a pixel is set iff any RGB
-channel is nonzero; the shift is the integer (dx, dy) in [−40, 40]
-minimising the differing-mask fraction, reported as a percentage. The
-projection fit is measured on the **cube band, rows 0–133, at the tree's
-134-row extent** — the release extent's full-height draw crosses the
-0x5500-byte page slots and leaves a background spill the reference's frame
-does not show, so the full frame measures that spill, not the projection.
-With the band rule and a [−20, 20] shift range the six silhouette frames
-8400–8800 give 0.30/0.50/0.57/0.35/0.49/0.58 % (mean **0.47 %**) at 213/100
-and 3.83/11.38/2.97/7.20/5.53/7.40 % (mean **6.38 %**) at the tree's
-142/66. The y-scale fit is flat over 206–216 at origin 100; 213 is the 3/2
-value. `the_cube_projection_is_the_releases_centred_scale`
+channel is nonzero; the shift is the integer (dx, dy) in [−20, 20]
+minimising the differing-mask fraction, comparing the port at (x, y) with
+the reference at (x + dx, y + dy) and treating reference pixels outside the
+frame as unset; a frame's percentage is XOR over the band's 42,880 pixels
+and a mean is the six-band total. The projection fit is measured on the
+**cube band, rows 0–133, at the tree's 134-row extent** — the release
+extent's full-height draw crosses the 0x5500-byte page slots and leaves a
+background spill the reference's frame does not show, so the full frame
+measures that spill, not the projection. Its reference is a committed
+capture, taken by the sanctioned path:
+
+```bash
+cargo xtask reference capture --arg 3 --boot autoexec \
+    --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8400,8450,8500,8600,8700,8800 --out reference/parts/plzpart/band
+```
+
+`the_projection_fit_is_the_committed_release_bands` renders the port through
+the real engine and player with a test-only probe selecting the tree extent
+and each pair, and pins every frame's XOR count and the totals: the six
+silhouette frames 8400–8800 give 0.30/0.50/0.57/0.35/0.49/0.58 % (mean
+**0.46 %**, 1,196 of 257,280) at 213/100 and 5.33/13.64/7.82/13.41/11.37/
+8.36 % (mean **9.99 %**, 25,696 of 257,280) at the tree's 142/66. The
+y-scale fit is flat over 206–216 at origin 100 (an earlier scratch sweep);
+213 is the 3/2 value. `the_cube_projection_is_the_releases_centred_scale`
 pins 213/100, `the_cube_draws_the_releases_full_screen` pins 200/201, and
 `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` pins the gate
 at 2641 — each fails if reverted (mutation checks in the task report).
@@ -1310,12 +1329,15 @@ page-slot spill registered above; the both-set part is shade/pose.
 `the_cube_keyframes_are_measured_and_recorded` pins the counts.
 
 **The residual that remains is registered, not adopted.** The close-up frames
-9100–9600 need frame-dependent camera data the tree does not carry: every
-RATA translation word in those segments is zero. This is **absent release
-camera data**, not a translation the port can apply. A global alignment (a
-wider search than the projection fit's [−40, 40]) confirms translation cannot
-explain the frame: the recorded best shift moves the reference by (−32, +83)
-(the port by (+32, −83)); over the 288×117 overlap
+9100–9600 need frame-dependent camera data the tree does not carry: the RATA
+control points they interpolate (15–26; boot 9100 is animation frame 736 and
+segment 15, boot 9600 frame 1236 and segment 23, and the spline at frame 1136
+is segment 21) are all `dx = dy = 0, dz = 300`, constant across those
+segments — the tree carries no frame-dependent translation. This is **absent
+release camera data**, not a translation the port can apply. A global
+alignment (a wider search than the projection fit's [−40, 40]) confirms
+translation cannot explain the frame: the recorded best shift moves the
+reference by (−32, +83) (the port by (+32, −83)); over the 288×117 overlap
 the silhouette masks XOR in 10.33 % of the region (10.47 % with the reviewer's
 border convention; IoU 0.897), and 99.95 % of the 30,214 common pixels still
 differ (max delta 255, mode 194, 9,226 of the common pixels). The 9500
@@ -1323,19 +1345,26 @@ keyframe therefore stands at **99.483 %**. The keyframe values are pinned to
 0.001 points (percentages) and exactly (max deltas) by
 `the_cube_keyframes_are_measured_and_recorded`: 8500 **26.161 %** (max delta
 247), 9500 **99.483 %** (max 255), with the 8500 decomposition and the 9500
-aligned counts pinned beside them. The plasma keyframes are unaffected
-(11.209/5.848/4.052 %).
+aligned counts pinned beside them. The close-up's control points are derived
+from the committed `RATA.INC` by
+`the_close_up_segments_carry_no_frame_dependent_translation`. The plasma
+keyframes are unaffected (11.209/5.848/4.052 %).
 
 **Decision (D24's procedure).** The extent, the projection and the entry
 phase are single-value release divergences and are adopted; the close-up
 camera path is a multi-value data difference the tree cannot supply and is
-registered, and the page-slot spill is a port-vs-release page-timing/clear
-difference that is registered. The far-keyframe residual is registered at
-**26.161 %**: 9.90 points port-only page spill and 16.10 points both-set
-shade/pose, with 0.16 points reference-only. "Verified" for PLZPART means a
-faithful port with A24's plasma tear and these cube divergences registered —
-not a matching cube. The diagnostic captures are under `out/`; `reference/`
-stays input-only.
+registered. The page-slot spill is **not** a measured release divergence: the
+port's own 200-row draw wraps through the 0x5500-byte page slot, the
+release's 8500 frame shows no such content, and which of the release's page
+timing, clear or draw path differs was not captured — it is an unresolved
+port-side artifact, registered as such. The far-keyframe residual is
+registered at **26.161 %**: 9.90 points port-only page spill and 16.10 points
+both-set shade/pose, with 0.16 points reference-only. "Verified" for PLZPART
+means a faithful port with A24's plasma tear, the 9.90-point port-side spill
+(not a release divergence) and the close-up's absent camera data registered —
+not a matching cube. The projection fit's reference is the committed
+`reference/parts/plzpart/band/`; the remaining diagnostic captures are under
+`out/`.
 
 ## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
 
@@ -1462,11 +1491,24 @@ The row *images* depend only on the counter's current `y1`/`y2`; the
 (`lasty`/`lasts`, `JP.C:96-99`): how far the counter jumps decides which
 pre-settle rows an earlier state leaves behind. The fixed step reproduces
 the **filed keyframes and the settled state**, not every intermediate
-wobble frame of another session: `out/b4b-jp-sweep1`'s 17200 matches the
-port at 0 px, while its 17400 and 17600 are **45.6023 %** and **39.8672 %**
-away (dump ticks 135, 335 and 535 and compare; `tests/jplogo.rs` pins the
-filed keyframes and the settled state). The census records the consequence
-(`reference-indices.md` §17.3, §17.5):
+wobble frame of another session: **scratch observations**, not reference
+evidence — `out/b4b-jp-sweep1` is a git-ignored diagnostic capture whose
+session phase the tree does not hold. The port was dumped at the mapping's
+ticks with
+
+```bash
+target/debug/secondreality --part jplogo --headless \
+    --dump-frames 135,335,535 --dump-dir out/jp-sweep-repro
+```
+
+and those RGB frames compared against the capture's 17200/17400/17600
+(640×200; a pixel differs iff any channel differs): 17200 matches at
+**0.0000 %** (0/128,000), while 17400 and 17600 are **45.6023 %**
+(58,371/128,000) and **39.8672 %** (51,030/128,000) away, max channel delta
+255. The captures are not reproducible from a clone and the numbers are
+recorded as the diagnostic observations they are; `tests/jplogo.rs` pins the
+filed keyframes and the settled state, which are the part's evidence. The
+census records the consequence (`reference-indices.md` §17.3, §17.5):
 
 - 17300's filed picture is 4/4; 17500's is 2/4;
 - 17700's *state* is settled 2/4 (`ec3de2bb…`) while the filed picture

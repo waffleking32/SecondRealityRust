@@ -427,14 +427,15 @@ pub(crate) struct CaptureDir {
 /// display geometry between the title screen and the part after it, one
 /// manifest carries one geometry, so Task 12 captured one screen at a time.
 /// `reference/parts` is the shape that made this a walk of the *whole* tree:
-/// eighteen of its captures are immediate subdirectories and two parts —
-/// `plzpart` and `techno`, the two whose screens have two geometries each —
-/// hold theirs one level deeper.
+/// eighteen of its captures are immediate subdirectories, `techno` — whose two
+/// screens are separate captures — holds two one level deeper, and `plzpart`
+/// holds three (the plasma, the cube keyframes and the projection fit's band
+/// capture).
 ///
 /// **The walk goes all the way down because measuring less than was asked for
 /// is how a green run lies.** A scan of the first level only found 18 of
-/// `parts/`'s 22 captures — skipping both CRTC-writing parts and every one of
-/// the keyframes that have no settled content — and still printed `verdict:
+/// `parts/`'s 23 captures — skipping the CRTC-writing parts, the keyframes that
+/// have no settled content and the band capture — and still printed `verdict:
 /// identical` with exit 0. Nothing below the root is skipped here, and a
 /// rendered side laid out differently is refused by [`pair_captures`] (the
 /// names have to match) rather than reduced to whatever the two sides happen to
@@ -2112,15 +2113,17 @@ mod tests {
     #[test]
     fn the_whole_tree_form_finds_every_capture_the_per_part_form_finds() {
         // `reference/parts` is the tree that hid four captures: eighteen of its
-        // capture directories are immediate subdirectories, and `plzpart` and
-        // `techno` — the two parts whose screens have two geometries each —
-        // hold theirs one level deeper. A scan of the first level measured 18
-        // of the 22 and still said `verdict: identical`, so the whole-tree form
-        // is pinned against the per-part form: the two have to find the same
-        // directories, no more and no fewer.
+        // capture directories are immediate subdirectories, `techno` — whose
+        // two screens, the interference and the troll, are separate captures —
+        // holds two one level deeper, and `plzpart` holds three (the plasma,
+        // the cube keyframes and the projection fit's band capture). A scan of
+        // the first level measured 18 of the 23 and still said
+        // `verdict: identical`, so the whole-tree form is pinned against the
+        // per-part form: the two have to find the same directories, no more
+        // and no fewer.
         let parts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/parts");
         let whole = resolve_captures(&parts).unwrap();
-        assert_eq!(whole.len(), 22, "the tree's capture directories, reviewed and pinned");
+        assert_eq!(whole.len(), 23, "the tree's capture directories, reviewed and pinned");
 
         let mut per_part: Vec<PathBuf> = Vec::new();
         for entry in fs::read_dir(&parts).unwrap() {
@@ -2129,13 +2132,14 @@ mod tests {
                 continue;
             }
             // Every subdirectory of `parts/` holds captures: eighteen hold one
-            // each and the two Mode X parts hold two — so a subdirectory with
-            // none is a change to the tree this test is about.
+            // each and the two Mode X parts hold two and three — so a
+            // subdirectory with none is a change to the tree this test is
+            // about.
             let captures = resolve_captures(&path)
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             per_part.extend(captures.into_iter().map(|capture| capture.dir));
         }
-        assert_eq!(per_part.len(), 22, "the same 22, one invocation per part");
+        assert_eq!(per_part.len(), 23, "the same 23, one invocation per part");
 
         // Both directions: a whole-tree run may not miss a capture the per-part
         // form finds, and may not measure one no per-part form finds.

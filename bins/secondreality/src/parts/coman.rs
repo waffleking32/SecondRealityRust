@@ -82,8 +82,8 @@
 //! (`PartCtx::music_fresh`).
 //!
 //! The part ends on `MAIN.C:59-60`'s break, `a > -8 && a < 0`, in MUSIC1
-//! order 96's `zplus == 1` tail: the published row 58 first gives
-//! `musplus == -6`, and the iterating part reads it at tick 2,014. The
+//! order 96's `zplus == 1` tail: the published row 57 first gives
+//! `musplus == -7`, and the iterating part reads it at tick 2,014. The
 //! 4,444-frame cap is never reached. In that tail the inner body also raises
 //! `startrise` a vblank. Once it reaches 130 the copy's first row
 //! `70 + startrise` is at or below row 200 and the screen is flat black —
@@ -1507,7 +1507,7 @@ mod tests {
             "the first published row inside the break's window"
         );
         assert_eq!(musplus, -7, "`row - 64` at MUSIC1 order 96 row 57");
-        // The published row enters the break's window at order 96 row 58
+        // The published row enters the break's window at order 96 row 57
         // (~boot 17060 with this part's origin), so the last iteration is the
         // 1,007th — tick 2,014. The terrain itself is already off the bottom
         // by 17,000: `startrise` rises one a vblank through order 96's
@@ -1572,6 +1572,4 @@ mod tests {
         assert_eq!(range(&wave1), (-33, 41), "W1DTA.BIN's signed words");
         assert_eq!(range(&wave2), (-56, 63), "W2DTA.BIN's signed words");
     }
-
 }
-

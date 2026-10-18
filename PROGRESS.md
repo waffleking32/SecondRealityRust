@@ -2162,7 +2162,7 @@ Rows are graded by their weakest value, as Phase 4's were.
 | LNS&ZOOM's tables and the 1,536-byte overrun | EX1 19,588 / EX2 6,860 / EX3 1,538 / EX4 6,252 bytes, with 103/102/43/116 rows drawn; a 1,536-byte copy at `back+64000` | `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` prints the geometry; `MAIN.C:302` | a table-bound error reads past a file; a wrong overrun changes the lens's bottom rows; 3400 fails | **yes** — 3400's 1,935 pixels are all A25's forehead, so the lens itself is the reference's; the row counts and the overrun are pinned |
 | the six part-tick mappings | PLZPART `5723 + tick`; LNS&ZOOM `2452 + tick`; TECHNO `4797`/`4799`/`4800 + tick`; PANICEND `8782 + tick`; COMAN four origins **15036/15034/15030/15028**; JPLOGO `17065 + tick` | the traces' `setmframe` resets (PLZPART 5723, LNS 2452), the content-probed TECHNO first rings and the fade's quantization, PANICEND's handoff states, COMAN's keyframe ticks, JPLOGO's entry sweep; none is an anchor (D30) | one tick and every keyframe lands on a different frame; each part's test fails | **half** — each mapping is a fit to the same keyframes the test compares, so the keyframes are not independent of it; exceptions: PANICEND's **9000** (self-contained and not used in the fit) and JPLOGO's 17100 sweep (under `out/`, corroboration); COMAN's drift is A26 |
 | A22 — PLZPART's exit palette **4** | `EXIT_PALETTE_RELEASE = 4`; the exit fires 65 ticks after the third switch; the tree's 5 stays for the test | the reference's 320×400 screen ends in (8310, 8340] (§13.7), while the tree's 5 would exit four switches in at boot 8769 | the tree's 5 ends the plasma 429 frames past the reference's last plasma screen; 8500 would be a plasma screen | **yes** — `the_release_exit_index_is_the_measured_one` (switches 975/2010/2527, exit 2592 = boot 8315 inside the window) plus 8500's cube; the screen boundary is a different observable from the exit arithmetic |
-| A23 — the cube's extent, projection, phase and close-up | `CUBE_DRAWN_ROWS = 200`, `CLEAR_LINES = 201`; `yy*213/zz + 100`; **8** pre-polls (gate at 8364); the 9500 camera data absent from the tree | fourteen diagnostic captures; the six silhouette frames 8400–8800's band fit (**0.47 %** at 213/100 vs **6.38 %** at 142/66); the corrected phase's 26.161 % vs 32.106 % | the tree's 142/66 leaves the cube 34 px high; a 134-row clip loses the band continuation; a one-poll phase error moves the residual 5.9 points | **yes** for the projection and phase — the band fit is measured on six frames, not the two keyframes, and the phase's residual change is measured; the close-up is **registered, not adopted** (the tree carries no camera data; 9500 stays 99.483 %) |
+| A23 — the cube's extent, projection, phase and close-up | `CUBE_DRAWN_ROWS = 200`, `CLEAR_LINES = 201`; `yy*213/zz + 100`; **8** pre-polls (gate at 8364); the 9500 camera data absent from the tree | the committed `reference/parts/plzpart/band/` capture; the six silhouette frames 8400–8800's band fit (**0.46 %** at 213/100 vs **9.99 %** at 142/66, `the_projection_fit_is_the_committed_release_bands`); the corrected phase's 26.161 % vs 32.106 % | the tree's 142/66 leaves the cube 34 px high; a 134-row clip loses the band continuation; a one-poll phase error moves the residual 5.9 points | **yes** for the projection and phase — the band fit is a committed capture and test on six frames, not the two keyframes, and the phase's residual change is measured; the close-up is **registered, not adopted** (the tree carries no camera data; 9500 stays 99.483 %) |
 | A24 — the plasma's tear | no constant: the port draws the four passes at one parameter generation (the boundary) | `PLZ.C`'s loop has no frame wait, so the copper's per-vblank latch can land between passes; the forced-split diagnostic table (before passes 0/1/2/3/boundary) | a fixed split cannot match all three frames (split 3: 8.42/8.59/8.28; the boundary: 11.21/5.85/4.05) | **none** — the split depends on the original's per-frame execution time, which neither the tree nor the reference records; the diagnostic table is a counterfactual, not a measurement of the mechanism |
 | A25 — the forehead picture and the setup frame | the tree's `LENS.EXB`; `ROT_SETUP_FRAMES = 2` | the reference's 2700 `.idx` differs from the tree's picture in **2,058 pixels** (rows 33..91, columns 129..211); the act ticks need eight waits where the source has seven | patching the tree's picture with the reference's 2700 plane makes 3400/4200/4900 byte-identical, so the residual is that picture; one frame less in the setup moves the rotazoomer and 4900 fails | **yes** — the strongest check in the phase: a 2,058-pixel patch taken from **one** keyframe (2700) makes **three other** frames (3400/4200/4900) byte-identical; the setup frame is measured by the act ticks and 4200/4900 |
 | A26 — COMAN's fixed two vblanks | `VBLANKS_PER_ITERATION = 2`; the frame-4 body's two waits | `MAIN.C:105/111` and `DISINT.ASM`'s return; the reference's keyframes imply **1.992** frames an iteration and origins 15036/15034/15030/15028 | a fixed one would halve the iterations and the keyframes fail; a variable model has no readable input | **half** — the pictures are byte-identical at all four keyframes, but the drift is *derived from those same keyframes*: no filed frame between them measures a one-vblank iteration, and the 1.992 fit is the evidence |
@@ -2209,7 +2209,7 @@ ok   music/second2: music trace, 4597 row(s), 1 file(s)
 ok   music/second3a: music trace, 7298 row(s), 1 file(s)
 ok   music/second3d: music trace, 2799 row(s), 1 file(s)
 (…)
-verdict: ok — 35 capture(s), 116 file(s), 26963022 bytes
+verdict: ok — 36 capture(s), 122 file(s), 28115022 bytes
 exit: 0
 
 $ cargo xtask assets verify --tree --decode
@@ -2221,14 +2221,15 @@ verdict: ok
 exit: 0
 ```
 
-(**1,068 tests pass, zero fail, seven are ignored**, summed from the run's 45 `test result:` lines,
+(**1,070 tests pass, zero fail, seven are ignored**, summed from the run's 45 `test result:` lines,
 and the run prints no `warning:` line. The seven ignored are Phase 4's set, unchanged — Phase 5
 added none: `sr-assets/tests/omf.rs`'s regenerator, CRED's two record tests, ALKU's two, MINVBALL's
 `j` fit and DDSTARS's `+17` survey check. Three of the seven read git-ignored scratch (`out/`), so a
-fresh clone cannot re-run them. `reference verify` covers **35 captures / 116 files / 26,963,022
+fresh clone cannot re-run them. `reference verify` covers **36 captures / 122 files / 28,115,022
 bytes** where Phase 4 closed at 32 / 113 / 26,511,402: the three new music traces are the phase's
-one new kind of reference, and the verifier recomputes each trace's coverage from the file's own
-frames. `assets/` is 158 files plus `PROVENANCE.md`, up from 151: the seven PLZPART `.INC`
+one new kind of reference, and the fix wave's committed PLZPART band capture (six frames, the
+projection fit's reference) is the other; the verifier recomputes each trace's coverage from the
+file's own frames. `assets/` is 158 files plus `PROVENANCE.md`, up from 151: the seven PLZPART `.INC`
 fragments. The two `test result:` lines shown are the two targets that carry ignored tests; `(…)`
 elides the other 43 targets' lines.)
 
@@ -2286,10 +2287,14 @@ elides the other 43 targets' lines.)
   (the camera and wave cursors advance once an iteration); a variable model would need the
   release's render time, which neither the tree nor the trace records.
 - **PLZPART's cube is registered, not matched (A23).** The 8500 keyframe is 26.161 %: 9.90 points
-  of port-only page-slot spill (the release's page timing/clear relationship differs) and 16.10
-  points of both-set shade/pose; the 9500 close-up is 99.483 % because the tree carries no camera
-  data for frames 9100–9600 (every RATA translation word is zero there). "Verified" for PLZPART
-  means a faithful port with these registered, and the plasma is itself A24's CPU-timing tear.
+  of port-only page-slot spill (the port's own 200-row draw wraps through the 0x5500-byte page
+  slot; which of the release's page timing, clear or draw path keeps its frame clean was not
+  captured, so the spill is an unresolved port-side artifact, not a measured release divergence)
+  and 16.10 points of both-set shade/pose; the 9500 close-up is 99.483 % because the tree carries
+  no camera data for frames 9100–9600 (the RATA control points those frames interpolate, 15–26,
+  are all `dx = dy = 0, dz = 300`, constant — the tree has no frame-dependent translation).
+  "Verified" for PLZPART means a faithful port with these registered, and the plasma is itself
+  A24's CPU-timing tear.
 - **LNS&ZOOM's residual is one asset difference (A25).** The tree's `LENS.EXB` forehead differs
   from the release's in 2,058 pixels; patching those bytes from the reference's 2700 index plane
   makes 3400, 4200 and 4900 byte-identical. The release's picture is not in the tree, and the port
@@ -2310,11 +2315,19 @@ elides the other 43 targets' lines.)
   `out/` (a 23-frame `cmp` across 5058–5900 plus the 8160/8170/8190 shrink frames), which a fresh
   clone cannot re-run. The seven filed frames do read the bars' wipes, but not the second-pass
   circle's sine cursor.
-- **PLZPART's cube evidence is under `out/`.** The projection/extent/phase fit rests on fourteen
-  diagnostic captures (`out/plz-diag-cube`, `out/plz-diag-cube2`), and the plasma's split
-  measurement on `out/b4-plz-probe1`; the filed 8500/9500 are the committed check. The plasma's
-  three reference pictures are themselves single-session points (presented 2/5, 0/4, 0/3 across
-  the census sessions), so a few per cent there is the reference's spread as well as A24's tear.
+- **PLZPART's cube evidence: one committed capture, the rest scratch.** The projection/extent fit
+  now has a committed reference — `reference/parts/plzpart/band/`, six frames 8400–8800 taken by
+  the sanctioned `cargo xtask reference capture` command recorded in `plzpart.md` §7 and A23 — and
+  a committed test, `the_projection_fit_is_the_committed_release_bands`, which renders the port
+  through the real engine at the tree's 134-row extent and pins the fit (0.30/0.50/0.57/0.35/
+  0.49/0.58 % at 213/100 against 5.33/13.64/7.82/13.41/11.37/8.36 % at 142/66; total 1,196 vs
+  25,696 of 257,280 band pixels) and the 8500 phase state (frames 136, page 4, display start
+  0x0028, music 68:46). The remaining extent/phase diagnostics (`out/plz-diag-cube*`, the
+  split measurement in `out/b4-plz-probe1`) stay scratch; the filed 8500/9500 are the committed
+  keyframe check. `cargo xtask reference verify --tree reference` now reads **36 capture(s),
+  122 file(s), 28,115,022 bytes**, exit 0. The plasma's three reference pictures are themselves
+  single-session points (presented 2/5, 0/4, 0/3 across the census sessions), so a few per cent
+  there is the reference's spread as well as A24's tear.
 - **PANICEND's pulse and its tick-0 view are not pinned.** Only the pulse's last value is visible
   (9000's entry 1 = (1,1,1)); the intermediate `cos` rounding of the DOS libm is not recoverable,
   and the first and last values are pinned. The tick-0 view reads past the port's 64,000-plane-byte
@@ -2399,8 +2412,9 @@ elides the other 43 targets' lines.)
 
 ### Phase 5 — Mid tier (complete — untagged)
 
-Eleven tasks on branch `phase-5-mid-tier`, from `phase-4` (`e4f467e`) to this close-out (20
-commits; the first is the phase's plan and the second the three new music traces). **1,068 tests
+Eleven tasks on branch `phase-5-mid-tier`, from `phase-4` (`e4f467e`) to this close-out (21
+commits; the first is the phase's plan, the second the three new music traces, and the last the
+final review's fix wave). **1,070 tests
 pass, zero failures, seven ignored, zero warnings** (Phase 4 closed at 935, seven ignored), and
 both clippy commands exit 0. Every number in the evidence section above was re-run at the
 committed state. **Nothing is tagged**: the final whole-branch review runs first and its findings
