@@ -199,7 +199,7 @@ fn a_manifest_this_tool_does_not_read_cannot_be_checked_and_exits_two() {
 fn the_reference_tree_the_repository_ships_checks_out() {
     // The sentence Phase 1's close-out could not write: **a test reads
     // `reference/`**. 24 frame captures and 105 frame files, every digest
-    // against the file beside it — and, since Phase 3, eight music traces
+    // against the file beside it — and, since Phase 3, eleven music traces
     // under `music/`, which are a second *kind* of capture the verifier reads
     // through its own checks (a flipped byte of one is
     // `xtask/tests/music.rs`'s finding, not this file's).
@@ -209,7 +209,7 @@ fn the_reference_tree_the_repository_ships_checks_out() {
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 32 capture(s), 113 file(s)"),
+            .contains("verdict: ok — 35 capture(s), 116 file(s)"),
         "{}",
         run.output()
     );
@@ -222,6 +222,9 @@ fn the_reference_tree_the_repository_ships_checks_out() {
         "music/hiddenu2",
         "music/second1",
         "music/second1b",
+        "music/second2",
+        "music/second3a",
+        "music/second3d",
     ] {
         assert!(
             run.stdout

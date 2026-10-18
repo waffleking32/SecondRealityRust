@@ -627,8 +627,9 @@ measured is the behaviour** — a `[NN` line advances the ring NN rows and draws
 ## A12 — The music clock: the port's tick clock is exact, the reference's frame counter is not
 
 **Part:** the music, under every part that plays it (Task 3; the traces are
-`reference/music/{second5,second5b,second3,hiddenu}` and Phase 4's
-`reference/music/{second1,second1b,second3b,hiddenu2}`).
+`reference/music/{second5,second5b,second3,hiddenu}`, Phase 4's
+`reference/music/{second1,second1b,second3b,hiddenu2}` and Phase 5's
+`reference/music/{second2,second3a,second3d}`).
 
 **Original:** the player's tick is `2.5/tempo` seconds of *the emulated machine's* time, and the
 traces are sampled once per frame of the emulator's own frame counter
@@ -652,35 +653,43 @@ exact clock sits *between* them, and that is the best a fixed clock can do.
 
 **Measured difference.** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
 prints, for every trace in `reference/music/`, the share of the trace's frames whose published
-position matches the port's, and the worst displacement. Phase 4's four are included; the three
-window runs are phase-aligned to their own session first (each prints its offset):
+position matches the port's, and the worst displacement. Phase 4's four and Phase 5's three
+are included; the six window runs are phase-aligned to their own session first (each prints
+its offset):
 
 ```
-8 filed trace(s)
+11 filed trace(s)
   hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
   hiddenu2: the session's phase is -16 frame(s) from the boot's
   hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
   second1 (MUSIC0): 3738 of 5538 frames agree (67.497 %); worst displacement 7 frame(s)
   second1b: the session's phase is +1 frame(s) from the boot's
   second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
+  second2: the session's phase is -5 frame(s) from the boot's
+  second2 (MUSIC1): 3207 of 4590 frames agree (69.869 %); worst displacement 4 frame(s)
   second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
+  second3a: the session's phase is +2 frame(s) from the boot's
+  second3a (MUSIC1): 6089 of 7291 frames agree (83.514 %); worst displacement 2 frame(s)
   second3b: the session's phase is +1 frame(s) from the boot's
   second3b (MUSIC1): 3179 of 4839 frames agree (65.695 %); worst displacement 6 frame(s)
+  second3d: the session's phase is +4 frame(s) from the boot's
+  second3d (MUSIC1): 2716 of 2792 frames agree (97.278 %); worst displacement 2 frame(s)
   second5 (MUSIC0): 769 of 883 frames agree (87.089 %); worst displacement 2 frame(s)
   second5b (MUSIC0): 775 of 883 frames agree (87.769 %); worst displacement 2 frame(s)
 ```
 
 On the Phase 3 windows the frames that disagree are one per row change — the ±1-frame placement
 of a row boundary. The larger displacements are `second1`'s **7** over 5,538 compared frames
-and `second3b`'s **6** over 4,839 — not the longest windows (`hiddenu`'s 6,084 compared frames
-reach 3) but the ones whose reference rate is farthest from the exact one: 48.06 and 52.06 a
-second where the port runs exactly 48.00 and 52.00, so 0.1 % accumulates to several frames over
-thousands. The *content* is not in doubt: the comparison test asserts, word by word, that the port
+and `second3b`'s **6** over 4,839 — not the longest windows (the longest, `second3a`'s 7,291
+compared frames, reach 2) but the ones whose reference rate is farthest from the exact one:
+48.06 and 52.06 a second where the port runs exactly 48.00 and 52.00, so 0.1 % accumulates to
+several frames over thousands. The *content* is not in doubt: the comparison test asserts, word by word, that the port
 publishes exactly the
 trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`, `loop` and
 `zplus`, and that every published value is one the trace publishes within **7** frames of that
 frame — the measured worst (`second1`), still under one 6-tick row (8.76 frames). The windows'
-own phase offsets (−16, +1 and +1 frames) are the boot's session-to-session spread, measured in
+own phase offsets (−16 for `hiddenu2`, −5 for `second2`, +1 for `second1b` and `second3b`,
++2 for `second3a`, +4 for `second3d`) are the boot's session-to-session spread, measured in
 `music-clock.md` §2, not clock drift.
 
 **What is not an approximation here:** the ten-poll publication delay (`_np_*` is a ring buffer ten

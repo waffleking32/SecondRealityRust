@@ -284,7 +284,7 @@ fn the_reference_tree_passes_with_the_traces_in_it() {
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("32 capture(s)"), "{text}");
+    assert!(text.contains("35 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a
@@ -496,7 +496,7 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 8, "the filed traces: {names:?}");
+    assert!(names.len() >= 11, "the filed traces: {names:?}");
 
     let mut samples = 0usize;
     for trace in &names {
@@ -520,8 +520,11 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         );
         samples += count;
     }
+    // The floor is below the measured total (38,803 across the eleven: 1150+1152+2755+6351+
+    // 5797+359+4846+1699+4597+7298+2799) and above the eight Phase 3/4 traces' 24,109 and
+    // the nine/ten-trace partial sums, so a trace silently dropping out of the walk fails here.
     assert!(
-        samples > 11_000,
+        samples > 38_000,
         "every filed trace's samples are checked, and there are {samples} of them"
     );
 }
@@ -596,7 +599,7 @@ fn the_anchor_is_the_same_in_every_filed_session() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 8, "the filed traces: {names:?}");
+    assert!(names.len() >= 11, "the filed traces: {names:?}");
 
     // recipe -> (trace, anchor, direct) for the traces that hold the start.
     let mut boots: std::collections::BTreeMap<String, Vec<(String, f64, f64)>> =

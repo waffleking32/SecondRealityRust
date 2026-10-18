@@ -679,22 +679,29 @@ the impossible. So the comparison asserts what a port can be held to —
    inside the one-entry slack and is invisible), while one that froze the counter at zero matches
    what the traces do.
 2. **placement**: every published value is one the trace publishes at that frame or within
-   3 frames of it;
+   7 frames of it;
 
-— and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints (the
-Phase 4 traces are included; the window runs first print their session's phase offset):
+— and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints (Phase
+4's and Phase 5's traces are included; the six window runs first print their session's phase
+offset):
 
 ```
-8 filed trace(s)
+11 filed trace(s)
   hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
   hiddenu2: the session's phase is -16 frame(s) from the boot's
   hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
   second1 (MUSIC0): 3738 of 5538 frames agree (67.497 %); worst displacement 7 frame(s)
   second1b: the session's phase is +1 frame(s) from the boot's
   second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
+  second2: the session's phase is -5 frame(s) from the boot's
+  second2 (MUSIC1): 3207 of 4590 frames agree (69.869 %); worst displacement 4 frame(s)
   second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
+  second3a: the session's phase is +2 frame(s) from the boot's
+  second3a (MUSIC1): 6089 of 7291 frames agree (83.514 %); worst displacement 2 frame(s)
   second3b: the session's phase is +1 frame(s) from the boot's
   second3b (MUSIC1): 3179 of 4839 frames agree (65.695 %); worst displacement 6 frame(s)
+  second3d: the session's phase is +4 frame(s) from the boot's
+  second3d (MUSIC1): 2716 of 2792 frames agree (97.278 %); worst displacement 2 frame(s)
   second5 (MUSIC0): 769 of 883 frames agree (87.089 %); worst displacement 2 frame(s)
   second5b (MUSIC0): 775 of 883 frames agree (87.769 %); worst displacement 2 frame(s)
 ```
@@ -704,9 +711,9 @@ one per row change — because the port's clock is exact and the reference's is 
 sits *between* the two sessions (a frame early in `second5`, a frame late in `hiddenu`) which is
 the best a fixed clock can do. The larger displacements are `second1`'s 7 frames and
 `second3b`'s 6 — the windows whose reference rate is 0.1 % from the port's exact one, not the
-longest (`hiddenu`'s 6,084 compared frames reach 3) — still under one row at their speeds; the
-content is asserted word by word, not by frames. `docs/fidelity/APPROXIMATIONS.md` A12 records
-the measurement and its cause.
+longest (the longest, `second3a`'s 7,291 compared frames, reach 2) — still under one row at
+their speeds; the content is asserted word by word, not by frames.
+`docs/fidelity/APPROXIMATIONS.md` A12 records the measurement and its cause.
 
 ### The end-to-end play, shown
 
@@ -1595,8 +1602,9 @@ rule written as row ranges. The demo's own parts read the answer as a countdown 
 
 **`muscode` is 0, and the substitute keeps `_np_zinfo`'s shape.** D8's route 1 walked the object's
 symbols and read the word live: it is at segment offset `0x08F7` and it is **0 in every sample of
-every filed trace** (24,109 across the eight — Phase 3's four and Phase 4's — covering MUSIC0's
-orders 0…9, 12, 13, 25…31 and 70…77 and MUSIC1's 0, 42…48 and 75…93), so the port returns 0
+every filed trace** (38,803 across the eleven — Phase 3's four, Phase 4's four and Phase 5's
+three — covering MUSIC0's orders 0…9, 12, 13, 25…31 and 70…77 and MUSIC1's 0 and 18…98, the
+`254` entries stepped over), so the port returns 0
 (`music-clock.md` §6). `muscode_from` takes the
 position and the wanted code and ignores both, so the phase that finds a mechanism for its other
 values replaces one body; the parts that wait on it — `GRID/MAIN.C:72` for 2, `:160` for 3,
