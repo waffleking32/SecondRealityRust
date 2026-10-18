@@ -47,7 +47,7 @@
 //!
 //! - `_setpalarea` uploads `2*count + start` bytes, not `3*count`: every
 //!   `(..., 0, 256)` call is 512 of the table's 768 bytes.
-//! - `setborder` returns immediately (`KOE.C:66-80`), and its calls are kept.
+//! - `setborder` returns immediately (`KOE.C:68-80`), and its calls are kept.
 //! - `flash(-2)` returns without capturing or uploading.
 //! - `drawline`'s `mov cx,400` in `init_interference` is overwritten before it
 //!   is read.
@@ -126,7 +126,7 @@ const PAL2: [u8; 48] = [
     0, 0, 0, 10, 7, 10, 20, 15, 20, 30, 23, 30, 40, 31, 40, 50, 38, 50, 60, 46, 60, 30, 23, 30,
 ];
 
-/// The byte-reversal `flip8` table (`KOEA.ASM:437-450`), built from its rule
+/// The byte-reversal `flip8` table (`KOEA.ASM:425-437`), built from its rule
 /// rather than transcribed.
 fn flip8_table() -> [u8; 256] {
     let mut table = [0u8; 256];
@@ -136,7 +136,7 @@ fn flip8_table() -> [u8; 256] {
     table
 }
 
-/// `blitinit`'s `_blit16t` (`KOEA.ASM:117-137`), 256 two-byte entries.
+/// `blitinit`'s `_blit16t` (`KOEA.ASM:84-114`), 256 two-byte entries.
 ///
 /// The table turns the vbuf's 1-bit-per-pixel outline into the plane byte the
 /// display fills: the low byte is the source byte's suffix parity, so the
@@ -345,7 +345,6 @@ pub struct Techno {
     /// starts in the repository root), `"../../"` for the unit tests.
     root: &'static str,
     phase: Phase,
-    fresh: bool,
     tick: u32,
     /// The three polls the emulator's CPU-bound preamble takes between the
     /// `setmframe(0)` and the first pass's first iteration: six rendered
@@ -469,7 +468,6 @@ impl Techno {
         Techno {
             root: "",
             phase: Phase::Gate,
-            fresh: false,
             tick: 0,
             extra_polls: 0,
             circle2: Vec::new(),
@@ -712,7 +710,7 @@ impl Techno {
         self.p1_framecount += 1;
     }
 
-    /// `KOEB.ASM:505-560`'s MOVE, with the dead `sizefade` multiply kept.
+    /// `KOEB.ASM:502-590`'s MOVE, with the dead `sizefade` multiply kept.
     fn first_pass_move(&mut self) {
         self.p1_scrnrot = (self.p1_scrnrot + 5) & 1023;
         let sin = SIN_TABLE[self.p1_scrnrot as usize] as i32;
@@ -764,7 +762,7 @@ impl Techno {
         self.p2_scrnposl = scrnx & 7;
         self.p2_scrnpos = 80 * scrny + (scrnx >> 3);
         // The source tests `framecount` against 350 *before* incrementing it
-        // (`KOEA.ASM:887-901`), so the ramp starts one frame later than a
+        // (`KOEA.ASM:887-897`), so the ramp starts one frame later than a
         // post-increment check would put it.
         if self.p2_framecount >= 70 * 5 {
             self.p2_powercnt = self.p2_powercnt.wrapping_add(1);
@@ -788,7 +786,7 @@ impl Techno {
     }
 
     /// The moving circles in plane 3, 44 bytes a row at a 640-wide address
-    /// space (`KOEA.ASM:780-833`).
+    /// space (`KOEA.ASM:779-818`).
     fn interference_draw(&mut self) {
         self.p2_sinurot = (self.p2_sinurot + 14) & 2047;
         let mut bp = self.p2_sinurot;
@@ -802,7 +800,7 @@ impl Techno {
             let ax = a - self.p2_scrnposl + self.p2_overx;
             let which = (7 - (ax & 7)) as usize;
             // The source's `push si` / `pop si` restores the row's base and
-            // adds 80 to it each iteration (`KOEA.ASM:800,825`), so row `r`
+            // adds 80 to it each iteration (`KOEA.ASM:790,812-814`), so row `r`
             // reads from `80*r + overya + (ax >> 3)`.
             let si = (row as i32 * 80 + self.p2_overya + (ax >> 3)) as u16 as usize;
             let di = self.p2_scrnpos as usize + row * 80;
@@ -1058,7 +1056,7 @@ impl Techno {
         }
     }
 
-    /// `drawline` (`KOEA.ASM:151-337`): the source's y-sorted DDA with its
+    /// `drawline` (`KOEA.ASM:170-370`): the source's y-sorted DDA with its
     /// unrolled mask states.
     fn drawline(&mut self, a: (i16, i16), b: (i16, i16)) {
         let (mut ax, mut bx) = (i32::from(a.0), i32::from(a.1));
@@ -1109,7 +1107,7 @@ impl Techno {
         }
     }
 
-    /// `_asmbox` (`KOEA.ASM:339-405`): clip the four points and draw the
+    /// `_asmbox` (`KOEA.ASM:373-419`): clip the four points and draw the
     /// polygon's edges; a one- or two-point result draws nothing (a dot is
     /// `y1 == y2`, and a two-point result draws the same line twice).
     fn asmbox(&mut self, pts: [(i16, i16); 4]) {
@@ -1172,7 +1170,7 @@ impl Techno {
     }
 }
 
-/// `rotate1` (`KOEA.ASM:592-620`): rotate the first 31,936 bytes right one bit
+/// `rotate1` (`KOEA.ASM:605-627`): rotate the first 31,936 bytes right one bit
 /// with a zero shifted in; the last 64 bytes of `dst` are untouched.
 fn rotate1(src: &[u8], dst: &mut [u8]) {
     let mut carry = 0u8;
@@ -1305,7 +1303,6 @@ impl Part for Techno {
         }
         self.palfade = troll_fade(&self.troll_palette);
         if ctx.music_fresh() {
-            self.fresh = true;
             for _ in 0..MUSIC_PRE_ROLL {
                 if let Some(music) = ctx.music() {
                     music.poll();
@@ -1536,8 +1533,10 @@ impl Techno {
         self.stride = PLANE_ROW;
         self.display_start = 0;
         self.pan = 0;
+        // `memset(vram,0,64000)` (`KOE.C:259`): the last 1,536 bytes of each
+        // plane keep what the interference left, exactly as the source does.
         for plane in &mut self.planes {
-            plane.fill(0);
+            plane[..64_000].fill(0);
         }
         for plane in &mut self.planes {
             plane[..PAGE_BYTES].fill(0xFF);
@@ -1716,7 +1715,11 @@ impl Techno {
 
     /// The post-wait half of a doit3 iteration.
     fn doit3_post(&mut self) {
-        self.pan = ((self.xpos & 3) * 2) as u8;
+        // The 16-colour screen's ATC pan is `xpos & 7` pixels (`KOE.C:528`);
+        // the `(xpos & 3)*2` form is the troll's 256-colour one. With the
+        // start register at `xpos/8` plane bytes the total is
+        // `8*(xpos/8) + (xpos & 7) = xpos`.
+        self.pan = (self.xpos & 7) as u8;
         let mut vbuf = std::mem::take(&mut self.vbuf);
         vbuf.fill(0);
         self.vbuf = vbuf;
@@ -2198,13 +2201,15 @@ mod tests {
             part.init(&mut ctx).unwrap();
         }
         // The interference screen is 320×200 from the mode set to the troll.
-        for tick in 1..3397u32 {
+        // The call with `tick` is engine frame `tick`; the view changes on
+        // frame 3396 (the dump's geometry follows at 3397).
+        for tick in 0..3396u32 {
             part.tick = tick;
             rig.tick(&mut part);
             assert_eq!((rig.view.width, rig.view.height), (320, 200), "tick {tick}");
         }
         // The mode 13h / inittwk transition sets the 320×400 view.
-        for tick in 3397..3402u32 {
+        for tick in 3396..3402u32 {
             part.tick = tick;
             rig.tick(&mut part);
         }
@@ -2372,6 +2377,85 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn doit3s_pan_is_the_low_three_bits_of_xpos() {
+        // `KOE.C:528` sets ATC 13h to `xpos & 7` on the 16-colour screen; the
+        // `(xpos & 3)*2` form belongs to the troll's 256-colour screen and
+        // loses bit 2 (xpos 4 would pan 0 instead of 4).
+        for xpos in [0i32, 1, 4, 5, 8, 13, 320] {
+            let mut t = Techno::new();
+            t.xpos = xpos;
+            t.doit3_post();
+            assert_eq!(t.pan, (xpos & 7) as u8, "xpos {xpos}");
+        }
+    }
+
+    #[test]
+    fn rotate1s_last_sixty_four_bytes_are_untouched() {
+        let src: Vec<u8> = (0..32_000usize).map(|i| (i * 37 % 251) as u8).collect();
+        let mut dst = vec![0xAAu8; 32_000];
+        rotate1(&src, &mut dst);
+        let mut carry = 0u8;
+        for i in 0..32_000 - 64 {
+            let value = src[i];
+            assert_eq!(dst[i], (value >> 1) | (carry << 7), "byte {i}");
+            carry = value & 1;
+        }
+        assert!(
+            dst[32_000 - 64..].iter().all(|byte| *byte == 0xAA),
+            "the source's loop stops 64 bytes short"
+        );
+    }
+
+    #[test]
+    fn flash_minus_two_uploads_nothing() {
+        let mut t = Techno::new();
+        t.dac = [7u8; 768];
+        t.flash_pal = [11i16; 48];
+        t.flash_apply(-2);
+        assert_eq!(t.dac, [7u8; 768], "flash(-2) uploads nothing");
+        assert_eq!(t.flash_pal, [11i16; 48], "and captures nothing");
+    }
+
+    #[test]
+    fn the_second_pass_reads_the_sine_as_a_byte_offset() {
+        let mut t = Techno::new();
+        t.reset_video_for_tests();
+        t.p2_scrnpos = 0;
+        t.p2_scrnposl = 0;
+        t.p2_overx = 0;
+        t.p2_overya = 0;
+        t.p2_sinuspower = 1;
+        t.p2_sinurot = 0;
+        for (k, circle) in t.circles.iter_mut().enumerate() {
+            circle.fill(0x10 + k as u8);
+        }
+        t.interference_draw();
+        let mut selected = std::collections::BTreeSet::new();
+        for row in 0..200usize {
+            // `sinurot += 14`, then `bp += 18` a row (`KOEA.ASM:785,791`).
+            let bp = (14 + 18 * (row + 1)) & 2047;
+            // The cursor is a byte offset; the word is `bp/2`.
+            let mut bx = (SIN_TABLE[bp / 2] as i32) >> 3;
+            bx = (bx & 0xFF) | (1 << 8);
+            let ax = i32::from(t.power0[bx as usize]);
+            let which = (7 - (ax & 7)) as usize;
+            selected.insert(which);
+            let si = (row as i32 * 80 + (ax >> 3)) as u16 as usize;
+            for k in 0..44usize {
+                assert_eq!(
+                    t.planes[3][row * 80 + k],
+                    t.circles[which][si + k],
+                    "row {row} byte {k} is circle {which} at {si}"
+                );
+            }
+        }
+        assert!(
+            selected.len() > 1,
+            "sinuspower 1 makes the byte cursor select more than one circle"
+        );
     }
 
     #[test]

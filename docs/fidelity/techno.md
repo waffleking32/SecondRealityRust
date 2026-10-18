@@ -6,7 +6,8 @@ transcription lives in `bins/secondreality/src/parts/techno.rs`; the unit
 tests are beside it and the process-level test is `bins/secondreality/tests/
 techno.rs`.
 
-The part is block 2's third (`MAIN/U2.ASM`), reached after TUNNELI. It is
+The part is block 2's fourth (`shell.rs`'s `PART_ORDER`; `MAIN/U2.ASM`),
+reached after TUNNELI. It is
 three stages and a second picture:
 
 1. **The interference, first pass** (`KOE.C:213-216`): a music gate
@@ -92,9 +93,10 @@ surface*: 640 bytes a row, four pixels a plane byte. A `View` then reads it:
   `80 + y*160`), i.e. pixel 320 of the surface's 640.
 
 `the_two_geometries_are_the_parts_two_screens` runs the real player and
-asserts the view is 320×200 for every tick from 1 to 3396, and 320×400 with
-`y_line_offset: Some(640)` and `start_addr: 0` over the mode change at
-3397..3401. `the_seven_keyframes_at_the_measured_mappings` shows the
+asserts the view is 320×200 for every frame from 0 to 3395, and 320×400 with
+`y_line_offset: Some(640)` and `start_addr: 0` from frame 3396 on (the
+engine sizes a dumped frame at the tick's start, so the first 320×400 dump
+is 3397; §8.3). `the_seven_keyframes_at_the_measured_mappings` shows the
 interference frames at 320×200 and the troll frames at 320×400 in the
 binary's own manifest.
 
@@ -142,12 +144,12 @@ raw pictures' sizes (8,000 and 24,000 bytes; `TROLL.UP` 320×400).
 1. `resetmode13` (`KOEB.ASM:175-213`): wait, zero the DAC, `int 10h` mode
    13h, program the ATC's sixteen entries, the border and `32`, zero the DAC
    again.
-2. `init_interference` (`KOEB.ASM:296-390`): CRTC `13h = 40` (80 plane bytes);
+2. `init_interference` (`KOEB.ASM:304-403`): CRTC `13h = 40` (80 plane bytes);
    `_circle2` blitted into plane 2 at `y*80` and vertically mirrored at
    `(399-y)*80`, each row forward then bit-reversed at +40; eight copies of
    the 32,000-byte plane-2 window rotated right one bit (`rotate1`); then
    `_circle`'s three planes blitted the same way into planes 0..2.
-3. `do_interference` (`KOEB.ASM:392-605`): per frame, the palette mixes
+3. `do_interference` (`KOEB.ASM:405-607`): per frame, the palette mixes
    `pal0` into the two 8-triple windows (`palanimc` stepping by `patdir`,
    wrapping 0..24), `palfader += 2` capped at 512; at ≤ 256 each channel is
    `src * palfader >> 8`, above 256 it is `src + (palfader - 256)` clamped to
@@ -171,9 +173,9 @@ pins iterations 101, 201 and 256).
 ### 3.1 The sine cursor is a byte offset
 
 `KOEA.ASM`'s `interference_draw` keeps `bp` in **bytes** into the word
-table: it adds `9*2` a row (`:795`) and masks with `& 2047` (`:786, :795`),
-i.e. 1,024 words. The MOVE routines keep a word index and write
-`shl bx,1` before `_sin1024[bx]` (`:830-836`, `:850-855`); the two cursors
+table: it adds `9*2` a row (`:791`) and masks with `& 2047` (`:785-786`,
+`:791-792`), i.e. 1,024 words. The MOVE routines keep a word index and
+write `shl bx,1` before `_sin1024[bx]` (`:837-838`, `:854-855`); the two cursors
 are written differently, and that is what tells them apart. The table is
 therefore exactly `SIN1024.INC`'s 1,024 words and the code after it in the
 linked segment is never read. The brief's "alias tail" was this byte cursor
@@ -231,27 +233,38 @@ The second pass has no keyframe in `reference/parts/techno/` (the tree's four
 320×200 frames are the first pass and the bars), so it was checked against
 live captures during the port and those are the evidence for the rule:
 
-```bash
-$ cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" \
-    --cycles 30000 --frames 5058,5400,5500,5600,5900 --out out/techno-secondpass-cal
+The captures are four sessions (all with the same prefix
+`cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left
+KBD_enter" --cycles 30000`):
+
+```text
+--frames 5050,5054,5056,5058,5060,5062,5070                  --out out/techno-secondpass-start
+--frames 5000,5400,5500,5600,5700,5800,5900,6000,6300         --out out/techno-secondpass-cal
+--frames 5410,5420,5430,5440,5450,5460,5470                   --out out/techno-secondpass-mid
+--frames 5421,5422,5423,5424,5425,5426,5427,5428,5429,5430,5431,5432
+                                                              --out out/techno-secondpass-dense
 ```
 
-The session is calibrated by its own 5000 and 6300: `sha256sum` of those
-two RGB files equals the tree's (`reference-indices.md` §9.2's hashes). At
-`tick = boot - 4799`, `cmp` of each captured RGB against the port's frame
-from
+The `cal` session is calibrated by its own 5000 and 6300: `sha256sum` of
+those two RGB files equals the tree's (`reference-indices.md` §9.2's
+hashes), so its boot indices are the tree's. At `tick = boot - 4799`, a
+single dump,
 
 ```bash
 $ target/debug/secondreality --part techno --headless \
-    --dump-frames 259,601,611,621,631,641,701,801,1101 --dump-dir out/techno-secondpass-port
+    --dump-frames 259,261,263,271,601,611,621,622,623,624,625,626,627,628,629,630,631,632,633,641,701,801,1101 \
+    --dump-dir out/techno-secondpass-port
 ```
 
-reports no differing byte for 5058, 5400, 5410, 5420, 5430, 5440, 5500,
-5600 and 5900. 5058 is the first second-pass frame (its overlay is drawn at
-0 and shown through 8,020); 5400/5500/5600/5900 cover the sinuspower
-transition at frame 5424, which is where the byte-offset cursor first
-matters. The captures are in `out/` (git-ignored); the committed acceptance
-remains the seven keyframes of §9.
+compares equal (`cmp`, no differing byte) for all 23 frames it names: 5058
+(tick 259), 5060/5062/5070 (261/263/271), 5400 (601), 5410/5420/5430/5440
+(611/621/631/641), 5421..5432 (622..633), 5500 (701), 5600 (801) and 5900
+(1101). 5058 is the first second-pass frame (its overlay is drawn at 0 and
+shown through 8,020); 5424 is the first frame where `sinuspower` is 1 and
+the byte cursor matters. Before the byte-offset fix, 5424 differed by
+**11,205 pixels**; the committed port reports 0. The captures and the dump
+are in `out/` (git-ignored); the committed acceptance remains the seven
+keyframes of §9.
 
 ### 4.2 `waitborder` and the four bar wipes (`KOE.C:262-316`)
 
@@ -300,9 +313,9 @@ and the one-bit plane mask doubles 1→2→4→8→1 at every wrap. doit3 uses f
 the pointer `+0x2000000*plv + 40` — the +40 plane bytes is the crosshatch's
 x offset, carried through the start register's low byte.
 
-**The geometry.** `drawline` (`KOEA.ASM:151-337`) is the source's y-sorted
+**The geometry.** `drawline` (`KOEA.ASM:170-370`) is the source's y-sorted
 DDA with unrolled mask states, XORing `0x80 >> (x & 7)` into `vbuf`; it skips
-horizontal lines and drops its last row. `asmbox` (`KOEA.ASM:339-405`) clips
+horizontal lines and drops its last row. `asmbox` (`KOEA.ASM:373-419`) clips
 the four corners with `POLYCLIP.ASM`'s `clipanypoly` and draws the closed
 polygon. `clipanypoly`'s first edge is the **closing** edge pre-clipped
 (`cap3` ends with `jmp cap35`, which skips the first loop iteration's
@@ -320,10 +333,22 @@ doit3's crosshatch.
 **doit3's ending.** The loop reads `getmframe()`: above 2520 it forces
 `xpos` to 0 on one frame and breaks on the next; from `count < 333` it
 shrinks `xpos` by `xposa/4` until 0. `xpos` also drives the display start's
-low byte (`xpos/8`) and the ATC pan (`(xpos & 3)*2`). The port's
-`DOIT3_MFRAME = 2520` and `DOIT3_COUNTDOWN = 333`; the `rot2 >= 32` sine
-divide is C's truncating `/4`, not an arithmetic shift — the shift moves
-every negative-sine edge a pixel and leaves a 4,552-pixel residual at 8100.
+low byte (`xpos/8`) and the ATC pan (`xpos & 7`, `KOE.C:528`; the
+`(xpos & 3)*2` form is the troll's 256-colour screen), so the total pixel
+offset is `8*(xpos/8) + (xpos & 7) = xpos`. The port's `DOIT3_MFRAME = 2520`
+and `DOIT3_COUNTDOWN = 333`; the `rot2 >= 32` sine divide is C's truncating
+`/4`, not an arithmetic shift — an arithmetic shift moved the negative-sine
+edges by a pixel in the port's first build, a then-measurement of 4,552
+differing pixels at 8100 that the committed build does not reproduce (8100
+is byte-identical).
+
+The shrink is live for the last ~45 frames of the screen, and no committed
+keyframe samples it: 8100 is frame 3301, before `count < 333` begins. The
+live capture `out/techno-troll-map2/frame_008150.rgb` is the evidence. The
+port at tick 3352 (boot 8151 by the 4799 fit; the capture's own session
+names the file 8150) is byte-identical with `pan = xpos & 7` and differs by
+4,951 pixels with the troll's `(xpos & 3)*2` form;
+`doit3s_pan_is_the_low_three_bits_of_xpos` pins the formula.
 
 ## 6. The troll (`KOE.C:588-727`)
 
@@ -386,7 +411,7 @@ Each is required behaviour, not a defect:
 - **`patdir` only moves towards smaller offsets**: it is set to -3 at rows
   ≡ 0 or 4 (mod 8) and never to +3, so the `>= 24` wrap only fires from
   below 0. The port keeps the negative-only arithmetic.
-- **`rotate1`'s last 64 bytes** (`KOEA.ASM:603-620`): `cx = 32000/32 - 2`
+- **`rotate1`'s last 64 bytes** (`KOEA.ASM:605-627`): `cx = 32000/32 - 2`
   rotates 31,936 bytes; the last 64 stay as the destination held them. The
   port copies the source's 16-bit rotate including its chained carry; the
   first carry comes from the caller's flags and is zero on the shipped path,
@@ -396,11 +421,14 @@ Each is required behaviour, not a defect:
   second 40,000-byte read into it (§6).
 - **`clipanypoly`'s first edge** is the pre-clipped closing edge (§5).
 
-The brief's line about "the unlinked `_COMBG` analogue `_PIC1/_PIC2` are not
-linked" has no counterpart in the vendored tree: `grep -a` finds no `_PIC1`,
-`_PIC2` or `_COMBG` anywhere under `upstream/SecondReality/`. The two externs
-that exist are `_circle` and `_circle2`, and they are the assets read above.
-There is nothing to model.
+The brief's `_PIC1`/`_PIC2` and `_COMBG` objects **exist in the tree but are
+not linked**: `TECHNO/_PIC1.OBK` and `_PIC2.OBK` (symbols `_pic`/`_pic2`) and
+`COMAN/_COMBG.OBK` (`_combg`, with `COMBG.LBM/UH/X`) are present, but
+`TECHNO/MAKEFILE:6-7` has `data=_circle.obk _circle2.obk` with
+`#_pic1.obk _pic2.obk` commented out, and `COMAN/MAKEFILE:3-4`'s link lists
+do not name `_combg.obk`. The port reads the two linked externs
+`_circle`/`_circle2` (above); the unlinked pictures are not part of the
+binary and there is nothing to model.
 
 ## 8. The gates, the entry pre-roll and the ticks
 

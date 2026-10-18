@@ -3,7 +3,7 @@
 //!
 //! The part's arithmetic is unit-tested beside it in `src/parts/techno.rs`
 //! (the bar palette, the 512-byte `setpalarea`, the first pass's 256-frame
-//! fade, the sin table's alias tail, the clip/fill renderer, the page flips,
+//! fade, the sine table's byte cursor, the clip/fill renderer, the page flips,
 //! the troll's RLE and row layout, the entry pre-roll and the section ticks).
 //! What is left over here is the wiring only a process can answer: the
 //! registry, the asset paths as a run resolves them from the repository root,
