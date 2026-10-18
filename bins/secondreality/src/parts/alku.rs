@@ -358,15 +358,17 @@ impl CopperState {
         }
     }
 
-    /// `COPPER.ASM:115-145`: the fade applier. `cop_pal` becomes `fadepal` and
-    /// the 16-bit 8.8 accumulator takes one `cop_fadepal` step.
+    /// `COPPER.ASM:115-145`: the fade applier. The source sets `cop_pal` to a
+    /// **pointer** to `fadepal` and then adds in place; `copper2` uploads it at
+    /// the retrace, so what reaches the DAC is the *post-add* palette. The port
+    /// copies `fadepal` after the add, which is the same bytes at the same
+    /// upload — and the last step's accumulation is uploaded, as the source's
+    /// is, rather than left one step behind.
     fn slot0(&mut self, _ctx: &mut PartCtx) {
         if self.cop_dofade == 0 {
             return;
         }
         self.cop_dofade -= 1;
-        self.cop_pal.copy_from_slice(&self.fadepal[..768]);
-        self.do_pal = true;
         for index in 0..768 {
             let low = u16::from(self.fadepal[768 + index]);
             let high = u16::from(self.fadepal[index]);
@@ -375,6 +377,8 @@ impl CopperState {
             self.fadepal[index] = (sum >> 8) as u8;
             self.fadepal[768 + index] = sum as u8;
         }
+        self.cop_pal.copy_from_slice(&self.fadepal[..768]);
+        self.do_pal = true;
     }
 
     /// `COPPER.ASM:64-81`: the CRTC start and pan.
@@ -979,7 +983,10 @@ impl Alku {
                         }
                     }
                     CardPhase::Hold { ticks } => {
-                        if ticks + 1 < CARD_HOLD_TICKS {
+                        // `wait(300)` is 300 frames: the first hold tick is
+                        // the one after the fade-in's last step, and the
+                        // fade-out begins the tick after the 300th.
+                        if ticks < CARD_HOLD_TICKS {
                             self.stage =
                                 Stage::Card { card, phase: CardPhase::Hold { ticks: ticks + 1 } };
                             return PartStatus::Continuing;
@@ -1028,6 +1035,8 @@ impl Alku {
                         self.stage = Stage::FinalFade { a: a + 1 };
                         return PartStatus::Continuing;
                     }
+                    // `MAIN.C:150`: the final `fonapois()` after the fade.
+                    self.fonapois(video);
                     self.stage = Stage::Done;
                     return PartStatus::Finished;
                 }
@@ -1109,6 +1118,8 @@ impl Alku {
                             self.stage = Stage::FinalFade { a: 1 };
                             return PartStatus::Continuing;
                         }
+                        // `MAIN.C:150` runs `fonapois()` on this path too.
+                        self.fonapois(video);
                         self.stage = Stage::Done;
                         return PartStatus::Finished;
                     }
@@ -1501,13 +1512,15 @@ mod tests {
     }
 
     /// All four gates published as soon as they can be: card 1 at tick 0,
-    /// card 2 at 427, card 3 at 854, the picture at 1281.
+    /// card 2 at 428, card 3 at 856, the picture at 1284 — each card is the
+    /// source's 64 + 300 + 64 ticks and the next gate is checked on the tick
+    /// after the fade-out's last step.
     fn picture_script(last_tick: u32) -> Vec<i32> {
         (0..=last_tick)
             .map(|tick| match tick {
-                0..=426 => 1,
-                427..=853 => 2,
-                854..=1280 => 3,
+                0..=427 => 1,
+                428..=855 => 2,
+                856..=1283 => 3,
                 _ => 4,
             })
             .collect()
@@ -1562,8 +1575,9 @@ mod tests {
             "card 1 must begin on the tick code 1 arrives, got {:?}",
             part.stage
         );
-        // Card 1 is 64 fade-in ticks, 300 hold ticks and 64 fade-out ticks.
-        run_to(&mut rig, &mut part, 5 + 427);
+        // Card 1 is 64 fade-in ticks, 300 hold ticks and 64 fade-out ticks;
+        // its 428th tick (tick 5 + 427) hands over to the code-2 gate's stage.
+        run_to(&mut rig, &mut part, 5 + 428);
         assert!(
             matches!(part.stage, Stage::Sync { code: 2, card: 1 }),
             "card 1 must hand over to the code-2 gate, got {:?}",
@@ -1581,9 +1595,9 @@ mod tests {
     #[test]
     fn the_scroll_advances_one_step_every_nine_ticks() {
         let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
-        run_to(&mut rig, &mut part, 1282);
+        run_to(&mut rig, &mut part, 1285);
         assert_eq!(part.stage, Stage::PictureFade);
-        for tick in 1282..=1289u32 {
+        for tick in 1285..=1292u32 {
             rig.step(&mut part);
             assert_eq!(
                 (rig.view.start_addr, rig.view.pan),
@@ -1598,7 +1612,7 @@ mod tests {
             "the ninth tick is the first step, (a=1,p=1)"
         );
         assert_eq!((part.a, part.p), (2, 0), "the step increments a and flips p");
-        for tick in 1291..=1298u32 {
+        for tick in 1294..=1301u32 {
             rig.step(&mut part);
             assert_eq!(
                 (rig.view.start_addr, rig.view.pan),
@@ -1782,21 +1796,32 @@ mod tests {
     }
 
     #[test]
-    fn the_fade_applier_adds_the_delta_to_the_16_bit_accumulator() {
+    fn the_fade_applier_uploads_the_post_add_palette() {
+        // `COPPER.ASM:122-124` sets `cop_pal` to a *pointer* to `fadepal` and
+        // `copper2` uploads it at the retrace, after the add: the port copies
+        // `fadepal` after the add. A delta that crosses a high-byte boundary
+        // distinguishes the two.
         let mut state = CopperState::new();
         state.cop_dofade = 1;
-        state.fade[0] = 240; // +240 as a positive 16-bit delta
-        state.fade[1] = -240; // and its negative
-        state.fadepal[0] = 60; // high
-        state.fadepal[768] = 0; // low
+        state.fade[0] = 100; // 2.200 + 100 = 2.300: the high byte moves
+        state.fade[1] = -240; // and a negative delta
+        state.fadepal[0] = 2; // high
+        state.fadepal[768] = 200; // low
+        state.fadepal[1] = 60;
+        state.fadepal[769] = 0;
         let mut rig = Rig::new(Player::scripted(Vec::new()));
         let mut ctx = rig.ctx(0);
         state.slot0(&mut ctx);
-        // 60*256 + 240 = 15600 = 0x3CF0: high 0x3C, low 0xF0.
-        assert_eq!((state.fadepal[0], state.fadepal[768]), (0x3C, 0xF0));
+        // 2*256 + 200 + 100 = 812 = 0x032C; 60*256 - 240 = 15120 = 0x3B10.
+        assert_eq!((state.fadepal[0], state.fadepal[768]), (3, 44));
+        assert_eq!((state.fadepal[1], state.fadepal[769]), (0x3B, 0x10));
         assert_eq!(state.cop_dofade, 0);
         assert!(state.do_pal);
-        assert_eq!(&state.cop_pal[..3], &[60, 0, 0], "cop_pal is fadepal before the add");
+        assert_eq!(
+            &state.cop_pal[..3],
+            &[3, 0x3B, 0],
+            "cop_pal is fadepal after the add, so the upload is the post-add step"
+        );
     }
 
     // --- the music's gates --------------------------------------------------
@@ -1804,9 +1829,9 @@ mod tests {
     #[test]
     fn the_picture_fade_hands_over_to_a_batch_gated_on_code_five() {
         let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
-        // The picture gate is tick 1281; the fade loop's first step is 1290
-        // and its 15th is 1416, where `cop_dofade` has reached zero.
-        run_to(&mut rig, &mut part, 1417);
+        // The picture gate is tick 1284; the fade loop's first step is 1293
+        // and its 15th is 1419, where `cop_dofade` has reached zero.
+        run_to(&mut rig, &mut part, 1420);
         assert_eq!(
             part.stage,
             Stage::Main(MainPhase::Inner { code: 5 }),
@@ -1821,12 +1846,12 @@ mod tests {
             let set = rig.ctx(0).copper_is_set(slot);
             assert!(set, "slot {slot} is registered");
         }
-        run_to(&mut rig, &mut part, 1282);
+        run_to(&mut rig, &mut part, 1285);
         assert_eq!(part.stage, Stage::PictureFade);
         // Slot 0 (the fade applier) decrements `cop_dofade` once a tick.
         let dofade = part.shared.borrow().cop_dofade;
         let frame_count = part.shared.borrow().frame_count;
-        rig.step(&mut part); // tick 1282
+        rig.step(&mut part); // tick 1285
         assert_eq!(part.shared.borrow().cop_dofade, dofade - 1, "slot 0's fade");
         // Slot 2 (the frame counter) increments once a tick.
         assert_eq!(part.shared.borrow().frame_count, frame_count + 1, "slot 2's counter");
@@ -1834,7 +1859,7 @@ mod tests {
         // after the reset it writes the first step's start and pan.
         assert_eq!(rig.view.start_addr, 0, "no step before the ninth tick");
         for _ in 0..8 {
-            rig.step(&mut part); // ticks 1283..1290
+            rig.step(&mut part); // ticks 1286..1293
         }
         assert_eq!(
             (rig.view.start_addr, rig.view.pan),
@@ -1878,15 +1903,15 @@ mod tests {
 
     #[test]
     fn the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase() {
-        // The reference's session reaches the empty text batch's `fmaketext`
-        // (`MAIN.C:141`, `aa<308`), which rebuilds `dtau` from the zeroed
-        // `tbuf` and erases the old text; the port's trace-faithful phase
-        // reaches it at `aa=308` and skips it, so its text survives into the
-        // next text fade. **With the post-gate transitions moved by -9 frames
-        // — the reference session's phase, measured by
-        // `the_5859_phase_sensitivity` — the frame is byte-identical.** That
-        // is what makes the pixel machinery, the palette and the pan exact
-        // and the phase the only difference.
+        // The reference's frame is bare: either its session reached the empty
+        // text batch's `fmaketext` (`MAIN.C:141`, `aa<308`), which rebuilds
+        // `dtau` from the zeroed `tbuf` and erases the old text, or its fade
+        // was elsewhere. The port's trace-faithful phase reaches the batch at
+        // `aa=308` and skips it, so its text survives into the next fade.
+        // **With the post-gate transitions moved by -9 frames — or by +10,
+        // which `the_5859_phase_sensitivity` also finds — the frame is
+        // byte-identical.** That is what makes the pixel machinery, the
+        // palette and the pan exact and the phase the only difference.
         let tick = 5859 - 404;
         let (mut rig, mut part) =
             started_with(Player::scripted(trace_script_after_gate(tick, -9)));
@@ -1971,13 +1996,18 @@ mod tests {
                 rig.step(&mut part);
             }
         }
+        let mut measured = Vec::new();
         for (boot, frame) in frames {
             let expected = reference(boot);
             let differing = differing_pixels(&frame, &expected);
             println!(
                 "boot {boot}: {differing} of 128000 pixels differ with the curated entries"
             );
+            measured.push((boot, differing));
         }
+        // A20's numbers, pinned: a silent change here would let the note's
+        // counterfactual go stale.
+        assert_eq!(measured, [(900, 0), (1719, 1595), (2719, 4171), (5859, 2706)]);
     }
 
     /// The text batches' transitions moved by `shift` while the four gates stay
@@ -2010,6 +2040,9 @@ mod tests {
     #[test]
     #[ignore]
     fn the_5859_phase_sensitivity() {
+        let mut at_zero = None;
+        let mut at_minus_nine = None;
+        let mut at_plus_ten = None;
         for shift in -18..=18 {
             let tick = 5859 - 404;
             let (mut rig, mut part) =
@@ -2024,6 +2057,16 @@ mod tests {
                 "shift {shift:+3}: {differing:5} pixels differ; a={} p={} f={} stage={:?}",
                 part.a, part.p, part.f, part.stage
             );
+            match shift {
+                0 => at_zero = Some(differing),
+                -9 => at_minus_nine = Some(differing),
+                10 => at_plus_ten = Some(differing),
+                _ => {}
+            }
         }
+        // A20's three measured rows, pinned.
+        assert_eq!(at_minus_nine, Some(0), "the reference phase's reproduction");
+        assert_eq!(at_plus_ten, Some(0), "a second phase that reproduces it");
+        assert_eq!(at_zero, Some(2358), "the port's own phase");
     }
 }

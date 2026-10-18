@@ -259,9 +259,10 @@ pub fn music_start_frame_for(part: &str) -> u32 {
 ///
 /// - A run whose first drawn frame is **at or before** [`MUSIC_START_FRAME`] waits for it:
 ///   the player is installed and seeked at the run's start, and does not advance until
-///   the frame the music's first tick falls on. This is the demo's own beginning — block 2
-///   and block 1 both draw from 404, four frames before the music starts — and it is what
-///   `second5`'s frames 404…407 hold: a loaded module that has not ticked.
+///   the frame the music's first tick falls on. This is the restart recipes' entry — block 2
+///   draws from 404, four frames before its restart's 408 — and it is what `second5`'s frames
+///   404…407 hold: a loaded module that has not ticked. (Block 1 is the other case: its
+///   clock starts at 400 and a run at 404 pre-polls the four frames it missed.)
 /// - A run whose first drawn frame is **after** it **pre-polls** the frames it missed, at
 ///   its start, because the music's advance is deterministic and does not depend on a
 ///   frame being drawn: `Player::poll` is the only thing that moves it, and N polls in a
@@ -2174,6 +2175,7 @@ mod tests {
                 }
             }
         }
+        println!("second1: trace code transitions {trace_codes:?}");
         println!("second1: code transition deltas (port minus trace): {code_delta:?}");
         assert!(
             by_delta.keys().all(|delta| (-3..=9).contains(delta)),

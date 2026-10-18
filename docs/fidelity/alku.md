@@ -106,17 +106,24 @@ spins, and `do_scroll(0)` steps only when the counter has reached nine. The
 unit test `the_scroll_advances_one_step_every_nine_ticks` pins the cadence:
 the first step is the ninth tick after the picture's reset, the view is
 `start_addr 4*88, pan 1` at `(a=1,p=1)`, it holds for eight ticks, and the
-eighteenth tick is `(a=2,p=0)` — `start_addr 0, pan 2`. The same counter paces
-`dofade` and `wait(300)`, and the port resets it at the source's own points
+eighteenth tick is `(a=2,p=0)` — `start_addr 0, pan 2`. The source's
+`dofade` and `wait(300)` are paced by the same counter; the port's `dofade`
+steps once a tick and its `wait(300)` is a 300-tick `Hold` with its own
+counter where the source counts `frame_count` — one frame a tick either way,
+and the port resets `frame_count` at the source's own points. The card is therefore **428 ticks** — the
+fade-in's 64, the hold's 300 and the fade-out's 64 — and its 428th tick hands
+over to the next gate's stage
 (`the_stage_gates_follow_the_music_and_a_skipped_code_still_passes_them`
-measures a card at 64 + 300 + 64 ticks and the handover to the next gate).
+runs to `5 + 428` and sees the code-2 gate).
 
 ## 5. The stages and the text's off-by-one
 
 The gates are `dis_sync() < 1`, `< 2`, `< 3` and `< 4` (`MAIN.C:59`, `:66`,
 `:72`, `:79`). `dis_sync()` is `sync_10`'s `ordersync1` answer
-(`crate::sr_engine::music::sync_from`); the codes the trace reaches are 1 at
-boot 1537, 2 at 2097, 3 at 2509 and 4 at 3069 (`second1`).
+(`sr_engine::music::sync_from`); the codes the trace reaches are 1 at
+boot 1537, 2 at 2097, 3 at 2509 and 4 at 3069, which the shell's block-1 test
+prints as `second1: trace code transitions {…}` (the frames at which
+`sync_from` first answers each code over `second1`).
 
 The batches wait
 
@@ -157,8 +164,9 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   rows survive.
 - **The final fade only when `f>7`** (`:148`): `63/SCRLF` is 7. The port runs
   the 64-step `dofade(palette2,palette)` when `f` is above it and retires
-  immediately otherwise, as the source does; the fade only touches entries
-  64-255, which the picture never indexes.
+  immediately otherwise, as the source does, and `fonapois()` (`:150`) runs on
+  both paths; the fade only touches entries 64-255, which the picture never
+  indexes.
 - **The `while(frame_count<9);` spin** is the 9-tick cadence (§4), never a
   loop.
 
@@ -186,7 +194,7 @@ ignored; §10):
 | 900 | 0 of 128,000 | 0 |
 | 1719 | 1,595 of 128,000 | **0** |
 | 2719 | 4,171 of 128,000 | **0** |
-| 5859 | 2,706 of 128,000 | 2,358 (this file's script; 2,353 through the real binary, §8) — the text-batch phase, A20 |
+| 5859 | 2,706 of 128,000 | 2,358 (this file's script; 2,353 through the real binary, §8) — the text-batch phase, A20; the post-add upload fix leaves the counts unchanged |
 
 The cards are the strong evidence: their text is drawn in entries 64, 128 and
 192 of `fade2`, which are palette entries 1, 2 and 3 (`MAIN.C:194-208`), so
@@ -247,9 +255,9 @@ shift  +0:  2358 pixels differ; a=311 p=1 f=22 stage=Main(Outer)
 shift +10:     0 pixels differ; a=311 p=1 f=20 stage=Main(Outer)
 ```
 
-With the post-gate transitions at the reference session's phase (`-9`), the
-frame is byte-identical, which is what makes the pixels, the palette and the
-pan exact and the phase the only difference
+With the post-gate transitions at a phase at which the frame is
+byte-identical (`-9`, and `+10` as well — the scan prints both), the picture,
+the palette and the pan are exact and the phase is the only difference
 (`the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`).
 The phase is the original's own CPU time in the batch loops (the port's
 `fmaketext`/`faddtext` are zero-cost; the original's were not) and the
@@ -279,9 +287,10 @@ order are the trace's, and the port's change frames minus the trace's are
 {-2: 1, -1: 1, 0: 3, 1: 1, 2: 217, 3: 285, 4: 118, 5: 10, 6: 1, 8: 1}
 ```
 
-— 2-4 frames ahead for 620 of them, the rest the trace's own missing frames
-and sample instant (A12). The code transitions ALKU reads are 2-4 frames
-ahead too:
+— the port's change frames are **2-4 frames after** the trace's for 620 of
+them (the port's music is behind the trace's direct reading; the rest are the
+trace's own missing frames and sample instant, A12). The code transitions
+ALKU reads are 2-4 frames behind too:
 
 ```
 {1: 2, 2: 3, 3: 2, 4: 3, 5: 2, 6: 4, 7: 3, 8: 4, 9: 3}

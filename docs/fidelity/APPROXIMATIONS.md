@@ -1130,13 +1130,17 @@ shift  +0:  2358 pixels differ; a=311 p=1 f=22 stage=Main(Outer)
 shift +10:     0 pixels differ; a=311 p=1 f=20 stage=Main(Outer)
 ```
 
-At the reference session's phase the frame is byte-identical
-(`the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`),
-so the pixels, the palette, the pan and the text are the source's; the phase
+At a phase at which the frame is byte-identical — `-9` and `+10` in the
+scan both give 0 pixels
+(`the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`) —
+the pixels, the palette, the pan and the text are the source's; the phase
 is the port's fixed tick giving `fmaketext`/`faddtext` zero CPU cost where the
 original's 1993 loops took frames, plus the session's music clock (the trace's
 own `second1` fit has a 5.4-frame spread between its two readings). The port
-cannot reproduce either, and this entry registers the difference.
+cannot reproduce either, and this entry registers the difference. **Fix round
+1** changed the copper fade's upload to the source's post-add step
+(`copper3`'s `cop_pal` pointer, `COPPER.ASM:122-124`) and re-measured: the counts above are unchanged —
+the fade's step changes the text pixels' colours, not which pixels differ.
 
 **What is not established, and must not be implied.** The direction: the
 reference session's phase is one boot, not a property of the release, and the
