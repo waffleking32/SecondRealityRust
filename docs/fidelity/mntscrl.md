@@ -125,12 +125,16 @@ pre-roll the position would read `42:8` (82 polls, trace frame 490).
 
 **The 11 is calibrated for an entry-point run.** It stands for `--part
 mntscrl` or `--block 3`, where the block restart starts MUSIC1 with the part;
-block 3 begins here, so both present routes take that path. If a future chain
-reached MNTSCRL with the player already running, the 11 would have to be
-skipped, because the player would already be at the reference's position. The
-seam is scheduled in `PROGRESS.md`'s Phase 5 hand-off (a `PartCtx` signal that
-the player was already running, or the pre-roll moved into the shell's
-per-part entry path); no current run meets the mid-chain case.
+block 3 begins here, so both present routes take that path. A part reached
+mid-chain with the player already running would skip the 11, because the
+player would already be at the reference's position. The Phase 5 seam is
+`PartCtx::music_fresh` (D31): true only for the init of the first part started
+after the run's player was installed, false for every later part, and `init`
+polls only when it is true
+(`a_mid_chain_start_does_not_pre_roll_the_music`). No run the port can make
+reaches MNTSCRL mid-chain yet — block 3 begins here (fresh), and a full run
+through PANICEND is unmodelled — so the guarded branch is unit-tested, not
+chain-tested.
 
 **The first wait is the release's 71 ticks.** The tree's `:153-159` waits for
 `dis_musplus() >= 0`, but no threshold of that shape can produce the

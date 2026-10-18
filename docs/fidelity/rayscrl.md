@@ -136,10 +136,13 @@ rayscrl`, whose shell seeks `MUSIC1` to order 86 and starts the player with
 the part; a part reached mid-chain with the player already running (the first
 runnable block-3 chain, after MINVBALL) has the player already at the
 reference's position, and `init`'s 268 pre-polls would advance it 268 polls
-past it. A mid-chain start therefore requires the pre-roll to be skipped,
-through the seam `PROGRESS.md`'s Phase 5 hand-off schedules (a `PartCtx`
-signal that the player was already running, or the pre-roll moved into the
-shell's per-part entry path).
+past it. A mid-chain start therefore requires the pre-roll to be skipped. The
+Phase 5 seam is `PartCtx::music_fresh` (D31), and `init` polls only when it is
+true. The block-3 chain test exercises it with the real player: RAYSCRL
+publishes **86:62** inside its gate and opens on **88:0** at chain 12,546 (the
+trace's boot 12,962) — a 268-poll jump on top of 86:62 would leave order 86
+entirely. `a_mid_chain_start_does_not_pre_roll_the_music` covers the unit
+case.
 
 **The release's gates act seven ticks after the tree's condition** on the
 port's clock — the cue's trace labels are eight, because the trace's player

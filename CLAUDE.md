@@ -51,28 +51,36 @@ in any new crate manifest.
 
 ## Running it
 
-`cargo run --bin secondreality` opens a window and plays a run. The port has twelve parts: the
-Phase 0 test card, and the demo's own **ALKU**, **PAM**, **BEGLOGO**, **TUNNELI**, **MNTSCRL**,
-**MINVBALL**, **RAYSCRL**, **DDSTARS**, **ENDLOGO**, **CRED** and **ENDSCRL**. Any other part the
-demo runs is refused by name — `--part glenz` says "glenz is not ported yet" rather than starting
-something else.
+`cargo run --bin secondreality` opens a window and plays a run. The port has eighteen parts: the
+Phase 0 test card, and the demo's own **ALKU**, **PAM**, **BEGLOGO**, **TUNNELI**, **TECHNO**,
+**PANIC** (`panicend`), **MNTSCRL**, **LNS&ZOOM** (`lnszoom`), **PLZPART**, **MINVBALL**,
+**RAYSCRL**, **3DSINFLD** (`3dsinfld` — not a legal Rust identifier, so its module is `coman.rs`),
+**JPLOGO**, **DDSTARS**, **ENDLOGO**, **CRED** and **ENDSCRL**. Any other part the demo runs is
+refused by name — `--part glenz` says "glenz is not ported yet" rather than starting something
+else.
 
 ```bash
 cargo run --release --bin secondreality -- --block 1     # ALKU, then it stops: U2A is unported
-cargo run --release --bin secondreality -- --block 3     # MNTSCRL, then it stops: LNS&ZOOM is unported
+cargo run --release --bin secondreality -- --block 3     # the whole mid-tier chain, then U2E
 cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> ENDSCRL
 cargo run --release --bin secondreality -- --block 2     # BEGLOGO, then it stops: GLENZ is unported
 cargo run --release --bin secondreality -- --block U     # DDSTARS (the hidden part)
 cargo run --release --bin secondreality -- --part alku
 ```
 
+`--block 3` runs **MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO** and
+stops at U2E, which is unported; `--block 2` still stops at GLENZ and `--block 1` at U2A.
+
 **ESC** ends the part that is playing and the shell starts the next one — the original's exit flag
-(`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`). The six Phase-4
-parts read it (`ctx.exit_requested`) where their sources consult the exit flag, and in their wait
-loops, which must not spin; a part that sees it can end on that tick without drawing. For a part
-that does not poll, the engine carries the flag and the *shell* retires the part at the end of the
-tick it was set in. Once the run has nothing left to play, ESC closes the window, where the
-original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
+(`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`). The Phase-4
+parts, and LNS&ZOOM, TECHNO, 3DSINFLD and JPLOGO, read it (`ctx.exit_requested`) where their
+sources consult the exit flag, and in their wait loops, which must not spin; a part that sees it
+can end on that tick without drawing.
+**PANICEND never polls it** — `SHUTDOWN.C` has no `dis_exit()` call — and **PLZPART**'s port leaves
+it to the shell as well (its source polls, but the tick is drawn and the part retired either way);
+for a part that does not poll, the engine carries the flag and the *shell* retires the part at the
+end of the tick it was set in. Once the run has nothing left to play, ESC closes the window, where
+the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
 `ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
 a key.

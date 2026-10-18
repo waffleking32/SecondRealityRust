@@ -349,7 +349,8 @@ the word "entry-point" belongs to the row as a *starting* position, not to every
 A run that reaches U2E inside blocks 2 or 3 (or GLENZ inside block 1) needs a **mid-run**
 restart at that point in the sequence, which the one-row-per-run model has no place for yet;
 nothing the port can run today gets that far (`--block 2`'s plan stops at GLENZ, unported;
-`--block 3` cannot start at all), and `docs/fidelity/music.md` §12 and D27 carry the
+`--block 3` ran no part when this entry was written and since Phase 5 runs MNTSCRL through JPLOGO
+but stops at U2E, unported), and `docs/fidelity/music.md` §12 and D27 carry the
 citations.
 
 **Block arguments: the README and the code disagree, and the port follows the code.**
@@ -1989,3 +1990,62 @@ the next is boot 12,950, past the frame cap at 12,947 — so the one-tick differ
 picture in its run (`docs/fidelity/minvball.md` §5). ALKU's and PAM's gates sit far from their
 keyframes; their traces and the four keyframes are the check. What the reference's checks actually
 read is D28's one-tick relationship, and where the release's timing differs, A17/A18 register it.
+
+## D31 — Phase 5's decisions: a mid-chain seam on the part context, PLZPART's `.INC` data filed verbatim, and a chain that hands over with no loader gap (2026-10-18)
+
+Phase 5 ported the six mid-tier parts and, with them, the seam Phase 4 deferred, a part whose data is
+its original's assembler text, and the first block-3 chain that runs more than one part. Three rules
+the parts and the shell follow were decided rather than measured. Each is a decision about the port's
+model, not a divergence from the original; the phase's release-versus-tree divergences are
+**A22–A27**, not this entry.
+
+**1. The mid-chain seam is a property of the install, not of the part: `PartCtx::music_fresh`.**
+Phase 4's final review found the assumption its four parts were built on — MINVBALL's **256**-poll
+entry pre-roll, RAYSCRL's **268**, MNTSCRL's **11**, and PAM's open-gate `frame_count = 2` — true only
+for a run that begins at the part, and false for a part reached mid-chain with the player already
+running. The seam is a flag on the context, not a per-part constant: `Engine::set_music` arms it,
+the next `Engine::start` consumes it (clearing it **before** `init`, so a failed start cannot leak
+freshness), the init context of that one part reports `music_fresh() == true`, and every later
+`start`, every band context and every copper context reports `false`. A second `set_music` re-arms
+it. The consumers are the four Phase-4 parts above and the five Phase-5 parts with entry pre-rolls —
+`lnszoom` **490**, `plzpart` **8**, `techno` **253** (+ its two extra polls), `coman` **527**,
+`jplogo` **483** — each of which polls only when fresh and takes the source's own music gate
+mid-chain; PANICEND reads no music at all. The check is the engine test
+`the_music_is_fresh_only_for_the_first_part_after_set_music` (true, then false, then true again after
+a second install), the four Phase-4 mid-chain cases, and the block-3 chain with the real player:
+PLZPART's last frame and MINVBALL's first publish **75:60** one poll apart and the trace's **75:61**
+arrives three ticks in; RAYSCRL publishes **86:62** inside its gate and opens on **88:0**. A
+256/268-poll jump mid-chain is orders ahead and cannot publish those positions.
+
+**2. PLZPART's data is its original's `.INC` text, filed verbatim under `assets/PLZPART/`.** The part
+has no media file; its tables are seven assembler fragments (`PSINI`, `LSINI4`, `LSINI16`, `SINIT`,
+`PTAU`, `SPLINE`, `RATA`, 84,992 / 42,496 / 42,496 / 10,616 / 525 / 9,493 / 1,926 bytes). The rule
+"read assets in their original formats" makes them assets: they are copied **byte for byte** with
+their provenance into `assets/PLZPART/`, hashed by `cargo xtask assets verify --tree`, and parsed at
+run time by a part-local `db`/`dw` reader — not converted into Rust constants at build time.
+`TILE.INC` and `TILEPAL.INC` sit in the tree and are **not** copied: the shipped `PLZPART.PRJ` names
+neither. The assembler's placeholders `0xC100`/`0xC200`/`0xC300`/`0xC400` are not the table bases —
+`PLZPART.MAP:368-369,391` gives `_psini 027D:0000`, `_lsini4 027D:4000`, `_lsini16 027D:8000`,
+`_plzline 027D:C000`, and the port builds the flat `0xC000`-byte segment the map describes. The
+parsed shapes are asserted (`16,384` `db`; `8,192`+`8,192` `dw`; `2,575` bytes; `129` values;
+`1,024` and `1,088` words — the last with `REPT 100` expanded). The consequence is a deliberate one:
+the tree's text is the data even where the release's frames disagree with it, and the disagreement is
+A22/A23's, measured against the frames rather than patched into the tables.
+
+**3. The block-3 chain hands over with no loader gap, and the chain test says so rather than
+pretending one index fits every part.** The original's parts are separate EXEs the loader brings in;
+the port's parts hand over in one tick, with the surface and the player continuous. Chain tick `t`
+names boot `419 + t` (MNTSCRL's tick 0), but at a part boundary the reference's boot counter carries
+the loader's frames while the port's does not, so one affine translation cannot fit every part. The
+chain test therefore asks for the keyframe at **the first chain tick whose trace position is the
+reference's at `index + 419`**, and three of the eight keyframe indices (seven parts, PLZPART
+twice) move by one to three ticks (PLZPART 8,082 for 8,081; MINVBALL 10,482 for 10,481; JPLOGO
+16,884 for 16,881). What the test
+asserts at those indices is (part, geometry, manifest `.idx`/`.rgb`, and the trace's published
+`(order, row)`) — not a frame-by-frame pixel equality across a seam. A future full-run comparison
+against boot indices will need per-seam offsets, the same way the parts' own tests state mappings
+(D30), and the loader's own duration is what a Phase 9 full run must model. The stance is measured
+by the positions themselves: **75:60 → 75:60** at the PLZPART→MINVBALL handoff and the trace's
+**75:61** three ticks in; **86:62** at 12,537 and **88:0** at 12,546 for RAYSCRL. Block 3 still
+stops at U2E, so the `MAIN/U2.ASM:880-885` mid-run MUSIC0@18 restart is not reached, and block 2's
+stop at GLENZ keeps TECHNO and PANICEND unreachable through a block until Phase 7.

@@ -149,10 +149,12 @@ chain is continuous, yet the source still runs its post-gate setup
 (`OUTTAA.C:40-45`) on that tick, which zeroes
 `frame_count`, and its first step is four copper frames later. The port would
 set 2 and step one animation frame two ticks early. Telling the two cases
-apart needs the seam `PROGRESS.md`'s Phase 5 hand-off schedules (a `PartCtx`
-signal that the player was already running, or the entry pre-roll moved into
-the shell's per-part entry path); it becomes testable when U2A lands. Nothing
-in the present comparisons meets it — no ported chain reaches PAM.
+apart is what the Phase 5 seam does: `PartCtx::music_fresh` (D31) is true only
+for the anchored entry run, and the already-open gate sets the counter to 2
+only then, taking the source's `0` otherwise
+(`a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero`). No
+ported chain reaches PAM yet — block 1 stops at U2A — so the chain-level case
+waits on Phase 6.
 
 What the tick mapping is **not** is a claim that every intermediate frame is
 four ticks apart in the original: §6.1 measures the animation's *window* as

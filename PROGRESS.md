@@ -14,13 +14,24 @@ Phase status board. **Read this first if you are resuming work.**
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
 | 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
-| 5 | Mid tier | not started | — | — |
+| 5 | Mid tier | **complete — untagged** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A22–A24's exit/tear/cube divergences — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the six parts wait on the music as their originals do, on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stops at U2E, block 2 still at GLENZ and block 1 at U2A. Evidence below; the final whole-branch review runs first and **the tag is withheld** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | — |
 | 6 | Vector engine | not started | — | — |
 | 7 | GLENZ | not started | — | — |
 | 8 | Vault | not started | — | — |
 | 9 | Assembly & fidelity pass | not started | — | — |
 
 ## Where to pick up
+
+**Phase 5 (mid tier) is complete — untagged — on `phase-5-mid-tier`.** Its exit criterion
+(spec §10 — PLZPART, TECHNO, LENS, PANIC, JPLOGO, COMAN verified) is met, every criterion was
+re-run at the committed state, and the evidence is recorded below. Its plan is
+`docs/plans/05-mid-tier.md`, its per-task ledger (git-ignored scratch) is
+`.superpowers/sdd/05-mid-tier/progress.md`, its six notes are
+`docs/fidelity/{plzpart,lnszoom,techno,panicend,3dsinfld,jplogo}.md`, and its decisions are
+**D31** (with D24, D25 and D29 binding). **Nothing is tagged here**: the final whole-branch review
+runs first, and the tag goes on only after its findings are applied (Phase 1/2/3/4's practice).
+The branch starts at `phase-4` (`e4f467e`): its first commit is the phase's plan, its second the
+three new music traces, and the rest the phase's ten tasks and their fix rounds.
 
 **Phase 4 (music-synced tier A) is done, tagged `phase-4` at this commit** on
 `phase-4-music-synced-tier-a`. Its exit criterion (spec §10 — ALKU, PAM, DDSTARS, DOTS,
@@ -1858,8 +1869,9 @@ Both exit 0.)
   reference indices; their shell tests assert the first part, the music row and the numbering, and
   the keyframe tests run `--part <name>` and compare at the mapping. More sharply: because a block
   **stops at the first part it has not written**, `--block 1` stops at U2A (so PAM is unreachable
-  through block 1), `--block 3` stops at LNS&ZOOM (so MINVBALL and RAYSCRL are unreachable through
-  block 3), and only ALKU, MNTSCRL and DDSTARS start a block run. The three mid-block parts'
+  through block 1), and `--block 3` stopped at LNS&ZOOM when this was written (Phase 5 extends it
+  through JPLOGO, so MINVBALL and RAYSCRL are now reached mid-chain), and only ALKU, MNTSCRL and
+  DDSTARS start a block run. The three mid-block parts'
   acceptance is `--part`, not a block run; the block plans are untruncated and a test derives each
   stop from the registry.
 - **The release's mechanisms are unknown, and the phase says so.** MNTSCRL's 71-tick wait and
@@ -1983,7 +1995,445 @@ holds are the fit's own evidence. The falsification count is now **11 independen
 "do-while" for a `for` in the source description, non-load-bearing and not a measurement.
 **The tag is applied at this commit**, per Phase 1/2/3's practice.
 
+### Phase 5's evidence (close-out, Task 11, 2026-10-18)
+
+**Exit criterion (spec §10): PLZPART, TECHNO, LENS, PANIC, JPLOGO and COMAN verified.** All six
+are. Every number below was **re-run at the committed state** (`542d12b`, branch
+`phase-5-mid-tier`); the close-out's own commit adds records only, so the code and assets the
+commands ran against are the phase's tip. The workspace suite was re-run after the record edits and
+its `test result:` lines in the verification block below are that run's. The blocks are pastes of
+those runs: `(…)` marks an elision, and an `exit:` line is the shell's reading of a command's exit
+code rather than a line of its output. A number that appears in the prose but not in a command
+block is a value a **named test** asserts, and the sentence says which test (D25).
+
+| part | reference keyframes | planes compared | the verdict |
+|---|---|---|---|
+| PLZPART | 6000, 7000, 7600 (plasma); 8500, 9500 (cube) | RGB only — all five (the 320×400 plasma's indexed read was refused, and the cube's was never filed; `reference-indices.md` §13.4) | plasma **11.209 % / 5.848 % / 4.052 %** (max channel delta 16/21/17) — A24's tear; cube **26.161 %** (max 247) and **99.483 %** (max 255) — A23's page spill + shade and the close-up's absent camera data |
+| LNS&ZOOM | 2700, 3400, 4200, 4900, 5650 | 2700 indexed + RGB; the other four RGB only (5650's `.idx` is the tool's planar memory read, not the displayed plane) | **2,058 / 1,935 / 0 / 1,396 / 0** differing pixels (3.2156 / 3.0234 / 0 / 2.1812 / 0 %) — A25's forehead picture, seen through the wipe, the lens and the rotazoomer |
+| TECHNO | 4900, 5000, 6300, 8100 (interference); 8200, 8300, 8400 (troll) | RGB only — all seven (the 320×200 EGA screen refuses the indexed read; 8200's `.idx` is 128,000 bytes of index 0, asserted not to be a check) | **0 differing pixels** at all seven |
+| PANICEND | 8792, 8800 (handoff); 9000 (standalone) | 8792/8800 RGB; 9000 RGB + `.idx` | handoff **0 differing bytes** at ticks 10, 13 and 18 (tick 13 is the held window the reference captures at 8795 and holds through 8800); standalone **0** at 9000 in both planes — and the evidence split is measured: the standalone differs from 8792/8800 by **4,914 / 702 bytes of 192,000** |
+| COMAN | 15500, 16000, 16500, 16800 | RGB only — all four (the offset register's racy read filed no `.idx`) | **0 differing pixels** at all four, on **both** ticks each is drawn (the two-vblank step) |
+| JPLOGO | 17300, 17500, 17700 | RGB only — all three (the offset register's racy read filed no `.idx`) | **0** at 17300/17500; **51,445 pixels (40.1914 %, max 255)** at 17700 — A27's filed-picture residual, which is the reference's own census spread |
+
+**The seven commands and what they printed.** The six per-part integration tests and the shell test
+run the real binary and the real MUSIC1 player. `test … ok` is the printed verdict; the per-frame
+lines are the measured numbers the tests pin:
+
+```text
+$ cargo test -p secondreality --test plzpart -- --nocapture
+(…)
+running 3 tests
+plasma 6000 (tick 277): 11.209% pixels, max delta 16
+plasma 7000 (tick 1277): 5.848% pixels, max delta 21
+plasma 7600 (tick 1877): 4.052% pixels, max delta 17
+test the_plasma_keyframes_are_close_at_the_derived_mapping ... ok
+test the_run_is_numbered_in_its_own_frames_and_declares_both_screens ... ok
+cube 8500 (tick 2777): 26.161% pixels, max delta 247
+cube 9500 (tick 3777): 99.483% pixels, max delta 255
+test the_cube_keyframes_are_measured_and_recorded ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.16s
+
+$ cargo test -p secondreality --test lnszoom -- --nocapture
+(…)
+running 2 tests
+test the_run_is_numbered_in_its_own_frames_and_declares_the_music_row ... ok
+2700 (tick 248): 3.2156 % pixels, max delta 53
+3400 (tick 948): 3.0234 % pixels, max delta 48
+4200 (tick 1748): 0 pixels, max delta 0
+4900 (tick 2448): 2.1812 % pixels, max delta 41
+5650 (tick 3198): 0 pixels
+test the_five_keyframes_at_the_measured_mapping ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.62s
+
+$ cargo test -p secondreality --test techno -- --nocapture
+(…)
+running 2 tests
+test the_run_is_numbered_in_its_own_frames_and_declares_the_music_row ... ok
+4900 (tick 103): 0 px 0.0000 %, max delta 0
+5000 (tick 203): 0 px 0.0000 %, max delta 0
+6300 (tick 1501): 0 px 0.0000 %, max delta 0
+8100 (tick 3301): 0 px 0.0000 %, max delta 0
+8200 (tick 3401): 0 px 0.0000 %, max delta 0
+8300 (tick 3500): 0 px 0.0000 %, max delta 0
+8400 (tick 3600): 0 px 0.0000 %, max delta 0
+test the_seven_keyframes_at_the_measured_mappings ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.32s
+
+$ cargo test -p secondreality --test panicend -- --nocapture
+(…)
+running 3 tests
+tick 10 vs 8792: 4914 of 192000 bytes differ
+tick 18 vs 8800: 702 of 192000 bytes differ
+test the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so ... ok
+test the_standalone_run_matches_the_self_contained_dot_9000_exactly ... ok
+test the_run_is_numbered_in_its_own_frames_and_declares_the_music_row ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+
+$ cargo test -p secondreality --test coman -- --nocapture
+(…)
+running 2 tests
+test the_run_is_numbered_in_its_own_frames_and_declares_the_derived_music_row ... ok
+15500 (tick 464): 0 px 0.0000 %, max delta 0
+15500 (tick 465): 0 px 0.0000 %, max delta 0
+16000 (tick 966): 0 px 0.0000 %, max delta 0
+16000 (tick 967): 0 px 0.0000 %, max delta 0
+16500 (tick 1470): 0 px 0.0000 %, max delta 0
+16500 (tick 1471): 0 px 0.0000 %, max delta 0
+16800 (tick 1772): 0 px 0.0000 %, max delta 0
+16800 (tick 1773): 0 px 0.0000 %, max delta 0
+test the_four_keyframes_at_the_measured_ticks ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.47s
+
+$ cargo test -p secondreality --test jplogo -- --nocapture
+(…)
+running 3 tests
+test the_run_is_numbered_in_its_own_frames_and_declares_the_measured_music_row ... ok
+test the_sweeps_17100_is_entry_step_thirty_four ... ok
+17300 (tick 235): 0 px 0.0000 %, max delta 0
+17300 (tick 236): 0 px 0.0000 %, max delta 0
+17500 (tick 435): 0 px 0.0000 %, max delta 0
+17500 (tick 436): 0 px 0.0000 %, max delta 0
+17700 (tick 635): 51445 px 40.1914 %, max delta 255
+test the_three_keyframes_at_the_measured_ticks ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.30s
+
+$ cargo test -p secondreality --test shell -- --nocapture
+(…)
+running 12 tests
+(…)
+test a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_roll ... ok
+(…)
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.15s
+```
+
+**The chain test's numbers, named rather than printed.** `a_block_three_run_is_the_whole_chain_and_
+its_mid_chain_entries_do_not_pre_roll` runs one block-3 dump and asserts, from its manifest, that
+every part appears in demo order at the chain index the mapping names — MNTSCRL 681, LNS&ZOOM 2,281,
+PLZPART 5,581 (320×400) and 8,082 (320×200), MINVBALL 10,482, RAYSCRL 12,581, 3DSINFLD 15,081,
+JPLOGO 16,884 (320×400) — and that each index's published position is the trace's at
+`index + 419` (MNTSCRL's tick 0 draws at boot 419). The seam's own values: **75:60** at 9,942
+(PLZPART's last) and **75:60** at 9,943 (MINVBALL's first), **75:61** at 9,946 (the trace's boot
+10,368); **86:62** at 12,537 (inside RAYSCRL's gate) and **88:0** at 12,546 (the trace's boot
+12,962). Three keyframe indices are one to three ticks later than `K − 419` — PLZPART 8,082,
+MINVBALL 10,482, JPLOGO 16,884 — because the port's chain has no loader gap (D31 §3).
+
+#### The falsification list (the plan's Step 2)
+
+Every constant and rule this phase introduced, in Phase 2/3/4's table shape: the value, how it was
+derived, what a one-unit error would change, and the strongest **independent** check that exists
+for it. "Independent" means the same thing it did in Phases 3 and 4 — a measurement produced for
+another purpose or by a different instrument, **not** the evidence the constant was derived from.
+Rows are graded by their weakest value, as Phase 4's were.
+
+| constant or rule | value | how it was derived | a one-unit error would… | independent check |
+|---|---|---|---|---|
+| PLZPART's music forms: the plasma gate, the cube gate and the cube exit | `musplus < 0` (`PLZ.C:68`), `musplus < 13` (`VECT.C:116`), `-4 <= musplus < 0` (`VECT.C:119-120`) | the source; the cube gate's **8-poll** pre-roll lands it on manifest 2641 = boot 8364, the trace's first order-68 row 13; the seek puts the plasma gate on the fresh run's tick 0 | the cube gate one poll early/late moves the 8500 phase (nine polls measured **32.106 %**, eight **26.161 %**); the plasma gate one row off moves the whole plasma; the cube exit is past every keyframe | **half** — the cube gate is checked by the 8500 keyframe's phase (a different measurement from the trace row); the plasma gate and the cube exit are visible in no filed frame |
+| LNS&ZOOM's gates, and part 1's broken `if` | `musplus < -6` (`MAIN.C:104`), `musplus < -20` (`:380`), `musplus > -4` (`:213`); `if(dis_musplus>-30)` tests the function pointer, so the wait always runs | the source and the traces: 2452 `45:59` (the pre-roll lands `-5` at tick 0) and 2925 `48:44` (`-20`); the broken `if` is the missing `()` | a threshold one unit strict or loose starts the wipe or the lens one row (~11 ticks) early or late, and 2700/3400 move by far more than A25's 2,058-pixel set; the part-3 break never fires in the window (5650 is `-18`), so `>-4` is unobservable there | **half** — the lens and rotazoomer frames are the reference's modulo A25 and a one-row shift would move thousands of pixels (`the_real_player_puts_the_acts_on_the_reference_ticks` pins ticks 474/1196), but the broken `if` is pinned only synthetically: both readings run the wait, so no reference frame distinguishes them |
+| TECHNO's four entering gates | stage 1 `musplus < -4` (`KOE.C:213`); stage 2 `musplus < -3` (`:284`); interference end `getmframe >= 925` (`KOEA.ASM:900-905`); troll `order > 35 \|\| (order == 35 && row > 48)` (`:638-648`) | the source and `second2`; the pre-roll (**253** + 2 extra polls) puts tick 0 on `18:60` with `musplus = -4`, so stage 1 passes without waiting; the trace rows at the keyframes are the gate evidence | a one-unit error moves a section one row or frame: 4900/5000 (the fade), 6300 (the second wipe), 8100 (doit3's phase) and 8300/8400 (the troll's pan/ripple) move by thousands of pixels | **yes** — seven keyframes byte-identical at their traced ticks, and `the_sections_land_on_the_reference_ticks` pins the whole transition vector with the real player (258/1246/1295/1436/1857/2698/3400) |
+| TECHNO's troll exit | `-6 < musplus < 16` (`KOE.C:705-726`) | the source; the trace's 8400 is `36:23` | one unit either side ends the part one row (~6 ticks) early or late | **none** — no reference frame after 8400 |
+| COMAN's gate and break | `musplus < 0` (`MAIN.C:56`) and `-8 < musplus < 0` (`:59`) | the source and `second3d`/`second3b`; the **527**-poll pre-roll leaves the published row 63 with `-1`, and tick 0 polls order 93 row 0 | the gate one tick early/late shifts every render by two ticks (the picture changes on every second tick) and all four keyframes fail; the break one tick off moves the 2,014 end | **half** — four keyframes byte-identical at their measured ticks check the gate; the break is traced (order 96's `zplus == 1` tail) and unit-tested (`the_part_ends_on_the_music_break_not_the_dead_frame_cap`), but **no reference frame after 16,800** shows it |
+| JPLOGO's gate | `musplus >= 4` (`JP.C:71`) | the source and `second3d`; the **483**-poll pre-roll reproduces the trace's positions from `96:58` at tick 0, and the gate opens at tick 84 on `98:5`, the first `doit` counter 1 at tick 85 | a one-row shift moves every `doit` counter at 17300/17500/17700 and the frames fail | **yes** — 17300 and 17500 byte-identical, 17700 the settled state; the counter phase is read through the pictures |
+| PANICEND's cue set | **none** — no `dis_musplus` call in `SHUTDOWN.C` | the source is a fixed line of waits; the shell's `music_for_part` row (MUSIC1 order 37) exists only for the seek | nothing: there is no cue to get wrong | **not applicable** — the part never reads the player, and §9 of its note records the shell-owned retirement |
+| TECHNO's stage lengths | a 256-frame first pass; `doit1/2/3` at **420/840/980**; four wipes of 21 iterations; five flashes | `KOE.C:317/409/493`'s `70*N`, `KOEB.ASM`'s 256, `KOE.C:262-316`'s `for(a=256;a>-400;a-=32)`; the reference's 4900 (101st iteration) and 5000 (white) pin the fade | a one-unit error moves the white hold, the section boundaries (1436/1857/2698) and doit3's phase; 4900/5000/6300/8100 fail | **yes** — 4900 and 5000 byte-identical across the fade's two phases, 6300 in the wipes, and 8100 inside doit3, whose phase a doit1/2 error would move |
+| LNS&ZOOM's act lengths | part 1 **300** frames (drawing `< 80`); part 2 **715** + a five-frame hold (**720**); part 3 **2000** (fade `> 1872`, first-16 white); `ROT_SETUP_FRAMES = 2` | `MAIN.C:107/144/179/211/223-225`; the reference's path frames 552 at 4200 and 1252 at 4900 give `T3 = 3648`, and the lens's last draw is 3640 | a one-unit error in 715/720/2000 or the setup moves an act boundary and 4200/4900 fail (the rotazoomer moves 6.7–39.8 % of pixels a frame) | **half** — 715/720/2000 and the two setup frames are checked by the act ticks and 4200/4900; the **300** and **80** are not observable at a filed keyframe: 2700 is part 1's frame 247, past both |
+| COMAN's 4,444-frame cap | `frame < 4444` (`MAIN.C:57`) | the source; the music break ends the part at tick 2,014 | a one-unit error changes nothing on this boot: the cap never fires | **none** — the break precedes it; the note calls it dead |
+| JPLOGO's 700 cap and 511 freeze | `frame < 700`, `if(frame>511)` skips the assignment | `JP.C:72/78`; the freeze leaves `y1`/`y2`, so the settle is frames 379..511 and the hold draws nothing from tick 463 | the freeze one frame early/late changes the settled `y1`/`y2` and the hold's patchwork; 17300/17500 fail if the settle moves | **half** — 17300/17500 byte-identical pin the settle; the 700 cap itself has no reference frame (the part is static at 17700) |
+| PANICEND's collapse sequence and 121 ticks | the `a` values **32, 26, 21, 17, 14, 11, 9, 7, 5, 4, 3** (`a*5/6`); eleven passes; **121** waits; the two closing copies share the last pass | `SHUTDOWN.C:93-105`'s loop arithmetic and the wait count; 8792 is the `a = 7` pass, 8800 the `a = 3` pass plus the closing copies | one step in `a` writes different rows (8792's band is rows 97–103) and moves the sequence; the closing copies on their own tick would make tick 13 differ from 8800 | **half** — the handoff test's 0 bytes at ticks 10/13/18 is the check, but each pass's tick is *derived from those same frames*; the pixel content — the 234-pixel line and its 3-pixel hole — is an independent check of `copyline`'s arithmetic; the 121st tick has no frame of its own |
+| PLZPART's two screens, split and pan | plasma 320×400, 96-byte plane rows, split register 60/61 → scanline 61/62, pan 4/0 → 2/0 px, `cop_start = 96*282 = 27,072`; cube 320×200, 160-byte rows, six pages at 0/0x5500/0xAA00, display starts 0xAA28/0x0028/0x5528 | `TWEAK.ASM`'s two mode sets and `COPPER.ASM`'s `pompota`; the register+1 is measured from three consecutive frames (first content row 62/61/62, §1.9); the cube's phase (frames 136, page 4, start 0x0028) at 8500 | a wrong stride shears the picture; a wrong split or pan moves the lower band; a wrong page/start shows the wrong page — and the cube's 26.161 % becomes a different number | **yes** — the 8500 decomposition (6,333 port-only spill, 105 reference-only, 10,305 both-set) and the phase's measured change (32.106 → 26.161 %); the shell chain's geometry (320×400 at 5,581, 320×200 at 8,082); the split/pan alternation is measured against the reference's parity |
+| TECHNO's two screens | 320×200 EGA planar, 80-byte plane rows (CRTC `0x13 = 40`) → 320×400 mode 13h chain-4 off, 160-byte plane rows (`0x13 = 80`); eight/four pages | `KOE.C:230-258`, `KOEB.ASM`'s `init_interference`, `KOE.C:588-596`; the troll's `lineblit` at `+80` | a wrong stride, origin or pan fails 6300/8100/8300/8400 massively | **yes** — the four 320×200 and three 320×400 keyframes are byte-identical; the geometry is also in the manifest |
+| LNS&ZOOM's three acts and mode change | parts 1–2 mode 13h 320×200; part 3 `inittwk` 400-line planar (CRTC 9 = 3, 100 character rows doubled), DAC cleared, the `setpalarea` at `:200` erased | `ASM.ASM:185-238`; the reference's 4200/4900 row pairs show the two-pixel repetition; 5650's `.idx` is the planar memory read | a missed register or stride shows the wrong picture at 4200/4900 and breaks the two-pixel composition | **yes** — 4200 and 4900 byte-identical (modulo the patched forehead) and 5650's index plane's 100-row/zero-tail shape asserted |
+| PLZPART's copper slot mapping | engine slot 0 ← `copper3` (empty), slot 1 ← `copper1` (CRTC start/pan), slot 2 ← `copper2` (frame count, palette, `pompota`/`moveplz`/`do_drop`) | `COPPER.ASM:44-65`'s `init_copper` and the DIS's slot meanings, by what each routine does | swapping slots 1 and 2 moves the split/pan a tick and the palette a frame; the plasma's banding changes | **half** — the split/pan parity and the 62/61/62 measurement pin slot 1; the palette's slot-2 timing is inside the plasma's A24 residual and is not separable |
+| TECHNO's 512-byte palette upload | `2*count + start` bytes: `(palette,0,256)` writes **512 of 768**, start 4/count 2 writes 8 at offset 4 | `KOEA.ASM:1054-1055`'s `shl cx,1; add cx,ax` (`bugs.md` §4) | a 768-byte upload would write entries 170..255 as well; a 256-byte one would stop at 127 | **none visible** — the EGA screens are 16-colour and the troll's picture does not reach the truncated entries, so no filed frame separates the bug from a full upload; the unit test pins the byte count and the untouched tail, and the DAC it hands on is PANICEND's. Recorded as invisible, not as checked |
+| JPLOGO's 512-byte upload and DAC clear | 768 zero bytes in `inittwk`, then `(palette,0,256)` = 512 bytes: entries 0..169 whole, entry 170's red and green, 171..255 black | `ASM.ASM:104-126`, `:31-38` | a 768-byte upload would put the file's entries 170..255 on the DAC; the picture's highest index is 65 (`the_picture_uses_only_colours_the_512_byte_upload_writes`), so its own frames cannot see it — but the next part's inherited DAC would | **none visible in this part's frames** — the upload is invisible by construction (max index 65); the unit test pins it, and the note says it is mandatory as the DAC handed on |
+| PLZPART's palette leak | `memset(fadepal,0,768)` of 1,536 bytes clears the colour half and keeps the fractions; 16-bit accumulators | `PLZ.C:81`, `COPPER.ASM:184,238-252` | a full 1,536-byte clear would restart each fade from zero and change the trajectory and banding | **half** — the reference frames see the fade (the 6000/7000/7600 residuals, max deltas 16/21/17), but A24's tear is in the same numbers and no test separates the two |
+| PANICEND's entry-0 black and `getpal` at 0 | the 64 fade tables start at `b = 3`, entry 0 zero; `mov al, 0d` is **decimal 0**, so the DAC read is unrotated | `SHUTDOWN.C:62/148`; `TWEAK.ASM:200`'s contrasting `0dh` | a 13-entry rotation or entries 0..2 filled shifts the collapse's palette; the 9000 dot's index 1 would be a different colour; 8792/8800/9000 fail | **yes** — 8792/8800 and 9000 are byte-identical, and a 13-rotation table does not reproduce the handoff frames (note §3) |
+| the mid-chain seam (`PartCtx::music_fresh`) | `true` only for the init of the first part started after `set_music`; `false` for every later part and every band/copper context | Phase 4's final review's Important 1 and the engine's install/start lifecycle | if true mid-chain, MINVBALL/RAYSCRL poll **256/268** times, orders ahead, and the chain's 75:61/88:0 are unreachable; if always false, an entry `--part` run starts at the seek's row 0 and every part's pre-roll keyframes fail | **yes** — the engine test, the four mid-chain unit cases, and the block-3 chain with the real player (75:60 → 75:60 at the hand-off, 75:61 at 9,946; 86:62 at 12,537, 88:0 at 12,546) |
+| PLZPART's `.INC` tables | seven fragments: 84,992 / 42,496 / 42,496 / 10,616 / 525 / 9,493 / 1,926 bytes; 16,384 `db`; 8,192 + 8,192 `dw`; 2,575 bytes; 129 values; 1,024 words; 1,088 words; bases `027D:0000/4000/8000/C000` | the files themselves (`sha256sum`, `wc -c`), `PLZPART.MAP:368-369,391`; `TILE.INC`/`TILEPAL.INC` are not in the shipped project | a wrong base or word order evaluates the wrong table; every plasma pixel changes and the three plasma keyframes fail | **yes** — the three plasma keyframes at 11.209/5.848/4.052 % with max 16/21/17 (a wrong table would not stay within a sixteenth of the palette) and `assets verify --tree`'s hashes |
+| COMAN's wave tables and `THELOOP` | `W1DTA.BIN`/`W2DTA.BIN` 65,536 bytes each, signed ranges −33..41 and −56..63; `THELOOP.INC`'s 128 `zwave` constants and 5,230 lines | `wc -c`, `the_wave_tables_are_the_linked_sixty_four_kilobyte_ints`, `the_zwave_is_the_generators_three_sines_at_the_labels_it_emits`; `CALCW12` is off | a one-word error in either table moves the terrain everywhere; a wrong `zwave` constant moves one colour band; the four keyframes fail | **yes** — four byte-identical keyframes; the `THELOOP.INC` execution is a second reading of the shipped program (a transcription check, not an independent oracle) |
+| JPLOGO's picture and zoom data | `ICEKNGDM.UP` 58,566 bytes (320×400, palette +49); the 184-byte crop + 65 border; source 0→64; `ZOOM.INC`'s 54 routines, scales 140..244; its own `SIN1024` (index 256 = 255) | `READP.C`, `ASM.ASM`, `JP.C`, `DOL.C`'s formula; the file's own bytes | a wrong crop or border shows at the edges; a wrong scale/table shifts the comb; 17300/17500 fail | **half** — the frames are byte-identical, but the zoom model is checked against a second transliteration of `DOL.C`'s formula, not an independent oracle; the sin table's ±255 is only observable through the frames |
+| TECHNO's sine cursor and table | `bp` is a **byte** offset and the mask `& 2047` is 1,024 words; the table is `SIN1024.INC`'s 1,024 words, max 256 | `KOEA.ASM:785-792/837-838/854-855`; `the_sin_table_is_the_incs_1024_words` | a word index reads the table at half rate and selects wrong circles; before the fix the second pass's 5424 differed by **11,205 pixels** | **half** — the second-pass evidence is four live captures under `out/` (23 frames compared equal), not a filed keyframe; the filed seven are first-pass/troll and do not read this cursor |
+| LNS&ZOOM's tables and the 1,536-byte overrun | EX1 19,588 / EX2 6,860 / EX3 1,538 / EX4 6,252 bytes, with 103/102/43/116 rows drawn; a 1,536-byte copy at `back+64000` | `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` prints the geometry; `MAIN.C:302` | a table-bound error reads past a file; a wrong overrun changes the lens's bottom rows; 3400 fails | **yes** — 3400's 1,935 pixels are all A25's forehead, so the lens itself is the reference's; the row counts and the overrun are pinned |
+| the six part-tick mappings | PLZPART `5723 + tick`; LNS&ZOOM `2452 + tick`; TECHNO `4797`/`4799`/`4800 + tick`; PANICEND `8782 + tick`; COMAN four origins **15036/15034/15030/15028**; JPLOGO `17065 + tick` | the traces' `setmframe` resets (PLZPART 5723, LNS 2452), the content-probed TECHNO first rings and the fade's quantization, PANICEND's handoff states, COMAN's keyframe ticks, JPLOGO's entry sweep; none is an anchor (D30) | one tick and every keyframe lands on a different frame; each part's test fails | **half** — each mapping is a fit to the same keyframes the test compares, so the keyframes are not independent of it; exceptions: PANICEND's **9000** (self-contained and not used in the fit) and JPLOGO's 17100 sweep (under `out/`, corroboration); COMAN's drift is A26 |
+| A22 — PLZPART's exit palette **4** | `EXIT_PALETTE_RELEASE = 4`; the exit fires 65 ticks after the third switch; the tree's 5 stays for the test | the reference's 320×400 screen ends in (8310, 8340] (§13.7), while the tree's 5 would exit four switches in at boot 8769 | the tree's 5 ends the plasma 429 frames past the reference's last plasma screen; 8500 would be a plasma screen | **yes** — `the_release_exit_index_is_the_measured_one` (switches 975/2010/2527, exit 2592 = boot 8315 inside the window) plus 8500's cube; the screen boundary is a different observable from the exit arithmetic |
+| A23 — the cube's extent, projection, phase and close-up | `CUBE_DRAWN_ROWS = 200`, `CLEAR_LINES = 201`; `yy*213/zz + 100`; **8** pre-polls (gate at 8364); the 9500 camera data absent from the tree | fourteen diagnostic captures; the six silhouette frames 8400–8800's band fit (**0.47 %** at 213/100 vs **6.38 %** at 142/66); the corrected phase's 26.161 % vs 32.106 % | the tree's 142/66 leaves the cube 34 px high; a 134-row clip loses the band continuation; a one-poll phase error moves the residual 5.9 points | **yes** for the projection and phase — the band fit is measured on six frames, not the two keyframes, and the phase's residual change is measured; the close-up is **registered, not adopted** (the tree carries no camera data; 9500 stays 99.483 %) |
+| A24 — the plasma's tear | no constant: the port draws the four passes at one parameter generation (the boundary) | `PLZ.C`'s loop has no frame wait, so the copper's per-vblank latch can land between passes; the forced-split diagnostic table (before passes 0/1/2/3/boundary) | a fixed split cannot match all three frames (split 3: 8.42/8.59/8.28; the boundary: 11.21/5.85/4.05) | **none** — the split depends on the original's per-frame execution time, which neither the tree nor the reference records; the diagnostic table is a counterfactual, not a measurement of the mechanism |
+| A25 — the forehead picture and the setup frame | the tree's `LENS.EXB`; `ROT_SETUP_FRAMES = 2` | the reference's 2700 `.idx` differs from the tree's picture in **2,058 pixels** (rows 33..91, columns 129..211); the act ticks need eight waits where the source has seven | patching the tree's picture with the reference's 2700 plane makes 3400/4200/4900 byte-identical, so the residual is that picture; one frame less in the setup moves the rotazoomer and 4900 fails | **yes** — the strongest check in the phase: a 2,058-pixel patch taken from **one** keyframe (2700) makes **three other** frames (3400/4200/4900) byte-identical; the setup frame is measured by the act ticks and 4200/4900 |
+| A26 — COMAN's fixed two vblanks | `VBLANKS_PER_ITERATION = 2`; the frame-4 body's two waits | `MAIN.C:105/111` and `DISINT.ASM`'s return; the reference's keyframes imply **1.992** frames an iteration and origins 15036/15034/15030/15028 | a fixed one would halve the iterations and the keyframes fail; a variable model has no readable input | **half** — the pictures are byte-identical at all four keyframes, but the drift is *derived from those same keyframes*: no filed frame between them measures a one-vblank iteration, and the 1.992 fit is the evidence |
+| A27 — JPLOGO's one vblank and the 17700 filing | `frame += 1`; the port reproduces the settled state, not the filed 17700 picture | `JP.C:77` and the DIS's return; the census's twelve captures hold ten distinct images at 17700, the settled `ec3de2bb…` in 2/4 and the filed `91d6ce6b…` in 0/4 | a multi-vblank step leaves a different patchwork; the port's residual against the filed picture is 51,445 px (40.1914 %) | **yes** — the census is a different capture set from the filed keyframes: the port's 17700 digest is the census's settled state byte for byte and its residual equals that session's; the filing is the reference's spread, not the port's |
+
+**The count, measured rather than assumed.** The table has **32 graded rows** (PANICEND's "no cue"
+row is not graded — there is no constant). They divide three ways:
+
+- **15 are checked by something independent of their own derivation**: TECHNO's four entering gates,
+  its stage lengths and its two screens; JPLOGO's gate and A27; PLZPART's screens, `.INC` data and
+  A22; LNS&ZOOM's mode change and tables and A25; COMAN's wave tables; PANICEND's entry-0 black;
+  the seam; and A23's projection and phase.
+- **12 are half-checked, and the halves are named**: PLZPART's gates and palette leak; LNS&ZOOM's
+  gates and act lengths; COMAN's gate-and-break row; JPLOGO's cap/freeze and its picture/zoom data;
+  the copper slot mapping; TECHNO's sine cursor; the six mappings; PANICEND's collapse; and A26.
+- **5 have no independent check at all**: TECHNO's troll exit, COMAN's dead 4,444 cap, TECHNO's
+  512-byte upload, JPLOGO's 512-byte upload and DAC clear, and A24's tear.
+
+This is broader than the plan's Step 2 named: it asked for the cue forms, the stage bounds, the
+two-screen transitions, the palette truncations, the seam and the table data; the table adds the
+`getpal` spelling, `copyline`'s arithmetic, the copper mapping, the act lengths, the dead caps and
+A22–A27 because each is load-bearing for a keyframe the phase claims. The absences are recorded
+rather than smoothed over.
+
+#### The verification commands, re-run
+
+```text
+$ cargo test --workspace
+(…)
+test result: ok. 355 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 18.05s
+(…)
+test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+(…)
+exit: 0
+
+$ cargo clippy --workspace -- -D warnings
+exit: 0
+$ cargo clippy --workspace --all-targets -- -D warnings
+exit: 0
+
+$ cargo xtask reference verify --tree reference
+(…)
+ok   music/second2: music trace, 4597 row(s), 1 file(s)
+ok   music/second3a: music trace, 7298 row(s), 1 file(s)
+ok   music/second3d: music trace, 2799 row(s), 1 file(s)
+(…)
+verdict: ok — 35 capture(s), 116 file(s), 26963022 bytes
+exit: 0
+
+$ cargo xtask assets verify --tree --decode
+(…)
+tree: 158 file(s) recorded, 158 in the tree, 0 finding(s)
+(…)
+decode: 158 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 95 headerless with no decoder, 1 refused on record, 0 finding(s)
+verdict: ok
+exit: 0
+```
+
+(**1,068 tests pass, zero fail, seven are ignored**, summed from the run's 45 `test result:` lines,
+and the run prints no `warning:` line. The seven ignored are Phase 4's set, unchanged — Phase 5
+added none: `sr-assets/tests/omf.rs`'s regenerator, CRED's two record tests, ALKU's two, MINVBALL's
+`j` fit and DDSTARS's `+17` survey check. Three of the seven read git-ignored scratch (`out/`), so a
+fresh clone cannot re-run them. `reference verify` covers **35 captures / 116 files / 26,963,022
+bytes** where Phase 4 closed at 32 / 113 / 26,511,402: the three new music traces are the phase's
+one new kind of reference, and the verifier recomputes each trace's coverage from the file's own
+frames. `assets/` is 158 files plus `PROVENANCE.md`, up from 151: the seven PLZPART `.INC`
+fragments. The two `test result:` lines shown are the two targets that carry ignored tests; `(…)`
+elides the other 43 targets' lines.)
+
+#### What could not be confirmed — the phase's own negatives
+
+- **Which cues rest on the three new traces, and which on synthetic sequences.** The three filed
+  traces cover: **`second2`** (frames 4700–9299, 4,597 rows) — TECHNO's `musplus<-4`/`musplus<-3`
+  gates, its row-8 wipe gates and the `getmframe` thresholds, and PANICEND's music row (which the
+  part never reads); **`second3a`** (2900–10199, 7,298 rows) — PLZPART's order-62 seek and its
+  cube gate, and LNS&ZOOM's `48:44` inter-act gate; **`second3d`** (15000–17799, 2,799 rows) —
+  COMAN's 91→93 crossing and JPLOGO's 96 across its whole start window. LNS&ZOOM's start row
+  (`45:59` at 2452) is the **Phase 3** trace `second3`, not a new one. Every part's cue **form** is
+  additionally driven by a scripted `Music` in its unit tests — the one-unit boundary cases on
+  either side of each threshold are synthetic, because a scripted player is the only way to drive
+  a threshold from the wrong side. The real-player tests assert the trace's positions; the
+  synthetic ones assert the form.
+- **TECHNO and PANICEND are unreachable through a block until GLENZ (Phase 7).** Block 2's plan is
+  BEGLOGO → GLENZ → TUNNELI → TECHNO → PANICEND, and it stops at GLENZ, which is unported. Both
+  parts therefore run only with `--part`; their acceptance is the part runs, not a chain. The
+  block-2→block-3 alignment wait (`MAIN/U2.ASM:829-853`) is likewise unmodelled.
+- **PANICEND's two 8792/8800 handoff keyframes are not standalone evidence.** The part inherits
+  TECHNO's surface, view and DAC (`getpal` reads the inherited DAC; the collapse copies the
+  troll's picture), so a `--part panicend` run starts on a blank surface and the default DAC. The
+  handoff unit test drives TECHNO's port to `Done` and then PANICEND on the same surface/view/
+  palette and matches ticks 10/13/18 byte for byte; the standalone process test compares 9000 (the
+  self-contained dot, RGB and `.idx`) and **measures the limitation** at 8792/8800 (4,914 and 702
+  of 192,000 bytes). Which keyframe is which kind of evidence is the note's §1.
+- **Every part-relative mapping is a mapping, not an anchor.** All six return `None` from
+  `boot_anchor` and their manifests say `index_origin: "part"`, `anchor: null`; the reference
+  indices are reached by `boot = K + tick` with the K per part (D30). A block-3 dump's indices are
+  therefore not reference indices, and the chain test compares trace positions at mapped indices,
+  not pixels. The six mappings' keyframes are the same frames that fitted them — the mappings'
+  falsification row is graded **half** for that reason.
+- **The reference keyframes are RGB-only for most of the phase, and why.** PLZPART's five: the
+  320×400 plasma's indexed read was refused (a 384-byte stride that is a race, `§13.4`) and the
+  cube's was never filed; TECHNO's seven: the 320×200 EGA screen refuses the indexed read, and the
+  320×400 screen's only `.idx` (8200) is 128,000 bytes of index 0 — a flat black frame, asserted
+  and not counted; COMAN's four and JPLOGO's three: the part writes CRTC `0x0c`/`0x0d` and the
+  oracle's indexed read of them is racy, so none was filed; LNS&ZOOM files `.idx` at 2700 (held) and
+  5650 (the planar memory read, not the displayed plane), the other three RGB; PANICEND files
+  `.idx` only at 9000. There is no cross-format claim: every comparison is `.idx` against `.idx`
+  where both sides have one, `.rgb` against `.rgb` otherwise.
+- **JPLOGO's 17700 is the reference's own spread, not a port residual.** The census's twelve
+  captures hold ten distinct byte-images at 17700; the settled state `ec3de2bb…` is presented by
+  2/4 sessions and the **filed** picture `91d6ce6b…` by **0/4**, and seven re-capture probes did
+  not draw the filed one. The port reproduces the settled state byte for byte (its digest is the
+  census's) and its 51,445 px / 40.1914 % residual equals the `-sess2` session's. A27 registers it;
+  the port does not fit a jump to the filing.
+- **COMAN's A26 drift is measured, not modelled away.** The port's fixed two vblanks an iteration
+  reproduces all four keyframes at ticks 464/966/1470/1772, whose implied origins are
+  15036/15034/15030/15028 — 2, 4 and 2 frames of drift across the three spans — because the
+  reference renders at about 1.992 frames an iteration. The pictures do not depend on the count
+  (the camera and wave cursors advance once an iteration); a variable model would need the
+  release's render time, which neither the tree nor the trace records.
+- **PLZPART's cube is registered, not matched (A23).** The 8500 keyframe is 26.161 %: 9.90 points
+  of port-only page-slot spill (the release's page timing/clear relationship differs) and 16.10
+  points of both-set shade/pose; the 9500 close-up is 99.483 % because the tree carries no camera
+  data for frames 9100–9600 (every RATA translation word is zero there). "Verified" for PLZPART
+  means a faithful port with these registered, and the plasma is itself A24's CPU-timing tear.
+- **LNS&ZOOM's residual is one asset difference (A25).** The tree's `LENS.EXB` forehead differs
+  from the release's in 2,058 pixels; patching those bytes from the reference's 2700 index plane
+  makes 3400, 4200 and 4900 byte-identical. The release's picture is not in the tree, and the port
+  reads the tree's file as the rules require.
+- **The `3dsinfld`/`coman` name split.** The demo's own binary is `3DSINFLD.EXE`, which is not a
+  legal Rust identifier: the registry and the plan keep `"3dsinfld"`, the module is
+  `bins/secondreality/src/parts/coman.rs`, and the test target is `tests/coman.rs`. `--part
+  3dsinfld` is the name a user types; the note is `docs/fidelity/3dsinfld.md`.
+- **The chain's no-loader-gap 1–2-frame handoff drift.** The port hands over between parts in one
+  tick, so at a seam its player can sit one or two rows from the reference's boot counter at the
+  same index; three of the chain's keyframe indices are asked for one to three ticks later, and the
+  test asserts the trace's position at the shifted index. This is D31 §3's stance, not a part
+  defect; it also means a future frame-by-frame chain comparison against boot indices needs
+  per-seam offsets.
+- **TECHNO's second pass has no filed keyframe.** The committed acceptance is the seven filed
+  frames (the first pass, the bars and the troll). The second pass — its display pipeline, the
+  sine cursor and the `waitborder` wipes' lag — was checked against four live captures under
+  `out/` (a 23-frame `cmp` across 5058–5900 plus the 8160/8170/8190 shrink frames), which a fresh
+  clone cannot re-run. The seven filed frames do read the bars' wipes, but not the second-pass
+  circle's sine cursor.
+- **PLZPART's cube evidence is under `out/`.** The projection/extent/phase fit rests on fourteen
+  diagnostic captures (`out/plz-diag-cube`, `out/plz-diag-cube2`), and the plasma's split
+  measurement on `out/b4-plz-probe1`; the filed 8500/9500 are the committed check. The plasma's
+  three reference pictures are themselves single-session points (presented 2/5, 0/4, 0/3 across
+  the census sessions), so a few per cent there is the reference's spread as well as A24's tear.
+- **PANICEND's pulse and its tick-0 view are not pinned.** Only the pulse's last value is visible
+  (9000's entry 1 = (1,1,1)); the intermediate `cos` rounding of the DOS libm is not recoverable,
+  and the first and last values are pinned. The tick-0 view reads past the port's 64,000-plane-byte
+  surface and wraps; no reference keyframe covers that one frame.
+- **The ignored tests and the scratch captures.** The seven ignored tests are Phase 4's; Phase 5
+  adds none. Three read `out/` (CRED's two and DDSTARS's `+17` check); ALKU's two and MINVBALL's
+  fit read committed files. Phase 5's own scratch evidence is the TECHNO second-pass/shrink
+  captures, PLZPART's diagnostic cube captures and JPLOGO's sweep/census sessions — all under
+  `out/`, none a filed reference.
+- **The suite green is not a claim that every keyframe is exact.** **18 of the 27** are
+  byte-identical; the nine residuals are named, attributed and asserted at their measured counts
+  (A23–A25, A27), and no residual is a tolerance: the tests pin percentages to 0.001 points and max
+  deltas exactly.
+
+#### What Phase 5 leaves Phase 6, in one place
+
+- **U2A and U2E are Phase 6's vector engine, and they are the two blocks' stops.** Block 1 still
+  stops at U2A and block 3 at U2E; U2E is also the part the `MAIN/U2.ASM:880-885` mid-run MUSIC0@18
+  restart precedes, so neither restart site is reachable until U2E runs. Block 4 begins at U2E.
+- **GLENZ is Phase 7's, and it is block 2's stop.** Until it lands, TECHNO and PANICEND are
+  `--part`-only parts and the block-2→block-3 alignment wait (`MAIN/U2.ASM:829-853`) is unmodelled.
+- **The full-run music restarts remain unmodelled** (`:813-818` MUSIC1@0 for `SECOND 1`, `:880-885`
+  MUSIC0@18 before U2E): the one-row-per-run model still has no place for a mid-run restart
+  (D13, `music.md` §12), and the `second3d` trace stops at 17799 because its planned tail crosses
+  the block-3 `:880-885` restart — the trace command's fixed base refused the window, and the
+  capture was intact through 17847, so the refusal is in (17847, 18000].
+- **The chain's loader gap and a frame-by-frame chain comparison.** D31 §3 is the stance; a full
+  run that compares every frame against boot indices needs the loader's duration modelled or
+  per-seam offsets.
+- **A22–A27's release-side mechanisms are still the frames, not the binary.** The packed release is
+  the lead for PLZPART's exit/projection/camera data and JPLOGO's vblank cadence; no unpacker was
+  written. The D24 residuals stand as measured.
+- **PANICEND's inherited DAC is proved by a unit rig, not by a block run.** The part reads TECHNO's
+  surface, view and DAC, and the handoff test drives the two ports on one engine; block 2 stops at
+  GLENZ, so the real chain never reaches PANICEND. When Phase 7 ports GLENZ, block 2 becomes the
+  first run in which the mid-chain DAC inheritance is exercised end to end.
+- **The phase's instruments are reusable.** The music traces (`second2`, `second3a`, `second3d`),
+  the `music_fresh` seam, the `.INC` reader and the chain's mapped-index pattern are what Phase 6's
+  U2A/U2E will use; a part that begins in a window gets a mapping, not an anchor (D30).
+
+#### The phase's records, and what this close-out changed
+
+- `PROGRESS.md`'s Phase 5 row is **complete — untagged**, with the evidence above and the hand-off
+  list; the tag is deliberately withheld until the final whole-branch review's findings are
+  applied (Phase 1/2/3/4's practice).
+- `docs/decisions.md` gains **D31** — the `music_fresh` seam's contract, PLZPART's `.INC` data
+  filed verbatim, and the block-3 chain's no-loader-gap stance. D13's "`--block 3` cannot start at
+  all" is corrected in place to the state the wiring produced. Nothing else in `decisions.md`
+  needed changing: the release-versus-tree divergences are D24's procedure applied per part,
+  registered as A22–A27.
+- `docs/fidelity/APPROXIMATIONS.md`: **A22–A27** are the phase's six approximations, numbered
+  consistently with A1–A21 and each carrying its `**Part:** … Phase 5` line; the close-out checked
+  them against the six notes and needed no edit. A23 is the phase's only entry with both an adopted
+  and a registered half; the rest are one or the other.
+- The six notes (`plzpart.md`, `lnszoom.md`, `techno.md`, `panicend.md`, `3dsinfld.md`,
+  `jplogo.md`) are complete: each has its original, its port's transliteration, its preserved bugs,
+  its D24 section where it has one, its music section and the commands that reproduce its numbers.
+  The close-out re-ran the six parts' integration tests, the workspace suite, both clippy commands
+  and both verifiers; every number this record quotes from them agrees with the notes' text.
+- `docs/fidelity/music.md` §12 is corrected: block 3 no longer stops at LNS&ZOOM — it runs the
+  mid-tier chain and stops at U2E.
+- The four Phase-4 notes (`mntscrl.md`, `minvball.md`, `rayscrl.md`, `pam.md`) carried the
+  pre-seam sentence that the seam was *scheduled* in the Phase 5 hand-off; each now names
+  `PartCtx::music_fresh` (D31) as the delivered contract and says what is still unexercised
+  (MNTSCRL's and PAM's mid-chain cases; MINVBALL's and RAYSCRL's are the chain test's).
+- `CLAUDE.md`'s `## Running it` is corrected (controller ruling): **eighteen** registry names (the
+  test card plus seventeen demo parts, the six new ones included), block 3's example and its chain,
+  block 2's stop at GLENZ, block 1's at U2A, blocks 5/U unchanged, and the ESC paragraph — PANICEND
+  never polls the flag and is retired by the shell; PLZPART's port also leaves it to the shell.
+- `docs/fidelity/part-sequence.md` needed no change: the phase changed no block's contents, and its
+  statements about the run order and the restart sites remain true.
+- The plan file (`docs/plans/05-mid-tier.md`) is not edited: it is the phase's historical argument.
+  Nothing is tagged in this task.
+
 ## Phase log
+
+### Phase 5 — Mid tier (complete — untagged)
+
+Eleven tasks on branch `phase-5-mid-tier`, from `phase-4` (`e4f467e`) to this close-out (20
+commits; the first is the phase's plan and the second the three new music traces). **1,068 tests
+pass, zero failures, seven ignored, zero warnings** (Phase 4 closed at 935, seven ignored), and
+both clippy commands exit 0. Every number in the evidence section above was re-run at the
+committed state. **Nothing is tagged**: the final whole-branch review runs first and its findings
+are applied before the tag, per Phase 1/2/3/4's practice.
+
+**What was built.** Six parts under `bins/secondreality/src/parts/`, each a transliteration of its
+source into the `Part` API: **PLZPART** (the 320×400 plasma — the `.INC` tables in their original
+text, the four plane passes, the split/pan walk, the palette leak, the release's exit — and the
+320×200 textured cube with the six-page flip, the spline camera and the release's projection),
+**LNS&ZOOM** (the two-edge face wipe, the lens's four table passes, the rotazoomer's 16.16 walk and
+planar composition, the white exit), **TECHNO** (the two interference passes, the flashes, the four
+row-gated bar wipes, `doit1/2/3`'s clipped boxes on eight and four pages, the troll's RLE picture
+and fade chain), **PANICEND** (the inherited screenshot, the 32→3 collapse, the line and the dot,
+the 60-frame pulse, no exit poll), **COMAN** (`3dsinfld`'s palette formula, the two linked wave
+tables, `docopy`'s 160→320 duplication and the generated `THELOOP` ray march) and **JPLOGO** (the
+spring tables, the cropped and bordered picture, the 512-byte upload, the entry's 83-step scroll,
+the per-row zoom and the palimpsest guard). `sr-engine` gained the mid-chain seam — `PartCtx::
+music_fresh`, armed by `Engine::set_music` and consumed by the next `start` — with the four
+Phase-4 guards and the five Phase-5 entry pre-rolls on it, and the shell gained the six names in
+their blocks (four in block 3, TECHNO and PANICEND in block 2), `music_for_part`'s six rows (five
+measured, COMAN's derived) and the block-3 chain test
+with the real player. Three new music traces were filed (`second2`, `second3a`, `second3d`). The
+phase's decisions are **D31**; its approximations are **A22–A27**.
+
+**The phase's method was the reference's own keyframes and traces, and D24 decided four of the six
+parts.** Every part is accepted against its reference keyframes at a mapping the note states and the
+test asserts, with D19's support frames; every cue is driven both by a scripted player and, where
+the run reaches it, by the real player against a filed trace. Where the release and the tree
+disagree, D24's procedure ran per part: PLZPART's exit index, cube extent and projection follow the
+release (A22/A23), its plasma tear and close-up camera data are registered (A23/A24); LNS&ZOOM's
+forehead picture is the release's and is registered (A25); COMAN's vblank count and JPLOGO's filing
+are registered (A26/A27). The result is **18 of the 27 keyframes byte-identical**, with every
+residual asserted at its measured count and A25 proved by a 2,058-pixel patch taken from one
+keyframe making three others byte-identical.
+
+**What it could not confirm, in one place.** The reference's own spread at PLZPART's plasma frames
+and JPLOGO's 17700 (the filed picture is outside its census); TECHNO's second pass, which has no
+filed keyframe and rests on `out/` captures; PANICEND's 8792/8800, which are handoff evidence
+rather than standalone; COMAN's 1.992-frames-per-iteration drift; PLZPART's cube and A24's tear,
+which are registered rather than matched; and the chain's no-loader-gap handoff, which is D31 §3's
+stance. All of it is in the evidence section's negatives, item by item.
 
 ### Phase 4 — Music-synced tier A (done, tag `phase-4`)
 

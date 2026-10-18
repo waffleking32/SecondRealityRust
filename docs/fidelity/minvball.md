@@ -210,10 +210,13 @@ already running. The first runnable block-3 chain (Phase 5's LNS&ZOOM/PLZPART)
 reaches this part with the player continuous since MNTSCRL; the player is
 then already at the reference's position, and `init`'s 256 pre-polls would
 advance it 256 polls past it. A mid-chain start therefore requires the entry
-pre-roll to be skipped, through the seam `PROGRESS.md`'s Phase 5 hand-off
-schedules (a `PartCtx` signal that the player was already running, or moving
-the pre-roll into the shell's per-part entry path). No chain can run until the
-intervening parts land.
+pre-roll to be skipped. The Phase 5 seam is `PartCtx::music_fresh` (D31): true
+only for the init of the first part started after `Engine::set_music`, false
+for every later part, and `init` polls only when it is true. The block-3 chain
+test exercises it with the real player: PLZPART's last frame and MINVBALL's
+first publish **75:60** one poll apart and the trace's **75:61** (boot 10,368)
+arrives at chain 9,946 — a 256-poll jump could not publish that.
+`a_mid_chain_start_does_not_pre_roll_the_music` covers the unit case.
 
 ## 6. The keyframes, and the measured residue
 
