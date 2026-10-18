@@ -220,13 +220,14 @@ fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A `--block 5` headless run that dumps the frames asked for, and the manifest it wrote.
-fn block5_dump(name: &str, frames: &str) -> (PathBuf, serde_json::Value) {
+/// A `--block <block>` headless run that dumps the frames asked for, and the manifest it
+/// wrote.
+fn block_dump(name: &str, block: &str, frames: &str) -> (PathBuf, serde_json::Value) {
     let dir = scratch(name);
     let out = run(&[
         "--headless",
         "--block",
-        "5",
+        block,
         "--dump-frames",
         frames,
         "--dump-dir",
@@ -235,6 +236,11 @@ fn block5_dump(name: &str, frames: &str) -> (PathBuf, serde_json::Value) {
     assert_eq!(out.status.code(), Some(OK), "{}", String::from_utf8_lossy(&out.stderr));
     let manifest = manifest(&dir);
     (dir, manifest)
+}
+
+/// A `--block 5` headless run that dumps the frames asked for, and the manifest it wrote.
+fn block5_dump(name: &str, frames: &str) -> (PathBuf, serde_json::Value) {
+    block_dump(name, "5", frames)
 }
 
 #[test]
@@ -268,6 +274,77 @@ fn a_block_five_run_plays_music_one_at_the_order_its_entry_point_names() {
     assert_eq!(first["index"], BLOCK5_ANCHOR);
     assert_eq!(first["music_position"], "0:0");
     assert_eq!(trace_position("second5", BLOCK5_ANCHOR), (0, 0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_block_one_run_starts_at_alku_in_the_boots_numbering() {
+    // `SECOND 1` runs ALKU first (`MAIN/U2.ASM:790-792`), and ALKU is a block entry
+    // measured at the boot's first graphics frame, 404. Its music is the initial
+    // `_zplaysong(0)` — MUSIC0 at order 0 (`:766-775`) — whose clock starts at
+    // `BLOCK_ONE_MUSIC_START_FRAME` (400); the run draws from 404 and pre-polls the four
+    // frames in between, so the player's first run tick is the run's own first frame.
+    let (dir, manifest) = block_dump("block1", "1", "900");
+    assert_eq!(manifest["part"], "alku");
+    assert_eq!(manifest["index_origin"], "boot");
+    assert_eq!(manifest["anchor"], 404);
+    assert_eq!(manifest["music"]["module"], "MUSIC0");
+    assert_eq!(manifest["music"]["start_order"], 0);
+    assert_eq!(manifest["music"]["start_frame"], 404);
+
+    let frame = &manifest["frames"][0];
+    assert_eq!(frame["index"], 900, "the keyframe asked for");
+    assert_eq!(frame["part"], "alku");
+    assert!(dir.join("alku_000900.idx").is_file(), "the dump wrote the frame it named");
+    assert!(dir.join("alku_000900.rgb").is_file());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_block_three_run_starts_at_mntscrl_with_its_own_numbering() {
+    // `SECOND 3`'s entry point is MNTSCRL (`MAIN/U2.ASM:865-866`, guarded `& 4`), and
+    // its restart is MUSIC1 at order 42 (`:856-863`). The part's first graphics frame
+    // is a measured *window*, not a frame (`reference-indices.md` §11.5), so the run
+    // numbers its own frames from zero and the manifest says so rather than wearing the
+    // reference's number.
+    let (dir, manifest) = block_dump("block3", "3", "1100");
+    assert_eq!(manifest["part"], "mntscrl");
+    assert_eq!(manifest["index_origin"], "part");
+    assert_eq!(manifest["anchor"], serde_json::Value::Null);
+    assert_eq!(manifest["music"]["module"], "MUSIC1");
+    assert_eq!(manifest["music"]["start_order"], 42);
+    assert_eq!(manifest["music"]["start_frame"], 0, "part-numbered, so the music starts with it");
+
+    let frame = &manifest["frames"][0];
+    assert_eq!(frame["index"], 1100);
+    assert_eq!(frame["part"], "mntscrl");
+    assert!(dir.join("mntscrl_001100.idx").is_file());
+    assert!(dir.join("mntscrl_001100.rgb").is_file());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_block_u_run_starts_at_ddstars_with_its_own_numbering() {
+    // `SECOND U` is the hidden block: DDSTARS alone (`MAIN/U2.ASM:889-896`), under
+    // MUSIC0 at order 70 (`:889-894`). DDSTARS has no measured anchor either — its
+    // boot mapping is derived from the part's own filed keyframes, not a first drawn
+    // frame — so a run of it is part-numbered like block 3's.
+    let (dir, manifest) = block_dump("blockU", "U", "1900");
+    assert_eq!(manifest["part"], "ddstars");
+    assert_eq!(manifest["index_origin"], "part");
+    assert_eq!(manifest["anchor"], serde_json::Value::Null);
+    assert_eq!(manifest["music"]["module"], "MUSIC0");
+    assert_eq!(manifest["music"]["start_order"], 70);
+    assert_eq!(manifest["music"]["start_frame"], 0);
+
+    let frame = &manifest["frames"][0];
+    assert_eq!(frame["index"], 1900);
+    assert_eq!(frame["part"], "ddstars");
+    assert!(dir.join("ddstars_001900.idx").is_file());
+    assert!(dir.join("ddstars_001900.rgb").is_file());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

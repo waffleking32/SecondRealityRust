@@ -1431,6 +1431,14 @@ mod tests {
         assert_eq!(boot_anchor("cred"), None);
         assert_eq!(boot_anchor("endscrl"), None);
         assert_eq!(boot_anchor("mntscrl"), None);
+        // Block 3's other ported parts are mid-block too: MINVBALL and RAYSCRL
+        // begin inside their block's run, and DDSTARS — block U's only part —
+        // has a derived boot mapping from its own filed keyframes, not a
+        // measured first drawn frame. Their runs number their own frames from
+        // zero and the dump manifest says `index_origin: "part"`, `anchor: null`.
+        assert_eq!(boot_anchor("minvball"), None);
+        assert_eq!(boot_anchor("rayscrl"), None);
+        assert_eq!(boot_anchor("ddstars"), None);
     }
 
     // --- the restart table --------------------------------------------------
@@ -2534,6 +2542,85 @@ mod tests {
         assert_eq!(run.part(), "a", "the unported part must not be skipped to");
         assert!(!run.finished(), "the port ran out of parts; the run has not ended");
         assert_eq!(run.index(), 8, "and it holds rather than stopping: the index keeps counting");
+    }
+
+    /// A one-frame stub for every name the registry builds, and nothing for the demo's
+    /// names the port has not reached: the registry, not a list in the test below, is
+    /// what decides which is which.
+    fn registered_stub_source(name: &str) -> Option<Box<dyn Part>> {
+        crate::parts::registered(name)
+            .map(|name| Box::new(Stub { name, fill: None, retires: Some(0) }) as Box<dyn Part>)
+    }
+
+    #[test]
+    fn every_blocks_plan_stops_at_the_first_part_the_registry_lacks() {
+        // The plan is the demo's own sequence and is not truncated (`block_plan`); where
+        // a run stops is `take_next`'s answer when the part source refuses the next name.
+        // The expected stop is the first plan name `parts.rs` does not register, so a
+        // part that lands moves the stop with it — and the run says which name it could
+        // not go on to (`stopped_at`, which the window's status line prints as
+        // "holding; <name> is not ported yet").
+        //
+        // This is the block-level claim Task 9 adds the end-to-end runs for: `--block 1`
+        // plays ALKU and stops at U2A, and `--block 3` plays MNTSCRL and stops at
+        // LNS&ZOOM, in the plans the demo itself has.
+        let expected: &[(char, Option<&str>)] = &[
+            ('1', Some("u2a")),
+            ('2', Some("glenz")),
+            ('3', Some("lnszoom")),
+            ('4', Some("u2e")),
+            ('5', None),
+            ('U', None),
+        ];
+        for (block, stop) in expected {
+            let plan = block_plan(*block).unwrap();
+            let first_missing = plan
+                .iter()
+                .copied()
+                .find(|name| crate::parts::registered(name).is_none());
+            assert_eq!(first_missing, *stop, "{block}: the first part the port lacks");
+
+            let prefix = plan
+                .iter()
+                .position(|name| Some(*name) == *stop)
+                .unwrap_or(plan.len());
+            if prefix == 0 {
+                // A block whose *first* part is unported has no run at all: the command
+                // line refuses it (`resolve`) and a hand-built sequence names the part it
+                // could not start.
+                match Sequence::with_source(
+                    TEST_SURFACE,
+                    TEST_SURFACE,
+                    View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+                    plan,
+                    registered_stub_source,
+                ) {
+                    Ok(_) => panic!("{block} begins at a part the port lacks"),
+                    Err(error) => assert_eq!(
+                        error.to_string(),
+                        format!("{} is not ported yet", stop.unwrap()),
+                        "{block}'s run does not start"
+                    ),
+                }
+                continue;
+            }
+
+            // Every prefix part builds, and the first missing name is where the run
+            // holds — with the part before it still on the screen.
+            let held = plan[prefix - 1];
+            let mut run = Sequence::with_source(
+                TEST_SURFACE,
+                TEST_SURFACE,
+                View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+                plan,
+                registered_stub_source,
+            )
+            .unwrap();
+            run_out(&mut run, 64);
+            assert!(run.holding(), "{block}: the run holds where the port stopped");
+            assert_eq!(run.stopped_at(), *stop, "{block}: the part it could not go on to");
+            assert_eq!(run.part(), held, "{block}: the screen it holds");
+        }
     }
 
     #[test]
