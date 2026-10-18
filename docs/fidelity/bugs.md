@@ -142,7 +142,7 @@ exactly the ports that must show it in their captures: ALKU, whose cards are gat
 (`reference/parts/pam/`, 7710/7760/7830/7900, §6). A wrong off-by-one shows there as a timing
 difference; the check that pins it exactly is a unit test on the ported lookup against this table.
 
-## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO and ENDLOGO ported; JPLOGO and others behind them)
+## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO, ENDLOGO and JPLOGO ported; the others behind them)
 
 **What it is.** The ranged palette upload moves **`2*count + start` bytes where it intends
 `3*count`**, so a fade that means to ramp 254 entries writes two-thirds of them: the last third of

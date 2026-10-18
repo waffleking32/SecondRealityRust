@@ -41,7 +41,9 @@ does the mode work: CRTC `0x09 = 0` (the comment says "400 rows": one
 scanline a CRTC row), `0x14 = 0`, `0x17 = 0xE3`, the sequencer memory mode
 `0x04 = 6` (**chain-4 off**, odd/even off) and the map mask `0x02 = 0x0F`.
 It writes no CRTC `0x13`, so the offset stays mode 13h's 40 words = **80
-plane bytes a row**. `inittwk` then clears with `mov cx,32768 / rep stosw`:
+plane bytes a row**. It also writes 768 zero bytes to the DAC data port
+(`ASM.ASM:31-38`), blacking every entry before the part uploads its 512
+bytes (§2.3). `inittwk` then clears video memory with `mov cx,32768 / rep stosw`:
 each word write goes through the emulator's unchained handler, which issues
 two dword stores at `((uint32_t*)linear)[addr]` — eight linear bytes a word
 write — so the 32,768 words cover **all 256 KB**, not the 64 KB a plain
@@ -93,10 +95,10 @@ The first pass and the settle are pinned by
 `parts::jplogo::tests::the_spring_tables_are_the_sources_own_first_frames`:
 `framey1 = [500, 885, 1172, 1323, 1317, 1153, …]`,
 `framey2 = [6368, 6370, 6354, 6338, 6322, 6306, …]`, `framey1[95:] = 0`
-and `framey2[95:] = 6400` exactly. The test compares all 200 entries of
-each table against a second transliteration of the same source lines, so a
-shared arithmetic slip in the part cannot hide in the two agreeing by
-construction.
+and `framey2[95:] = 6400` exactly. The test also compares all 200 entries
+of each table against a second transliteration of the same source lines —
+a check on transcription, not an independent oracle; the keyframe
+comparisons (§7) are the external check.
 
 `:164-171` interpolates fourfold — `b=a/4, c=a&3, d=3-c` and
 `(framey1[b]*d + framey1[b+1]*c)/3` — into the 800-entry tables `doit`
@@ -169,6 +171,15 @@ then the `rep` stops, and entries 171..255 keep whatever the DAC held.
 `the_palette_upload_is_the_sources_512_bytes` starts from a patterned live
 palette and pins all three regions, entry 64 blacked.
 
+**The DAC is cleared first.** `inittwk` (`ASM.ASM:31-38`) points the DAC's
+write index at 0 and writes 768 zeros before `readp`, so the 512-byte upload
+builds on black, not on the palette the previous part left. The source's
+post-init DAC is therefore the file's entries 0..169 (entry 64 black), entry
+170's red and green over a **zero** blue, and entries 171..255 **black**.
+`init_clears_the_dac_before_the_512_byte_upload` drives `init` with a
+patterned inherited palette and pins all three; in a `--block 3` chain this
+is the DAC state that replaces 3DSINFLD's.
+
 The upload is **invisible** on this screen: the picture's highest index is
 65 (`the_picture_uses_only_colours_the_512_byte_upload_writes`), so the
 partial entry and the untouched tail cannot be reached — and it is
@@ -215,8 +226,11 @@ all of them: tick `t` is boot frame **17065 + t**.
 | 17500 | the filed keyframe | 435 |
 | 17700 | the filed keyframe | 635 |
 
-The three filed keyframes match at ticks 235/435/635 with **0 differing
-pixels** — `bins/secondreality/tests/jplogo.rs` prints them. The same
+17300 and 17500 match at ticks 235 and 435 with **0 differing pixels**
+(`bins/secondreality/tests/jplogo.rs` prints them). 17700 at tick 635
+reproduces the census's settled `ec3de2bb…` state and leaves the recorded
+**51,445 px (40.1914 %, max delta 255)** residual against the filed
+`91d6ce6b…` picture — the reference caveat of §6, not a match. The same
 origin puts the sweep's 17100 at tick 35, the entry's step 34, which is the
 record's "band of the picture across the top: the entry has just begun"
 (`reference-indices.md` §17.1); that capture is under `out/` and is a
@@ -234,9 +248,10 @@ is the oracle's timing draw, not a second algorithm (§6).
 `:71` first waits for `dis_musplus() >= 4` — the loop condition is
 `while(!dis_exit() && dis_musplus()<4);`, so it spins while the value is
 below four. At this point of MUSIC1 the published order is 96, whose
-`zplus` is 0 up to row 32 and 1 after it, so its `musplus` is -32 or
-`row-64` — below four either way; the gate opens only in order 98, whose
-`zplus` 2 gives `musplus = row`, at **row 4**.
+`zplus` is 1 from its row 0 on (the trace: order 95 is `zplus` 0 and the
+`254` at order 97 is the next marker), so its `musplus` is `row-64` — below
+four; the gate opens only in order 98, whose `zplus` 2 gives `musplus = row`
+from **row 4** until row 31.
 With the reference's position (tick 84 is order 98 row 5) the gate passes
 without a spent iteration. The port checks it once a tick until it does.
 
@@ -271,8 +286,17 @@ row and checks it survives, then forgets the row and checks it does not.
 `linezoom(dest, src, a)` clamps `a` to 318 with an **unsigned** compare
 (`cmp bx,318 / jbe` — a negative 16-bit value is above 318) and clears its
 low bit, then dispatches through a 160-word table indexed by `a`. `DOL.C`
-generates every even scale from 140 to 244; values below 140 use 140 and
-above 244 use 244, and `a = 0` is `@zoom0`.
+generates every even scale from 140 to 244; the table maps 0 to `@zoom0`,
+2..138 to `@zoom140`, 140..244 to that scale and 246..318 to `@zoom244`.
+The routine's geometry is the **label's**, not the index's: a passed 318
+draws at 244's `le/ri`, not at 318's.
+
+The part's own scales never leave the generated range: over every `doit`
+frame 1..511 the reachable `a` is **[164, 224]**
+(`the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside`,
+which also pins 318/320/-3 → `@zoom244`, 2/141 → `@zoom140` and 0 →
+`@zoom0`). The two clamps are therefore unreachable on this screen and are
+carried because they are the routine's.
 
 A routine's semantics are one row image:
 
@@ -290,7 +314,9 @@ The port's `zoom_row` is that per-pixel model — one byte per displayed
 pixel into the packed surface — and
 `the_zoom_window_is_the_source_bytes_at_each_scale` compares it against a
 direct transliteration of `DOL.C`'s formula at scales 140, 141, 142, 144,
-184, 200, 244, 318, 320 and -3, margins included. `scale_184_is_the_identity…`
+184, 200, 244, 318, 320 and -3, margins included (the helper is a second
+transcription of the same formula, not an independent oracle; §7 is the
+external check). `scale_184_is_the_identity…`
 pins the entry's strip: x=68..251 are source bytes 0..183, x=252 is the 65
 border, and x=67/x=253 are black.
 
@@ -428,8 +454,11 @@ The run's own numbering is asserted too: `index_origin: "part"`,
 
 ## 8. The preserved bugs
 
-- **`setpalarea`'s 512-byte upload** (§2.3), with entry 64 blacked and the
-  source 0→64 remap; invisible on this picture and mandatory.
+- **The DAC clear and `setpalarea`'s 512-byte upload** (§2.3): `inittwk`'s
+  768 zero bytes (`ASM.ASM:31-38`) and then the file's 512, leaving entry
+  170's blue and entries 171..255 black; entry 64 blacked and the source
+  0→64 remap follow. Invisible on this picture and mandatory: it is the DAC
+  this part hands on.
 - **JPLOGO's own sine table.** `SIN1024.INC` differs from the common copy:
   indices 256 and 768 are ±255, not ±256. The port uses this file's table;
   `the_sine_table_is_the_sources_own_1024_words` parses the shipped file

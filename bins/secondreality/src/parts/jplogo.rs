@@ -349,15 +349,25 @@ fn entry_scrolls() -> Vec<u16> {
 /// `[32,288)` and no pixel outside it: the source byte
 /// `((x-le)*185 + c/2)/c` for `x` in `[le,ri]`, black otherwise. `a` is
 /// clamped to 318 with an **unsigned** compare and rounded down to even
-/// (`:140-143`). `src` `None` is `@zoom0`, which writes black.
+/// (`:140-143`); the resulting table index then selects a **label**:
+/// 0 is `@zoom0`, 2..138 is `@zoom140`, 140..244 is that scale and 246..318
+/// is `@zoom244` (`DOL.C:31-38`). The routine's geometry is the label's, not
+/// the index's. `src` `None` is `@zoom0`, which writes black.
+///
+/// The part's own scales stay well inside the generated range:
+/// `the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside`
+/// measures the reachable set over every `doit` frame as [164, 224], so the
+/// two clamps are unreachable here and carried anyway.
 fn zoom_row(pixels: &mut [u8], y: usize, src: Option<&[u8; ROW_BYTES]>, scale: i32) {
     // `_linezoom`'s `cmp bx,318 / jbe` is an **unsigned** compare, and
     // `and bx,not 1` follows it (`ASM.ASM:140-143`).
-    let mut a = scale as u16 as i32;
-    if (a as u16) > 318 {
-        a = 318;
+    let mut index = scale as u16 as i32;
+    if (index as u16) > 318 {
+        index = 318;
     }
-    a &= !1;
+    index &= !1;
+    // `zoomt`'s dispatch (`DOL.C:31-38`).
+    let a = if index == 0 { 0 } else { index.clamp(140, 244) };
 
     let base = y * SCREEN_WIDTH as usize;
     let Some(src) = src else {
@@ -369,6 +379,13 @@ fn zoom_row(pixels: &mut [u8], y: usize, src: Option<&[u8; ROW_BYTES]>, scale: i
         }
         return;
     };
+    if a == 0 {
+        // `@zoom0` selected with a source still draws black.
+        for x in 32..288 {
+            pixels[base + x] = 0;
+        }
+        return;
+    }
 
     let le = 160 - a / 2;
     let ri = 160 + a / 2;
@@ -386,9 +403,16 @@ fn zoom_row(pixels: &mut [u8], y: usize, src: Option<&[u8; ROW_BYTES]>, scale: i
 // ------------------------------------------------------------ the palette --
 
 /// The DAC upload `setpalarea(palette,0,256)` (`ASM.ASM:104-126`) performs on
-/// the live palette: `2*count + start` = 512 bytes, no more.
-fn palette_upload(file: &Palette, live: Palette) -> Palette {
-    let mut out = live;
+/// the palette state `dac`: `2*count + start` = 512 bytes, no more.
+///
+/// `init` passes [`Palette::new`] — all black — because `inittwk`
+/// (`ASM.ASM:31-38`) writes 768 zero bytes to the DAC data port before the
+/// upload, so the source's post-init DAC is the file's entries 0..169, entry
+/// 170's red and green over a **zero** blue, and a black 171..255. The
+/// entries past 169 are inherited from that clear, not from whatever part ran
+/// before this one.
+fn palette_upload(file: &Palette, dac: Palette) -> Palette {
+    let mut out = dac;
     for entry in 0..PALETTE_ENTRIES_WHOLE {
         let blacked = if entry == usize::from(BLACK_INDEX) {
             [0, 0, 0]
@@ -398,7 +422,7 @@ fn palette_upload(file: &Palette, live: Palette) -> Palette {
         out.set_entry(entry as u8, blacked);
     }
     // 512 bytes stop after entry 170's green; its blue is the DAC's old one.
-    let old_blue = live.entry(PALETTE_PARTIAL as u8)[2];
+    let old_blue = dac.entry(PALETTE_PARTIAL as u8)[2];
     let partial = file.entry(PALETTE_PARTIAL as u8);
     out.set_entry(PALETTE_PARTIAL as u8, [partial[0], partial[1], old_blue]);
     out
@@ -545,9 +569,11 @@ impl Part for Jplogo {
             });
         }
 
-        // `readp(palette,-1,pic)` / `:188-196`'s palette and rows.
+        // `readp(palette,-1,pic)` / `:188-196`'s palette and rows. `inittwk`
+        // has already written 768 zeros to the DAC (`ASM.ASM:31-38`), so the
+        // 512-byte upload builds on black, not on the inherited palette.
         self.rows = Self::read_rows(&image);
-        let palette = palette_upload(&image.palette, *ctx.palette);
+        let palette = palette_upload(&image.palette, Palette::new());
         ctx.set_palette(palette);
 
         // `:117-171`'s tables, `:211-219`'s entry.
@@ -805,16 +831,21 @@ mod tests {
 
     fn reference_zoom_row(y: usize, src: Option<&[u8; ROW_BYTES]>, scale: i32) -> Vec<u8> {
         let mut row = vec![0xAAu8; PICTURE_WIDTH];
-        let mut a = scale as u16 as i32;
-        if (a as u16) > 318 {
-            a = 318;
+        let mut index = scale as u16 as i32;
+        if (index as u16) > 318 {
+            index = 318;
         }
-        a &= !1;
+        index &= !1;
+        let a = if index == 0 { 0 } else { index.clamp(140, 244) };
         let _ = y;
         let Some(src) = src else {
             row[32..288].fill(0);
             return row;
         };
+        if a == 0 {
+            row[32..288].fill(0);
+            return row;
+        }
         let le = 160 - a / 2;
         let ri = 160 + a / 2;
         let c = ri - le + 1;
@@ -952,6 +983,48 @@ mod tests {
     }
 
     #[test]
+    fn the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside() {
+        let image = asset();
+        let rows = Jplogo::read_rows(&image);
+        let render = |scale: i32| {
+            let mut pixels = vec![0xAAu8; PICTURE_WIDTH * PICTURE_HEIGHT];
+            zoom_row(&mut pixels, 0, Some(&rows[0]), scale);
+            pixels[..PICTURE_WIDTH].to_vec()
+        };
+        // `DOL.C`'s table: 246..318 is `@zoom244`, 2..138 is `@zoom140`,
+        // 140..244 is that label and 0 is `@zoom0`.
+        assert_eq!(render(318), render(244));
+        assert_eq!(render(320), render(244));
+        assert_eq!(render(-3), render(244));
+        assert_eq!(render(2), render(140));
+        assert_eq!(render(141), render(140));
+        let mut zero = vec![0xAAu8; PICTURE_WIDTH];
+        zero[32..288].fill(0);
+        assert_eq!(render(0), zero);
+        // The part's own reachable scales, over every `doit` frame.
+        let (fy1, fy2) = spring_tables();
+        let (t1, t2) = interpolate_800(&fy1, &fy2);
+        let (mut lo, mut hi) = (i32::MAX, i32::MIN);
+        for frame in 1..=FREEZE_AFTER as usize {
+            let y1 = t1[frame] / 16;
+            let y2 = t2[frame] / 16;
+            let xsc = (400 - (y2 - y1)) / 8;
+            let first = y1.max(0);
+            let last = y2.min(PICTURE_HEIGHT as i32);
+            for y in first..last {
+                let b = (y - y1) * 400 / (y2 - y1);
+                let a = 184
+                    + (i32::from(SIN1024[b as usize * 32 / 25]) * xsc + 32) / 64;
+                let a = a & !1;
+                lo = lo.min(a);
+                hi = hi.max(a);
+            }
+        }
+        assert_eq!((lo, hi), (164, 224));
+        assert!((140..=244).contains(&lo) && (140..=244).contains(&hi));
+    }
+
+    #[test]
     fn scale_184_is_the_identity_over_the_185_source_bytes() {
         let image = asset();
         let rows = Jplogo::read_rows(&image);
@@ -1041,6 +1114,32 @@ mod tests {
     }
 
     // ----------------------------------------------------- the palette ----
+
+    #[test]
+    fn init_clears_the_dac_before_the_512_byte_upload() {
+        // `inittwk`'s `mov cx,768 / out dx,al` (`ASM.ASM:31-38`) zeroes the
+        // DAC before the upload, so an inherited palette cannot survive past
+        // entry 169 — and entry 170's blue is that zero, not the old DAC's.
+        let mut rig = Rig::new();
+        rig.palette = patterned_palette();
+        let mut part = Jplogo::at("../../");
+        rig.init(&mut part, true).unwrap();
+        let file = asset().palette;
+        assert_eq!(
+            rig.palette.entry(170),
+            [file.entry(170)[0], file.entry(170)[1], 0],
+            "entry 170's blue is the cleared DAC's"
+        );
+        for entry in 171..256u16 {
+            assert_eq!(
+                rig.palette.entry(entry as u8),
+                [0, 0, 0],
+                "entry {entry} was not written by the 512 bytes and stayed cleared"
+            );
+        }
+        assert_eq!(rig.palette.entry(64), [0, 0, 0], "the blacked entry");
+        assert_eq!(rig.palette.entry(1), file.entry(1), "the file's first entry");
+    }
 
     #[test]
     fn the_palette_upload_is_the_sources_512_bytes() {

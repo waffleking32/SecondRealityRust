@@ -1456,11 +1456,16 @@ previous iteration used (`JP.C:78-83`). The port models **one vblank an
 iteration** (`frame += 1`), which is the reference's own cadence at the filed
 keyframes: 17300 is tick 235 and 17500 tick 435, 0 differing pixels each.
 
-The picture does not depend on the count while the band is changing (every
-iteration redraws nearly every row), but the *hold* does, through the
-palimpsest guard (`lasty`/`lasts`, `JP.C:96-99`): how far the counter jumps
-decides which pre-settle rows an earlier state leaves behind. The census
-records the consequence (`reference-indices.md` §17.3, §17.5):
+The row *images* depend only on the counter's current `y1`/`y2`; the
+*screen* depends on the path, through the palimpsest guard
+(`lasty`/`lasts`, `JP.C:96-99`): how far the counter jumps decides which
+pre-settle rows an earlier state leaves behind. The fixed step reproduces
+the **filed keyframes and the settled state**, not every intermediate
+wobble frame of another session: `out/b4b-jp-sweep1`'s 17200 matches the
+port at 0 px, while its 17400 and 17600 are **45.6023 %** and **39.8672 %**
+away (dump ticks 135, 335 and 535 and compare; `tests/jplogo.rs` pins the
+filed keyframes and the settled state). The census records the consequence
+(`reference-indices.md` §17.3, §17.5):
 
 - 17300's filed picture is 4/4; 17500's is 2/4;
 - 17700's *state* is settled 2/4 (`ec3de2bb…`) while the filed picture
