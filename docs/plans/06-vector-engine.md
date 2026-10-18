@@ -4,7 +4,7 @@
 
 **Goal:** Port the VISU 3D engine and the two vector parts — U2A (the landing pad and flying saucer over the U2ABG landscape) and U2E (the city flythrough) — so each renders the reference's own keyframes, each waits on the music exactly as the original does, block 1 runs through U2A and PAM, block 4 runs for the first time, and block 3 crosses the mid-run `MUSIC0@18` restart before U2E.
 
-**Architecture:** A shared renderer module under `bins/secondreality/src/parts/visu/` (fixed-point matrix/projection maths, the polygon pipeline, and the scene driver), with the packed scene formats read as plain data by a new `crates/sr-assets/src/visu.rs`. The two parts are transliterations of `VISU/C/U2A.C` and `VISU/C/U2E.C` over that engine, using four 64,000-pixel pages laid into the engine surface and flipped through copper slot 2 exactly as the original flips CRTC 0x0c. The shell gains the restart site at the U2E boundary (`MAIN/U2.ASM:880-885`) and U2E's measured boot anchor.
+**Architecture:** A shared renderer module under `bins/secondreality/src/parts/visu/` (fixed-point matrix/projection maths, the polygon pipeline, and the scene driver), with the packed scene formats read as plain data by a new `crates/sr-assets/src/visu.rs`. The two parts are transliterations of `VISU/C/U2A.C` and `VISU/C/U2E.C` over that engine, using four 64,000-pixel pages laid into the engine surface and flipped through copper slot 2 exactly as the original flips CRTC 0x0c. The shell gains the restart site at the U2E boundary (`MAIN/U2.ASM:880-885`) and U2E's measured first visible frame, from which its run anchor is derived.
 
 **Tech Stack:** Rust 2021, `crates/sr-engine` (part API, surface/view, copper, palette, music), `crates/sr-assets` (asset readers), `xtask` (reference capture/compare, music trace), SDL2 only in the binary.
 
@@ -71,7 +71,7 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
   - **D34 — the mid-run restart model.** At the U2E boundary the shell installs a fresh MUSIC0 seeked to order 18 (the row for block '4', whose guard `whattorun & 8` is implied by U2E's presence in any plan). The new player waits `MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME = 4` engine ticks before advancing. **Verified by `second3e`:** `second4` and `second3e` are the same restarted session shifted by 17,441–17,442 frames (17,442 at the measured rows; the ±1 is row sampling); the restarted clock starts at 17,850.2, the U2E boundary at 17,846.2 = chain 17,427, and the first music tick at chain 17,431 = boot 17,850 — the 4-tick wait. The restart does **not** zero `_np_zframe` (9,099 at 18000, carried from PLZPART's 5,723 reset); `music-clock.md` §2's causal clause is corrected.
 - [ ] **Step 6: Commit.** `git add reference/music/second1c reference/music/second4 reference/music/second3e docs/fidelity/music-clock.md docs/decisions.md docs/fidelity/reference-indices.md` (whatever changed) and commit.
 
-**Acceptance:** the three traces exist with manifests and pass `reference verify`; `music-clock.md` names them with their windows and the measured positions; the U2E anchor is measured in two sessions and recorded; the pad palette question is answered against the two candidate palettes; D32–D34 are written with citations.
+**Acceptance:** the three traces exist with manifests and pass `reference verify`; `music-clock.md` names them with their windows and the measured positions; the U2E first visible frame is measured in two sessions and the run anchor derived from it is recorded; the pad palette question is answered against the two candidate palettes; D32–D34 are written with citations.
 
 ---
 
@@ -256,7 +256,7 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 ### Task 8: The shell — the U2E boundary restart and the run shapes
 
 **Files:**
-- Modify: `bins/secondreality/src/shell.rs` (`boot_anchor` for `u2e`, the restart site and its install path, `Sequence`'s stored music source, the block-plan/stop tests), `bins/secondreality/tests/shell.rs` (the block-3 chain extension, the block-4 run, the block-1 chain extension), `CLAUDE.md` is Task 9
+- Modify: `bins/secondreality/src/shell.rs` (the restart site and its install path, `Sequence`'s stored music source, the block-plan/stop tests; the U2E anchor constant is Task 7's), `bins/secondreality/tests/shell.rs` (the block-3 chain extension, the block-4 run, the block-1 chain extension), `CLAUDE.md` is Task 9
 - Test: shell unit tests, `tests/shell.rs`
 
 **Interfaces:**
@@ -269,13 +269,13 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing shell tests.** `a_restart_installs_the_next_modules_order_at_the_u2e_boundary` — a stub plan `[mntscrl, u2e]` with the real `MusicSource` seam (or a scripted one) asserts the music changes to MUSIC0@18 at the boundary, `RunMusic.start.waiting == 4`, the dump's scratch survives, and the engine's fresh flag is armed for U2E. `u2e_runs_are_numbered_from_their_measured_anchor` — `boot_anchor("u2e")` is `Some(anchor)` and `--block 4`'s first index is the anchor. The block-stop tests update: block 1 stops at `glenz`, block 3/4 stop at `None` (ENDSCRL never ends).
+- [ ] **Step 1: Write the failing shell tests.** `a_restart_installs_the_next_modules_order_at_the_u2e_boundary` — a stub plan `[mntscrl, u2e]` with the real `MusicSource` seam (or a scripted one) asserts the music changes to MUSIC0@18 at the boundary, `RunMusic.start.waiting == 4`, the dump's scratch survives, and the engine's fresh flag is armed for U2E. `u2e_runs_are_numbered_from_their_derived_intro_anchor` — checks the constant Task 7 added: `boot_anchor("u2e")` is `Some(anchor)` and `--block 4`'s first index is the anchor. The block-stop tests update: block 1 stops at `glenz`, block 3/4 stop at `None` (ENDSCRL never ends).
 - [ ] **Step 2: Run; fail.**
 - [ ] **Step 3: Implement the restart and the anchor** (D34's waiting value).
 - [ ] **Step 4: Extend the real chain tests, bounded.** In `tests/shell.rs`, extend the block-1 chain to the first PAM frames, asserting ALKU → U2A → PAM with the reference numbering and the music positions at U2A's start/gates. In the block-3 chain, extend past 16,884 to just past the U2E boundary, asserting the restart fired (MUSIC0 order 18), the part switched to U2E, the geometry is 320×200, and the player's positions match `second3e` at the mapping-derived indices within its row granularity. Do not run U2E's 3,600-tick animation in the chain test; the part's own integration test owns that.
 - [ ] **Step 5: Run `cargo test -p secondreality --test shell` and the shell unit tests; commit.**
 
-**Acceptance:** the restart unit test fails without the install and passes with it; block 1 and block 3 real chains assert the new boundaries and the restart; block 4 starts at the measured anchor.
+**Acceptance:** the restart unit test fails without the install and passes with it; block 1 and block 3 real chains assert the new boundaries and the restart; block 4 starts at the derived intro anchor.
 
 ---
 
@@ -289,7 +289,7 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 **Steps:**
 
 - [ ] **Step 1: Write the fidelity notes' remaining sections** (any evidence Task 1 produced that the part tasks deferred) and the approximation entries with measured differences.
-- [ ] **Step 2: Finalize D32–D34** with the measured values (the anchor, the gate frames, the restart phase from `second3e`).
+- [ ] **Step 2: Finalize D32–D34** with the measured values (the first-visible frame and the derived anchor, the gate frames, the restart phase from `second3e`).
 - [ ] **Step 3: Apply the Phase 5 carried doc fixes.** A27's label; the "fourteen captures" count; the x-scale sweep's marking; the D19 amendment with its reasoning and where fit corpora live.
 - [ ] **Step 4: Update `CLAUDE.md`.** The part count becomes twenty; the run examples show `--block 1` running to GLENZ, `--block 3` through U2E to the scrollers, `--block 4` from U2E; the ESC paragraph names U2A/U2E's exit behaviour (both poll `ctx.exit_requested` in their waits and loops; U2A's gate-2 cut is the original's music cut, not an exit).
 - [ ] **Step 5: Update `PROGRESS.md`.** Phase 6's row is **done** with the tag withheld until the final review (the project's practice), the evidence: the three traces, the three/four keyframe comparisons per part, the chain/restart tests, the new decisions and approximation numbers.
