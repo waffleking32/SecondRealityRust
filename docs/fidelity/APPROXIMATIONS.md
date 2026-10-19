@@ -1610,3 +1610,63 @@ and `cargo test -p secondreality
 the_reference_7300_is_the_measured_stream_state` (1098 belongs to state 297
 and to no other of the 522), plus the dump command in
 `docs/fidelity/u2a.md` §7.
+
+## A30 — U2E: the release's Gouraud shading differs at the four keyframes (registered, not adopted)
+
+**Part:** U2E (`VISU/C/U2E.C` over the VISU engine), Phase 6.
+
+**Original:** the four filed keyframes render the release's Gouraud shading on
+the moving objects. At the reference's own stream state — the port's `K - 4`
+frame, the state search's unique minimum for every keyframe — the silhouettes
+are exact and the differences are confined to the Gouraud faces of `s01`
+(123 of its 124 faces are Gouraud), `Tree01g` (64 of 70) and `Car02` (all 10).
+
+**Port:** the tree's algorithm, the same engine `parts/visu/` carries for
+U2A. At the reference's own state the residual is **189 / 7,118 / 231 / 1,177
+of 64,000 pixels (0.2953 / 11.1219 / 0.3609 / 1.8391 %)** for 1000 / 1600 /
+2600 / 3600. Every flat-shaded object and every silhouette reproduces exactly;
+the reference-derived palette-index deltas run from −8 to +12 and are dominated
+by **+1** (6,655 of 7,118 at 1600).
+
+**Why (D24 step 3).** This is the same release-versus-tree Gouraud difference
+A28 registers for U2A: the same engine reproduces the flat faces and the
+silhouettes byte for byte, the tree's lighting and filler arithmetic match
+`ADRAW.ASM`/`AVIDFILL.ASM` as transliterated, and no tree-carriable constant
+turns a whole object's Gouraud interpolation into the release's. The release's
+constants are not readable from `SECOND.EXE` (D24 step 2), and fitting one
+keyframe's Gouraud shade would be unverifiable against another.
+
+**Measured difference:** 189, 7,118, 231 and 1,177 of 64,000 pixels
+(0.2953 / 11.1219 / 0.3609 / 1.8391 %), all on the named Gouraud faces;
+silhouettes and flat objects exact. Reproduce with
+`cargo test --release -p secondreality --bin secondreality
+search_reference_states -- --ignored --nocapture` and
+`cargo test -p secondreality --test u2e
+the_keyframes_record_the_measured_session_phase_and_gouraud_residual`.
+
+## A31 — U2E: the block-4 keyframe boot indices are a session-phase intercept (registered)
+
+**Part:** U2E (`VISU/C/U2E.C`), Phase 6.
+
+**Original:** the filed keyframe capture displays stream state `(t - 702)/2` at
+boot `t`; at 1000 / 1600 / 2600 / 3600 that is states 149 / 449 / 949 / 1449.
+
+**Port:** the displayed state is `(t - 698)/2` — the same slope to the frame, a
+**four-tick (two-state) intercept**. The pictures at the exact keyframes differ
+by **11,006 / 11,805 / 17,278 / 16,234 of 64,000 pixels (17.1969 / 18.4453 /
+26.9969 / 25.3656 %)**.
+
+**Why (D17).** The port's music clock reaches order 19 at boot 698 where the
+filed `second4` trace reads it at 699, and the keyframe capture is another
+session; the four-tick offset is the same class of session phase A29 registers
+for U2A's 7300. The port's intro is byte-exact against the sessions that agree
+with it (boot 460..660 at 0 differing), which pins the 418 anchor and the
+70 Hz tick; changing the block-4 start or the gate to chase the keyframes
+would move the verified intro. No anchor, cadence or clock was fitted.
+
+**Measured difference:** 11,006 / 11,805 / 17,278 / 16,234 of 64,000 pixels
+(17.1969 / 18.4453 / 26.9969 / 25.3656 %) at 1000 / 1600 / 2600 / 3600, with
+the aligned-state residual A30's. Reproduce with
+`cargo test -p secondreality --test u2e
+the_keyframes_record_the_measured_session_phase_and_gouraud_residual` and the
+`search_reference_states` diagnostic above.

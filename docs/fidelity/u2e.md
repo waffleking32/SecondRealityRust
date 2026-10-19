@@ -181,10 +181,13 @@ the same slope to the frame, a **four-tick intercept** (two stream states).
 The port's music clock reaches order 19 at 698 where `second4` reads it at
 699, and the keyframe capture is another session: this is D17's session phase,
 the same class **A29** registers for U2A's 7300. No anchor or timing is fitted
-to it.
+to it. **Ruled and registered as A31** in
+`docs/fidelity/APPROXIMATIONS.md`; the port keeps the tree's clock and the
+byte-exact intro.
 
 At the exact keyframes the RGB comparisons differ by **11,006 / 11,805 /
-17,278 / 16,234** pixels. At the reference's **own** state — the port's
+17,278 / 16,234** pixels (17.1969 / 18.4453 / 26.9969 / 25.3656 %). At the
+reference's **own** state — the port's
 `K - 4` frame — the silhouettes are exact: **0** pixels disagree between
 "background" and "object". The remaining colour residual is **189 / 7,118 /
 231 / 1,177** pixels, and every differing pixel's topmost writer is a
@@ -203,10 +206,13 @@ reference-derived index deltas are small and mostly `+1`:
 
 Every flat-shaded object reproduces exactly; the residual is confined to the
 Gouraud faces, the release-versus-tree difference **A28** already registers
-for U2A (`docs/fidelity/u2a.md` §5). The port keeps the tree's translation; no
-constant was fitted to a keyframe (D24/D17). The ignored unit test
-`search_reference_states` reproduces the states, the topmost attribution and
-the deltas; the integration test asserts the numbers above.
+for U2A (`docs/fidelity/u2a.md` §5). **Ruled and registered as A30** in
+`docs/fidelity/APPROXIMATIONS.md`: the four numbers are 189 / 7,118 / 231 /
+1,177 of 64,000 (0.2953 / 11.1219 / 0.3609 / 1.8391 %), the index deltas run
+from −8 to +12 and 6,655 of the 7,118 at 1600 are `+1`. The port keeps the
+tree's translation; no constant was fitted to a keyframe (D24/D17). The
+ignored unit test `search_reference_states` reproduces the states, the topmost
+attribution and the deltas; the integration test asserts the numbers above.
 
 ## 6. The bugs and hardware behaviours, preserved
 
@@ -269,14 +275,17 @@ cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter
     --cycles 30000 --frames 420,430,440,450,460,470,480,490,500 --out out/u2e-start
 ```
 
-**The older sweep session's hold.** `out/b4b-u2e-sweep`'s 600 and 700 are one
-4-colour screen (`ef539f9e…`, mean 158.30) with the fadeset page under a
-red/cyan palette (entry 252 = `(20,0,0)`, 253 = `(0,63,63)`, 254 =
-`(63,63,63)`), while `out/b4b-u2e-sweep2`'s 530, 590 and 660 are the 2-colour
-grey hold (`befaf38a…`, mean 191.25) that `reference-indices.md` §18.6
-independently matches on a `SECOND 3` boot, and the port matches sweep2. The
-two sessions' 500 frames are byte-identical (`a830146f…`), so they are at the
-same fade step at 500; the sweep's 600 screen cannot be produced by either
-intro path or by the patched main palette (any path reaches black/white at the
-hold). The port follows the source and the sessions that agree with it; the
-sweep's hold is flagged here rather than fitted.
+**The older sweep session's hold is a reference anomaly.** `out/b4b-u2e-sweep`'s
+600 and 700 are one 4-colour screen (`ef539f9e…`, mean 158.30) with the
+fadeset page under a red/cyan palette (entry 252 = `(20,0,0)`, 253 =
+`(0,63,63)`, 254 = `(63,63,63)`), while `out/b4b-u2e-sweep2`'s 530, 590 and
+660 are the 2-colour grey hold (`befaf38a…`, mean 191.25) that
+`reference-indices.md` §18.6 independently matches on a `SECOND 3` boot, and
+the port matches sweep2 at 0 differing. The two sessions' 500 frames are
+byte-identical (`a830146f…`), so they are at the same fade step at 500; the
+sweep's 600 screen cannot be produced by either intro path or by the patched
+main palette (every path reaches black/white at the hold). It is therefore a
+**reference anomaly**, not a port approximation: the port follows the source
+and the sessions that agree with it (and the filed keyframes' city scenes),
+and the anomaly is **not registered in `APPROXIMATIONS.md`** for that reason.
+The `+252` correction above is source-faithful and unrelated to it.
