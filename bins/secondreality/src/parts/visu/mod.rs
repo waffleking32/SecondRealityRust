@@ -417,6 +417,13 @@ impl Ring {
     pub fn displayed(&self) -> usize {
         self.displayed_page
     }
+
+    /// The schedule counter, for a diagnostic that replays the stream state by
+    /// state outside the loop.
+    #[cfg(test)]
+    pub(crate) fn set_currframe(&mut self, value: i32) {
+        self.currframe = value;
+    }
 }
 
 /// What `vid_clearbg`/`vid_clear255` puts on a fresh page.
@@ -465,6 +472,13 @@ impl Driver {
             fov: 0,
             first_draw,
         }
+    }
+
+    /// The draw order for `scene`, for a diagnostic that attributes pixels to
+    /// the topmost object.
+    #[cfg(test)]
+    pub(crate) fn order_for_test(&self, scene: &mut Scene) -> Vec<usize> {
+        self.order_instances(scene)
     }
 
     /// The loop body of `U2A.C:284-324` / `U2E.C:386-433`: clear the page,

@@ -503,9 +503,9 @@ mod tests {
     #[test]
     fn a_block_is_a_run_the_window_drives_as_well_as_a_dump() {
         // The window drives the same `Sequence` a headless run dumps, so a
-        // block is no longer refused outside `--headless`. What is still
-        // refused, in either mode, is a block whose first part the port cannot
-        // start at: `SECOND 4` begins at U2E, which is not ported.
+        // block is no longer refused outside `--headless`. Every block the
+        // demo accepts now starts at a part the port has: `SECOND 4` begins at
+        // U2E, which landed with the vector engine's second part.
         let cli = parse(&["--block", "5"]).unwrap();
         assert_eq!(cli.block, Some('5'));
         assert!(!cli.headless, "the window is the default mode");
@@ -513,8 +513,9 @@ mod tests {
         assert!(parse(&["--block", "3"]).is_ok(), "MNTSCRL is ported");
         assert!(parse(&["--block", "1"]).is_ok(), "ALKU is ported");
 
-        let message = parse(&["--block", "4"]).unwrap_err();
-        assert!(message.contains("u2e is not ported yet"), "{message}");
+        let cli = parse(&["--block", "4"]).unwrap();
+        assert_eq!(cli.block, Some('4'), "SECOND 4 begins at U2E, which is ported");
+        assert!(!cli.headless);
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub mod rayscrl;
 pub mod techno;
 pub mod tunneli;
 pub mod u2a;
+pub mod u2e;
 pub mod visu;
 
 use sr_engine::part::Part;
@@ -85,6 +86,9 @@ pub fn registry() -> &'static [PartEntry] {
         // `READP.C` — the jelly logo, block 3's last part
         // (`MAIN/U2.ASM:856-874`).
         ("jplogo", || Box::new(jplogo::Jplogo::new())),
+        // `VISU/C/U2E.C` — the city flythrough, block 3's tail after the
+        // restart and block 4's entry (`MAIN/U2.ASM:880-887`).
+        ("u2e", || Box::new(u2e::U2e::new())),
     ]
 }
 

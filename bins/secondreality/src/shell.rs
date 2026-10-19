@@ -103,9 +103,24 @@ pub fn boot_anchor(part: &str) -> Option<u32> {
     match part {
         "alku" | "beglogo" | "endlogo" => Some(FIRST_GRAPHICS_FRAME),
         "pam" => Some(PAM_ANCHOR),
+        "u2e" => Some(U2E_ANCHOR),
         _ => None,
     }
 }
+
+/// U2E's intro start in the reference's numbering: the derived **418**, not
+/// the first visible frame.
+///
+/// On the `SECOND 4` boot the loader's flat black holds through 466 and the
+/// intro's `fadeset` draws the white band at **467** — measured in two
+/// independent dense scans (`reference-indices.md` §18.7). The source
+/// (`U2E.C:285-303`) runs 33 fade-in waits and 16 further waits before the
+/// fadeset writes the displayed page, and that write precedes the fadeset's own
+/// wait: 49 pre-visible waits, so the part's tick 0 is `467 - 49 = 418`. The
+/// candidate 417 counts the fadeset's own wait before the write instead of
+/// after it; the unit test `the_fadeset_lands_on_tick_49_and_paints_the_measured_band`
+/// calibrates the value against the measured 467.
+pub const U2E_ANCHOR: u32 = 418;
 
 /// PAM's first drawn frame in the reference's numbering: the flat
 /// `(251,251,251)` wash that is the 63rd palette copy over the opening frame.
@@ -1459,11 +1474,31 @@ mod tests {
 
     #[test]
     fn a_block_entry_anchor_is_the_boots_first_graphics_frame() {
-        // The three block entries the port can start from are anchored at
-        // 404: the demo's first graphics frame under the D17 recipe.
+        // The block entries that start at the boot's first graphics frame are
+        // anchored at 404 under the D17 recipe.
         assert_eq!(boot_anchor("alku"), Some(404));
         assert_eq!(boot_anchor("beglogo"), Some(404));
         assert_eq!(boot_anchor("endlogo"), Some(404));
+    }
+
+    #[test]
+    fn u2e_is_anchored_at_its_derived_intro_start() {
+        // The reference's first visible U2E frame is 467 (two dense sessions),
+        // and the fadeset that draws it is the source's 49th pre-visible wait;
+        // 467 - 49 = 418. The part's unit test calibrates the fadeset onto
+        // tick 49.
+        assert_eq!(boot_anchor("u2e"), Some(418));
+        assert_eq!(U2E_ANCHOR, 467 - 49);
+        // Block 4's recipe restarts MUSIC0 at 408, so a run from 418 pre-polls
+        // the ten frames between them.
+        assert_eq!(
+            MusicStart::for_part("u2e", Some(U2E_ANCHOR)),
+            MusicStart {
+                frame: U2E_ANCHOR,
+                waiting: 0,
+                pre: 10
+            }
+        );
     }
 
     #[test]
@@ -1807,6 +1842,10 @@ mod tests {
             // `second3d` holds order 96 across JPLOGO's whole start window
             // (17000, 17100]; the `254` at 97 is crossed at 17109.
             ("jplogo", Some((ModuleId::Music1, 96))),
+            // `MAIN/U2.ASM:880-885` restarts MUSIC0 at order 18 for block 4
+            // (`SECOND 4`) and for the mid-run restart the other blocks take
+            // before U2E.
+            ("u2e", Some((ModuleId::Music0, 18))),
             // The hidden part: `SECOND U` restarts MUSIC0 at order 70
             // (`MAIN/U2.ASM:889-894`), and block U's plan is this part alone.
             ("ddstars", Some((ModuleId::Music0, 70))),
@@ -2649,20 +2688,22 @@ mod tests {
         // "holding; <name> is not ported yet").
         //
         // This is the block-level claim the end-to-end runs rest on: `--block 1` plays
-        // ALKU, U2A, PAM and BEGLOGO, and stops at GLENZ, and `--block 3` runs its
-        // whole tier — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO —
-        // and stops at U2E, in the plans the demo itself has. Block 2 still stops at
-        // GLENZ, which leaves TECHNO and PANICEND unreachable through a block until
-        // GLENZ lands (Phase 7).
+        // ALKU, U2A, PAM and BEGLOGO, and stops at GLENZ; block 3 runs its whole tier
+        // — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO, U2E — and
+        // then the block-4 entry and the end sequence, because U2E's mask bit (8) is
+        // in block 3's (0x1c); block 4 starts at U2E (`SECOND 4`) and runs it and the
+        // scrollers. Both stop only where the registry lacks a name, and since U2E
+        // landed none of blocks 3, 4, 5 and U does. Block 2 still stops at GLENZ,
+        // which leaves TECHNO and PANICEND unreachable through a block until GLENZ
+        // lands (Phase 7).
         let expected: &[(char, Option<&str>)] = &[
             ('1', Some("glenz")),
             ('2', Some("glenz")),
-            // Block 3's chain now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL →
-            // RAYSCRL → COMAN → JPLOGO and stops at U2E, the first name the
-            // registry still lacks (JPLOGO was the stop before Phase 5's Task
-            // 9).
-            ('3', Some("u2e")),
-            ('4', Some("u2e")),
+            // U2E is ported: block 3's tail through U2E (and on into the end
+            // sequence) is complete, and block 4 — `SECOND 4`, U2E first —
+            // runs.
+            ('3', None),
+            ('4', None),
             ('5', None),
             ('U', None),
         ];
