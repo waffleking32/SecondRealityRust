@@ -256,8 +256,8 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 ### Task 8: The shell — the U2E boundary restart and the run shapes
 
 **Files:**
-- Modify: `bins/secondreality/src/shell.rs` (the restart site and its install path, `Sequence`'s stored music source, the block-plan/stop tests; the U2E anchor constant is Task 7's), `bins/secondreality/tests/shell.rs` (the block-3 chain extension, the block-4 run, the block-1 chain extension), `CLAUDE.md` is Task 9
-- Test: shell unit tests, `tests/shell.rs`
+- Modify: `bins/secondreality/src/shell.rs` (the restart site and its install path, `Sequence`'s stored music source, the block-plan/stop tests; the U2E anchor constant is Task 7's), `bins/secondreality/tests/shell.rs` (the block-3 chain extension, the block-4 run, the block-1 chain extension), `crates/sr-engine/src/part.rs` and `crates/sr-engine/src/engine.rs` (the exit-drain opt-in, carried from Task 7's review), `bins/secondreality/src/parts/u2e.rs` (the opt-in override), `CLAUDE.md` is Task 9
+- Test: shell unit tests, `tests/shell.rs`, sr-engine unit tests
 
 **Interfaces:**
 - Consumes: `Engine::set_music` (re-arms `music_fresh`), `MusicStart`, `MUSIC_RESTARTS`, `MusicSource`, `RunMusic`.
@@ -265,17 +265,18 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
   - `MUSIC_RESTART_AT: &[(&str, ModuleId, u8)] = &[("u2e", ModuleId::Music0, 18)]` — a part-keyed restart site. Its original guard `whattorun & 8` (`MAIN/U2.ASM:880`) is implied by U2E's presence in any block plan; the doc comment says so.
   - `MusicStart::restart(index: u32) -> MusicStart` — `{ frame: index, waiting: MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME, pre: 0 }` (4 ticks; D34).
   - `Sequence` stores `music: Option<MusicSource>` alongside its plan; `take_next` consults `MUSIC_RESTART_AT` before `start(name)` and, when the row's module/order differs from the current `RunMusic`, installs a fresh player with `play_song(order)`, `MusicStart::restart(self.index)`, and carries `AudioDump`/scratch across. The first part of a plan is unaffected (it goes through `with_run`'s entry install, not `take_next`).
+  - **The exit-drain opt-in (carried from Task 7's review).** `Part::drains_after_exit(&self) -> bool { false }`: true only for a part whose source runs a timed teardown after `dis_exit` (U2E's 16-step DAC fade, `U2E.C:541-555`). `Sequence::tick` retires a part when it returns `Finished`, or when exit is requested and the part does **not** drain; `Runner::stopped` applies the same rule. U2E overrides it; U2A does not (its teardown is synchronous within the exit tick). The next part's `Engine::start` clears the sticky exit flag, so the drain cannot leak.
 - **Block shapes:** block 1's plan runs ALKU → U2A → PAM → BEGLOGO and stops at GLENZ; block 3's plan runs its whole list (… → JPLOGO → U2E → ENDLOGO → CRED → ENDSCRL) and stops at no part, the restart firing at the U2E boundary; block 4 runs U2E → ENDLOGO → CRED → ENDSCRL from U2E's anchor under MUSIC0@18.
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing shell tests.** `a_restart_installs_the_next_modules_order_at_the_u2e_boundary` — a stub plan `[mntscrl, u2e]` with the real `MusicSource` seam (or a scripted one) asserts the music changes to MUSIC0@18 at the boundary, `RunMusic.start.waiting == 4`, the dump's scratch survives, and the engine's fresh flag is armed for U2E. `u2e_runs_are_numbered_from_their_derived_intro_anchor` — checks the constant Task 7 added: `boot_anchor("u2e")` is `Some(anchor)` and `--block 4`'s first index is the anchor. The block-stop tests update: block 1 stops at `glenz`, block 3/4 stop at `None` (ENDSCRL never ends).
+- [ ] **Step 1: Write the failing tests.** `a_restart_installs_the_next_modules_order_at_the_u2e_boundary` — a stub plan `[mntscrl, u2e]` with the real `MusicSource` seam (or a scripted one) asserts the music changes to MUSIC0@18 at the boundary, `RunMusic.start.waiting == 4`, the dump's scratch survives, and the engine's fresh flag is armed for U2E. `u2e_runs_are_numbered_from_their_derived_intro_anchor` — checks the constant Task 7 added: `boot_anchor("u2e")` is `Some(anchor)` and `--block 4`'s first index is the anchor. The block-stop tests update: block 1 stops at `glenz`, block 3/4 stop at `None` (ENDSCRL never ends). **The drain tests:** a stub part with `drains_after_exit() = true` receives ticks after the exit flag and retires on its own `Finished`; the default `false` retires on the exit tick; and a U2E unit test drives the teardown with `ctx.exit_requested` set, proving all 16 uploads (T+1..T+16) run.
 - [ ] **Step 2: Run; fail.**
-- [ ] **Step 3: Implement the restart and the anchor** (D34's waiting value).
+- [ ] **Step 3: Implement the restart, the anchor** (D34's waiting value) **and the drain opt-in** in the `Part` trait, `Sequence::tick` and `Runner::stopped`.
 - [ ] **Step 4: Extend the real chain tests, bounded.** In `tests/shell.rs`, extend the block-1 chain to the first PAM frames, asserting ALKU → U2A → PAM with the reference numbering and the music positions at U2A's start/gates. In the block-3 chain, extend past 16,884 to just past the U2E boundary, asserting the restart fired (MUSIC0 order 18), the part switched to U2E, the geometry is 320×200, and the player's positions match `second3e` at the mapping-derived indices within its row granularity. Do not run U2E's 3,600-tick animation in the chain test; the part's own integration test owns that.
 - [ ] **Step 5: Run `cargo test -p secondreality --test shell` and the shell unit tests; commit.**
 
-**Acceptance:** the restart unit test fails without the install and passes with it; block 1 and block 3 real chains assert the new boundaries and the restart; block 4 starts at the derived intro anchor.
+**Acceptance:** the restart unit test fails without the install and passes with it; block 1 and block 3 real chains assert the new boundaries and the restart; block 4 starts at the derived intro anchor; a part that drains keeps ticking through its teardown after ESC and one that does not still retires on the exit tick.
 
 ---
 
@@ -290,7 +291,7 @@ Every row is from the five Phase 6 surveys; **the implementer re-derives each ag
 
 - [ ] **Step 1: Write the fidelity notes' remaining sections** (any evidence Task 1 produced that the part tasks deferred) and the approximation entries with measured differences.
 - [ ] **Step 2: Finalize D32–D34** with the measured values (the first-visible frame and the derived anchor, the gate frames, the restart phase from `second3e`).
-- [ ] **Step 3: Apply the Phase 5 carried doc fixes.** A27's label; the "fourteen captures" count; the x-scale sweep's marking; the D19 amendment with its reasoning and where fit corpora live.
+- [ ] **Step 3: Apply the Phase 5 and Phase 6 carried doc fixes.** A27's label; the "fourteen captures" count; the x-scale sweep's marking; the D19 amendment with its reasoning and where fit corpora live; `u2e.md:157`'s stale fadeset test name (`the_fadeset_writes_the_source_s_pattern_within_its_page`), `u2e.md:185`'s dump command (the current `FRAMES`, including 1597), and `math.rs:19-21`'s `UNIT` comment (U2E does not use it; the scoped allow stays).
 - [ ] **Step 4: Update `CLAUDE.md`.** The part count becomes twenty; the run examples show `--block 1` running to GLENZ, `--block 3` through U2E to the scrollers, `--block 4` from U2E; the ESC paragraph names U2A/U2E's exit behaviour (both poll `ctx.exit_requested` in their waits and loops; U2A's gate-2 cut is the original's music cut, not an exit).
 - [ ] **Step 5: Update `PROGRESS.md`.** Phase 6's row is **done** with the tag withheld until the final review (the project's practice), the evidence: the three traces, the three/four keyframe comparisons per part, the chain/restart tests, the new decisions and approximation numbers.
 - [ ] **Step 6: Run the full suite and both clippy gates; commit.**
