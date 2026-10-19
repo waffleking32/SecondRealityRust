@@ -1543,3 +1543,65 @@ is not in any trace, and the part's `waitb` returns a value no filed
 capture carries. A cost model built from the `ZOOM.INC` instruction counts
 would need the emulator's cycles-per-instruction and VGA wait states, none
 of which the tree records.
+
+## A28 — U2A: the release's Gouraud shading differs at 7300 (registered, not adopted)
+
+**Part:** U2A (`VISU/C/U2A.C` over the VISU engine), Phase 6.
+
+**Original:** the reference's 7300 picture is the shipped build's rendering of
+stream state 294 — the state search in the port's unit tests finds it as the
+unique minimum (426 differing pixels; 892 at state 293 and 858 at 295) — and
+the difference is in the Gouraud shading of the three `U2A.001` instances. The
+object silhouette and the flat-shaded `U2A.002` object are exact.
+
+**Port:** the tree's algorithm — `ACALC.ASM`'s matrix and normal rotations,
+`ADRAW.ASM`/`ADRAWCLP.ASM`'s culling, clipping and span generation, and
+`AVIDFILL.ASM`'s three Gouraud tiers — transliterated in
+`bins/secondreality/src/parts/visu/`. At state 294 it differs from the
+reference in **426 of 64,000 pixels (0.6656 %)**, entirely on the Gouraud
+faces: attributing each differing pixel to the topmost object that writes it
+gives 75 on instance 1, 0 on instance 2, 115 on 4 and 236 on 5, with
+palette-index deltas from −5 to +12.
+
+**Why (D24 step 3).** No tree-carriable constant reproduces the release's
+output. The variant scan in `docs/fidelity/u2a.md` §5 covers the face lists,
+draw order, matrix order, normal-rotation variants, camera multipliers,
+Gouraud slope/tier/buffer variants and lighting variants, and an independent
+transliteration of the tree's drawing path agrees with the Rust engine byte
+for byte at state 294; the tree's two filler versions (`AVIDFILL.ASM`,
+`AVIDFILL.OK`) differ only in copy loops, not in the Gouraud code. The
+release's own constants cannot be read without unpacking: `SECOND.EXE`
+carries no `U2A`/`AVISTAN` strings and no six-byte light-vector sequence, so
+D24 step 2's "can the tree produce it" cannot be answered from the packed
+artifact. A one-frame fit to a single Gouraud picture would be unverifiable
+against another Gouraud frame.
+
+**Measured difference:** 426/64,000 = 0.6656 %, all on the Gouraud faces; the
+flat object and the silhouette are exact. Reproduce with
+`cargo test -p secondreality the_reference_7300_is_the_measured_stream_state`.
+
+## A29 — U2A: the 7300 boot-index picture is a session-phase offset (registered)
+
+**Part:** U2A (`VISU/C/U2A.C`), Phase 6.
+
+**Original:** boot 7300 displays stream state 294 in the capture session whose
+keyframes are filed at `reference/parts/u2a`.
+
+**Port:** boot 7300 displays stream state 297, three states later; **1098 of
+64,000 pixels (1.7156 %)** differ, in both the RGB and the index plane.
+
+**Why (D17).** The offset is the music clock's session phase, amplified by the
+part's page holds. The port's block-1 clock matches `second1`: at boot 5900 it
+reads **9:51 / zframe 3771**, the trace's own value, while `second1c` — the
+trace that supplies the gate-1 measurement the plan carried — reads
+**9:50 / zframe 3768** at the same index. The 6988 gate is therefore
+`second1c`'s, not the keyframe capture session's, and the port is faithful to
+`second1`. Two to three ticks of music phase move the gate, and the ring
+displays each page for four to five stream states, so the visible state at
+7300 moves with it. Changing the block-1 clock to match `second1c` would move
+ALKU's verified frames.
+
+**Measured difference:** 1098/64,000 = 1.7156 %, RGB and indices. Reproduce
+with `cargo test -p secondreality --test u2a
+the_saucer_frame_records_its_measured_divergence` and the dump command in
+`docs/fidelity/u2a.md` §7.

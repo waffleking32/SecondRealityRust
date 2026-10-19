@@ -27,8 +27,10 @@
 //! test `the_reference_7300_is_the_measured_stream_state` searches every
 //! state and pins it), so the pose itself differs — 1098 pixels, not the 426
 //! the reference's own state leaves (that residual is on the Gouraud-shaded
-//! faces; `docs/fidelity/u2a.md` §5 carries the diagnosis and D24's ruling
-//! decides).
+//! faces; `docs/fidelity/u2a.md` §5 carries the diagnosis). Both divergences
+//! are registered under D17/D24 as **A28** (the Gouraud residual) and
+//! **A29** (this session-phase offset) in `docs/fidelity/APPROXIMATIONS.md`;
+//! neither is fitted, and this test records the measured numbers.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -216,13 +218,13 @@ fn the_saucer_frame_records_its_measured_divergence() {
     let expected = reference_frame(7300, "idx");
     let count = differing(&rendered, &expected, 1);
     println!("boot 7300: {count}/64000 indices differ");
-    // The measured divergence (`docs/fidelity/u2a.md` §5, D24): the port's
-    // schedule displays stream state 297 here and the reference's picture is
-    // state 294, so the pose differs. The reference's own state renders 426
-    // pixels differently (the unit test pins it); the 297-vs-294 pose is
-    // 1098. This is not fitted: the assertion records what the faithful port
-    // draws, and the decision is D24's.
-    assert_eq!(count, 1098, "the measured 7300 divergence");
+    // The measured divergence (`docs/fidelity/u2a.md` §5), registered as
+    // A29 in `docs/fidelity/APPROXIMATIONS.md`: the port's schedule displays
+    // stream state 297 here and the reference's picture is state 294, so the
+    // pose differs. The reference's own state renders 426 pixels differently
+    // (the unit test pins it); the 297-vs-294 pose is 1098. This is not
+    // fitted: the assertion records what the faithful port draws (D17/D24).
+    assert_eq!(count, 1098, "the measured 7300 divergence (A29)");
     let rendered = dumped_file(&dir, &manifest, 7300, "rgb");
     let expected = reference_frame(7300, "rgb");
     assert_eq!(differing(&rendered, &expected, 3), 1098, "the RGB agrees");

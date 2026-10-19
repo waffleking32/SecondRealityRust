@@ -223,18 +223,44 @@ The 7300 divergence, measured rather than fitted:
   different. This is D17's session phase, made visible because the part's
   animation is a stream of integer states and a page holds several of them,
   not a continuous clock.
+- **The phase is the music clock's, and the port is faithful to `second1`.**
+  At boot 5900 the port's block-1 clock reads **9:51 / zframe 3771**, the
+  `second1` trace's own value; `second1c` — the trace that supplies the
+  gate-1 measurement the plan carried — reads **9:50 / zframe 3768** at the
+  same index. The 6988 gate is therefore that session's, not the keyframe
+  capture session's. The port's two-frame-early gate at 6986 is a different
+  session's phase, not a defect in the gate condition, and changing the
+  block-1 clock to match `second1c` would move ALKU's verified frames.
 - **The 426-pixel Gouraud residual is a D24 item, not a transliteration
   slip.** The port's draw path is `parts/visu/draw.rs`'s transliteration of
   `ADRAW.ASM`/`ADRAWCLP.ASM`/`AVIDFILL.ASM`, whose tier, clipping and
   lighting tests are hand-derived from those files; the tree's two filler
   versions (`AVIDFILL.ASM`, `AVIDFILL.OK`) differ only in their copy loops,
   not in the Gouraud tier code; and every flat-shaded face matches the
-  reference exactly (the attribution above). The residual is therefore the
-  release's Gouraud output against the tree's algorithm: small (±1–12
-  palette-index steps) and confined to the Gouraud faces, but not localised
-  to a single constant the tree's algorithm can carry, so D24's step 3
-  registers it rather than adopting a fitted value. The note records the
-  measurement for the controller's ruling.
+  reference exactly (the attribution above). An independent second
+  transliteration of the same sources — the diagnostic used to produce the
+  state and attribution numbers above — renders state 294 identically to the
+  Rust engine, and a scan of the plausible single differences finds none
+  that improves on 426: every face-list choice and object draw order;
+  reversed matrix multiplication; `nnum1`-only, source, dword and unsigned
+  normal rotations; camera-only and transposed matrices; ±6 around the
+  shipped multipliers; ±2 camera-entry perturbations; the Gouraud slope
+  divisor, tier bounds, buffer direction and `calclight`/`normallight`
+  variants. The residual is therefore the release's Gouraud output against
+  the tree's algorithm: small (±1–12 palette-index steps) and confined to
+  the Gouraud faces, not localised to a single constant the tree's algorithm
+  can carry.
+- **D24 step 2's limit: the release's code cannot be read.** `SECOND.EXE`
+  carries no `U2A` or `AVISTAN` strings and no six-byte light-vector sequence
+  (`12118,10603,3030`), so the packed build's constants are not recoverable
+  without unpacking it; "can the tree produce the release's Gouraud output"
+  cannot be answered from the artifact the reference was captured from.
+- **Ruled (registered, not fitted).** Both divergences are registered:
+  **A28** for the 426-pixel Gouraud difference at the reference's own state
+  and **A29** for the 1098-pixel session-phase offset at boot 7300
+  (`docs/fidelity/APPROXIMATIONS.md`). The port keeps the tree's translation
+  and the recorded numbers; no constant was fitted to the keyframe, and the
+  integration test asserts the measured 1098 with A29 named.
 
 ## 6. The bugs and hardware behaviours, preserved
 
