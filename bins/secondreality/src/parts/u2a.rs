@@ -433,6 +433,10 @@ mod tests {
     const TEST_REFERENCE_6500: &str = "../../reference/parts/u2a/frame_006500.rgb";
     const TEST_REFERENCE_7300: &str = "../../reference/parts/u2a/frame_007300.rgb";
     const TEST_REFERENCE_7640: &str = "../../reference/parts/u2a/frame_007640.rgb";
+    /// The 7640 index plane: the `U2ABG.UH` image under the natural palette
+    /// (`docs/fidelity/u2a.md` §4). The 6500 frame is the same pixels under
+    /// the pad palette, so the pair measures the palette entry by entry.
+    const TEST_REFERENCE_7640_IDX: &str = "../../reference/parts/u2a/frame_007640.idx";
 
     /// The music a unit test hands the part: one scripted published position
     /// a tick, every other call the null reading.
@@ -684,6 +688,44 @@ mod tests {
         // would brighten to 2, but the reference's white stars are black.
         assert_eq!(part.background_palette.entry(PAD_BLACK), [63, 63, 63]);
         assert_eq!(pad_entry([63, 63, 63]), [2, 2, 2]);
+
+        // A32's counts, measured rather than quoted: the reference's own
+        // 7640 index plane says which pixels use which entry, and the 6500
+        // frame — the same picture under the pad palette — says what the
+        // release's DAC showed there. Of the 57,600 pixels whose index is
+        // >= 192, the formula reproduces 57,516; the other 84 are the
+        // index-195 stars, which the release renders black.
+        let indices = reference(TEST_REFERENCE_7640_IDX);
+        let measured = reference(TEST_REFERENCE_6500);
+        let pixels = usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT);
+        assert_eq!(indices.len(), pixels, "the 7640 index plane is one byte a pixel");
+        assert_eq!(measured.len(), pixels * 3, "the 6500 frame is one RGB triple a pixel");
+        let mut above_192 = 0usize;
+        let mut stars = 0usize;
+        let mut formula_matches = 0usize;
+        for (&index, rgb) in indices.iter().zip(measured.chunks_exact(3)) {
+            if index < 192 {
+                continue;
+            }
+            above_192 += 1;
+            if index == PAD_BLACK {
+                stars += 1;
+            }
+            // The background's own entries 0..63 are the palette the release
+            // transformed; 192..255 index them (`(3 * bg + 5) & 63`).
+            let entry = pad_entry(part.background_palette.entry(index - 192));
+            let expected = [
+                dac_expand(entry[0]),
+                dac_expand(entry[1]),
+                dac_expand(entry[2]),
+            ];
+            if rgb == expected {
+                formula_matches += 1;
+            }
+        }
+        assert_eq!(above_192, 57_600, "the pixels that use indices >= 192");
+        assert_eq!(stars, 84, "the index-195 star pixels");
+        assert_eq!(formula_matches, 57_516, "the pixels the formula reproduces");
     }
 
     #[test]

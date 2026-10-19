@@ -170,9 +170,12 @@ palette passed through `(3*v + 5) & 63` on every channel of every entry, with
 entry 195 forced black: Task 1 reconstructed 52 entries from the 6500 RGB
 against the 7640 index plane with no conflicts, and the formula reproduces
 57,516 of the 57,600 pixels that use indices ≥192, the other 84 being the
-index-195 stars the black entry renders. The port applies the formula to all
-256 entries (`pad_entry`) and blacks entry 195; the resulting whole frame
-compares at **0 of 64,000 pixels** against `frame_006500.rgb`
+index-195 stars the black entry renders. The counts are reproduced in-tree by
+`the_pad_palette_is_the_measured_formula_with_entry_195_black`, which reads
+`frame_007640.idx` and `frame_006500.rgb` with the `U2ABG.UH` palette and
+asserts 57,600 / 84 / 57,516. The port applies the formula to all 256 entries
+(`pad_entry`) and blacks entry 195; the resulting whole frame compares at
+**0 of 64,000 pixels** against `frame_006500.rgb`
 (`the_pad_hold_is_the_reference_6500`, and the integration test).
 
 At gate 1 the merged palette goes up (`U2A.C:243-246` in the source, after

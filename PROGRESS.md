@@ -2464,12 +2464,13 @@ and measured. Every number below was re-run at the committed state (`7df0baa`, b
 the commands ran against are the phase's tip. The blocks are pastes of those runs: `(…)` marks
 an elision, and an `exit:` line is the shell's reading of a command's exit code rather than a
 line of its output. A number that appears in the prose but not in a command block is a value a
-**named test** asserts, and the sentence says which test (D25).
+**named test** asserts, or a command named in the fidelity note the sentence cites; the
+sentence says which (D25).
 
 | part | reference comparison | planes compared | the verdict |
 |---|---|---|---|
 | U2A | 6500, 7300, 7640 | 6500 RGB only (no reference `.idx`); 7300 and 7640 `.idx` + RGB | **0 / 64,000** at 6500 and 7640; 7300 **1098 / 64,000** (1.7156 %) at the port's boot index — **A29**, the keyframe capture is a third session — and **426 / 64,000** (0.6656 %) at the reference's own stream state 294 — **A28**, the release-vs-tree Gouraud difference; the silhouette and the flat object are exact |
-| U2E | intro 460, 467, 470, 480, 490, 500, 530, 590, 660; keyframes 1000, 1600, 2600, 3600 | RGB only (no `.idx` is filed; the part writes CRTC 0x0C every retrace) | the intro is **0 differing at all nine indices**; the four keyframes are **11,006 / 11,805 / 17,278 / 16,234** at K (17.1969 / 18.4453 / 26.9969 / 25.3656 %) — **A31**, the four-tick session phase — and **189 / 7,118 / 231 / 1,177** at the reference's own state (0.2953 / 11.1219 / 0.3609 / 1.8391 %) — **A30**, the Gouraud difference; the silhouettes are exact |
+| U2E | intro 460, 467, 470, 480, 490, 500, 530, 590, 660; keyframes 1000, 1600, 2600, 3600 | RGB only (no `.idx` is filed; the part writes CRTC 0x0C every retrace) | the intro is **0 differing at all nine indices** (the dump and nine `cmp` commands are `docs/fidelity/u2e.md` §3); the four keyframes are **11,006 / 11,805 / 17,278 / 16,234** at K (17.1969 / 18.4453 / 26.9969 / 25.3656 %) — **A31**, the four-tick session phase — and **189 / 7,118 / 231 / 1,177** at the reference's own state (0.2953 / 11.1219 / 0.3609 / 1.8391 %) — **A30**, the Gouraud difference; the silhouettes are exact |
 
 **The phase's own measurements.** The U2A gate-1 frame **6988** is `second1c`'s first order-11
 row-47 frame; the port's block-1 clock matches `second1` and opens at boot **6986** (the
@@ -2485,7 +2486,10 @@ handover (D31 §3), not the restart: the new player's first row advance lands at
 ring first publishes **18:1** at **17,440**, and against `second3e` at the mapping-derived
 indices the positions are within one MUSIC0 row — **18:17/18:16** at 17,581, **18:19/18:18** at
 17,600 and **19:1/19:0** at 17,721 (the `tests/shell.rs` chain test asserts all of them).
-Block 1's chain hands over ALKU→U2A at **6,007/6,008**, draws U2A's gate at **6,988**, retires
+Block 1's chain hands over ALKU→U2A at **6,007/6,008**, opens U2A's gate at **6,986** (the
+port's own clock, from the `--dump-frames 6985,6986` manifest in `docs/fidelity/u2a.md` §3:
+6,986 reads 11:47; 6,988 is the reference's index, the frame at which the chain test's
+music-position check reads `second1c`'s 11:47), retires
 U2A at **7,507/7,508** and reaches PAM at **7,710** (the same test).
 
 **The three new traces and the reference tree.** `second1c` (5900..7599), `second4`

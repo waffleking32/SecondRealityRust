@@ -89,8 +89,8 @@ band after 33 fade-in waits and 16 further waits and *before* the fadeset's own
 `dis_waitb()`, so it is the part's tick **49** and the intro's tick 0 is
 `467 - 49 = **418**` (`shell::U2E_ANCHOR`). The part's unit test
 `the_fadeset_lands_on_tick_49_and_paints_the_measured_band` drives 49 ticks of
-black and finds the band on tick 49; the candidate 417 would put it on tick
-48.
+black and finds the band on tick 49; the candidate 417 would put the band at
+boot **466** instead of 467.
 
 The measured milestones (`cargo xtask reference capture --arg 4 --boot autoexec
 --keys "KBD_left KBD_enter" --cycles 30000 --frames …`):

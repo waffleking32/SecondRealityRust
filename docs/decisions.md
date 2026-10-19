@@ -353,6 +353,10 @@ nothing the port can run today gets that far (`--block 2`'s plan stops at GLENZ,
 but stops at U2E, unported), and `docs/fidelity/music.md` §12 and D27 carry the
 citations.
 
+*(Phase 6 update — superseded by D34/D35: the U2E-boundary mid-run restart is implemented
+(`MUSIC_RESTART_AT`, `MusicStart::restart`, waiting 4) and `--block 3` now runs through it;
+`--block 1` now reaches PAM and stops at GLENZ. The paragraph above is D13's record.)*
+
 **Block arguments: the README and the code disagree, and the port follows the code.**
 `reference/original/README.1ST:66-79` documents `1`–`5` and their meanings, and all five
 agree with what the code selects. But the README never mentions `U`, which the code
@@ -1834,6 +1838,11 @@ deterministic and does not depend on a frame being drawn (`SECOND 3` is that cas
 MNTSCRL's first graphics frame is in (415, 420] — and no run the port can make today is,
 because both blocks it can start at are anchored at 404).
 
+*(Phase 6 update — superseded by D34/D35: the port now starts blocks 3 and 4 as well. Block 3
+has a numbering of its own (MNTSCRL's start is a measured window, not an anchor), and block 4
+is anchored at U2E's derived 418 and pre-polls the ten frames from 408. The clause above is
+D27's record.)*
+
 **What that buys, and what it costs.** A `--block 5` run's music is the trace's: 778 of
 `second5`'s 894 frames from 404 agree exactly on the published `(order, row)` and the worst
 displacement is 2 frames — the same shape the trace test measures for a bare player (771 of
@@ -2072,6 +2081,10 @@ by the positions themselves: **75:60 → 75:60** at the PLZPART→MINVBALL hando
 stops at U2E, so the `MAIN/U2.ASM:880-885` mid-run MUSIC0@18 restart is not reached, and block 2's
 stop at GLENZ keeps TECHNO and PANICEND unreachable through a block until Phase 7.
 
+*(Phase 6 update — superseded by D34/D35: the mid-run `MUSIC0@18` restart is implemented
+(`MUSIC_RESTART_AT`, `MusicStart::restart`, waiting 4) and `--block 3` runs through it into the
+scrollers; block 2 still stops at GLENZ. The paragraph above is D31's record.)*
+
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
 Decided: the VISU engine lives in the module directory `bins/secondreality/src/parts/visu/` —
@@ -2171,7 +2184,7 @@ the keyframe comparison — is what pins the anchor.
 **Phase 6 outcome.** Both tick models shipped as decided and both parts' comparisons are
 recorded. U2E's anchor is the derived **418**, not 417: the unit test
 `the_fadeset_lands_on_tick_49_and_paints_the_measured_band` drives 49 black ticks and finds
-the band on tick 49 (417 would put it on tick 48), and
+the band on tick 49 (the candidate anchor 417 would put the band at boot **466**), and
 `u2e_runs_are_numbered_from_their_derived_intro_anchor` pins the shell constant. With it, the intro compares at **0 differing** at nine indices — 460,
 467, 470, 480, 490, 500, 530, 590 and 660 — against the dense/start/sweep2 sessions
 (`docs/fidelity/u2e.md` §3). The gate measurements are session-specific: U2A's **6988** is

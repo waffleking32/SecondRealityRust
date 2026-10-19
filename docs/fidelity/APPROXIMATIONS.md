@@ -1700,13 +1700,15 @@ the measured exception rather than the formula's value.
 
 **Measured difference:** the formula matches **57,516 of the 57,600** pixels that use indices
 ≥ 192; the remaining **84** are the index-195 pixels, which the adopted black entry renders
-black — exactly the reference's pixels — so the full frame is **0/64,000**. The measurement is
-`.superpowers/sdd/06-vector-engine/task-1-report.md` §4 (the two independent index-plane
-reconstructions and the candidate comparison); the port's result is pinned by
-`cargo test -p secondreality --bin secondreality the_pad_palette_is_the_measured_formula_with_entry_195_black`
-and `the_pad_hold_is_the_reference_6500`.
+black — exactly the reference's pixels — so the full frame is **0/64,000**. Task 1's two
+index-plane reconstructions and the candidate comparison are
+`.superpowers/sdd/06-vector-engine/task-1-report.md` §4; the counts are now produced in-tree
+by `cargo test -p secondreality --bin secondreality
+the_pad_palette_is_the_measured_formula_with_entry_195_black`, which reads
+`reference/parts/u2a/frame_007640.idx` and `frame_006500.rgb` with the `U2ABG.UH` palette and
+asserts **57,600 / 84 / 57,516**, and the port's whole frame by `the_pad_hold_is_the_reference_6500`.
 
-## A33 — U2A: the first draw uses `fov = 0` for the C's uninitialised variable (registered; no measured difference)
+## A33 — U2A: the first draw uses `fov = 0` for the C's uninitialised variable (substitution; no measured difference)
 
 **Part:** U2A (`VISU/C/U2A.C`), Phase 6.
 
@@ -1769,12 +1771,15 @@ memory a plane byte is four linear pixels, so consecutive pages are **16,384 pla
 
 **Port:** the surface packs the four pages at `page * 64_000` pixels (`PAGE_PIXELS`), with no
 gap. Every page is cleared, drawn and read through the port's own origin, so each page shows
-the same picture the original's does; the one page a filed keyframe reads, page 0, has origin
-0 in both layouts. U2E's `fadeset` writes the same plane addresses into each of the four
-pages; its top block's last write is 172 addresses past the row just written, lands in rows
-`y+3..` and is overwritten by the later row passes, and the port's page bound (16,000
-addresses, the original's picture within its 0x4000-byte slot) never fires for the shipped
-pattern, whose largest address is the bottom row's byte 15,999 (`docs/fidelity/u2e.md` §4).
+the same picture the original's does. **The reference's U2A keyframes are page 0's picture
+at origin 0** — the one origin the two layouts share; the port's live boot index displays a
+later page of the same ring, which the reference does not file, and U2E's page origins are
+not established by its RGB-only keyframes. U2E's `fadeset` writes the same plane addresses
+into each of the four pages; its top block's last write is 172 addresses past the row just
+written, lands in rows `y+3..` and is overwritten by the later row passes, and the port's
+page bound (16,000 addresses, the original's picture within its 0x4000-byte slot) never fires
+for the shipped pattern, whose largest address is the bottom row's byte 15,999
+(`docs/fidelity/u2e.md` §4).
 
 **Why.** The port's pages are a linear indexed surface, not VGA memory; a gap buys nothing and
 would have to be modelled in every page slice. The observable content — every page's pixels

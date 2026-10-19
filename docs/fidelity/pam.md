@@ -141,20 +141,22 @@ The tick mapping is not an assumption. The reference's own support frames
 
 **The 2 is calibrated for the anchored entry point.** `init`'s
 `open_at_start` branch treats every gate-already-open start as this anchored
-7710 start and sets the counter to 2. That is right for `--part pam`, the only
-route that reaches the part today (block 1 stops at U2A); a block-1 chain that
-reaches PAM after U2A with the player already running meets the source's
-ordinary case instead: the gate is open at the part's own start because the
-chain is continuous, yet the source still runs its post-gate setup
+7710 start and sets the counter to 2. That is right for `--part pam`; a block-1
+chain reaches PAM after U2A with the player already running, which is the
+source's ordinary case instead: the gate is open at the part's own start
+because the chain is continuous, yet the source still runs its post-gate setup
 (`OUTTAA.C:40-45`) on that tick, which zeroes
 `frame_count`, and its first step is four copper frames later. The port would
 set 2 and step one animation frame two ticks early. Telling the two cases
 apart is what the Phase 5 seam does: `PartCtx::music_fresh` (D31) is true only
 for the anchored entry run, and the already-open gate sets the counter to 2
 only then, taking the source's `0` otherwise
-(`a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero`). No
-ported chain reaches PAM yet — block 1 stops at U2A — so the chain-level case
-waits on Phase 6.
+(`a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero`). **Block 1
+now reaches PAM this way** — it runs ALKU → U2A → PAM → BEGLOGO and stops at
+GLENZ — and `tests/shell.rs`'s
+`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering` asserts the
+hand-over and PAM's measured first drawn frame at boot 7,710; the pixel
+comparison remains the standalone keyframes in `tests/pam.rs`.
 
 What the tick mapping is **not** is a claim that every intermediate frame is
 four ticks apart in the original: §6.1 measures the animation's *window* as

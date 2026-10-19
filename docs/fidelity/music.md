@@ -1789,13 +1789,17 @@ above is that block's *start*, not this restart, and
 is what makes "the site is inside `& 2`'s region" an assertion rather than a reading of the line
 numbers' order — and pins it (nothing else in the suite looks at this site).
 
-**Nothing the port can run today reaches either** — `--block 1` stops at U2A and `--block 2` at
-GLENZ, both unported; `--block 3` starts at MNTSCRL and runs the whole mid-tier chain (LNS&ZOOM,
-PLZPART, MINVBALL, RAYSCRL, 3DSINFLD, JPLOGO) but stops at **U2E**, which is unported and is the
-part whose preceding `:880-885` restart a block-3 run would fire; `--block 5`'s mask has bit 3
-clear, so `:880` is skipped for it — but a run that *does* reach U2E inside blocks 2 or 3
-needs a **mid-run** restart at that point in the sequence, and the port's one-row-per-run model
-has no place for one yet. That is a Phase 4 dependency, and
+**The port reaches the `:880-885` site today; it does not yet reach `:813-818`.** `--block 3`
+runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO → U2E and, before
+U2E, fires `:880-885`'s mid-run restart: the shell installs a fresh MUSIC0 seeked to order 18,
+which waits four engine ticks (D34; `MUSIC_RESTART_AT`, `MusicStart::restart`), and the block-3
+chain test in `tests/shell.rs` asserts the boundary, the first published row and the positions
+against `second3e`. `--block 4` takes the same call as its entry-point install. The
+one-row-per-run model now has that restart seam; `--block 5`'s mask has bit 3 clear, so `:880`
+is skipped for it. `--block 1` runs ALKU → U2A → PAM → BEGLOGO and stops at GLENZ, the first
+part the port lacks, so it does not reach `:813-818` (MUSIC1@0, which sits between `exe3` and
+`exe4`); `--block 2` stops at GLENZ before both sites. The table's rows and D27 remain the
+sites' record, and
 `one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it, site by site:
 `:880-885`'s guard has no `unless` bit and all four of those masks carry bit 3; `:856-863`'s and
 `:898-905`'s `unless` bits are asserted (and are what keep them entry-point-only); and
