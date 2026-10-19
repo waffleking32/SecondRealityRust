@@ -3,9 +3,11 @@
 //! `VISU/C/U2E.C` is the vector engine's second part. Its acts:
 //!
 //! 1. `:185-283` — the mode check (`jellywas`), the packed-scene load, and the
-//!    intro palette: a fresh boot starts from `vid_init(1)`'s black DAC with
-//!    entries 1..63 white; a boot reached after another part (`jellywas`) captures
-//!    the live DAC instead.
+//!    intro palette: the live DAC is captured. The port's runs always start in
+//!    its graphics surface, so the BIOS mode is always above 3 and
+//!    `jellywas == 1`; a block-4/`--part` entry captures the shell's boot DAC
+//!    and a mid-chain entry the predecessor's. The text-mode `vid_init(1)`
+//!    initialisation is unreachable here.
 //! 2. `:285-335` — the 100-wait intro: 33 fade-in steps, 16 waits, the
 //!    `fadeset` border/letterbox into page 0, a CRTC 9 write, the `fadeset` into
 //!    pages 1..3, 16 waits, and 33 fade-out steps.
@@ -151,12 +153,19 @@ impl U2e {
 
     /// Read the scene, choose the intro palette and set the view.
     ///
-    /// The source's `jellywas` is the BIOS mode check at `:198-205`: a boot that
-    /// arrives at U2E after another part inherits its DAC, while `SECOND 4` (or
-    /// `--part u2e`) starts from `vid_init(1)`'s. The port's proxy is
-    /// [`PartCtx::music_fresh`]: a fresh run is the block-4 entry, and any later
-    /// part in a chain is not. This substitution is recorded in
-    /// `docs/fidelity/u2e.md`; no reference keyframe covers the intro.
+    /// The source's `jellywas` is the BIOS video mode at `:198-205`: `a > 3`
+    /// is mode 13h and above, and `jellywas == 1` captures the live DAC
+    /// (`:281-282`) instead of running `vid_init(1)`'s text-mode palette
+    /// initialisation (`:274-277`).
+    ///
+    /// **The port's runs always take the capture.** Every run shape begins in
+    /// the shell's graphics surface — `--block 4` and `--part u2e` from the
+    /// boot DAC `hardware_default_palette` installs, a chain from whatever its
+    /// predecessor left — so the mode the source reads is always above 3. The
+    /// `vid_init(1)` branch is unreachable and is not implemented; the
+    /// substitution changes no measured intro frame, because the fade-in
+    /// saturates every byte it touches either way. Recorded in
+    /// `docs/fidelity/u2e.md` §4.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         if ctx.music().is_none() {
             return Err(self.error(
@@ -182,18 +191,11 @@ impl U2e {
         main_palette.set_entry(254, [63, 63, 63]);
         main_palette.set_entry(255, [0, 0, 0]);
 
-        if ctx.music_fresh() {
-            // `vid_init(1)`'s DAC is black; `:276-277` sets entries 1..63
-            // white. Entries 64..255 stay black.
-            self.fpal = [0; 768];
-            for byte in &mut self.fpal[3..64 * 3] {
-                *byte = 63;
-            }
-        } else {
-            // `outp(0x3c7,0); fpal[a]=inp(0x3c9)` (`U2E.C:281-282`): the live
-            // DAC, six bits a component.
-            self.fpal = capture_palette(ctx.palette);
-        }
+        // `outp(0x3c7,0); for(a=0;a<768;a++) fpal[a]=inp(0x3c9);`
+        // (`U2E.C:281-282`): the live DAC, six bits a component. Every run
+        // shape reaches this branch — see the doc comment above — including a
+        // block-4 entry, which captures the shell's boot DAC.
+        self.fpal = capture_palette(ctx.palette);
         self.palette_dirty = false;
         self.teardown_dirty = false;
 
@@ -807,14 +809,14 @@ mod tests {
         }
     }
 
-    fn started_with(player: Player, fresh: bool) -> (Rig, U2e) {
+    /// The part started in the mid-chain shape (not `music_fresh`), on the
+    /// rig's live palette. U2E captures the DAC in every run shape, so the two
+    /// context shapes differ in nothing the part reads; the block-4 shape is
+    /// covered by `a_block_four_shaped_init_captures_the_live_dac_too`.
+    fn started_with(player: Player) -> (Rig, U2e) {
         let mut rig = Rig::new(player);
         let mut part = U2e::at(TEST_SCENE_DIR);
-        if fresh {
-            part.init(&mut rig.ctx_fresh(0)).unwrap();
-        } else {
-            part.init(&mut rig.ctx(0)).unwrap();
-        }
+        part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
 
@@ -840,31 +842,6 @@ mod tests {
     // --- the intro ----------------------------------------------------------
 
     #[test]
-    fn a_fresh_intro_starts_from_vid_init_1_and_uploads_nothing_at_init() {
-        let rig = Rig::new(Player::closed());
-        let mut part = U2e::at(TEST_SCENE_DIR);
-        // The live DAC is something distinctive, so a capture would be visible.
-        let mut live = Palette::new();
-        live.set_entry(7, [5, 6, 7]);
-        {
-            let mut rig = rig;
-            rig.palette = live;
-            part.init(&mut rig.ctx_fresh(0)).unwrap();
-            assert_eq!(rig.palette, live, "init uploads no palette (U2E.C:273-283)");
-        }
-        assert_eq!(&part.fpal[0..3], &[0, 0, 0], "entry 0 is black");
-        assert!(
-            part.fpal[3..192].iter().all(|&byte| byte == 63),
-            "entries 1..63 are white (U2E.C:276-277)"
-        );
-        assert!(
-            part.fpal[192..].iter().all(|&byte| byte == 0),
-            "entries 64..255 start black"
-        );
-        assert_eq!(part.phase, Phase::FadeIn { step: 0 });
-    }
-
-    #[test]
     fn a_jelly_boot_captures_the_live_dac() {
         let mut rig = Rig::new(Player::closed());
         let mut live = Palette::new();
@@ -879,11 +856,40 @@ mod tests {
         assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
         assert_eq!(&part.fpal[3 * 255..], &[63, 1, 2]);
         assert_eq!(rig.palette, live, "the capture reads, it does not write");
+        assert_eq!(part.phase, Phase::FadeIn { step: 0 });
+    }
+
+    #[test]
+    fn a_block_four_shaped_init_captures_the_live_dac_too() {
+        // **The entry shape**, where the old `music_fresh` proxy used to take
+        // `vid_init(1)`'s text-mode palette. The port's block-4 run starts in
+        // its graphics surface with the shell's boot DAC installed
+        // (`hardware_default_palette`, the emulator's mode-set table), so the
+        // BIOS mode is above 3 here exactly as it is mid-chain and the source
+        // takes the capture branch (`U2E.C:281-282`). The palette used is a
+        // non-black one, so a capture is visible against a fresh `fpal`.
+        let mut rig = Rig::new(Player::closed());
+        let mut live = Palette::new();
+        live.set_entry(0, [63, 0, 0]);
+        live.set_entry(7, [5, 6, 7]);
+        live.set_entry(247, [11, 12, 16]);
+        rig.palette = live;
+        let mut part = U2e::at(TEST_SCENE_DIR);
+        part.init(&mut rig.ctx_fresh(0)).unwrap();
+        assert_eq!(
+            part.fpal,
+            capture_palette(&live),
+            "the block-4 shape captures the shell's DAC, not vid_init(1)'s"
+        );
+        assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
+        assert_eq!(&part.fpal[3 * 247..3 * 247 + 3], &[11, 12, 16]);
+        assert_eq!(rig.palette, live, "init uploads no palette (U2E.C:273-283)");
+        assert_eq!(part.phase, Phase::FadeIn { step: 0 });
     }
 
     #[test]
     fn the_fade_in_runs_33_steps_and_saturates_entries_1_to_253() {
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         // One mutation a tick, uploaded one tick later: after 33 mutations
         // fpal is saturated and the 33rd upload is the 34th tick's palette.
         for _ in 0..FADE_STEPS {
@@ -905,7 +911,7 @@ mod tests {
 
     #[test]
     fn the_fadeset_lands_on_tick_49_and_paints_the_measured_band() {
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         for tick in 0..49 {
             let (_, frame) = rig.step_render(&mut part);
             assert!(
@@ -980,7 +986,7 @@ mod tests {
 
     #[test]
     fn the_fadeset_reaches_pages_1_to_3_at_tick_51() {
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         for _ in 0..51 {
             rig.step(&mut part);
         }
@@ -1001,7 +1007,7 @@ mod tests {
 
     #[test]
     fn the_fade_out_starts_on_tick_68_and_matches_the_measured_490_and_500() {
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         for _ in 0..67 {
             rig.step(&mut part);
         }
@@ -1043,7 +1049,7 @@ mod tests {
 
     #[test]
     fn the_main_palette_goes_up_at_tick_100_and_holds_the_letterbox() {
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         for _ in 0..=100 {
             rig.step(&mut part);
         }
@@ -1081,7 +1087,7 @@ mod tests {
 
     #[test]
     fn the_view_is_the_shipped_320x200_from_the_intro_on() {
-        let (rig, part) = started_with(Player::closed(), true);
+        let (rig, part) = started_with(Player::closed());
         assert_eq!((rig.view.width, rig.view.height), (VIEW_WIDTH, VIEW_HEIGHT));
         assert_eq!(rig.view.start_addr, 0);
         assert_eq!(rig.view.y_line_offset, Some(320), "CRTC 0x13: 320 pixels a row");
@@ -1096,7 +1102,7 @@ mod tests {
     fn the_gate_polls_once_a_tick_until_order_19_and_exit_tears_down() {
         // The setup polls at tick 100; ticks 0..100 are closed, and tick 101
         // is the first order 19 poll.
-        let (mut rig, mut part) = started_with(Player::opening_at(101), true);
+        let (mut rig, mut part) = started_with(Player::opening_at(101));
         for tick in 0..=100 {
             assert_eq!(rig.step(&mut part), PartStatus::Continuing, "tick {tick}");
         }
@@ -1111,7 +1117,7 @@ mod tests {
 
         // Exit during the gate: the source's `while(!dis_exit())` falls through
         // to the ring setup and the loop's own exit test, which tears down.
-        let (mut rig, mut part) = started_with(Player::closed(), true);
+        let (mut rig, mut part) = started_with(Player::closed());
         to_gate(&mut rig, &mut part);
         assert_eq!(part.driver.as_ref().unwrap().borrow().ring.displayed(), 0);
         let before = rig.surface.pixels().to_vec();
@@ -1126,7 +1132,7 @@ mod tests {
 
     #[test]
     fn the_first_loop_tick_draws_nothing_and_queues_the_fadeset_page() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN), true);
+        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         let fadeset_page = rig.page(0).to_vec();
         let origin = rig.view.start_addr;
@@ -1141,7 +1147,7 @@ mod tests {
 
     #[test]
     fn the_cadence_over_eight_ticks_advances_four_stream_frames() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN), true);
+        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         // The first loop tick parses frame 0 and queues page 0; the steady
         // state is one stream frame per two ticks (U2E.C:434-444).
@@ -1159,7 +1165,7 @@ mod tests {
 
     #[test]
     fn the_scene_is_the_u2e_city_with_the_name_hacks_object() {
-        let (_, part) = started_with(Player::closed(), true);
+        let (_, part) = started_with(Player::closed());
         let scene = part.scene.as_ref().unwrap();
         assert_eq!(scene.master.city, 0, "U2E.00M byte 15 is 0");
         assert_eq!(scene.instances.len(), 58, "conum 58, camera first");
@@ -1191,7 +1197,7 @@ mod tests {
 
     #[test]
     fn the_teardown_fades_sixteen_steps_from_dac_entry_255_and_finishes() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN), true);
+        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         // The live DAC is the main palette; the capture is that palette.
         let captured = capture_palette(&part.main_palette);
@@ -1278,7 +1284,7 @@ mod tests {
         // sixteen uploads must still happen: T's tick triggers the teardown and
         // computes step 1, T+1..T+16 upload steps 1..16, and the part returns
         // `Finished` on T+16.
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN), true);
+        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         let captured = capture_palette(&part.main_palette);
 

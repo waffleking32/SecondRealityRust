@@ -22,6 +22,7 @@
 //! is moving.
 
 use std::error::Error;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sdl2::event::Event;
@@ -82,7 +83,7 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     // and opens no device — the ring has one consumer and a second one would take samples
     // away from the first — and a run that asked for neither (or for `--no-audio`) plays
     // nothing at all, which the music does not notice: its position is the tick's.
-    let audio = audio_of(&sdl, &mut run, cli)?;
+    let mut audio = audio_of(&sdl, &mut run, cli)?;
 
     let mut raster = output_size(run.frame(), &opts);
     let mut status = status_line(&run, block);
@@ -125,6 +126,17 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         let now = Instant::now();
         run.advance(now - sampled);
         sampled = now;
+
+        // A mid-run restart installs a fresh player (`MAIN/U2.ASM:880-885`, at U2E's
+        // boundary in block 3), and the card was opened on the entry one. Hand the drain
+        // the run's current player; the old ring's tail is dropped, as the module reload
+        // interrupts it in the original too. `advance` above is what may have taken the
+        // restart, and the next tick polls the new player.
+        if let (Some(device), Some(player)) = (audio.as_mut(), run.audio_player()) {
+            if !Arc::ptr_eq(&device.player(), &player) {
+                device.follow(player);
+            }
+        }
 
         // `Engine::tick` sizes the frame from the view every tick, so a part
         // that changes the picture's geometry — double-scan takes it to 400

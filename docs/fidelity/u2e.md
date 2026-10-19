@@ -157,17 +157,32 @@ rows' x 256..319 keep the loader page's pixels (black). The unit test
 `the_fadeset_writes_the_source_s_pattern_and_bounds_the_stray` pins the whole
 table, the unwritten top columns and the page bound.
 
-**The jelly substitution.** The source's `jellywas` is the BIOS video mode
-(`a > 3` is mode 13h and above). The port uses `PartCtx::music_fresh()`
-instead: a run whose plan *starts* at U2E — `--block 4` or `--part u2e` — is
-fresh and takes the `vid_init(1)` branch (entries 1..63 = 63, rest 0); a part
-reached mid-chain is not fresh and captures the live 6-bit DAC. This is a
-substitution, not the original's check, and no filed keyframe covers the
-intro; the two branches differ only in the transient intro colours (the
-fade-in saturates entries 1..253 either way and the fade-out takes entries
-1..252 to 0 and 253/254 to 63, so the post-fade hold is the same). The port's
-fresh path reproduces the dense/start/sweep2 intro at 0 differing; the older
-`sweep` session's hold differs — §7.
+**The jelly branch, and why the port always takes the capture.** The source's
+`jellywas` is the BIOS video mode (`a > 3` is mode 13h and above, `:198-205`):
+`jellywas == 0` runs `vid_init(1)` and initialises `fpal` to entries 1..63 =
+63, the rest 0 (`:274-277`); `jellywas == 1` captures the live DAC
+(`outp(0x3c7,0); fpal[a]=inp(0x3c9)`, `:281-282`).
+
+**The port runs the graphics-mode capture in every run shape.** Every way a
+run reaches U2E begins in the port's graphics surface, so the mode the source
+reads is always above 3: `--block 4`/`--part u2e` captures the shell's boot
+DAC (`hardware_default_palette`, the emulator's mode-set table), a mid-chain
+entry captures the predecessor's live DAC. The text-mode `vid_init(1)`
+initialisation is unreachable and is not implemented. This replaces the
+earlier `PartCtx::music_fresh()` proxy, which the U2E-boundary restart broke:
+`set_music` re-arms the flag, so a mid-chain U2E would have taken the
+text-mode branch even though the screen it inherits is graphics.
+
+**It changes no measured intro frame.** The fade-in mutates bytes 3..761
+(`+2`, clamp 63) for 33 steps, so every byte it touches saturates to 63 from
+either starting value; the untouched bytes are entry 0 and entries 254/255.
+For the block-4 shape the shell's boot DAC has those black — its table is 248
+entries and the last eight are unset — which is what the text-mode branch left
+there too; for a mid-chain run the capture was already the source's branch, so
+nothing changes. The fadeset's palette (entry 0 black, 252/253 white, 254
+black) and the fade-out's (1..252 → 0, 253/254 → 63) are therefore identical
+either way, and a block-4 run's intro still compares at 0 differing — the
+dense/start/sweep2 intro; the older `sweep` session's hold differs — §7.
 
 **The main palette.** `cp = scenem+16` is the `.00M`'s 768 bytes; entries 252,
 255 are set black and 253, 254 to 63 (`U2E.C:337-350`) and `vid_setpal(cp)`
@@ -230,6 +245,25 @@ from −8 to +12 and 6,655 of the 7,118 at 1600 are `+1`. The port keeps the
 tree's translation; no constant was fitted to a keyframe (D24/D17). The
 ignored unit test `search_reference_states` reproduces the states, the topmost
 attribution and the deltas; the integration test asserts the numbers above.
+
+**The block-3 seam is nine ticks early, and it is measured rather than fitted.**
+The mid-run `MUSIC0@18` restart (`MAIN/U2.ASM:880-885`) is installed by the
+shell at the run's U2E boundary, and the block-3 chain test
+(`bins/secondreality/tests/shell.rs`) records where that boundary lands: the
+port's U2E starts at chain **17,418** (JPLOGO's last frame is 17,417), where
+D34 derives **17,427** from the block's mapping (chain tick 0 = boot 419,
+boundary boot 17,846.2). The nine frames are the port's **gapless handover** —
+D31 §3's per-seam difference, which this part's boundary is the last block-3
+seam to accumulate — not a timing error in the restart: the new player is
+seeked at the port's boundary and waits D34's four engine ticks
+(`MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME`), its ten-deep publish ring primes
+at `0:0`, first publishes `18:1` at chain 17,440, and against `second3e` at
+the mapping-derived indices (chain = boot − 419) the published positions are
+within one MUSIC0 row (8.76 frames at speed 6, tempo 120): `18:17` against
+`18:16` at 17,581, `18:19` against `18:18` at 17,600, and the order-19
+boundary `19:1` against `19:0` at 17,721. Nothing was shifted to close the
+offset; a later full-run comparison will need the seam's own offset, as D31
+§3 says.
 
 ## 6. The bugs and hardware behaviours, preserved
 

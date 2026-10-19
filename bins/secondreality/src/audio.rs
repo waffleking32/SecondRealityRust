@@ -51,6 +51,22 @@ pub(crate) fn lock(player: &Shared) -> MutexGuard<'_, Player> {
     player.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The cell a [`Drain`] reads its player through, so the card can **follow** the run to a
+/// new player.
+///
+/// A run's player can be replaced mid-run: `MAIN/U2.ASM:880-885`'s restart at the U2E
+/// boundary stops the module, loads the next and seeks it (`restartmus`, `:348-397`), and
+/// the port installs that as a fresh [`Shared`] (`Sequence::restart_music`). The sound
+/// card is opened once, on the run's entry player, and outlives it; this cell is what lets
+/// the window hand it the run's current one ([`Device::follow`]).
+pub(crate) type Swappable = Arc<Mutex<Shared>>;
+
+/// The player in a [`Swappable`], whatever state the cell's lock is in. The same poison
+/// policy as [`lock`].
+fn cell(cell: &Swappable) -> MutexGuard<'_, Shared> {
+    cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 // -------------------------------------------------------------------------------------------
 // The adapter: `Player` as the engine's `Music`
 // -------------------------------------------------------------------------------------------
@@ -346,6 +362,9 @@ pub struct Device {
     /// Kept for the run's lifetime; [`Device::open`] has already resumed it, because SDL
     /// opens a playback device paused.
     device: AudioDevice<Drain>,
+    /// The same cell the callback's [`Drain`] reads: swapping the `Shared` here is what
+    /// makes the card follow a mid-run restart ([`Device::follow`]).
+    player: Swappable,
 }
 
 impl Device {
@@ -373,15 +392,34 @@ impl Device {
             channels: Some(channels),
             samples: None,
         };
-        let device = audio.open_playback::<Drain, _, _>(None, &spec, |_spec| Drain { player })?;
+        let cell: Swappable = Arc::new(Mutex::new(player));
+        let callback = Arc::clone(&cell);
+        let device =
+            audio.open_playback::<Drain, _, _>(None, &spec, |_spec| Drain { player: callback })?;
         device.resume();
-        Ok(Device { device })
+        Ok(Device { device, player: cell })
     }
 
     /// The rate, channel count and callback buffer size SDL actually gave us, in frames.
     pub fn spec(&self) -> (i32, u8, u16) {
         let spec = self.device.spec();
         (spec.freq, spec.channels, spec.samples)
+    }
+
+    /// The player the card is draining now.
+    pub fn player(&self) -> Shared {
+        cell(&self.player).clone()
+    }
+
+    /// Point the drain at `player` — the run's current one after a mid-run restart.
+    ///
+    /// The old player's ring keeps its tail, but nothing drains it: `restartmus`
+    /// (`MAIN/U2.ASM:348-397`) interrupts the module it was playing too, and the samples
+    /// of a module the demo has stopped are not the demo's music. The callback's next
+    /// `drain` takes the new player's ring (the cell is swapped under its lock, so a
+    /// callback in flight finishes against the player it started with).
+    pub fn follow(&mut self, player: Shared) {
+        *cell(&self.player) = player;
     }
 }
 
@@ -392,7 +430,9 @@ impl Device {
 /// callback that mixed, ticked or waited would make the music's position depend on the
 /// card's clock instead of the demo's.
 pub(crate) struct Drain {
-    player: Shared,
+    /// The run's current player, behind a cell so [`Device::follow`] can swap it while
+    /// the callback is live.
+    player: Swappable,
 }
 
 impl Drain {
@@ -400,12 +440,23 @@ impl Drain {
     /// without a sound card (this module's tests, and the underrun policy's in particular).
     #[cfg(test)]
     pub(crate) fn new(player: Shared) -> Drain {
-        Drain { player }
+        Drain { player: Arc::new(Mutex::new(player)) }
+    }
+
+    /// Point the drain at `player`; the next [`drain`](Drain::drain) reads its ring.
+    #[cfg(test)]
+    pub(crate) fn follow(&self, player: Shared) {
+        *cell(&self.player) = player;
     }
 
     /// Fill `out` the way the callback does, and say how many samples the ring gave up.
+    ///
+    /// The cell is locked only long enough to take the current `Shared`; the ring's own
+    /// lock is held for the take. So a `follow` between drains is safe, and one during a
+    /// drain waits for that drain's take rather than splitting it across two players.
     pub(crate) fn drain(&mut self, out: &mut [i16]) -> usize {
-        let taken = lock(&self.player).take_samples(out);
+        let player = cell(&self.player).clone();
+        let taken = lock(&player).take_samples(out);
         out[taken..].fill(0);
         taken
     }
@@ -701,6 +752,48 @@ mod tests {
             0,
             "the drain is the only consumer, and it took everything there was"
         );
+    }
+
+    #[test]
+    fn the_drain_follows_a_restart_to_the_runs_new_player() {
+        // A run's player is replaced mid-run at the U2E boundary (`MAIN/U2.ASM:880-885`'s
+        // `restartmus`), and the card is opened once, on the entry player. The drain's
+        // cell is what lets it follow: after the swap the next callback takes the new
+        // ring's samples and none of the old player's, which are the stopped module's.
+        let old = shared("MUSIC1");
+        lock(&old).play_song(0);
+        lock(&old).poll();
+        lock(&old).poll();
+        let old_pending = lock(&old).pending_samples();
+        assert!(old_pending > 0, "the old player has samples waiting");
+
+        let new = shared("MUSIC0");
+        lock(&new).play_song(18);
+        lock(&new).poll();
+        let new_samples = lock(&new).samples_this_poll() as usize;
+        assert!(new_samples > 0, "and the new player mixes a poll's worth");
+        assert_ne!(old_pending, new_samples, "the two rings are distinguishable by size");
+
+        let mut drain = Drain::new(Arc::clone(&old));
+        drain.follow(Arc::clone(&new));
+        let mut out = vec![0i16; 4096];
+        assert_eq!(
+            drain.drain(&mut out),
+            new_samples,
+            "the next drain takes the new player's ring, not the old player's \
+             {old_pending} samples"
+        );
+        assert_eq!(lock(&new).pending_samples(), 0, "the new ring is what was drained");
+        assert_eq!(
+            lock(&old).pending_samples(),
+            old_pending,
+            "none of the old player's samples were taken"
+        );
+        // And the new ring is now empty, so the next drain is silence: the swap did not
+        // duplicate anything either.
+        let mut empty = vec![i16::MIN; 64];
+        assert_eq!(drain.drain(&mut empty), 0);
+        assert!(empty.iter().all(|sample| *sample == 0));
     }
 
     #[test]
