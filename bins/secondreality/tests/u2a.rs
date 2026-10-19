@@ -119,6 +119,28 @@ fn differing(rendered: &[u8], expected: &[u8], unit: usize) -> usize {
         .count()
 }
 
+/// One frame of a filed trace: the published position and zframe at a
+/// reference index.
+fn trace_row(name: &str, frame: u32) -> (u8, u8, i64) {
+    let path = repository_root()
+        .join("reference/music")
+        .join(name)
+        .join("trace.csv");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for line in text.lines().skip(1) {
+        let fields: Vec<&str> = line.split(',').collect();
+        if fields[0].trim().parse::<u32>().unwrap() == frame {
+            return (
+                fields[1].trim().parse().unwrap(),
+                fields[2].trim().parse().unwrap(),
+                fields[9].trim().parse().unwrap(),
+            );
+        }
+    }
+    panic!("{name} holds no frame {frame}")
+}
+
 /// One frame of a filed trace: the published position at a reference index.
 fn trace_position(name: &str, frame: u32) -> (u8, u8) {
     let path = repository_root()
@@ -181,6 +203,27 @@ fn the_run_is_numbered_in_boot_frames_and_reaches_u2a_after_alku() {
     assert_eq!(entry(&manifest, 7300)["music_position"], "12:18");
     assert_eq!(trace, (12, 18));
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_block_one_clock_matches_second1_at_boot_5900() {
+    // A29's mechanism: the port's block-1 clock follows `second1`, not
+    // `second1c` (the trace that supplies the 6988 gate measurement). At
+    // boot 5900 `second1` holds 9:51 with zframe 3771; `second1c` holds
+    // 9:50 with zframe 3768. The 7300 session-phase offset follows from the
+    // clock the port is actually faithful to.
+    let (dir, manifest) = dump("phase", "5900");
+    assert_eq!(entry(&manifest, 5900)["music_position"], "9:51");
+    let (order, row, zframe) = trace_row("second1", 5900);
+    assert_eq!((order, row), (9, 51), "second1 at boot 5900");
+    assert_eq!(zframe, 3771, "second1's zframe at boot 5900");
+    let (order, row, zframe) = trace_row("second1c", 5900);
+    assert_eq!(
+        (order, row, zframe),
+        (9, 50, 3768),
+        "second1c is the other session, four frames behind"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

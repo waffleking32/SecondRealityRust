@@ -42,18 +42,20 @@ to it.
   `repeat` stream frames (`:336-430`). `0xFF 0xFF` calls `resetscene()`, sets
   `xit`, and the outer loop ends (`:351-356`).
 - **`:432-451` teardown.** `dis_setcopper(2,NULL)`; all four pages cleared
-  with the background; `vid_setswitch(3,-1)` leaves the display on the last
-  one; `vid_deinit()` only outside the demo.
+  with the background; `vid_setswitch(3,-1)` names page 3 as the **draw**
+  page, and its `-1` leaves CRTC 0x0C (the display start) unchanged, so the
+  source never re-points the display during teardown (`AVID.ASM:341-358`);
+  `vid_deinit()` only outside the demo.
 
 The release does more **before** the gate than the tree: `U2A.C` draws
-nothing until `:259`, while the reference's 6500 frame, 488 frames into the
-pad hold, is the `U2ABG.UH` picture under a different DAC. Task 1 measured it
+nothing until `:259`, while the reference's 6500 frame — 534–540 frames after
+the paint measured in (5960, 5966] — is the `U2ABG.UH` picture under a
+different DAC. Task 1 measured it
 (`.superpowers/sdd/06-vector-engine/task-1-report.md` §4) and the controller's
 ruling made it the port's `init`: set the view to 320×200, paint page 0 with
-the background, upload the pad palette. The pad appears in
-(5960, 5966] in the reference's captures, and this is the *release's*
-behaviour, not the tree's (D24's first kind of difference: the shipped build
-does something a source in the tree does not).
+the background, upload the pad palette. The pad appears in that window, and
+this is the *release's* behaviour, not the tree's (D24's first kind of
+difference: the shipped build does something a source in the tree does not).
 
 ## 2. The screen and the four pages
 
@@ -280,9 +282,27 @@ The 7300 divergence, measured rather than fitted:
 - **The second gate is dead in the shipped stream.** The END's `resetscene();
   xit=1` (`:351-355`) ends the loop before order 12 row 55; the port keeps
   the check first in its loop (`the_second_gate_tears_down_on_the_first_tick_it_is_open`).
-- **The teardown clears all four pages and leaves the display on page 3.**
-  `U2A.C:432-441`; the source removes slot 2, the port installs no-ops in all
-  three the way PAM does, so nothing an unregistered slot held can run.
+- **The dead city hacks.** `U2A.C:301-310` forces sort distances to
+  1,000,000,000 for `co[2]`, `co[7]` and `co[13]` when the master's byte 15
+  is `'C'`, and for `co[14]` when it is `'R'`. `U2A.00M`'s byte 15 is 0
+  (`U2A.C:168-169` reads it into `city`), so neither branch runs for this
+  part. The driver implements both — guarded against instances the scene
+  does not have — and `parts/visu/mod.rs`'s
+  `the_city_hacks_are_u2a_s_and_guard_out_of_range_instances` pins them.
+- **The teardown clears all four pages.** `U2A.C:432-441`: the source
+  removes slot 2, and `vid_setswitch(3,-1)` names page 3 as the draw page
+  while the display start is left alone (`AVID.ASM:341-358`), so the display
+  never moves during teardown. The port installs no-ops in all three slots
+  (PAM's pattern, so nothing an unregistered slot held can run) and sets the
+  origin to page 3 per the controller's ruling; the choice is unobservable
+  because every page holds the same cleared background.
+- **The two exits leave different screens.** `dis_exit()` inside the gate's
+  wait is a bare `return` (`U2A.C:239`): no copper has been installed and no
+  page cleared, so the pad stays up and the shell retires the part
+  (`the_gate_holds_until_the_scripted_cue_and_exits_on_request` asserts the
+  untouched page and DAC). Inside the loop, `while(!dis_exit() && !xit)`
+  falls through to the teardown (`:432`), so the four cleared pages are
+  shown.
 - **The background is not de-interleaved.** `U2A.C:153-166` reorders `bg` in
   place before the loop (`for(z=0;z<4;z++) for(y=0;y<200;y++)
   for(x=z;x<320;x+=4) bg2[u++]=bg[16+768+x+y*320]`). Task 1 measured the

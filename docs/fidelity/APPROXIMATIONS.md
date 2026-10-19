@@ -1603,5 +1603,10 @@ ALKU's verified frames.
 
 **Measured difference:** 1098/64,000 = 1.7156 %, RGB and indices. Reproduce
 with `cargo test -p secondreality --test u2a
-the_saucer_frame_records_its_measured_divergence` and the dump command in
+the_saucer_frame_records_its_measured_divergence`,
+`cargo test -p secondreality --test u2a
+the_block_one_clock_matches_second1_at_boot_5900` (the 9:51/zframe 3771 pin)
+and `cargo test -p secondreality
+the_reference_7300_is_the_measured_stream_state` (1098 belongs to state 297
+and to no other of the 522), plus the dump command in
 `docs/fidelity/u2a.md` §7.

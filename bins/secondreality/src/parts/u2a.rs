@@ -39,6 +39,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use sr_assets::load_path;
+use sr_engine::copper::COPPER_SLOTS;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
@@ -291,9 +292,12 @@ impl U2a {
         };
         // `while(cl[clw].ready) { if(deadlock>16) break; }` (`U2A.C:278-283`):
         // a busy page makes this tick the wait, not a spin.
-        let page = match driver.borrow_mut().ring.next_page() {
-            Some(page) => page,
-            None => return,
+        let page = {
+            let mut driver = driver.borrow_mut();
+            driver.ring.next_page()
+        };
+        let Some(page) = page else {
+            return;
         };
 
         // `vid_setswitch(clw,-1); vid_clearbg(bg); vid_cameraangle(fov);
@@ -348,7 +352,7 @@ impl U2a {
         // The source removes slot 2 (`dis_setcopper(2,NULL)`); the port
         // installs no-ops in all three, the way `PAM` retires its copper, so
         // nothing an unregistered slot held can run again.
-        for slot in 0..3 {
+        for slot in 0..COPPER_SLOTS {
             ctx.set_copper(slot, Box::new(|_ctx: &mut PartCtx| {}));
         }
         let pixels = ctx.surface.pixels_mut();
@@ -539,6 +543,24 @@ mod tests {
             self.ctx_with(tick, false)
         }
 
+        /// A context for a run with no player at all.
+        fn ctx_without_music(&mut self, tick: u32) -> PartCtx<'_> {
+            PartCtx::new(
+                &mut self.surface,
+                &mut self.view,
+                &mut self.palette,
+                &mut self.timeline,
+                &mut self.copper,
+                None,
+                tick,
+                0,
+                1,
+                true,
+                false,
+                false,
+            )
+        }
+
         fn run_slot(&mut self, slot: usize) {
             let Some(mut callback) = self.copper.take(slot) else {
                 return;
@@ -724,6 +746,10 @@ mod tests {
         let (mut rig, mut part) = started_with(Player::closed());
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
+        // `U2A.C:239`'s bare `return` leaves the pad: no copper, no clear.
+        assert_eq!(rig.page(0), part.background, "the pad screen stays up");
+        assert_eq!(rig.palette, part.pad_palette, "and the pad DAC");
+        assert!(!rig.copper.is_set(2), "no copper was installed");
         assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
 
         // The gate is tested first (`U2A.C:238-239`): an open gate with the
@@ -751,6 +777,25 @@ mod tests {
             assert_eq!(rig.page(page), part.background, "page {page} cleared");
         }
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32);
+    }
+
+    #[test]
+    fn init_without_music_is_a_part_error() {
+        // PAM's precedent: a part whose gates read the published position
+        // refuses to start when the run has no player, rather than waiting
+        // for ever.
+        let mut rig = Rig::new(Player::closed());
+        let mut part = U2a::at(TEST_SCENE_DIR, TEST_BACKGROUND);
+        let error = {
+            let mut ctx = rig.ctx_without_music(0);
+            part.init(&mut ctx).unwrap_err()
+        };
+        assert_eq!(error.part, NAME);
+        assert!(
+            error.message.contains("no music"),
+            "the refusal names the reason: {}",
+            error.message
+        );
     }
 
     #[test]
@@ -882,7 +927,8 @@ mod tests {
         let mut best = (usize::MAX, usize::MAX);
         let mut best_pixels = Vec::new();
         let mut neighbours = std::collections::BTreeMap::new();
-        for state in 0..=521 {
+        let mut counts = vec![usize::MAX; 522];
+        for (state, count) in counts.iter_mut().enumerate() {
             if state > 0 {
                 driver.fov = scene.step_frame().unwrap();
             }
@@ -891,6 +937,7 @@ mod tests {
                 driver.draw_frame(&mut scene, &mut page, Clear::Background(background.pixels()));
             }
             let differing = differing_pixels(&plain_rgb(&pixels, &merged), &reference_7300);
+            *count = differing;
             if [293, 294, 295].contains(&state) {
                 neighbours.insert(state, differing);
             }
@@ -916,6 +963,14 @@ mod tests {
             Some(&858),
             "the state after the reference's"
         );
+        // The live run's boot-7300 frame differs from the same reference by
+        // 1098 (`tests/u2a.rs`); against the reference that count belongs to
+        // stream state 297 and to nothing else, which is what identifies the
+        // port's pose as state 297 (A29).
+        let at_1098: Vec<usize> = (0..=521).filter(|&state| counts[state] == 1098).collect();
+        println!("states whose reference comparison is 1098: {at_1098:?}");
+        assert_eq!(counts[297], 1098);
+        assert_eq!(at_1098, vec![297], "1098 uniquely identifies stream state 297");
 
         // The silhouette is exact: every pixel the object covers and every
         // background pixel agrees with the reference. The residual is inside
