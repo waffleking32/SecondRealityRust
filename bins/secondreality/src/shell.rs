@@ -311,10 +311,15 @@ pub fn music_start_frame_for(part: &str) -> u32 {
 ///   `--part testcard`) has no reference frame to synchronise to: its music starts with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MusicStart {
-    /// The frame the music's own clock starts on, in the run's numbering.
+    /// The frame the run's music was started at, in the run's numbering: the music's own
+    /// start for an entry install ([`new`](MusicStart::new),
+    /// [`for_part`](MusicStart::for_part)), and the boundary a mid-run restart was
+    /// installed at for [`restart`](MusicStart::restart) — whose clock then begins
+    /// [`waiting`](MusicStart::waiting) frames later.
     pub frame: u32,
     /// Polls the engine makes before the music advances: the frames between the run's
-    /// first drawn frame and the music's start.
+    /// first drawn frame and the music's start (for a restart, between the boundary it was
+    /// installed at and the restarted clock's first tick).
     pub waiting: u32,
     /// Polls the run makes at its start, before its first tick, so that the music is
     /// where it would have been had it been polled since its start.
@@ -339,6 +344,27 @@ impl MusicStart {
             MusicStart::new(anchor)
         } else {
             MusicStart::at(anchor, start_frame)
+        }
+    }
+
+    /// The start a **mid-run restart** installs at the run's boundary frame `index`
+    /// ([`MUSIC_RESTART_AT`], `MAIN/U2.ASM:880-885`).
+    ///
+    /// The original's `restartmus` loads the new module and seeks it with `_zplaysong`, then
+    /// hands the shell to the next part; the player is not polled across the boundary, and
+    /// the first tick of the restarted clock lands **four** frames later — the restart
+    /// recipes' measured 404→408 relation, `MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME`, which
+    /// D34 records as `RunMusic.start.waiting == 4` and verifies through the block-3 chain
+    /// (`second3e` is `second4`'s session shifted by 17,441–17,442 frames). Nothing is
+    /// pre-polled: a restart is installed at the boundary, not before it.
+    ///
+    /// `index` is the run's own frame at that boundary — the frame the part being started
+    /// draws its first tick at. The player's clock begins `waiting` frames later.
+    pub fn restart(index: u32) -> MusicStart {
+        MusicStart {
+            frame: index,
+            waiting: MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME,
+            pre: 0,
         }
     }
 
@@ -526,6 +552,35 @@ pub const MUSIC_RESTARTS: &[MusicRow] = &[
         ],
     },
 ];
+
+/// The parts whose start is a **mid-run** `restartmus` site, and the module and order
+/// each restarts: a part-keyed transcription of the block-guarded rows in
+/// [`MUSIC_RESTARTS`].
+///
+/// There is one row, and it is `MAIN/U2.ASM:880-885`:
+///
+/// ```text
+/// test    cs:whattorun,8
+/// jz      @@skipp4
+/// mov     ax,0
+/// mov     bx,18
+/// mov     cx,45000
+/// call    restartmus
+/// mov     si,OFFSET exe19
+/// call    partexecute
+/// ```
+///
+/// The original's guard is `whattorun & 8` **alone** — not a block number — and every block
+/// whose mask carries bit 3 reaches the site (`SECOND 1` `0x1f`, `2` `0x1e`, `3` `0x1c`, `4`
+/// `0x18`). The port therefore keys the restart by the part the site precedes: U2E's presence
+/// in a plan implies the guard, so a plan that reaches `u2e` through [`Sequence::take_next`]
+/// restarts MUSIC0 at order 18 before it starts. For `SECOND 4` the same call is the run's
+/// *entry* install and goes through [`Sequence::with_run`], not this table; only block 3
+/// reaches it mid-plan today (`SECOND 1` and `2` stop at GLENZ).
+///
+/// D34 has the measurement: the new player waits four engine ticks and the block-3 chain's
+/// restarted session is `second4`'s shifted by 17,441–17,442 frames.
+pub const MUSIC_RESTART_AT: &[(&str, ModuleId, u8)] = &[("u2e", ModuleId::Music0, 18)];
 
 /// The module and order `SECOND block` starts its music at — the restart table's row for
 /// the block, or [`ShellError::UnknownPart`] for a block the original rejects.
@@ -747,17 +802,25 @@ pub struct Sequence {
     finished: bool,
     /// The run's music, when it has any. See [`RunMusic`].
     music: Option<RunMusic>,
+    /// How the run builds a player, kept so a mid-run restart can install a fresh one
+    /// ([`MUSIC_RESTART_AT`]): the original's `restartmus` loads the module into a new
+    /// player, so the shell needs the loader again at the boundary, not only at the start.
+    /// `None` for a run with no music at all.
+    music_source: Option<MusicSource>,
 }
 
-/// The music a run was built with: the player, which module and order it began at, where
-/// its own clock starts, and the dump it feeds.
+/// The music a run was built with: the player, which module and order it began at, how its
+/// clock was started, and the dump it feeds.
 struct RunMusic {
-    /// The player, shared with the engine's adapter and with whatever drains it.
+    /// The player, shared with the engine's adapter and with whatever drains it. A
+    /// mid-run restart ([`MUSIC_RESTART_AT`]) replaces it with a fresh one.
     player: crate::audio::Shared,
-    /// The module and order the run's entry point starts at ([`MUSIC_RESTARTS`]).
+    /// The module and order the player began at: the entry point's ([`MUSIC_RESTARTS`]) or
+    /// the restart site's.
     module: ModuleId,
     order: u8,
-    /// Where the music's own clock starts, in the run's numbering ([`MusicStart`]).
+    /// How this player's clock was started in the run's numbering ([`MusicStart`]): the
+    /// entry recipe or the boundary a mid-run restart installed it at.
     start: MusicStart,
     /// `--audio-dump`'s file, when one was asked for: every tick's samples, in order.
     ///
@@ -891,12 +954,17 @@ impl Sequence {
             stopped_at: None,
             finished: false,
             music: None,
+            music_source: music,
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
         *run.engine.palette_mut() = hardware_default_palette();
         if let (Some(loader), Some((module, order))) = (music, music_for_part(first)) {
-            run.install_music(module, order, loader)?;
+            // The plan's first name is the entry point, and it decides the recipe: a
+            // block-1 part starts under the initial `_zplaysong(0)` (frame 400), every
+            // other entry under its restart's frame (408).
+            let start = MusicStart::for_part(first, anchor);
+            run.install_music(module, order, loader, start)?;
         }
         run.start(first)?;
         Ok(run)
@@ -909,17 +977,26 @@ impl Sequence {
     /// demo's own start), and only then does anything poll it — the engine's `set_music`
     /// makes it the run's player from the next tick on, and [`MusicStart::waiting`] holds
     /// its clock back to the frame the music's own first tick falls on.
+    ///
+    /// `start` is the entry path's [`MusicStart::for_part`] or the restart's
+    /// [`MusicStart::restart`]; the two differ in when the player's clock begins. A
+    /// restart is a **new player** (`restartmus` loads the module again), so the run's
+    /// [`AudioDump`](crate::audio::AudioDump) and sample scratch are carried across: they
+    /// belong to the run and its one output stream, not to whichever player mixes it.
     fn install_music(
         &mut self,
         module: ModuleId,
         order: u8,
         source: MusicSource,
+        start: MusicStart,
     ) -> Result<(), ShellError> {
         let player = source(module).map_err(|message| ShellError::Music { message })?;
-        // The plan's first name is the entry point, and it decides the recipe: a
-        // block-1 part starts under the initial `_zplaysong(0)` (frame 400), every
-        // other entry under its restart's frame (408).
-        let start = MusicStart::for_part(self.current, self.anchor);
+        // Only now that the new player exists is the old one's state taken: a load that
+        // fails must not cost the run the dump it has already written.
+        let (dump, scratch) = match self.music.take() {
+            Some(old) => (old.dump, old.scratch),
+            None => (None, vec![0; 1024]),
+        };
         crate::audio::lock(&player).play_song(order);
         // **The frames the music missed before this run began.** A run whose first drawn
         // frame is *after* the music's own start pre-polls the frames in between, because
@@ -956,8 +1033,8 @@ impl Sequence {
             module,
             order,
             start,
-            dump: None,
-            scratch: vec![0; 1024],
+            dump,
+            scratch,
         });
         Ok(())
     }
@@ -973,12 +1050,19 @@ impl Sequence {
             return SequenceStatus::Finished;
         }
         let part = self.live.as_mut().expect("a part is live");
+        // Whether the exit flag ends this part's *work* as well as its loop. U2E's
+        // source fades the DAC over sixteen retraces after `dis_exit`
+        // (`U2E.C:541-555`), so its `Finished` is the only retirement signal; every
+        // other part is done the moment the flag reaches it.
+        let drains = part.drains_after_exit();
         let status = self.engine.tick(&mut **part, &mut self.frame);
         self.index += 1;
         // Finished, or asked to quit: either way this part's loop has ended and
         // the next tick hands the screen to the next part. The engine keeps the
         // surface and the DAC, which is what the original's separate EXEs do.
-        if status == PartStatus::Finished || self.engine.exit_requested() {
+        if status == PartStatus::Finished
+            || (self.engine.exit_requested() && !drains)
+        {
             self.live = None;
         }
         // The music, after the part has drawn: the fade while there is nothing left to
@@ -1034,6 +1118,15 @@ impl Sequence {
             return self.hold(None);
         };
         self.next += 1;
+        // `MAIN/U2.ASM:880-885` runs **before** `partexecute`: a restart site
+        // replaces the player the incoming part will read, so it must be
+        // installed before the part's `init` (U2E's `music_fresh` and its
+        // `dis_sync` gate both see it).
+        if let Err(error) = self.restart_music(name) {
+            eprintln!("secondreality: {error}; the run ends here");
+            self.finished = true;
+            return false;
+        }
         match self.start(name) {
             Ok(()) => true,
             // A part the port *has* but cannot start is a different thing from
@@ -1050,6 +1143,38 @@ impl Sequence {
             // numbering the block gave them.
             Err(_) => self.hold(Some(name)),
         }
+    }
+
+    /// Install the restart site's player when the part the run is about to start
+    /// is one ([`MUSIC_RESTART_AT`], `MAIN/U2.ASM:880-885`).
+    ///
+    /// The original's `restartmus` stops and unloads the player, loads the new module and
+    /// seeks it, every time the site runs. The port installs a fresh player too — the
+    /// modules are different files and `Player` owns its module — but only when the row's
+    /// module/order **differs** from the player the run already has: a plan that reaches a
+    /// restart site under the very same module and order would otherwise throw away a
+    /// player's position for nothing. The first part of a plan never comes through here
+    /// (it is [`with_run`](Sequence::with_run)'s entry install).
+    fn restart_music(&mut self, name: &'static str) -> Result<(), ShellError> {
+        let Some(&(_, module, order)) = MUSIC_RESTART_AT
+            .iter()
+            .find(|(part, _, _)| *part == name)
+        else {
+            return Ok(());
+        };
+        let Some(source) = self.music_source else {
+            return Ok(());
+        };
+        let already = self
+            .music
+            .as_ref()
+            .is_some_and(|music| music.module == module && music.order == order);
+        if already {
+            return Ok(());
+        }
+        // The boundary is the frame the incoming part's first tick draws at; the
+        // restarted clock begins `waiting` frames later (D34).
+        self.install_music(module, order, source, MusicStart::restart(self.index))
     }
 
     /// Start holding the screen the run's last part left. `stopped_at` is the
@@ -1174,8 +1299,9 @@ impl Sequence {
         self.music.as_ref().map(|music| (music.module, music.order))
     }
 
-    /// Where the music's own clock starts, in the run's numbering, or `None` for a run with
-    /// no player.
+    /// The frame the run's music was started at, in the run's numbering — where the
+    /// clock's start is for an entry install, or the boundary a mid-run restart was
+    /// installed at — or `None` for a run with no player. See [`MusicStart::frame`].
     pub fn music_start_frame(&self) -> Option<u32> {
         self.music.as_ref().map(|music| music.start.frame)
     }
@@ -1482,13 +1608,18 @@ mod tests {
     }
 
     #[test]
-    fn u2e_is_anchored_at_its_derived_intro_start() {
+    fn u2e_runs_are_numbered_from_their_derived_intro_anchor() {
         // The reference's first visible U2E frame is 467 (two dense sessions),
         // and the fadeset that draws it is the source's 49th pre-visible wait;
         // 467 - 49 = 418. The part's unit test calibrates the fadeset onto
         // tick 49.
         assert_eq!(boot_anchor("u2e"), Some(418));
         assert_eq!(U2E_ANCHOR, 467 - 49);
+        // Block 4's plan begins at U2E (`SECOND 4`'s partsmask `0x18` selects
+        // U2E's bit and nothing before it), so a `--block 4` run's first index
+        // is the part's derived anchor.
+        assert_eq!(block_plan('4').unwrap()[0], "u2e");
+        assert_eq!(boot_anchor(block_plan('4').unwrap()[0]), Some(U2E_ANCHOR));
         // Block 4's recipe restarts MUSIC0 at 408, so a run from 418 pre-polls
         // the ten frames between them.
         assert_eq!(
@@ -2435,6 +2566,43 @@ mod tests {
     }
 
     #[test]
+    fn the_mid_run_restart_waits_the_restart_recipes_four_ticks() {
+        // **The restart site.** `MAIN/U2.ASM:880-885`'s `restartmus(ax=0, bx=18, cx=45000)`
+        // is the one restart the demo reaches mid-plan: its guard is `whattorun & 8` alone
+        // (`:880`), and every block whose plan reaches U2E carries bit 3 — so the site is
+        // keyed by the part's presence rather than by a block. Block 4 is the same
+        // `restartmus`, fired at the run's entry instead of mid-run.
+        assert_eq!(MUSIC_RESTART_AT.len(), 1);
+        assert_eq!(
+            MUSIC_RESTART_AT[0],
+            ("u2e", ModuleId::Music0, 18),
+            "the part, its module and the order the restart seeks"
+        );
+        assert_eq!(
+            music_for('4').unwrap(),
+            (MUSIC_RESTART_AT[0].1, MUSIC_RESTART_AT[0].2),
+            "the site's row is block 4's `restartmus`, the same call"
+        );
+        // And it is the music `u2e` is reached under, by the entry table's own answer.
+        assert_eq!(music_for_part("u2e"), Some((ModuleId::Music0, 18)));
+
+        // **D34's measured wait.** A restarted player is seeked at the boundary and its
+        // clock starts four engine ticks later — `MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME`,
+        // the restart recipes' measured 404→408 relation — with nothing pre-polled, because
+        // the run is already at the boundary when the player is installed.
+        assert_eq!(MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME, 4);
+        assert_eq!(
+            MusicStart::restart(17_418),
+            MusicStart { frame: 17_418, waiting: 4, pre: 0 }
+        );
+        assert_eq!(
+            MusicStart::restart(0),
+            MusicStart { frame: 0, waiting: 4, pre: 0 },
+            "an unanchored run's boundary is its own frame 0"
+        );
+    }
+
+    #[test]
     fn every_part_of_the_plan_starts_under_its_blocks_music_recipe() {
         // `MAIN/U2.ASM:790-799` runs ALKU, U2A and PAM before any restart; every
         // other entry point is one of the restart sites.
@@ -2531,6 +2699,9 @@ mod tests {
             // Draws nothing at all: whatever the screen holds when it starts is
             // what its frames show, which is how the handover is tested.
             "b" => Some(Box::new(Stub { name: "b", fill: None, retires: Some(0) })),
+            // Never retires, and does not drain: the shell must retire it on
+            // the exit tick.
+            "holds" => Some(Box::new(Stub { name: "holds", fill: None, retires: None })),
             // A demo part that retires at once, so a run of it reaches the hold and its
             // music's fade. `pam` is the demo's own part and no block *starts* at it, which
             // is why it is played from the demo's beginning (MUSIC0 at order 0).
@@ -2824,6 +2995,239 @@ mod tests {
             ctx.request_exit();
             PartStatus::Continuing
         }
+    }
+
+    // --- the exit drain (`U2E.C:541-555`) ------------------------------------
+
+    /// A part with a timed teardown: it keeps drawing after the exit flag and
+    /// reports `Finished` itself on its fourth tick. Its two post-exit ticks are
+    /// what say the shell did not cut it short.
+    struct Draining;
+
+    impl Part for Draining {
+        fn name(&self) -> &'static str { "draining" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            if ctx.frame >= 3 {
+                PartStatus::Finished
+            } else {
+                PartStatus::Continuing
+            }
+        }
+        fn drains_after_exit(&self) -> bool { true }
+    }
+
+    fn draining_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            "draining" => Some(Box::new(Draining)),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn a_part_that_drains_after_exit_keeps_ticking_until_it_finishes() {
+        // The exit flag is sticky in the engine, so `Sequence::tick` retires a
+        // part on the exit tick unless the part opts out. U2E's source runs its
+        // sixteen-retrace DAC fade *after* `dis_exit` (`U2E.C:541-555`), and
+        // `drains_after_exit` is what buys it those ticks.
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["draining", "b"],
+            draining_source,
+        )
+        .unwrap();
+        run.tick();
+        run.tick();
+        assert_eq!(run.part(), "draining");
+        assert!(run.request_exit(), "a part is live to ask");
+        run.tick();
+        assert_eq!(run.part(), "draining", "the exit flag does not retire a draining part");
+        assert_eq!(run.frame_index(), Some(2), "and the tick drew");
+        run.tick();
+        assert_eq!(
+            run.part(),
+            "draining",
+            "the part's own Finished tick still drew; it retires after it"
+        );
+        run.tick();
+        assert_eq!(run.part(), "b", "and only then does the run go on");
+    }
+
+    #[test]
+    fn a_part_that_does_not_drain_retires_on_the_exit_tick() {
+        // The default, and every part but U2E: a part that never polls the flag
+        // is retired by the shell at the end of the tick the flag reaches it.
+        let mut run = sequence_of(vec!["holds", "b"]).unwrap();
+        run.tick();
+        run.tick();
+        assert_eq!(run.part(), "holds");
+        assert!(run.request_exit());
+        run.tick();
+        assert_eq!(run.part(), "holds", "the exit tick still drew the part once");
+        run.tick();
+        assert_eq!(run.part(), "b", "the next tick has retired it");
+    }
+
+    // --- the mid-run restart (`MAIN/U2.ASM:880-885`) -------------------------
+
+    /// What U2E's `init` saw of `music_fresh` when it was reached through the
+    /// restart site. A `static` because [`PartSource`] is a plain `fn`.
+    static FRESH_AT_RESTART: AtomicBool = AtomicBool::new(false);
+
+    /// Stands in for U2E: its `init` is the context the engine's fresh flag
+    /// belongs to, and it never retires.
+    struct FreshProbe;
+
+    impl Part for FreshProbe {
+        fn name(&self) -> &'static str { "u2e" }
+        fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+            FRESH_AT_RESTART.store(ctx.music_fresh(), Ordering::SeqCst);
+            Ok(())
+        }
+        fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus { PartStatus::Continuing }
+    }
+
+    fn restart_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            // Block 3's first ported part, retiring at once so the plan reaches
+            // the boundary on the second tick.
+            "mntscrl" => Some(Box::new(Stub {
+                name: "mntscrl",
+                fill: None,
+                retires: Some(0),
+            })),
+            "u2e" => Some(Box::new(FreshProbe)),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn a_restart_installs_the_next_modules_order_at_the_u2e_boundary() {
+        FRESH_AT_RESTART.store(false, Ordering::SeqCst);
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["mntscrl", "u2e"],
+            restart_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        // The entry install is the plan's first part's own row: MNTSCRL runs
+        // under MUSIC1 at order 42 and, having no anchor, its clock starts with
+        // the run.
+        assert_eq!(run.music_module(), Some((ModuleId::Music1, 42)));
+        assert_eq!(
+            run.music.as_ref().unwrap().start,
+            MusicStart { frame: 0, waiting: 0, pre: 0 }
+        );
+        // The shell's dump and scratch belong to the run, not to one player: a
+        // restart installs a fresh player and carries both across. The marker
+        // is past one poll's samples (~570) so the dump's drain before the
+        // boundary cannot overwrite it — what is under test is the vector's
+        // identity, not its contents.
+        run.music.as_mut().unwrap().scratch[1000] = 700;
+        let dir = std::env::temp_dir().join(format!("sr-shell-restart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        run.dump_audio(&dir.join("music.wav")).unwrap();
+        assert!(run.music.as_ref().unwrap().dump.is_some());
+        let entry_player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+
+        // Tick 0: MNTSCRL draws and retires. Tick 1: the boundary — the
+        // restart site installs MUSIC0@18 before U2E's `init`.
+        run.tick();
+        assert_eq!(run.part(), "mntscrl");
+        run.tick();
+        assert_eq!(run.part(), "u2e", "the boundary part started");
+        assert_eq!(
+            run.music_module(),
+            Some((ModuleId::Music0, 18)),
+            "`MAIN/U2.ASM:880-885`'s restartmus(0, 18)"
+        );
+        let music = run.music.as_ref().expect("the restart installed a player");
+        assert_eq!(music.start.waiting, 4, "D34's measured wait");
+        assert_eq!(
+            music.start,
+            MusicStart { frame: 1, waiting: 4, pre: 0 },
+            "the boundary's own run index, four ticks of waiting, no pre-poll"
+        );
+        assert_eq!(music.scratch[1000], 700, "the scratch is the run's");
+        assert!(music.dump.is_some(), "and so is the dump");
+        assert_ne!(
+            std::sync::Arc::as_ptr(&music.player),
+            entry_player,
+            "a fresh player, as `restartmus` loads the module again"
+        );
+        assert!(
+            FRESH_AT_RESTART.load(Ordering::SeqCst),
+            "set_music re-armed the fresh flag, and U2E's init consumed it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The number of `init` contexts `music_fresh` reported `true` to.
+    static SAME_ORDER_FRESH_INITS: AtomicU32 = AtomicU32::new(0);
+
+    struct SameOrderProbe;
+
+    impl Part for SameOrderProbe {
+        fn name(&self) -> &'static str { "u2e" }
+        fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+            if ctx.music_fresh() {
+                SAME_ORDER_FRESH_INITS.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            if ctx.frame >= 1 {
+                PartStatus::Finished
+            } else {
+                PartStatus::Continuing
+            }
+        }
+    }
+
+    fn same_order_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            "u2e" => Some(Box::new(SameOrderProbe)),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn a_run_already_on_the_restarts_module_does_not_reinstall_it() {
+        // The restart fires only when the row's module/order differs from the
+        // current `RunMusic`: a plan that reaches U2E with MUSIC0@18 already
+        // playing keeps the one player (and its clock's position).
+        SAME_ORDER_FRESH_INITS.store(0, Ordering::SeqCst);
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["u2e", "u2e"],
+            same_order_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(run.music_module(), Some((ModuleId::Music0, 18)));
+        let player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+        run.tick();
+        assert_eq!(run.part(), "u2e");
+        run.tick();
+        assert_eq!(run.part(), "u2e", "the second U2E started");
+        assert_eq!(
+            std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player),
+            player,
+            "the same player: the row's module/order did not differ"
+        );
+        assert_eq!(
+            SAME_ORDER_FRESH_INITS.load(Ordering::SeqCst),
+            1,
+            "only the entry install armed the fresh flag"
+        );
     }
 
     // --- the keyboard (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`) ------

@@ -51,6 +51,27 @@ pub trait Part {
     fn band_count(&self) -> u16 {
         1
     }
+
+    /// Whether the part keeps running after the exit flag is set, to finish a
+    /// teardown of its own.
+    ///
+    /// The original's `dis_exit()` ends a part's loop; it does not skip the
+    /// code after it. A part whose source runs a **timed teardown** after the
+    /// loop — U2E's sixteen-retrace DAC fade (`U2E.C:541-555`) — is still
+    /// working when it returns, so retiring it on the exit tick would cut the
+    /// teardown short: `Sequence::tick` and `Runner::stopped` keep ticking a
+    /// part that reports `true` here until it returns
+    /// [`PartStatus::Finished`](PartStatus::Finished) itself.
+    ///
+    /// The default is `false`, and it is right for every part but U2E: U2A's
+    /// teardown is synchronous within the tick its gate or loop sees the flag
+    /// (`U2A.C:239`, `:259`), and the rest simply return.
+    ///
+    /// [`Engine::start`](crate::engine::Engine::start) clears the sticky exit
+    /// flag, so a drain cannot leak into the part that follows.
+    fn drains_after_exit(&self) -> bool {
+        false
+    }
 }
 
 /// A part's handle on the engine for one call.

@@ -432,6 +432,15 @@ impl Part for U2e {
         self.prepare(ctx)
     }
 
+    /// U2E is the one part whose source runs a **timed teardown after
+    /// `dis_exit`**: `U2E.C:541-555` removes the copper, captures the DAC and
+    /// fades it over sixteen retraces, whichever way the gate or loop exits.
+    /// Retiring the part on the exit tick would cut that fade to nothing, so
+    /// the shell keeps it live until it reports `Finished` itself.
+    fn drains_after_exit(&self) -> bool {
+        true
+    }
+
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.flush_palette(ctx);
         self.flush_teardown(ctx);
@@ -1258,6 +1267,48 @@ mod tests {
             before,
             "the no-op copper and the finished part touch nothing"
         );
+    }
+
+    #[test]
+    fn a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown() {
+        // **The shell's exit flag is sticky** (`Engine::exit_requested`), so a
+        // part that opted into draining sees it in every `PartCtx` of its
+        // teardown. The source's fade is not guarded by `dis_exit` at all
+        // (`U2E.C:541-555` runs after either loop exit), and every one of the
+        // sixteen uploads must still happen: T's tick triggers the teardown and
+        // computes step 1, T+1..T+16 upload steps 1..16, and the part returns
+        // `Finished` on T+16.
+        let (mut rig, mut part) = started_with(Player::opening_at(OPEN), true);
+        to_loop(&mut rig, &mut part);
+        let captured = capture_palette(&part.main_palette);
+
+        // Every tick from here carries the exit flag, exactly as the engine
+        // hands it to a draining part's bands.
+        assert_eq!(rig.step_exit(&mut part), PartStatus::Continuing, "T: teardown triggered");
+        assert_eq!(part.phase, Phase::Teardown { left: TEARDOWN_STEPS - 1 });
+        assert_eq!(rig.palette, part.main_palette, "T uploads nothing");
+
+        let mut step = captured;
+        for number in 1..=TEARDOWN_STEPS {
+            // T+number: the previous tick's mutation is uploaded, then the next
+            // is computed; the sixteenth is the one the part ends on.
+            for byte in &mut step {
+                *byte = (*byte + 4).min(63);
+            }
+            let status = rig.step_exit(&mut part);
+            assert_eq!(
+                rig.palette,
+                rotated_palette(&step),
+                "upload {number} of {TEARDOWN_STEPS} did not run"
+            );
+            if number < TEARDOWN_STEPS {
+                assert_eq!(status, PartStatus::Continuing, "upload {number}");
+            } else {
+                assert_eq!(status, PartStatus::Finished, "the sixteenth upload ends the part");
+            }
+        }
+        assert_eq!(part.phase, Phase::Done);
+        assert_eq!(part.fpal, step, "sixteen mutations, with the flag set throughout");
     }
 
     /// A diagnostic, not a commitment: render every stream state through the

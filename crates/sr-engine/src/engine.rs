@@ -372,7 +372,8 @@ impl Runner {
 
     /// One logic tick. A part that has finished, or asked to quit, is not
     /// ticked again: the runner returns the last status the part itself
-    /// reported, which for an exit request is still `Continuing`.
+    /// reported, which for an exit request is still `Continuing`. A part that
+    /// drains after exit is the exception — see [`Runner::stopped`].
     pub fn step(&mut self) -> PartStatus {
         if self.stopped() {
             return self.status;
@@ -401,8 +402,14 @@ impl Runner {
     /// Whether the part is done: it reported `Finished`, or it asked to quit.
     /// Retiring on an exit request is the runner's job because the shell that
     /// would act on it is a layer up.
+    ///
+    /// A part that [`drains_after_exit`](Part::drains_after_exit) is the
+    /// exception: the exit flag ends its loop, not the teardown the source runs
+    /// after it (U2E's sixteen-retrace DAC fade, `U2E.C:541-555`), so it is
+    /// ticked until it reports `Finished` itself.
     fn stopped(&self) -> bool {
-        self.status == PartStatus::Finished || self.engine.exit_requested()
+        self.status == PartStatus::Finished
+            || (self.engine.exit_requested() && !self.part.drains_after_exit())
     }
 
     /// The last presented frame.
@@ -990,6 +997,49 @@ mod tests {
         assert!(r.exit_requested());
         let frames_before = r.part_frame();
         assert_eq!(r.advance(Duration::from_secs(1)), 0, "an exit request must stop the ticking");
+        assert_eq!(r.part_frame(), frames_before);
+    }
+
+    /// Asks to quit from its first tick and keeps drawing until its fourth,
+    /// then reports `Finished`: the shape a part with a timed teardown has
+    /// (`U2E.C:541-555`'s sixteen-retrace DAC fade after `dis_exit`).
+    struct DrainsAfterExit;
+
+    impl Part for DrainsAfterExit {
+        fn name(&self) -> &'static str { "drains-after-exit" }
+        fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> { Ok(()) }
+        fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+            ctx.request_exit();
+            if ctx.frame >= 3 {
+                PartStatus::Finished
+            } else {
+                PartStatus::Continuing
+            }
+        }
+        fn drains_after_exit(&self) -> bool { true }
+    }
+
+    #[test]
+    fn a_runner_keeps_ticking_a_part_that_drains_after_exit() {
+        // The exit flag is sticky in the engine, so a part whose source runs a
+        // teardown after `dis_exit` would be retired on the exit tick under the
+        // default rule. `drains_after_exit` is what buys it the ticks its
+        // source's teardown takes; it retires on its own `Finished`, not on the
+        // flag.
+        let mut r = Runner::new(8, 4, View::new(8, 4), Box::new(DrainsAfterExit)).unwrap();
+        assert_eq!(r.step(), PartStatus::Continuing);
+        assert!(r.exit_requested(), "the first tick asked to quit");
+        assert_eq!(r.part_frame(), 1);
+        assert_eq!(r.step(), PartStatus::Continuing, "the drain's second tick runs");
+        assert_eq!(r.step(), PartStatus::Continuing, "and its third");
+        assert_eq!(r.step(), PartStatus::Finished, "the part retires on its own Finished");
+        assert_eq!(r.part_frame(), 4, "every tick of the teardown ran");
+        let frames_before = r.part_frame();
+        assert_eq!(
+            r.advance(Duration::from_secs(1)),
+            0,
+            "a drained part must not keep ticking after it finishes"
+        );
         assert_eq!(r.part_frame(), frames_before);
     }
 

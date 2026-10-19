@@ -210,10 +210,20 @@ fn position_string((order, row): (u8, u8)) -> String {
     format!("{order}:{row}")
 }
 
-/// The four `SECOND 3` music traces, which together tile the block's boot
-/// timeline: `second3` covers 144..2899, `second3a` 2900..10199, `second3b`
-/// 10200..15049 and `second3d` 15000..17799.
-const BLOCK3_TRACES: &[&str] = &["second3", "second3a", "second3b", "second3d"];
+/// The manifest's `order:row` spelling back into its two numbers.
+fn parse_position(text: &str) -> (u8, u8) {
+    let (order, row) = text
+        .split_once(':')
+        .unwrap_or_else(|| panic!("{text:?} is not `order:row`"));
+    (order.parse().unwrap(), row.parse().unwrap())
+}
+
+/// The `SECOND 3` music traces, which together tile the block's boot timeline:
+/// `second3` covers 144..2899, `second3a` 2900..10199, `second3b` 10200..15049,
+/// `second3d` 15000..17799 and `second3e` 18000..21999 (the mid-run restart and
+/// U2E's opening, D34). `second3e` does not overlap `second3d`'s window; the
+/// 17,800..17,999 frames no filed trace holds are the handover.
+const BLOCK3_TRACES: &[&str] = &["second3", "second3a", "second3b", "second3d", "second3e"];
 
 /// The published position block 3's traces hold at a boot frame, from whichever
 /// session covers it. The sessions overlap only at their seams (15000..15049 is
@@ -236,6 +246,25 @@ fn block3_trace_position(frame: u32) -> (u8, u8) {
     found
         .unwrap_or_else(|| panic!("no block-3 trace holds boot frame {frame}"))
         .1
+}
+
+/// The published position the `SECOND 1` traces hold at a boot frame, from the
+/// first session that covers it: `second1` covers 148..5999, `second1c`
+/// 5900..7599 (U2A's gates) and `second1b` 7600..7959 (PAM's opening).
+///
+/// **These are three different sessions, not one tiled window.** `second1` and
+/// `second1c` overlap over 5900..5999 and their published rows differ by one
+/// there (the sessions' own sample phase), so a frame takes the first trace
+/// that holds it rather than being required to agree across them — unlike
+/// block 3's `second3b`/`second3d` seam, which the helper there checks. Every
+/// index the chain test reads is covered by exactly one of the three.
+fn block1_trace_position(frame: u32) -> (u8, u8) {
+    for name in ["second1", "second1c", "second1b"] {
+        if let Some(position) = trace_position_opt(name, frame) {
+            return position;
+        }
+    }
+    panic!("no block-1 trace holds boot frame {frame}")
 }
 
 fn repository_root() -> PathBuf {
@@ -313,13 +342,28 @@ fn a_block_five_run_plays_music_one_at_the_order_its_entry_point_names() {
 }
 
 #[test]
-fn a_block_one_run_starts_at_alku_in_the_boots_numbering() {
-    // `SECOND 1` runs ALKU first (`MAIN/U2.ASM:790-792`), and ALKU is a block entry
-    // measured at the boot's first graphics frame, 404. Its music is the initial
-    // `_zplaysong(0)` — MUSIC0 at order 0 (`:766-775`) — whose clock starts at
-    // `BLOCK_ONE_MUSIC_START_FRAME` (400); the run draws from 404 and pre-polls the four
-    // frames in between, so the player's first run tick is the run's own first frame.
-    let (dir, manifest) = block_dump("block1", "1", "900");
+fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
+    // `SECOND 1` runs ALKU, U2A and PAM (`MAIN/U2.ASM:790-799`), and ALKU is a
+    // block entry measured at the boot's first graphics frame, 404. Its music is
+    // the initial `_zplaysong(0)` — MUSIC0 at order 0 (`:766-775`) — whose clock
+    // starts at `BLOCK_ONE_MUSIC_START_FRAME` (400); the run draws from 404 and
+    // pre-polls the four frames in between, so the player's first run tick is
+    // the run's own first frame.
+    //
+    // **The chain's own handover indices are measured, not fitted.** The port's
+    // parts hand over with no loader gap (D31 §3): ALKU's first frame is boot
+    // 404 and its last is chain 6,007, so U2A starts at **6,008** — 48 frames
+    // after the reference's U2A (`reference-indices.md` §5 puts its first frame
+    // at 5,960/5,961). U2A's animation stream then ends before the reference's
+    // second gate (`D33`: the stream ends ~7,510 and the reference holds the
+    // cleared background until PAM's 7,710), so PAM's part starts at chain
+    // **7,508**. What the table below asserts is therefore (part, geometry,
+    // music position): the music is still the reference's at the same boot
+    // index — including at the gate frame 6,988 and at PAM's measured first
+    // drawn frame 7,710 — and a part boundary that moves is recorded as
+    // measured, not absorbed into an offset.
+    let frames = "900,6007,6008,6500,6988,7300,7507,7508,7618,7709,7710,7712";
+    let (dir, manifest) = block_dump("block1", "1", frames);
     assert_eq!(manifest["part"], "alku");
     assert_eq!(manifest["index_origin"], "boot");
     assert_eq!(manifest["anchor"], 404);
@@ -327,11 +371,51 @@ fn a_block_one_run_starts_at_alku_in_the_boots_numbering() {
     assert_eq!(manifest["music"]["start_order"], 0);
     assert_eq!(manifest["music"]["start_frame"], 404);
 
-    let frame = &manifest["frames"][0];
-    assert_eq!(frame["index"], 900, "the keyframe asked for");
-    assert_eq!(frame["part"], "alku");
+    let expected: &[(u32, &str, u16, u16)] = &[
+        (900, "alku", 320, 400),
+        (6007, "alku", 320, 400),
+        (6008, "u2a", 320, 200),
+        (6500, "u2a", 320, 200),
+        (6988, "u2a", 320, 200),
+        (7300, "u2a", 320, 200),
+        (7507, "u2a", 320, 200),
+        (7508, "pam", 320, 200),
+        (7618, "pam", 320, 200),
+        (7709, "pam", 320, 200),
+        (7710, "pam", 320, 200),
+        (7712, "pam", 320, 200),
+    ];
+    let dumped = manifest["frames"].as_array().unwrap();
+    assert_eq!(dumped.len(), expected.len(), "every asked-for frame was dumped");
+    for (frame, (index, part, width, height)) in dumped.iter().zip(expected) {
+        assert_eq!(frame["index"], *index);
+        assert_eq!(frame["part"], *part, "chain frame {index}");
+        assert_eq!(frame["width"], *width, "chain frame {index}'s width");
+        assert_eq!(frame["height"], *height, "chain frame {index}'s height");
+    }
+
+    // The music's positions at the boundary, the first gate and PAM's start are
+    // the traces' at the same boot index (the reference's own numbering, which
+    // the run shares). 6,988 is U2A's first gate (`U2A.C:238`: order > 10 and
+    // row > 46; `second1c` reads 11:47); 7,618 is its second, which the
+    // reference holds in `second1b` as 12:55 even though the port's U2A has
+    // already retired at its stream's end; 7,710 is PAM's measured first drawn
+    // frame (`reference-indices.md` §6.1, §6.4).
+    for index in [900u32, 6008, 6988, 7508, 7618, 7710] {
+        let (order, row) = block1_trace_position(index);
+        assert_eq!(
+            frame_position(dumped, index),
+            position_string((order, row)),
+            "chain frame {index}: the trace holds {order}:{row}"
+        );
+    }
+    assert_eq!(block1_trace_position(6_988), (11, 47), "U2A's first gate");
+    assert_eq!(block1_trace_position(7_618), (12, 55), "U2A's second gate");
+
+    // The dump names the run's numbering and wrote the files it claims.
     assert!(dir.join("alku_000900.idx").is_file(), "the dump wrote the frame it named");
     assert!(dir.join("alku_000900.rgb").is_file());
+    assert!(dir.join("pam_007710.rgb").is_file());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -395,23 +479,28 @@ fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_rol
     // (PLZPART's last) and 9,943 (MINVBALL's first) are the handoff; 12,537 is inside
     // RAYSCRL's gate and 12,546 is the tick its `musplus >= 0` confirmation opens on.
     //
-    // One run to chain 16,884 — tens of seconds in a debug build — and only the listed
-    // frames are written; the chain is not played to its end.
+    // One run to chain 17,721 — tens of seconds in a debug build — and only the listed
+    // frames are written; the chain is not played to U2E's 3,600-tick animation, which the
+    // part's own integration test owns.
     let (dir, manifest) = block_dump(
         "chain3",
         "3",
-        "681,2281,5581,8082,9942,9943,9944,9946,10482,12537,12546,12581,15081,16884",
+        "681,2281,5581,8082,9942,9943,9944,9946,10482,12537,12546,12581,15081,16884,\
+         17417,17418,17431,17440,17581,17600,17721",
     );
 
     // The run's numbering: block 3 begins at a part whose first drawn frame is a window, so
-    // the indices are the run's own and the manifest says so; the music is the block's own
-    // restart, MUSIC1 at order 42 with its clock starting with the run.
+    // the indices are the run's own and the manifest says so. The manifest's music is the
+    // player **last installed**: the mid-run restart at the U2E boundary (`MAIN/U2.ASM:880-885`)
+    // replaces the entry's MUSIC1@42 with MUSIC0@18, and the entry install is asserted by
+    // `a_block_three_run_starts_at_mntscrl_with_its_own_numbering`'s run, which stops long
+    // before the boundary.
     assert_eq!(manifest["part"], "mntscrl");
     assert_eq!(manifest["index_origin"], "part");
     assert_eq!(manifest["anchor"], serde_json::Value::Null);
-    assert_eq!(manifest["music"]["module"], "MUSIC1");
-    assert_eq!(manifest["music"]["start_order"], 42);
-    assert_eq!(manifest["music"]["start_frame"], 0);
+    assert_eq!(manifest["music"]["module"], "MUSIC0");
+    assert_eq!(manifest["music"]["start_order"], 18);
+    assert_eq!(manifest["music"]["start_frame"], 17_418);
 
     // Every part of the demo's block-3 plan appears, at the chain index above, with the
     // geometry the part's own note records: PLZPART's plasma is 320x400 and its vect screen
@@ -431,6 +520,16 @@ fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_rol
         (12581, "rayscrl", 320, 200),
         (15081, "3dsinfld", 320, 200),
         (16884, "jplogo", 320, 400),
+        // The U2E boundary. The port's JPLOGO hands over at 17,417/17,418,
+        // nine ticks before D34's reference-derived chain 17,427 (the measured
+        // seam; see the restart's assertions below).
+        (17417, "jplogo", 320, 400),
+        (17418, "u2e", 320, 200),
+        (17431, "u2e", 320, 200),
+        (17440, "u2e", 320, 200),
+        (17581, "u2e", 320, 200),
+        (17600, "u2e", 320, 200),
+        (17721, "u2e", 320, 200),
     ];
     let frames = manifest["frames"].as_array().unwrap();
     assert_eq!(frames.len(), expected.len(), "every asked-for frame was dumped");
@@ -497,6 +596,48 @@ fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_rol
         "RAYSCRL's gate opens on the trace's start position"
     );
     assert_eq!(block3_trace_position(12_962), (88, 0));
+
+    // **The mid-run restart at the U2E boundary** (`MAIN/U2.ASM:880-885`, D34).
+    // The part switch and its geometry are in the table above; what is left is the
+    // restarted player's own clock. The port starts U2E at chain **17,418**, nine
+    // ticks before D34's reference-derived chain 17,427: the port's parts hand over
+    // with no loader gap (D31 §3), and JPLOGO's end is the seam that accumulates the
+    // difference. The number is measured and recorded rather than fitted away.
+    //
+    // The fresh player is seeked to order 18 at the boundary, waits D34's four
+    // engine ticks, and publishes nothing while its ten-deep ring primes — 0:0 at
+    // the boundary and at D34's first-tick chain index 17,431 (where the restarted
+    // clock's first row advance lands: 17,418 + 4 waits + the row's own 8.76
+    // frames), and the first published row 18:1 at 17,440.
+    assert_eq!(frame_position(frames, 17_418), "0:0", "the restarted player's ring primes");
+    assert_eq!(frame_position(frames, 17_431), "0:0", "still priming at D34's first tick");
+    assert_eq!(frame_position(frames, 17_440), "18:1", "the restarted session's first row");
+    assert_eq!(manifest["music"]["start_frame"], 17_418, "the boundary the restart was installed at");
+
+    // **The restarted session against `second3e`.** D34 derives `second3e` as
+    // `second4`'s session shifted by 17,441–17,442 frames; at the chain's mapping
+    // (chain tick 0 = boot 419) a boot frame `B` is chain `B - 419`. The port's
+    // nine-tick lead at this seam is under one MUSIC0 row (speed 6, tempo 120:
+    // 8.76 frames), so the position at the mapped index is the trace's within one
+    // row — and the order, which is what U2E's gate reads, is exact. At 17,581
+    // (boot 18,000) the port reads 18:17 against `second3e`'s 18:16; at 17,600
+    // (18,019) 18:19 against 18:18; at 17,721 (18,140) 19:1 against the order-19
+    // boundary 19:0.
+    for index in [17_581u32, 17_600, 17_721] {
+        let boot = index + MNTSCRL_CHAIN_ORIGIN;
+        let (order, row) = block3_trace_position(boot);
+        let (port_order, port_row) = parse_position(&frame_position(frames, index));
+        assert_eq!(
+            port_order, order,
+            "chain frame {index}: the trace at boot {boot} is in order {order}"
+        );
+        assert!(
+            port_row.abs_diff(row) <= 1,
+            "chain frame {index}: the port publishes {port_order}:{port_row}, the trace \
+             {order}:{row} at boot {boot} — more than one row's lead is a shifted restart"
+        );
+    }
+    assert_eq!(block3_trace_position(18_140), (19, 0), "the trace's order-19 boundary");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
