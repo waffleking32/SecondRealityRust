@@ -266,7 +266,9 @@ pub struct Frame {
     /// ends a stream sets none, and holds 0; the original exits before drawing
     /// it.
     pub fov: u8,
-    /// The commands in file order. Empty in the END frame.
+    /// The commands in file order. Empty in every shipped END frame; a stream
+    /// that places commands before the terminator keeps them, as the original
+    /// applies them before `resetscene()`.
     pub ops: Vec<Op>,
     /// True only for the stream's terminating `0xFF 0xFF` frame, which is
     /// always the last one. An empty [`ops`](Frame::ops) does **not** mean

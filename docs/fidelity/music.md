@@ -1852,9 +1852,10 @@ A run reaches that clock in one of two ways, and the shell computes both from it
   from 404, four frames early. This is what the trace holds at 404…407 — a seek publishes
   nothing, so the position is the ring's priming — and it is why the port's first published
   row change is frame **426** against the trace's 427.
-- **After 408**, the run *pre-polls*: the frames between 408 and the run's first drawn frame
-  are polled at the run's start, because the music's advance is deterministic and does not
-  depend on a frame being drawn. The port's runs use this path: **`--part pam` pre-polls
+- **After the recipe's clock start** (block 1's 400, the restart recipes' 408), the run
+  *pre-polls*: the frames between it and the run's first drawn frame are polled at the run's
+  start, because the music's advance is deterministic and does not depend on a frame being
+  drawn. The port's runs use this path: **`--part pam` pre-polls
   7,310 frames** — it draws from its measured 7,710 anchor while block 1's clock starts at
   400 (`PAM_ANCHOR`, `MusicStart::pre`) — and **`--block 4` pre-polls 10** (U2E's derived
   anchor 418 against the restart recipes' 408; `shell::boot_anchor`, `MusicStart::for_part`).
