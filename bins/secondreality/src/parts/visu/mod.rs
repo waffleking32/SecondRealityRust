@@ -63,8 +63,8 @@ pub struct Instance {
     pub r0: Matrix,
     /// `co[a].on`: the last toggle the stream applied.
     pub on: bool,
-    /// `co[a].index`: the `.00N` number this entry was loaded from, `0` for
-    /// the camera (`U2A.C:183`, `:227-231`).
+    /// `co[a].index`: the `.00N` number this entry was loaded from
+    /// (`U2A.C:183`). The camera is `co[0]` (`U2A.C:202`) and keeps `0`.
     pub index: u16,
 }
 
@@ -109,61 +109,59 @@ impl Scene {
     /// (`U2A.C:351-356`). The parts draw before stepping
     /// (`U2A.C:318-336`).
     pub fn step_frame(&mut self) -> Option<u16> {
-        let Scene {
-            animation,
-            instances,
-            cam,
-            stream,
-            xit,
-            ..
-        } = self;
-        let Some(frame) = animation.frames.get(*stream) else {
-            // The reader always leaves the END frame last, and `xit` stops
-            // the loop before this; refusing to read past the list keeps a
-            // caller that ignores `xit` from panicking.
-            *xit = true;
-            return None;
-        };
-
-        for op in &frame.ops {
-            if let Some(on) = op.toggle {
-                if let Some(instance) = instances.get_mut(op.object) {
-                    instance.on = on;
-                }
-            }
-            let target = if op.object == 0 {
-                &mut *cam
-            } else if let Some(instance) = instances.get_mut(op.object) {
-                &mut instance.r0
-            } else {
-                continue;
+        {
+            let Scene {
+                animation,
+                instances,
+                cam,
+                stream,
+                xit,
+                ..
+            } = self;
+            let Some(frame) = animation.frames.get(*stream) else {
+                // The reader always leaves the END frame last, and `xit`
+                // stops the loop before this; refusing to read past the list
+                // keeps a caller that ignores `xit` from panicking.
+                *xit = true;
+                return None;
             };
-            target.x = target.x.wrapping_add(op.dx);
-            target.y = target.y.wrapping_add(op.dy);
-            target.z = target.z.wrapping_add(op.dz);
-            for (entry, delta) in target.m.iter_mut().zip(op.dm.iter()) {
-                if let Some(delta) = delta {
-                    *entry = entry.wrapping_add(*delta);
+
+            for op in &frame.ops {
+                if let Some(on) = op.toggle {
+                    if let Some(instance) = instances.get_mut(op.object) {
+                        instance.on = on;
+                    }
+                }
+                let target = if op.object == 0 {
+                    &mut *cam
+                } else if let Some(instance) = instances.get_mut(op.object) {
+                    &mut instance.r0
+                } else {
+                    continue;
+                };
+                target.x = target.x.wrapping_add(op.dx);
+                target.y = target.y.wrapping_add(op.dy);
+                target.z = target.z.wrapping_add(op.dz);
+                for (entry, delta) in target.m.iter_mut().zip(op.dm.iter()) {
+                    if let Some(delta) = delta {
+                        *entry = entry.wrapping_add(*delta);
+                    }
                 }
             }
-        }
 
-        if frame.end {
-            // `resetscene(); xit=1` (`U2A.C:351-355`): the reset also rewinds
-            // `sp` (`:77`).
-            for instance in instances.iter_mut() {
-                instance.r = Matrix::default();
-                instance.r0 = Matrix::default();
+            if !frame.end {
+                let angle = u16::from(frame.fov) << 8;
+                *stream += 1;
+                return Some(angle);
             }
-            *cam = Matrix::default();
-            *stream = 0;
-            *xit = true;
-            return None;
         }
 
-        let angle = u16::from(frame.fov) << 8;
-        *stream += 1;
-        Some(angle)
+        // `resetscene(); xit=1` (`U2A.C:351-355`): the reset also rewinds `sp`
+        // (`:77`). The field borrows above end here, so the END frame can use
+        // the same reset as the rest of the scene.
+        self.reset();
+        self.xit = true;
+        None
     }
 }
 
@@ -297,8 +295,7 @@ pub struct Ring {
     repeat: i32,
     /// The original increments this every copper tick and the shipped parts
     /// never read it; U2E's skipped first draw resets it (`U2A.C:97`, `:117`,
-    /// `U2E.C:433`).
-    #[allow(dead_code)]
+    /// `U2E.C:433`). The module-wide dead-code allow covers the field.
     coppercnt: i32,
     deadlock: i32,
     displayed_page: usize,
@@ -452,6 +449,13 @@ pub struct Driver {
 impl Driver {
     /// A driver with both parts' window `vid_window(0,319,25,174,512,
     /// 9999999)` (`U2A.C:247`, `U2E.C:351`), fov 0 and the chosen ring.
+    ///
+    /// The window's x range is fixed in practice: `math::camera_angle` takes
+    /// its half-width from the constant `HALF_WIDTH = 160`, which is the
+    /// shipped `clip_x[1] - add_x` (`math.rs:40-47`), because its signature
+    /// has no `Projection`. Overriding `proj` with a different x range is
+    /// unsupported; supporting one needs `camera_angle` to compute
+    /// `clip_x[1] - add_x` from the projection.
     pub fn new(ring: Ring, first_draw: bool) -> Driver {
         Driver {
             ring,
@@ -464,20 +468,23 @@ impl Driver {
     /// The loop body of `U2A.C:284-324` / `U2E.C:386-433`: clear the page,
     /// order the enabled objects and draw them.
     pub fn draw_frame(&mut self, scene: &mut Scene, page: &mut Page<'_>, clear: Clear<'_>) {
-        // `vid_cameraangle(fov)` (`U2A.C:287`, `U2E.C:397`), with the
-        // `AVIDM1.ASM` aspect both parts install.
-        let (mul_x, mul_y) = camera_angle(self.fov, ASPECT);
-        self.proj.mul_x = mul_x;
-        self.proj.mul_y = mul_y;
-
         if self.first_draw {
             // U2E's `if(!firstframe) ... else { syncframe=0; firstframe=0;
-            // coppercnt=1; }` (`U2E.C:386-387`, `:433`): no clear, no draw.
+            // coppercnt=1; }` (`U2E.C:386-387`, `:433`): no camera angle, no
+            // clear, no draw. The next draw runs `vid_cameraangle`
+            // (`U2E.C:394-397`).
             self.ring.syncframe = 0;
             self.ring.coppercnt = 1;
             self.first_draw = false;
             return;
         }
+
+        // `vid_cameraangle(fov)` (`U2A.C:287`, `U2E.C:397`), with the
+        // `AVIDM1.ASM` aspect both parts install and the shipped window's
+        // fixed `HALF_WIDTH` (see [`Driver::new`]).
+        let (mul_x, mul_y) = camera_angle(self.fov, ASPECT);
+        self.proj.mul_x = mul_x;
+        self.proj.mul_y = mul_y;
 
         match clear {
             Clear::Background(background) => {
@@ -1337,7 +1344,8 @@ mod tests {
         // one of U2A.002's projected vertices is above `clip_y[0] = 25` when
         // frame 16 turns it on, so `calc_project`'s AND is VF_UP and
         // `vis_drawobject` returns before the list (`VISU.C:111-112`). The
-        // stream's `dy = -575`-a-frame descent clears the cull at frame 22.
+        // stream's negative `dy` deltas descend it into the window only at
+        // frame 22: frames 16..=21 draw nothing and frame 22 draws.
         let mut scene = load_scene(Path::new(SCENE_DIR), "U2A").unwrap();
         let background = load_path(Path::new(BACKGROUND)).unwrap();
         let mut pixels = vec![0u8; 320 * 200];
@@ -1357,10 +1365,16 @@ mod tests {
         draw(&mut scene, &mut driver, &mut pixels);
         assert_eq!(pixels, background.pixels());
 
-        for _ in 0..6 {
+        // Frames 17..=21 still leave every projected vertex above the window.
+        for _ in 0..5 {
             driver.fov = scene.step_frame().unwrap();
             draw(&mut scene, &mut driver, &mut pixels);
+            assert_eq!(pixels, background.pixels());
         }
+
+        // Frame 22's descent is the first one the cull lets through.
+        driver.fov = scene.step_frame().unwrap();
+        draw(&mut scene, &mut driver, &mut pixels);
         let drawn = pixels
             .iter()
             .zip(background.pixels())
