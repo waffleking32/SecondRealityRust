@@ -1854,15 +1854,19 @@ A run reaches that clock in one of two ways, and the shell computes both from it
   row change is frame **426** against the trace's 427.
 - **After 408**, the run *pre-polls*: the frames between 408 and the run's first drawn frame
   are polled at the run's start, because the music's advance is deterministic and does not
-  depend on a frame being drawn. `SECOND 3` is the case — MNTSCRL's first graphics frame is in
-  (415, 420] while the music starts at 408 — and no run the port can make today is one:
-  `MusicStart::pre` is `anchor - 408` and exists only for an anchor *after* 408, while
-  `shell::boot_anchor` answers `Some(404)` (which waits) or `None` (`pre` 0). **The largest
-  catch-up any run can have today is zero**, and the `3` elsewhere in this note is A12's
-  *placement* tolerance, a different number. (If one ever runs, a catch-up longer than the
-  ring's 8192 samples would have its oldest samples dropped rather than saved — the ring's
-  overflow policy, the same one an undrained device meets — so a pre-polled run with
-  `--audio-dump` would begin slightly clipped.)
+  depend on a frame being drawn. The port's runs use this path: **`--part pam` pre-polls
+  7,310 frames** — it draws from its measured 7,710 anchor while block 1's clock starts at
+  400 (`PAM_ANCHOR`, `MusicStart::pre`) — and **`--block 4` pre-polls 10** (U2E's derived
+  anchor 418 against the restart recipes' 408; `shell::boot_anchor`, `MusicStart::for_part`).
+  `MusicStart::pre` is `anchor - start_frame` and exists only for an anchor *after* the
+  start. **What is not modelled is the boot's own 396→408 transient**: the modules' speed
+  and tempo words change at 396 (the boot's initial `restartmus`) and at 408 (the block's
+  restart) with zero ticks between, and the port installs the module once at the frame it is
+  aligned to. The `3` elsewhere in this note is A12's *placement* tolerance, a different
+  number. (A catch-up longer than the ring's 8192 samples has its oldest samples dropped
+  rather than saved — the ring's overflow policy, the same one an undrained device meets — so
+  a pre-polled run with `--audio-dump` begins slightly clipped; PAM's 7,310 polls are such a
+  run.)
 - A run whose numbering is **its own** has no reference frame to synchronise to, so its music
   starts with it, on its frame 0. `--part beglogo` and `--part endlogo` are *not* that case —
   both parts carry measured anchors (`shell::boot_anchor`), so those runs wait for 408 exactly
@@ -1911,11 +1915,16 @@ parts call (`DIS/DIS.H:37-59`) hand back a sync code (`dis_muscode`, `dis_musplu
 `dis_sync`), the published row (`dis_musrow`) and the tick counter (`_dis_getmframe`,
 `_dis_setmframe`) — **none of them returns `_np_speed` or `_np_tempo`**, and neither does any
 `DIS` wrapper in the tree. `MusicPosition::speed` and `::tempo` are the port's own, for the
-status line and the manifest, which the shell reads **and no part reads today** — the method is
-on the part-facing `Music` trait, so a part *can* read the two words; what the demo's parts do
-is ask for the six `dis_*` answers, and no ported part calls the music at all yet (ENDLOGO's
-gate is Task 8's, and it waits on `dis_musplus`). So the difference is visible to a reader of
-the status line and of `Player::state`, and to a part only if one ever asks for the port's own
+status line and the manifest, which the shell reads **and no part reads** — the method is
+on the part-facing `Music` trait, so a part *can* read the two words, but the demo's parts
+ask for the six `dis_*` answers and the published position instead. The ported parts do call
+the music: U2A and U2E read `position()` in their gates every tick
+(`parts/u2a.rs:251`, `parts/u2e.rs:309`;
+`the_gate_holds_until_the_scripted_cue_and_exits_on_request`,
+`tests/u2e.rs`'s `the_block_four_clock_reaches_order_19_at_698`), ENDLOGO waits on
+`dis_musplus`, and PAM, MNTSCRL, LNS&ZOOM and the rest read their `dis_*` cues — but **none
+of them reads `speed` or `tempo`**. So the difference is visible to a reader of the status
+line and of `Player::state`, and to a part only if one ever asks for the port's own
 extension.
 
 ### Where the samples go: the device, the dump, and the status line

@@ -38,8 +38,11 @@
 //! `U2E.C:397`), so [`Frame::fov`] is its high byte and a consumer reconstructs
 //! the angle as `u16::from(fov) << 8`. `0xFF 0xFF` ends the stream: the
 //! original calls `resetscene()` and sets its exit flag (`U2A.C:351-355`).
-//! The frame it terminates carries `end: true`, `fov: 0` and no commands; an
-//! empty command list alone does not mean END, because U2A frames 1..=15 and
+//! The frame it terminates carries `end: true`, `fov: 0` and whatever commands
+//! the stream places before the terminator — which every shipped stream leaves
+//! empty, because `READVUE.C` writes `0xFF 0xFF` directly after a frame's
+//! `0xFF fov`; an empty command list alone does not mean END, because U2A
+//! frames 1..=15 and
 //! 30 of U2E's drawable frames are legitimately commandless. A command is one
 //! byte, optionally extended by a `0xC0`-flagged byte carrying the object's
 //! high six bits; its low nibble is the object number and its bits 6..7 toggle
@@ -267,7 +270,10 @@ pub struct Frame {
     pub ops: Vec<Op>,
     /// True only for the stream's terminating `0xFF 0xFF` frame, which is
     /// always the last one. An empty [`ops`](Frame::ops) does **not** mean
-    /// END: many drawable frames carry no commands.
+    /// END: many drawable frames carry no commands. The END frame keeps the
+    /// commands the stream places before the terminator (the original applies
+    /// them, then `resetscene()` clears the scene); every shipped stream gives
+    /// it none.
     pub end: bool,
 }
 
@@ -367,12 +373,16 @@ pub fn read_animation(bytes: &[u8], conum: usize) -> Result<Animation, AssetErro
                 }
                 if next == 0xFF {
                     // resetscene() and xit in the original; the stream ends
-                    // and this frame is never drawn. READVUE.C:253-254 writes
-                    // it with no commands.
+                    // and this frame is never drawn. The commands the stream
+                    // places before the terminator are kept: the original
+                    // applies them and then `resetscene()` clears the scene
+                    // (`U2A.C:343-361`, `:351-355`). READVUE.C writes the
+                    // terminator directly after a frame's `0xFF fov`, so every
+                    // shipped END frame carries none.
                     frames.push(Frame {
                         fov: 0,
                         end: true,
-                        ops: Vec::new(),
+                        ops,
                     });
                     return Ok(Animation { frames });
                 }

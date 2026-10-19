@@ -311,11 +311,16 @@ pub fn music_start_frame_for(part: &str) -> u32 {
 ///   `--part testcard`) has no reference frame to synchronise to: its music starts with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MusicStart {
-    /// The run frame the music is **aligned to**: for an entry install
-    /// ([`new`](MusicStart::new), [`for_part`](MusicStart::for_part)) the clock's start in
-    /// the run's numbering; for a restart ([`restart`](MusicStart::restart)) its boundary,
-    /// with the clock beginning [`waiting`](MusicStart::waiting) frames later. The
-    /// manifest's `start_frame` is this same word.
+    /// The run frame the music is **aligned to**. For a waiting entry
+    /// ([`new`](MusicStart::new), [`for_part`](MusicStart::for_part) with an
+    /// anchor at or before the start) it is the clock's start; for a
+    /// **pre-polled** entry (an anchor after it — block 4 is 418 against the
+    /// clock's 408) it is the run's first drawn frame, and the frames in
+    /// between are polled at the run's start
+    /// ([`pre`](MusicStart::pre)); for a restart
+    /// ([`restart`](MusicStart::restart)) it is the boundary, with the clock
+    /// beginning [`waiting`](MusicStart::waiting) frames later. The manifest's
+    /// `start_frame` is this same word.
     pub frame: u32,
     /// Polls the engine makes before the music advances: the frames between the run's
     /// first drawn frame and the music's start (for a restart, between the boundary it was

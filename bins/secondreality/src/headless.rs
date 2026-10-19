@@ -378,9 +378,10 @@ struct MusicSetup<'a> {
     /// mid-run restart's.
     start_order: u8,
     /// The run frame, in this manifest's own numbering, the music is **aligned to**
-    /// ([`shell::MusicStart`](crate::shell::MusicStart)): the clock's start for an entry
-    /// install, and a mid-run restart's boundary — whose clock begins
-    /// `MusicStart::waiting` frames later.
+    /// ([`shell::MusicStart`](crate::shell::MusicStart)): for a waiting entry the clock's
+    /// start; for a pre-polled entry (block 4: 418 while the clock starts at 408) the
+    /// run's first drawn frame, with the intervening frames pre-polled; and for a mid-run
+    /// restart its boundary, whose clock begins `MusicStart::waiting` frames later.
     start_frame: u32,
 }
 

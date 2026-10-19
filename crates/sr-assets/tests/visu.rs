@@ -218,6 +218,29 @@ fn a_0xff_byte_that_is_not_a_terminator_falls_through_as_a_command() {
     assert!(animation.frames[1].end);
 }
 
+/// The END frame keeps the commands the stream places before its terminator:
+/// the original applies them and then `resetscene()` clears the scene
+/// (`U2A.C:343-361`, `:351-355`). Every shipped stream gives it none —
+/// `READVUE.C` writes `0xFF 0xFF` straight after a frame's `0xFF fov` — so the
+/// case is built by hand: `0x80` is "object 0 on" before the terminator.
+#[test]
+fn the_end_frame_keeps_the_commands_the_stream_places_before_the_terminator() {
+    let animation = read_animation(&[0xFF, 0x22, 0x80, 0xFF, 0xFF], 1).unwrap();
+
+    assert_eq!(animation.frames.len(), 2);
+    assert!(!animation.frames[0].end);
+    assert!(animation.frames[0].ops.is_empty());
+    assert!(animation.frames[1].end);
+    assert_eq!(animation.frames[1].fov, 0, "the END frame has no fov");
+    assert_eq!(
+        animation.frames[1].ops.len(),
+        1,
+        "the command before the terminator is kept"
+    );
+    assert_eq!(animation.frames[1].ops[0].object, 0);
+    assert_eq!(animation.frames[1].ops[0].toggle, Some(true));
+}
+
 #[test]
 fn the_scene_lists_name_scene_one_and_stop_at_their_sentinel() {
     for name in ["U2A.0AA", "U2E.0AA"] {

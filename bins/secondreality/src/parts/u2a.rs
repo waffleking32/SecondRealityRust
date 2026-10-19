@@ -346,8 +346,12 @@ impl U2a {
         }
     }
 
-    /// `U2A.C:432-441`: slot 2 removed, all four pages cleared with the
-    /// background, the display left on the last cleared page.
+    /// `U2A.C:432-441`: slot 2 removed and all four pages cleared with the
+    /// background. The source's `vid_setswitch(3,-1)` names page 3 as the
+    /// **draw** page and leaves CRTC 0x0C (the display start) unchanged, so it
+    /// never re-points the display; the port's page-3 origin is its own
+    /// teardown ruling, and every page holds the same cleared background, so
+    /// the choice is unobservable.
     fn teardown(&mut self, ctx: &mut PartCtx) {
         // The source removes slot 2 (`dis_setcopper(2,NULL)`); the port
         // installs no-ops in all three, the way `PAM` retires its copper, so
@@ -896,7 +900,7 @@ mod tests {
         }
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32, "the last cleared page");
         assert_eq!(rig.palette, part.merged_palette, "the DAC keeps the merged palette");
-        for slot in 0..3 {
+        for slot in 0..COPPER_SLOTS {
             assert!(rig.copper.is_set(slot), "slot {slot} holds a no-op");
         }
         // The no-ops do nothing: a finished part's screen holds.

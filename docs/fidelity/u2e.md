@@ -97,7 +97,8 @@ The measured milestones (`cargo xtask reference capture --arg 4 --boot autoexec
 
 | boot | screen | source |
 |---|---|---|
-| 420–466 | flat black, one colour, `ea0787f6…` — the loader | `out/u2e-dense-a`, `-b` |
+| 420–450 | flat black, one colour, `ea0787f6…` — the loader | `out/u2e-start`, `-b` (the grid's 420/430/440/450) |
+| 456–466 | the same flat black | `out/u2e-dense-a`, `-b` |
 | 467–473 | the band, `6eb4e4cd…`: 185 white at x 68..252 and 135 black in every row (37,000 white, 27,000 black) | `out/u2e-dense-a`, `-b` |
 | 480, 490, 500 | the fade-out: the band's top/bottom (index 252) dims and the middle sides (index 254) brighten; at 490 entry 252 = 53 (215) and entry 254 = 10 (40), at 500 33 (134) and 30 (121) | `out/u2e-start`, `-b` |
 | 530, 590, 660 | the post-fade hold, `befaf38a…`: two colours, mean 191.25 — rows 25..174 white, the rest black | `out/b4b-u2e-sweep2`; `reference-indices.md` §18.6 ties it to a `SECOND 3` boot's 18000/18100 |
@@ -210,7 +211,9 @@ cargo run --release --bin secondreality -- --block 4 --headless \
 ```
 
 The run's manifest says `part: "u2e"`, `index_origin: "boot"`, `anchor: 418`,
-320x200, `MUSIC0` order 18 starting at 408 with the run pre-polled to 418. The
+320x200, `MUSIC0` order 18 aligned to the run's **418** (`start_frame`; the
+clock itself starts at 408, and the ten frames 408..=417 are pre-polled at the
+run's start). The
 port's published positions are `19:34` at 1000, `20:39` at 1600, `22:25` at
 2600 and `24:11` at 3600; `second4` reads `19:34`, `20:38`, `22:25` and
 `24:11` — 1600 sits on a row boundary within a frame, the D17 session class.
@@ -338,6 +341,13 @@ cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter
     --out out/u2e-dense-a
 cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" \
     --cycles 30000 --frames 420,430,440,450,460,470,480,490,500 --out out/u2e-start
+# the hold session the 530/590/660 comparisons use (`reference-indices.md` §18.2):
+cargo xtask reference capture --arg 4 --boot autoexec --keys "KBD_left KBD_enter" \
+    --cycles 30000 \
+    --frames 430,480,530,590,660,760,850,950,3100,3200,3400,3700,3900,3950,4050,4100,4200,4400,4600,4800 \
+    --out out/b4b-u2e-sweep2
+# §18.2 records this run as exit 2, refused at 4400 (320×400 there): the frames through
+# 4200 were written, and 530/590/660 are the hold compared above.
 ```
 
 **The older sweep session's hold is a reference anomaly.** `out/b4b-u2e-sweep`'s
