@@ -13,14 +13,24 @@ Phase status board. **Read this first if you are resuming work.**
 | 1 | Assets & references | **done** | [01-assets.md](docs/plans/01-assets.md) | `phase-1` |
 | 2 | Shell + easy tier | **done** — BEGLOGO and ENDLOGO frame-diff-identical (exit 0, every keyframe, both planes byte-identical); TUNNELI, CRED and ENDSCRL play, each residual measured and attributed (exit 1, A6/A10/A11); `--block 5` sequences them. Evidence below | [02-shell.md](docs/plans/02-shell.md) | `phase-2` |
 | 3 | Music engine | **done** — all four exit criteria met: both modules play end-to-end, the `(order, row)` cue matches a per-frame trace of the original's own player state, `_np_zinfo` is deferred with D8's record and the substitute cue named, and `dis_getmframe`'s rate is measured. ENDLOGO's gate is the source's own loop, its four keyframes exit 0 / 0.0000 % / both planes byte-identical under both `--block 5` and `--part endlogo`, and the suite holds (802 tests at the close-out, 806 after the final review's fix wave). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed. The user has listened via `--audio-dump` and reports the music sounds right; their real-device skips are the VM's audio path (the same WAV is perfect on the host), not the port | [03-music.md](docs/plans/03-music.md) | `phase-3` |
-| 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stops at U2A and block 3 at LNS&ZOOM; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part`. Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
-| 5 | Mid tier | **done** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stops at U2E, block 2 still at GLENZ and block 1 at U2A. Evidence below. The final whole-branch review ran (fable, `e4f467e..7dae540`): **With fixes** — 0 Critical / 3 Important / 8 Minor — its findings are applied in `96ff6cc` and the scoped re-review is clean; **the tag is applied at this commit** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | `phase-5` |
-| 6 | Vector engine | not started | — | — |
+| 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stopped at U2A and block 3 at LNS&ZOOM at this phase's close; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part` (closed by Phase 6, which ports U2A and U2E: block 1 now stops at GLENZ and block 3 runs through U2E into the end sequence). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
+| 5 | Mid tier | **done** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 then ran MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stopped at U2E, block 2 still at GLENZ and block 1 at U2A (closed by Phase 6: block 1 now stops at GLENZ and block 3 runs through U2E into ENDLOGO → CRED → ENDSCRL). Evidence below. The final whole-branch review ran (fable, `e4f467e..7dae540`): **With fixes** — 0 Critical / 3 Important / 8 Minor — its findings are applied in `96ff6cc` and the scoped re-review is clean; **the tag is applied at this commit** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | `phase-5` |
+| 6 | Vector engine | **complete — untagged** — spec §10's U2A and U2E verified against their references with every residual registered and measured: U2A's 6500 and 7640 keyframes compare at 0 and 7300 is A28 (426 px at the reference's own state 294, the release-vs-tree Gouraud difference) + A29 (1098 px at the port's boot index, session phase); U2E's intro is byte-exact at nine indices and its four keyframes are A30 (189/7,118/231/1,177 at the reference's own state) + A31 (11,006/11,805/17,278/16,234 at K, the four-tick session phase). The mid-run MUSIC0@18 restart is measured at chain 17,418 against D34's derived 17,427 (the gapless-handover seam) and waits 4; the ESC drain (`Part::drains_after_exit`) and the sound card's follow seam are in. Three new traces (`second1c`, `second4`, `second3e`). Evidence below. The tag is withheld until the whole-branch final review is clean | [06-vector-engine.md](docs/plans/06-vector-engine.md) | — (withheld until the final review) |
 | 7 | GLENZ | not started | — | — |
 | 8 | Vault | not started | — | — |
 | 9 | Assembly & fidelity pass | not started | — | — |
 
 ## Where to pick up
+
+**Phase 6 (vector engine) is complete — untagged, awaiting the whole-branch final review** on
+`phase-6-vector-engine`. Its exit criterion (spec §10 — U2A and U2E verified) is met: every
+reference comparison is recorded below, the divergences are registered (A28–A31) rather than
+fitted, and the phase's carried debt is closed. The tag is deliberately withheld until the
+whole-branch review is clean (Phase 1/2/3/4's practice). Its plan is
+`docs/plans/06-vector-engine.md`, its per-task ledger (git-ignored scratch) is
+`.superpowers/sdd/06-vector-engine/progress.md`, its notes are `docs/fidelity/{u2a,u2e}.md`,
+and its decisions are **D32–D35** (with D24, D25, D29 and D17 binding). The branch starts at
+`phase-5` (`8b1b99a`).
 
 **Phase 5 (mid tier) is done, tagged `phase-5` at this commit, on `phase-5-mid-tier`.** Its exit
 criterion (spec §10 — PLZPART, TECHNO, LENS, PANIC, JPLOGO, COMAN verified) is met, every
@@ -183,7 +193,7 @@ index.) Held/moving is measured per keyframe, not assumed from the part (§1.4).
 |---|---|---|---|---|
 | BEGLOGO | `SECOND 2`, 320×400 Mode X | 430, 470, 560, 900 | 430 and 900 held; 470/560 moving — a palette fade over the held picture | **exit 0, identical, 0.0000 %, offsets `{0: 4}`**; 900 byte-identical in five sessions |
 | ALKU | `SECOND 1`, 320×400, 176-byte rows, RGB only | 900, 1719, 2719, 5859 | 900/1719/2719 held; 5859 moving — the part's own 1 px-per-9-frames pan | exit 1, `mode: rgb`: three held frames 0.0000 % at offset 0; 5859 differs by a whole number of pan pixels (15.2797 % at offset 0, **0 px of 95,700 after the shift**). No tolerance added (§4.4) |
-| U2A | `SECOND 1`, 320×200 | 6500, 7300, 7640 | 6500/7640 held; 7300 moving | exit 0, identical, 0.0000 %, offsets `{0: 3}` |
+| U2A | `SECOND 1`, 320×200 | 6500, 7300, 7640 | 6500/7640 held; 7300 moving | exit 0, identical, 0.0000 %, offsets `{0: 3}` — this is the reference re-captured, not the port. **Phase 6's port comparison**: 6500 and 7640 **0 differing**; 7300 **1098** pixels at the port's boot index (**A29**, the keyframe capture is a third session) and **426** at the reference's own stream state 294 (**A28**, the release-vs-tree Gouraud difference) |
 | PAM | `SECOND 1`, 320×200 | 7710, 7760, 7830, 7900 | 7830/7900 held; 7710/7760 moving | exit 0, identical, 0.0000 %, offsets `{0: 4}` |
 | GLENZ | `SECOND 2`, 320×200, 92-byte plane row | 1499, 2300, 3000, 3400 | 1499 held (palette cycles); 2300/3000/3400 moving | exit 1, `mode: mixed`: 1499 identical at offset 0; the three moving frames are the largest-support pictures and are **byte-identical at offset 0** against the review's independent partner. **3000 and 3400: no settled content** (§1.8) |
 | TUNNELI | `SECOND 2`, 320×200, RGB only | 3800, 4200, 4500, 4600 | all four moving | exit 1, `mode: rgb`: 3800/4200/4500 identical 0.0000 % at offset 0; 4600 0.0891 % (57 px). **4500 and 4600: no settled content** |
@@ -198,7 +208,7 @@ index.) Held/moving is measured per keyframe, not assumed from the part (§1.4).
 | RAYSCRL | `SECOND 3`, 320×200 Mode 13h | 13000, 13500, 14000, 14500 | 13500 held; the rest moving | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions and the reviewer's; **4/4 (100 %)** — the cleanest row in the tree |
 | 3DSINFLD | `SECOND 3`, 320×200, 80-byte plane rows, RGB only | 15500, 16000, 16500, 16800 | all four moving, in **two-frame steps** | **exit 0, identical, 0.0000 %** against two sessions; exit 1 against one two steps out of phase (38.90 %/41.79 %). Census 3/3, 3/3, 3/4, 2/3 — **all four settled** after the fix round re-filed 16500 and 16800 |
 | JPLOGO | `SECOND 3`, 320×400 Mode X, RGB only | 17300, 17500, 17700 | all three held *within* a session, but the held bytes differ between sessions | exit 1, `mode: rgb`: 17300 0.0000 % in all four sessions; 17500 0.0000 % in two (2/4 = 50 %) and 39.4–41.4 % in the other two; 17700 40.19 % against two and 27.4–29.6 % against the others. **17700: settled as a state, unfiled as a file** — the state two sessions hold was not drawn by any of seven re-capture probes |
-| U2E | `SECOND 4` (and `SECOND 3`, other indices), 320×200 | 1000, 1600, 2600, 3600 | all four moving; the buffer rotation is not a fixed period | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent session; exit 1 against the three census sessions, each missing one keyframe by 55.5–60.8 % (a phase group, not a different screen). Census 4/4, 3/4, 3/4, 3/4 — every keyframe settled |
+| U2E | `SECOND 4` (and `SECOND 3`, other indices), 320×200 | 1000, 1600, 2600, 3600 | all four moving; the buffer rotation is not a fixed period | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against the reviewer's independent session; exit 1 against the three census sessions, each missing one keyframe by 55.5–60.8 % (a phase group, not a different screen). Census 4/4, 3/4, 3/4, 3/4 — every keyframe settled. This is the reviewer's session, not the port: **Phase 6's port** reproduces the intro at **0 differing** at nine indices, and the four keyframes are **11,006 / 11,805 / 17,278 / 16,234** at K (**A31**, the four-tick session phase) and **189 / 7,118 / 231 / 1,177** at the reference's own state (**A30**, the release-vs-tree Gouraud difference) |
 | ENDLOGO | `SECOND 5`, 320×400 Mode X | 430, 500, 900, 1180 | 430/900 held; 500/1180 moving — palette fades over the held picture | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions; **4/4 (100 %)**. Only 900 is index-compared (no session holds a 430 `.idx`) |
 | CRED | `SECOND 5`, 320×200, 160-byte plane rows | 1440, 3240, 5440, 7640, 8740 | all five held | **exit 0, identical, 0.0000 %, offsets `{0: 5}`** against three sessions; **4/4 (100 %)**; all 82 frames RGB-only — the *coherence* check, not a stride and not a mode (§20.2) |
 | ENDSCRL | `SECOND 5`, **non-looping**, 640×400 mode 0eh 16-colour | 9100, 10000, 12000, 14000 | all four moving — the 401-line ring scrolls a line per two vblanks | **exit 0, identical, 0.0000 %, offsets `{0: 4}`** against three sessions. Its census is an **offset-0 count**, not a window count — see the caveat below: **9/9 at 9100, 5/5** at the rest |
@@ -2445,6 +2455,120 @@ corpus), whose D19 amendment is due in that same pass. None of the three changes
 record asserts.
 
 **The tag is applied at this commit**, per Phase 1/2/3/4's practice.
+
+### Phase 6's evidence (close-out, Task 9, 2026-10-19)
+
+**Exit criterion (spec §10): U2A and U2E verified.** Both are, with every residual registered
+and measured. Every number below was re-run at the committed state (`7df0baa`, branch
+`phase-6-vector-engine`); this close-out's own commit adds records only, so the code and assets
+the commands ran against are the phase's tip. The blocks are pastes of those runs: `(…)` marks
+an elision, and an `exit:` line is the shell's reading of a command's exit code rather than a
+line of its output. A number that appears in the prose but not in a command block is a value a
+**named test** asserts, and the sentence says which test (D25).
+
+| part | reference comparison | planes compared | the verdict |
+|---|---|---|---|
+| U2A | 6500, 7300, 7640 | 6500 RGB only (no reference `.idx`); 7300 and 7640 `.idx` + RGB | **0 / 64,000** at 6500 and 7640; 7300 **1098 / 64,000** (1.7156 %) at the port's boot index — **A29**, the keyframe capture is a third session — and **426 / 64,000** (0.6656 %) at the reference's own stream state 294 — **A28**, the release-vs-tree Gouraud difference; the silhouette and the flat object are exact |
+| U2E | intro 460, 467, 470, 480, 490, 500, 530, 590, 660; keyframes 1000, 1600, 2600, 3600 | RGB only (no `.idx` is filed; the part writes CRTC 0x0C every retrace) | the intro is **0 differing at all nine indices**; the four keyframes are **11,006 / 11,805 / 17,278 / 16,234** at K (17.1969 / 18.4453 / 26.9969 / 25.3656 %) — **A31**, the four-tick session phase — and **189 / 7,118 / 231 / 1,177** at the reference's own state (0.2953 / 11.1219 / 0.3609 / 1.8391 %) — **A30**, the Gouraud difference; the silhouettes are exact |
+
+**The phase's own measurements.** The U2A gate-1 frame **6988** is `second1c`'s first order-11
+row-47 frame; the port's block-1 clock matches `second1` and opens at boot **6986** (the
+keyframe capture is a third session). Gate 2 is **7618** in `second1b` and is dead in the
+shipped stream (the END arrives first). U2E's gate is **699** in `second4`; the port's clock
+reaches order 19 at **698**. Its run anchor is the derived **418** — the first visible frame
+**467** less the 49 pre-visible waits — calibrated by
+`the_fadeset_lands_on_tick_49_and_paints_the_measured_band` and pinned in the shell by
+`u2e_runs_are_numbered_from_their_derived_intro_anchor`. The mid-run `MUSIC0@18` restart waits
+D34's **4** ticks; block 3's measured U2E boundary is chain **17,418** (JPLOGO's last frame is
+17,417), nine frames before D34's derived **17,427**, and the nine are the port's gapless part
+handover (D31 §3), not the restart: the new player's first row advance lands at 17,431, the
+ring first publishes **18:1** at **17,440**, and against `second3e` at the mapping-derived
+indices the positions are within one MUSIC0 row — **18:17/18:16** at 17,581, **18:19/18:18** at
+17,600 and **19:1/19:0** at 17,721 (the `tests/shell.rs` chain test asserts all of them).
+Block 1's chain hands over ALKU→U2A at **6,007/6,008**, draws U2A's gate at **6,988**, retires
+U2A at **7,507/7,508** and reaches PAM at **7,710** (the same test).
+
+**The three new traces and the reference tree.** `second1c` (5900..7599), `second4`
+(500..4399) and `second3e` (18000..21999) join the filed set; `cargo xtask reference verify
+--tree reference` reports **39 capture(s), 125 file(s)**, exit 0, and the trace model is pinned
+by `cargo test -p sr-audio --test trace` (5 tests; the two restart traces align at phase
+**+1**: `second4` agrees on **3,822 of 3,892** frames (98.201 %), `second3e` on **3,857 of
+3,992** (96.618 %)). `second3e` is the restart's own session: it holds `second4`'s
+session shifted by **17,441–17,442 frames**, which is what verifies D34's four-tick wait.
+
+**The decisions and the register.** D32 (the renderer's home) held as written; D33's tick
+models and anchor shipped; D34's restart shipped and its measured seam is recorded; D35 records
+the two shell seams the restart needed — `Part::drains_after_exit` (default `false`, U2E
+`true`) and the swappable audio drain player (`Device::follow`), whose seam tests are
+`a_runner_keeps_ticking_a_part_that_drains_after_exit`,
+`a_part_that_drains_after_exit_keeps_ticking_until_it_finishes`,
+`a_part_that_does_not_drain_retires_on_the_exit_tick`,
+`a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown` and
+`the_drain_follows_a_restart_to_the_runs_new_player`. The register gains **A28–A31** (the two
+parts' four registered divergences) and **A32–A35** (the adopted pad palette and the three
+zero-difference substitutions: `fov = 0`, the linear fill page and the packed four-page
+layout); A32's port frame is **0/64,000** after its one forced entry, and A33–A35 measure 0 on
+every shipped comparison. Every entry names its reproducing test or command.
+
+**The suite and both clippy gates.** `cargo test --workspace` is green — **1,201 passed, 0
+failed, 8 ignored**, summed over the 48 `test result:` lines — and both
+`cargo clippy --workspace --all-targets -- -D warnings` and its `--release` form exit 0.
+
+```text
+$ cargo test -p secondreality --test u2a -- --nocapture
+(…)
+running 5 tests
+test the_block_one_clock_matches_second1_at_boot_5900 ... ok
+boot 6500: 0/64000 px differ
+test the_pad_reference_6500_compares_at_zero ... ok
+boot 7300: 1098/64000 indices differ
+test the_saucer_frame_records_its_measured_divergence ... ok
+boot 7640: 0/64000 px differ
+test the_cleared_hold_reference_7640_compares_at_zero_in_both_planes ... ok
+test the_run_is_numbered_in_boot_frames_and_reaches_u2a_after_alku ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.61s
+
+$ cargo test -p secondreality --test u2e -- --nocapture
+(…)
+running 4 tests
+test the_block_four_clock_reaches_order_19_at_698 ... ok
+test the_keyframe_music_is_the_second4_trace_at_three_of_four_indices ... ok
+test the_run_is_numbered_from_the_intro_anchor_and_plays_the_block_four_music ... ok
+boot 1000: 11006/64000 px differ at K, 189 at K-4
+boot 1600: 11805/64000 px differ at K, 7118 at K-4
+boot 2600: 17278/64000 px differ at K, 231 at K-4
+boot 3600: 16234/64000 px differ at K, 1177 at K-4
+test the_keyframes_record_the_measured_session_phase_and_gouraud_residual ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.44s
+
+$ cargo test -p secondreality --test shell
+(…)
+running 11 tests
+(…)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.33s
+
+$ cargo xtask reference verify --tree reference
+(…)
+verdict: ok — 39 capture(s), 125 file(s), 28414606 bytes        exit 0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+(…)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.89s     exit 0
+
+$ cargo clippy --workspace --all-targets --release -- -D warnings
+(…)
+Finished `release` profile [optimized] target(s) in 6.12s               exit 0
+
+$ cargo test --workspace
+(…)
+test result: ok. 460 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 50.79s
+(… all 48 `test result:` lines are `ok`; …)
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+(…)
+exit: 0
+```
 
 ## Phase log
 

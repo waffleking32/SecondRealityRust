@@ -251,9 +251,11 @@ fn block3_trace_position(frame: u32) -> (u8, u8) {
 /// **These are three different sessions, not one tiled window.** `second1` and
 /// `second1c` overlap over 5900..5999 and their published rows differ by one
 /// there (the sessions' own sample phase), so a frame takes the first trace
-/// that holds it rather than being required to agree across them — unlike
-/// block 3's `second3b`/`second3d` seam, which the helper there checks. Every
-/// index the chain test reads is covered by exactly one of the three.
+/// that holds it rather than being required to agree across them — the same
+/// first-covering rule [`block3_trace_position`] follows for its
+/// `second3b`/`second3d` seam, whose comment records the one-row phase at
+/// 15000. Every index the chain test reads is covered by exactly one of the
+/// three.
 fn block1_trace_position(frame: u32) -> (u8, u8) {
     for name in ["second1", "second1c", "second1b"] {
         if let Some(position) = trace_position_opt(name, frame) {

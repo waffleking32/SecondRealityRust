@@ -169,7 +169,8 @@ impl Engine {
         // The part's frame 0 is its own, whatever ran in this engine before.
         self.frame_counter = 0;
         self.exit_requested = false;
-        // The entry part is the one `set_music` was for; consuming the flag
+        // The next start is the part the install was for — a run's entry part
+        // or the mid-chain part a restart site precedes; consuming the flag
         // here is what makes every later `start` a mid-chain start.
         let music_fresh = self.music_fresh;
         self.music_fresh = false;

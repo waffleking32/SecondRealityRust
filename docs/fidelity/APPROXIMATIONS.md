@@ -1258,9 +1258,10 @@ reference pins to boot 8364.
 parses, word for word. A faithful port of the tree draws a 134-row cube with
 `yyy = yy*142/zz + 66`.
 
-**The release does not.** Fourteen diagnostic captures (`out/plz-diag-cube`
-and `out/plz-diag-cube2`, the documented `SECOND 3` recipe at cycles 30000;
-the filed 8500/9500 are reproduced byte-identically in the same session) show:
+**The release does not.** The committed six-frame band capture
+(`reference/parts/plzpart/band/`, frames 8400–8800, taken by the documented `SECOND 3`
+recipe at cycles 30000) and the filed 8500/9500 cube frames
+(`reference/parts/plzpart/cube/`) show:
 
 - **The extent.** The discriminating evidence is the lower band's face
   continuation: at 8500 the 134-row render fills the band below row 133 with
@@ -1294,8 +1295,8 @@ the filed 8500/9500 are reproduced byte-identically in the same session) show:
   the release extent's 26.161 % is test-pinned.
 - **The projection.** The release's `yyy` is `yy*213/zz + 100`: scale 213 =
   142 × 3/2, origin 100 = the screen's vertical centre (the tree's 66 leaves
-  the cube 34 px high). The x pair is unchanged (256; an x-scale sweep's
-  minimum).
+  the cube 34 px high). The x pair is unchanged (256; a scratch x-scale
+  sweep's minimum — a diagnostic, not reproducible from a clone).
 
 **The comparison rule** (the numbers below): a pixel is set iff any RGB
 channel is nonzero; the shift is the integer (dx, dy) in [−20, 20]
@@ -1509,7 +1510,7 @@ target/debug/secondreality --part jplogo --headless \
 ```
 
 and those RGB frames compared against the capture's 17200/17400/17600
-(640×200; a pixel differs iff any channel differs): 17200 matches at
+(320×400; a pixel differs iff any channel differs): 17200 matches at
 **0.0000 %** (0/128,000), while 17400 and 17600 are **45.6023 %**
 (58,371/128,000) and **39.8672 %** (51,030/128,000) away, max channel delta
 255. The captures are not reproducible from a clone and the numbers are
@@ -1670,3 +1671,118 @@ the aligned-state residual A30's. Reproduce with
 `cargo test -p secondreality --test u2e
 the_keyframes_record_the_measured_session_phase_and_gouraud_residual` and the
 `search_reference_states` diagnostic above.
+
+## A32 — U2A: the pre-gate pad palette is the release's measured bright transform (adopted)
+
+**Part:** U2A (`VISU/C/U2A.C` over the VISU engine), Phase 6.
+
+**Original:** the tree draws nothing before its first music gate (`U2A.C:229-240`), but the
+release paints the `U2ABG.UH` picture at the part's start and shows it under a **bright**
+palette until the gate. The released palette is not the tree's merged scene palette and not
+ALKU's final DAC: both match **0 of 64,000** pixels of the reference's 6500 frame. It is the
+background palette passed through `(3 × bg + 5) & 63` on every channel — reconstructed with
+zero conflicts from the 6500 RGB and the 7640 index plane (52 entries) and independently from
+7300's own RGB by its own index plane — with **entry 195 black**, the entry the background's
+white stars use.
+
+**Port:** `init` paints page 0 with the `U2ABG.UH` payload and uploads
+`pad_entry(v) = (3v + 5) & 63` over all 256 entries with entry 195 forced black; the merged
+scene palette goes up at gate 1, as the source has it. The whole 6500 frame then compares at
+**0 of 64,000** pixels.
+
+**Why (D24, adopted).** This is the release behaving where the tree does not, and the measured
+formula is one constant expression the tree can carry; it reproduces every used entry but one,
+and that one is a single forced black. Adopting the release's picture is the rule D24's
+procedure gives when the value is measurable and reproducible; inventing the tree's silence
+would be a visible miss at the reference's own keyframe. The 195 entry's 84 star pixels are
+the exception the formula cannot express (it predicts `(2,2,2)` there), so the port carries
+the measured exception rather than the formula's value.
+
+**Measured difference:** the formula matches **57,516 of the 57,600** pixels that use indices
+≥ 192; the remaining **84** are the index-195 pixels, which the adopted black entry renders
+black — exactly the reference's pixels — so the full frame is **0/64,000**. The measurement is
+`.superpowers/sdd/06-vector-engine/task-1-report.md` §4 (the two independent index-plane
+reconstructions and the candidate comparison); the port's result is pinned by
+`cargo test -p secondreality --bin secondreality the_pad_palette_is_the_measured_formula_with_entry_195_black`
+and `the_pad_hold_is_the_reference_6500`.
+
+## A33 — U2A: the first draw uses `fov = 0` for the C's uninitialised variable (registered; no measured difference)
+
+**Part:** U2A (`VISU/C/U2A.C`), Phase 6.
+
+**Original:** `int fov;` is declared inside the outer loop (`U2A.C:261`) and read by
+`vid_cameraangle(fov)` (`:287`) before the first parse assigns it (`:348`). In the release's
+build the stack slot holds whatever the preceding code left; the value is not defined by the
+source.
+
+**Port:** `Driver::new` starts with `fov = 0` (`parts/visu/mod.rs`). The first draw is made
+with that value and the stream's `0x22` (`0x2200`) takes over from the first parsed frame.
+
+**Why.** Every object is still off on the first draw — `U2A.0AB` frame 0 has no toggle; object
+2 turns on at frame 16 — so the camera angle multiplies nothing and the frame is the cleared
+background whatever the angle is. The C's uninitialised read is therefore unobservable in the
+shipped data, and 0 is the deterministic choice rather than a guess at the release's stack.
+
+**Measured difference:** **0 of 64,000** pixels. Reproduce with
+`cargo test -p secondreality --bin secondreality the_first_displayed_page_is_the_cleared_background`,
+which asserts the first rendered frame equals the cleared background under both palettes, and
+`the_first_stream_frame_leaves_every_object_off_and_frame_sixteen_turns_object_two_on`, which
+pins frame 0's all-off state and the `0x2200` that replaces the initial value.
+
+## A34 — The vector engine fills a linear page, not the original's planar VGA memory (substitution; no measured difference)
+
+**Part:** U2A and U2E (`VISU/AVIDFILL.ASM`, `ADRAW.ASM`, `ADRAWCLP.ASM`), Phase 6.
+
+**Original:** the polygon pipeline emits a `{FILL-DATA}` stream and a VGA-planar filler writes
+it in the unchained 320×200 mode: one page row is 80 addresses and one address holds four
+pixels, one per plane (`x >> 2`, plane `x & 3`), selected by the map mask. The stream and the
+planes are a VGA implementation detail of the tree's code.
+
+**Port:** the span generators emit the same bands and `write_address` expands every planar
+byte write to the pixels `4 × address + plane` for each plane the mask selects, into a linear
+320-wide page. The tiers' one-, two- and four-pixel colour quantisation, `AFILLDIV.INC`'s
+`65536/len` slope, the `0x8000` X bias, the increment-before-use row loop and the
+right-exclusive stop are transliterated literally (`parts/visu/draw.rs`'s module comment).
+
+**Why.** The port's surface is a linear indexed image; carrying a planar stream and a VGA map
+mask would add a representation the engine does not use anywhere else. What is preserved is
+the pixel set and its colours, which is what the reference compares.
+
+**Measured difference:** **0** on every shipped comparison — the U2A 6500 and 7640 keyframes
+are 0/64,000, U2E's intro is 0 differing at nine indices, and the registered Gouraud residuals
+(A28/A30) have **0**-difference silhouettes, so they are colour deltas on faces the pipeline
+drew, not a fill-geometry difference. Reproduce with
+`cargo test -p secondreality --bin secondreality parts::visu::draw`
+(the span/fill unit tests), `cargo test -p secondreality --test u2a` and
+`cargo test -p secondreality --test u2e`.
+
+## A35 — The four VGA pages are packed at 64,000 pixels, not the original's 65,536-pixel slots (substitution; no measured difference)
+
+**Part:** U2A and U2E (`VISU/C/U2A.C:105-166`, `U2E.C:115-183` over `AVID.ASM:341-358`),
+Phase 6.
+
+**Original:** `vid_setswitch` gives page `p` the drawing segment `0xA000 + p*0x400` and the
+display start `p << 14`, a page slot of 0x4000 bytes. In the emulator's four-plane byte-group
+memory a plane byte is four linear pixels, so consecutive pages are **16,384 plane bytes =
+65,536 linear pixels** apart, with the picture (16,000 plane bytes = 64,000 pixels) and a
+1,536-pixel gap per slot.
+
+**Port:** the surface packs the four pages at `page * 64_000` pixels (`PAGE_PIXELS`), with no
+gap. Every page is cleared, drawn and read through the port's own origin, so each page shows
+the same picture the original's does; the one page a filed keyframe reads, page 0, has origin
+0 in both layouts. U2E's `fadeset` writes the same plane addresses into each of the four
+pages; its top block's last write is 172 addresses past the row just written, lands in rows
+`y+3..` and is overwritten by the later row passes, and the port's page bound (16,000
+addresses, the original's picture within its 0x4000-byte slot) never fires for the shipped
+pattern, whose largest address is the bottom row's byte 15,999 (`docs/fidelity/u2e.md` §4).
+
+**Why.** The port's pages are a linear indexed surface, not VGA memory; a gap buys nothing and
+would have to be modelled in every page slice. The observable content — every page's pixels
+under the shared palette and the origins the parts set — is identical.
+
+**Measured difference:** **0** on every shipped comparison: U2A 6500/7640 at 0/64,000, U2E's
+intro at 0 differing at nine indices, and the registered keyframe residuals are A28/A30's
+Gouraud colour deltas with exact silhouettes. Reproduce with
+`cargo test -p secondreality --bin secondreality the_fadeset_writes_the_source_s_pattern_within_its_page`
+(the fadeset's plane expansion and page bound), `cargo test -p secondreality --test u2a` and
+`cargo test -p secondreality --test u2e`.

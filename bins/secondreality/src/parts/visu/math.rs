@@ -16,8 +16,8 @@
 
 /// The fixed-point unit, `unit equ 16384` (`AD.INC:41`).
 ///
-/// This module's own tests and Task 7's U2E build matrices from it; U2A
-/// itself never names it.
+/// This module's own tests (and the driver's) build matrices from it; neither
+/// shipped part, U2A or U2E, names it, so the scoped allow stays.
 #[allow(dead_code)]
 pub const UNIT: i32 = 16384;
 

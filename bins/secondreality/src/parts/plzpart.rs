@@ -248,8 +248,9 @@ const PAGE_VMEM: [u16; 6] = [0x0000, 0x5500, 0xAA00, 0x0000, 0x5500, 0xAA00];
 const CLR_SLOTS: usize = 8;
 /// The release draws the cube to the foot of the 320×200 screen. The tree's
 /// development build clips at `cmp yy,134` (`PLZA.ASM:77`), which leaves the
-/// cube's lower band undrawn; the fourteen captures show content to row 181
-/// at 8500 and 199 at 9500, so the release's extent is the full screen.
+/// cube's lower band undrawn; the filed 8500/9500 frames and the committed
+/// band capture show content to row 181 at 8500 and 199 at 9500, so the
+/// release's extent is the full screen.
 const CUBE_DRAWN_ROWS: i32 = 200;
 /// The clear mirrors the draw's extent: the tree's `ycnt=134`/mask 134 walk
 /// 135/134 lines for its 134-row clip, so the release's 200-row clip walks
@@ -1760,8 +1761,9 @@ impl Plzpart {
             self.xx[index] = [xx, yy, zz];
             let xxx = xx.wrapping_mul(256) / zz + 160 + 160;
             // The release's vertical projection origin and scale, measured
-            // against fourteen captured frames at the corrected phase and
-            // extent (D24, APPROXIMATIONS A23): the tree's development build
+            // against the six committed band frames 8400-8800 at the
+            // corrected phase and extent (D24, APPROXIMATIONS A23): the
+            // tree's development build
             // compiles 142/66 (`VECT.OBJ`: `imul eax,eax,0x8e; add ax,0x42`),
             // but the release's cube sits 1.5x taller and is centred on the
             // screen. On the cube band (rows 0-133, the tree extent, to

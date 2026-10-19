@@ -303,7 +303,8 @@ render and is not claimed.
 data the port parses (compared word for word). The release's captured frames
 pin a different pair: `yyy = yy*213/zz + 100` (the y scale 213 = 142 × 3/2,
 the origin 100 the screen's vertical centre; the tree's 66 leaves the cube
-34 px high). The x pair is unchanged (`256`; an x-scale sweep's minimum).
+34 px high). The x pair is unchanged (`256`; a scratch x-scale sweep's
+minimum — a diagnostic, not reproducible from a clone).
 The evidence is a **committed reference capture**, the same sanctioned path
 the keyframes took:
 

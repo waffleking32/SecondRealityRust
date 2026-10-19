@@ -154,7 +154,7 @@ page slot's 384-byte gap and never the next page.
 The fadeset's visible effect at 467 is exactly the measured band under the
 fade-in's saturated palette: entry 0 black, 252/253 white, 254 black; the top
 rows' x 256..319 keep the loader page's pixels (black). The unit test
-`the_fadeset_writes_the_source_s_pattern_and_bounds_the_stray` pins the whole
+`the_fadeset_writes_the_source_s_pattern_within_its_page` pins the whole
 table, the unwritten top columns and the page bound.
 
 **The jelly branch, and why the port always takes the capture.** The source's
@@ -172,6 +172,14 @@ initialisation is unreachable and is not implemented. This replaces the
 earlier `PartCtx::music_fresh()` proxy, which the U2E-boundary restart broke:
 `set_music` re-arms the flag, so a mid-chain U2E would have taken the
 text-mode branch even though the screen it inherits is graphics.
+
+**This is not an approximation and is not registered in `APPROXIMATIONS.md`.**
+The text-mode `vid_init(1)` initialisation has no counterpart in the port's
+run shapes, so there is no source behaviour the port differs from: the branch
+that *is* reachable — the captured DAC — is the source's own, and the dead one
+is deliberately not implemented rather than approximated. The source selects it
+only when the BIOS mode is 3 or below (`U2E.C:198-205`), and no port run shape
+begins there.
 
 **It changes no measured intro frame.** The fade-in mutates bytes 3..761
 (`+2`, clamp 63) for 33 steps, so every byte it touches saturates to 63 from
@@ -197,7 +205,7 @@ because the part writes CRTC 0x0C every retrace (`reference-indices.md`
 
 ```bash
 cargo run --release --bin secondreality -- --block 4 --headless \
-    --dump-frames 994,996,997,999,1000,1001,1594,1596,1599,1600,1601,2594,2596,2599,2600,2601,3594,3596,3599,3600,3601 \
+    --dump-frames 996,997,999,1000,1001,1596,1597,1599,1600,1601,2596,2597,2599,2600,2601,3596,3597,3599,3600,3601 \
     --dump-dir out/u2e
 ```
 

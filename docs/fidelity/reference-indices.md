@@ -903,6 +903,34 @@ drawn screen — gave `exit 0, verdict: identical` on all four, **5859 included*
 landing on the reference's own pan phase. So a capture still means the same thing a day later for
 these two, which is the weakest and most directly tested form of the claim this section states.
 
+### 1.13 Fit corpora — a third kind of reference
+
+A **fit corpus** is a run of reference frames used to determine a constant or a phase by
+fitting a model over them; it is neither a keyframe nor a trace (D19's amendment). The tree
+holds one: `reference/parts/plzpart/band/`, six frames **8400, 8450, 8500, 8600, 8700,
+8800**, filed by the sanctioned capture path
+
+```bash
+cargo xtask reference capture --arg 3 --boot autoexec \
+    --keys "KBD_left KBD_enter" --cycles 30000 \
+    --frames 8400,8450,8500,8600,8700,8800 --out reference/parts/plzpart/band
+```
+
+It was taken so A23's cube projection could be fitted against evidence a clone can re-run:
+the six frames' band silhouettes give `yy*213/zz + 100` (**0.46 %** at 213/100
+against **9.99 %** at the tree's `142/66`), and the 8500 frame pins the phase state
+(frames 136, page 4, display start 0x0028, music 68:46). `the_projection_fit_is_the_committed_
+release_bands` renders the port through the real engine and asserts both. The corpus has a
+manifest whose per-frame `sha256` `reference verify` checks, like any capture (D23).
+
+Its indices are **not** reference keyframes. Nothing pairs the port against them with
+`compare`; they are not rows of §2's table; and a difference at one of them is a fit
+residual, not a keyframe verdict. A keyframe is a screen a port must reproduce at a run
+index; a trace is the original player's own state (`docs/fidelity/music-clock.md`); a fit
+corpus is evidence for a **derivation**, and its band mask and fit range are part of that
+evidence. It is committed rather than left under `out/` because a fit that cannot be re-run
+from a clone is not evidence (D25).
+
 ## 2. The index table
 
 One row per part. `keyframes` are the boot indices in `reference/parts/<part>/`; `the partner`
@@ -1509,6 +1537,18 @@ the moving frame is what shows the same group exists for this part too.
 changed from the frame before it and held for the frame after, so a session one frame out of phase
 would find its answer at offset ±1 — exactly the case the support frames exist for. The other
 group was not observed, so this is a statement about the frames' spacing, not about a result.
+
+**The gate's 6988 is a session's, and the keyframe capture is another (Phase 6).** The 6988
+gate the phase carried is `second1c`'s first order-11 row-47 frame. The port's block-1 clock
+matches **`second1`**: at boot 5900 it reads **9:51 / zframe 3771**, the trace's own value,
+where `second1c` reads **9:50 / zframe 3768**; the port therefore opens its gate at boot
+**6986**. The keyframe capture above (6500/7300/7640) is a **third** session, so its 7300
+picture is stream state 294 while the port's boot index displays state 297: **1098/64,000**
+pixels, registered as **A29**. At the reference's own state the residual is A28's **426**
+Gouraud pixels, and the two held keyframes (6500, 7640) compare at **0** either way.
+Reproduce with `cargo test -p secondreality --test u2a
+the_block_one_clock_matches_second1_at_boot_5900` and
+`the_saucer_frame_records_its_measured_divergence`.
 
 ### 5.5 Where the part ends — and how, when nothing changes geometry
 

@@ -1274,6 +1274,26 @@ can be aligned and *still* report `verdict: different`; the number is recorded i
 row, and no tolerance is introduced — a pixel tolerance is exactly what the user's ruling
 avoided (fix round 1, ruling 3).
 
+**Amendment (2026-10-19, Phase 6's close-out) — a fit corpus is a third kind of reference.**
+Phase 5 committed `reference/parts/plzpart/band/` (six frames, 8400…8800, filed by the
+sanctioned `reference capture` path) so that A23's cube projection could be fitted against
+evidence a clone can re-run; the phase-5 close-out ruled that acceptable and parked this
+amendment. A **fit corpus** is neither a keyframe nor a trace. A keyframe is a screen the
+port must reproduce at a run index, paired by `compare` with its ±1 supports; a trace is the
+original player's own state, a row a frame (`docs/fidelity/music-clock.md`). A fit corpus is
+a run of reference frames used to **determine a constant or a phase** by fitting a model
+over them — here the silhouette bands give `yy*213/zz + 100` (0.46 % at 213/100
+against 9.99 % at the tree's 142/66 over the six frames) and the phase state (frames 136,
+page 4, start 0x0028, music 68:46), and `the_projection_fit_is_the_committed_release_bands`
+pins both. It lives under `reference/parts/<part>/` with a manifest whose per-frame `sha256`
+`reference verify` checks (D23), and it is named by the test that consumes it. Its indices
+are **not** reference keyframes: nothing pairs the port against them with `compare`, they
+are not in `reference-indices.md` §2's table, and a difference at one of them is a fit
+residual, not a keyframe verdict. Fit corpora are committed rather than left under `out/`
+for the same reason a keyframe is: a fit that cannot be re-run from a clone is not evidence
+(D25). They are the one kind whose *derivation* — the band mask, the fit range — is part of
+the evidence, where a keyframe's is the picture itself.
+
 ---
 
 ## D20 — What a reference index means, and the fallback that was not needed (2026-10-12)
@@ -2078,6 +2098,16 @@ paths and the two parts' `use` lines the only consumers. The readers would move 
 binary ever needed them; nothing in this phase does, and a crate added speculatively would
 carry the licence/manifest/test-layout work for one consumer.
 
+**Phase 6 outcome.** The decision held as written. The renderer is
+`parts/visu/mod.rs` (the driver and ring), `math.rs` and `draw.rs`; the packed readers are
+`crates/sr-assets/src/visu.rs`; `parts/u2a.rs` and `parts/u2e.rs` consume both and no new crate
+exists. The readers parse all 45 shipped objects and both scene streams — `U2A.0AB` 522 frames /
+1,272 commands, `U2E.0AB` 1,802 frames / 4,047 commands
+(`cargo test -p sr-assets --test visu every_shipped_object_resolves_its_lists_and_matches_its_own_vertex_count`,
+and `cargo xtask assets verify --tree --decode`'s census: 158 assets, 51 Visu scene files, 44
+headerless, 1 refused). The rest of the phase's code is the two parts, their fidelity notes and
+the shell rows; nothing moved between the layers.
+
 ## D33 — The two parts' tick models, and U2E's first drawn frame (2026-10-18)
 
 Decided: **U2A** advances one animation-stream frame per logic tick and flips one page per
@@ -2138,6 +2168,30 @@ hundreds of frames by index 3600, so all four moving keyframes are wrong, not by
 one-frame **phase** offset is the only case that is a uniform ±1. The intro tick map — not
 the keyframe comparison — is what pins the anchor.
 
+**Phase 6 outcome.** Both tick models shipped as decided and both parts' comparisons are
+recorded. U2E's anchor is the derived **418**, not 417: the unit test
+`the_fadeset_lands_on_tick_49_and_paints_the_measured_band` drives 49 black ticks and finds
+the band on tick 49 (417 would put it on tick 48), and
+`u2e_runs_are_numbered_from_their_derived_intro_anchor` pins the shell constant. With it, the intro compares at **0 differing** at nine indices — 460,
+467, 470, 480, 490, 500, 530, 590 and 660 — against the dense/start/sweep2 sessions
+(`docs/fidelity/u2e.md` §3). The gate measurements are session-specific: U2A's **6988** is
+`second1c`'s first order-11 row-47 frame; the port's block-1 clock matches **`second1`**
+(9:51 / zframe 3771 at boot 5900 against `second1c`'s 9:50 / 3768) and opens at boot 6986,
+and the keyframe capture is a third session. U2E's gate is 699 in `second4`; the port's clock
+reaches order 19 at 698.
+
+**What "verified" means for these two parts (D24/D17).** No value was fitted to a keyframe.
+U2A's 6500 and 7640 compare at **0**; 7300 is registered as **A28** — 426 of 64,000 pixels at
+the reference's own stream state 294, the release-versus-tree Gouraud difference, with the
+silhouette and the flat object exact — and **A29** — 1098 of 64,000 at the port's boot index,
+the music clock's session phase amplified by the part's page holds. U2E's four moving
+keyframes are registered as **A30** (189 / 7,118 / 231 / 1,177 at the reference's own state,
+all on Gouraud faces) and **A31** (11,006 / 11,805 / 17,278 / 16,234 at K: the port displays
+stream state `(t − 698)/2`, the filed session `(t − 702)/2`, a four-tick intercept). Both are
+the same D24/D17 classes as U2A's, are measured by committed tests/diagnostics, and are
+reproduced by the commands the register entries name. The intro and the held keyframes are
+what pin the models; the residuals are the release's Gouraud output and the sessions' phase.
+
 ## D34 — The mid-run `MUSIC0@18` restart: four engine ticks of waiting, verified by the two sessions' shift (2026-10-18)
 
 Decided: at the U2E boundary the shell installs a fresh MUSIC0 seeked to order 18
@@ -2179,3 +2233,64 @@ and `zplus`, not `zframe`.
 U2E's four keyframes then sit one 2-tick stream step out and the block-3 chain test's position
 assertions at the mapping fail. The 17,441–17,442-frame shift is independent evidence — it
 comes from two different boots' order boundaries, not from the gate measurement it verifies.
+
+**Phase 6 outcome.** The restart shipped as decided (`MUSIC_RESTART_AT`,
+`MusicStart::restart` with `waiting = 4`), and the two sessions' shift did verify it. The
+block-3 chain measures the port's U2E boundary at chain **17,418** (JPLOGO's last frame is
+17,417), **nine ticks before the derived 17,427**. The nine frames are not the restart's
+waiting: they are the port's **gapless part handover** accumulating over D31 §3's seams, and
+the restart's own behaviour is as derived — the new player waits four ticks, its first row
+advance lands at chain 17,431, the ten-deep publish ring primes at `0:0` and first publishes
+`18:1` at 17,440, and at the mapping-derived indices the positions agree with `second3e`
+within one MUSIC0 row (18:17 against 18:16 at 17,581; 18:19 against 18:18 at 17,600; 19:1
+against 19:0 at 17,721). The seam is recorded in `docs/fidelity/u2e.md` §5 and asserted by
+`bins/secondreality/tests/shell.rs`'s chain test; nothing was shifted. The manifest records
+the last installed player (`MUSIC0@18`, `start_frame` 17,418), which is the value the chain
+test pins, and the restart's `_np_zframe` difference stays as recorded and unread.
+
+## D35 — The shell's restart seams: an exit drain the part opts into, and a sound card that follows a new player (2026-10-19)
+
+Decided: the shell's mid-run restart needs two contracts the part API did not have, and both
+are the narrowest form that keeps existing parts unchanged.
+
+**1. `Part::drains_after_exit() -> bool`, default `false`; U2E overrides it to `true`.**
+`Sequence::tick` and `Runner::stopped` keep a draining part live after the exit flag is set
+and retire it only when it reports `Finished` (`crates/sr-engine/src/part.rs`,
+`crates/sr-engine/src/engine.rs`, `bins/secondreality/src/shell.rs`). The original's
+`dis_exit()` ends a part's loop, not the code after it: U2E captures the live DAC and runs a
+**sixteen-retrace fade** whichever way its gate or loop exits (`VISU/C/U2E.C:541-555`), so
+retiring it on the exit tick would skip every one of the sixteen uploads (Task 7's review
+measured the defect: the first upload now lands at T+1, so an exit-at-T retirement loses all
+sixteen). The default is `false` because every other ported part either returns on the tick
+that sees the flag or finishes synchronously — U2A's teardown runs inside its own exit tick
+(`VISU/C/U2A.C:239`, `:432-441`) — and a `true` default would give every part an extra tick
+after ESC for no source behaviour. `Engine::start` clears the sticky flag, so a drain cannot
+leak into the part that follows. Evidence:
+`a_runner_keeps_ticking_a_part_that_drains_after_exit` (engine),
+`a_part_that_drains_after_exit_keeps_ticking_until_it_finishes` and
+`a_part_that_does_not_drain_retires_on_the_exit_tick` (shell),
+`a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown` (U2E, every rotated upload checked).
+
+**2. The sound card follows a restart: a swappable drain player (`Device::follow`).** The
+window opens the SDL device once with the entry player's `Arc`
+(`bins/secondreality/src/window.rs`), so a mid-run restart's fresh `Player` would leave a
+windowed `--block 3` run silent after the U2E boundary while the engine's positions and the
+WAV dump (whose dump and scratch the restart carries) stayed correct. `Device` now keeps the
+player behind a `Swappable` cell (`Arc<Mutex<Shared>>`) that the audio callback reads per
+`drain`; `Device::follow(&mut self, Shared)` swaps it after `run.advance`, and the window
+calls it whenever `Arc::ptr_eq` says the run's player has changed. The swap is under the
+cell's lock, so a callback in flight finishes against the player it started with and never
+takes half a buffer from each. The old ring's tail may be dropped: the original's
+`restartmus` (`MAIN/U2.ASM:348-397`) interrupts the module it was playing too, and the
+samples of a stopped module are not the run's music. Evidence:
+`the_drain_follows_a_restart_to_the_runs_new_player` (the old ring's pending count is
+untouched, the next drain is exactly the new ring's, a second is silence). No sound card
+exists in CI, so the seam is unit-tested and the window's use of it is the three-line
+`ptr_eq`/`follow` the review checked, as ruled.
+
+**Cost if wrong.** The drain flag is one trait method and two call sites; a wrong default
+changes *when* a part retires by a tick, which the stub tests pin in both dispositions. The
+swappable cell costs one lock and one `Arc` clone per tick in the window loop; a wrong
+implementation would split a drain across two players, which the seam test's pending-count
+and exact-sample assertions would catch. Neither touches a reference frame: no filed keyframe
+covers ESC or a windowed restart.
