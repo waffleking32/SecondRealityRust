@@ -19,7 +19,7 @@
 //! transliterated literally.
 //!
 //! The original's `poly1`/`poly2` working buffers hold `MAXPOLYSIDES` = 16
-//! vertices each (`AD.INC:52`, `POLYSIZE` at `AD.INC:70`). A 12-sided shipped
+//! vertices each (`AD.INC:51`, `POLYSIZE` at `AD.INC:64`). A 12-sided shipped
 //! face (U2E.039) through the near clip and the four 2-D passes can produce
 //! more than 16 vertices, and the original writes past the buffer. The port
 //! widens the cap to `MAX_POLY_SIDES` and notes the overflow at the guard;
@@ -57,12 +57,13 @@ const MAX_FACE_SIDES: usize = 16;
 /// The port's widened working-list cap. The original's `poly1`/`poly2` hold
 /// exactly `MAXPOLYSIDES` = 16 vertices (`POLYSIZE` = 208 bytes,
 /// `AD.INC:64`); a 12-sided shipped face can leave 16 after the near clip
-/// alone and up to 12 * 2^4 = 192 vertices through the four 2-D passes, so the
-/// original writes past the end of `poly2` into the code segment and corrupts
-/// the list. 256 keeps every 12- and 16-sided input's worst case in bounds;
-/// shipped faces produce the same vertices as the original and therefore the
-/// same pixels.
-const MAX_POLY_SIDES: usize = 256;
+/// alone, and each of the five clipping passes (near plus four 2-D) can at
+/// most double an arbitrary list, so the mechanical bound is 12 * 2^5 = 384
+/// and 16 * 2^5 = 512. The original writes past the end of `poly2` into the
+/// code segment and corrupts the list; 512 keeps the 16-sided worst case in
+/// bounds. Shipped faces produce the same vertices as the original and
+/// therefore the same pixels.
+const MAX_POLY_SIDES: usize = 512;
 
 /// `MAXCOLS` (`A.INC:150`), the Gouraud colour buffer's length.
 const MAXCOLS: usize = 640;
@@ -349,9 +350,9 @@ struct PolyVert {
 /// The near clip alone can leave 16 out of a 12-gon, and each of the four
 /// 2-D passes can add another, so a shipped 12-sided face (U2E.039) can
 /// overflow it; the original then writes over the statics that follow. The
-/// widened cap keeps the worst case (12 * 2^4 = 192) and every 16-sided
-/// case (16 * 2^4 = 256) representable; a face that somehow exceeds it is
-/// truncated rather than allowed to corrupt memory.
+/// widened cap keeps the five-pass worst case (16 * 2^5 = 512) representable;
+/// a face that somehow exceeds it is truncated rather than allowed to
+/// corrupt memory.
 fn push_vert(out: &mut Vec<PolyVert>, vertex: PolyVert) {
     if out.len() < MAX_POLY_SIDES {
         out.push(vertex);
@@ -429,10 +430,18 @@ fn clip_near(
         return (Vec::new(), 0);
     }
     let clip_z = projection.clip_z[0];
+    // The visible loop's test is inclusive (`cmp ecx,z ; jle @@2`)...
     let visible = |vertex: &PolyVert| {
         rotated
             .get(vertex.vx)
             .is_none_or(|rotated| rotated.z >= clip_z)
+    };
+    // ... and the hidden loop's is strict (`cmp ecx,z ; jge @@1`): a vertex
+    // exactly on the plane stays hidden when it follows a hidden one.
+    let still_hidden = |vertex: &PolyVert| {
+        rotated
+            .get(vertex.vx)
+            .is_none_or(|rotated| rotated.z <= clip_z)
     };
 
     // The source's two loops are one state machine: `@@2` copies a visible
@@ -460,7 +469,11 @@ fn clip_near(
         } else {
             si = 0;
         }
-        let now_visible = visible(&src[si]);
+        let now_visible = if in_visible {
+            visible(&src[si])
+        } else {
+            !still_hidden(&src[si])
+        };
         if now_visible != in_visible {
             let (vertex, flags) = near_crossing(&src[last], &src[si], rotated, projection, &out);
             vis |= flags;
@@ -546,12 +559,22 @@ fn clip_2d(
     if n == 0 {
         return Vec::new();
     }
+    // The visible loop is inclusive (`jge`/`jle`); the hidden loop is strict
+    // (`jle`/`jge`, i.e. equality stays hidden coming from hidden).
     let inside = |vertex: &PolyVert| {
         let coord = axis.get(vertex);
         if keep_above {
             coord >= limit
         } else {
             coord <= limit
+        }
+    };
+    let still_hidden = |vertex: &PolyVert| {
+        let coord = axis.get(vertex);
+        if keep_above {
+            coord <= limit
+        } else {
+            coord >= limit
         }
     };
 
@@ -578,7 +601,11 @@ fn clip_2d(
         } else {
             si = 0;
         }
-        let now_inside = inside(&src[si]);
+        let now_inside = if in_visible {
+            inside(&src[si])
+        } else {
+            !still_hidden(&src[si])
+        };
         if now_inside != in_visible {
             let vertex = clip_2d_crossing(&src[last], &src[si], limit, axis, interpolate);
             push_copy(&mut out, &vertex);
@@ -599,12 +626,14 @@ fn clip_2d_crossing(
     axis: Axis,
     interpolate: bool,
 ) -> PolyVert {
-    // `cmp cx,bx ; jl l3 ; xchg`: order the endpoints so `small` has the
-    // smaller clipped coordinate.
+    // `cmp cx,bx ; jl l3 ; xchg` (`ADRAWCLP.ASM:42-51`): cx starts as the
+    // *current* vertex's clipped coordinate and bx as the last one; with no
+    // swap `small` is the current endpoint, and the `xchg` makes it the last
+    // one only when current >= last.
     let (small, large) = if axis.get(current) < axis.get(last) {
-        (last, current)
-    } else {
         (current, last)
+    } else {
+        (last, current)
     };
     let small_clipped = axis.get(small);
     let large_clipped = axis.get(large);
@@ -618,7 +647,7 @@ fn clip_2d_crossing(
         (numerator / denominator) as i16
     };
 
-    let diff = large.gr.wrapping_sub(small.gr) as i32;
+    let diff = i32::from(large.gr.wrapping_sub(small.gr) as i16);
     // `imul bx ; shld dx,ax,2 ; add dx,ds:[si+POLYGR]`: the 8.8 word, not
     // its high byte, is interpolated.
     let delta = (diff.wrapping_mul(i32::from(multiplier)) >> 14) as i16;
@@ -713,9 +742,10 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
     }
     let (top, min_y, max_y) = top_vertex(verts);
     if min_y == max_y {
-        // Height zero: `cmp dx,cx ; je @@d0`. The original writes 0xFFFF over
-        // the stream's StartY, which the filler then uses as a row index;
-        // the port emits no pixels (there is nothing to draw).
+        // Height zero: `cmp dx,cx ; je @@d0` overwrites the first band's flag
+        // with 0xFFFF (not StartY, which is written earlier at stream offset
+        // 2), and the filler returns on the flag's sign bit without drawing a
+        // row. Nothing is emitted, as here.
         return;
     }
 
@@ -936,9 +966,11 @@ fn gouraud_row(page: &mut Page<'_>, y: i32, low: i16, high: i16, color1: u16, co
         return;
     }
     let n = n as u16;
-    // The four buffers hold MAXCOLS bytes; a span of one 320-wide page gives
-    // n <= 160, and n = 320 is the largest the buffers can represent. The
-    // original indexes past its buffer beyond this; drop the row instead.
+    // After clipping every vertex is inside the 320-pixel window, so a span
+    // is at most 320 pixels wide and n <= 160; the original's colour buffers
+    // hold MAXCOLS = 640 entries. This guard is therefore unreachable from
+    // clipped shipped data, but an unclipped caller must not index past the
+    // buffers (the original would run off them).
     if n > (MAXCOLS / 2) as u16 {
         return;
     }
@@ -1293,6 +1325,46 @@ mod tests {
         assert_eq!(row(&pixels, 3, 5), &[0; 5]);
     }
 
+    #[test]
+    fn flat_three_four_five_triangle_truncates_the_slope() {
+        // (0,0), (4,0), (0,3): the right edge's 16.16 adder is
+        // -0x40000 / 3, which `idiv` truncates to -0x15555 = -87381 (the
+        // floor would be -87382). Row 0: 0x48000 - 0x15555 = 0x32AAB, high
+        // word 3, so x = 0..=2; row 1 reaches 1 -> x = 0..=0; row 2 reaches
+        // 0 and is skipped.
+        let projection = page_projection();
+        let f = face(&[0, 1, 2], 0);
+        let pixels = run_flat(&f, &[pv(0, 0), pv(4, 0), pv(0, 3)], 9, &projection);
+        assert_eq!(row(&pixels, 0, 5), &[9, 9, 9, 0, 0]);
+        assert_eq!(row(&pixels, 1, 5), &[9, 0, 0, 0, 0]);
+        assert_eq!(row(&pixels, 2, 5), &[0; 5]);
+        // The truncating division itself, not just the rows it produced.
+        let from = PolyVert {
+            x: 4,
+            y: 0,
+            gr: 0,
+            vx: 0,
+        };
+        let to = PolyVert {
+            x: 0,
+            y: 3,
+            gr: 0,
+            vx: 0,
+        };
+        assert_eq!(side_x(&from, &to, 3).1, -87381);
+    }
+
+    #[test]
+    fn zero_height_polygon_draws_nothing() {
+        // `cmp dx,cx ; je @@d0` replaces the first band flag with 0xFFFF;
+        // the filler's `or ax,ax ; js` returns before any row. Nothing is
+        // drawn.
+        let projection = page_projection();
+        let f = face(&[0, 1, 2], 0);
+        let pixels = run_flat(&f, &[pv(0, 5), pv(4, 5), pv(2, 5)], 9, &projection);
+        assert!(pixels.iter().all(|&pixel| pixel == 0));
+    }
+
     // ---------------------------------------------------------------------
     // Gouraud spans and the three accuracy tiers
     // ---------------------------------------------------------------------
@@ -1431,6 +1503,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn gouraud_one_pixel_tier_handles_an_odd_left_edge() {
+        // x = 1..5 with constant edge colours 0x1000 and 0x1800: n = 1 and
+        // the slope is -2047 (the 65536/1 entry), so gouraud1. The halved
+        // adder -0x400 gives 16 and 20 for the two buffer entries; the odd
+        // left edge starts the mask phase at 0x44 and leaves the carry to
+        // step the address only after 0x88. The endpoints are 16 at x = 1
+        // and 24 at x = 4.
+        let projection = page_projection();
+        let f = face(&[0, 1, 2, 3], F_GOURAUD | F_SHADE32);
+        let colors = [0x1000, 0x1800, 0x1800, 0x1000];
+        let pixels = run_gouraud(
+            &f,
+            &[],
+            &[pv(1, 0), pv(5, 0), pv(5, 4), pv(1, 4)],
+            &colors,
+            &projection,
+        );
+        for y in 0..4 {
+            assert_eq!(row(&pixels, y, 6), &[0, 16, 16, 20, 24, 0], "row {y}");
+        }
+    }
+
     // ---------------------------------------------------------------------
     // The near clip and its preserved colour-copy bug
     // ---------------------------------------------------------------------
@@ -1509,6 +1604,73 @@ mod tests {
         // The left edge adds 0x800 per row, so the second row starts at
         // 0x2000 and matches the constant right edge: a flat 32.
         assert_eq!(row(&pixels, 1, 4), &[32, 32, 32, 32]);
+        assert_eq!(row(&pixels, 2, 4), &[0; 4]);
+    }
+
+    #[test]
+    fn near_clip_first_output_crossing_takes_the_zero_colour() {
+        // The face's first two vertices are behind the near plane, so the
+        // first output is the crossing on the hidden -> visible edge and
+        // `ZCLIPADDVX` has no previous output vertex: it reads `poly2`'s last
+        // POLYVX word, which no clipper writes and which is 0. The crossing
+        // at (0,2) therefore carries colour 0. The left edge of the fill runs
+        // 0x1000 -> 0 over two rows: row 0's span colours are 8 and 32, and
+        // the -0x1800 slope (1-pixel tier) gives 8, 14, 20, 26; row 1's
+        // 0 -> 0x2000 slope gives 0, 8, 16, 24.
+        let projection = Projection {
+            mul_x: 1024,
+            mul_y: 1024,
+            add_x: 0,
+            add_y: 0,
+            clip_x: [0, 319],
+            clip_y: [0, 199],
+            clip_z: [512, 1_000_000_000],
+        };
+        let f = face(&[0, 1, 2, 3], F_GOURAUD | F_SHADE32);
+        let rotated = [
+            Rotated {
+                x: 0,
+                y: 2,
+                z: 0,
+                normal: 0,
+            },
+            Rotated {
+                x: 0,
+                y: 2,
+                z: 0,
+                normal: 0,
+            },
+            Rotated {
+                x: 0,
+                y: 0,
+                z: 1024,
+                normal: 0,
+            },
+            Rotated {
+                x: 4,
+                y: 0,
+                z: 1024,
+                normal: 0,
+            },
+        ];
+        let pverts = [
+            PVert {
+                x: 0,
+                y: 0,
+                vf: VF_NEAR,
+            },
+            PVert {
+                x: 0,
+                y: 0,
+                vf: VF_NEAR,
+            },
+            pv(0, 0),
+            pv(4, 0),
+        ];
+        let colors = [0x4000, 0x6000, 0x1000, 0x2000];
+        let pixels = run_gouraud(&f, &rotated, &pverts, &colors, &projection);
+        assert_eq!(row(&pixels, 0, 4), &[8, 14, 20, 26]);
+        assert_eq!(row(&pixels, 1, 4), &[0, 8, 16, 24]);
         assert_eq!(row(&pixels, 2, 4), &[0; 4]);
     }
 
@@ -1598,6 +1760,272 @@ mod tests {
         assert_eq!(row(&pixels, 1, 5), &[8, 8, 8, 8, 0]);
         assert_eq!(row(&pixels, 2, 5), &[8, 8, 8, 8, 0]);
         assert_eq!(row(&pixels, 3, 5), &[0; 5]);
+    }
+
+    #[test]
+    fn slanted_crossing_orders_the_endpoints_like_the_asm() {
+        // Up clip at 0, the edge from (0,10) (last, inside) to (25,-15)
+        // (current, hidden). `cmp cx,bx ; jl l3` (`ADRAWCLP.ASM:42-51`) takes
+        // the *current* endpoint as the small one here, so
+        // t = (0 - (-15))*16384/25 = 9830 and
+        // x = 25 + (-25*9830 >> 14) = 25 - 15 = 10. With the endpoints
+        // reversed (the bug) the crossing is at 9. The closing edge crosses
+        // at x = -25 + (25*9830 >> 14) = -11.
+        let src = [
+            PolyVert {
+                x: 0,
+                y: 10,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: 25,
+                y: -15,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: -25,
+                y: -15,
+                gr: 0,
+                vx: 0,
+            },
+        ];
+        let out = clip_2d(&src, 0, Axis::Y, true, false);
+        assert_eq!(
+            out,
+            vec![
+                PolyVert {
+                    x: 0,
+                    y: 10,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 10,
+                    y: 0,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: -11,
+                    y: 0,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 0,
+                    y: 10,
+                    gr: 0,
+                    vx: 0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn clipped_gouraud_crossing_sign_extends_the_colour_difference() {
+        // Left clip at x = 10 between last (x 0, gr 0x4000) and current
+        // (x 20, gr 0x1000). The current's clipped coordinate is larger, so
+        // small = last and t = (10 - 0)*16384/20 = 8192. `newclip_grd`
+        // (`ADRAWCLP.ASM:24-34`) computes a 16-bit signed difference,
+        // -0x3000, so delta = -0x3000*8192 >> 14 = -0x1800 and the crossing
+        // colour is 0x4000 - 0x1800 = 0x2800. A zero-extended difference gives
+        // 0xA800. The other coordinate is 0 + (20*8192 >> 14) = 10.
+        let last = PolyVert {
+            x: 0,
+            y: 0,
+            gr: 0x4000,
+            vx: 0,
+        };
+        let current = PolyVert {
+            x: 20,
+            y: 20,
+            gr: 0x1000,
+            vx: 0,
+        };
+        let crossing = clip_2d_crossing(&last, &current, 10, Axis::X, true);
+        assert_eq!((crossing.x, crossing.y, crossing.gr), (10, 10, 0x2800));
+    }
+
+    #[test]
+    fn a_vertex_on_the_limit_after_a_hidden_one_stays_hidden() {
+        // Up clip at 0. The hidden run is (5,-15), (10,0), (15,-10); the
+        // hidden loop's strict test (`y <= limit`) keeps the on-limit (10,0)
+        // hidden, so the crossing is taken from the last hidden vertex
+        // (15,-10) to the first visible one (20,10) at x = 17. An inclusive
+        // hidden loop would end the run at (10,0) and insert it as an extra
+        // vertex.
+        let src = [
+            PolyVert {
+                x: 0,
+                y: 10,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: 5,
+                y: -15,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: 10,
+                y: 0,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: 15,
+                y: -10,
+                gr: 0,
+                vx: 0,
+            },
+            PolyVert {
+                x: 20,
+                y: 10,
+                gr: 0,
+                vx: 0,
+            },
+        ];
+        let out = clip_2d(&src, 0, Axis::Y, true, false);
+        assert_eq!(
+            out,
+            vec![
+                PolyVert {
+                    x: 0,
+                    y: 10,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 2,
+                    y: 0,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 17,
+                    y: 0,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 20,
+                    y: 10,
+                    gr: 0,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 0,
+                    y: 10,
+                    gr: 0,
+                    vx: 0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn near_clip_keeps_an_on_plane_vertex_hidden_after_a_hidden_one() {
+        // clip_z[0] = 512. The vertices run z = 1024 (visible), 0 (hidden),
+        // 512 (exactly on the plane), 0 (hidden), 1024 (visible), all on
+        // y = 0 with x = 0, 10, 20, 30, 40; mul = 1024, so a crossing at
+        // z = 512 projects x = 2 * x3d. The strict hidden loop
+        // (`clip_z >= z`, ADRAWCLP.ASM:266-268) keeps the on-plane vertex
+        // hidden: the visible run resumes at the last vertex and the
+        // crossing is (40 + (30-40)/2) * 2 = 70. An inclusive hidden loop
+        // would instead insert the on-plane vertex as an extra (40,0).
+        let projection = Projection {
+            mul_x: 1024,
+            mul_y: 1024,
+            add_x: 0,
+            add_y: 0,
+            clip_x: [0, 319],
+            clip_y: [0, 199],
+            clip_z: [512, 1_000_000_000],
+        };
+        let rotated = [
+            Rotated {
+                x: 0,
+                y: 0,
+                z: 1024,
+                normal: 0,
+            },
+            Rotated {
+                x: 10,
+                y: 0,
+                z: 0,
+                normal: 0,
+            },
+            Rotated {
+                x: 20,
+                y: 0,
+                z: 512,
+                normal: 0,
+            },
+            Rotated {
+                x: 30,
+                y: 0,
+                z: 0,
+                normal: 0,
+            },
+            Rotated {
+                x: 40,
+                y: 0,
+                z: 1024,
+                normal: 0,
+            },
+        ];
+        // The list's projected x: v0 (0,0); v4 (40,0); the hidden vertices'
+        // x/y are undefined and only matter if one is copied, which the
+        // fixed path never does.
+        let src: Vec<PolyVert> = (0..5)
+            .map(|index| PolyVert {
+                x: if index == 0 { 0 } else { 40 },
+                y: 0,
+                gr: [0x1000, 0x3000, 0x4000, 0x5000, 0x2000][index],
+                vx: index,
+            })
+            .collect();
+        let (out, _) = clip_near(&src, &rotated, &projection);
+        assert_eq!(
+            out,
+            vec![
+                PolyVert {
+                    x: 0,
+                    y: 0,
+                    gr: 0x1000,
+                    vx: 0
+                },
+                // The two crossings take the previous output's word: v0's
+                // 0x1000 for both.
+                PolyVert {
+                    x: 10,
+                    y: 0,
+                    gr: 0x1000,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 70,
+                    y: 0,
+                    gr: 0x1000,
+                    vx: 0
+                },
+                PolyVert {
+                    x: 40,
+                    y: 0,
+                    gr: 0x2000,
+                    vx: 4
+                },
+                PolyVert {
+                    x: 0,
+                    y: 0,
+                    gr: 0x1000,
+                    vx: 0
+                },
+            ]
+        );
     }
 
     // ---------------------------------------------------------------------
@@ -1782,7 +2210,8 @@ mod tests {
         // normallight = clamp(((dot >> 16) as i16 >> 5) + 128, 0, 255), then
         // calclight shifts by 6 - (flags >> 10) and clamps 1..=30. The light
         // vector is (12118, 10603, 3030) and UNIT is 16384. With the 32-shade
-        // band (shift 3): +x 27, -x 4, +y 26, -y 5, +z 18, -z 13.
+        // band (shift 3): the six axes are +x 27, -x 4, +y 26, -y 5, +z 18,
+        // -z 13, and the eight cube corners follow.
         let principal = [
             (
                 RotatedNormal {
@@ -1834,6 +2263,27 @@ mod tests {
             ),
         ];
         for (normal, expected) in principal {
+            assert_eq!(light(&normal, F_SHADE32), expected, "{normal:?}");
+        }
+
+        // The eight cube corners: +++ 30, ++- 30, +-+ 20, +-- 14, -++ 17,
+        // -+- 11, --+ 1, --- 1.
+        let corners = [
+            (1, 1, 1, 30),
+            (1, 1, -1, 30),
+            (1, -1, 1, 20),
+            (1, -1, -1, 14),
+            (-1, 1, 1, 17),
+            (-1, 1, -1, 11),
+            (-1, -1, 1, 1),
+            (-1, -1, -1, 1),
+        ];
+        for (x, y, z, expected) in corners {
+            let normal = RotatedNormal {
+                x: x * 16384,
+                y: y * 16384,
+                z: z * 16384,
+            };
             assert_eq!(light(&normal, F_SHADE32), expected, "{normal:?}");
         }
     }
@@ -1894,10 +2344,13 @@ mod tests {
     // import exercised so the module link is explicit.
     #[test]
     fn page_projection_matches_the_maths_window() {
+        // The test helper supplies its own projected vertices, so the
+        // multipliers and centre are zero, but the three clips must be the
+        // maths window's.
+        let window = math::window(0, 319, 0, 199, 512, 1_000_000_000);
         let p = page_projection();
-        assert_eq!(
-            (p.clip_x, p.clip_y),
-            (math::window(0, 319, 0, 199, 0, 0).clip_x, [0, 199])
-        );
+        assert_eq!(p.clip_x, window.clip_x);
+        assert_eq!(p.clip_y, window.clip_y);
+        assert_eq!(p.clip_z, window.clip_z);
     }
 }
