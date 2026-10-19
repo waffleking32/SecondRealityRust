@@ -678,7 +678,8 @@ mod tests {
     fn project_uses_each_axis_add_and_keeps_far_z() {
         // Distinct, nonzero adds: y takes add_y and x takes add_x. With
         // x=10, y=20, z=500 and mul 500, x = 10+100 = 110 and y = 20+40 =
-        // 60; swapping the adds would give 140 and 30.
+        // 60; swapping the adds would give x = 10+40 = 50 and y = 20+100 =
+        // 120.
         let p = Projection {
             mul_x: 500,
             mul_y: 500,
