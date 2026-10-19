@@ -9,11 +9,10 @@
 //! driven by the copper interrupt (`U2A.C:105-133`), and the per-frame draw
 //! (`U2A.C:284-324`, `U2E.C:386-433`).
 
-// This engine's callers are Tasks 6 and 7's parts, which land after it; until
-// then nothing outside this module's tests names any of it, and rustc reports
-// the whole module (including `math` and `draw`) as dead. The allow is scoped
-// to this module tree and goes away with the first part that calls the driver.
-#![allow(dead_code)]
+// The engine's callers are Tasks 6 and 7's parts. Task 6's U2A names the
+// loader, the ring, the driver and `Clear::Background`; what Task 7's U2E
+// alone uses (`first_draw`, the name hacks and `Clear::Byte`) is exercised by
+// this module's tests until then, so rustc does not report it dead.
 
 pub mod draw;
 pub mod math;
@@ -428,6 +427,9 @@ pub enum Clear<'a> {
     /// (`U2A.C:153-166`) is not ported.
     Background(&'a [u8]),
     /// U2E's `vid_clear255()` (`U2E.C:395`): one byte over the whole page.
+    ///
+    /// Task 7's U2E constructs it; until then only this module's tests do.
+    #[allow(dead_code)]
     Byte(u8),
 }
 

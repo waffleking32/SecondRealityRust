@@ -34,18 +34,31 @@ use super::math::{
 };
 
 /// `F_FLIP` (`AD.INC:68`).
+///
+/// No shipped face carries it and neither part's loop reads it; it is kept
+/// with the flag word's other bits because the word is read as a whole.
+#[allow(dead_code)]
 pub const F_FLIP: u16 = 0x0100;
 /// `F_2SIDE` (`AD.INC:69`).
 pub const F_2SIDE: u16 = 0x0200;
 /// `F_SHADE8` (`AD.INC:70`).
+///
+/// The three shade constants name the bits `calclight` masks with
+/// `F_SHADE32`; U2A's shipped faces use the 16- and 32-colour tiers.
+#[allow(dead_code)]
 pub const F_SHADE8: u16 = 0x0400;
 /// `F_SHADE16` (`AD.INC:71`).
+#[allow(dead_code)]
 pub const F_SHADE16: u16 = 0x0800;
 /// `F_SHADE32` (`AD.INC:72`); the shade bits are `F_SHADE8 | F_SHADE16`.
 pub const F_SHADE32: u16 = 0x0C00;
 /// `F_GOURAUD` (`AD.INC:73`).
 pub const F_GOURAUD: u16 = 0x1000;
 /// `F_TEXTURE` (`AD.INC:74`).
+///
+/// No shipped face sets it and the pipeline has no texture path; kept with
+/// the flag word's other bits.
+#[allow(dead_code)]
 pub const F_TEXTURE: u16 = 0x2000;
 
 /// The mask `calclight` tests (`and ax,F_SHADE32`).

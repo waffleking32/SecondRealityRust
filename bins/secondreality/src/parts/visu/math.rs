@@ -15,6 +15,10 @@
 //! the values `AVID.ASM:60-85` produces for the two shipped scenes' `fov`s.
 
 /// The fixed-point unit, `unit equ 16384` (`AD.INC:41`).
+///
+/// This module's own tests and Task 7's U2E build matrices from it; U2A
+/// itself never names it.
+#[allow(dead_code)]
 pub const UNIT: i32 = 16384;
 
 /// The fixed-point shift, `unitshr equ 14` (`AD.INC:42`).

@@ -28,6 +28,7 @@ pub mod poslist;
 pub mod rayscrl;
 pub mod techno;
 pub mod tunneli;
+pub mod u2a;
 pub mod visu;
 
 use sr_engine::part::Part;
@@ -42,6 +43,8 @@ pub fn registry() -> &'static [PartEntry] {
         ("testcard", || Box::new(TestCard::new())),
         // `ALKU/MAIN.C`, block 1's entry (`MAIN/U2.ASM:790-792`).
         ("alku", || Box::new(alku::Alku::new())),
+        // `VISU/C/U2A.C`, block 1's second part (`MAIN/U2.ASM:793-799`).
+        ("u2a", || Box::new(u2a::U2a::new())),
         // `PAM/OUTTAA.C`, block 1's third part (`MAIN/U2.ASM:793-799`).
         ("pam", || Box::new(pam::Pam::new())),
         // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).

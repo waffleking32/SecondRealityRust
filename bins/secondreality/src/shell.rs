@@ -1782,6 +1782,7 @@ mod tests {
             // `SECOND 1`'s first parts run before any restart, under the initial
             // `_zplaysong(0)` (`MAIN/U2.ASM:766-775`).
             ("alku", Some((ModuleId::Music0, 0))),
+            ("u2a", Some((ModuleId::Music0, 0))),
             ("pam", Some((ModuleId::Music0, 0))),
             ("beglogo", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
@@ -2648,12 +2649,13 @@ mod tests {
         // "holding; <name> is not ported yet").
         //
         // This is the block-level claim the end-to-end runs rest on: `--block 1` plays
-        // ALKU and stops at U2A, and `--block 3` runs its whole tier — MNTSCRL, LNS&ZOOM,
-        // PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO — and stops at U2E, in the plans the
-        // demo itself has. Block 2 still stops at GLENZ, which leaves TECHNO and PANICEND
-        // unreachable through a block until GLENZ lands (Phase 7).
+        // ALKU, U2A, PAM and BEGLOGO, and stops at GLENZ, and `--block 3` runs its
+        // whole tier — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO —
+        // and stops at U2E, in the plans the demo itself has. Block 2 still stops at
+        // GLENZ, which leaves TECHNO and PANICEND unreachable through a block until
+        // GLENZ lands (Phase 7).
         let expected: &[(char, Option<&str>)] = &[
-            ('1', Some("u2a")),
+            ('1', Some("glenz")),
             ('2', Some("glenz")),
             // Block 3's chain now runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL →
             // RAYSCRL → COMAN → JPLOGO and stops at U2E, the first name the
