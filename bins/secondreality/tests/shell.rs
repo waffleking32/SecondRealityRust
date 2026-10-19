@@ -225,27 +225,23 @@ fn parse_position(text: &str) -> (u8, u8) {
 /// 17,800..17,999 frames no filed trace holds are the handover.
 const BLOCK3_TRACES: &[&str] = &["second3", "second3a", "second3b", "second3d", "second3e"];
 
-/// The published position block 3's traces hold at a boot frame, from whichever
-/// session covers it. The sessions overlap only at their seams (15000..15049 is
-/// in both `second3b` and `second3d`), and where two hold the frame they must
-/// agree — a boot frame the sessions disagree about would make the chain's
-/// comparison pick a winner rather than read an answer.
+/// The published position block 3's traces hold at a boot frame, from the
+/// **first** session that covers it.
+///
+/// The sessions overlap at one seam, 15000..15049 in both `second3b` and
+/// `second3d`, and they are different sessions: `second3b` reads `91:60` at
+/// 15000 where `second3d` reads `91:59` (zframes 6888/6884), a one-row phase
+/// difference. So a frame takes the first trace that holds it rather than
+/// being required to agree across the seam — the same rule as
+/// [`block1_trace_position`], and for the same reason. Every index the chain
+/// test reads is covered by exactly one trace.
 fn block3_trace_position(frame: u32) -> (u8, u8) {
-    let mut found: Option<(&str, (u8, u8))> = None;
     for name in BLOCK3_TRACES {
         if let Some(position) = trace_position_opt(name, frame) {
-            match found {
-                Some((other, known)) => assert_eq!(
-                    known, position,
-                    "{name} and {other} disagree about boot frame {frame}"
-                ),
-                None => found = Some((name, position)),
-            }
+            return position;
         }
     }
-    found
-        .unwrap_or_else(|| panic!("no block-3 trace holds boot frame {frame}"))
-        .1
+    panic!("no block-3 trace holds boot frame {frame}")
 }
 
 /// The published position the `SECOND 1` traces hold at a boot frame, from the
@@ -619,14 +615,25 @@ fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_rol
     // (chain tick 0 = boot 419) a boot frame `B` is chain `B - 419`. The port's
     // nine-tick lead at this seam is under one MUSIC0 row (speed 6, tempo 120:
     // 8.76 frames), so the position at the mapped index is the trace's within one
-    // row — and the order, which is what U2E's gate reads, is exact. At 17,581
-    // (boot 18,000) the port reads 18:17 against `second3e`'s 18:16; at 17,600
-    // (18,019) 18:19 against 18:18; at 17,721 (18,140) 19:1 against the order-19
-    // boundary 19:0.
-    for index in [17_581u32, 17_600, 17_721] {
+    // row — and the order, which is what U2E's gate reads, is exact. The port's
+    // own rows are pinned here too (D25: `docs/fidelity/u2e.md` §5 quotes them):
+    // 18:17 at 17,581 against `second3e`'s 18:16; 18:19 at 17,600 against 18:18;
+    // and the order-19 boundary 19:1 at 17,721 against 19:0.
+    let restart_positions: &[(u32, &str, (u8, u8))] = &[
+        (17_581, "18:17", (18, 16)),
+        (17_600, "18:19", (18, 18)),
+        (17_721, "19:1", (19, 0)),
+    ];
+    for &(index, measured, trace) in restart_positions {
         let boot = index + MNTSCRL_CHAIN_ORIGIN;
+        assert_eq!(
+            frame_position(frames, index),
+            measured,
+            "chain frame {index}: the port's measured row"
+        );
         let (order, row) = block3_trace_position(boot);
-        let (port_order, port_row) = parse_position(&frame_position(frames, index));
+        assert_eq!((order, row), trace, "the trace's own position at boot {boot}");
+        let (port_order, port_row) = parse_position(measured);
         assert_eq!(
             port_order, order,
             "chain frame {index}: the trace at boot {boot} is in order {order}"
@@ -637,7 +644,6 @@ fn a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_rol
              {order}:{row} at boot {boot} — more than one row's lead is a shifted restart"
         );
     }
-    assert_eq!(block3_trace_position(18_140), (19, 0), "the trace's order-19 boundary");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

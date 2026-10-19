@@ -451,9 +451,10 @@ impl Drain {
 
     /// Fill `out` the way the callback does, and say how many samples the ring gave up.
     ///
-    /// The cell is locked only long enough to take the current `Shared`; the ring's own
-    /// lock is held for the take. So a `follow` between drains is safe, and one during a
-    /// drain waits for that drain's take rather than splitting it across two players.
+    /// The cell is locked only long enough to clone the current `Shared`; the take then
+    /// holds that player's own ring lock. A `follow` between two drains is therefore
+    /// safe, and one that lands while a drain is running cannot split the take across two
+    /// players — the callback finishes against the player it started with.
     pub(crate) fn drain(&mut self, out: &mut [i16]) -> usize {
         let player = cell(&self.player).clone();
         let taken = lock(&player).take_samples(out);

@@ -191,8 +191,8 @@ impl PartCtx<'_> {
     }
 
     /// Whether the run's music was installed for this part alone — true only
-    /// for the init context of the **entry part** of a run, false for every
-    /// later part in the chain.
+    /// for the init context of the part the **last `set_music` was for**, false
+    /// for every later part in the chain.
     ///
     /// [`Engine::set_music`](crate::engine::Engine::set_music) marks the
     /// player fresh; the next [`Engine::start`](crate::engine::Engine::start)
@@ -200,7 +200,11 @@ impl PartCtx<'_> {
     /// part a `--part` or block run starts — the one the shell starts after
     /// installing the music — is fresh, and every part the chain reaches
     /// afterwards is not: its stretch of the player's timeline has already
-    /// run. A part that makes the player catch up to a boot frame (MINVBALL's
+    /// run. A **mid-run restart** (`MAIN/U2.ASM:880-885`, at U2E's boundary)
+    /// loads a new player and re-arms the flag, so the part the restart
+    /// precedes is fresh too; the part after it is not.
+    ///
+    /// A part that makes the player catch up to a boot frame (MINVBALL's
     /// 256 polls, RAYSCRL's 268, MNTSCRL's 11) or anchors a counter to one
     /// (PAM's `frame_count = 2`) does so only when this is `true`; a part
     /// reached mid-chain polls nothing and starts its counter at zero.

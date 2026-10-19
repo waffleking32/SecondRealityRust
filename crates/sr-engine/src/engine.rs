@@ -60,9 +60,10 @@ pub struct Engine {
     /// separate EXEs that come and go around it.
     music: Option<Box<dyn Music>>,
     /// Set by [`set_music`](Engine::set_music), consumed by the next
-    /// [`start`](Engine::start): the entry part's init is the only context
-    /// that sees it. False means the part is reached mid-chain, with the
-    /// player already running.
+    /// [`start`](Engine::start): that part's init is the only context that
+    /// sees it — the entry part of a run, or the part a mid-chain restart
+    /// installed a fresh player for. False means the part is reached
+    /// mid-chain, with the player already running.
     music_fresh: bool,
     frame_counter: u32,
     exit_requested: bool,
@@ -130,9 +131,11 @@ impl Engine {
     /// uses both (Task 7). See [`crate::music`]'s module comment.
     ///
     /// Installing a player also arms the mid-chain seam: the **next**
-    /// [`start`](Engine::start) is the entry part of a run, so its init
-    /// context reports [`PartCtx::music_fresh`] as `true`; every later part
-    /// in the chain reports `false`. Calling this again re-arms it.
+    /// [`start`](Engine::start) is the part the install was for — a run's
+    /// entry part, or the mid-chain part a restart site installs a fresh
+    /// player for (`MAIN/U2.ASM:880-885`'s call before `partexecute`) — so
+    /// that init context reports [`PartCtx::music_fresh`] as `true`; every
+    /// later part in the chain reports `false`. Calling this again re-arms it.
     pub fn set_music(&mut self, music: Box<dyn Music>) {
         self.music = Some(music);
         self.music_fresh = true;

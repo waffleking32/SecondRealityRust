@@ -361,10 +361,10 @@ struct Manifest<'a> {
     index_origin: &'a str,
     /// The reference index the run began at, for a `boot` run.
     anchor: Option<u32>,
-    /// The music the run began with: which module, the order its entry point starts at, and
-    /// the frame its own clock starts on — the shell's restart table's answer
-    /// (`shell::MUSIC_RESTARTS`), recorded the way a capture records the argument it
-    /// started the original with (D13). `null` for a run with no player.
+    /// The music the run's **current** player was started as: which module, the order it
+    /// was seeked to, and the run frame it is aligned to — the entry point's row, or the
+    /// mid-run restart's — recorded the way a capture records the argument it started the
+    /// original with (D13). `null` for a run with no player.
     music: Option<MusicSetup<'a>>,
     frames: &'a [FrameEntry],
 }
@@ -374,10 +374,13 @@ struct Manifest<'a> {
 struct MusicSetup<'a> {
     /// `MUSIC0` or `MUSIC1`.
     module: &'a str,
-    /// The order the run's entry point seeked to.
+    /// The order the run's current player was seeked to — the entry point's, or the
+    /// mid-run restart's.
     start_order: u8,
-    /// The frame, in this manifest's own numbering, the music's own clock starts on
-    /// ([`shell::MusicStart`](crate::shell::MusicStart)).
+    /// The run frame, in this manifest's own numbering, the music is **aligned to**
+    /// ([`shell::MusicStart`](crate::shell::MusicStart)): the clock's start for an entry
+    /// install, and a mid-run restart's boundary — whose clock begins
+    /// `MusicStart::waiting` frames later.
     start_frame: u32,
 }
 

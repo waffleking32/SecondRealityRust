@@ -311,11 +311,11 @@ pub fn music_start_frame_for(part: &str) -> u32 {
 ///   `--part testcard`) has no reference frame to synchronise to: its music starts with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MusicStart {
-    /// The frame the run's music was started at, in the run's numbering: the music's own
-    /// start for an entry install ([`new`](MusicStart::new),
-    /// [`for_part`](MusicStart::for_part)), and the boundary a mid-run restart was
-    /// installed at for [`restart`](MusicStart::restart) — whose clock then begins
-    /// [`waiting`](MusicStart::waiting) frames later.
+    /// The run frame the music is **aligned to**: for an entry install
+    /// ([`new`](MusicStart::new), [`for_part`](MusicStart::for_part)) the clock's start in
+    /// the run's numbering; for a restart ([`restart`](MusicStart::restart)) its boundary,
+    /// with the clock beginning [`waiting`](MusicStart::waiting) frames later. The
+    /// manifest's `start_frame` is this same word.
     pub frame: u32,
     /// Polls the engine makes before the music advances: the frames between the run's
     /// first drawn frame and the music's start (for a restart, between the boundary it was
@@ -3168,7 +3168,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The number of `init` contexts `music_fresh` reported `true` to.
+    /// The number of `init` contexts the probe has seen, and how many of those
+    /// `music_fresh` reported `true` to. The total is what proves the second
+    /// U2E's init actually ran.
+    static SAME_ORDER_INITS: AtomicU32 = AtomicU32::new(0);
     static SAME_ORDER_FRESH_INITS: AtomicU32 = AtomicU32::new(0);
 
     struct SameOrderProbe;
@@ -3176,6 +3179,7 @@ mod tests {
     impl Part for SameOrderProbe {
         fn name(&self) -> &'static str { "u2e" }
         fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+            SAME_ORDER_INITS.fetch_add(1, Ordering::SeqCst);
             if ctx.music_fresh() {
                 SAME_ORDER_FRESH_INITS.fetch_add(1, Ordering::SeqCst);
             }
@@ -3202,6 +3206,13 @@ mod tests {
         // The restart fires only when the row's module/order differs from the
         // current `RunMusic`: a plan that reaches U2E with MUSIC0@18 already
         // playing keeps the one player (and its clock's position).
+        //
+        // The probe draws frame 0 and finishes on frame 1, so the boundary is
+        // the third tick: tick 0 draws the first U2E's frame 0, tick 1 draws
+        // its frame 1 and retires it, and tick 2 starts the second U2E — whose
+        // init is the context the skip branch must leave un-rearmed. Ticking
+        // only twice would stop on the first part and test nothing.
+        SAME_ORDER_INITS.store(0, Ordering::SeqCst);
         SAME_ORDER_FRESH_INITS.store(0, Ordering::SeqCst);
         let mut run = Sequence::with_run(
             TEST_SURFACE,
@@ -3217,7 +3228,14 @@ mod tests {
         run.tick();
         assert_eq!(run.part(), "u2e");
         run.tick();
+        assert_eq!(run.part(), "u2e", "the first U2E's last frame");
+        run.tick();
         assert_eq!(run.part(), "u2e", "the second U2E started");
+        assert_eq!(
+            SAME_ORDER_INITS.load(Ordering::SeqCst),
+            2,
+            "the second U2E's init ran, so the restart site was consulted"
+        );
         assert_eq!(
             std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player),
             player,
