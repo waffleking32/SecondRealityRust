@@ -36,7 +36,7 @@ use super::visu::{load_scene, Clear, Driver, Ring, Scene};
 const NAME: &str = "u2e";
 
 /// The packed scene directory and name (`U2E.C:208`).
-pub const SCENE_DIR: &str = "assets/VISU/C/SCENE";
+const SCENE_DIR: &str = "assets/VISU/C/SCENE";
 const SCENE_NAME: &str = "U2E";
 
 /// The displayed picture: the shipped 320x200 mode (`U2E.C:275`, `:336`).
@@ -103,10 +103,13 @@ pub struct U2e {
     driver: Option<Rc<RefCell<Driver>>>,
     /// `fpal[768]`: the intro's and the teardown's working DAC.
     fpal: [u8; 768],
-    /// Whether `fpal` has a mutation waiting for the next tick's upload. The
-    /// source mutates, waits and then uploads, so a fade's step shows one tick
-    /// after it is computed; this flag is that one-tick delay.
+    /// Whether `fpal` has an intro mutation waiting for the next tick's upload.
+    /// The source mutates, waits and then uploads, so a fade's step shows one
+    /// tick after it is computed; this flag is that one-tick delay.
     palette_dirty: bool,
+    /// The same one-tick delay for the teardown, whose upload is the rotated
+    /// DAC write rather than the intro's straight 768-byte copy.
+    teardown_dirty: bool,
     phase: Phase,
     /// CRTC register 9's scan-doubling bit (`U2E.C:305-308`): display hardware
     /// state only, kept for the record and the tests.
@@ -123,6 +126,7 @@ impl U2e {
             driver: None,
             fpal: [0; 768],
             palette_dirty: false,
+            teardown_dirty: false,
             phase: Phase::FadeIn { step: 0 },
             crtc_scan_doubled: false,
             scene_dir: SCENE_DIR,
@@ -191,6 +195,7 @@ impl U2e {
             self.fpal = capture_palette(ctx.palette);
         }
         self.palette_dirty = false;
+        self.teardown_dirty = false;
 
         // `vid_init(1)`/`vid_init(11)` are state only for the port: both modes
         // are the shipped 320x200 tweak (`AVIDM1.ASM:17-42`, `:44-69`), and
@@ -223,6 +228,16 @@ impl U2e {
         if self.palette_dirty {
             ctx.set_palette(palette_from_six_bit(&self.fpal));
             self.palette_dirty = false;
+        }
+    }
+
+    /// Upload a teardown mutation one tick after it was computed: the same
+    /// `dis_waitb(); outp(...)` delay as the intro's, with the rotated write
+    /// (`U2E.C:552-554`).
+    fn flush_teardown(&mut self, ctx: &mut PartCtx) {
+        if self.teardown_dirty {
+            ctx.set_palette(rotated_palette(&self.fpal));
+            self.teardown_dirty = false;
         }
     }
 
@@ -372,36 +387,31 @@ impl U2e {
         }
     }
 
-    /// `U2E.C:541-555`: slot 2 removed, the live DAC captured into `fpal`, then
-    /// the first of the sixteen fade steps on this tick.
+    /// `U2E.C:541-555`: slot 2 removed, the live DAC captured into `fpal`, and
+    /// the first of the sixteen fade steps computed on this tick. The first
+    /// upload is the next tick's, as `dis_waitb()` precedes it in the source.
     fn teardown(&mut self, ctx: &mut PartCtx) {
         for slot in 0..COPPER_SLOTS {
             ctx.set_copper(slot, Box::new(|_ctx: &mut PartCtx| {}));
         }
         self.fpal = capture_palette(ctx.palette);
         self.palette_dirty = false;
+        self.teardown_dirty = false;
         self.phase = Phase::Teardown {
-            left: TEARDOWN_STEPS,
+            left: TEARDOWN_STEPS - 1,
         };
-        self.teardown_step(ctx);
+        self.teardown_mutate();
     }
 
-    /// One `fpal[a]+=4` pass and the 768-byte DAC write from entry 255
-    /// (`U2E.C:545-555`). The write wraps: entry 255 takes `fpal`'s entry 0
-    /// and entry `j < 255` takes `fpal`'s entry `j + 1`.
-    fn teardown_step(&mut self, ctx: &mut PartCtx) {
+    /// One `fpal[a]+=4` pass (`U2E.C:545-550`); the 768-byte DAC write from
+    /// entry 255 follows on the next tick (`:552-554`). The write wraps: entry
+    /// 255 takes `fpal`'s entry 0 and entry `j < 255` takes `fpal`'s entry
+    /// `j + 1`.
+    fn teardown_mutate(&mut self) {
         for byte in &mut self.fpal {
             *byte = (*byte + 4).min(63);
         }
-        ctx.set_palette(rotated_palette(&self.fpal));
-        let Phase::Teardown { left } = self.phase else {
-            return;
-        };
-        self.phase = if left <= 1 {
-            Phase::Done
-        } else {
-            Phase::Teardown { left: left - 1 }
-        };
+        self.teardown_dirty = true;
     }
 
     fn status(&self) -> PartStatus {
@@ -424,6 +434,7 @@ impl Part for U2e {
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.flush_palette(ctx);
+        self.flush_teardown(ctx);
         match self.phase {
             Phase::Done => PartStatus::Finished,
             Phase::FadeIn { step } => {
@@ -492,9 +503,18 @@ impl Part for U2e {
                 self.loop_tick(ctx);
                 self.status()
             }
-            Phase::Teardown { .. } => {
-                self.teardown_step(ctx);
-                self.status()
+            Phase::Teardown { left } => {
+                // The previous tick's mutation was flushed above; when all
+                // sixteen are computed and uploaded, the part ends on the tick
+                // that shows the last one.
+                if left == 0 {
+                    self.phase = Phase::Done;
+                    PartStatus::Finished
+                } else {
+                    self.teardown_mutate();
+                    self.phase = Phase::Teardown { left: left - 1 };
+                    PartStatus::Continuing
+                }
             }
         }
     }
@@ -528,8 +548,10 @@ fn palette_from_six_bit(bytes: &[u8; 768]) -> Palette {
 /// The top block's last `memset` is at `vram+y*80+252` — 172 addresses past the
 /// row it just wrote, which lands in rows `y+3..`; every one of those addresses
 /// is written again by a later row pass, so the stray has no visible effect.
-/// Addresses past the page's 16,000 are dropped: in the original they are in the
-/// page slot's 384-byte gap, never in the next page.
+/// Every write the shipped pattern makes is inside its page (the largest is the
+/// bottom row's byte 15,999), so the `pixel < PAGE_PIXELS` guard never fires
+/// for it; it is a bound against a malformed pattern, and the unit test's
+/// sentinel proves a page's writes never cross into the next page.
 fn fadeset(pixels: &mut [u8], page: usize) {
     let start = page * PAGE_PIXELS;
     let page = &mut pixels[start..start + PAGE_PIXELS];
@@ -905,18 +927,19 @@ mod tests {
     }
 
     #[test]
-    fn the_fadeset_writes_the_source_s_pattern_and_bounds_the_stray() {
+    fn the_fadeset_writes_the_source_s_pattern_within_its_page() {
         // The source's top block writes bytes 0..63 (x 0..255) and then a
         // `memset(vram+y*80+252,0,16)` that lands in a later row; the middle
-        // and bottom blocks write x 0..319. A sentinel shows both the columns
-        // the top block never writes and the page boundary.
+        // and bottom blocks write x 0..319. A sentinel shows the columns the
+        // top block never writes and proves page 0's writes stay in page 0
+        // (the shipped pattern is entirely in-page; the guard is a bound).
         let mut pixels = vec![0xEEu8; 2 * PAGE_PIXELS];
         {
             let (page0, rest) = pixels.split_at_mut(PAGE_PIXELS);
             fadeset(page0, 0);
             assert!(
                 rest.iter().all(|&pixel| pixel == 0xEE),
-                "the stray beyond the page's 16,000 addresses is dropped"
+                "the fadeset never writes across the page boundary"
             );
         }
         let row = |y: usize, x: usize| pixels[y * 320 + x];
@@ -1137,10 +1160,15 @@ mod tests {
             .map(|instance| instance.object.name.as_slice())
             .collect();
         assert!(names.contains(&b"\"s01\"".as_slice()), "U2E.028");
-        assert!(
-            names.iter().any(|name| name.get(1) == Some(&b'_')),
-            "the underscore objects U2E.C:408 forces to 1e9"
-        );
+        // The objects whose quoted name puts `_` at name[1], which
+        // `U2E.C:408` forces to 1e9: U2E.001, .003, .011, .014, .015, .016,
+        // .017, .020 and .022 — nine of the 42 files.
+        let underscored = scene
+            .instances
+            .iter()
+            .filter(|instance| instance.object.name.get(1) == Some(&b'_'))
+            .count();
+        assert_eq!(underscored, 9, "the `_` objects U2E.C:408 forces to 1e9");
         // `currframe`'s window is strict: 1800 < currframe < 2200, in the
         // ring's frame units (`U2E.C:410-416`). The engine's own unit test
         // pins the sort; here the shipped scene shows the object the window
@@ -1158,16 +1186,22 @@ mod tests {
         to_loop(&mut rig, &mut part);
         // The live DAC is the main palette; the capture is that palette.
         let captured = capture_palette(&part.main_palette);
+        // Tick T: the capture and the first +4 are computed, but the upload is
+        // the next tick's (`fpal[a]+=4; dis_waitb(); outp(...)`,
+        // `U2E.C:545-554`).
         let status = rig.step_exit(&mut part);
         assert_eq!(status, PartStatus::Continuing);
-        // Step 1: the live DAC is captured and every byte takes +4, clamp 63.
-        let mut expected = [0u8; 768];
-        for (at, &byte) in captured.iter().enumerate() {
-            expected[at] = (byte + 4).min(63);
+        assert_eq!(part.phase, Phase::Teardown { left: TEARDOWN_STEPS - 1 });
+        let mut step1 = captured;
+        for byte in &mut step1 {
+            *byte = (*byte + 4).min(63);
         }
-        assert_eq!(part.fpal, expected, "the live DAC captured, then stepped");
-        // The write starts at DAC entry 255 and wraps: 255 gets fpal[0..3],
-        // entry j gets fpal[3(j+1)..3(j+2)].
+        assert_eq!(part.fpal, step1, "the live DAC captured, then stepped");
+        assert_eq!(rig.palette, part.main_palette, "no upload on the trigger tick");
+
+        // Tick T+1: step 1 is the live DAC, written from entry 255 with the
+        // wrap (255 gets fpal[0..3], entry j gets fpal[3(j+1)..3(j+2)]).
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         for index in 0..=255u8 {
             let at = if index == 255 {
                 0
@@ -1176,18 +1210,25 @@ mod tests {
             };
             assert_eq!(
                 rig.palette.entry(index),
-                [expected[at], expected[at + 1], expected[at + 2]],
+                [step1[at], step1[at + 1], step1[at + 2]],
                 "DAC entry {index}"
             );
         }
-        // Fifteen more steps, then Finished; no page is cleared.
+        let mut step2 = step1;
+        for byte in &mut step2 {
+            *byte = (*byte + 4).min(63);
+        }
+        assert_eq!(part.fpal, step2, "step 2 is computed one tick ahead");
+
+        // Ticks T+2..T+16: each shows the previous step; the sixteenth upload
+        // is the one the part ends on. No page is cleared.
         let before = rig.surface.pixels().to_vec();
-        for step in 1..TEARDOWN_STEPS {
+        for step in 2..=TEARDOWN_STEPS {
             let status = rig.step(&mut part);
-            if step + 1 < TEARDOWN_STEPS {
+            if step < TEARDOWN_STEPS {
                 assert_eq!(status, PartStatus::Continuing, "step {step}");
             } else {
-                assert_eq!(status, PartStatus::Finished, "the sixteenth step ends the part");
+                assert_eq!(status, PartStatus::Finished, "the sixteenth upload ends the part");
             }
         }
         assert_eq!(part.phase, Phase::Done);
@@ -1198,7 +1239,19 @@ mod tests {
                 *byte = (*byte + 4).min(63);
             }
         }
-        assert_eq!(part.fpal, last);
+        assert_eq!(part.fpal, last, "sixteen mutations");
+        for index in 0..=255u8 {
+            let at = if index == 255 {
+                0
+            } else {
+                3 * (usize::from(index) + 1)
+            };
+            assert_eq!(
+                rig.palette.entry(index),
+                [last[at], last[at + 1], last[at + 2]],
+                "the last upload is visible: DAC entry {index}"
+            );
+        }
         assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
         assert_eq!(
             rig.surface.pixels(),

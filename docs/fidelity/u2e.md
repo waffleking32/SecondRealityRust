@@ -51,8 +51,9 @@ registered as `"u2e"`, with its integration test in
   and parses `repeat = (a+1)/2` stream frames, advancing `currframe` by
   `repeat*2`. `0xFF 0xFF` resets the scene and sets `xit`.
 - **`:541-559` the teardown.** Slot 2 removed, `outp(0x3c7,0)` and the live
-  DAC captured into `fpal`, then 16 steps of `+4` (clamp 63) uploaded from DAC
-  entry 255, then the part ends. No page is cleared.
+  DAC captured into `fpal`, then 16 steps of `+4` (clamp 63), each computed and
+  uploaded a retrace later from DAC entry 255; the sixteenth upload is the
+  part's last visible tick. No page is cleared.
 
 ## 2. The screen, the four pages and the copper
 
@@ -101,16 +102,32 @@ The measured milestones (`cargo xtask reference capture --arg 4 --boot autoexec
 | 480, 490, 500 | the fade-out: the band's top/bottom (index 252) dims and the middle sides (index 254) brighten; at 490 entry 252 = 53 (215) and entry 254 = 10 (40), at 500 33 (134) and 30 (121) | `out/u2e-start`, `-b` |
 | 530, 590, 660 | the post-fade hold, `befaf38a…`: two colours, mean 191.25 — rows 25..174 white, the rest black | `out/b4b-u2e-sweep2`; `reference-indices.md` §18.6 ties it to a `SECOND 3` boot's 18000/18100 |
 | 600 = 700 | a *different* 4-colour hold (`ef539f9e…`, mean 158.30) in the older `out/b4b-u2e-sweep` session | `reference-indices.md` §18.2; see §7's concern |
-| 699 | order 19 first published — the gate | `reference/music/second4/trace.csv` |
+| 698 (port) / 699 (`second4`) | order 19 first published — the gate; the port's clock is one frame ahead of the trace | `tests/u2e.rs`'s `the_block_four_clock_reaches_order_19_at_698`; `reference/music/second4/trace.csv` |
 | 800 | the corridor, 37 colours | `out/b4b-u2e-sweep` |
 | 1000 | the console, 36 colours | `reference/parts/u2e/frame_001000.rgb` |
 
 The port reproduces the intro **byte for byte**: a `--block 4` run's 460, 467,
 470, 480, 490, 500, 530, 590 and 660 compare at **0 differing** against those
-sessions' RGB captures. The fade-out's step arithmetic is pinned too: the
-first fade-out mutation is on part tick 67 and its upload on tick 68, so boot
-486 is step 1 and the measured 490 (tick 72) is step 5 and 500 (tick 82) is
-step 15 (`the_fade_out_starts_on_tick_68_and_matches_the_measured_490_and_500`).
+sessions' RGB captures. The dump and comparison are:
+
+```bash
+cargo run --release --bin secondreality -- --block 4 --headless \
+    --dump-frames 460,467,470,480,490,500,530,590,660 --dump-dir out/u2e-intro
+cmp out/u2e-intro/u2e_000460.rgb out/u2e-dense-a/frame_000460.rgb
+cmp out/u2e-intro/u2e_000467.rgb out/u2e-dense-a/frame_000467.rgb
+cmp out/u2e-intro/u2e_000470.rgb out/u2e-dense-a/frame_000470.rgb
+cmp out/u2e-intro/u2e_000480.rgb out/u2e-start/frame_000480.rgb
+cmp out/u2e-intro/u2e_000490.rgb out/u2e-start/frame_000490.rgb
+cmp out/u2e-intro/u2e_000500.rgb out/u2e-start/frame_000500.rgb
+cmp out/u2e-intro/u2e_000530.rgb out/b4b-u2e-sweep2/frame_000530.rgb
+cmp out/u2e-intro/u2e_000590.rgb out/b4b-u2e-sweep2/frame_000590.rgb
+cmp out/u2e-intro/u2e_000660.rgb out/b4b-u2e-sweep2/frame_000660.rgb
+```
+
+Every `cmp` exits 0. The fade-out's step arithmetic is pinned too: the first
+fade-out mutation is on part tick 67 and its upload on tick 68, so boot 486 is
+step 1 and the measured 490 (tick 72) is step 5 and 500 (tick 82) is step 15
+(`the_fade_out_starts_on_tick_68_and_matches_the_measured_490_and_500`).
 
 ## 4. The palette, the jelly substitution and the fadeset
 
@@ -228,17 +245,23 @@ attribution and the deltas; the integration test asserts the numbers above.
 - **The deadlock escape.** `while(cl[clw].ready) { if(deadlock>16)
   break; }` draws into a page the display may still hold; the port's
   `Ring::next_page` returns the busy page once the copper has counted past 16.
-- **The 768-write DAC rotation.** The teardown writes 768 bytes from DAC entry
-  255, so the index wraps: entry 255 takes `fpal`'s entry 0 and entry
-  `j < 255` takes `fpal`'s entry `j + 1`; `fpal`'s entry 255 lands in entry
-  254 and nothing is left unwritten. The unit test derives the rotation from
-  the source and pins every entry.
+- **The 768-write DAC rotation, one tick late.** The teardown's iteration is
+  `fpal[a]+=4; dis_waitb(); outp(0x3c8,255); write 768 bytes` (`:545-554`), so
+  the trigger tick only captures and computes step 1; step `n` is visible on
+  tick `T+n`, and the part ends on the tick that shows step 16. The write
+  starts at DAC entry 255 and wraps: entry 255 takes `fpal`'s entry 0 and
+  entry `j < 255` takes `fpal`'s entry `j + 1`; `fpal`'s entry 255 lands in
+  entry 254 and nothing is left unwritten. The unit test derives the rotation
+  from the source, pins every entry, and asserts the first/last visible
+  palette values.
 - **The city hacks are dead.** `U2E.00M` byte 15 is 0, and U2E never reads
   `city` anyway; the driver's city branches are U2A's cadence only.
 - **The name hacks run.** `name[1] == '_'` forces distance 1,000,000,000
   (`:408`), and `currframe > 1800 && currframe < 2200` forces `s01`'s distance
   to 1 (`:410-416`) — strict bounds, in `currframe`'s two-retrace units. The
-  shipped scene has nine `_` objects and `U2E.028` is `"s01"`.
+  shipped scene has **nine** `_` objects (U2E.001, .003, .011, .014, .015,
+  .016, .017, .020, .022) and `U2E.028` is `"s01"`;
+  `the_scene_is_the_u2e_city_with_the_name_hacks_object` counts them.
 - **The waits are ticks, not spins.** Every intro wait, every gate poll and
   every busy writer page is one `frame()` call; `ctx.exit_requested` is read
   in the gate and in the loop.

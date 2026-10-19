@@ -154,13 +154,14 @@ fn trace_position(frame: u32) -> (u8, u8) {
     panic!("second4 holds no frame {frame}")
 }
 
-/// The keyframes and the port's aligned state one tick either side: the four
-/// filed indices and, for each, the port's frame at `K - 4` (the reference's
-/// own stream state) plus `K - 6` and `K - 2` as its supports.
-const FRAMES: &str = "994,996,998,997,999,1000,1001,\
-                      1594,1596,1598,1597,1599,1600,1601,\
-                      2594,2596,2598,2597,2599,2600,2601,\
-                      3594,3596,3598,3597,3599,3600,3601";
+/// The keyframes and the port's aligned state with its supports: for each
+/// filed index `K`, the port's frame at `K - 4` (the reference's own stream
+/// state), its two-tick hold `K - 3`, and the keyframe's `K - 1`, `K`, `K + 1`.
+/// Every index here is read by an assertion below.
+const FRAMES: &str = "996,997,999,1000,1001,\
+                      1596,1597,1599,1600,1601,\
+                      2596,2597,2599,2600,2601,\
+                      3596,3597,3599,3600,3601";
 
 #[test]
 fn the_run_is_numbered_from_the_intro_anchor_and_plays_the_block_four_music() {
@@ -179,6 +180,20 @@ fn the_run_is_numbered_from_the_intro_anchor_and_plays_the_block_four_music() {
     for index in [1000u32, 1600, 2600, 3600] {
         assert_eq!(entry(&manifest, index)["part"], "u2e");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_block_four_clock_reaches_order_19_at_698() {
+    // The port's player is one frame ahead of `second4` at the gate: order 19
+    // is published at 698, where the trace reads 18:31 (699 is 19:0 in both).
+    // This is the fact docs/fidelity/u2e.md §5's session-phase intercept
+    // rests on.
+    let (dir, manifest) = dump("gate", "698,699");
+    assert_eq!(entry(&manifest, 698)["music_position"], "19:0");
+    assert_eq!(entry(&manifest, 699)["music_position"], "19:0");
+    assert_eq!(trace_position(698), (18, 31));
+    assert_eq!(trace_position(699), (19, 0));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -233,6 +248,13 @@ fn the_keyframes_record_the_measured_session_phase_and_gouraud_residual() {
             silhouette_differing(&at_state, &reference),
             0,
             "boot {index}: the aligned silhouette is the reference's"
+        );
+        // The aligned state is held for two ticks too, which is what `K - 3`
+        // is dumped for.
+        assert_eq!(
+            dumped_file(&dir, &manifest, index - 4, "rgb"),
+            dumped_file(&dir, &manifest, index - 3, "rgb"),
+            "boot {index}: the aligned state holds through K-3"
         );
         // The supports move: the port holds each state for two ticks, so K and
         // K+1 are the same page and K-1 is the previous stream state. D19's
