@@ -8,9 +8,12 @@
 //! Nothing outside this module's own tests names its items yet: the pipeline
 //! and driver are the callers, and they land later in the phase.
 
-// Every `math` item is unused until the polygon pipeline (Task 4) and the
-// scene driver (Task 5) consume it; this allow is scoped to `math` alone and
-// is removed once Task 5's driver calls the maths (plain
-// `cargo clippy -D warnings` then passes without it).
+// Every `math` and `draw` item is unused until the scene driver (Task 5)
+// consumes them; this allow is scoped to each module and is removed once
+// Task 5's driver calls them (plain `cargo clippy -D warnings` then passes
+// without it).
 #[allow(dead_code)]
 pub mod math;
+
+#[allow(dead_code)]
+pub mod draw;
