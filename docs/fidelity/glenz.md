@@ -377,9 +377,10 @@ skips the site (`whattorun & 1` clear) and its initial start already sought
 MUSIC1 order 0 (`:772-775`), so `Sequence::restart_music`'s equality check
 must — and does — keep the player and its clock.
 
-- **Block 2's boundary is 576.** BEGLOGO is 172 ticks from the boot's 404
-  (32 vertical blanks, the mode-set tick, 129 fade steps, the closing write),
-  and GLENZ's first tick draws 576 under the entry player:
+- **Block 2's boundary is 576.** BEGLOGO is 172 ticks from the boot's 404:
+  32 vertical blanks, the mode-set tick, the nine frames A5 records as
+  unmodelled, 129 fade steps and the closing write (32+1+9+129+1 = 172), and
+  GLENZ's first tick draws 576 under the entry player:
   `music.start_frame` is still **408**, not a restart at 576
   (`a_block_two_run_reaches_glenz_without_reloading_music_one`,
   `the_block_two_run_does_not_reload_at_glenz`).
@@ -399,9 +400,10 @@ must — and does — keep the player and its clock.
   closed by a fitted start.
 - **The block-2 wait against `second2b`.** The reference exits at **1,111**
   (`2:45`); the port's position is `2:44` through 1,116 and `2:45` at
-  **1,117**, six ticks later — a session-phase difference of A12's class, and
-  larger than A12's measured three-frame worst, so it is registered rather than
-  absorbed. Task 7 aligns the moving keyframes by this measured offset
+  **1,117**, six ticks later — a session-phase difference of A12's class,
+  larger than A12's measured 5-frame worst for `second2b` itself (the table's
+  overall worst is 7, on `second1`), so it is registered rather than absorbed.
+  Task 7 aligns the moving keyframes by this measured offset
   (`L_p − L_r = 6`), which the same chain test records.
 
 **The post-PANICEND cue wait.** `MAIN/U2.ASM:826-853`'s `@@zh5`/`@@zh4`,

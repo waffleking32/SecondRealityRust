@@ -1263,7 +1263,18 @@ impl Sequence {
         // hold when PANICEND was the plan's last. Consumed here, before either.
         if self.cue_pending {
             self.cue_pending = false;
-            return self.start_cue_wait();
+            // `@@zh5`'s first `dis_waitb`/`dis_exit` pair runs before it reads
+            // the music, and `jnz @@skip5` leaves the wait when the flag is
+            // already set. The race is real: PANICEND does not poll the flag
+            // (`SHUTDOWN.C` has no `dis_exit`), so ESC on its own final tick
+            // leaves the part reporting `Finished` *and* the engine's flag
+            // set — and `start_cue_wait`'s `engine.start` would clear that
+            // flag before the cue could see it. Skip the wait instead and go
+            // on with the plan; the next part's `start` clears the flag, as
+            // `dis_partstart`'s version call does in the original.
+            if !self.engine.exit_requested() {
+                return self.start_cue_wait();
+            }
         }
         let Some(&name) = self.plan.get(self.next) else {
             return self.hold(None);
@@ -3798,6 +3809,44 @@ mod tests {
         assert!(run.holding(), "and then the run holds PANICEND's screen");
         assert_eq!(run.stopped_at(), None, "the plan ran out; no part is to blame");
         assert_eq!(run.part(), "panicend");
+    }
+
+    #[test]
+    fn an_exit_on_panicends_last_tick_skips_the_cue_wait() {
+        // `SHUTDOWN.C` never polls `dis_exit`, so ESC on PANICEND's final tick
+        // leaves the part reporting `Finished` *and* the engine's flag set. The
+        // original's `@@zh5` reads `dis_exit` before the music and jumps to
+        // `@@skip5`: the wait is skipped and the sequence goes on. The port
+        // must skip it too — installing the `CueWait` would call
+        // `engine.start`, which clears the flag before the cue could see it.
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["panicend", "mntscrl"],
+            |name| match name {
+                "panicend" => Some(Box::new(Stub {
+                    name: "panicend",
+                    fill: Some(9),
+                    retires: Some(0),
+                })),
+                "mntscrl" => Some(Box::new(Stub {
+                    name: "mntscrl",
+                    fill: None,
+                    retires: None,
+                })),
+                other => stub_source(other),
+            },
+        )
+        .unwrap();
+        run.engine.set_music(Box::new(ScriptedMusic::new([-32, -32, -32, -32])));
+        assert!(run.request_exit(), "the running PANICEND is asked");
+        run.tick();
+        assert_eq!(run.part(), "panicend", "its final tick still reports Finished");
+        run.tick();
+        assert_eq!(run.part(), "mntscrl", "the exit skipped the cue; the plan goes on");
+        assert_eq!(run.index(), 2, "two ticks, and no cue tick between them");
+        assert!(!run.holding());
     }
 
     #[test]

@@ -1792,7 +1792,7 @@ above is that block's *start*, not this restart, and
 is what makes "the site is inside `& 2`'s region" an assertion rather than a reading of the line
 numbers' order — and pins it (nothing else in the suite looks at this site).
 
-**The port reaches the `:880-885` site today; it does not yet reach `:813-818`.** `--block 3`
+**The port reaches both mid-run sites today** (Phase 7 added `:813-818`). `--block 3`
 runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO → U2E and, before
 U2E, fires `:880-885`'s mid-run restart: the shell installs a fresh MUSIC0 seeked to order 18,
 which waits four engine ticks (D34; `MUSIC_RESTART_AT`, `MusicStart::restart`), and the block-3

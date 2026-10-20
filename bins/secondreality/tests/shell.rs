@@ -529,8 +529,9 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
 fn a_block_two_run_reaches_glenz_without_reloading_music_one() {
     // `SECOND 2`'s mask is `0x1e`: BEGLOGO first (`MAIN/U2.ASM:801-811`), then
     // GLENZ (`:812-815`). BEGLOGO is 172 ticks from the boot's 404 — 32 vertical
-    // blanks, the mode set's tick, 129 fade steps and the closing write at
-    // `BEG/BEG.C:86` — so its last frame is 575 and GLENZ's first is **576**.
+    // blanks, the mode set's tick, the nine frames A5 records as unmodelled,
+    // 129 fade steps and the closing write at `BEG/BEG.C:86`
+    // (32+1+9+129+1 = 172) — so its last frame is 575 and GLENZ's first is **576**.
     //
     // Block 2's `whattorun & 1` is **clear**, so `:813-814` skips the restart the
     // block-1 run takes; its initial start already sought MUSIC1 to order 0
@@ -576,8 +577,9 @@ fn a_block_two_run_reaches_glenz_without_reloading_music_one() {
     // `musplus` −19 the wait ends on); the port's position is `2:44` through
     // 1,116 and `2:45` at **1,117**, the first frame whose picture differs from
     // the hold. The six-tick difference is a session-phase difference of A12's
-    // class — larger than A12's measured three-frame worst, so Task 7 registers
-    // it rather than absorbing it, and aligns GLENZ's moving keyframes by this
+    // class — larger than A12's measured 5-frame worst for `second2b` itself
+    // (the table's overall worst is 7, on `second1`), so Task 7 registers it
+    // rather than absorbing it, and aligns GLENZ's moving keyframes by this
     // measured offset (`L_p − L_r`), never by a fitted one.
     let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
     let hold = rgb(576);
@@ -585,6 +587,10 @@ fn a_block_two_run_reaches_glenz_without_reloading_music_one() {
     assert_ne!(rgb(1_117), hold, "the zoomer's first body draws at 1,117");
     assert_eq!(frame_position(dumped, 1_116), "2:44");
     assert_eq!(frame_position(dumped, 1_117), "2:45", "the wait's exit condition");
+    // The reference's own rows, read from the filed trace (as the block-1 test
+    // reads `second1d`), so a stale trace cannot let these numbers pass.
+    assert_eq!(trace_position("second2b", 1_110), (2, 44), "the reference's last holding tick");
+    assert_eq!(trace_position("second2b", 1_111), (2, 45), "the reference's measured exit");
     assert_eq!(
         1_117 - 1_111,
         6,
