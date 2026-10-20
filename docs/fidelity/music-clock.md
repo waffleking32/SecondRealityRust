@@ -553,8 +553,9 @@ $ awk -F, '$1 == 8520 || $1 == 8521' reference/music/second1d/trace.csv
 byte through 8520 and changes by 8530, and the dense `out/p7-b1-collapse-dense` (frames
 8516…8528) first changes on **8522** — one frame after the trace's reset sample, the
 sample/publish instant D17 quantises, where on `SECOND 2` the two both read 1111. From the
-filed window's first sample to the reset the music advances 106 rows (`ord 1 row 4` → `ord 2
-row 45`) in 421 frames, 318 ticks at 3 a row against 312 `_np_zframe` ticks.
+filed window's first sample to the reset the music makes **105 row changes** (`ord 1 row 4` →
+`ord 2 row 45`) in 421 frames — 315 ticks at 3 a row against the 312 sampled `_np_zframe`
+ticks plus the reset tick.
 
 **One reading is a limit, not an explanation.** The post-reload sample at 8100 is 68 rows into
 MUSIC1 (order 0's 64 rows and order 1's first 4), and at the module's own 1.3474 frames a tick

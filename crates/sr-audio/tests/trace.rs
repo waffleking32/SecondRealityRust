@@ -88,14 +88,12 @@ const MUSIC_START_FRAME: i64 = 408;
 /// no filed measurement of either — these two values are the shell source's start path plus
 /// the anchor the recipes sharing that path measure.
 ///
-/// `SECOND 2` is the tree's only recipe-2 trace, and it is `second2` (4700..9299): the phase
-/// needs TECHNO and PANICEND, not the block's first frames. Block 2 leaves bit 0 of
-/// `whattorun` clear, so the shell starts it on the `ax = 1, bx = 0` path of
-/// `MAIN/U2.ASM:766-775` — `restartmus(1, 0, 48700)`, **MUSIC1 at order 0** — and the first
-/// play is `_zplaysong(0)` (`:785-787`). That is the same `restartmus` path blocks 3 and 5
-/// take, whose boot anchor is the measured 408 (`music-clock.md` §2). The comparison is
-/// still held to the trace's own frames and phase-aligned like every window trace; these
-/// values only say where the simulation begins.
+/// **`SECOND 2` no longer needs this table.** Its boot trace `second2b` (Phase 7, 380..3799)
+/// holds the block's first frames and measures its own anchor (401.1 by the rows,
+/// `music-clock.md` §2), so `second2`'s window (4700..9299) is simulated from that measured
+/// start and phase-aligned like every window. The old row here — the shell's `ax = 1, bx = 0`
+/// path of `MAIN/U2.ASM:766-775`, `restartmus(1, 0, 48700)`, MUSIC1 at order 0 — is still the
+/// source's recipe, but the tree now measures it rather than assuming the restart recipes' 408.
 ///
 /// **`SECOND 4`'s only trace is `second4` (500..4399), and its start is the restart, not the
 /// boot's initial play.** A block-4 boot's first show part is U2E, so the shell reaches the
@@ -152,9 +150,9 @@ const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of mi
 const JITTER_FRAMES: i64 = 7;
 
 /// How far a window trace's session may sit from its recipe's boot phase before this test
-/// refuses to align it. The ten window shifts measure **−16 (`hiddenu2`), −5 (`second2`),
-/// −1 (`second1d`), +1 (`second1b`, `second3b`, `second1c`, `second4`, `second3e`), +2
-/// (`second3a`) and +4 (`second3d`) frames** (printed by
+/// refuses to align it. The ten window shifts measure **−16 (`hiddenu2`), −1 (`second1d`),
+/// +1 (`second1b`, `second3b`, `second1c`, `second4`, `second3e`), +2 (`second2`,
+/// `second3a`) and +4 (`second3d`) frames** (printed by
 /// `the_port_reproduces_every_filed_trace`): the two `SECOND U` sessions, `hiddenu` (frames
 /// 146…6499) and `hiddenu2` (6500…8199), read `_np_zframe` 4175 and 4185 at adjacent frames —
 /// ten ticks, about fifteen frames — which is the largest session phase spread the tree

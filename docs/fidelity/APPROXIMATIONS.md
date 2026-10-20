@@ -654,12 +654,12 @@ exact clock sits *between* them, and that is the best a fixed clock can do.
 
 **Measured difference.** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
 prints, for every trace in `reference/music/`, the share of the trace's frames whose published
-position matches the port's, and the worst displacement. Phase 4's four, Phase 5's three and
-Phase 6's three are included; the nine window runs are phase-aligned to their own session
-first (each prints its offset):
+position matches the port's, and the worst displacement. Phase 4's four, Phase 5's three,
+Phase 6's three and Phase 7's two are included; the ten window runs are phase-aligned to their
+own session first (each prints its offset):
 
 ```
-14 filed trace(s)
+16 filed trace(s)
   hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
   hiddenu2: the session's phase is -16 frame(s) from the boot's
   hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
@@ -668,8 +668,11 @@ first (each prints its offset):
   second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
   second1c: the session's phase is +1 frame(s) from the boot's
   second1c (MUSIC0): 1609 of 1692 frames agree (95.095 %); worst displacement 1 frame(s)
-  second2: the session's phase is -5 frame(s) from the boot's
+  second1d: the session's phase is -1 frame(s) from the boot's
+  second1d (MUSIC1): 475 of 692 frames agree (68.642 %); worst displacement 2 frame(s)
+  second2: the session's phase is +2 frame(s) from the boot's
   second2 (MUSIC1): 3207 of 4590 frames agree (69.869 %); worst displacement 4 frame(s)
+  second2b (MUSIC1): 2000 of 3390 frames agree (58.997 %); worst displacement 5 frame(s)
   second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
   second3a: the session's phase is +2 frame(s) from the boot's
   second3a (MUSIC1): 6089 of 7291 frames agree (83.514 %); worst displacement 2 frame(s)
@@ -695,9 +698,9 @@ publishes exactly the
 trace's sequence of values for each of `order`, `pattern`, `row`, `speed`, `tempo`, `loop` and
 `zplus`, and that every published value is one the trace publishes within **7** frames of that
 frame — the measured worst (`second1`), still under one 6-tick row (8.76 frames). The windows'
-own phase offsets (−16 for `hiddenu2`, −5 for `second2`, +1 for `second1b`, `second3b`,
-`second1c`, `second4` and `second3e`, +2 for `second3a`, +4 for `second3d`) are the boot's
-session-to-session spread, measured in
+own phase offsets (−16 for `hiddenu2`, −1 for `second1d`, +1 for `second1b`, `second3b`,
+`second1c`, `second4` and `second3e`, +2 for `second2` and `second3a`, +4 for `second3d`) are
+the boot's session-to-session spread, measured in
 `music-clock.md` §2, not clock drift.
 
 **What is not an approximation here:** the ten-poll publication delay (`_np_*` is a ring buffer ten

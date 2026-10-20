@@ -682,11 +682,11 @@ the impossible. So the comparison asserts what a port can be held to —
    7 frames of it;
 
 — and *measures* the rest. `cargo test -p sr-audio --test trace -- --nocapture` prints (Phase
-4's, Phase 5's and Phase 6's traces are included; the nine window runs first print their
-session's phase offset):
+4's, Phase 5's, Phase 6's and Phase 7's traces are included; the ten window runs first
+print their session's phase offset):
 
 ```
-14 filed trace(s)
+16 filed trace(s)
   hiddenu (MUSIC0): 5685 of 6084 frames agree (93.442 %); worst displacement 3 frame(s)
   hiddenu2: the session's phase is -16 frame(s) from the boot's
   hiddenu2 (MUSIC0): 1620 of 1692 frames agree (95.745 %); worst displacement 1 frame(s)
@@ -695,8 +695,11 @@ session's phase offset):
   second1b (MUSIC0): 344 of 352 frames agree (97.727 %); worst displacement 1 frame(s)
   second1c: the session's phase is +1 frame(s) from the boot's
   second1c (MUSIC0): 1609 of 1692 frames agree (95.095 %); worst displacement 1 frame(s)
-  second2: the session's phase is -5 frame(s) from the boot's
+  second1d: the session's phase is -1 frame(s) from the boot's
+  second1d (MUSIC1): 475 of 692 frames agree (68.642 %); worst displacement 2 frame(s)
+  second2: the session's phase is +2 frame(s) from the boot's
   second2 (MUSIC1): 3207 of 4590 frames agree (69.869 %); worst displacement 4 frame(s)
+  second2b (MUSIC1): 2000 of 3390 frames agree (58.997 %); worst displacement 5 frame(s)
   second3 (MUSIC1): 2141 of 2484 frames agree (86.192 %); worst displacement 2 frame(s)
   second3a: the session's phase is +2 frame(s) from the boot's
   second3a (MUSIC1): 6089 of 7291 frames agree (83.514 %); worst displacement 2 frame(s)

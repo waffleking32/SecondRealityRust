@@ -662,9 +662,10 @@ fn the_anchor_is_the_same_in_every_filed_session() {
             .join(",");
 
         if first <= MUSIC_START_FRAME {
-            // The two readings are one frame plus the tick a row boundary is
-            // seen within apart — a bound on one tick plus one frame, not a
-            // claim that the two agree to within a tick.
+            // The two readings are the recipe's measured gap apart — 5.4 frames for
+            // `second1`'s two-ticks-at-once sample, 6.9 for `second2b`'s boot, and 2.9
+            // for the Phase 3 traces — a bound on the tick the row boundary is seen
+            // within plus the sample instant, not a claim that the two agree to a tick.
             let bound = lookup(DIRECT_GAP, &recipe);
             assert!(
                 (direct - anchor).abs() <= bound + 1e-9,

@@ -2315,9 +2315,9 @@ matrix/rotation/projection), `tables.rs` (`MATHSIN.INC`'s sin/cos), `poly.rs`
 (`ceasypolylist` and the `rolcol`/`rolused` allocator), `span.rs` (NEW.ASM's transparent
 compositor), `intro.rs` (the zoomer and the FC bounce), `mod.rs` (the `Glenz` part) — a module
 in the binary, D32's precedent, not a crate. It keeps the original's 64,000-byte `vram` and
-`bgpic` as private **linear 320-pixel-row** buffers (`GLENZ/MAIN.C:7-8`, `char *vram =
-0xa0000000L`; `NEW.ASM`'s `NE_X` and `yrowad` are row*320) and copies the visible rows into the
-engine surface once a tick. The original's plane masks and the shipped build's 92-byte CRTC
+`bgpic` as private **linear 320-pixel-row** buffers (`GLENZ/MAIN.C:18`, `char far
+*vram=(char far *)0xa0000000L`; `bgpic` is `:12`; `NEW.ASM`'s `NE_X` and `yrowad` are row*320)
+and copies the visible rows into the engine surface once a tick. The original's plane masks and the shipped build's 92-byte CRTC
 plane row are memory-layout facts, not the displayed geometry: the picture is 320 pixels a row
 either way.
 
@@ -2399,9 +2399,35 @@ holds the surface, consumes one tick a call, and is exit-aware. A run whose plan
 at 8049 (`out/second1d-limit`) and the filed `second1d` opens at 8100 on MUSIC1 order 1 row 4;
 the wide `7800..8800` window refuses across the reload (`_np_ord reads -1 … the base 0x0051F0
 is not this segment's`, exit 2). The block-1 GLENZ wait exits at **8521** (`music-clock.md`
-§2.2), 106 rows after 8100. The cue wait's crossing is `second2`'s order 39 row 0 at **8823**
-with `zplus` 2, where `musplus` is the row (0); row 1 at **8827** is the first value `> 0`
-(`awk -F, '$1 >= 8820 && $1 <= 8835' reference/music/second2/trace.csv`).
+§2.2), 105 row changes after 8100 (315 ticks at 3 a row against the 312 sampled `zframe`s plus
+the reset tick).
+
+**The cue wait's calibration is PANICEND's retirement, not its last drawn frame.** PANICEND's
+mapping is `boot = 8782 + tick` and the part itself retires at **tick 121 = boot 8903**
+(`docs/fidelity/panicend.md` §7); block 2's `second2` trace shows the wait's phases on the
+published words there:
+
+```text
+$ awk -F, '($1>=8900 && $1<=8906) || ($1>=8950 && $1<=8956) || ($1>=9215 && $1<=9222)' \
+    reference/music/second2/trace.csv
+8903,39,19,18,0,3,130,0,2,3047     <- the part has retired; musplus 19 (>=0): phase 1 waits
+8953,39,32,18,0,3,130,0,2,3085     <- musplus -32: the first negative; phase 1 ends
+9219,42,1,30,0,6,130,0,2,3282      <- musplus 1 (>0): the exit
+```
+
+The old 8823/8827 crossing — order 39 row 0/1, `zplus` 2 — is ~80 frames before the part
+retires and is PANICEND's own music position, not the wait's exit; it is withdrawn. Task 6 pins
+**8953/9219** (the first negative and the first positive after it).
+
+**The block-1 restart's port timing is a measured difference, owned here.** A source-faithful
+restart at the port's BEGLOGO→GLENZ boundary seeks MUSIC1 to order 0 row 0; reaching the wait's
+exit condition (order 2 row 45) then takes **173 rows × 3 ticks = 519 music ticks ≈ 519 ×
+1.3474 = 699 frames** after the restart. The reference's measured reset is **8521**, and the
+part chain's boundary is somewhere in 8060–8090 (BEGLOGO's first tick plus its 172, or its
+7920 mode change plus them), so the port's zoomer starts at boundary + 699 ≈ 8759–8789 —
+**roughly 240–270 frames after 8521**. This is the consequence of the source-faithful seek; it
+is **not** registered as an A entry here because the port side is not yet measured (D25), and
+Task 6's chain test measures the port's wait and registers the difference if it survives.
 
 **One limit is carried into Task 6.** `second1d`'s first sample is 68 rows into MUSIC1, which
 at the module's rate puts the restarted play clock ~275 frames before 8100 — earlier than the
