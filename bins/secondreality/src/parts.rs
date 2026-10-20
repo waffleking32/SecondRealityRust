@@ -17,6 +17,7 @@ pub mod cred;
 pub mod ddstars;
 pub mod endlogo;
 pub mod endscrl;
+pub mod glenz;
 pub mod jplogo;
 pub mod lnszoom;
 pub mod minvball;
