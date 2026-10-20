@@ -24,8 +24,11 @@
 //! as a full-word map and a 256-byte low-byte table over the one `used` pool.
 //!
 //! The visible path also writes the face's 16-entry DAC group: the group's
-//! shade comes from the cross product, its base from the colour word's bit 1,
-//! and entry j is the base plus one `backpal` row shifted right twice — the
+//! base comes from the colour word's bit 1 and the cross-product shade — a
+//! reused slot keeps the computed shade, while a freshly allocated slot's
+//! `mov ax,bp` (`VEC.ASM:460`) clears AH, where `mov ah,al` (`:447`) had put
+//! it, so a fresh group is built with shade 0 — and entry j is the base plus
+//! one `backpal` row shifted right twice — the
 //! source restores the base every entry (`mov bx,di; mov cx,si` after each
 //! `setpalxxx`, `VEC.ASM:498-499`), so the ramp is not cumulative — with each
 //! channel clamped to 63 when written.
@@ -272,6 +275,11 @@ impl ColourState {
     /// `demo_glz`'s visible branch (`VEC.ASM:430-505`): take the full-word
     /// slot (allocating the first free even slot 2..30, or 32 when they are
     /// all taken), return its DAC base and write the group's 16 entries.
+    ///
+    /// The shade in the group's base is the computed cross-product shade on a
+    /// reused slot, but 0 on a freshly allocated one: `mov ax,bp`
+    /// (`VEC.ASM:460`) overwrites AH — where `mov ah,al` (`:447`) put the
+    /// shade — and the reuse branch jumps over it (`jne @@rc1`, `:453`).
     fn visible_face(
         &mut self,
         colour: u16,
@@ -279,10 +287,10 @@ impl ColourState {
         backpal: &[[u8; 3]; 16],
         palette: &mut Palette,
     ) -> u16 {
-        let slot = match self.visible.get(&colour) {
+        let (slot, fresh) = match self.visible.get(&colour) {
             // `mov al,cs:rolcol[bx]; cmp al,0; jne @@rc1` (`VEC.ASM:450-453`):
             // a stored slot is reused without touching the pool bit.
-            Some(&slot) => slot,
+            Some(&slot) => (slot, false),
             None => {
                 // `mov cx,15; mov bp,2` … `loop @@rc3` (`VEC.ASM:454-459`):
                 // fifteen even candidates. The loop exits with bp = 32 when
@@ -295,7 +303,7 @@ impl ColourState {
                 // (`VEC.ASM:461-462`): the full-word map and the pool only.
                 self.visible.insert(colour, slot);
                 self.used[slot as usize] = true;
-                slot
+                (slot, true)
             }
         };
 
@@ -309,13 +317,17 @@ impl ColourState {
         // (high word, already-shifted `ax1`) right by one, so
         // `ax2 = (ax1 >> 1) | (high16(cross) << 15)`. The 16-bit sum is
         // clamped signed to 0..63.
-        let shade = if self.lightshift == 9 {
+        let computed_shade = if self.lightshift == 9 {
             ((cross >> 7) as i16).clamp(0, 63)
         } else {
             let ax1 = (cross >> 8) as i16;
             let ax2 = (((ax1 as u16) >> 1) | (((cross >> 16) as u16) << 15)) as i16;
             ax1.wrapping_add(ax2).clamp(0, 63)
         } as u8;
+        // `mov ax,bp` (`VEC.ASM:460`) replaces AH with the slot's high byte
+        // (0) on the allocation branch; the reused branch keeps the computed
+        // shade that `mov ah,al` (`:447`) left there.
+        let shade = if fresh { 0 } else { computed_shade };
 
         // `mov cl,cs:_lightshift; cmp cl,9; je @@x9; … mov cl,7`
         // (`VEC.ASM:430-440`): R's base is 7 in the first phase, otherwise
@@ -682,17 +694,24 @@ mod tests {
         }
     }
 
-    /// The visible group's ramp: `lightshift == 9`, a known shade and
-    /// backpal, and the group at `slot << 3`. The base is restored each
-    /// entry, so the ramp is not cumulative.
+    /// The visible group's ramp on a **reused** slot: `lightshift == 9`, a
+    /// known shade and backpal, and the group at `slot << 3`. The base is
+    /// restored each entry, so the ramp is not cumulative.
     #[test]
     fn glz_writes_the_backpal_ramp_at_slot_shifted_by_3() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let backpal = [[8, 4, 12]; 16];
 
-        // cross 256 → shade (256 >> 7) = 2. 0x4002 has bit 1 set, so the base
-        // is R=7, G=shade/2=1, B=shade=2. The first slot is 2: the group is
+        // Warm the allocation: the first face takes slot 2 but builds its
+        // group with the fresh-slot shade 0. The second face reuses slot 2
+        // and its computed shade.
+        assert_eq!(
+            state.face(0x4002, 256, DemoMode::Glz, &backpal, &mut palette),
+            16
+        );
+        // cross 256 → shade (256 >> 7) = 2 on the reused slot. 0x4002 has bit
+        // 1 set, so the base is R=7, G=shade/2=1, B=shade=2; the group is
         // entries 16..31.
         assert_eq!(
             state.face(0x4002, 256, DemoMode::Glz, &backpal, &mut palette),
@@ -722,6 +741,11 @@ mod tests {
         let mut palette = Palette::new();
         let backpal = [[60, 0, 0]; 16];
 
+        // Warm the allocation; the second, reused face has the computed shade.
+        assert_eq!(
+            state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
+            16
+        );
         // cross 10000 → shade 63. 0x4004 has bit 1 clear: R=G=B=63.
         assert_eq!(
             state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
@@ -731,6 +755,36 @@ mod tests {
         // 8-bit accumulator would reach 258 and wrap at entry 12).
         for j in 0..16u8 {
             assert_eq!(palette.entry(16 + j), [63, 63, 63], "entry {j}");
+        }
+    }
+
+    /// A freshly allocated slot builds its group with shade 0: `mov ax,bp`
+    /// (`VEC.ASM:460`) clears AH before the base is read.
+    #[test]
+    fn glz_fresh_allocation_builds_its_group_with_shade_zero() {
+        let mut state = ColourState::new();
+        let mut palette = Palette::new();
+        let backpal = [[8, 4, 12]; 16];
+
+        // cross 256 would give shade 2 on a reuse, but this is a fresh slot.
+        // 0x4002 has bit 1 set: base [R=7, G=0, B=0]; every entry adds
+        // backpal[j] >> 2 = [2,1,3].
+        assert_eq!(
+            state.face(0x4002, 256, DemoMode::Glz, &backpal, &mut palette),
+            16
+        );
+        for j in 0..16u8 {
+            assert_eq!(palette.entry(16 + j), [9, 1, 3], "entry {j}");
+        }
+
+        // 0x4004 has bit 1 clear: the fresh base is [0,0,0], so the group is
+        // only the backpal row [2,1,3].
+        assert_eq!(
+            state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
+            32
+        );
+        for j in 0..16u8 {
+            assert_eq!(palette.entry(32 + j), [2, 1, 3], "entry {j}");
         }
     }
 
@@ -751,6 +805,11 @@ mod tests {
                 assert_eq!(palette.entry(16 + j), expected, "entry {j}");
             }
         };
+
+        // Warm the allocation: the first face takes slot 2 with the
+        // fresh-slot shade 0; every call below reuses it and uses the
+        // computed shade.
+        assert_eq!(face(&mut state, &mut palette, 0), 16);
 
         // 1280 >> 8 = 5, high word 0, so ax2 = 2 and the shade is 7. Bit 1
         // set: R=10, G=3, B=7.
