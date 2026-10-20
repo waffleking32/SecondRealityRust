@@ -241,7 +241,7 @@ Every row is from the carried Phase 1–6 surveys and this phase's Task 1; **the
 
 **Interfaces:**
 - Consumes: the block-2 chain (Task 6), the part (Task 5).
-- Produces: the keyframe comparison and any registered entries (A36, A37).
+- Produces: the keyframe comparison and any registered entries (the next free A numbers).
 
 **Steps:**
 
@@ -258,12 +258,12 @@ Every row is from the carried Phase 1–6 surveys and this phase's Task 1; **the
 ### Task 8: Close-out — docs, carried debt and the phase record
 
 **Files:**
-- Modify: `docs/fidelity/APPROXIMATIONS.md` (A36/A37 and any Task 1 finding), `docs/decisions.md` (finalize D36–D38), `docs/fidelity/reference-indices.md` (§7's addendum), `CLAUDE.md` (twenty-one parts, the block examples, the GLENZ ESC/cue-wait note), `PROGRESS.md` (Phase 7 done, the evidence), `docs/fidelity/asset-inventory.md` if the FC.UH row needs the reader note, `docs/fidelity/bugs.md` if the preserved quirks are listed there
+- Modify: `docs/fidelity/APPROXIMATIONS.md` (the registered divergences and any Task 1 finding), `docs/decisions.md` (finalize D36–D38), `docs/fidelity/reference-indices.md` (§7's addendum), `CLAUDE.md` (twenty-one parts, the block examples, the GLENZ ESC/cue-wait note), `PROGRESS.md` (Phase 7 done, the evidence), `docs/fidelity/asset-inventory.md` if the FC.UH row needs the reader note, `docs/fidelity/bugs.md` if the preserved quirks are listed there
 - Test: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` (both the default and `--release` invocations)
 
 **Steps:**
 
-- [ ] **Step 1: Write the remaining fidelity-note sections** and the approximation entries with their measured differences (the span repaint substitution if not registered sooner, the shipped-layout findings, A36/A37).
+- [ ] **Step 1: Write the remaining fidelity-note sections** and the approximation entries with their measured differences (the span repaint substitution if not registered sooner, the shipped-layout findings, the registered divergences).
 - [ ] **Step 2: Finalize D36–D38** with the measured values (the trace's reset, `L_r`, the keyframe offsets).
 - [ ] **Step 3: Update `CLAUDE.md`.** The part count becomes twenty-one; the run examples: block 1 runs ALKU → … → GLENZ → … → ENDSCRL and has no stop; block 2 runs BEGLOGO → … → ENDSCRL; block 3/4 unchanged; the ESC paragraph names GLENZ's music-cut exit and the post-PANICEND cue wait.
 - [ ] **Step 4: Update `PROGRESS.md`.** Phase 7's row is **done** with the tag withheld until the final review (the project's practice), the evidence: the two traces, the four keyframe comparisons, the shell seams, the new decisions and approximation numbers.
