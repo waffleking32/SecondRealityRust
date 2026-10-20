@@ -19,29 +19,20 @@
 //! path zero-extends the **full colour word** (`movzx bx,es:[bx-2]`,
 //! `VEC.ASM:450`), the hidden path uses the **low byte** (`mov bl,al`,
 //! `VEC.ASM:417`). The source's `rolcol` is only 256 bytes, so the two keys
-//! address different memory; this port models the two key spaces explicitly —
-//! a full-word map and a 256-byte low-byte table — over the one pool. As the
-//! Phase 7 brief pins, a visible allocation records its slot under both keys;
-//! a hidden face reads and clears only the low-byte entry and the pool bit,
-//! leaving the full-word entry behind. That asymmetry is the allocator's
-//! behaviour, not an accident of this port.
+//! address different memory and the maps are independent: a hidden face never
+//! frees a slot the visible path allocated. The port keeps the two key spaces
+//! as a full-word map and a 256-byte low-byte table over the one `used` pool.
 //!
 //! The visible path also writes the face's 16-entry DAC group: the group's
 //! shade comes from the cross product, its base from the colour word's bit 1,
-//! and each entry adds one `backpal` row (shifted right twice) to a cumulative
-//! 8-bit accumulator, clamped to 63 when written.
+//! and entry j is the base plus one `backpal` row shifted right twice — the
+//! source restores the base every entry (`mov bx,di; mov cx,si` after each
+//! `setpalxxx`, `VEC.ASM:498-499`), so the ramp is not cumulative — with each
+//! channel clamped to 63 when written.
 //!
-//! # Source disagreements recorded, not silently resolved
-//!
-//! The vendored development snapshot (`VEC.ASM`, and the tree's own unpacked
-//! `V.EXE`) differs from the Phase 7 brief in three places: its `demo_glz2`
-//! reduces the **visible** face (`jc @@1` skips the hidden one), stores
-//! `(al>>1)&1` without the `<<2`, and its `REPT` ramp restores the base
-//! between entries (`mov bx,di; mov cx,si`, `VEC.ASM:498-499`), making the
-//! group non-cumulative. The brief — and the plan's colour-path row — pins
-//! the other behaviour: hidden → 0/4, a cumulative wrapping ramp. The port
-//! follows the brief; the shipped release's part (the PKLITE-packed
-//! `MAIN/DATA/GLENZ.EXE`) is the D24 tiebreaker and is left to Task 7.
+//! `demo_glz2` reduces a **visible** face to `(word >> 1) & 1` and leaves a
+//! hidden face's word unchanged: `jc @@1` returns on the hidden carry
+//! (`VEC.ASM:403-410`).
 
 // The part driver lands in Tasks 4-7; until it consumes this layer every item
 // here is dead code to the binary target (the tests below use it).
@@ -200,9 +191,13 @@ pub struct ColourState {
     /// `_lightshift` (`MAIN.C:394`, `:500`): 9, or 10 once the second
     /// object's scale overtakes the first's.
     pub lightshift: i16,
-    /// The visible path's slots, keyed by the full 16-bit colour word.
+    /// The visible path's slots, keyed by the full 16-bit colour word. Only
+    /// the visible path reads and writes this map.
     visible: HashMap<u16, u8>,
-    /// The hidden path's slots, keyed by the colour word's low byte.
+    /// The hidden path's slots, keyed by the colour word's low byte. The
+    /// visible path does not write it: the source's full-word index lands
+    /// outside the 256-byte array, so the in-range entries stay zero and a
+    /// hidden face frees nothing a visible face allocated.
     hidden: [u8; 256],
     /// `rolused`: whether a slot's DAC group is allocated.
     used: [bool; 256],
@@ -235,13 +230,15 @@ impl ColourState {
     /// list, and, for a visible face under [`DemoMode::Glz`], writes the
     /// face's 16 DAC entries.
     ///
-    /// - [`DemoMode::Glz2`] visible keeps `colour`; hidden returns
-    ///   `((colour >> 1) & 1) << 2` (0 or 4). No DAC writes.
+    /// - [`DemoMode::Glz2`] visible returns `(colour >> 1) & 1`; hidden keeps
+    ///   `colour` unchanged (`jc @@1` returns on the hidden carry). No DAC
+    ///   writes.
     /// - [`DemoMode::Glz`] visible allocates or reuses a slot under the full
     ///   colour word, returns `(slot << 3) as u8` and writes the group;
     ///   hidden clears the slot stored under the colour's low byte and
     ///   `used[slot]` (harmless when that entry is 0) and returns
-    ///   `((colour >> 1) & 1) << 2`.
+    ///   `((colour >> 1) & 1) << 2`. The two key spaces are independent, so
+    ///   the hidden path never frees a visible slot.
     pub fn face(
         &mut self,
         colour: u16,
@@ -250,18 +247,25 @@ impl ColourState {
         backpal: &[[u8; 3]; 16],
         palette: &mut Palette,
     ) -> u16 {
-        if cross < 0 {
-            // `demo_glz`'s hidden branch (`VEC.ASM:413-429`) frees the slot
-            // stored under the low byte; `demo_glz2` (`:403-410`) leaves the
-            // allocator alone. Both store the reduced word.
-            if mode == DemoMode::Glz {
-                self.hidden_face(colour);
-            }
-            return ((colour >> 1) & 1) << 2;
-        }
         match mode {
-            DemoMode::Glz2 => colour,
-            DemoMode::Glz => self.visible_face(colour, cross, backpal, palette),
+            DemoMode::Glz2 => {
+                if cross < 0 {
+                    colour
+                } else {
+                    (colour >> 1) & 1
+                }
+            }
+            DemoMode::Glz => {
+                if cross < 0 {
+                    // `demo_glz`'s hidden branch (`VEC.ASM:413-429`) frees
+                    // the slot stored under the low byte and stores the
+                    // reduced word.
+                    self.hidden_face(colour);
+                    ((colour >> 1) & 1) << 2
+                } else {
+                    self.visible_face(colour, cross, backpal, palette)
+                }
+            }
         }
     }
 
@@ -288,9 +292,8 @@ impl ColourState {
                     .find(|&candidate| !self.used[candidate as usize])
                     .unwrap_or(32);
                 // `mov cs:rolcol[bx],al; mov cs:rolused[bp],1`
-                // (`VEC.ASM:461-462`), recorded in both key spaces.
+                // (`VEC.ASM:461-462`): the full-word map and the pool only.
                 self.visible.insert(colour, slot);
-                self.hidden[colour as u8 as usize] = slot;
                 self.used[slot as usize] = true;
                 slot
             }
@@ -301,15 +304,17 @@ impl ColourState {
         let start = (u16::from(slot) << 3) as u8;
 
         // The shade (`VEC.ASM:430-446`): `low16(cross >> 7)` when
-        // lightshift is 9, otherwise the wrapping 16-bit sum of
-        // `low16(cross >> 8)` and `low16(cross >> 9)`; the signed word is
-        // clamped to 0..63.
+        // lightshift is 9. Otherwise the source's literal pair: `ax1` is
+        // `low16(cross >> 8)`, and the second `shrd` shifts the 32-bit pair
+        // (high word, already-shifted `ax1`) right by one, so
+        // `ax2 = (ax1 >> 1) | (high16(cross) << 15)`. The 16-bit sum is
+        // clamped signed to 0..63.
         let shade = if self.lightshift == 9 {
             ((cross >> 7) as i16).clamp(0, 63)
         } else {
-            ((cross >> 8) as i16)
-                .wrapping_add((cross >> 9) as i16)
-                .clamp(0, 63)
+            let ax1 = (cross >> 8) as i16;
+            let ax2 = (((ax1 as u16) >> 1) | (((cross >> 16) as u16) << 15)) as i16;
+            ax1.wrapping_add(ax2).clamp(0, 63)
         } as u8;
 
         // `mov cl,cs:_lightshift; cmp cl,9; je @@x9; … mov cl,7`
@@ -328,22 +333,18 @@ impl ColourState {
             [shade, shade, shade]
         };
 
-        // The 16-entry group (`VEC.ASM:486-501`): each entry adds one row of
-        // `backpal` shifted right twice to an 8-bit accumulator, and the
-        // value written is that accumulator clamped to 63. The accumulator is
-        // not written back by the DAC output, so it keeps its unclamped
-        // (wrapped) value for the next entry.
-        let mut accumulator = base;
+        // The 16-entry group (`VEC.ASM:486-501`): entry j is the base plus
+        // one row of `backpal` shifted right twice, and the value written is
+        // clamped to 63. The source restores the base after every entry
+        // (`mov bx,di; mov cx,si`, `:498-499`), so the rows do not
+        // accumulate; the add is an 8-bit register add.
         for (j, back) in backpal.iter().enumerate() {
-            accumulator[0] = accumulator[0].wrapping_add(back[0] >> 2);
-            accumulator[1] = accumulator[1].wrapping_add(back[1] >> 2);
-            accumulator[2] = accumulator[2].wrapping_add(back[2] >> 2);
             palette.set_entry(
                 start.wrapping_add(j as u8),
                 [
-                    accumulator[0].min(63),
-                    accumulator[1].min(63),
-                    accumulator[2].min(63),
+                    base[0].wrapping_add(back[0] >> 2).min(63),
+                    base[1].wrapping_add(back[1] >> 2).min(63),
+                    base[2].wrapping_add(back[2] >> 2).min(63),
                 ],
             );
         }
@@ -354,10 +355,11 @@ impl ColourState {
         u16::from(start)
     }
 
-    /// `demo_glz`'s hidden branch (`VEC.ASM:413-429`): key `rolcol` by the
-    /// colour's low byte, clear that entry and the slot's `used` bit. When
-    /// the entry is 0 the slot is 0 and `used[0]` is cleared, which the
-    /// allocator never reads.
+    /// `demo_glz`'s hidden branch (`VEC.ASM:413-429`): key the low-byte map
+    /// by the colour's low byte, clear that entry and the slot's `used` bit.
+    /// When the entry is 0 the slot is 0 and `used[0]` is cleared, which the
+    /// allocator never reads. The map is independent of `visible`, so this
+    /// cannot free a slot a visible face owns.
     fn hidden_face(&mut self, colour: u16) {
         let key = colour as u8;
         let slot = self.hidden[key as usize];
@@ -467,7 +469,9 @@ mod tests {
         );
         assert_eq!(polys.len(), 1);
         assert_eq!(polys[0].points, [(0, 0), (10, 0), (0, 10)]);
-        assert_eq!(polys[0].colour, 0x4002);
+        // The stored triangle is visible (cross 100), and Glz2 reduces a
+        // visible word to `(0x4002 >> 1) & 1` = 1.
+        assert_eq!(polys[0].colour, 1);
     }
 
     /// The closing duplicate: the last stored pair is dropped when it equals
@@ -516,7 +520,9 @@ mod tests {
         // The second polygon's leading 0 equals the closing duplicate the
         // first polygon dropped, so only its last two vertices are stored.
         assert_eq!(polys[1].points, [(5, 20), (30, 5)]);
-        assert_eq!(polys[1].colour, 0x4004);
+        // Two stored pairs give cross 0 (the port's guard): visible, so
+        // Glz2 reduces 0x4004 to 0.
+        assert_eq!(polys[1].colour, 0);
     }
 
     /// The cross product on hand-computed triangles, and both signs.
@@ -553,25 +559,27 @@ mod tests {
         assert_eq!(cross(&[(0, 0), (0, -32768), (-32768, 0)]), -1_073_741_824);
     }
 
-    /// `demo_glz2` (`VEC.ASM:403-410`): visible keeps the colour word, hidden
-    /// returns `((word >> 1) & 1) << 2`, and nothing is allocated or written
-    /// to the DAC.
+    /// `demo_glz2` (`VEC.ASM:403-410`): `jc @@1` returns on the hidden carry,
+    /// so a visible face is reduced to `(word >> 1) & 1` and a hidden face
+    /// keeps its colour word. Nothing is allocated or written to the DAC.
     #[test]
-    fn glz2_keeps_the_visible_word_and_reduces_the_hidden_one() {
+    fn glz2_reduces_the_visible_word_and_keeps_the_hidden_one() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let face = |state: &mut ColourState, palette: &mut Palette, colour, c| {
             state.face(colour, c, DemoMode::Glz2, &NO_BACKPAL, palette)
         };
 
-        assert_eq!(face(&mut state, &mut palette, 0x4002, 100), 0x4002);
-        assert_eq!(face(&mut state, &mut palette, 0x4004, 100), 0x4004);
-        // Bit 1 set reduces to 4, clear to 0.
-        assert_eq!(face(&mut state, &mut palette, 0x4002, -100), 4);
-        assert_eq!(face(&mut state, &mut palette, 0x4004, -100), 0);
-        assert_eq!(face(&mut state, &mut palette, 0x4006, -100), 4);
-        assert_eq!(face(&mut state, &mut palette, 0x4008, -100), 0);
-        assert_eq!(face(&mut state, &mut palette, 0x4030, -100), 0);
+        // Bit 1 set reduces to 1, clear to 0.
+        assert_eq!(face(&mut state, &mut palette, 0x4002, 100), 1);
+        assert_eq!(face(&mut state, &mut palette, 0x4004, 100), 0);
+        assert_eq!(face(&mut state, &mut palette, 0x4006, 100), 1);
+        assert_eq!(face(&mut state, &mut palette, 0x4008, 100), 0);
+        assert_eq!(face(&mut state, &mut palette, 0x4030, 100), 0);
+        // Hidden faces are untouched.
+        assert_eq!(face(&mut state, &mut palette, 0x4002, -100), 0x4002);
+        assert_eq!(face(&mut state, &mut palette, 0x4004, -100), 0x4004);
+        assert_eq!(face(&mut state, &mut palette, 0x4030, -100), 0x4030);
 
         assert_eq!(palette, Palette::new());
         assert!(state.visible.is_empty());
@@ -601,60 +609,39 @@ mod tests {
         assert_eq!(state.visible.len(), 3);
     }
 
-    /// The two key spaces: a visible face stores the slot under the full word
-    /// and the low byte; a hidden face of the same word frees the low-byte
-    /// entry and the pool bit, not the full-word entry.
+    /// The two key spaces are independent: a visible allocation writes only
+    /// the full-word map, and the hidden path reads the (zero) low-byte
+    /// entry, so a hidden face of the same word does not free the visible
+    /// slot — the next new colour takes the next free slot.
     #[test]
-    fn glz_hidden_frees_the_low_byte_entry_not_the_full_word_entry() {
+    fn glz_hidden_face_does_not_free_the_visible_slot() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let colour = 0x4002;
-
-        assert_eq!(
-            state.face(colour, 100, DemoMode::Glz, &NO_BACKPAL, &mut palette),
-            16
-        );
-        assert_eq!(state.visible.get(&colour), Some(&2));
-        assert_eq!(state.hidden[colour as u8 as usize], 2);
-        assert!(state.used[2]);
-
-        // Hidden: `0x4002`'s bit 1 is set, so the reduced word is 4.
-        assert_eq!(
-            state.face(colour, -100, DemoMode::Glz, &NO_BACKPAL, &mut palette),
-            4
-        );
-        assert_eq!(state.hidden[colour as u8 as usize], 0);
-        assert!(!state.used[2]);
-        // The full-word entry the visible path wrote is untouched: the hidden
-        // path keyed the low byte.
-        assert_eq!(state.visible.get(&colour), Some(&2));
-    }
-
-    /// A freed slot is reused by the next new allocation: allocate three,
-    /// hide the middle, allocate a fourth.
-    #[test]
-    fn glz_reuses_a_slot_freed_by_a_hide() {
-        let mut state = ColourState::new();
-        let mut palette = Palette::new();
         let face = |state: &mut ColourState, palette: &mut Palette, colour, c| {
             state.face(colour, c, DemoMode::Glz, &NO_BACKPAL, palette)
         };
 
-        assert_eq!(face(&mut state, &mut palette, 0x4002, 100), 16);
+        assert_eq!(face(&mut state, &mut palette, colour, 100), 16);
+        assert_eq!(state.visible.get(&colour), Some(&2));
+        assert_eq!(state.hidden[colour as u8 as usize], 0);
+        assert!(state.used[2]);
+
+        // Hidden: `0x4002`'s bit 1 is set, so the reduced word is 4. The
+        // low-byte entry is 0, so only `used[0]` is cleared.
+        assert_eq!(face(&mut state, &mut palette, colour, -100), 4);
+        assert_eq!(state.hidden[colour as u8 as usize], 0);
+        assert!(state.used[2]);
+        assert_eq!(state.visible.get(&colour), Some(&2));
+
+        // The visible allocation is still in the pool: the next colour gets
+        // slot 4, not the visible word's slot 2.
         assert_eq!(face(&mut state, &mut palette, 0x4004, 100), 32);
-        assert_eq!(face(&mut state, &mut palette, 0x4006, 100), 48);
-        // 0x4004 has bit 1 clear, so its hidden word is 0.
-        assert_eq!(face(&mut state, &mut palette, 0x4004, -100), 0);
-        assert!(!state.used[4]);
-        // The first free slot from 2 upward is 4, so the new colour gets it.
-        assert_eq!(face(&mut state, &mut palette, 0x4008, 100), 32);
-        assert_eq!(state.visible.get(&0x4008), Some(&4));
-        assert!(state.used[4]);
-        // The next one takes 8 (2, 4 and 6 are taken again).
-        assert_eq!(face(&mut state, &mut palette, 0x400a, 100), 64);
+        assert_eq!(state.visible.get(&0x4004), Some(&4));
+        assert!(state.used[2] && state.used[4]);
     }
 
-    /// Sixteen simultaneously allocated colours: the 15 even slots 2..30 fill
+    /// Sixteen distinct visible colour words: the 15 even slots 2..30 fill
     /// first, then the sixteenth gets slot 32 — colour 0, and its group is
     /// written at DAC entry 0.
     #[test]
@@ -685,10 +672,10 @@ mod tests {
         assert_eq!(state.visible.get(&0x4020), Some(&32));
         assert!(state.used[32]);
         // The group starts at `(32 << 3) as u8 == 0`. Shade 0, bit 1 clear:
-        // base [0,0,0], and each entry adds one backpal row: [1,2,3],
-        // [2,4,6], … [16,32,48].
+        // base [0,0,0], and every entry is that base plus the same backpal
+        // row (the base is restored each entry), [1,2,3].
         assert_eq!(palette.entry(0), [1, 2, 3]);
-        assert_eq!(palette.entry(15), [16, 32, 48]);
+        assert_eq!(palette.entry(15), [1, 2, 3]);
         // Nothing beyond the group was written.
         for index in 16..=255u8 {
             assert_eq!(palette.entry(index), [0, 0, 0], "entry {index}");
@@ -696,9 +683,10 @@ mod tests {
     }
 
     /// The visible group's ramp: `lightshift == 9`, a known shade and
-    /// backpal, and the group at `slot << 3`.
+    /// backpal, and the group at `slot << 3`. The base is restored each
+    /// entry, so the ramp is not cumulative.
     #[test]
-    fn glz_writes_the_cumulative_backpal_ramp_at_slot_shifted_by_3() {
+    fn glz_writes_the_backpal_ramp_at_slot_shifted_by_3() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let backpal = [[8, 4, 12]; 16];
@@ -710,17 +698,10 @@ mod tests {
             state.face(0x4002, 256, DemoMode::Glz, &backpal, &mut palette),
             16
         );
-        // Each entry adds backpal[j] >> 2 = [2,1,3] cumulatively.
-        for j in 0..16u16 {
-            assert_eq!(
-                palette.entry(16 + j as u8),
-                [
-                    7 + 2 * (j + 1) as u8,
-                    1 + (j + 1) as u8,
-                    2 + 3 * (j + 1) as u8
-                ],
-                "entry {j}"
-            );
+        // Every entry is the base plus backpal[j] >> 2 = [2,1,3]; the source
+        // restores the base after each one.
+        for j in 0..16u8 {
+            assert_eq!(palette.entry(16 + j), [9, 2, 5], "entry {j}");
         }
         // Nothing before or after the group was touched.
         for index in 0..16u8 {
@@ -731,10 +712,12 @@ mod tests {
         }
     }
 
-    /// The ramp's accumulator is an unclamped u8 that keeps its wrapped value
-    /// between entries; only the written value is clamped to 63.
+    /// The ramp restores the base every entry and clamps each written value
+    /// to 63; the add is the 8-bit accumulator add (with a 6-bit backpal and
+    /// a clamped base the sum is at most 126, so the clamp is the visible
+    /// guard — a cumulative implementation would wrap at entry 12).
     #[test]
-    fn glz_group_ramp_wraps_the_u8_and_clamps_each_written_entry() {
+    fn glz_group_ramp_restores_the_base_and_clamps_each_entry() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let backpal = [[60, 0, 0]; 16];
@@ -744,19 +727,16 @@ mod tests {
             state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
             16
         );
-        // R accumulates 63 + 15 per entry: entries 0..11 write the clamp 63,
-        // entry 12 wraps 258 to 2, then 17, 32, 47.
-        for j in 0..12u8 {
+        // 63 + (60 >> 2) = 78 clamps to 63 on every entry (a cumulative
+        // 8-bit accumulator would reach 258 and wrap at entry 12).
+        for j in 0..16u8 {
             assert_eq!(palette.entry(16 + j), [63, 63, 63], "entry {j}");
         }
-        assert_eq!(palette.entry(28), [2, 63, 63]);
-        assert_eq!(palette.entry(29), [17, 63, 63]);
-        assert_eq!(palette.entry(30), [32, 63, 63]);
-        assert_eq!(palette.entry(31), [47, 63, 63]);
     }
 
-    /// `lightshift != 9` uses `low16(cross >> 9) + low16(cross >> 8)` as a
-    /// wrapping 16-bit sum, clamped signed to 0..63, and R's base becomes
+    /// `lightshift != 9` uses the source's literal two-shift shade,
+    /// `clamp_i16(ax1 + ax2)` with `ax1 = low16(cross >> 8)` and
+    /// `ax2 = (ax1 >> 1) | (high16(cross) << 15)`, and R's base becomes
     /// `lightshift`.
     #[test]
     fn glz_lightshift_10_uses_the_two_shift_shade_and_its_r_base() {
@@ -766,25 +746,33 @@ mod tests {
         let face = |state: &mut ColourState, palette: &mut Palette, c| {
             state.face(0x4002, c, DemoMode::Glz, &NO_BACKPAL, palette)
         };
+        let expect_group = |palette: &Palette, expected: [u8; 3]| {
+            for j in 0..16u8 {
+                assert_eq!(palette.entry(16 + j), expected, "entry {j}");
+            }
+        };
 
-        // 1280 >> 8 = 5, >> 9 = 2, shade 7. Bit 1 set: R=10, G=3, B=7.
+        // 1280 >> 8 = 5, high word 0, so ax2 = 2 and the shade is 7. Bit 1
+        // set: R=10, G=3, B=7.
         assert_eq!(face(&mut state, &mut palette, 1280), 16);
-        for j in 0..16u8 {
-            assert_eq!(palette.entry(16 + j), [10, 3, 7], "entry {j}");
-        }
+        expect_group(&palette, [10, 3, 7]);
 
-        // The sum wraps at 16 bits: both shifts' low words are 0xFFFF (−1),
-        // so the shade is −2 and clamps to 0.
+        // The sum wraps at 16 bits: ax1 = −1 and the high word 0x7fff is odd,
+        // so ax2 = 0x7fff | 0x8000 = −1; the shade is −2 and clamps to 0.
         assert_eq!(face(&mut state, &mut palette, 0x7fff_ffff), 16);
-        for j in 0..16u8 {
-            assert_eq!(palette.entry(16 + j), [10, 0, 0], "entry {j}");
-        }
+        expect_group(&palette, [10, 0, 0]);
 
-        // 0x5000 >> 8 = 80, >> 9 = 40, sum 120 clamps to 63; G = 31.
+        // 0x5000: ax1 = 80, ax2 = 40, sum 120 clamps to 63; G = 31.
         assert_eq!(face(&mut state, &mut palette, 0x5000), 16);
-        for j in 0..16u8 {
-            assert_eq!(palette.entry(16 + j), [10, 31, 63], "entry {j}");
-        }
+        expect_group(&palette, [10, 31, 63]);
+
+        // The literal second shift, not `low16(cross >> 9)`: with cross
+        // 0x0001_0100, ax1 = 0x0101 (257) and the high word 1 is odd, so
+        // ax2 = 0x0080 | 0x8000 = −32640 and the shade clamps to 0. The
+        // `low16(cross>>8) + low16(cross>>9)` form would give 257 + 128 =
+        // 385 → 63.
+        assert_eq!(face(&mut state, &mut palette, 0x0001_0100), 16);
+        expect_group(&palette, [10, 0, 0]);
     }
 
     /// `build` hands the colour rule the cross product of the polygon's first
@@ -803,8 +791,9 @@ mod tests {
             &NO_BACKPAL,
             &mut palette,
         );
-        // The first winding is negative (hidden), the second positive.
-        assert_eq!(polys[0].colour, 4);
-        assert_eq!(polys[1].colour, 0x4004);
+        // The first winding is negative (hidden), so its word is kept; the
+        // second is visible, so it is reduced to `(word >> 1) & 1` = 0.
+        assert_eq!(polys[0].colour, 0x4002);
+        assert_eq!(polys[1].colour, 0);
     }
 }
