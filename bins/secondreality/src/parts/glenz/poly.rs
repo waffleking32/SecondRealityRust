@@ -25,9 +25,12 @@
 //!
 //! The visible path also writes the face's 16-entry DAC group: the group's
 //! base comes from the colour word's bit 1 and the cross-product shade — a
-//! reused slot keeps the computed shade, while a freshly allocated slot's
-//! `mov ax,bp` (`VEC.ASM:460`) clears AH, where `mov ah,al` (`:447`) had put
-//! it, so a fresh group is built with shade 0 — and entry j is the base plus
+//! reused slot keeps the computed shade and `R = 7|lightshift`, while a fresh
+//! allocation's base is the allocation scan's leavings: `mov ax,bp`
+//! (`VEC.ASM:460`) clears AH, where `mov ah,al` (`:447`) had put the shade,
+//! and the scan's `mov cx,15`/`loop @@rc3` (`:454-459`) has overwritten CL
+//! with `16 − slot/2`, so a fresh group is built with shade 0 and, for a
+//! bit-1 word, that residual as R — and entry j is the base plus
 //! one `backpal` row shifted right twice — the
 //! source restores the base every entry (`mov bx,di; mov cx,si` after each
 //! `setpalxxx`, `VEC.ASM:498-499`), so the ramp is not cumulative — with each
@@ -276,10 +279,14 @@ impl ColourState {
     /// slot (allocating the first free even slot 2..30, or 32 when they are
     /// all taken), return its DAC base and write the group's 16 entries.
     ///
-    /// The shade in the group's base is the computed cross-product shade on a
-    /// reused slot, but 0 on a freshly allocated one: `mov ax,bp`
-    /// (`VEC.ASM:460`) overwrites AH — where `mov ah,al` (`:447`) put the
-    /// shade — and the reuse branch jumps over it (`jne @@rc1`, `:453`).
+    /// The shade and R base in the group are the computed ones on a reused
+    /// slot, but on a freshly allocated one they are what the allocation scan
+    /// leaves behind: `mov cx,15; … loop @@rc3` (`VEC.ASM:454-459`)
+    /// overwrites CL with `16 − slot/2`, and `mov ax,bp` (`:460`) clears AH
+    /// (where `mov ah,al`, `:447`, had put the shade). So a fresh group has
+    /// shade 0 and, for a bit-1 word, R = `16 − slot/2`; a bit-1-clear word's
+    /// base is all zero (`mov cl,ah`). The reuse branch (`jne @@rc1`, `:453`)
+    /// skips the scan and keeps CL = 7|lightshift and the computed shade.
     fn visible_face(
         &mut self,
         colour: u16,
@@ -330,9 +337,13 @@ impl ColourState {
         let shade = if fresh { 0 } else { computed_shade };
 
         // `mov cl,cs:_lightshift; cmp cl,9; je @@x9; … mov cl,7`
-        // (`VEC.ASM:430-440`): R's base is 7 in the first phase, otherwise
-        // the lightshift itself.
-        let r_base = if self.lightshift == 9 {
+        // (`VEC.ASM:430-440`): on a reused slot R's base is 7 in the first
+        // phase, otherwise the lightshift itself. A fresh allocation's scan
+        // has overwritten CL (`mov cx,15; … loop @@rc3`, `:454-459`), leaving
+        // the residual 16 − slot/2 (slot 2 → 15, …, 30 → 1, 32 → 0).
+        let r_base = if fresh {
+            16 - slot / 2
+        } else if self.lightshift == 9 {
             7
         } else {
             self.lightshift as u8
@@ -758,33 +769,60 @@ mod tests {
         }
     }
 
-    /// A freshly allocated slot builds its group with shade 0: `mov ax,bp`
-    /// (`VEC.ASM:460`) clears AH before the base is read.
+    /// A freshly allocated slot builds its group from the allocation scan's
+    /// leavings: shade 0 (`mov ax,bp` clears AH) and, for a bit-1 word,
+    /// R = 16 − slot/2 (`mov cx,15`/`loop` clobbers CL).
     #[test]
-    fn glz_fresh_allocation_builds_its_group_with_shade_zero() {
+    fn glz_fresh_allocation_uses_the_scan_residual_and_zero_shade() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let backpal = [[8, 4, 12]; 16];
 
-        // cross 256 would give shade 2 on a reuse, but this is a fresh slot.
-        // 0x4002 has bit 1 set: base [R=7, G=0, B=0]; every entry adds
+        // Slot 2: the scan leaves CL = 16 − 1 = 15 and AH = 0; 0x4002 has bit
+        // 1 set, so the base is [15,0,0] and every entry adds
         // backpal[j] >> 2 = [2,1,3].
         assert_eq!(
             state.face(0x4002, 256, DemoMode::Glz, &backpal, &mut palette),
             16
         );
         for j in 0..16u8 {
-            assert_eq!(palette.entry(16 + j), [9, 1, 3], "entry {j}");
+            assert_eq!(palette.entry(16 + j), [17, 1, 3], "entry {j}");
         }
 
-        // 0x4004 has bit 1 clear: the fresh base is [0,0,0], so the group is
-        // only the backpal row [2,1,3].
+        // Slot 4: CL = 14, so a bit-1 word's base is [14,0,0].
         assert_eq!(
-            state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
+            state.face(0x4006, 10000, DemoMode::Glz, &backpal, &mut palette),
             32
         );
         for j in 0..16u8 {
-            assert_eq!(palette.entry(32 + j), [2, 1, 3], "entry {j}");
+            assert_eq!(palette.entry(32 + j), [16, 1, 3], "entry {j}");
+        }
+
+        // A bit-1-clear word's fresh base is all zero (`mov cl,ah`): 0x4004
+        // takes slot 6 and the group is the backpal row alone.
+        assert_eq!(
+            state.face(0x4004, 10000, DemoMode::Glz, &backpal, &mut palette),
+            48
+        );
+        for j in 0..16u8 {
+            assert_eq!(palette.entry(48 + j), [2, 1, 3], "entry {j}");
+        }
+
+        // Fill slots 8..30 with twelve more bit-1 words, then the sixteenth
+        // distinct word exhausts the pool: slot 32 leaves CL = 16 − 16 = 0.
+        for k in 0..12u8 {
+            let colour = 0x5002 + 4 * u16::from(k);
+            state.face(colour, 0, DemoMode::Glz, &backpal, &mut palette);
+        }
+        for slot in (8u8..=30).step_by(2) {
+            assert!(state.used[slot as usize], "slot {slot}");
+        }
+        assert_eq!(
+            state.face(0x6002, 0, DemoMode::Glz, &backpal, &mut palette),
+            0
+        );
+        for j in 0..16u8 {
+            assert_eq!(palette.entry(j), [2, 1, 3], "entry {j}");
         }
     }
 
