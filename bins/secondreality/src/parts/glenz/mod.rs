@@ -634,12 +634,15 @@ impl Glenz {
 
     /// `MAIN.C:290-293`: wait for the music, then `dis_setmframe(0)` and
     /// `zoomer2()`'s first body *in the same tick*.
+    ///
+    /// The source's `while(!dis_exit() && dis_musplus()<-19);` exits on either
+    /// condition and then **continues**: ESC does not skip `dis_setmframe(0)`
+    /// or `zoomer2()` (`MAIN.C:291-293`). The zoomer checks only `kbhit`, so
+    /// an exit flag runs all 47 of its bodies; the bounce's own
+    /// `while(!dis_exit())` is what sees the flag next, and the main loop's
+    /// check retires the part.
     fn wait_music(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        if ctx.exit_requested {
-            self.phase = Phase::Done;
-            return PartStatus::Finished;
-        }
-        if Self::music_plus(ctx) < -19 {
+        if !ctx.exit_requested && Self::music_plus(ctx) < -19 {
             return PartStatus::Continuing;
         }
         if let Some(music) = ctx.music() {
@@ -668,9 +671,21 @@ impl Glenz {
         self.bounce_frame(ctx)
     }
 
-    /// One FC-bounce body. The spring's terminal top-of-loop test shares its
-    /// tick with the first `getmframe` poll (`MAIN.C:322-353`).
+    /// One FC-bounce body (`MAIN.C:321-351`).
+    ///
+    /// The spring is `while(!dis_exit()) { ... }`: at the top of the body an
+    /// exit flag skips the bounce entirely. The `getmframe` loop that follows
+    /// is skipped for the same reason, and the unconditional `dis_waitb` is
+    /// this tick — the palette build is the next one.
     fn bounce_frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+        if ctx.exit_requested {
+            // `while(!dis_exit())` is not entered; the `getmframe` loop that
+            // follows is skipped for the same flag; the unconditional
+            // `dis_waitb` (`MAIN.C:354`) is this tick, so the palette build
+            // is the next one.
+            self.phase = Phase::Wait300Palette;
+            return PartStatus::Continuing;
+        }
         let drew = {
             let bounce = self.bounce.as_mut().expect("the bounce is running");
             bounce.tick(&mut self.vram, &self.fc)
@@ -680,7 +695,7 @@ impl Glenz {
             return PartStatus::Continuing;
         }
         self.phase = Phase::Wait300;
-        if ctx.exit_requested || Self::music_frame(ctx) >= 300 {
+        if Self::music_frame(ctx) >= 300 {
             self.phase = Phase::Wait300Palette;
         }
         PartStatus::Continuing
@@ -1651,13 +1666,50 @@ mod tests {
         assert_eq!(part.vram, before, "ESC draws nothing on its tick");
     }
 
-    /// ESC during the music wait finishes at once; the source's wait is the
-    /// one intro wait that ends the part rather than continuing.
+    /// ESC during the music wait does **not** retire the part: `MAIN.C:290`'s
+    /// `while(!dis_exit() && musplus<-19);` exits and the source continues to
+    /// `dis_setmframe(0)` and `zoomer2()`. The zoomer checks only `kbhit`, so
+    /// its 47 bodies run; the bounce's `while(!dis_exit())` skips every body;
+    /// the waits fall through; the main loop's check retires the part.
     #[test]
-    fn escape_during_the_music_wait_finishes() {
+    fn escape_during_the_music_wait_continues_into_the_zoomer() {
         let (mut rig, mut part) = started(Player::measured(4));
         assert_eq!(rig.step(&mut part, 0), PartStatus::Continuing);
-        assert_eq!(rig.step_exit(&mut part, 1), PartStatus::Finished);
+        // musplus is still -32, but the exit flag ends the gate anyway.
+        assert_eq!(rig.step_exit(&mut part, 1), PartStatus::Continuing);
+        assert_eq!(part.phase, Phase::Zoomer, "the source still calls zoomer2");
+        assert_eq!(
+            rig.player.as_ref().unwrap().reset_tick(),
+            Some(1),
+            "dis_setmframe(0) still runs"
+        );
+
+        let mut tick = 2;
+        for _ in 1..47 {
+            assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing);
+            tick += 1;
+        }
+        assert_eq!(part.zoomer.as_ref().unwrap().zy(), 260);
+        // The break tick: epilogue and mode set, then the bounce's loop is
+        // skipped and the palette-build tick follows.
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing);
+        tick += 1;
+        assert_eq!(part.phase, Phase::Wait300Palette);
+        assert_eq!(
+            part.bounce.as_ref().map(|b| b.drawn()),
+            Some(0),
+            "no bounce body draws on ESC"
+        );
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // palette
+        tick += 1;
+        assert_eq!(part.phase, Phase::Wait300Snapshot);
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // bgpic
+        tick += 1;
+        assert_eq!(part.phase, Phase::Wait333Done);
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // part start
+        tick += 1;
+        assert_eq!(part.phase, Phase::MainWait);
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
     }
 

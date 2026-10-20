@@ -9,8 +9,9 @@ each); the block-2 keyframe comparison is Task 7's.
 
 ## 1. The tick map
 
-The source's clock is one `dis_waitb` a tick (`MAIN.C:252-256`) and one logic
-tick is one displayed emulator frame. The anchors are Task 1's, measured on
+The source's clock is one `dis_waitb` a tick (`DIS/DISC.ASM:42-47`, the DIS's
+frame-count call) and one logic tick is one displayed emulator frame. The
+anchors are Task 1's, measured on
 `reference/music/second2b` and the `SECOND 2` captures
 (`docs/fidelity/reference-indices.md` §7.6); the port's offsets from the reset
 are pinned by
@@ -87,6 +88,19 @@ Every tick, `blit` copies 400 rows (during the zoomer) or 200 rows (after the
 mode set) into the surface's first 320 columns. The view's `y_line_offset` is
 unset, so the beam reads the surface's own stride (640 in every run), and the
 copy is at that stride.
+
+**A run that starts at GLENZ has no BEGLOGO frame to inherit.** The demo
+always reaches the part after BEGLOGO (`MAIN/U2.ASM:812-815`), whose last
+screen is the 320×400 Mode X picture the zoomer closes over. `--part glenz`
+(or a plan beginning there) enters whatever view and surface the shell
+started with. `init` therefore installs the 320×400 view itself — 320 wide,
+400 lines, origin 0, no line offset, no split — and copies the surface's
+first 320 columns of rows 0..400 into `vram`; in a fresh run those rows are
+the shell's black, so the opening plays over black instead of over BEGLOGO's
+picture. The mode set discards the inherited rows a few hundred ticks later.
+The unit tests enter through this standalone shape (`View::new(320, 200)`
+before `init`); the substitution changes the opening's background, not its
+geometry or tick map.
 
 The original's Mode X plane masks and the shipped build's 92-byte CRTC row
 (`GLENZ/VIDINIT.ASM:306`) are memory-layout facts, not image facts: the
@@ -228,10 +242,13 @@ source parse test. The `frame>1800` products use the source's explicit
 
 The generated-code question the phase's Global Constraints raise is settled
 by what the shipped path calls: `ceasypolylist` + `cglenzinit/polylist/done`
-+ `NEW.ASM`, never `polygroup`/`polyf`; `ZOOMLOOP.INC` is not linked by GLENZ
-(`ZOOMER.C`/`ZOOM.ASM` only use `sin1024`). VEC.ASM's matrix-in-immediates
-and the patched group loops are state-only here, so the port keeps the
-source's structure and lets the compiler hold the matrix.
++ `NEW.ASM`, never `polygroup`/`polyf`. `ZOOMLOOP.INC` **is** linked —
+`ZOOM.ASM:27` includes it, and `zoom.obj` is on the link line
+(`GLENZ/MAKEFILE:3`) — but it is the body of `_zoom`, which only the
+unshipped `zoomer1` calls; `zoomer2`, the shipped intro, uses none of it and
+`ZOOM.ASM` exports only `_zoom` and `_sin1024`. VEC.ASM's
+matrix-in-immediates and the patched group loops are state-only here, so the
+port keeps the source's structure and lets the compiler hold the matrix.
 
 ## 6. The held opening, measured
 
@@ -268,9 +285,9 @@ The reference decides each; nothing here was fitted.
   port reads the reference through the chunky model and projects with
   `init320x200`'s 256/213/160/130. Task 1's 2300 box (x 97..217, y 38..149,
   centroid 156.8,94.1) was computed with those constants, and the port's
-  frame 44..49 silhouettes match that model's own output pixel for pixel. If
-  the shipped build's row goes with different constants, the 2300/3000/3400
-  comparison is where it shows; no constant is adjusted here.
+  frame 44..49 boxes, pixel counts and centroids match that model's output.
+  If the shipped build's row goes with different constants, the
+  2300/3000/3400 comparison is where it shows; no constant is adjusted here.
 - **The visible-path `rolcol` key (D7/D24).** `poly.rs` keys the visible path
   by the full 16-bit colour word and the hidden path by the low byte, per
   `VEC.ASM`. Whether the shipped build does is Task 7's arbitration against
@@ -282,7 +299,10 @@ The reference decides each; nothing here was fitted.
   is reference `1562 + f`. A block-2 run in Task 7 compares the moving
   keyframes at their own index if the shell's numbering agrees; if it does
   not, the offset is registered, not absorbed. The held opening is unaffected
-  either way: the hold is ~228 ticks wide around 1499.
+  either way: the bounce's last body draws at reference 1334 and the first
+  object pixels are at 1606, so the picture holds for **272 ticks** —
+  1334..1605, the 228 ticks from the last bounce body to the main loop's
+  first wait at 1562 plus the 44 main-loop ticks before frame 44 draws.
 
 ## 8. The plan's carried items
 
@@ -291,10 +311,11 @@ The reference decides each; nothing here was fitted.
   unconditionally, so a short list would read stale `polylist` bytes. The
   shipped tables always store three; the guard is reachable only if two
   distinct projected vertices coincide and the closing-duplicate drop fires.
-  The frames this task can check — the held 1499 (exact) and the six
-  silhouettes (exact pixel sets) — show no such frame; Task 7's
-  2300/3000/3400 diffs are the arbiter. If one triggers it, it is a new
-  `APPROXIMATIONS.md` entry with that frame; none is filed now.
+  The frames this task can check — the held 1499 (exact) and the frame
+  44..49 silhouettes (matching bounding boxes, pixel counts and centroids) —
+  show no such frame; Task 7's 2300/3000/3400 diffs are the arbiter. If one
+  triggers it, it is a new `APPROXIMATIONS.md` entry with that frame; none is
+  filed now.
 - **`NEW.ASM`'s `nep`/`ne` bound.** The original's 256-word row table is
   followed in memory by the edge arena, so a projected upper y above 255
   would read or write inside it. The Task 4 review's conservative bound puts
@@ -311,14 +332,22 @@ The reference decides each; nothing here was fitted.
 
 ## 9. What is ported and what is not
 
-- The intro's exit behaviour: `WaitMusic` ends the part on ESC (the source's
-  `while(!dis_exit() && ...)`), and the zoomer and bounce ignore it, as the
-  source's `kbhit` loops do. The two `dis_getmframe` waits do test
-  `dis_exit` in the source; the port lets an exit flag end those waits and
-  fall through the remaining setup into the main loop, whose top check
-  retires the part — the source's own path. The main loop ends on ESC, on the
-  music cut `-16 < musplus < 0`, or after frame 7000; it has no teardown, so
-  `drains_after_exit()` is false.
+- **Exit behaviour.** `MAIN.C:290`'s `while(!dis_exit() &&
+  dis_musplus()<-19);` exits on either condition and **continues**:
+  `dis_setmframe(0)` and `zoomer2()` (`:291-293`) still run, and the zoomer
+  checks only `kbhit` (`ZOOMER.C:38`), so ESC during the gate or the zoomer
+  still plays all 47 bodies. The bounce is `while(!dis_exit())`
+  (`MAIN.C:320`; V.EXE's main calls `dis_exit` at map 0x8f7 and skips the
+  body on a true answer), and the two `dis_getmframe` loops test `dis_exit`
+  as well (`:353`, `:400`), so ESC before the bounce's first body skips every
+  bounce body and both waits. The unconditional `dis_waitb`s and the
+  `backpal`/`tmppal` build, `bgpic` snapshot and part-start still run; the
+  main loop's `while(frame<7000 && !dis_exit())` is not entered, and the
+  part retires on its first main-loop check. The port follows exactly that:
+  `WaitMusic` continues into the zoomer on ESC, the zoomer ignores it, and
+  the bounce and both waits see it.
+- The main loop ends on ESC, on the music cut `-16 < musplus < 0`, or after
+  frame 7000; it has no teardown, so `drains_after_exit()` is false.
 - The source's `dis_setcopper(0,copper)` and its teardown
   `dis_setcopper(0,NULL)` are not ported as callbacks (see §3); there is
   nothing to remove on exit.
@@ -327,3 +356,6 @@ The reference decides each; nothing here was fitted.
   installs mode 13h composes at 320×400 (rows 200..399 are the zoomer's last
   copy). It is one tick, at reference 1158, outside every keyframe; the next
   tick is 320×200. Recorded here rather than hidden.
+- The standalone-entry substitution of §2: a run that starts at GLENZ opens
+  over the shell's surface rather than BEGLOGO's last frame; the view and the
+  tick map are the same.
