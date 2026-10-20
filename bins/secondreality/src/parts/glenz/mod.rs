@@ -605,6 +605,12 @@ impl Glenz {
 
     /// The copper's per-retrace upload, as the port models it: entries 0..15
     /// only (`MAIN.C:414-415`'s `16*3`), never `set_palette`.
+    ///
+    /// Called before [`MainState::step`], so the frame this tick composes
+    /// pairs surface *N* with `pal` as it stood after frame *N−1* — the
+    /// source's upload-before-work order (`MAIN.C:414-590`). The reference
+    /// capture samples after the source's upload, so its DAC can lead its
+    /// surface by one frame (D17; `docs/fidelity/glenz.md` §11).
     fn upload_low_palette(&self, ctx: &mut PartCtx) {
         for (index, entry) in self.main.pal.iter().enumerate() {
             ctx.set_palette_entry(index as u8, *entry);

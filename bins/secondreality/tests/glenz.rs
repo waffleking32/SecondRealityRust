@@ -1,46 +1,58 @@
-//! GLENZ through the real binary: the block-2 numbering, the held opening and
-//! the moving keyframes at their measured phase.
+//! GLENZ through the real binary: the block-2 numbering, the loop start, the
+//! held opening and the moving keyframes at their measured alignments.
 //!
 //! The part's arithmetic is unit-tested beside it (`glenz::*`): the tick map,
 //! the intro's 47+177, the palette phases, the physics, the projection, the
 //! colour allocator and the compositor. What is left for a process is the
 //! wiring: the registry name, the block-2 anchor and music row, the frames the
-//! shell composes, and the comparison against the filed reference.
+//! shell composes, the loop-start measurement, and the comparison against the
+//! filed reference.
 //!
 //! **The held opening is exact.** Boot 1499 carries the reference's index
 //! plane (`reference/parts/glenz/frame_001499.idx`) at **0 differing indices**
 //! of 64,000, and the RGB follows from it.
 //!
-//! **The moving keyframes are compared at the measured phase, not fitted**
-//! (`docs/fidelity/glenz.md` §11; `APPROXIMATIONS.md` A36/A37). The block-2
-//! music wait exits at **1117** in the port against the reference `second2b`'s
-//! **1111**, and the intro's ticks from the reset to the main loop's first
-//! wait are fixed at 451, so the port's loop start is `L_p = 1568` against
-//! Task 1's `L_r = 1562`. Main-loop frame `f` is therefore the picture at boot
-//! `1568 + f` while the reference's is at `1562 + f`, and the plan's aligned
-//! index is `K + 6` (2306/3006/3406 for 2300/3000/3400).
+//! **The port's loop start is L_p = 1567** (`docs/fidelity/glenz.md` §11;
+//! `APPROXIMATIONS.md` A36). Two independent measurements: the first
+//! above-floor object pixels are at boot **1611** (8 px, the reference frame
+//! 44's silhouette) → `1611 − 44 = 1567`; and the first surface showing the
+//! fade is boot **2269** (`pal` after frame 701, b = 63) after 2268 (b = 64)
+//! → `2269 − 702 = 1567`. The block-2 music wait exits at **1117** against
+//! `second2b`'s **1111**, so the reset-to-frame-44 span is **494** in the port
+//! against the reference's **495**: the port's real player reaches zframe
+//! 300/333 one tick earlier relative to the reset than the trace's. The phase
+//! machine itself matches the source (the reset and the first zoomer body
+//! share a tick, and the scripted-clock unit test pins the rest).
 //!
-//! The reference's *captured* moving frames pair a surface with a DAC that
-//! runs one to two main frames ahead of it (D17's sample/publish instant):
-//! the filed 2300 surface is the partner sessions' 2299 and its low palette is
-//! the fade computed at main frame 738, while the port at its own main frame
-//! 737 (boot 2305) draws that surface. So the test pins two alignments:
+//! **The plan's alignment is therefore `K + 5`.** Main-loop frame `f` is at
+//! boot `1567 + f` in the port and `1562 + f` in the reference. The reference
+//! capture adds a surface phase: the filed 2300's surface is its linear
+//! frame 738 (lag 0), while the filed 3000/3400 surfaces are frames
+//! 1437/1837 against counters 1438/1838 (lag 1); its DAC runs one frame ahead
+//! of its surface in all three (D17's sample/publish instant). The test pins
+//! three layers, each a measurement:
 //!
-//! - **the plan's `K + 6`** — the music-clock alignment, whose residual is
-//!   dominated by the reference capture's surface lag: 9,777 / 10,806 /
-//!   12,001 pixels at 2306/3006/3406 (A36);
-//! - **the surface-aligned frame** — 2305 at 2300, and 3004/3404 where the
-//!   second object's larger faces expose the capture's two-frame DAC lead —
-//!   where the model itself is pinned: **5,208 / 2,289 / 5,941** differing
-//!   pixels, and at 2305 **every** differing pixel is a low-palette fade entry
-//!   (the reference shows `b = 26`, the port `b = 27`; the object pixels are
-//!   byte-identical, which is the picture evidence for the shipped low-byte
-//!   `rolcol` key A37 adopts).
+//! - **the plan's `K + 5`** — 2305/3005/3405 against 2300/3000/3400:
+//!   **5,208 / 3,114 / 5,261** differing pixels (A36);
+//! - **the surface minima** — 2305 (K+5, the 2300 surface), 3004/3404 (K+4,
+//!   the one-frame capture lag): **5,208 / 2,289 / 5,941**, the unique minima
+//!   of the index-structure metric (their neighbours are 1,859/1,740,
+//!   4,486/2,837 and 5,876/4,780 unexplained pixels);
+//! - **`K + 6`** — one frame past the plan's alignment, kept to record the
+//!   DAC phase: 9,777 / 10,806 / 12,001.
+//!
+//! At 2305 every difference is a low-palette fade entry: the port's surface
+//! frame 738 pairs with `pal` after 737 (b = 27, its upload-before-step
+//! pairing), the capture's with the value computed at 738 (b = 26), and the
+//! object pixels are byte-identical — the picture evidence for the low-byte
+//! `rolcol` reading A37 adopts.
 //!
 //! No constant, anchor or tick was adjusted to chase these numbers (D24/D17).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use sr_assets::load_path;
 
 /// Where a `cargo run` of the acceptance command starts, and where the part's
 /// `assets/GLENZ/` paths resolve.
@@ -105,6 +117,26 @@ fn reference_frame(index: u32, suffix: &str) -> Vec<u8> {
     .unwrap()
 }
 
+/// `FC.UH`'s palette entries 0..15, the picture palette and `backpal`'s source.
+fn picture_palette() -> [[u8; 3]; 16] {
+    let image = load_path(&repository_root().join("assets/GLENZ/FC.UH"))
+        .expect("the committed FC.UH loads");
+    std::array::from_fn(|index| image.palette.entry(index as u8))
+}
+
+/// The fade's palette: `pal = backpal · b / 64` (`MAIN.C:542`, `:550`), six
+/// bits, truncated.
+fn faded(palette: &[[u8; 3]; 16], b: i16) -> [[u8; 3]; 16] {
+    std::array::from_fn(|index| {
+        std::array::from_fn(|channel| ((i16::from(palette[index][channel]) * b) / 64) as u8)
+    })
+}
+
+/// A six-bit channel widened the way the DAC and the presenter widen it.
+fn widened(value: u8) -> u8 {
+    ((u16::from(value) * 259 + 33) >> 6) as u8
+}
+
 /// How many pixels of `rendered` differ from `expected`, with the unit taken
 /// from the suffix's element size.
 ///
@@ -126,28 +158,17 @@ fn differing(rendered: &[u8], expected: &[u8], unit: usize) -> usize {
         .count()
 }
 
-/// The differing RGB pixels split by the port's own background palette:
-/// `(low, high)`, where `low` counts pixels whose `.idx` is 0..15.
+/// The differing RGB pixels split by the port's own palette: `(low, high)`,
+/// where `low` counts pixels whose `.idx` is 0..15.
 ///
 /// The low entries are the ones the main loop uploads (`MAIN.C:414-415`); the
-/// group entries at 16..255 are the faces' DAC groups. The split is what
-/// attributes the 2305 residual to the reference capture's fade palette.
+/// group entries at 16..255 are the faces' DAC groups.
 fn differing_by_palette(rendered: &[u8], expected: &[u8], indices: &[u8]) -> (usize, usize) {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-        rendered.len(),
-        expected.len()
-    );
+    assert_eq!(rendered.len(), expected.len(), "the frame lengths differ");
     assert_eq!(indices.len(), rendered.len() / 3, "one index per pixel");
     let (mut low, mut high) = (0, 0);
     for (pixel, &index) in indices.iter().enumerate() {
-        let (a, b) = (
-            &rendered[pixel * 3..pixel * 3 + 3],
-            &expected[pixel * 3..pixel * 3 + 3],
-        );
-        if a != b {
+        if rendered[pixel * 3..pixel * 3 + 3] != expected[pixel * 3..pixel * 3 + 3] {
             if index < 16 {
                 low += 1;
             } else {
@@ -158,15 +179,18 @@ fn differing_by_palette(rendered: &[u8], expected: &[u8], indices: &[u8]) -> (us
     (low, high)
 }
 
-/// How many pixels the port's index structure fails to explain: for each
-/// index the port paints, the reference's colour at those pixels is counted,
-/// and every pixel whose colour is not that index's most common reference
-/// colour is returned.
+/// The port's index structure against the reference: the number of pixels
+/// whose reference colour is not their port index's most common reference
+/// colour, `(unexplained, low-index, high-index, object pixels)`.
 ///
-/// A moving screen's index structure is the XOR of the faces covering each
-/// pixel. When the port and the reference draw the same faces, every index
-/// maps to one reference colour; a slid facet boundary shows up here first.
-fn unexplained_pixels(rendered: &[u8], expected: &[u8], indices: &[u8]) -> usize {
+/// A moving screen's index is the XOR of the faces covering its pixel. When
+/// the port and the reference draw the same faces, every index maps to one
+/// reference colour; a slid facet boundary shows up here first.
+fn unexplained_pixels(
+    rendered: &[u8],
+    expected: &[u8],
+    indices: &[u8],
+) -> (usize, usize, usize, usize) {
     use std::collections::HashMap;
     assert_eq!(rendered.len(), expected.len(), "the frame lengths differ");
     assert_eq!(indices.len(), rendered.len() / 3, "one index per pixel");
@@ -183,13 +207,19 @@ fn unexplained_pixels(rendered: &[u8], expected: &[u8], indices: &[u8]) -> usize
             .entry(reference)
             .or_default() += 1;
     }
-    let mut unexplained = 0;
-    for by_colour in counts.values() {
-        let total: usize = by_colour.values().sum();
+    let (mut unexplained, mut low, mut high, mut total) = (0, 0, 0, 0);
+    for (&index, by_colour) in &counts {
+        let here: usize = by_colour.values().sum();
         let top = by_colour.values().copied().max().unwrap_or(0);
-        unexplained += total - top;
+        total += here;
+        unexplained += here - top;
+        if index < 16 {
+            low += here - top;
+        } else {
+            high += here - top;
+        }
     }
-    unexplained
+    (unexplained, low, high, total)
 }
 
 /// The frame's eight reds after the frame-786 `backpal` rebuild (`MAIN.C:557-584`).
@@ -202,41 +232,83 @@ fn rebuilt_reds() -> [[u8; 3]; 8] {
     })
 }
 
-/// A six-bit channel widened the way the DAC and the presenter widen it.
-fn widened(value: u8) -> u8 {
-    ((u16::from(value) * 259 + 33) >> 6) as u8
-}
-
-/// How many pixels disagree about belonging to the second (red) object. The
-/// reference has only RGB, so membership is its colour in the rebuilt
-/// palette's entries 1..7; the port's is an index below 8 (`Glz2`'s
-/// `(word >> 1) & 1` and the hidden faces' low bytes 2/4, all XORed).
-fn red_mask_differing(rendered: &[u8], expected: &[u8], indices: &[u8]) -> usize {
+/// The second (red) object's mask on both sides: `(port, reference,
+/// differing)`. The reference has only RGB, so membership is its colour in
+/// the rebuilt palette's entries 1..7; the port's is an index below 8
+/// (`Glz2`'s `(word >> 1) & 1` and the hidden faces' low bytes 2/4, XORed).
+fn red_mask(rendered: &[u8], expected: &[u8], indices: &[u8]) -> (usize, usize, usize) {
     let reds: Vec<[u8; 3]> = rebuilt_reds()[1..]
         .iter()
         .map(|rgb| [widened(rgb[0]), widened(rgb[1]), widened(rgb[2])])
         .collect();
-    let is_red = |pixel: &[u8]| {
-        let pixel = [pixel[0], pixel[1], pixel[2]];
-        reds.contains(&pixel)
-    };
+    let is_red = |pixel: &[u8]| reds.contains(&[pixel[0], pixel[1], pixel[2]]);
     assert_eq!(rendered.len(), expected.len(), "the frame lengths differ");
     assert_eq!(indices.len(), rendered.len() / 3, "one index per pixel");
-    indices
-        .iter()
-        .enumerate()
-        .filter(|&(i, &index)| {
-            let port = index != 0 && index < 8;
-            let reference = is_red(&expected[i * 3..i * 3 + 3]);
-            port != reference
-        })
-        .count()
+    let (mut port, mut reference, mut diff) = (0, 0, 0);
+    for (i, &index) in indices.iter().enumerate() {
+        let port_red = index != 0 && index < 8;
+        let reference_red = is_red(&expected[i * 3..i * 3 + 3]);
+        if port_red {
+            port += 1;
+        }
+        if reference_red {
+            reference += 1;
+        }
+        if port_red != reference_red {
+            diff += 1;
+        }
+    }
+    (port, reference, diff)
 }
 
-/// The images every test below reads: the held opening, the plan's aligned
-/// moving indices (`K + 6`) and the surface-aligned frames the capture's DAC
-/// lead requires (A36/A37).
-const FRAMES: &str = "1499,2305,2306,3004,3006,3404,3406";
+/// The above-floor object pixels of a frame, against its own sky colour:
+/// `(count, (min x, max x, min y, max y))`. Rows 0..149 are above the floor
+/// (`reference-indices.md` §7.6).
+fn above_floor_object(rgb: &[u8]) -> (usize, (usize, usize, usize, usize)) {
+    let width = 320;
+    let sky = &rgb[0..3];
+    let mut points = Vec::new();
+    for i in 0..150 * width {
+        if &rgb[i * 3..i * 3 + 3] != sky {
+            points.push((i % width, i / width));
+        }
+    }
+    let count = points.len();
+    let boxed = (
+        points.iter().map(|p| p.0).min().unwrap_or(0),
+        points.iter().map(|p| p.0).max().unwrap_or(0),
+        points.iter().map(|p| p.1).min().unwrap_or(0),
+        points.iter().map(|p| p.1).max().unwrap_or(0),
+    );
+    (count, boxed)
+}
+
+/// The object box, count and centroid in the port's own index plane, against
+/// the 1499 background: `(min x, max x, min y, max y, count, cx, cy)`.
+fn object_box(indices: &[u8], background: &[u8]) -> (usize, usize, usize, usize, usize, f64, f64) {
+    let width = 320;
+    let points: Vec<(usize, usize)> = (0..150 * width)
+        .filter(|&i| indices[i] != background[i])
+        .map(|i| (i % width, i / width))
+        .collect();
+    let count = points.len();
+    let xs: Vec<usize> = points.iter().map(|p| p.0).collect();
+    let ys: Vec<usize> = points.iter().map(|p| p.1).collect();
+    (
+        *xs.iter().min().unwrap(),
+        *xs.iter().max().unwrap(),
+        *ys.iter().min().unwrap(),
+        *ys.iter().max().unwrap(),
+        count,
+        xs.iter().sum::<usize>() as f64 / count as f64,
+        ys.iter().sum::<usize>() as f64 / count as f64,
+    )
+}
+
+/// The images the keyframe tests read: the held opening and the moving
+/// indices at the plan's alignment (`K + 5`), one past it (`K + 6`) and the
+/// capture's surface minima (`K + 5` at 2300, `K + 4` at 3000/3400).
+const FRAMES: &str = "1499,2304,2305,2306,3003,3004,3005,3006,3403,3404,3405,3406";
 
 #[test]
 fn the_block_two_run_is_numbered_in_boot_frames_and_reaches_glenz() {
@@ -252,7 +324,9 @@ fn the_block_two_run_is_numbered_in_boot_frames_and_reaches_glenz() {
     assert_eq!(manifest["music"]["start_order"], 0);
     assert_eq!(manifest["music"]["start_frame"], 408);
 
-    for &index in &[1499u32, 2305, 2306, 3004, 3006, 3404, 3406] {
+    for &index in &[
+        1499u32, 2304, 2305, 2306, 3003, 3004, 3005, 3006, 3403, 3404, 3405, 3406,
+    ] {
         let frame = entry(&manifest, index);
         assert_eq!(frame["part"], "glenz", "boot {index} is GLENZ's screen");
         assert_eq!(frame["width"], 320);
@@ -263,14 +337,81 @@ fn the_block_two_run_is_numbered_in_boot_frames_and_reaches_glenz() {
         );
     }
 
-    // The port's music position at each index. The filed `second2b` trace is
-    // one row ahead at all four (1499 5:12, 2306 8:20, 3006 11:1, 3406
-    // 12:36) — the six-tick wait offset A36 registers, seen on the published
-    // position.
+    // The port's music position at the filed indices. The filed `second2b`
+    // trace is one row ahead at all four (1499 5:12, 2306 8:20, 3006 11:1,
+    // 3406 12:36) — the six-tick wait offset A36 registers, seen on the
+    // published position.
     assert_eq!(entry(&manifest, 1499)["music_position"], "5:11");
     assert_eq!(entry(&manifest, 2306)["music_position"], "8:19");
     assert_eq!(entry(&manifest, 3006)["music_position"], "11:0");
     assert_eq!(entry(&manifest, 3406)["music_position"], "12:35");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_loop_start_is_1567() {
+    // The reset is boot 1117: 1115 and 1116 are still BEGLOGO's held
+    // 320x400 picture (the zoomer inherits it), and 1117 is the zoomer's
+    // first body — row 0 and row 399 (640 px). The block-2 wait's exit is
+    // six ticks after `second2b`'s 1111.
+    let (dir, manifest) = dump("phase", "1115,1116,1117,1610,1611,1612,2268,2269");
+    let at_1115 = dumped_file(&dir, &manifest, 1115, "rgb");
+    let at_1116 = dumped_file(&dir, &manifest, 1116, "rgb");
+    let at_1117 = dumped_file(&dir, &manifest, 1117, "rgb");
+    assert_eq!(
+        differing(&at_1116, &at_1115, 3),
+        0,
+        "1115/1116 are the held picture"
+    );
+    assert_eq!(
+        differing(&at_1117, &at_1116, 3),
+        640,
+        "1117 is the zoomer's first body (rows 0 and 399)"
+    );
+
+    // The first object pixels: main-loop frame 44's 8-pixel silhouette at
+    // boot 1611, none at 1610, 21 px at 1612 (frames 45).
+    let (none, _) = above_floor_object(&dumped_file(&dir, &manifest, 1610, "rgb"));
+    assert_eq!(none, 0, "frame 43 draws no object pixel");
+    let (eight, boxed) = above_floor_object(&dumped_file(&dir, &manifest, 1611, "rgb"));
+    assert_eq!((eight, boxed), (8, (172, 179, 0, 0)), "frame 44 at 1611");
+    let (twenty_one, boxed) = above_floor_object(&dumped_file(&dir, &manifest, 1612, "rgb"));
+    assert_eq!(
+        (twenty_one, boxed),
+        (21, (166, 179, 0, 1)),
+        "frame 45 at 1612"
+    );
+
+    // The first faded surface: the fade begins at main frame 701 and the
+    // port uploads `pal` before stepping, so frame 702 at boot 2269 shows
+    // b = 63; 2268 (frame 701) still shows b = 64.
+    let palette = picture_palette();
+    for &(boot, b) in &[(2268u32, 64i16), (2269, 63)] {
+        let rgb = dumped_file(&dir, &manifest, boot, "rgb");
+        let indices = dumped_file(&dir, &manifest, boot, "idx");
+        let expected = faded(&palette, b);
+        let mismatched = (0..320 * 200)
+            .filter(|&i| indices[i] < 16)
+            .filter(|&i| {
+                let pixel = &rgb[i * 3..i * 3 + 3];
+                let entry = &expected[indices[i] as usize];
+                pixel != [widened(entry[0]), widened(entry[1]), widened(entry[2])]
+            })
+            .count();
+        assert_eq!(mismatched, 0, "boot {boot}: every low pixel is b = {b}");
+    }
+
+    // Both measurements give the same loop start.
+    assert_eq!(1611 - 44, 1567, "first object: 1611 - frame 44");
+    assert_eq!(2269 - 702, 1567, "first fade: 2269 - frame 702");
+    // The reset-to-frame-44 span: the port's 494 against the reference's
+    // 495 (1606 - 1111; `reference-indices.md` §7.6). The one-tick difference
+    // is the port's real player reaching zframe 300/333 one tick earlier
+    // relative to the reset than `second2b`'s; the phase machine's own
+    // relative ticks match the source.
+    assert_eq!(1611 - 1117, 494);
+    assert_eq!(1606 - 1111, 495);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -292,80 +433,176 @@ fn the_held_opening_1499_is_the_reference_index_plane() {
 }
 
 #[test]
-fn the_moving_keyframes_record_the_registered_phase_and_residuals() {
+fn the_moving_keyframes_record_the_registered_alignments_and_residuals() {
     let (dir, manifest) = dump("keyframes", FRAMES);
+    let reference = |index: u32| reference_frame(index, "rgb");
+    let frame = |index: u32| dumped_file(&dir, &manifest, index, "rgb");
+    let indices = |index: u32| dumped_file(&dir, &manifest, index, "idx");
 
-    // A36: the plan's `K + 6` — the music-clock alignment. The residual is
-    // the reference capture's surface lag (the filed picture is the partner
-    // sessions' `K - 1`), not a port frame error: the port's K+6 surface is
-    // the partner sessions' K+1 surface, an independent capture's picture.
-    let aligned: &[(u32, u32, usize)] =
-        &[(2306, 2300, 9777), (3006, 3000, 10806), (3406, 3400, 12001)];
-    for &(port, reference, expected) in aligned {
-        let rendered = dumped_file(&dir, &manifest, port, "rgb");
-        let expected_frame = reference_frame(reference, "rgb");
-        let count = differing(&rendered, &expected_frame, 3);
-        println!("boot {port} vs reference {reference} (K+6): {count}/64000 px differ");
-        assert_eq!(
-            count, expected,
-            "A36's measured K+6 residual at {reference}"
-        );
-    }
-
-    // A37: the surface-aligned frame. At 2300 the reference's own main frame
-    // is 737 (the partner sessions' 2299) — the port's boot 2305. The only
-    // difference is the capture's low palette, which is the fade computed at
-    // main frame 738 (b = 26) where the port's displayed frame 737 computes
-    // b = 27; every object pixel is byte-identical.
-    let surface_aligned: &[(u32, u32, usize)] =
-        &[(2305, 2300, 5208), (3004, 3000, 2289), (3404, 3400, 5941)];
-    for &(port, reference, expected) in surface_aligned {
-        let rendered = dumped_file(&dir, &manifest, port, "rgb");
-        let expected_frame = reference_frame(reference, "rgb");
-        let count = differing(&rendered, &expected_frame, 3);
-        println!("boot {port} vs reference {reference} (surface): {count}/64000 px differ");
-        assert_eq!(
-            count, expected,
-            "A37's measured surface residual at {reference}"
-        );
-    }
-
-    let rendered = dumped_file(&dir, &manifest, 2305, "rgb");
-    let expected = reference_frame(2300, "rgb");
-    let indices = dumped_file(&dir, &manifest, 2305, "idx");
-    let (low, high) = differing_by_palette(&rendered, &expected, &indices);
-    println!("boot 2305 vs 2300: {low} low-palette, {high} group-entry pixels differ");
-    assert_eq!(
-        (low, high),
-        (5208, 0),
-        "the 2300 residual is the capture's fade palette: the object entries match"
-    );
-    assert_eq!(
-        unexplained_pixels(&rendered, &expected, &indices),
-        0,
-        "every index at 2305 maps to one reference colour (the filed 2300's face coverage)"
-    );
-
-    // At 3000/3400 the second object's interior facet boundaries differ on a
-    // small count of XOR pixels while its outer silhouette agrees to a pixel;
-    // these are A37's measured residual, not a constant a port could fit.
-    for &(port, reference, unexplained, red_mask) in &[
-        (3004u32, 3000u32, 711usize, 118usize),
-        (3404, 3400, 839, 180),
+    // A36: the plan's `K + 5` — L_p 1567 against L_r 1562. The residual is
+    // the capture's DAC phase; at 2305 it is the low fade palette alone.
+    for &(port, filed, expected, unexplained) in &[
+        (2305u32, 2300u32, 5208usize, 0usize),
+        (3005, 3000, 3114, 2837),
+        (3405, 3400, 5261, 4780),
     ] {
-        let rendered = dumped_file(&dir, &manifest, port, "rgb");
-        let expected = reference_frame(reference, "rgb");
-        let indices = dumped_file(&dir, &manifest, port, "idx");
-        let count = unexplained_pixels(&rendered, &expected, &indices);
-        let red = red_mask_differing(&rendered, &expected, &indices);
-        println!("boot {port} vs {reference}: {count} unexplained indices, {red} red-mask px");
+        let count = differing(&frame(port), &reference(filed), 3);
+        let (not_explained, _, _, _) =
+            unexplained_pixels(&frame(port), &reference(filed), &indices(port));
+        println!("boot {port} vs {filed} (K+5): {count} px, {not_explained} unexplained");
+        assert_eq!(count, expected, "A36's K+5 residual at {filed}");
         assert_eq!(
-            count, unexplained,
-            "A37's unexplained pixels at {reference}"
+            not_explained, unexplained,
+            "A36's K+5 index structure at {filed}"
         );
+    }
+
+    // A37: the capture's surface minima. 2305 is the 2300 surface (lag 0);
+    // 3004/3404 are the 3000/3400 surfaces (the capture's one-frame lag), and
+    // the unique minima of the index-structure metric — neighbours 1,859 /
+    // 1,740, 4,486 / 2,837 and 5,876 / 4,780.
+    for &(port, filed, expected, unexplained) in &[
+        (2305u32, 2300u32, 5208usize, 0usize),
+        (3004, 3000, 2289, 711),
+        (3404, 3400, 5941, 839),
+    ] {
+        let count = differing(&frame(port), &reference(filed), 3);
+        let (not_explained, _, _, _) =
+            unexplained_pixels(&frame(port), &reference(filed), &indices(port));
+        println!("boot {port} vs {filed} (surface): {count} px, {not_explained} unexplained");
+        assert_eq!(count, expected, "A37's surface residual at {filed}");
         assert_eq!(
-            red, red_mask,
-            "A37's second-object silhouette at {reference}"
+            not_explained, unexplained,
+            "A37's surface index structure at {filed}"
+        );
+    }
+
+    // One frame past the plan's alignment: the capture's DAC phase.
+    for &(port, filed, expected, unexplained) in &[
+        (2306u32, 2300u32, 9777usize, 1740usize),
+        (3006, 3000, 10806, 5762),
+        (3406, 3400, 12001, 7974),
+    ] {
+        let count = differing(&frame(port), &reference(filed), 3);
+        let (not_explained, _, _, _) =
+            unexplained_pixels(&frame(port), &reference(filed), &indices(port));
+        println!("boot {port} vs {filed} (K+6): {count} px, {not_explained} unexplained");
+        assert_eq!(count, expected, "the K+6 (one past) residual at {filed}");
+        assert_eq!(
+            not_explained, unexplained,
+            "the K+6 index structure at {filed}"
+        );
+    }
+
+    // At 2305 (main frame 738) the port pairs the frame with `pal` after 737
+    // (b = 27); the capture pairs the same surface with the value computed
+    // at 738 (b = 26). Every low-palette pixel differs for that reason and
+    // every object pixel is identical.
+    let rgb_2305 = frame(2305);
+    let reference_2300 = reference(2300);
+    let idx_2305 = indices(2305);
+    assert_eq!(
+        differing_by_palette(&rgb_2305, &reference_2300, &idx_2305),
+        (5208, 0),
+        "the 2300 residual is the capture's fade palette"
+    );
+    let palette = picture_palette();
+    let port_b27 = faded(&palette, 27);
+    let capture_b26 = faded(&palette, 26);
+    let (mut port_bad, mut capture_bad) = (0, 0);
+    for i in 0..320 * 200 {
+        if idx_2305[i] >= 16 {
+            continue;
+        }
+        let entry = idx_2305[i] as usize;
+        let expected = [
+            widened(port_b27[entry][0]),
+            widened(port_b27[entry][1]),
+            widened(port_b27[entry][2]),
+        ];
+        if rgb_2305[i * 3..i * 3 + 3] != expected {
+            port_bad += 1;
+        }
+        if reference_2300[i * 3..i * 3 + 3] != rgb_2305[i * 3..i * 3 + 3] {
+            let expected = [
+                widened(capture_b26[entry][0]),
+                widened(capture_b26[entry][1]),
+                widened(capture_b26[entry][2]),
+            ];
+            if reference_2300[i * 3..i * 3 + 3] != expected {
+                capture_bad += 1;
+            }
+        }
+    }
+    assert_eq!(port_bad, 0, "the port's frame 738 renders b = 27");
+    assert_eq!(capture_bad, 0, "the capture's 2300 renders b = 26");
+
+    // The 2305 object is the filed 2300's: box and centroid from the port's
+    // own index plane against the 1499 background.
+    let background = dumped_file(&dir, &manifest, 1499, "idx");
+    let (x0, x1, y0, y1, count, cx, cy) = object_box(&idx_2305, &background);
+    println!("boot 2305 object: x {x0}..{x1}, y {y0}..{y1}, {count} px, ({cx:.1}, {cy:.1})");
+    assert_eq!((x0, x1, y0, y1, count), (97, 217, 38, 149, 9989));
+    assert!((cx - 156.8).abs() < 0.05 && (cy - 94.1).abs() < 0.05);
+
+    // The next displayed frame (739 at boot 2306) is the 9,927-px box the
+    // partner sessions present at 2300 (and Task 1's `out/p7-stability`).
+    let (x0, x1, y0, y1, count, cx, cy) = object_box(&indices(2306), &background);
+    println!("boot 2306 object: x {x0}..{x1}, y {y0}..{y1}, {count} px, ({cx:.1}, {cy:.1})");
+    assert_eq!((x0, x1, y0, y1, count), (99, 217, 37, 149, 9927));
+    assert!((cx - 157.6).abs() < 0.05 && (cy - 94.2).abs() < 0.05);
+
+    // The chosen surface frames are the unique minima of the index-structure
+    // metric; these are their neighbours (the same comparison one frame each
+    // side).
+    for &(port, filed, unexplained) in &[
+        (2304u32, 2300u32, 1859usize),
+        (3003, 3000, 4486),
+        (3403, 3400, 5876),
+    ] {
+        let (not_explained, _, _, _) =
+            unexplained_pixels(&frame(port), &reference(filed), &indices(port));
+        println!("neighbour {port} vs {filed}: {not_explained} unexplained");
+        assert_eq!(
+            not_explained, unexplained,
+            "the surface minimum's neighbour at {filed}"
+        );
+    }
+
+    // The surface minima's remaining residual: the second object's interior
+    // XOR boundaries. 3004: 710 of 711 at indices < 16 (one at >=16); 3404:
+    // all 839 at indices < 16. Its outer red silhouette matches within
+    // 118/180 px, the port's red masks holding 27,057/33,312 px.
+    for &(port, filed, split, red) in &[
+        (
+            3004u32,
+            3000u32,
+            (710usize, 1usize, 35_896usize),
+            (27_057usize, 27_143usize, 118usize),
+        ),
+        (3404, 3400, (839, 0, 43_938), (33_312, 33_416, 180)),
+    ] {
+        let (not_explained, low, high, object) =
+            unexplained_pixels(&frame(port), &reference(filed), &indices(port));
+        assert_eq!(
+            (low, high, object),
+            split,
+            "A37's unexplained split and object total at {filed}"
+        );
+        assert_eq!(low + high, not_explained);
+        let (port_red, reference_red, red_diff) =
+            red_mask(&frame(port), &reference(filed), &indices(port));
+        assert_eq!(
+            (port_red, reference_red, red_diff),
+            red,
+            "A37's red-object masks at {filed}"
+        );
+        let (low_differing, high_differing) =
+            differing_by_palette(&frame(port), &reference(filed), &indices(port));
+        println!(
+            "boot {port} vs {filed}: {not_explained} unexplained ({low} low / {high} high) of \
+             {object}; red masks {port_red}/{reference_red} differ {red_diff}; \
+             {low_differing} low-palette / {high_differing} group px differ"
         );
     }
 

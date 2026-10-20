@@ -24,12 +24,13 @@
 //! sixteenth word gets slot 32, whose DAC group starts at entry 0 (clobbering
 //! the low palette) and whose stored colour is 0 (painting nothing). The
 //! reference contradicts that: at 2300 its low palette is exactly the frame's
-//! `pal` and every face is drawn (D24's arbitration, Task 7). The shipped
-//! build therefore reads `rolcol` **in bounds by the low byte on both paths**,
-//! and the port adopts that reading: one 256-byte map over the one `used`
-//! pool, a hidden face freeing the slot its visible face took. The residual
-//! evidence and the two model outputs are in `docs/fidelity/glenz.md` §7 and
-//! `APPROXIMATIONS.md` A37.
+//! `pal` and every face is drawn (D24's arbitration, Task 7). The reference's
+//! picture therefore identifies the shipped build's reading as the **in-bounds
+//! low-byte key on both paths** (the packed EXE cannot be disassembled to
+//! confirm it), and the port adopts that reading: one 256-byte map over the
+//! one `used` pool, a hidden face freeing the slot its visible face took. The
+//! residual evidence and the two model outputs are in `docs/fidelity/glenz.md`
+//! §7 and §11 and `APPROXIMATIONS.md` A37.
 //!
 //! The visible path also writes the face's 16-entry DAC group: the group's
 //! base comes from the colour word's bit 1 and the cross-product shade — a
@@ -190,17 +191,17 @@ pub fn cross(points: &[(i16, i16)]) -> i32 {
 /// The colour allocator's persistent state: `rolcol`, `rolused` and the
 /// frame's `lightshift` (`VEC.ASM:396-397`; `MAIN.C:394`).
 ///
-/// `slots` is the shipped build's `rolcol` read in bounds by the colour
-/// word's **low byte** (see the module docs; D24): the visible and hidden
-/// paths share it, so a hidden face frees the slot its visible face took.
-/// `used` has one entry per DAC group; slots are the even numbers 2..30, plus
-/// 32 for the exhausted case.
+/// `slots` is the reading the reference's picture identifies — `rolcol` read
+/// in bounds by the colour word's **low byte** (see the module docs; D24):
+/// the visible and hidden paths share it, so a hidden face frees the slot its
+/// visible face took. `used` has one entry per DAC group; slots are the even
+/// numbers 2..30, plus 32 for the exhausted case.
 pub struct ColourState {
     /// `_lightshift` (`MAIN.C:394`, `:500`): 9, or 10 once the second
     /// object's scale overtakes the first's.
     pub lightshift: i16,
-    /// The slots, keyed by the colour word's low byte (the shipped build's
-    /// in-bounds reading; D24). Both paths share it.
+    /// The slots, keyed by the colour word's low byte (the reading the
+    /// reference's picture identifies; D24). Both paths share it.
     slots: [u8; 256],
     /// `rolused`: whether a slot's DAC group is allocated.
     used: [bool; 256],
