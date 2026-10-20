@@ -13,10 +13,12 @@
 //! - `poly` — `ceasypolylist`, the hidden-face cross product and the
 //!   `rolcol`/`rolused` colour allocator (`VEC.ASM:260-553`) with the shipped
 //!   polygon tables (`MAIN.C:176-240`).
+//! - `span` — the transparent span compositor (`NEW.ASM:26-418`).
 //!
-//! `span` (the transparent compositor) and `intro` (the zoomer and the FC
-//! bounce) are later tasks' files; the part driver lands with them.
+//! `intro` (the zoomer and the FC bounce) is a later task's file; the part
+//! driver lands with it.
 
 pub mod math;
 pub mod poly;
+pub mod span;
 pub mod tables;
