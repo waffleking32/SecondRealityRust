@@ -72,10 +72,6 @@
 //! buffers (D36); the source's `MAXLINES` 512 cap on the edge arena is
 //! dropped (the shipped scenes stay under 96 edges).
 
-// The part driver lands in Task 5; until it consumes this layer every item
-// here is dead code to the binary target (the tests below use it).
-#![allow(dead_code)]
-
 use super::poly::Poly;
 
 /// The visible width in pixels; `yrowad` advances by this much per row.

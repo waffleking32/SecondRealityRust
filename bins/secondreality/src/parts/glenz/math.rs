@@ -17,10 +17,6 @@
 //! `checkdeg` (`MATH.ASM:17-28`): an unsigned `jb` for the in-range test, then
 //! a signed `jl` to choose the direction, repeated ±3600.
 
-// The builder and driver land in Tasks 3-7; until they consume this layer
-// every item here is dead code to the binary target (the tests below use it).
-#![allow(dead_code)]
-
 use super::tables::{COS, SIN};
 
 /// `or bp,16` (`VEC.ASM:198`): z was below the projection's `min_z`, so x

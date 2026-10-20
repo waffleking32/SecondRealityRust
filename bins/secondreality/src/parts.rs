@@ -51,6 +51,11 @@ pub fn registry() -> &'static [PartEntry] {
         ("pam", || Box::new(pam::Pam::new())),
         // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).
         ("beglogo", || Box::new(beglogo::Beglogo::new())),
+        // `GLENZ/MAIN.C` over its own `VEC.ASM`/`MATH.ASM`/`NEW.ASM` — the
+        // zoom-and-bounce opening and the two polyhedra, block 2's second
+        // part (`MAIN/U2.ASM:812-815`, `exe4`; the block-1 run reaches it
+        // through the `restartmus` at `:813-818`).
+        ("glenz", || Box::new(glenz::Glenz::new())),
         // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).
         ("tunneli", || Box::new(tunneli::Tunneli::new())),
         // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).

@@ -40,10 +40,6 @@
 //! hidden face's word unchanged: `jc @@1` returns on the hidden carry
 //! (`VEC.ASM:403-410`).
 
-// The part driver lands in Tasks 4-7; until it consumes this layer every item
-// here is dead code to the binary target (the tests below use it).
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use sr_engine::Palette;
