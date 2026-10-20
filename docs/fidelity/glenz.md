@@ -243,7 +243,7 @@ source parse test. The `frame>1800` products use the source's explicit
 The generated-code question the phase's Global Constraints raise is settled
 by what the shipped path calls: `ceasypolylist` + `cglenzinit/polylist/done`
 + `NEW.ASM`, never `polygroup`/`polyf`. `ZOOMLOOP.INC` **is** linked —
-`ZOOM.ASM:27` includes it, and `zoom.obj` is on the link line
+`ZOOM.ASM:26` includes it, and `zoom.obj` is on the link line
 (`GLENZ/MAKEFILE:3`) — but it is the body of `_zoom`, which only the
 unshipped `zoomer1` calls; `zoomer2`, the shipped intro, uses none of it and
 `ZOOM.ASM` exports only `_zoom` and `_sin1024`. VEC.ASM's

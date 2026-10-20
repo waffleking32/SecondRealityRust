@@ -31,7 +31,8 @@
 //!
 //! # The tick model (D37)
 //!
-//! One logic tick is one `dis_waitb` (`MAIN.C:252-256`). The measured anchors
+//! One logic tick is one `dis_waitb` (`MAIN.C:413`; the wrapper is
+//! `DIS/DISC.ASM:42-47`). The measured anchors
 //! (`second2b`, `reference-indices.md` §7.6) are: the music wait exits at
 //! **1111**, and `zoomer2`'s first body is that same tick because the source's
 //! post-wait actions run in the call that saw the wait end. The 47 zoomer
@@ -48,7 +49,7 @@
 //! # The palette
 //!
 //! The source's copper callback uploads `pal`'s entries 0..15 at every
-//! retrace (`MAIN.C:281-286`, `:408`). The port does not register a copper
+//! retrace (`MAIN.C:264-270`, `:408`). The port does not register a copper
 //! callback: its per-tick entry-0..15 upload plus `poly::build`'s group writes
 //! are the same DAC state at compose time (D37; `docs/fidelity/glenz.md`).
 //! Entries 16..255 are only ever written by the colour allocator's 16-entry
