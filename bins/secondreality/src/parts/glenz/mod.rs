@@ -10,10 +10,13 @@
 //!   `ccliplist` (`MATH.ASM`, `VEC.ASM`), with the asm's 16/32/64-bit widths.
 //! - `tables` — the source's `sintable16`/`costable16` (`MATHSIN.INC`) as
 //!   [`tables::SIN`] and [`tables::COS`].
+//! - `poly` — `ceasypolylist`, the hidden-face cross product and the
+//!   `rolcol`/`rolused` colour allocator (`VEC.ASM:260-553`) with the shipped
+//!   polygon tables (`MAIN.C:176-240`).
 //!
-//! `poly` (the point-list builder and colour allocator), `span` (the
-//! transparent compositor) and `intro` (the zoomer and the FC bounce) are
-//! later tasks' files; the part driver lands with them.
+//! `span` (the transparent compositor) and `intro` (the zoomer and the FC
+//! bounce) are later tasks' files; the part driver lands with them.
 
 pub mod math;
+pub mod poly;
 pub mod tables;
