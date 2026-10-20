@@ -16,11 +16,24 @@ Phase status board. **Read this first if you are resuming work.**
 | 4 | Music-synced tier A | **done** — spec §10's criterion met: ALKU, PAM, DDSTARS, DOTS (`minvball`), MNTSCRL and RAYSCRL verified against their reference keyframes (17 of the 24 reference keyframes byte-identical; the seven residuals are A19's four coincident-dot frames, A20's text phase at ALKU 5859, and the release's `MIEKKA.SCI` at RAYSCRL 14000/14500 — PAM's 7900 index plane is an additional registered comparison, A21, not an eighth keyframe); the five parts that wait on the music do so as their originals do, with the release's timings in A17/A18, and DDSTARS has no music cue (the shell starts its MUSIC0 recipe). Block 1 stopped at U2A and block 3 at LNS&ZOOM at this phase's close; block U plays DDSTARS; PAM, MINVBALL and RAYSCRL run with `--part` (closed by Phase 6, which ports U2A and U2E: block 1 now stops at GLENZ and block 3 runs through U2E into the end sequence). Evidence below. The final whole-branch review ran and its findings are fixed and re-reviewed; **the tag is applied at this commit** | [04-music-synced-tier-a.md](docs/plans/04-music-synced-tier-a.md) | `phase-4` |
 | 5 | Mid tier | **done** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 then ran MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stopped at U2E, block 2 still at GLENZ and block 1 at U2A (closed by Phase 6: block 1 now stops at GLENZ and block 3 runs through U2E into ENDLOGO → CRED → ENDSCRL). Evidence below. The final whole-branch review ran (fable, `e4f467e..7dae540`): **With fixes** — 0 Critical / 3 Important / 8 Minor — its findings are applied in `96ff6cc` and the scoped re-review is clean; **the tag is applied at this commit** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | `phase-5` |
 | 6 | Vector engine | **done** — spec §10's U2A and U2E verified against their references with every residual registered and measured: U2A's 6500 and 7640 keyframes compare at 0 and 7300 is A28 (426 px at the reference's own state 294, the release-vs-tree Gouraud difference) + A29 (1098 px at the port's boot index, session phase); U2E's intro is byte-exact at nine indices and its four keyframes are A30 (189/7,118/231/1,177 at the reference's own state) + A31 (11,006/11,805/17,278/16,234 at K, the four-tick session phase). The mid-run MUSIC0@18 restart is measured at chain 17,418 against D34's derived 17,427 (the gapless-handover seam) and waits 4; the ESC drain (`Part::drains_after_exit`) and the sound card's follow seam are in. Three new traces (`second1c`, `second4`, `second3e`). Evidence below. The final whole-branch review ran (fable, `8b1b99a..5cc532c`): **no Criticals**; its two Important and four Minor findings are fixed in `5cc532c` and the scoped re-review is clean; **the tag is applied at this commit** | [06-vector-engine.md](docs/plans/06-vector-engine.md) | `phase-6` |
-| 7 | GLENZ | **in progress** | [07-glens.md](docs/plans/07-glens.md) | — |
+| 7 | GLENZ | **complete — untagged, awaiting the whole-branch final review** — spec §10's "GLENZ verified": the held opening at 1499 compares at **0 differing indices of 64,000**, and the moving keyframes are measured at the capture's surface-aligned phase — **2305/2300** 5,208 px (every difference a palette 0..15 fade entry, **0** at an index ≥ 16; the object is the reference's 9,989-px box exactly), **3004/3000** 2,289 px (711 registered-unexplained) and **3404/3400** 5,941 px (839), with **`L_p = 1567`** against `L_r = 1562` (**K + 5**) — A36/A37. D24 (b) is settled by the reference's picture: the in-bounds **low-byte** colour key is adopted (one shared slot map; the tree's full-word key exhausts the pool and is rejected). The two shell seams are in: the block-1 `MUSIC1@0` restart (boundary **8,057**, inside the reference's (8,049, 8,100)), whose source-faithful seek puts the first zoomer body at **8,770** — **249 frames after 8,521** (registered **A38**) — and the post-PANICEND cue wait (**8,903 / 8,953 / 9,219**). Blocks 1 and 2 run to ENDSCRL with no stop, and `--part glenz` runs. The span compositor's full-repaint substitution is **A39** (measured difference 0). Evidence below. **The tag is withheld until the whole-branch final review is clean** | [07-glens.md](docs/plans/07-glens.md) | — |
 | 8 | Vault | not started | — | — |
 | 9 | Assembly & fidelity pass | not started | — | — |
 
 ## Where to pick up
+
+**Phase 7 (GLENZ) is complete — untagged, awaiting the whole-branch final review** — on
+`phase-7-glens`, 26 commits from `4223266` (the Phase 6 close-out). Its exit criterion is spec
+§10's "GLENZ verified", and it is met (evidence below). Its plan is `docs/plans/07-glens.md`,
+its note is `docs/fidelity/glenz.md` (with `reference-indices.md` §7.6–§7.7 for the
+measurements), and its decisions are **D36** (the renderer's home, the linear buffers and the
+repaint substitution), **D37** (the tick model) and **D38** (the two shell seams), with **D17,
+D24 and D25 binding** — D24's procedure decided the projection/window and the colour key, and
+D25 sources every registered number. Its per-task ledger is
+`.superpowers/sdd/07-glens/progress.md` — git-ignored scratch outside the tracked tree, removed
+once the final review closes; everything durable has been copied into the notes, the decisions
+and the evidence section. **The tag is withheld until the whole-branch final review is clean**,
+per Phase 1–6's practice; this close-out's commit is the phase's record.
 
 **Phase 6 (vector engine) is done, tagged `phase-6`, merged to `main` and pushed.** The tag is
 on `4223266`; `main` was fast-forwarded from `8b1b99a` to it and the full workspace suite was
@@ -28,13 +41,6 @@ re-run on the merged result (1,202 passed, 0 failed, 8 ignored) before the push.
 `docs/plans/06-vector-engine.md`, its notes are `docs/fidelity/{u2a,u2e}.md`, and its decisions
 are **D32–D35** (with D24, D25, D29 and D17 binding). The branch started at `phase-5`
 (`8b1b99a`).
-
-**Phase 7 (GLENZ) is in progress** on `phase-7-glens`, whose first commit is the plan
-`docs/plans/07-glens.md`. Its exit criterion is spec §10's "GLENZ verified"; the phase ports
-GLENZ's own vector library (`VID*.ASM`, not Phase 6's VISU), the zoomer/bounce opening, and the
-two shell seams it makes reachable — the block-1 `MUSIC1@0` restart (`MAIN/U2.ASM:813-818`) and
-the post-PANICEND cue wait (`:826-849`). Its per-task ledger (git-ignored scratch) is
-`.superpowers/sdd/07-glens/progress.md`.
 
 **Phase 5 (mid tier) is done, tagged `phase-5` at this commit, on `phase-5-mid-tier`.** Its exit
 criterion (spec §10 — PLZPART, TECHNO, LENS, PANIC, JPLOGO, COMAN verified) is met, every
@@ -2577,6 +2583,129 @@ test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 (…)
 exit: 0
 ```
+
+### Phase 7's evidence (close-out, Task 8, 2026-10-20)
+
+**Exit criterion (spec §10): GLENZ verified.** The held opening and the three moving keyframes
+are compared at the measured phase with every residual registered and counted, blocks 1 and 2
+run through GLENZ to ENDSCRL with no stop, and `--part glenz` runs. Every number below was
+re-run at the committed state (`4309468` on `phase-7-glens`); this close-out's own commit adds
+records only, so the code and assets the commands ran against are the phase's tip. The blocks
+are pastes of those runs: `(…)` marks an elision, and a number in the prose that is not in a
+command block is asserted by the named test (D25).
+
+| comparison | the measured result |
+|---|---|
+| port 1499 vs `frame_001499.idx` | **0 differing indices of 64,000** (and 0 RGB) — the held opening |
+| port 2305 vs 2300 | **5,208 px (8.1375 %)**, **0 unexplained** — every difference a palette entry 0..15, **0** with an index ≥ 16; the object is the reference's 9,989-px, (156.8, 94.1) box exactly (A36/A37) |
+| port 3004 vs 3000 | **2,289 px (3.5766 %)**, **711 unexplained** — 710 low + 1 high; outer red silhouette within 118 px |
+| port 3404 vs 3400 | **5,941 px (9.2828 %)**, **839 unexplained** — all low; outer red silhouette within 180 px |
+
+**The phase and the keyframes.** The port's block-2 wait exits at **1,117** (the reference's
+1,111) and its intro from that reset to main-loop frame 44 is **494** ticks against the
+reference's **495**, so **`L_p = 1567`** against `L_r = 1562` and the plan's alignment is
+**K + 5**. Two independent measurements give 1,567: the first above-floor object pixels at boot
+**1,611** (8 px, box 172..179 × 0..0, the reference frame 44's silhouette) and the first faded
+surface at **2,269** (`pal` after main frame 701, b = 63). At K+5 the port differs by
+**5,208 / 3,114 / 5,261** px at 2305/3005/3405; the surface minima (K+4 at 3000/3400 — the
+capture's one-frame surface lag) are **2,289 / 5,941** with **711 / 839** unexplained. The held
+1499 is byte-exact. The residual's index structure matches the reference almost exactly: the
+first object is exact at 2305 and the second's red masks are 27,057/27,143 and 33,312/33,416 px
+at the minima.
+
+**D24's three questions.** (a) Projection/window: the tree's `INIT_320X200` and the
+320-pixel-row model reproduce the reference's 2300 object pixels exactly at 2305, so no shipped
+constant is adopted; the 92-byte CRTC row stays a memory-layout fact (D36). (b) The colour key:
+the reference's picture identifies the in-bounds **low-byte** `rolcol` reading. With the tree's
+full-word key the fifteen-slot pool fills, the sixteenth word takes slot 32, its group is
+written at DAC entry 0 and every post-exhaustion face vanishes (2306's sky `(97,97,97)`, object
+8,066 px against the reference's 9,927); the port adopts one shared `slots: [u8; 256]` keyed by
+the low byte (A37; `glz_hidden_face_frees_the_visible_slot`, and the rejected mechanism pinned
+by `glz_pool_exhaustion_uses_slot_32_and_entry_0`). (c) `L_r` against `L_p`: +5, A36.
+
+**The two shell seams.** Block 1's `MUSIC1@0` restart installs at the port's boundary
+**8,057** with `waiting == 4` (`the_block_one_run_restarts_music1_at_glenz`); block 2's
+equality check keeps its entry player and clock (`the_block_two_run_does_not_reload_at_glenz`;
+manifest `MUSIC1@0`, `start_frame` 408, boundary 576). The block-1 wait's source-faithful seek
+ends at **8,770** — 713 ticks after the boundary and **249 frames after the reference's
+8,521** — registered as **A38** (the reference's restart interval is the unreconciled
+(8,049, 8,100): `second1d` opens on MUSIC1 order 1 row 4 at 8,100, `out/second1d-limit` reads
+MUSIC0 at 8,049). The post-PANICEND cue wait runs on the measured **8,903 / 8,953 / 9,219**
+(musplus 19 → −32 → 1), holds the screen and is skipped when exit is already set
+(`the_post_panicend_wait_ends_on_a_positive_musplus`, `the_cue_wait_holds_the_screen`,
+`an_exit_on_panicends_last_tick_skips_the_cue_wait`). Blocks 1 and 2 have no stop
+(`blocks_one_and_two_have_no_stop`).
+
+**The decisions and the register.** D36 (the renderer's home, the linear 320-pixel-row buffers,
+and the full-repaint substitution), D37 (the source's phase machine: reset 1,111, the waits
+1,515/1,560/1,562, `L_p = 1567`, the 494/495 span, the 16-bit int model, and surface *N* paired
+with `pal` after *N−1*) and D38 (both seams, the restart interval and the measured 8,770/8,521
+consequence) are finalized. **A36–A39** are the register: the K+5 phase and the capture's
+surface/DAC lead, the adopted low-byte key with the 711/839 px registered-unexplained residual,
+the block-1 hold, and the zero-difference span repaint. The **13 carried/registered items** are
+four registered and nine the note carries: A36, A37, A38, A39; `cross`'s short-list guard
+(not reachable in the measured frames, not registered); `NEW.ASM`'s `nep`/`ne` bound (worst
+shipped y≈252, not exercised, not registered); the clear-before-paint order; the ESC flow (the
+wait continues into the zoomer, the bounce and both waits see the flag, no teardown); the
+copper callbacks not registered as callbacks; the mode-set tick's one-frame 320×400
+composition; the standalone-entry substitution of `--part glenz`; the block-2 wait's +6 exit;
+and the surface-*N*/`pal`-after-*N−1* pairing. The traces' own recorded limits — the (8,049,
+8,100) restart interval, SECOND 2's 401.1-by-rows against 408-by-`zframe` boot anchor, and
+`second1d`'s back-extrapolated 7,815 sr-audio anchor — are carried in A38 and
+`music-clock.md` §2.2; no constant was fitted to any of them.
+
+**The traces and the reference tree.** `second2b` (frames 380..3,800) and `second1d`
+(8,100..8,800) join the filed set. The dump and comparison commands are `glenz.md` §11's:
+
+```text
+$ cargo test -p secondreality --test glenz -- --nocapture
+running 5 tests
+(…)
+boot 1499: 0/64000 indices differ
+boot 2305 vs 2300 (surface): 5208 px, 0 unexplained
+(…)
+boot 3004 vs 3000 (surface): 2289 px, 711 unexplained
+boot 3404 vs 3400 (surface): 5941 px, 839 unexplained
+(…)
+boot 2305 object: x 97..217, y 38..149, 9989 px, (156.8, 94.1)
+(…)
+boot 3004 vs 3000: 711 unexplained (710 low / 1 high) of 35896; red masks 27057/27143 differ 118
+boot 3404 vs 3400: 839 unexplained (839 low / 0 high) of 43938; red masks 33312/33416 differ 180
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.93s
+
+$ cargo test -p secondreality --test shell
+running 12 tests
+(…)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 56.75s
+
+$ cargo xtask reference verify --tree reference
+verdict: ok — 41 capture(s), 127 file(s), 28534303 bytes        exit 0
+```
+
+**The suite and both clippy gates.** `cargo test --workspace` is green — **1,290 passed, 0
+failed, 8 ignored**, summed over the 49 `test result:` lines (the binary's 549 tests are 542
+passed and 7 ignored) — and both `cargo clippy --workspace --all-targets -- -D warnings` and its
+`--release` form exit 0.
+
+```text
+$ cargo test --workspace
+(…)
+test result: ok. 542 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 49.86s
+(… all 49 `test result:` lines are `ok`; …)
+exit: 0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+(…)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.19s     exit 0
+
+$ cargo clippy --workspace --all-targets --release -- -D warnings
+(…)
+Finished `release` profile [optimized] target(s) in 2.63s               exit 0
+```
+
+**The tag is withheld** until the whole-branch final review is clean, per Phase 1–6's practice;
+this close-out commit is the phase's record, and the branch's tag is `phase-7` (not applied
+here).
 
 ## Phase log
 

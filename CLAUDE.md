@@ -51,29 +51,30 @@ in any new crate manifest.
 
 ## Running it
 
-`cargo run --bin secondreality` opens a window and plays a run. The port has twenty parts: the
-Phase 0 test card, and the demo's own **ALKU**, **U2A**, **PAM**, **BEGLOGO**, **TUNNELI**,
-**TECHNO**, **PANIC** (`panicend`), **MNTSCRL**, **LNS&ZOOM** (`lnszoom`), **PLZPART**,
-**MINVBALL**, **RAYSCRL**, **3DSINFLD** (`3dsinfld` — not a legal Rust identifier, so its module
-is `coman.rs`), **JPLOGO**, **U2E**, **DDSTARS**, **ENDLOGO**, **CRED** and **ENDSCRL**. Any
-other part the demo runs is refused by name — `--part glenz` says "glenz is not ported yet"
-rather than starting something else.
+`cargo run --bin secondreality` opens a window and plays a run. The port has twenty-one parts: the
+Phase 0 test card, and the demo's own **twenty** — **ALKU**, **U2A**, **PAM**, **BEGLOGO**,
+**GLENZ**, **TUNNELI**, **TECHNO**, **PANIC** (`panicend`), **MNTSCRL**, **LNS&ZOOM**
+(`lnszoom`), **PLZPART**, **MINVBALL**, **RAYSCRL**, **3DSINFLD** (`3dsinfld` — not a legal
+Rust identifier, so its module is `coman.rs`), **JPLOGO**, **U2E**, **DDSTARS**, **ENDLOGO**,
+**CRED** and **ENDSCRL**. Every part a block plays is ported; a name the demo never had is
+refused as unknown rather than starting something else.
 
 ```bash
-cargo run --release --bin secondreality -- --block 1     # ALKU -> U2A -> PAM -> BEGLOGO, then it stops: GLENZ is unported
-cargo run --release --bin secondreality -- --block 2     # BEGLOGO, then it stops: GLENZ is unported
-cargo run --release --bin secondreality -- --block 3     # the whole mid-tier chain through U2E, then ENDLOGO -> CRED -> ENDSCRL
-cargo run --release --bin secondreality -- --block 4     # U2E, then ENDLOGO -> CRED -> ENDSCRL
+cargo run --release --bin secondreality -- --block 1     # ALKU -> ... -> ENDSCRL, no stop
+cargo run --release --bin secondreality -- --block 2     # BEGLOGO -> ... -> ENDSCRL, no stop
+cargo run --release --bin secondreality -- --block 3     # MNTSCRL -> ... -> ENDSCRL, no stop
+cargo run --release --bin secondreality -- --block 4     # U2E -> ENDLOGO -> CRED -> ENDSCRL
 cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> ENDSCRL
 cargo run --release --bin secondreality -- --block U     # DDSTARS (the hidden part)
-cargo run --release --bin secondreality -- --part alku
+cargo run --release --bin secondreality -- --part glenz
 ```
 
-`--block 1` runs **ALKU → U2A → PAM → BEGLOGO** and stops at GLENZ, the one part in its plan
-the port lacks. `--block 3` runs **MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL →
-3DSINFLD → JPLOGO → U2E** and then continues into **ENDLOGO → CRED → ENDSCRL**, because U2E's
-mask bit is in block 3's; it has no stop. `--block 4` starts at U2E and runs it and the
-scrollers. `--block 2` still stops at GLENZ.
+`--block 1` runs **ALKU → U2A → PAM → BEGLOGO → GLENZ → TUNNELI → TECHNO → PANIC → MNTSCRL →
+LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO → U2E → ENDLOGO → CRED →
+ENDSCRL** with no stop. `--block 2` begins at BEGLOGO and runs the same sequence from there;
+`--block 3` begins at MNTSCRL, `--block 4` at U2E, and `--block 5` runs ENDLOGO → CRED →
+ENDSCRL. Every block's plan is fully ported, so no block stops at a part; a run whose source
+cannot build the next name still holds there rather than skipping over it.
 
 **ESC** ends the part that is playing and the shell starts the next one — the original's exit flag
 (`DIS/DISINT.ASM:151-153`, handed to the part's own loop by `exit_2` `:186-190`). The Phase-4
@@ -84,21 +85,33 @@ U2A's teardown is synchronous within the exit tick, while U2E runs its sixteen-s
 after ESC — the one part that opts into `Part::drains_after_exit`, so the shell keeps ticking it
 until it reports `Finished`. U2A's gate-2 cut is the original's music cut (`U2A.C:276`), not an
 exit; it leaves through the part's own teardown path.
+**GLENZ** polls it in its music wait (`MAIN.C:290`), the bounce (`:320`), both `getmframe` waits
+(`:353`, `:400`) and the main loop (`:411`), and the main loop also ends on the music cut
+`-16 < musplus < 0` or after frame 7000. The music wait leaves on either condition and continues
+into the zoomer, whose 47 bodies do not poll; ESC before the bounce's first body skips the
+bounce and both waits, as the source orders it, and the part retires on its first main-loop
+check — it has no teardown and does not drain.
 **PANICEND never polls it** — `SHUTDOWN.C` has no `dis_exit()` call — and **PLZPART**'s port leaves
 it to the shell as well (its source polls, but the tick is drawn and the part retired either way);
 for a part that does not poll, the engine carries the flag and the *shell* retires the part at the
-end of the tick it was set in. Once the run has nothing left to play, ESC closes the window, where
+end of the tick it was set in. **After PANICEND retires** (by its own `Finished`, not by ESC), the
+shell runs the original's cue wait (`MAIN/U2.ASM:826-849`): it holds the screen and polls
+`musplus`, waiting while it is `>= 0` and then while it is `<= 0`, and continues on the first
+`> 0`. The wait is exit-aware — an ESC already set when it would be installed skips it
+(`@@skip5`) — and a plan that ends at PANICEND enters the wait and then the hold. Once the run
+has nothing left to play, ESC closes the window, where
 the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
 `ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
 a key.
 
-`--block 5` ends in ENDSCRL, whose own loop is `while(!dis_exit())` (`ENDSCRL/MAIN.C:45-49`) — the
-scroller runs until you exit, as it does in the demo, so leaving it is ESC twice: once to end the
-part, once to close the window (or the window's close button).
+`--block 1` through `--block 5` end in ENDSCRL, whose own loop is `while(!dis_exit())`
+(`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it does in the demo, so leaving it
+is ESC twice: once to end the part, once to close the window (or the window's close button).
 
-A block plays the parts of that block the port has, in the demo's own order, and **stops at the
-first one it has not written** rather than skipping over it. The window's title bar is the run's
+A block plays the parts of that block, in the demo's own order; every block's plan is now fully
+ported, so no block stops. A run whose source cannot build the next part still holds at the first
+one it cannot run rather than skipping over it. The window's title bar is the run's
 status line: the part whose picture is up, that frame's index in the **reference's own numbering**
 (boot-relative emulator frames — the space everything under `reference/` is measured in), and the
 block it came from. A run that has stopped says why, and a run whose index is *not* the

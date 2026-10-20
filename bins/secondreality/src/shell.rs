@@ -92,13 +92,12 @@ pub const BLOCKS: &[(char, u8)] = &[
 ///   and is the 63rd palette copy over the opening frame
 ///   (`reference-indices.md` §6.1, §6.4), while 7700 is still U2A's landscape.
 ///
-/// Everything else returns `None`, and the mid-block parts without an anchor
-/// are why: TUNNELI, CRED and ENDSCRL begin after an unported predecessor or a
-/// music gate, and their starts are known only as **windows** — CRED's boundary
-/// is in (1200, 1240] and ENDSCRL's in (8840, 8940] (§20, §21); MNTSCRL's is
-/// the (415, 420] window §11.5 measures. A number here would be a guess wearing
-/// a citation, and a run that starts at one of them is not
-/// reference-comparable, which is what `None` makes it say.
+/// Everything else returns `None`, and the mid-block parts without an anchor are why: TUNNELI,
+/// CRED and ENDSCRL are reached mid-run, and their starts are known only as **windows** —
+/// CRED's boundary is in (1200, 1240] and ENDSCRL's in (8840, 8940] (§20, §21); MNTSCRL's is
+/// the (415, 420] window §11.5 measures. A number here would be a guess wearing a citation,
+/// and a run that starts at one of them is not reference-comparable, which is what `None`
+/// makes it say.
 pub fn boot_anchor(part: &str) -> Option<u32> {
     match part {
         "alku" | "beglogo" | "endlogo" => Some(FIRST_GRAPHICS_FRAME),
@@ -430,15 +429,20 @@ pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, Strin
 /// shape is not `:880`'s; it fires for every block with bit 0, and every such mask also
 /// has bit 1.
 ///
-/// **Nothing the port can run today reaches either of them.** `--block 2`'s plan stops at
-/// GLENZ, which is not ported, so TECHNO and PANICEND — block 2's fourth and fifth parts —
-/// are unreachable through a block until GLENZ lands (Phase 7). `--block 3` now runs its
-/// whole tier (MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO) but
-/// stops at U2E, which is not ported, so the plan stops before `:880-885` fires. `--block
-/// 5`'s mask has bit 3 clear, so `:880` is skipped for it. A run that *does* reach U2E
-/// inside blocks 2 or 3 needs a **mid-run** restart at that point in the sequence, and this
-/// one-row-per-run table has no place for one yet. That is the Phase 4 dependency the row
-/// for block 4 does not, by itself, express.
+/// **The run-time restarts are the second table, [`MUSIC_RESTART_AT`], and every block the
+/// port runs now reaches its sites.** The rows above are each block's *starting* music;
+/// `:880-885` is reached mid-run by blocks 1, 2 and 3 (between JPLOGO and U2E, where the
+/// shell installs MUSIC0@18) and as block 4's entry point, and `:813-818` is reached by
+/// block 1 between BEGLOGO and GLENZ (MUSIC1@0; block 2's mask has bit 0 clear and skips
+/// it). `MUSIC_RESTART_AT`'s `("u2e", ModuleId::Music0, 18)` and
+/// `("glenz", ModuleId::Music1, 0)` rows are that mid-run expression:
+/// [`Sequence::restart_music`] installs a fresh player at the named part's boundary, and
+/// its equality check keeps block 2's already-playing MUSIC1@0 and its clock. Block 5's
+/// mask has bit 3 clear, so it takes only `:898-905`'s entry restart.
+///
+/// This one-row-per-run table cannot express a mid-run restart by itself — that is why the
+/// second table exists — but no block the port runs stops before its sites: blocks 1 and 2
+/// run to ENDSCRL, block 3 through U2E, block 4 starts at U2E and block 5 is after it.
 #[derive(Debug, Clone, Copy)]
 // The four fields below are the row's *evidence* — which `whattorun` bits guard it and
 // where `MAIN/U2.ASM` says so — and nothing at run time reads them: the test beside the
@@ -645,12 +649,14 @@ pub fn music_for(block: char) -> Result<(ModuleId, u8), ShellError> {
 ///   `mov ax,1` / `mov bx,0` — which puts **MUSIC1 at order 0** between BEGLOGO and
 ///   GLENZ/TUNNELI; block 2's bit 0 is clear, so it skips that site and took the initial
 ///   start's other branch, also **MUSIC1 at order 0** (`:772-775`). Both sequences therefore
-///   reach TUNNELI under MUSIC1. The **order in force** when TUNNELI begins is not in any
-///   filed evidence — GLENZ has played since the restart, and no block-1 or block-2 music
-///   trace exists — so the port seeks to the restart's own order, **0**, which is the only
-///   value the evidence names. That the order is not established is deliberate in the record,
-///   not an oversight: a run of `--part tunneli` plays the right module and the right
-///   movement of the track, from the top of it.
+///   reach TUNNELI under MUSIC1. The **order in force** when TUNNELI begins is not
+///   established: the two filed GLENZ traces (`second1d`, frames 8,100..8,800, and
+///   `second2b`, 380..3,800) measure MUSIC1, the part's boundary and its wait exit, but
+///   GLENZ's 7,000-frame main loop lies between that trace and TUNNELI's start, so neither
+///   covers TUNNELI. The port seeks to the restart's own order, **0**, which is the only
+///   value the evidence names. That the order is not established is deliberate in the
+///   record, not an oversight: a run of `--part tunneli` plays the right module and the
+///   right movement of the track, from the top of it.
 /// - **CRED** runs in **every block**: every `partsmask` byte carries bit 4 (blocks 1–5 are
 ///   `0x1f`, `0x1e`, `0x1c`, `0x18`, `0x10`), and bit 3 is what decides which restart precedes
 ///   it. Block 5 (bit 3 clear) takes the entry restart at `:898-905`, **MUSIC0 at order 25**;
@@ -2005,9 +2011,12 @@ mod tests {
         //
         // For `SECOND 4` that is its entry point (its plan begins at U2E, `:886-887`); for
         // the other three it is a **mid-run** restart between JPLOGO (`exe18`, `:877-878`)
-        // and U2E, under a player that has been playing something else — which the port's
-        // one-row-per-run table has no place for. Nothing the port can run today reaches it,
-        // and this test is what makes that a stated dependency rather than a hidden one.
+        // and U2E, under a player that has been playing something else. The port runs all
+        // three of those sequences now — blocks 1 and 2 to ENDSCRL, block 3 through U2E —
+        // and the mid-run install is `MUSIC_RESTART_AT`'s `("u2e", Music0, 18)` row, whose
+        // boundary the shell's chain tests pin. This test is what pins the row's
+        // characterization: bit 3 alone, with no `unless`, is why the block-4 row is also
+        // the mid-run site's guard.
         let row = MUSIC_RESTARTS
             .iter()
             .find(|row| row.block == '4')
@@ -3052,9 +3061,11 @@ mod tests {
 
     #[test]
     fn a_block_run_stops_at_the_first_part_the_port_cannot_run() {
-        // `SECOND 2` runs BEGLOGO then GLENZ; GLENZ is not ported, so the run
-        // stops at BEGLOGO rather than silently skipping to TUNNELI and
-        // producing frames in a numbering nothing supports.
+        // A run whose source cannot build the next part holds where it stands rather than
+        // skipping over it and producing frames in a numbering nothing supports.
+        // `for_part("beglogo")` is a one-part plan, so it holds on its only part; the
+        // second half uses a source that declines TECHNO (registered, but this stub does
+        // not build it) and the run holds on "a".
         let mut run = for_part("beglogo").unwrap();
         run_out(&mut run, 8);
         assert_eq!(run.part(), "beglogo");

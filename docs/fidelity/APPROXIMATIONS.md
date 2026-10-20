@@ -1894,3 +1894,83 @@ frees the visible slot and the next colour reuses it).
 the_moving_keyframes_record_the_registered_alignments_and_residuals` and
 `cargo test -p secondreality --bin secondreality
 glz_hidden_face_frees_the_visible_slot`.
+
+## A38 — GLENZ: block 1's wait starts 249 frames late, because the restart seeks MUSIC1 from order 0 (registered)
+
+**Part:** GLENZ (`GLENZ/MAIN.C:290`) through the shell's block-1 restart
+(`MAIN/U2.ASM:813-818`), Phase 7.
+
+**Original.** Block 1's `restartmus(1, 0, 48700)` fires between BEGLOGO (`exe3`) and
+GLENZ (`exe4`). The reference's restart lies in the interval **(8,049, 8,100)**: the
+pre-reload window `out/second1d-limit` (frames 7,800..8,050, scratch) reads MUSIC0 at
+8,049 with the player's positions intact, and the filed `second1d` (8,100..8,800) opens
+on **MUSIC1 order 1 row 4** at 8,100 — already 68 rows into the restarted module. The
+reload hides the restart frame itself, and the wide 7,800..8,800 window refuses across
+it (exit 2: `_np_ord reads -1, which is not a byte value: the base 0x0051F0 is not this
+segment's`). The reference's WaitMusic exit is **8,521**: `second1d` reads order 2
+row 45 (`musplus` −19, `zplus` 1, `zframe` 5,588 → 0), and
+`out/p7-b1-collapse-dense` (frames 8,516…8,528) holds through 8,521 and first differs
+on **8,522** (the sample/publish instant, D17).
+
+**Port.** The restart installs MUSIC1@0 at the port's BEGLOGO→GLENZ boundary, **8,057**
+(inside the reference's interval), with D34's four-tick `waiting`. The wait
+(`MAIN.C:290`, `musplus < -19`) ends on the first published order 2 row 45; from order 0
+row 0 that is 173 rows × 3 ticks = 519 music ticks ≈ 699 frames, and the port's first
+zoomer body is at boot **8,770** — **713 ticks after the boundary** and **249 frames
+after the reference's 8,521**. The port's 8,770 is the first frame that differs from the
+held picture and publishes `2:45`; 8,769 still holds at `2:44`.
+
+**Why (registered, not fitted).** The seek is the source's own (`restartmus(1,0)` seeks
+the module to order 0 row 0); the reference's player had already played a stretch of
+MUSIC1 when its part chain reached GLENZ, and `second1d`'s first sample cannot tell a
+seek that left the row from a play that began during the module load (D38's recorded
+limit). No row, order, frame or tick was adjusted to reduce the 249: the interval is
+the reference's own record, the port's boundary is the chain's measured one, and the
+difference is the consequence of the source-faithful seek. It is not the same quantity
+as A36 (block 2's loop start): this is block 1's *wait length*, measured on the shell's
+chain.
+
+**Measured difference:** **8,770 − 8,521 = 249 frames** (the wait's exit); the port's
+boundary 8,057 lies inside the reference's unreconciled `(8,049, 8,100)`. Reproduce
+with
+
+```text
+cargo test -p secondreality --test shell \
+    a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering
+cargo test -p secondreality --bin secondreality \
+    the_block_one_run_restarts_music1_at_glenz
+awk -F, '$1 == 8521' reference/music/second1d/trace.csv
+cargo run -q -p xtask -- music trace --cycles 30000 --frames 7800..8050 --arg 1 \
+    --out out/second1d-limit
+awk -F, '$1 == 8049' out/second1d-limit/trace.csv
+```
+
+The chain test pins 8,057, 8,770, 713, 249 and reads `second1d`'s 8,521 = `2:45`; the
+restart test pins the fresh install and `waiting == 4`. The two `awk` lines print
+`8521,2,45,50,0,3,130,0,1,0` and `8049,14,4,31,0,6,120,0,0,5239`.
+
+## A39 — GLENZ: the span compositor repaints every span instead of walking the previous frame's list (substitution; measured difference 0)
+
+**Part:** GLENZ (`GLENZ/NEW.ASM:66-172`, `ng_pass3`), Phase 7.
+
+**Original.** The screen is not cleared between frames. `ng_pass3` walks the previous
+frame's boundary list and the new one together, keeping the new and old accumulated
+colours, and repaints `[prev, position)` **only where the two colours differ**. Every
+span's pixels are `colour | bgpic[pixel]`, so a span whose colour did not change already
+holds exactly the bytes a repaint would write: the walk is an optimisation with
+identical pixels.
+
+**Port.** `span.rs`'s `Compositor::paint` drops the dirty-span walk and repaints every
+span from `bgpic`, never clearing the buffer. The equivalence is not assumed: the test
+module keeps the source's two-list walk beside the port and compares whole 64,000-byte
+frames over a 13-frame corpus (including the sentinel pixel 63,999, which neither
+implementation writes).
+
+**Why.** No pixel differs; the substitution removes a stateful walk the port would
+otherwise have to carry between ticks. No constant, upload order or boundary changed.
+
+**Measured difference:** **0** — byte-identical frames over the corpus (twelve generated
+frames of moving, rotating and held polygons plus an empty frame, 13 in all; 64,000 bytes a
+frame). Reproduce with
+`cargo test -p secondreality --bin secondreality
+parts::glenz::span::tests::the_full_repaint_equals_the_source_two_list_walk`.

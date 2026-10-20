@@ -355,7 +355,10 @@ citations.
 
 *(Phase 6 update — superseded by D34/D35: the U2E-boundary mid-run restart is implemented
 (`MUSIC_RESTART_AT`, `MusicStart::restart`, waiting 4) and `--block 3` now runs through it;
-`--block 1` now reaches PAM and stops at GLENZ. The paragraph above is D13's record.)*
+`--block 1` now reaches PAM and stops at GLENZ. **Phase 7 update:** both mid-run sites are
+implemented and reached — block 1 takes `:813-818`'s `MUSIC1@0` and `:880-885`'s `MUSIC0@18`,
+blocks 2 and 3 take `:880-885`, and blocks 1/2 run to ENDSCRL — so no block the port runs stops
+at an unported part. The paragraph above is D13's record.)*
 
 **Block arguments: the README and the code disagree, and the port follows the code.**
 `reference/original/README.1ST:66-79` documents `1`–`5` and their meanings, and all five
@@ -2083,7 +2086,8 @@ stop at GLENZ keeps TECHNO and PANICEND unreachable through a block until Phase 
 
 *(Phase 6 update — superseded by D34/D35: the mid-run `MUSIC0@18` restart is implemented
 (`MUSIC_RESTART_AT`, `MusicStart::restart`, waiting 4) and `--block 3` runs through it into the
-scrollers; block 2 still stops at GLENZ. The paragraph above is D31's record.)*
+scrollers; block 2 still stops at GLENZ. **Phase 7 update:** block 2 now runs through GLENZ and
+on to ENDSCRL, and every block's plan is fully ported. The paragraph above is D31's record.)*
 
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
@@ -2328,6 +2332,29 @@ reproduced exactly by a 320-row model). `reference-indices.md` §1.7 is the stri
 measurement. The port therefore never models the planes or the CRTC row: the buffers are
 linear and the surface copy is `surface[(row*width + x)] = vram[row*320 + x]`.
 
+**The substitution and the colour path.** The source's dirty-span walk (`NEW.ASM:66-172`) is
+an optimisation whose pixels are identical (a span whose colour did not change already holds
+`colour | bgpic[pixel]`); the port repaints every span and the test module runs the source's
+two-list walk beside it over a 13-frame corpus (twelve generated polygon scenes and an empty
+frame) — `parts::glenz::span::tests::the_full_repaint_equals_the_source_two_list_walk`, **0
+differing bytes** of 64,000 a frame, including the never-painted pixel 63,999 — registered as
+**A39**.
+The colour path inside this renderer is **A37**'s arbitration: `poly.rs` keeps one
+`slots: [u8; 256]` keyed by the colour word's **low byte**, shared by the visible and hidden
+paths, because the reference's pictures identify that reading; the tree's full-word visible
+key exhausts the pool, writes slot 32's group at DAC entry 0 and is rejected (A37,
+`glenz.md` §11.2).
+
+**Phase 7 outcome.** The decision held as written. The renderer is
+`bins/secondreality/src/parts/glenz/` (`math.rs`, `tables.rs`, `poly.rs`, `span.rs`,
+`intro.rs`, `mod.rs`); the buffers are linear 320-pixel rows and the blit is a row copy, with
+no plane mask or CRTC row modelled. The held opening reproduces `frame_001499.idx` at **0
+differing indices of 64,000** (`the_held_opening_1499_is_the_reference_index_plane`) and the
+reference's 2300 object pixels at boot 2305 exactly — 9,989 px, (156.8, 94.1), every object
+pixel byte-identical (`the_moving_keyframes_record_the_registered_alignments_and_residuals`).
+The repaint substitution measures **0** (A39) and the colour path is A37's adopted low-byte
+key. No shipped constant was adopted and no buffer layout was changed.
+
 **Cost if wrong.** A module move, not a behaviour change: the display model is one copy loop
 and the buffers' indexing. No filed frame can distinguish a plane-mask implementation from
 this one when both display 320 pixels a row; the 92-byte stride would only matter to a port
@@ -2364,6 +2391,29 @@ capture sessions. Block 1's GLENZ wait exits at **8521** (`second1d`), and the p
 change is at **8522** (`out/p7-b1-collapse-dense`) — the sample/publish instant, one frame
 after the reset sample. The bounce's 177 is the source's own count (a C
 reproduction of `:320-351`; the drawn band converges to 153…199), not a fit.
+
+**The port side, measured (Tasks 5–7).** The block-2 wait exits at **1117**, six ticks after
+`second2b`'s 1,111, with the reset and the first zoomer body on the same tick. The intro's own
+relative ticks are the source's — 47 zoomer bodies, 177 bounce bodies, the two `dis_waitb`
+ticks, the part-start wait and the main loop's first wait (`the_intro_is_47_plus_177_ticks_and_the_measured_waits`)
+— but the port's real player reaches the two `getmframe` crossings (300 and 333) one tick
+earlier relative to the reset than `second2b`, so the reset-to-frame-44 span is **494** against
+the reference's **495**; no transition was changed to move the loop start. Therefore
+**`L_p = 1567`** against `L_r = 1562`: two independent measurements agree — the first
+above-floor object pixels at boot **1611** (8 px, box 172..179 × 0..0, the reference frame 44's
+silhouette; none at 1,610, 21 px at 1,612) and the first faded surface at **2,269** (`pal`
+after main frame 701, b = 63) — and the plan's aligned index is **K + 5** (A36,
+`glenz.md` §11.1).
+
+The **16-bit int model** is the source's own: every physics term wraps at 16 bits (the jello
+trajectory's `xscale` 115 at frame 800 is the wrapped value), and the reference's 2300 object
+pixels are reproduced exactly at boot 2305 with no 32-bit widening, so D24 (a) is not
+contradicted and no shipped constant is adopted. The **palette pairing** is surface *N* with
+`pal` after *N−1*: the source uploads, then does the frame's work (`MAIN.C:414-590`), and the
+reference's capture transiently shows surface *N−1* with the DAC of *N* — the 0/1-frame surface
+lag and one-frame DAC lead A36 records. The colour path is A37's adopted **low-byte key**: at
+2305 all 5,208 differing pixels are palette entries 0..15 and **0** have an index ≥ 16 — the
+fade at b = 26 against the port's 27, the pairing and not the colour model.
 
 **The music gates** are the boundary wait (`musplus < -19`, `MAIN.C:290`) and the exit cue
 (`−16 < musplus < 0`, `:411`), both read from the published `zplus`/`row`
@@ -2419,27 +2469,44 @@ The old 8823/8827 crossing — order 39 row 0/1, `zplus` 2 — is ~80 frames bef
 retires and is PANICEND's own music position, not the wait's exit; it is withdrawn. Task 6 pins
 **8953/9219** (the first negative and the first positive after it).
 
-**The block-1 restart's port timing is a measured difference, owned here.** A source-faithful
-restart at the port's BEGLOGO→GLENZ boundary seeks MUSIC1 to order 0 row 0; reaching the wait's
-exit condition (order 2 row 45) then takes **173 rows × 3 ticks = 519 music ticks ≈ 519 ×
-1.3474 = 699 frames** after the restart. The reference's measured reset is **8521**, and the
-part chain's boundary is somewhere in 8060–8090 (BEGLOGO's first tick plus its 172, or its
-7920 mode change plus them), so the port's zoomer starts at boundary + 699 ≈ 8759–8789 —
-**roughly 240–270 frames after 8521**. This is the consequence of the source-faithful seek; it
-is **not** registered as an A entry here because the port side is not yet measured (D25), and
-Task 6's chain test measures the port's wait and registers the difference if it survives.
+**The block-1 restart's port timing is measured and registered as A38.** Task 6's chain
+measured it: the restart installs MUSIC1@0 at the port's boundary **8,057** (inside the
+reference's unreconciled (8,049, 8,100)), and the source-faithful seek ends the wait at
+**8,770** — **713 ticks after the boundary** and **249 frames after the reference's 8,521**,
+whose own exit is also order 2 row 45. The difference is the seek's: the reference's player
+had already played a stretch of MUSIC1 when its chain reached GLENZ, and `second1d`'s first
+sample (order 1 row 4 at 8,100) cannot separate a seek that left the row from a play that
+began during the module load. Nothing was fitted; **A38** carries the measured values and the
+commands (`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering` pins 8,057,
+8,770, 713 and 249 and reads `second1d`'s 8,521 = `2:45`;
+`the_block_one_run_restarts_music1_at_glenz` pins the fresh install and `waiting == 4`).
 
-**One limit is carried into Task 6.** `second1d`'s first sample is 68 rows into MUSIC1, which
+**One limit is carried.** `second1d`'s first sample is 68 rows into MUSIC1, which
 at the module's rate puts the restarted play clock ~275 frames before 8100 — earlier than the
 part chain's boundary (BEGLOGO's held 900 screen runs through 8520 and its 172 ticks put the
 boundary near 8060). The trace cannot tell a seek that left the row from a play that began
-during the module load, and the reload hides the restart frame itself. The shell's restart
-should be implemented as the source says (seek to order 0 at the boundary); Task 6's chain
-tests pin the module, the order, the waiting and the boundary, and this interval is the
-trace's record rather than a fitted row for the port's player.
+during the module load, and the reload hides the restart frame itself. The port implements the
+restart as the source says (seek to order 0 at the boundary); the shell's chain tests pin the
+module, the order, the waiting and the boundary, and this interval is the trace's record
+rather than a fitted row for the port's player.
 
 **Cost if wrong.** The restart row is one table entry and one equality check; the cue wait is
 one private part and one install. A wrong guard reloads MUSIC1 in block 2 (audible as a
 restart at BEGLOGO→GLENZ), and a wrong cue phase ends PANICEND's screen early or late; the
 shell tests pin both (`the_block_one_run_restarts_music1_at_glenz`,
 `the_block_two_run_does_not_reload_at_glenz`, the cue wait's two phases).
+
+**Phase 7 outcome.** Both seams shipped as written. The block-1 restart fires in block 1 and
+not block 2 (`the_block_one_run_restarts_music1_at_glenz`,
+`the_block_two_run_does_not_reload_at_glenz`, the latter asserting the same player `Arc`); the
+cue wait runs on the measured phases — 8,903 `musplus` 19 (phase 1 waits), 8,953 −32 (the first
+negative), 9,219 1 (the exit) — holds the screen
+(`the_post_panicend_wait_ends_on_a_positive_musplus`, `the_cue_wait_holds_the_screen`) and
+sits between PANICEND and the next plan part or the hold
+(`the_post_panicend_wait_is_between_the_part_and_the_next_one`); an exit flag already set on
+PANICEND's last tick skips the wait, the `@@skip5` first-poll path
+(`an_exit_on_panicends_last_tick_skips_the_cue_wait`). Blocks 1 and 2 have no stop
+(`blocks_one_and_two_have_no_stop`; every block's expected first missing part is `None` in
+`every_blocks_plan_stops_at_the_first_part_the_registry_lacks`). The block-1 wait's
+8,770/713/249 is **A38**; the reference's restart interval (8,049, 8,100) stays recorded as
+the trace's limit. Nothing was fitted.

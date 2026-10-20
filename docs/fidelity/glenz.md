@@ -124,6 +124,17 @@ runs in chain-4, so its 65,535 addressed bytes cover all of the plane's 400
 rows; the port clears the whole 128,000-byte buffer (the zoomer's epilogue has
 already zeroed it).
 
+**The compositor's paint is a substitution.** The source's `ng_pass3` walks the
+previous frame's boundary list and the new one together and repaints only the
+spans whose colour changed (`NEW.ASM:66-172`). Every span's pixels are
+`colour | bgpic[pixel]`, so a skipped span already holds exactly the bytes a
+repaint would write; the port drops the walk and repaints every span from
+`bgpic`, never clearing the buffer. The substitution is **A39** with a measured
+difference of **0**:
+`span::tests::the_full_repaint_equals_the_source_two_list_walk` keeps the
+source's two-list walk in the test module and compares whole frames over a
+13-frame corpus, including pixel 63,999, which neither implementation writes.
+
 ## 3. The copper, substituted
 
 The source registers `copper` (`MAIN.C:264-270`, `:408`), which uploads
@@ -411,8 +422,8 @@ must — and does — keep the player and its clock.
   (8,521 is `2:45` in `second1d`) — at **8,770**, 713 ticks after the boundary
   and **249 frames after the reference's 8,521**. The difference is the
   source-faithful seek's: the reference's player had already played a stretch
-  of MUSIC1 when its chain reached GLENZ. It is recorded for Task 7/8, not
-  closed by a fitted start.
+  of MUSIC1 when its chain reached GLENZ. It is registered as **A38** (with the
+  measured values and the commands), not closed by a fitted start.
 - **The block-2 wait against `second2b`.** The reference exits at **1,111**
   (`2:45`); the port's position is `2:44` through 1,116 and `2:45` at
   **1,117**, six ticks later — a session-phase difference of A12's class,

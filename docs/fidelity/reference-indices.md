@@ -2088,6 +2088,45 @@ its floor colours are the dimmed `pal`, which is why the 2300 box's own sky is (
 
 ---
 
+### 7.7 The port's phase and the block-2 comparison (Phase 7, Tasks 6–7)
+
+The port side of §7.6, measured on a `SECOND 2` run. `docs/fidelity/glenz.md` §11 carries
+the full comparison and `bins/secondreality/tests/glenz.rs` asserts every number; this is the
+index-side summary the phase's evidence cites. The commands:
+
+```text
+cargo run --release --bin secondreality -- --block 2 --headless \
+    --dump-frames 1499,2304,2305,2306,3003,3004,3005,3006,3403,3404,3405,3406 \
+    --dump-dir out/glenz-final
+cargo run --release --bin secondreality -- --block 2 --headless \
+    --dump-frames 1499,2300,3000,3400 --dump-dir out/glenz-indexed
+cargo xtask compare --reference reference/parts/glenz \
+    --rendered out/glenz-indexed --out out/glenz-indexed-diff
+cargo test -p secondreality --test glenz
+```
+
+- **The held opening is exact.** Port boot **1499** against `frame_001499.idx` is **0 differing
+  indices of 64,000** (and 0 RGB): `the_held_opening_1499_is_the_reference_index_plane`.
+- **The loop start.** The block-2 music wait exits at **1,117** (the trace's is 1,111), and the
+  intro from that reset to main-loop frame 44 is **494** ticks against the reference's **495**,
+  so **`L_p = 1567`** against `L_r = 1562` and the plan's aligned index is **K + 5**. The two
+  measurements of 1,567 are the first above-floor object pixels at boot **1,611** (8 px, box
+  172..179 × 0..0, the reference frame 44's silhouette) and the first faded surface at
+  **2,269** (`pal` after main frame 701, b = 63):
+  `the_loop_start_is_1567`.
+- **The moving keyframes at their surface-aligned phase.** Port **2305** against 2300 differs
+  by **5,208 px (8.1375 %)** — every one a palette entry 0..15, **0** with an index ≥ 16, the
+  capture's one-frame DAC lead (b = 26 against the port's 27) — and the object is the
+  reference's box exactly, 9,989 px, (156.8, 94.1). Port **3004** against 3000 differs by
+  **2,289 px (3.5766 %)** with **711** unexplained; port **3404** against 3400 by **5,941 px
+  (9.2828 %)** with **839** unexplained (the second object's interior XOR boundaries; its red
+  silhouette matches within 118/180 px). A36 registers the phase and A37 the residual:
+  `the_moving_keyframes_record_the_registered_alignments_and_residuals`.
+- **The unshifted indices are not the comparison.** The index-keyed `xtask compare` over a dump
+  at the filed indices reports 1499 at 0.0000 % and exit 1 overall, because the port's moving
+  frames at 2300/3000/3400 are five ticks behind — 22,632 / 15,333 / 19,708 px (35.3625 /
+  23.9578 / 30.7938 %) — with the port numbered in the reference's boot frames.
+
 ## 8. TUNNELI
 
 `SECOND 2`'s third part: the dot tunnel. 320×200, mode 13h (`TUNNELI/TUN10.PAS:110-115`,

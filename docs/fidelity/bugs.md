@@ -198,6 +198,58 @@ paint a fade into entries 170-254 will meet a region that has been white since B
 ENDLOGO, on `SECOND 5`), and the difference will show as colour that does not move. Whoever ports that
 part should start here.
 
+## 5. GLENZ's span raster: the 1..319 clamp, the broken same-x merge, the fresh slot's shade, and pixel 63999
+
+**What it is.** Four artefacts of `GLENZ/NEW.ASM`'s transparent compositor and `VEC.ASM`'s colour
+allocator. Each decides pixels or palette entries, so each is required behaviour rather than
+something to tidy:
+
+- **The boundary clamp is 1..319, not 0..319.** `ng_pass2` reads the low word of `x>>16` signed
+  and clamps it with signed compares (`NEW.ASM:246-253`): an x of 0 becomes 1 and 320 becomes
+  319. A span's left edge therefore never lands on column 0 of its row, and a boundary at the
+  right edge sits on column 319. The port clamps the same
+  (`boundaries_clamp_to_columns_one_and_319`; the row-crossing case is
+  `a_row_crossing_span_uses_the_global_position`).
+- **The same-x merge compares the wrong register.** `ng_pass2` tries to XOR a boundary whose
+  clamped x equals the previous one's into the previous entry (`:255-260`), but the word
+  compared is `cx`, which the preceding `mov cx,ax` (`:267`) has loaded with the stored **colour
+  word**, not the clamped x — the linked `V.EXE` confirms it (`cmp %ax,%cx` at load offset
+  0x3daf). The branch fires only when a colour word equals a column 1..319; GLENZ's colour
+  words are all ≥ `0x4000`, so in the shipped path it is inert. The port emits every boundary
+  and sorts by position; XOR is commutative, so the pixels are identical
+  (`coincident_edges_xor_like_the_merged_edge`, and the equivalence test below asserts the
+  corpus never leaves GLENZ's colour domain).
+- **A fresh colour slot is shaded 0 and its R is the allocation scan's residual.**
+  `VEC.ASM:454-460`: when no slot is reused, the scan (`mov cx,15` / `loop`, then `mov ax,bp`)
+  has clobbered **CL** and zeroed AH, so the stored shade is 0; for a bit-1 word R is
+  `16 − slot/2` (slot 2 → 15 … slot 32 → 0), G = B = 0. A reused slot keeps the computed
+  shade. The port reproduces both branches
+  (`glz_fresh_allocation_uses_the_scan_residual_and_zero_shade`,
+  `glz_allocates_even_slots_in_order`,
+  `glz_group_ramp_restores_the_base_and_clamps_each_entry`).
+- **Pixel 63999 is never painted.** `ng_pass3`'s sentinel list ends `(63999, 0), (-1, 0)`
+  (`:279-285`); the fill runs to the boundary exclusive and `-1` stops the walk, so the last
+  byte of the 64,000-byte buffer is never written by a span. The port leaves it alone
+  (`edges_off_the_screen_are_dropped_or_clipped`,
+  `the_full_repaint_equals_the_source_two_list_walk`).
+
+**Not in this register: the slot-32 exhaustion.** With the tree's full-word visible key the
+256-byte `rolcol` pool exhausts and the sixteenth word's group is written at DAC entry 0,
+painting every later face with colour 0 (`glz_pool_exhaustion_uses_slot_32_and_entry_0`). The
+reference's picture does not show that model — it identifies the in-bounds low-byte key, which
+the port adopts (A37) — so the exhaustion is the mechanism of a **rejected** reading, pinned by
+a unit test and registered in A37, not behaviour the shipped part has.
+
+**Where the source does it.** `GLENZ/NEW.ASM:174-418` (`ng_pass2`/`ng_pass3`),
+`GLENZ/VEC.ASM:403-506` (`demo_glz`'s pool and groups).
+
+**What the port must do.** Keep the clamp, the sentinel walk and both colour branches literal;
+keep the boundaries independent (the source's merge is inert) and never clear between frames
+(the background comes from `bgpic`; the full repaint is A39's proven substitution).
+
+**Evidence.** The tests above; the reference's 1499 held frame (0 differing indices) and the
+2300/3000/3400 keyframes (`docs/fidelity/glenz.md` §11).
+
 ---
 
 ## Adding an entry
