@@ -15,13 +15,21 @@
 //! # The colour allocator
 //!
 //! `demo_glz` keeps one pool of even DAC groups, slots 2..30 (and 32 when they
-//! are all taken), in `rolused`, and two ways of keying `rolcol`: the visible
-//! path zero-extends the **full colour word** (`movzx bx,es:[bx-2]`,
-//! `VEC.ASM:450`), the hidden path uses the **low byte** (`mov bl,al`,
-//! `VEC.ASM:417`). The source's `rolcol` is only 256 bytes, so the two keys
-//! address different memory and the maps are independent: a hidden face never
-//! frees a slot the visible path allocated. The port keeps the two key spaces
-//! as a full-word map and a 256-byte low-byte table over the one `used` pool.
+//! are all taken), in `rolused`, keyed in `rolcol` by the colour word. The
+//! tree's visible path zero-extends the **full colour word**
+//! (`movzx bx,es:[bx-2]`, `VEC.ASM:450`) and its hidden path uses the **low
+//! byte** (`mov bl,al`, `VEC.ASM:417`); with a 256-byte `rolcol` the full-word
+//! keys fall outside it and the two maps are independent, so the visible map
+//! accumulates every word ever seen and the fifteen-slot pool exhausts — a
+//! sixteenth word gets slot 32, whose DAC group starts at entry 0 (clobbering
+//! the low palette) and whose stored colour is 0 (painting nothing). The
+//! reference contradicts that: at 2300 its low palette is exactly the frame's
+//! `pal` and every face is drawn (D24's arbitration, Task 7). The shipped
+//! build therefore reads `rolcol` **in bounds by the low byte on both paths**,
+//! and the port adopts that reading: one 256-byte map over the one `used`
+//! pool, a hidden face freeing the slot its visible face took. The residual
+//! evidence and the two model outputs are in `docs/fidelity/glenz.md` §7 and
+//! `APPROXIMATIONS.md` A37.
 //!
 //! The visible path also writes the face's 16-entry DAC group: the group's
 //! base comes from the colour word's bit 1 and the cross-product shade — a
@@ -39,8 +47,6 @@
 //! `demo_glz2` reduces a **visible** face to `(word >> 1) & 1` and leaves a
 //! hidden face's word unchanged: `jc @@1` returns on the hidden carry
 //! (`VEC.ASM:403-410`).
-
-use std::collections::HashMap;
 
 use sr_engine::Palette;
 
@@ -184,23 +190,18 @@ pub fn cross(points: &[(i16, i16)]) -> i32 {
 /// The colour allocator's persistent state: `rolcol`, `rolused` and the
 /// frame's `lightshift` (`VEC.ASM:396-397`; `MAIN.C:394`).
 ///
-/// The source keeps one 256-byte `rolcol` indexed two ways (see the module
-/// docs). This port keeps the two key spaces apart — `visible` is the
-/// full-word map, `hidden` the low-byte table — over the one `used` pool.
+/// `slots` is the shipped build's `rolcol` read in bounds by the colour
+/// word's **low byte** (see the module docs; D24): the visible and hidden
+/// paths share it, so a hidden face frees the slot its visible face took.
 /// `used` has one entry per DAC group; slots are the even numbers 2..30, plus
 /// 32 for the exhausted case.
 pub struct ColourState {
     /// `_lightshift` (`MAIN.C:394`, `:500`): 9, or 10 once the second
     /// object's scale overtakes the first's.
     pub lightshift: i16,
-    /// The visible path's slots, keyed by the full 16-bit colour word. Only
-    /// the visible path reads and writes this map.
-    visible: HashMap<u16, u8>,
-    /// The hidden path's slots, keyed by the colour word's low byte. The
-    /// visible path does not write it: the source's full-word index lands
-    /// outside the 256-byte array, so the in-range entries stay zero and a
-    /// hidden face frees nothing a visible face allocated.
-    hidden: [u8; 256],
+    /// The slots, keyed by the colour word's low byte (the shipped build's
+    /// in-bounds reading; D24). Both paths share it.
+    slots: [u8; 256],
     /// `rolused`: whether a slot's DAC group is allocated.
     used: [bool; 256],
 }
@@ -219,10 +220,15 @@ impl ColourState {
     pub fn new() -> Self {
         ColourState {
             lightshift: 9,
-            visible: HashMap::new(),
-            hidden: [0; 256],
+            slots: [0; 256],
             used: [false; 256],
         }
+    }
+
+    /// Test-only: the slot stored under a colour word's low byte.
+    #[cfg(test)]
+    pub(crate) fn slot_of(&self, colour: u16) -> u8 {
+        self.slots[colour as u8 as usize]
     }
 
     /// Apply `demo_glz`/`demo_glz2` to one face.
@@ -235,12 +241,12 @@ impl ColourState {
     /// - [`DemoMode::Glz2`] visible returns `(colour >> 1) & 1`; hidden keeps
     ///   `colour` unchanged (`jc @@1` returns on the hidden carry). No DAC
     ///   writes.
-    /// - [`DemoMode::Glz`] visible allocates or reuses a slot under the full
-    ///   colour word, returns `(slot << 3) as u8` and writes the group;
-    ///   hidden clears the slot stored under the colour's low byte and
+    /// - [`DemoMode::Glz`] visible allocates or reuses a slot under the
+    ///   colour word's low byte, returns `(slot << 3) as u8` and writes the
+    ///   group; hidden clears the slot stored under the same low byte and
     ///   `used[slot]` (harmless when that entry is 0) and returns
-    ///   `((colour >> 1) & 1) << 2`. The two key spaces are independent, so
-    ///   the hidden path never frees a visible slot.
+    ///   `((colour >> 1) & 1) << 2`. The two paths share the map, so a hidden
+    ///   face frees the slot its visible face took (D24's shipped reading).
     pub fn face(
         &mut self,
         colour: u16,
@@ -271,9 +277,10 @@ impl ColourState {
         }
     }
 
-    /// `demo_glz`'s visible branch (`VEC.ASM:430-505`): take the full-word
-    /// slot (allocating the first free even slot 2..30, or 32 when they are
-    /// all taken), return its DAC base and write the group's 16 entries.
+    /// `demo_glz`'s visible branch (`VEC.ASM:430-505`): take the slot stored
+    /// under the colour word's low byte (allocating the first free even slot
+    /// 2..30, or 32 when they are all taken), return its DAC base and write
+    /// the group's 16 entries.
     ///
     /// The shade and R base in the group are the computed ones on a reused
     /// slot, but on a freshly allocated one they are what the allocation scan
@@ -290,11 +297,10 @@ impl ColourState {
         backpal: &[[u8; 3]; 16],
         palette: &mut Palette,
     ) -> u16 {
-        let (slot, fresh) = match self.visible.get(&colour) {
+        let (slot, fresh) = match self.slots[colour as u8 as usize] {
             // `mov al,cs:rolcol[bx]; cmp al,0; jne @@rc1` (`VEC.ASM:450-453`):
             // a stored slot is reused without touching the pool bit.
-            Some(&slot) => (slot, false),
-            None => {
+            0 => {
                 // `mov cx,15; mov bp,2` … `loop @@rc3` (`VEC.ASM:454-459`):
                 // fifteen even candidates. The loop exits with bp = 32 when
                 // none is free.
@@ -303,11 +309,12 @@ impl ColourState {
                     .find(|&candidate| !self.used[candidate as usize])
                     .unwrap_or(32);
                 // `mov cs:rolcol[bx],al; mov cs:rolused[bp],1`
-                // (`VEC.ASM:461-462`): the full-word map and the pool only.
-                self.visible.insert(colour, slot);
+                // (`VEC.ASM:461-462`): the low-byte map and the pool only.
+                self.slots[colour as u8 as usize] = slot;
                 self.used[slot as usize] = true;
                 (slot, true)
             }
+            slot => (slot, false),
         };
 
         // `shl al,3` (`VEC.ASM:465`): the group's first DAC entry; slot 32
@@ -377,12 +384,12 @@ impl ColourState {
     /// `demo_glz`'s hidden branch (`VEC.ASM:413-429`): key the low-byte map
     /// by the colour's low byte, clear that entry and the slot's `used` bit.
     /// When the entry is 0 the slot is 0 and `used[0]` is cleared, which the
-    /// allocator never reads. The map is independent of `visible`, so this
-    /// cannot free a slot a visible face owns.
+    /// allocator never reads. The visible path uses the same map, so this
+    /// frees the slot the face took when it was visible.
     fn hidden_face(&mut self, colour: u16) {
         let key = colour as u8;
-        let slot = self.hidden[key as usize];
-        self.hidden[key as usize] = 0;
+        let slot = self.slots[key as usize];
+        self.slots[key as usize] = 0;
         self.used[slot as usize] = false;
     }
 }
@@ -601,8 +608,7 @@ mod tests {
         assert_eq!(face(&mut state, &mut palette, 0x4030, -100), 0x4030);
 
         assert_eq!(palette, Palette::new());
-        assert!(state.visible.is_empty());
-        assert!(state.hidden.iter().all(|&slot| slot == 0));
+        assert!(state.slots.iter().all(|&slot| slot == 0));
         assert!(state.used.iter().all(|&used| !used));
     }
 
@@ -619,21 +625,20 @@ mod tests {
         assert_eq!(face(&mut state, &mut palette, 0x4002), 16);
         assert_eq!(face(&mut state, &mut palette, 0x4004), 32);
         assert_eq!(face(&mut state, &mut palette, 0x4006), 48);
-        assert_eq!(state.visible.get(&0x4002), Some(&2));
-        assert_eq!(state.visible.get(&0x4004), Some(&4));
-        assert_eq!(state.visible.get(&0x4006), Some(&6));
+        assert_eq!(state.slot_of(0x4002), 2);
+        assert_eq!(state.slot_of(0x4004), 4);
+        assert_eq!(state.slot_of(0x4006), 6);
         assert!(state.used[2] && state.used[4] && state.used[6]);
         // A colour already allocated keeps its slot (`jne @@rc1`).
         assert_eq!(face(&mut state, &mut palette, 0x4004), 32);
-        assert_eq!(state.visible.len(), 3);
+        assert!(state.used.iter().filter(|&&used| used).count() == 3);
     }
 
-    /// The two key spaces are independent: a visible allocation writes only
-    /// the full-word map, and the hidden path reads the (zero) low-byte
-    /// entry, so a hidden face of the same word does not free the visible
-    /// slot — the next new colour takes the next free slot.
+    /// The two paths share the low-byte map (D24's shipped reading): a hidden
+    /// face frees the slot the same word's visible face took, so the next new
+    /// colour reuses it instead of allocating a new one.
     #[test]
-    fn glz_hidden_face_does_not_free_the_visible_slot() {
+    fn glz_hidden_face_frees_the_visible_slot() {
         let mut state = ColourState::new();
         let mut palette = Palette::new();
         let colour = 0x4002;
@@ -642,27 +647,28 @@ mod tests {
         };
 
         assert_eq!(face(&mut state, &mut palette, colour, 100), 16);
-        assert_eq!(state.visible.get(&colour), Some(&2));
-        assert_eq!(state.hidden[colour as u8 as usize], 0);
+        assert_eq!(state.slot_of(colour), 2);
         assert!(state.used[2]);
 
         // Hidden: `0x4002`'s bit 1 is set, so the reduced word is 4. The
-        // low-byte entry is 0, so only `used[0]` is cleared.
+        // low-byte entry holds slot 2, which is freed.
         assert_eq!(face(&mut state, &mut palette, colour, -100), 4);
-        assert_eq!(state.hidden[colour as u8 as usize], 0);
-        assert!(state.used[2]);
-        assert_eq!(state.visible.get(&colour), Some(&2));
+        assert_eq!(state.slot_of(colour), 0);
+        assert!(!state.used[2]);
 
-        // The visible allocation is still in the pool: the next colour gets
-        // slot 4, not the visible word's slot 2.
-        assert_eq!(face(&mut state, &mut palette, 0x4004, 100), 32);
-        assert_eq!(state.visible.get(&0x4004), Some(&4));
-        assert!(state.used[2] && state.used[4]);
+        // The freed slot is the next allocation's: the next colour gets
+        // slot 2 again, not slot 4.
+        assert_eq!(face(&mut state, &mut palette, 0x4004, 100), 16);
+        assert_eq!(state.slot_of(0x4004), 2);
+        assert!(state.used[2]);
+        assert!(!state.used[4]);
     }
 
-    /// Sixteen distinct visible colour words: the 15 even slots 2..30 fill
-    /// first, then the sixteenth gets slot 32 — colour 0, and its group is
-    /// written at DAC entry 0.
+    /// Sixteen distinct visible colour words with no hidden face between
+    /// them: the 15 even slots 2..30 fill first, then the sixteenth gets slot
+    /// 32 — colour 0, and its group is written at DAC entry 0. (The shipped
+    /// animation never reaches this: its hidden faces free slots through the
+    /// shared low-byte map. The scan's exhausted branch is still pinned.)
     #[test]
     fn glz_pool_exhaustion_uses_slot_32_and_entry_0() {
         let mut state = ColourState::new();
@@ -688,7 +694,7 @@ mod tests {
             state.face(0x4020, 0, DemoMode::Glz, &backpal, &mut palette),
             0
         );
-        assert_eq!(state.visible.get(&0x4020), Some(&32));
+        assert_eq!(state.slot_of(0x4020), 32);
         assert!(state.used[32]);
         // The group starts at `(32 << 3) as u8 == 0`. Shade 0, bit 1 clear:
         // base [0,0,0], and every entry is that base plus the same backpal
@@ -804,17 +810,19 @@ mod tests {
             assert_eq!(palette.entry(48 + j), [2, 1, 3], "entry {j}");
         }
 
-        // Fill slots 8..30 with twelve more bit-1 words, then the sixteenth
-        // distinct word exhausts the pool: slot 32 leaves CL = 16 − 16 = 0.
+        // Fill slots 8..30 with twelve more bit-1 words (their low bytes are
+        // distinct from the three above and from each other), then the
+        // sixteenth distinct word exhausts the pool: slot 32 leaves
+        // CL = 16 − 16 = 0.
         for k in 0..12u8 {
-            let colour = 0x5002 + 4 * u16::from(k);
+            let colour = 0x500a + 4 * u16::from(k);
             state.face(colour, 0, DemoMode::Glz, &backpal, &mut palette);
         }
         for slot in (8u8..=30).step_by(2) {
             assert!(state.used[slot as usize], "slot {slot}");
         }
         assert_eq!(
-            state.face(0x6002, 0, DemoMode::Glz, &backpal, &mut palette),
+            state.face(0x6008, 0, DemoMode::Glz, &backpal, &mut palette),
             0
         );
         for j in 0..16u8 {

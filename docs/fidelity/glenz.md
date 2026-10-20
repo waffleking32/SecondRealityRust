@@ -288,21 +288,27 @@ The reference decides each; nothing here was fitted.
   frame 44..49 boxes, pixel counts and centroids match that model's output.
   If the shipped build's row goes with different constants, the
   2300/3000/3400 comparison is where it shows; no constant is adjusted here.
-- **The visible-path `rolcol` key (D7/D24).** `poly.rs` keys the visible path
-  by the full 16-bit colour word and the hidden path by the low byte, per
-  `VEC.ASM`. Whether the shipped build does is Task 7's arbitration against
-  the keyframes' facet colours; the port has no alternative selected by a
-  fitted colour.
-- **`L_r` against `L_p`.** The source's waits give `L_r = 1562` (first object
-  1606 − main frame 44). The port's phase machine consumes the measured tick
-  counts, so its loop origin `L_p` is the same 1562: main frame *f*'s picture
-  is reference `1562 + f`. A block-2 run in Task 7 compares the moving
-  keyframes at their own index if the shell's numbering agrees; if it does
-  not, the offset is registered, not absorbed. The held opening is unaffected
-  either way: the bounce's last body draws at reference 1334 and the first
-  object pixels are at 1606, so the picture holds for **272 ticks** —
-  1334..1605, the 228 ticks from the last bounce body to the main loop's
-  first wait at 1562 plus the 44 main-loop ticks before frame 44 draws.
+- **The visible-path `rolcol` key (D7/D24).** The tree keys the visible path
+  by the **full colour word** (`movzx bx,es:[bx-2]`, `VEC.ASM:450`) and the
+  hidden path by the low byte, so with a 256-byte `rolcol` the two maps are
+  independent. The reference contradicts that reading, and the shipped build
+  is the arbiter: keying the visible path by the **low byte** (one shared
+  in-bounds map) is what reproduces the picture. Adopted — `poly.rs` keeps a
+  single `slots: [u8; 256]` keyed by the low byte, shared by the visible and
+  hidden paths. The measurement and the two models' outputs are §11.2.
+- **`L_r` against `L_p`.** The block-2 music wait exits at **1117** in the
+  port against `second2b`'s **1111**, so the port's loop start is
+  `L_p = 1568` against `L_r = 1562` and the plan's aligned comparison index is
+  `K + 6` (§11.1). The reference's *captured* moving frames pair a surface
+  with a DAC one to two main frames ahead of it (the filed 2300 surface is
+  the partner sessions' 2299 and its palette is main frame 738's), so the
+  port's `K + 6` surface sits one displayed frame after the filed picture.
+  The offset and the residual are registered, not absorbed, and no anchor was
+  moved (§11, `APPROXIMATIONS.md` A36/A37). The held opening is unaffected:
+  the bounce's last body draws at 1334 and the first object pixels are at
+  1606, so the picture holds for **272 ticks** — 1334..1605, the 228 ticks
+  from the last bounce body to the main loop's first wait at 1562 plus the 44
+  main-loop ticks before frame 44 draws.
 
 ## 8. The plan's carried items
 
@@ -424,3 +430,141 @@ then the hold.
   `the_post_panicend_wait_ends_on_a_positive_musplus`, the install and the
   held screen in `the_post_panicend_wait_is_between_the_part_and_the_next_one`
   and `the_cue_wait_holds_the_screen`.
+
+## 11. The block-2 comparison (Task 7)
+
+The dump and the two comparisons:
+
+```text
+cargo run --release --bin secondreality -- --block 2 --headless \
+    --dump-frames 1499,2305,2306,3004,3006,3404,3406 --dump-dir out/glenz-final
+cargo run --release --bin secondreality -- --block 2 --headless \
+    --dump-frames 1499,2300,3000,3400 --dump-dir out/glenz-indexed
+cargo xtask compare --reference reference/parts/glenz \
+    --rendered out/glenz-indexed --out out/glenz-indexed-diff
+cargo test -p secondreality --test glenz
+```
+
+The block-2 dump exits **0**, writes all seven indices, and its manifest says
+`part: glenz`, `index_origin: boot`, `anchor: 404`, 320x200, `music:
+MUSIC1@0, start_frame 408` (the clock's measured 408; block 2's boundary is
+576). The index-keyed `xtask compare` over a dump at the filed indices
+(`out/glenz-indexed`, frames 1499/2300/3000/3400) reports **1499 at 0.0000 %
+(0/64,000)** and exit 1 overall, because the moving frames at their own
+indices are six ticks behind the reference's: 22,632 / 15,333 / 19,708
+(35.3625 / 23.9578 / 30.7938 %) at 2300/3000/3400.
+
+### 11.1 The measured phase
+
+Both sides of the boundary are measured, and neither is moved. The block-2
+music wait exits at **1117** in the port (`docs/fidelity/music-clock.md`'s
+trace is the reference's **1111**), and the intro's ticks from the reset to
+the main loop's first wait are fixed at **451**, so the port's loop start is
+`L_p = 1117 + 451 = 1568` against Task 1's `L_r = 1562`. Main-loop frame `f`
+is therefore the picture at boot `1568 + f` in the port and `1562 + f` in the
+reference, and the plan's aligned index for the filed `K` is **`K + 6`**.
+
+The reference's own capture adds a second, measured phase. The filed moving
+pictures are the **partner sessions' previous displayed frame**: the filed
+2300 is byte-identical to `out/glenz-recapture4`'s and
+`out/b3b2-rerev/fresh-partner`'s 2299, the filed 3000 is their 2999 (6 px),
+and the filed 3400 is their 3399 (65 px) — the §7.4 offsets. The port's
+`K + 6` surface is the partners' `K + 1` surface: at boot 2306 the port's
+object pixels are byte-identical to the fresh partner's 2301 picture (1,293
+px differ, all low-palette fade entries). So the reference capture pairs a
+surface with a DAC that runs **one to two main frames ahead of it** — D17's
+sample/publish instant, and the same mechanism that shows a one-step-ahead
+fade palette at the 2300 surface (§11.2). A capture is not a frame the port
+can draw: the port composes surface *N* with `pal` *N*, which is the source's
+stable display pairing. The registered A36 carries the numbers.
+
+### 11.2 The colour key: the shipped build keys `rolcol` by the low byte (adopted)
+
+`VEC.ASM:450` keys the tree's visible path by the **full colour word**
+(`movzx bx,es:[bx-2]`) and `:417` keys the hidden path by the **low byte**.
+With a 256-byte `rolcol` those are separate maps: a hidden face never frees a
+visible slot, so the fifteen-slot pool fills with every word that has ever
+been visible. The shipped animation makes that happen, and the reference says
+the shipped build does not:
+
+| model | boot 2306 (main frame 738) | low palette |
+|---|---|---|
+| full-word key (the tree) | object box (99,216, 37,149), **8,066 px**; sky `(97,97,97)` | DAC entry 0 is a slot-32 group (`16 − slot/2` residual): the background reads the group ramp, and every post-exhaustion face is painted with colour 0 and vanishes |
+| low-byte key (the shipped reading) | object box (99,217, 37,149), **9,927 px**, centroid (157.6, 94.2) | entry 0 black; every face drawn |
+
+The full-word row's picture numbers were measured on the **pre-adoption tree**
+(commit `63b4267`) with §11's dump command; the mechanism they show — the
+sixteenth word's group written at DAC entry 0, its colour 0 — is pinned by
+`glenz::poly::tests::glz_pool_exhaustion_uses_slot_32_and_entry_0` on the
+committed tree.
+
+The low-byte box is exactly the box the partner sessions' 2300 presents
+(`out/p7-stability`'s 2300: 99–217 × 37–149, 9,927 px, (157.6, 94.2)); the
+filed 2300 is the earlier displayed frame (97–217 × 38–149, 9,989 px,
+(156.8, 94.1)). Adopted, as one expression the tree's algorithm carries: a
+single `slots: [u8; 256]` keyed by the colour word's low byte, shared by the
+visible and hidden paths, so a hidden face frees the slot its visible face
+took. The permanent test of the derivation is
+`glenz::poly::tests::glz_hidden_face_frees_the_visible_slot`; the picture
+evidence is the 2305 comparison below.
+
+At boot **2305** (the port's main frame 737, the filed 2300's surface) the
+port's object pixels are **byte-identical** to the reference's: of 64,000
+pixels, 5,208 differ and **all 5,208 are palette entries 0..15** (0 with an
+index ≥16), and the reference's colours are exactly the fade at **b = 26**
+(main frame 738: `backpal·(764 − 738)/64`) where the port's frame 737
+computes **b = 27**. That is the reference capture's one-frame DAC lead, not
+a colour-model difference: the port's own `b = 27` reproduces every one of
+the 5,208 bytes of its frame, and `b = 26` reproduces every reference byte.
+
+### 11.3 The comparison, at both phases
+
+The port's boot index against the filed reference index:
+
+| port boot | reference | differing px | reading |
+|---|---|---|---|
+| 1499 | 1499 | **0** (indices and RGB) | the held opening (Task 5's intro) |
+| 2306 | 2300 | **9,777** (15.2766 %) | the plan's `K + 6`; the reference's surface is one displayed frame older |
+| 3006 | 3000 | **10,806** (16.8844 %) | the same, with the capture's two-frame DAC lead |
+| 3406 | 3400 | **12,001** (18.7516 %) | the same |
+| 2305 | 2300 | **5,208** (8.1375 %) | surface-aligned; all low-palette (11.2) |
+| 3004 | 3000 | **2,289** (3.5766 %) | surface-aligned; the capture's group palette is one or two frames ahead of its surface |
+| 3404 | 3400 | **5,941** (9.2828 %) | the same |
+
+At 3004/3404 the port's *index* structure matches the reference's face
+coverage almost exactly: every pixel whose port index is 16..255 maps to one
+reference colour except **711 / 839 px** of the ~35,900 / ~43,900 object
+pixels, and those are the second object's interior XOR boundaries (all at
+indices < 16, the `Glz2` reds). Its outer silhouette matches within
+**118 / 180 px** under the red mask (the port's red object holds
+27,057 / 33,312 px; the reference's 27,143 / 33,416), and the boxes agree to
+a pixel: 3004 28–270 × 0–191 against 27–270 × 0–192, 3404
+27–313 × 0–199 against 27–313 × 0–199. The first object matches exactly at
+2305. The residual is a sub-pixel edge/phase difference, not a value a
+constant can settle: the same `INIT_320X200` constants and the chunky
+320-row model produce the reference's 2300 object pixels exactly at 2305, so
+D24 (a)'s shipped projection/window is **not** contradicted and no shipped
+constant is adopted (D36's 92-byte row stays a memory-layout fact).
+
+### 11.4 What this settles, and what it carries
+
+- **The D24 questions.** (a) Projection/window: the tree's `INIT_320X200` and
+  the 320-pixel-row picture reproduce the reference's 2300 object pixels
+  exactly (2305, 0 differing with an index ≥16); no shipped constant needed.
+  (b) The visible colour key: adopted by the picture, §11.2. (c) `L_r`
+  against `L_p`: measured, `+6`, A36.
+- **`cross`'s short-list guard.** No measured frame shows a short polygon
+  list: the 2305 residual is palette-only (5,208 px, 0 with an index ≥16) and
+  the 3004/3404 index structures match the reference's except for the second
+  object's boundary pixels (711/839 px), so the guard is not reachable in
+  these frames and is not registered.
+- **`NEW.ASM`'s `nep`/`ne` bound.** The keyframes show no screen data outside
+  the objects' spans: the objects' boxes end at row 191/199 (the pass-2 loop
+  bounds), and the port's edge list is a `Vec` with no row-table adjacency.
+  The bound is not exercised visibly in the measured frames and is not
+  registered.
+- **The display pairing.** The port pairs surface *N* with `pal` *N* (and the
+  group writes of frame *N*); the reference's capture transiently shows
+  surface *N* with the DAC of *N+1*/*N+2*. No upload order was changed to
+  chase it — that would break the source's own order (`MAIN.C:414-415`
+  uploads, then the body computes the next palette).
