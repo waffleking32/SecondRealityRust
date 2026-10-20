@@ -77,13 +77,13 @@ fn mul15(a: i16, b: i16) -> i16 {
     ((i32::from(a) * i32::from(b)) >> 15) as i16
 }
 
-/// `cmatrix_yxz` (`VEC.ASM:30-44`) over `calcmatrix` (`MATH.ASM:46-159`):
+/// `cmatrix_yxz` (`MATH.ASM:30-44`) over `calcmatrix` (`MATH.ASM:46-159`):
 /// build the matrix for three tenth-degree angles.
 ///
 /// The C call is `cmatrix_yxz(rx, ry, rz, matrix)` (`MAIN.C:598`), but the asm
 /// stores its *second* argument in the square it calls the X slot and its
 /// first in the Y slot: `movpar ax,0` (arg0) goes to `[si+2]`, `movpar ax,1`
-/// (arg1) to `[si+0]`, and arg2 to `[si+4]` (`VEC.ASM:36-41`). The labels in
+/// (arg1) to `[si+0]`, and arg2 to `[si+4]` (`MATH.ASM:36-41`). The labels in
 /// `calcmatrix` are therefore shifted one place relative to the caller's
 /// names, and this port keeps the source's placement: `a1` is the X angle,
 /// `a0` the Y angle, `a2` the Z angle.
@@ -444,6 +444,34 @@ mod tests {
         assert_eq!(dst[1], [i32::MAX, 5, -3]);
     }
 
+    /// The accumulator is 64 bits: the identity's 32766 times `i32::MAX` is
+    /// 70,364,449,177,602, and `>> 15` gives 2,147,352,575. An i32 product
+    /// would wrap to -32766 and shift to -1 (`VEC.ASM:109-121`'s
+    /// `imul` into `edx:eax` and `shld ecx,ebx,17`).
+    #[test]
+    fn rotate_keeps_the_full_64_bit_product() {
+        let mut dst = Vec::new();
+        rotate(
+            &mut dst,
+            &[[i32::MAX, 0, 0]],
+            &matrix_yxz(0, 0, 0),
+            [0, 0, 0],
+        );
+        assert_eq!(dst, vec![[2147352575, 0, 0]]);
+    }
+
+    /// `shld ecx,ebx,17` keeps only the shifted sum's low 32 bits. Three
+    /// products of 32767 * `i32::MAX` sum to 211,099,789,983,747; `>> 15` is
+    /// 6,442,254,333, which does not fit a signed 32-bit word and stores as
+    /// 2,147,287,037.
+    #[test]
+    fn rotate_truncates_a_shifted_sum_wider_than_32_bits() {
+        let m = Matrix([32767, 32767, 32767, 0, 0, 0, 0, 0, 0]);
+        let mut dst = Vec::new();
+        rotate(&mut dst, &[[i32::MAX, i32::MAX, i32::MAX]], &m, [0, 0, 0]);
+        assert_eq!(dst, vec![[2147287037, 0, 0]]);
+    }
+
     /// `init320x200`'s values, pinned (`VID.ASM:201-210`).
     #[test]
     fn init_320x200_is_the_source_mode() {
@@ -627,6 +655,54 @@ mod tests {
                 z: 128
             }
         );
+    }
+
+    /// `jng`/`jnl` (`VEC.ASM:203-220`) are inclusive: a coordinate equal to a
+    /// window edge is inside and unflagged. The z = 128 vertices above cannot
+    /// land exactly on x = 319 (the quotient steps by 2) or y = 0 (the steps
+    /// around the edge are 1 and -1), so this hand projection makes the
+    /// quotient the coordinate and hits the edges exactly.
+    #[test]
+    fn projection_treats_the_window_edges_as_inside() {
+        let p = Projection {
+            mul_x: 1,
+            mul_y: 1,
+            add_x: 0,
+            add_y: 0,
+            min_z: 1,
+            min_x: -50,
+            max_x: 50,
+            min_y: -50,
+            max_y: 50,
+        };
+        let project_one = |point: [i32; 3]| {
+            let mut dst = Vec::new();
+            project(&mut dst, &[point], &p);
+            dst[0]
+        };
+        // x == max_x and y == min_y are both inside.
+        assert_eq!(
+            project_one([50, -50, 1]),
+            PVert {
+                x: 50,
+                y: -50,
+                flags: 0,
+                z: 1
+            }
+        );
+        // So are the other two edges.
+        assert_eq!(
+            project_one([-50, 50, 1]),
+            PVert {
+                x: -50,
+                y: 50,
+                flags: 0,
+                z: 1
+            }
+        );
+        // One past each edge flags in the asm's direction.
+        assert_eq!(project_one([51, 0, 1]).flags, FLAG_X_MAX);
+        assert_eq!(project_one([0, -51, 1]).flags, FLAG_Y_MIN);
     }
 
     /// The centre add and the comparisons are 16-bit: 20000*256/128 = 40000
