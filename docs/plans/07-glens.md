@@ -170,9 +170,9 @@ Every row is from the carried Phase 1–6 surveys and this phase's Task 1; **the
 ### Task 5: The intro and the part driver
 
 **Files:**
-- Create: `bins/secondreality/src/parts/glenz/intro.rs`, `bins/secondreality/src/parts/glenz/mod.rs` (the `Glenz` part), `bins/secondreality/tests/glenz.rs`, `docs/fidelity/glenz.md`
+- Create: `bins/secondreality/src/parts/glenz/intro.rs`, `bins/secondreality/src/parts/glenz/mod.rs` (the `Glenz` part), `docs/fidelity/glenz.md` (the integration test `tests/glenz.rs` moves to Task 7: a `--part glenz` run needs Task 6's music row)
 - Modify: `bins/secondreality/src/parts.rs` (registry row)
-- Test: the part's unit tests, `bins/secondreality/tests/glenz.rs`
+- Test: the part's unit tests (a rig driving the part directly with a scripted `Music`)
 
 **Interfaces:**
 - Consumes: Tasks 2–4, `PartCtx` (`surface`, `view`, `palette`, `set_palette`, `set_palette_entry`, `music`, `exit_requested`, `music_fresh`), `sr_assets::load_path`.
@@ -202,7 +202,7 @@ Every row is from the carried Phase 1–6 surveys and this phase's Task 1; **the
 - [ ] **Step 5: Write `docs/fidelity/glenz.md`** with the measured tick map and the D24 findings.
 - [ ] **Step 6: Run the unit tests and commit.**
 
-**Acceptance:** the tick-map tests pass (47, 177, the waits, the one-frame tick); the held intro's pixels match the reference 1499's index plane (the unit test compares the port's buffer to the filed `.idx`); the palette phases and the exit cue are pinned; `--part glenz` runs.
+**Acceptance:** the tick-map tests pass (47, 177, the waits, the one-frame tick); the held intro's pixels match the reference 1499's index plane (the unit test compares the port's buffer to the filed `.idx`); the palette phases and the exit cue are pinned; `parts::registered("glenz")` resolves (the `--part glenz` run shape is Task 6's, which adds its music row).
 
 ---
 
