@@ -284,7 +284,7 @@ fn the_reference_tree_passes_with_the_traces_in_it() {
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("39 capture(s)"), "{text}");
+    assert!(text.contains("41 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a
@@ -496,7 +496,7 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 14, "the filed traces: {names:?}");
+    assert!(names.len() >= 16, "the filed traces: {names:?}");
 
     let mut samples = 0usize;
     for trace in &names {
@@ -520,12 +520,12 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
         );
         samples += count;
     }
-    // The floor is below the measured total (48,400 across the fourteen: 1150+1152+2755+6351+
-    // 5797+359+4846+1699+4597+7298+2799, plus Phase 6's 1699+3899+3999) and above the total
-    // with any single trace dropped (the largest is 7,298, leaving 41,102), so a trace
-    // silently dropping out of the walk fails here.
+    // The floor is below the measured total (52,517 across the sixteen: 1150+1152+2755+6351+
+    // 5797+359+4846+1699+4597+7298+2799, plus Phase 6's 1699+3899+3999 and Phase 7's
+    // 3418+699) and above the total with any single trace dropped (the largest is 7,298,
+    // leaving 45,219), so a trace silently dropping out of the walk fails here.
     assert!(
-        samples > 48_000,
+        samples > 52_000,
         "every filed trace's samples are checked, and there are {samples} of them"
     );
 }
@@ -541,6 +541,14 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
 ///   `MAIN/U2.ASM:766-775`) and its clock starts at the initial `_zplaysong(0)`,
 ///   measured at **399.6** in `reference/music/second1`. The boot restart
 ///   reloads STMIK and zeroes the counter; the initial start does not.
+///   `SECOND 2`'s boot trace (`second2b`, Phase 7) measures its recipe's start
+///   at **401.1** by the rows, with the `zframe` column first non-zero at 408 —
+///   a 6.9-frame gap, the largest in the table, because the boot's first ticks
+///   are seen at nearly one a frame (`zframe` goes 0 → 2 between 407 and 408
+///   and 2 → 14 from 408 to 420) while the row reading applies the steady
+///   1.3474 frames a tick. It is recorded, not treated as the restart recipes'
+///   408: the two read the same `_zplaysong(0)` at `MAIN/U2.ASM:785-787` from
+///   different modules and the ticks between them are measured, not assumed.
 /// - Within a recipe the sessions agree to 0.1 frames — `second5` and `second5b`
 ///   derive the same 408.0, which is what makes the number a property of the
 ///   boot rather than of a session.
@@ -554,14 +562,18 @@ fn the_zplus_rule_is_re_derived_over_every_filed_trace() {
 /// The `zframe` column's first non-zero frame is one frame plus the tick a row
 /// boundary is seen within apart from the anchor (0.9 to 2.9 frames in the
 /// Phase 3 traces); `second1`'s first non-zero sample caught **two** ticks
-/// (`zframe` 0 → 2 at frame 405), so its gap is 5.4 frames, and that is the
-/// recipe's bound. Both bounds are measurements, not choices.
+/// (`zframe` 0 → 2 at frame 405), so its gap is 5.4 frames, and `second2b`'s
+/// boot caught the same shape over a longer stretch — 0 → 2 between 407 and
+/// 408, then 2 → 14 by 420 — so recipe 2's gap is 6.9 frames. Both bounds are
+/// measurements, not choices.
 #[test]
 fn the_anchor_is_the_same_in_every_filed_session() {
     /// The frame the music begins on, per recipe (`music-clock.md` §2).
     const ANCHORS: &[(&str, f64)] = &[
         // `SECOND 1`: the initial `_zplaysong(0)`, no restart. `second1`.
         ("1", 399.6),
+        // `SECOND 2`: its own boot trace, `second2b` (Phase 7). The row reading.
+        ("2", 401.1),
         // The restart recipes: `restartmus` reloads STMIK and zeroes the counter.
         ("3", 408.0),
         ("5", 408.0),
@@ -571,6 +583,10 @@ fn the_anchor_is_the_same_in_every_filed_session() {
     const DIRECT_GAP: &[(&str, f64)] = &[
         // `second1`'s 405 against 399.6 — the sample caught two ticks.
         ("1", 5.4),
+        // `second2b`'s 408 against 401.1 — the boot's first ticks are seen at
+        // nearly one a frame, so the row reading is 6.9 frames ahead of the
+        // first sample the column shows.
+        ("2", 6.9),
         // The Phase 3 traces' measured range.
         ("3", 2.9),
         ("5", 2.9),
@@ -600,7 +616,7 @@ fn the_anchor_is_the_same_in_every_filed_session() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 14, "the filed traces: {names:?}");
+    assert!(names.len() >= 16, "the filed traces: {names:?}");
 
     // recipe -> (trace, anchor, direct) for the traces that hold the start.
     let mut boots: std::collections::BTreeMap<String, Vec<(String, f64, f64)>> =

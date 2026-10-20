@@ -11,19 +11,21 @@
 //! which frames exist and which are the emulator's own gaps — is recomputed from the trace
 //! file and checked against the manifest.
 //!
-//! **Nine of the fourteen filed traces are windows, not boots.** `second1b`, `second3b` and
+//! **Ten of the sixteen filed traces are windows, not boots.** `second1b`, `second3b` and
 //! `hiddenu2` were filed for Phase 4's parts, `second2`, `second3a` and `second3d` for
-//! Phase 5's, and `second1c`, `second4` and `second3e` for Phase 6's; each begins thousands of
-//! frames after the music's start. A window trace's own columns derive the last tick-counter
-//! reset before it, not a boot anchor, so the port is
+//! Phase 5's, `second1c`, `second4` and `second3e` for Phase 6's (and `second3e` after a
+//! mid-run restart), and `second1d` for Phase 7's block-1 `MUSIC1@0` restart; each begins
+//! thousands of frames after the music's start. A window trace's own columns derive the last
+//! tick-counter reset before it, not a boot anchor, so the port is
 //! simulated from its recipe's anchor — the seek the boot made — and **phase-aligned to the
 //! session** at the window's first row change, because the boot's phase is session-dependent
 //! (D17) and the two `SECOND U` sessions differ by ten ticks at frames 6499/6500. It is then
 //! held to the trace from the window's first frame. That is the only way a later window can be
-//! reached by a player that never seeks mid-song. `SECOND 2` and `SECOND 4` have no boot trace
-//! at all, so their seek and anchor come from the shell's own start path and the recipes that
-//! share it ([`BOOTLESS_RECIPES`]); `second3e` begins after a **mid-run** restart, which the
-//! player cannot reach by playing on, so it is simulated from the restart itself
+//! reached by a player that never seeks mid-song. `SECOND 2` has a boot trace now — `second2b`
+//! (Phase 7), which measures its recipe's start at 401.1 — and `SECOND 4` still has none, so
+//! its seek and anchor come from the shell's own start path and the recipes that share it
+//! ([`BOOTLESS_RECIPES`]); `second3e` and `second1d` begin after a **mid-run** restart, which
+//! the player cannot reach by playing on, so they are simulated from the restart itself
 //! ([`RESTART_TRACES`]).
 //!
 //! `second1` is a boot trace but on a different recipe: `SECOND 1` has no block restart, so
@@ -103,7 +105,6 @@ const MUSIC_START_FRAME: i64 = 408;
 /// bootless recipe whose anchor is a filed measurement rather than a shared shell path
 /// (`music-clock.md` §2.1).
 const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
-    ("2", MUSIC_START_FRAME, 0),
     ("4", MUSIC_START_FRAME, 18),
 ];
 
@@ -118,7 +119,19 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 /// 408.2 + 17,442 = 17,850 ±1 (`docs/fidelity/music-clock.md` §2.1). A trace after a
 /// restart is simulated from the restart, not from its recipe's boot anchor: the player never
 /// seeks mid-song, so it could not reach the window at all.
-const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[("second3e", "MUSIC0", 17_850, 18)];
+///
+/// `SECOND 1` reaches GLENZ between BEGLOGO and GLENZ (`MAIN/U2.ASM:813-818`) and the shell
+/// restarts MUSIC1 at order 0 there. `second1d`'s window opens at 8,100, and its first
+/// published position — order 1 row 4, `music-clock.md` §2.2 — is 68 rows (204 ticks) into
+/// the new song; at the module's own 1.3474 frames a tick and the ten-poll ring's ten-frame
+/// delay, that puts the restart's `_zplaysong(0)` at 8,100 − 10 − 204/0.7419 ≈ **7,815**.
+/// The reload hides the restart frame itself from the trace (the wide window refuses, §7), so
+/// this is a back-extrapolation from the window's first sample rather than a measured boot
+/// frame; the comparison's phase alignment absorbs its few-frame error.
+const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[
+    ("second3e", "MUSIC0", 17_850, 18),
+    ("second1d", "MUSIC1", 7_815, 0),
+];
 
 /// The port's logic tick, in millihertz (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). A
 /// tick is `2.5/tempo` seconds, so it is `175215/(tempo × 1000)` frames long: the conversion
@@ -139,9 +152,9 @@ const TICK_NUMERATOR: i64 = FRAME_HZ_MILLI * 25 / 10; // 2.5 frames' worth of mi
 const JITTER_FRAMES: i64 = 7;
 
 /// How far a window trace's session may sit from its recipe's boot phase before this test
-/// refuses to align it. The nine window shifts measure **−16 (`hiddenu2`), −5 (`second2`),
-/// +1 (`second1b`, `second3b`, `second1c`, `second4`, `second3e`), +2 (`second3a`) and
-/// +4 (`second3d`) frames** (printed by
+/// refuses to align it. The ten window shifts measure **−16 (`hiddenu2`), −5 (`second2`),
+/// −1 (`second1d`), +1 (`second1b`, `second3b`, `second1c`, `second4`, `second3e`), +2
+/// (`second3a`) and +4 (`second3d`) frames** (printed by
 /// `the_port_reproduces_every_filed_trace`): the two `SECOND U` sessions, `hiddenu` (frames
 /// 146…6499) and `hiddenu2` (6500…8199), read `_np_zframe` 4175 and 4185 at adjacent frames —
 /// ten ticks, about fifteen frames — which is the largest session phase spread the tree
@@ -342,8 +355,8 @@ fn traces() -> Vec<Trace> {
     // directory went missing would still pass every assertion below; the floor is what makes
     // that a failure. It is a floor, not a list, so a later trace is covered with no edit.
     assert!(
-        names.len() >= 14,
-        "the filed traces: {} under {} — the phase's fourteen are expected",
+        names.len() >= 16,
+        "the filed traces: {} under {} — the phase's sixteen are expected",
         names.len(),
         root.display()
     );

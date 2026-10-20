@@ -1908,6 +1908,127 @@ second one this phase has had to find that way (§1.6, §7.5 here). The black is
 same bytes as `out/b3-pam-probe2`'s black in §6 and ALKU's black in §4.2: with no picture on
 screen the parts agree, which is why an index in the gap is not worth a keyframe.
 
+### 7.6 The opening measured: the intro start, the loop start and the object boxes (Phase 7)
+
+Two traces (`music-clock.md` §2.2) and the captures below measure GLENZ's opening. No capture
+here is filed; each is reproduced by the command beside it, into `out/`.
+
+**The intro start is the zoomer's first tick.** On `SECOND 2` the trace `second2b` reads
+`_np_zframe` 526 at 1110 and 0 at 1111, and `out/p7-collapse2` — a fresh boot, `--frames
+1100..1154`, every pair of frames compared — is byte-identical through 1110 and first differs
+on **1111** (320 pixels). The block-1 boot's intro is at **8521**: `second1d` reads 5588 → 0
+there, and `out/p7-b1-collapse-dense` (frames 8516…8528) is held through 8521 and first differs
+on **8522** — one frame after the reset sample, where `SECOND 2`'s two both read 1111 (the
+sample/publish instant D17 quantises). **The screen the zoomer plays over is BEGLOGO's final
+frame, not the 1499 hold**: `out/beglogo-tail`'s 1000–1110 and `out/p7-b1-collapse`'s
+8440–8520 are both `cbdc67eb…`, which is `reference/parts/beglogo/frame_000900`'s `sha256` at
+320×400, while the filed `frame_001499` is the later 320×200 FC-bounce hold (`e45ab076…`).
+
+**The loop start `L_r = 1562`.** The definition is `L_r = first_object_index −
+first_object_tick`, where `first_object_tick` is the first main-loop frame whose projected
+object draws a pixel. The reference's first object pixels are at **1606** (below), and the
+source's own physics gives frame **44**: the first frame on which a face's span crosses row 0.
+`1606 − 44 = 1562`, and the trace's waits agree — reset 1111, `getmframe()<300` at 1515,
+`getmframe()<333` at 1560, the three `dis_waitb` ticks and the main loop's first wait
+(`music-clock.md` §2.2) put main-loop frame f's picture at reference `1562 + f`. The session
+spread is **zero**: the reset is 1111 in the trace session and in `out/p7-collapse2`'s, and the
+first object pixels are at 1606 in *both* `out/p7-entry-dense` and `out/p7-entry-dense2` (two
+further sessions), frame for frame.
+
+The two commands that produce 1606, and the source's frame 44 beside it:
+
+```text
+cargo xtask reference capture --arg 2 --boot autoexec --keys "KBD_left KBD_enter" \
+    --cycles 30000 --frames "$(seq -s, 1590 1630)" --out out/p7-entry-dense
+python3 -I - <<'PY'
+W, H = 320, 200  # rows 0..149 are above the floor; the sky is pixel (0, 0)
+for n in range(1590, 1631):
+    b = open(f'out/p7-entry-dense/frame_{n:06d}.rgb', 'rb').read()
+    sky = tuple(b[0:3])
+    pts = [(i % 320, i // 320) for i in range(150 * 320) if tuple(b[i*3:i*3+3]) != sky]
+    if pts:
+        xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+        print(n, min(xs), max(xs), min(ys), max(ys), len(pts),
+              round(sum(xs)/len(pts), 1), round(sum(ys)/len(pts), 1))
+PY
+```
+
+```
+frame  first captured / simulated above-floor box  n     centroid
+1606   (172,179,0,0)  /  (172,179,0,0)              8     (175.5, 0.0)
+1607   (166,179,0,1)  /  (166,179,0,1)             21     (173.3, 0.3)
+1608   (157,180,0,3)  /  (157,180,0,3)             60     (170.5, 1.0)
+1609   (153,180,0,4)  /  (153,180,0,4)             86     (168.8, 1.4)
+1610   (149,179,0,5)  /  (149,179,0,5)            111     (166.6, 1.7)
+1611   (146,180,0,6)  /  (146,180,0,6)            137     (165.5, 2.0)
+```
+
+The simulated side is the source's recurrence (`GLENZ/MAIN.C:504-536`'s `ypos`/`jello`/scale
+terms, `VEC.ASM`'s `crotlist`/`projlist` with `init320x200`'s 256/213/160/130, `NEW.ASM`'s
+spans), reproduced by the scratch script `out/t1/glenz_physics.py` (`python3 -I
+out/t1/glenz_physics.py drawn` prints `first drawn main-loop frame: (44, -8254, 0, 120)`). The
+six-frame exact agreement is what makes 44 the reference's tick as well as the model's: every
+pixel count and centroid agrees, not just the first frame.
+
+**The object boxes.** The command, run from the repository root:
+
+```text
+python3 -I - <<'PY'
+W, H = 320, 200
+for n in (2300, 3000, 3400):
+    b = open(f'reference/parts/glenz/frame_{n:06d}.rgb', 'rb').read()
+    sky = tuple(b[0:3])                      # the frame's own sky colour
+    for top, label in ((150, 'above-floor'), (200, 'full-frame')):
+        pts = [(i % W, i // W) for i in range(top * W)
+               if tuple(b[i*3:i*3+3]) != sky]
+        xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+        print(n, label, 'x', min(xs), max(xs), 'y', min(ys), max(ys),
+              'n', len(pts), 'centroid', round(sum(xs)/len(pts), 1),
+              round(sum(ys)/len(pts), 1))
+PY
+```
+
+| frame | above-floor box (rows 0…149) | pixels | centroid | full-frame box |
+|---|---|---|---|---|
+| 2300 | x **97–217**, y **38–149** | **9,989** | **(156.8, 94.1)** | x 2–319, y 38–199 (with the floor band) |
+| 3000 | x **27–270**, y **0–149** | **30,004** | **(151.9, 82.2)** | x 27–270, y 0–192, 35,977 px, (151.7, 96.4) |
+| 3400 | x **27–313**, y **0–149** | **34,720** | **(169.3, 78.8)** | x 27–313, y 0–199, 44,080 px, (169.8, 98.8) |
+
+The 2300 row reproduces the plan's own numbers exactly — 97–217 × 38–149, 9,989 pixels,
+(156.8, 94.1) — which is the check that the method is the one the plan measured with. **At 3000
+and 3400 the floor is gone**: the main loop's frame 765–789 clear (`MAIN.C:552-585`) has
+emptied `bgpic`'s rows 150–199 by main frames 1438 and 1838, so "above the floor" truncates the
+object at row 149 and the full-frame box is the object's true extent; both are given. The
+2300 box in a fresh session (`out/p7-stability`'s 2300) is x 99–217, y 37–149, 9,927 px,
+(157.6, 94.2) — a one-frame phase difference from the filed frame on a screen that moves
+25.4 % of its pixels a frame, and the same box.
+
+**The palette phases, by mean brightness.** The captures' frames fall into phases named by the
+frame's own sky colour, not by an index:
+
+| frames | sky colour | mean brightness | reading |
+|---|---|---|---|
+| 1250, 1350, 1400, 1450, 1499, 1550 | (0,0,0) | 13.21 | the held picture over black; 1250/1350/1400/1450/1499/1550 are byte-identical |
+| 1300 | (0,0,0) | 13.66 | still the bounce: the band is at rows 153–199 with indices 12–14 (the index plane differs from 1499's) |
+| 1590…1605 | (0,0,0) | 13.21 | held, no object |
+| 1600 (a different session) | (174,0,0) | 60.59 | held, no object, the DAC in a red phase |
+| 1650/1700/1750/1800 | (174,0,0) | 63.4/64.6/64.6/62.5 | the object over the red phase |
+| `out/glenz-map1`'s 1620/1700/1800 (Phase 3's session) | (105,81,109) | ~101 | the same picture over a purple phase |
+| `out/glenz-stride-probe`'s 1600 (Phase 3's session) | (146,174,0) | 100.27 | the same picture over a green phase |
+
+The phase is a property of the session's DAC at the read, not of the frame (D17), which is why
+the object is measured against each frame's own sky rather than against black.
+
+**The palette cross-check on `L_r`.** The loop's fade is `MAIN.C:544-551`
+(`frame>700`: `pal[a] = backpal[a]·(764−frame)/64`, black at 764) and the `backpal` rebuild is
+`:552-584` (`frame<790`, the entries rewritten from `frame>785`). With `L_r = 1562` those are
+at reference **2263…2326** and **2348**. `out/p7-stability` (frames 2250…2350 ten apart, main
+frames 688…788) spans both: its mean brightness falls **22.8, 27.0, 23.2, 23.4, 21.3, 18.1,
+17.3, 15.3, 13.6, 14.9, 13.2** across 2250…2350 — the fade's path, with the floor's own clear
+(`MAIN.C:552-556`, main frames 765–789) inside it; 2348 (main 786) is the rebuild, in the
+capture's last step. The filed 2300 is main frame 738, inside the fade: its sky is black and
+its floor colours are the dimmed `pal`, which is why the 2300 box's own sky is (0,0,0).
+
 ---
 
 ## 8. TUNNELI

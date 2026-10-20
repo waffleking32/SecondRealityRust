@@ -2307,3 +2307,113 @@ swappable cell costs one lock and one `Arc` clone per tick in the window loop; a
 implementation would split a drain across two players, which the seam test's pending-count
 and exact-sample assertions would catch. Neither touches a reference frame: no filed keyframe
 covers ESC or a windowed restart.
+
+## D36 — GLENZ's renderer lives in the binary, on linear 320-pixel-row buffers (2026-10-20)
+
+Decided: the part is `bins/secondreality/src/parts/glenz/` — `math.rs` (the fixed-point
+matrix/rotation/projection), `tables.rs` (`MATHSIN.INC`'s sin/cos), `poly.rs`
+(`ceasypolylist` and the `rolcol`/`rolused` allocator), `span.rs` (NEW.ASM's transparent
+compositor), `intro.rs` (the zoomer and the FC bounce), `mod.rs` (the `Glenz` part) — a module
+in the binary, D32's precedent, not a crate. It keeps the original's 64,000-byte `vram` and
+`bgpic` as private **linear 320-pixel-row** buffers (`GLENZ/MAIN.C:7-8`, `char *vram =
+0xa0000000L`; `NEW.ASM`'s `NE_X` and `yrowad` are row*320) and copies the visible rows into the
+engine surface once a tick. The original's plane masks and the shipped build's 92-byte CRTC
+plane row are memory-layout facts, not the displayed geometry: the picture is 320 pixels a row
+either way.
+
+**Evidence.** `reference-indices.md` §7.3's `frame_001499.idx` reproduces its RGB over all
+64,000 pixels (11,720 non-black in rows 154–199, 8 indices) with the 92-byte stride, and §7.6
+measures the same 320-pixel-row picture's object boxes (2300's 97–217 × 38–149 is
+reproduced exactly by a 320-row model). `reference-indices.md` §1.7 is the stride's own
+measurement. The port therefore never models the planes or the CRTC row: the buffers are
+linear and the surface copy is `surface[(row*width + x)] = vram[row*320 + x]`.
+
+**Cost if wrong.** A module move, not a behaviour change: the display model is one copy loop
+and the buffers' indexing. No filed frame can distinguish a plane-mask implementation from
+this one when both display 320 pixels a row; the 92-byte stride would only matter to a port
+that read VGA memory directly, which this one does not.
+
+## D37 — GLENZ's tick model is the source's phase machine, calibrated by the reset and `L_r` (2026-10-20)
+
+Decided: the part is a phase machine, one engine tick per `dis_waitb`/poll:
+
+- **WaitMusic**: poll `musplus`; leave while `< -19`; on the first tick it is not, call
+  `dis_setmframe(0)` and enter the zoomer (`GLENZ/MAIN.C:290-291`). Exit-aware.
+- **Zoomer**: 47 ticks of `zoomer2` (`GLENZ/ZOOMER.C:38-69`: `zy(n)=n(n+1)/8` capped at 260;
+  the top band through `zy`, the bottom through `125*zy/260`; the palette's `c` capped at 32;
+  the final clear and entry-0 black).
+- **ModeSet**: one tick (`memset(vram,0,65535)`, `mov ax,13h`, `testasm()`'s live path —
+  `INIT_320X200` and 80-byte rows, state only).
+- **Bounce**: 177 ticks (`MAIN.C:320-351`'s `ya`/`yy` recurrence; the final drawn band is
+  rows 153…199, `y1=153 y2=200`); the DAC writes of `:308-318` happen first.
+- **Wait300**: ticks until `getmframe() >= 300`; then the tmppal build and two `dis_waitb`
+  ticks (`MAIN.C:353-398`), the second taking the `bgpic` snapshot.
+- **Wait333**: ticks until `getmframe() >= 333`; then `memcpy(pal,backpal)`, `dis_partstart()`
+  and the third `dis_waitb` (`:400-404`).
+- **Main**: one frame a tick (`frame++` then the physics of `:419-591`, the drawing of
+  `:593-640`); the loop ends on `exit_requested`, `frame >= 7000`, or the exit cue
+  `-16 < musplus < 0` (`:411`), holding the screen.
+
+**Measured calibration.** `reference/music/second2b` (`music-clock.md` §2.2) reads the reset at
+**1111**, `getmframe()<300` first true at **1515**, `<333` at **1560**, and the main loop's
+first `dis_waitb` at 1562. The reference's first object pixels are at **1606** in two capture
+sessions, and the source physics' first drawn main-loop frame is **44** — an exact six-frame
+silhouette match (reference-indices.md §7.6) — so **`L_r = 1606 − 44 = 1562`**, main-loop frame
+f being the picture at `1562 + f`. The session spread is **zero** across the trace and three
+capture sessions. Block 1's GLENZ wait exits at **8521** (`second1d`), and the picture's first
+change is at **8522** (`out/p7-b1-collapse-dense`) — the sample/publish instant, one frame
+after the reset sample. The bounce's 177 is the source's own count (a C
+reproduction of `:320-351`; the drawn band converges to 153…199), not a fit.
+
+**The music gates** are the boundary wait (`musplus < -19`, `MAIN.C:290`) and the exit cue
+(`−16 < musplus < 0`, `:411`), both read from the published `zplus`/`row`
+(`musplus_from`). `musplus` is not `_np_zplus`: at the block-2 boundary (frame 576, `zplus` 0)
+it is −32, and the wait opens only when order 2 row 45 with `zplus` 1 gives −19.
+
+**Cost if wrong.** A one-tick error in any phase shifts the moving keyframes: the intro's
+absolute start moves, and the loop's frame counter is the palette's and the physics' clock.
+Task 7's comparison at 2300/3000/3400 and Task 5's tick-map tests are the arbiters; the reset
+and `L_r` above are the calibration against which a drift is visible as a whole number of
+frames, not a fitted offset.
+
+## D38 — The two shell seams: the block-1 restart row and the post-PANICEND cue wait (2026-10-20)
+
+Decided: the shell gains two seams, both narrow and both the source's.
+
+**1. The block-1 `MUSIC1@0` restart.** `MAIN/U2.ASM:813-818` fires for a run with `whattorun &
+2` and `& 1` (block 1), between BEGLOGO and GLENZ: `restartmus(1, 0, 48700)`. The port's row is
+`MUSIC_RESTART_AT: &[(&str, ModuleId, u8)] = &[("u2e", Music0, 18), ("glenz", Music1, 0)]`,
+installed only when the run's current player is not already `MUSIC1@0`
+(`Sequence::restart_music`'s equality check) — block 2 starts MUSIC1@0 at its boot
+(`MAIN/U2.ASM:766-775`) and must not reload it. The engine's restart keeps D34's four-frame
+waiting.
+
+**2. The post-PANICEND cue wait.** `MAIN/U2.ASM:826-849` (`@@zh5`/`@@zh4`) polls `musplus`:
+first while `>= 0`, then until `> 0`, then continues. The port installs a held `CueWait` part
+in place of the next plan part whenever the part that just retired is `panicend` and the plan
+has a next part (the pre-flight ruling's `cue_pending` flag, consumed once): it draws nothing,
+holds the surface, consumes one tick a call, and is exit-aware. A run whose plan ends at
+`panicend` enters the wait and then the hold, as the original does.
+
+**Measured.** The block-1 restart lies in **(8049, 8100)**: the pre-reload window reads MUSIC0
+at 8049 (`out/second1d-limit`) and the filed `second1d` opens at 8100 on MUSIC1 order 1 row 4;
+the wide `7800..8800` window refuses across the reload (`_np_ord reads -1 … the base 0x0051F0
+is not this segment's`, exit 2). The block-1 GLENZ wait exits at **8521** (`music-clock.md`
+§2.2), 106 rows after 8100. The cue wait's crossing is `second2`'s order 39 row 0 at **8823**
+with `zplus` 2, where `musplus` is the row (0); row 1 at **8827** is the first value `> 0`
+(`awk -F, '$1 >= 8820 && $1 <= 8835' reference/music/second2/trace.csv`).
+
+**One limit is carried into Task 6.** `second1d`'s first sample is 68 rows into MUSIC1, which
+at the module's rate puts the restarted play clock ~275 frames before 8100 — earlier than the
+part chain's boundary (BEGLOGO's held 900 screen runs through 8520 and its 172 ticks put the
+boundary near 8060). The trace cannot tell a seek that left the row from a play that began
+during the module load, and the reload hides the restart frame itself. The shell's restart
+should be implemented as the source says (seek to order 0 at the boundary); Task 6's chain
+tests pin the module, the order, the waiting and the boundary, and this interval is the
+trace's record rather than a fitted row for the port's player.
+
+**Cost if wrong.** The restart row is one table entry and one equality check; the cue wait is
+one private part and one install. A wrong guard reloads MUSIC1 in block 2 (audible as a
+restart at BEGLOGO→GLENZ), and a wrong cue phase ends PANICEND's screen early or late; the
+shell tests pin both (`the_block_one_run_restarts_music1_at_glenz`,
+`the_block_two_run_does_not_reload_at_glenz`, the cue wait's two phases).
