@@ -332,8 +332,9 @@ tens-of-frames window the part's start is known to move in between sessions (`re
 `--align <N>`, which reads the *rendered* side's frame indices `N` higher (or lower) when pairing
 them — the frames' own indices are not rewritten, the alignment is printed before the frames, and
 every reported offset is the net one. It exists because this part is not the only one a run cannot
-anchor: TUNNELI, CRED and ENDSCRL all begin after an unported predecessor or a music gate, so
-`shell::boot_anchor` is `None` for them and a run of any of them draws its own ticks from zero
+anchor: TUNNELI, CRED and ENDSCRL all begin mid-run — after a predecessor and, for some, a music
+gate — and their starts are known only as windows, so `shell::boot_anchor` is `None` for them and a
+run of any of them draws its own ticks from zero
 (`xtask/tests/compare.rs` pins the behaviour both ways: the same two captures are refused without the
 option and identical with it). The measurement below is that command's output, so it can be re-run:
 

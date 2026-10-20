@@ -1895,7 +1895,7 @@ the_moving_keyframes_record_the_registered_alignments_and_residuals` and
 `cargo test -p secondreality --bin secondreality
 glz_hidden_face_frees_the_visible_slot`.
 
-## A38 — GLENZ: block 1's wait starts 249 frames late, because the restart seeks MUSIC1 from order 0 (registered)
+## A38 — GLENZ: block 1's zoomer starts 249 frames after the reference's, because the restart seeks MUSIC1 from order 0 (registered)
 
 **Part:** GLENZ (`GLENZ/MAIN.C:290`) through the shell's block-1 restart
 (`MAIN/U2.ASM:813-818`), Phase 7.

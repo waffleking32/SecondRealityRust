@@ -95,9 +95,9 @@ check — it has no teardown and does not drain.
 it to the shell as well (its source polls, but the tick is drawn and the part retired either way);
 for a part that does not poll, the engine carries the flag and the *shell* retires the part at the
 end of the tick it was set in. **After PANICEND retires** (by its own `Finished`, not by ESC), the
-shell runs the original's cue wait (`MAIN/U2.ASM:826-849`): it holds the screen and polls
-`musplus`, waiting while it is `>= 0` and then while it is `<= 0`, and continues on the first
-`> 0`. The wait is exit-aware — an ESC already set when it would be installed skips it
+shell runs the original's cue wait (`MAIN/U2.ASM:826-853`, the wait at `:833-853`): it holds the
+screen and polls `musplus`, waiting while it is `>= 0` and then while it is `<= 0`, and continues
+on the first `> 0`. The wait is exit-aware — an ESC already set when it would be installed skips it
 (`@@skip5`) — and a plan that ends at PANICEND enters the wait and then the hold. Once the run
 has nothing left to play, ESC closes the window, where
 the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing

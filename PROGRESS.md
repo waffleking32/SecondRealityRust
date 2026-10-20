@@ -23,7 +23,8 @@ Phase status board. **Read this first if you are resuming work.**
 ## Where to pick up
 
 **Phase 7 (GLENZ) is complete — untagged, awaiting the whole-branch final review** — on
-`phase-7-glens`, 26 commits from `4223266` (the Phase 6 close-out). Its exit criterion is spec
+`phase-7-glens`: 26 commits from `4223266` (the Phase 6 close-out) before this close-out
+record. Its exit criterion is spec
 §10's "GLENZ verified", and it is met (evidence below). Its plan is `docs/plans/07-glens.md`,
 its note is `docs/fidelity/glenz.md` (with `reference-indices.md` §7.6–§7.7 for the
 measurements), and its decisions are **D36** (the renderer's home, the linear buffers and the
@@ -2649,10 +2650,12 @@ shipped y≈252, not exercised, not registered); the clear-before-paint order; t
 wait continues into the zoomer, the bounce and both waits see the flag, no teardown); the
 copper callbacks not registered as callbacks; the mode-set tick's one-frame 320×400
 composition; the standalone-entry substitution of `--part glenz`; the block-2 wait's +6 exit;
-and the surface-*N*/`pal`-after-*N−1* pairing. The traces' own recorded limits — the (8,049,
-8,100) restart interval, SECOND 2's 401.1-by-rows against 408-by-`zframe` boot anchor, and
-`second1d`'s back-extrapolated 7,815 sr-audio anchor — are carried in A38 and
-`music-clock.md` §2.2; no constant was fitted to any of them.
+and the surface-*N*/`pal`-after-*N−1* pairing. The traces' own limits are recorded where they
+live: the (8,049, 8,100) restart interval in **A38** and `music-clock.md` §2.2;
+SECOND 2's 401.1-by-rows against 408-by-`zframe` boot anchor in `music-clock.md` §2; and
+`second1d`'s back-extrapolated **7,815** sr-audio anchor in
+`crates/sr-audio/tests/trace.rs:122-131`, exercised by
+`cargo test -p sr-audio --test trace`. No constant was fitted to any of them.
 
 **The traces and the reference tree.** `second2b` (frames 380..3,800) and `second1d`
 (8,100..8,800) join the filed set. The dump and comparison commands are `glenz.md` §11's:

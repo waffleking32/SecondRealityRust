@@ -433,15 +433,15 @@ must — and does — keep the player and its clock.
   the reset to frame 44 is one tick shorter than the reference's, so
   `L_p − L_r = 5` and Task 7's plan alignment is `K + 5` (§11.1, A36).
 
-**The post-PANICEND cue wait.** `MAIN/U2.ASM:826-853`'s `@@zh5`/`@@zh4`,
-after `exe7` (PANICEND) returns: one `dis_waitb` and one `dis_exit` a poll,
-then `dis_musplus` — wait while it is `>= 0`, then, after the first negative,
-while it is `<= 0`, and continue on the first `> 0`. The port installs a
-private `CueWait` part in place of the next plan part whenever
-`PartStatus::Finished` retires `panicend` (not when the exit flag retires it);
-it draws nothing, holds PANICEND's surface and picture, consumes one tick a
-call and is exit-aware. A plan that ends at `panicend` enters the wait and
-then the hold.
+**The post-PANICEND cue wait.** `MAIN/U2.ASM:826-853`, the wait at `:833-853`:
+`@@zh5`/`@@zh4`, entered after `exe7` (PANICEND) returns. One `dis_waitb` and
+one `dis_exit` a poll, then `dis_musplus` — wait while it is `>= 0`, then,
+after the first negative, while it is `<= 0`, and continue on the first `> 0`.
+The port installs a private `CueWait` part in place of the next plan part
+whenever `PartStatus::Finished` retires `panicend` (not when the exit flag
+retires it); it draws nothing, holds PANICEND's surface and picture, consumes
+one tick a call and is exit-aware. A plan that ends at `panicend` enters the
+wait and then the hold.
 
 - **The calibration** (`reference/music/second2`, D38): PANICEND retires at
   boot **8903** with `musplus` 19 (`zplus` 2, row 19) — non-negative, so the

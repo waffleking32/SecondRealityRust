@@ -920,8 +920,8 @@ impl Part for Holding {
 }
 
 /// The shell's wait between PANICEND and the next part of the plan —
-/// `MAIN/U2.ASM:826-853`'s `@@zh5`/`@@zh4`, entered after `exe7` (PANICEND)
-/// returns and skipped only by Ctrl or the exit flag:
+/// `MAIN/U2.ASM:826-853`, the wait at `:833-853`: `@@zh5`/`@@zh4`, entered after
+/// `exe7` (PANICEND) returns and skipped only by Ctrl or the exit flag:
 ///
 /// ```text
 /// @@zh5: mov bx,1

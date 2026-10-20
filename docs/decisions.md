@@ -2438,12 +2438,12 @@ installed only when the run's current player is not already `MUSIC1@0`
 (`MAIN/U2.ASM:766-775`) and must not reload it. The engine's restart keeps D34's four-frame
 waiting.
 
-**2. The post-PANICEND cue wait.** `MAIN/U2.ASM:826-849` (`@@zh5`/`@@zh4`) polls `musplus`:
-first while `>= 0`, then until `> 0`, then continues. The port installs a held `CueWait` part
-in place of the next plan part whenever the part that just retired is `panicend` and the plan
-has a next part (the pre-flight ruling's `cue_pending` flag, consumed once): it draws nothing,
-holds the surface, consumes one tick a call, and is exit-aware. A run whose plan ends at
-`panicend` enters the wait and then the hold, as the original does.
+**2. The post-PANICEND cue wait.** `MAIN/U2.ASM:826-853`, the wait at `:833-853`
+(`@@zh5`/`@@zh4`), polls `musplus`: first while `>= 0`, then until `> 0`, then continues. The
+port installs a held `CueWait` part in place of the next plan part whenever the part that just
+retired is `panicend` (the pre-flight ruling's `cue_pending` flag, consumed once): it draws
+nothing, holds the surface, consumes one tick a call, and is exit-aware. A run whose plan ends
+at `panicend` enters the wait and then the hold, as the original does.
 
 **Measured.** The block-1 restart lies in **(8049, 8100)**: the pre-reload window reads MUSIC0
 at 8049 (`out/second1d-limit`) and the filed `second1d` opens at 8100 on MUSIC1 order 1 row 4;
