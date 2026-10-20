@@ -119,8 +119,9 @@ impl Compositor {
 
     /// `__newgroup(1)` (`NEW.ASM:308-418`): add one polygon's edges.
     ///
-    /// The polygon's stored pairs are its consecutive vertices with the
-    /// closing pair last, which is what `ceasypolylist` leaves in `polylist`.
+    /// `ceasypolylist` stores a vertex pair per point and drops a closing
+    /// duplicate; `add` supplies the closing pair itself with
+    /// `(index + 1) % len`.
     pub fn add(&mut self, poly: &Poly) {
         let points = &poly.points;
         if points.is_empty() {
@@ -411,6 +412,61 @@ mod tests {
         assert_eq!(pixel(&pixels, 19, 9), 0x20);
     }
 
+    /// The slope's numerator is the **16-bit wrapped** x difference shifted
+    /// left 16 — 32767 → −32768 is +1, not −65535 — and `idiv` truncates a
+    /// negative non-exact quotient toward zero.
+    #[test]
+    fn the_slope_wraps_the_x_difference_and_truncates_toward_zero() {
+        // The upper x is 32767, the lower −32768: the word difference wraps
+        // to +1, so dx = (1 << 16) / 3 = 21845 (truncated).
+        let mut compositor = Compositor::new();
+        compositor.add(&make_poly(
+            0x4003,
+            &[(32767, 0), (-32768, 3), (-32768, 0)],
+        ));
+        assert_eq!(compositor.edges.len(), 2);
+        assert_eq!(compositor.edges[0].x, 32767 << 16);
+        assert_eq!(compositor.edges[0].y1, 0);
+        assert_eq!(compositor.edges[0].y2, 3);
+        assert_eq!(compositor.edges[0].dx, 65_536 / 3);
+        // The other edge is the vertical x = −32768, which clamps to 1.
+        assert_eq!(compositor.edges[1].dx, 0);
+
+        let bgpic = flat(0x10);
+        let mut pixels = bgpic.clone();
+        compositor.paint(&bgpic, &mut pixels);
+        for row in 0..3 {
+            assert_eq!(pixel(&pixels, 0, row), 0x10, "row {row}");
+            assert_eq!(pixel(&pixels, 1, row), 0x13, "row {row}");
+            assert_eq!(pixel(&pixels, 318, row), 0x13, "row {row}");
+            assert_eq!(pixel(&pixels, 319, row), 0x10, "row {row}");
+        }
+
+        // A negative, non-exact slope: (10 − 331) << 16 / 7 =
+        // −21_037_056 / 7 = −3_005_293 (truncated), not −3_005_294
+        // (floored).
+        let mut compositor = Compositor::new();
+        compositor.add(&make_poly(0x4003, &[(331, 0), (10, 7), (10, 0)]));
+        assert_eq!(compositor.edges.len(), 2);
+        assert_eq!(compositor.edges[0].x, 331 << 16);
+        assert_eq!(compositor.edges[0].dx, -3_005_293);
+        assert_eq!(compositor.edges[1].dx, 0);
+
+        let mut pixels = bgpic.clone();
+        compositor.paint(&bgpic, &mut pixels);
+        // The row positions from the truncated 16.16 step: 331 (clamped to
+        // 319), then 285, 239, 193, 147, 101, 55.
+        let right_edge = [319, 285, 239, 193, 147, 101, 55];
+        for (row, &right) in right_edge.iter().enumerate() {
+            assert_eq!(pixel(&pixels, 9, row), 0x10, "row {row}");
+            assert_eq!(pixel(&pixels, 10, row), 0x13, "row {row}");
+            assert_eq!(pixel(&pixels, right - 1, row), 0x13, "row {row}");
+            assert_eq!(pixel(&pixels, right, row), 0x10, "row {row}");
+        }
+        // y2 = 7 ends the edge at row 6.
+        assert!((0..320).all(|x| pixel(&pixels, x, 7) == 0x10));
+    }
+
     /// Positions are global, not row-local: a boundary clamped to 319 at the
     /// end of one row and the next row's boundary at x = 282 are 283 pixels
     /// apart in the linear buffer, and the fill between them is background.
@@ -566,9 +622,11 @@ mod tests {
 
     /// `ng_pass2` (`NEW.ASM:174-288`): the per-row insertion-sorted boundary
     /// list, with the "same x" XOR quirk, the global `row*320 + x` positions
-    /// and the `(63999,0)` / `(-1,0)` sentinels. Returns the new list.
-    fn source_pass2(edges: &mut [SourceEdge]) -> Vec<(u16, u16)> {
+    /// and the `(63999,0)` / `(-1,0)` sentinels. Returns the new list and the
+    /// number of times the literal "same x" compare fired.
+    fn source_pass2(edges: &mut [SourceEdge]) -> (Vec<(u16, u16)>, usize) {
         let mut list: Vec<(u16, u16)> = Vec::new();
+        let mut same_x_hits = 0usize;
         for row in 0..ROWS as i32 {
             // Edges added this row (y1 <= row) that have not reached y2.
             let mut active: Vec<usize> = (0..edges.len())
@@ -590,7 +648,9 @@ mod tests {
                 if previous_colour == ax as u16 {
                     // `@@16`/`@@14`'s "same x pos": XOR the colour word
                     // into the previous boundary instead of storing a new
-                    // one.
+                    // one. GLENZ's colour words never equal a column, so
+                    // this must stay at zero over the corpus.
+                    same_x_hits += 1;
                     list.last_mut().unwrap().1 ^= edge.colour;
                 } else {
                     list.push((row as u16 * 320 + ax as u16, edge.colour));
@@ -601,7 +661,7 @@ mod tests {
         }
         list.push((63_999, 0));
         list.push((u16::MAX, 0));
-        list
+        (list, same_x_hits)
     }
 
     /// `ng_pass3` (`NEW.ASM:66-172`): walk the previous frame's double-
@@ -703,12 +763,12 @@ mod tests {
             }
         }
 
-        fn frame(&mut self, bgpic: &[u8], polys: &[Poly]) -> usize {
+        fn frame(&mut self, bgpic: &[u8], polys: &[Poly]) -> (usize, usize) {
             let mut edges = source_edges(polys);
-            let current = source_pass2(&mut edges);
+            let (current, same_x_hits) = source_pass2(&mut edges);
             let painted = source_pass3(&self.previous, &current, bgpic, &mut self.screen);
             self.previous = current;
-            painted
+            (painted, same_x_hits)
         }
     }
 
@@ -810,18 +870,25 @@ mod tests {
 
         let mut compositor = Compositor::new();
         let mut painted = Vec::with_capacity(frames.len());
+        let mut same_x_hits = 0usize;
         for (index, polys) in frames.iter().enumerate() {
             compositor.clear();
             for poly in polys {
                 compositor.add(poly);
             }
             compositor.paint(&bgpic, &mut repaint);
-            painted.push(model.frame(&bgpic, polys));
+            let (painted_here, hits) = model.frame(&bgpic, polys);
+            painted.push(painted_here);
+            same_x_hits += hits;
             assert_eq!(
                 repaint, model.screen,
                 "the repaint and the two-list walk differ at frame {index}"
             );
         }
+        // The literal "same x" compare reads the previous boundary's colour
+        // word; the equivalence is only valid while the corpus stays in
+        // GLENZ's 0x40xx words, where it never equals a clamped column.
+        assert_eq!(same_x_hits, 0, "the corpus left GLENZ's colour domain");
 
         // The held frames repaint nothing: the two-list walk leaves the
         // screen alone, and the repaint rewrites the same bytes.
