@@ -359,3 +359,66 @@ The reference decides each; nothing here was fitted.
 - The standalone-entry substitution of §2: a run that starts at GLENZ opens
   over the shell's surface rather than BEGLOGO's last frame; the view and the
   tick map are the same.
+
+## 10. The two shell seams
+
+The part is reached through the shell, and two seams are the shell's, not
+GLENZ's: block 1's mid-run `MUSIC1@0` restart and the post-PANICEND cue wait.
+D38 has the decision; this section records what the port does and measures.
+
+**The block-1 restart.** `MAIN/U2.ASM:813-818` sits between BEGLOGO (`exe3`)
+and GLENZ (`exe4`): `test whattorun,1 / jz @@skip2b` inside the `whattorun & 2`
+region — both bits, so the site fires for `SECOND 1`'s run alone — and
+`restartmus(ax=1, bx=0, cx=48700)`. The port's row is
+`MUSIC_RESTART_AT = [("u2e", Music0, 18), ("glenz", Music1, 0)]`; a plan that
+reaches GLENZ under any other module installs a fresh player seeked to MUSIC1
+order 0 at the boundary, with `MusicStart::restart`'s four-tick wait. Block 2
+skips the site (`whattorun & 1` clear) and its initial start already sought
+MUSIC1 order 0 (`:772-775`), so `Sequence::restart_music`'s equality check
+must — and does — keep the player and its clock.
+
+- **Block 2's boundary is 576.** BEGLOGO is 172 ticks from the boot's 404
+  (32 vertical blanks, the mode-set tick, 129 fade steps, the closing write),
+  and GLENZ's first tick draws 576 under the entry player:
+  `music.start_frame` is still **408**, not a restart at 576
+  (`a_block_two_run_reaches_glenz_without_reloading_music_one`,
+  `the_block_two_run_does_not_reload_at_glenz`).
+- **Block 1's boundary is 8057.** PAM retires on 7,884 in the port's own
+  chain (its part started at 7,508, not the reference's 7,710), BEGLOGO draws
+  7,885..8,056, and the restart installs MUSIC1@0 at 8,057 with `waiting == 4`
+  (`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering`,
+  `the_block_one_run_restarts_music1_at_glenz`). D38's measured restart
+  interval is (8049, 8100); 8,057 is inside it.
+- **The block-1 wait is measured, not fitted.** The seek starts at 0:0; the
+  wait (`MAIN.C:290`, `musplus < -19`) ends on the first published order 2
+  row 45 (`musplus` −19) — the same position the reference's own exit answers
+  (8,521 is `2:45` in `second1d`) — at **8,770**, 713 ticks after the boundary
+  and **249 frames after the reference's 8,521**. The difference is the
+  source-faithful seek's: the reference's player had already played a stretch
+  of MUSIC1 when its chain reached GLENZ. It is recorded for Task 7/8, not
+  closed by a fitted start.
+- **The block-2 wait against `second2b`.** The reference exits at **1,111**
+  (`2:45`); the port's position is `2:44` through 1,116 and `2:45` at
+  **1,117**, six ticks later — a session-phase difference of A12's class, and
+  larger than A12's measured three-frame worst, so it is registered rather than
+  absorbed. Task 7 aligns the moving keyframes by this measured offset
+  (`L_p − L_r = 6`), which the same chain test records.
+
+**The post-PANICEND cue wait.** `MAIN/U2.ASM:826-853`'s `@@zh5`/`@@zh4`,
+after `exe7` (PANICEND) returns: one `dis_waitb` and one `dis_exit` a poll,
+then `dis_musplus` — wait while it is `>= 0`, then, after the first negative,
+while it is `<= 0`, and continue on the first `> 0`. The port installs a
+private `CueWait` part in place of the next plan part whenever
+`PartStatus::Finished` retires `panicend` (not when the exit flag retires it);
+it draws nothing, holds PANICEND's surface and picture, consumes one tick a
+call and is exit-aware. A plan that ends at `panicend` enters the wait and
+then the hold.
+
+- **The calibration** (`reference/music/second2`, D38): PANICEND retires at
+  boot **8903** with `musplus` 19 (`zplus` 2, row 19) — non-negative, so the
+  first phase keeps waiting rather than ending at the part's retirement;
+  **8953** is the first negative (row 32 → −32); **9219** is the first
+  positive (row 1 → 1), the exit. The phase rules are pinned tick by tick in
+  `the_post_panicend_wait_ends_on_a_positive_musplus`, the install and the
+  held screen in `the_post_panicend_wait_is_between_the_part_and_the_next_one`
+  and `the_cue_wait_holds_the_screen`.

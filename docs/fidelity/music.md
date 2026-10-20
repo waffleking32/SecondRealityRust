@@ -1799,9 +1799,10 @@ which waits four engine ticks (D34; `MUSIC_RESTART_AT`, `MusicStart::restart`), 
 chain test in `tests/shell.rs` asserts the boundary, the first published row and the positions
 against `second3e`. `--block 4` takes the same call as its entry-point install. The
 one-row-per-run model now has that restart seam; `--block 5`'s mask has bit 3 clear, so `:880`
-is skipped for it. `--block 1` runs ALKU → U2A → PAM → BEGLOGO and stops at GLENZ, the first
-part the port lacks, so it does not reach `:813-818` (MUSIC1@0, which sits between `exe3` and
-`exe4`); `--block 2` stops at GLENZ before both sites. The table's rows and D27 remain the
+is skipped for it. **Phase 7 gives the port the other site too**: `--block 1` now runs
+ALKU → … → GLENZ → … → ENDSCRL and fires `:813-818`'s `restartmus(1, 0)` between BEGLOGO and
+GLENZ (D38), while `--block 2` skips that site — its `whattorun & 1` is clear — and is already
+playing the MUSIC1@0 the site would install. The table's rows and D27 remain the
 sites' record, and
 `one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which` pins it, site by site:
 `:880-885`'s guard has no `unless` bit and all four of those masks carry bit 3; `:856-863`'s and

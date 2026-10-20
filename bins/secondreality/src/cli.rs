@@ -99,8 +99,9 @@ impl Cli {
                     let name = value(&mut args, "--part")?;
                     // The shell decides which names exist, because it is the
                     // only place that knows which of the demo's parts are the
-                    // port's: `--part glenz` is a task someone can pick up,
-                    // `--part glenzz` is a typo, and the two say so.
+                    // port's: a name the demo has and the port has not reached
+                    // is a task someone can pick up, and a name the demo never
+                    // had is a typo; the two used to say so.
                     cli.part = Some(
                         shell::resolve(&name)
                             .map_err(|e| format!("{e}; ported parts: {}", known_parts()))?,
@@ -376,10 +377,13 @@ mod tests {
     }
 
     #[test]
-    fn a_part_the_port_has_not_reached_is_rejected_by_name() {
-        // Not "unknown part": the demo has GLENZ, the port does not yet.
-        let message = parse(&["--part", "glenz"]).unwrap_err();
-        assert!(message.contains("glenz is not ported yet"), "{message}");
+    fn a_part_the_port_has_is_accepted_by_name() {
+        // GLENZ was the last name the demo's order had and the port had not;
+        // Task 6 gives it its music row, so `--part glenz` parses. (The
+        // unknown-name side is `an_unknown_part_is_rejected`.)
+        let cli = parse(&["--part", "glenz"]).unwrap();
+        assert_eq!(cli.part, Some("glenz"));
+        assert_eq!(cli.part_name(), "glenz");
     }
 
     #[test]
@@ -456,8 +460,9 @@ mod tests {
             "testcard",
         ])
         .unwrap_err();
-        // The contradiction, not the block's own state: the block's first part
-        // is not ported yet either, and the two are different problems.
+        // The contradiction, not the block's own state: `--part` and `--block`
+        // name two different runs, which is a different problem from either
+        // one's parts.
         assert!(message.contains("not both"), "{message}");
     }
 

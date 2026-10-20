@@ -155,17 +155,51 @@ fn a_part_anchored_at_a_boot_index_refuses_a_dump_before_it() {
 }
 
 #[test]
-fn a_part_the_port_has_not_reached_is_a_command_line_error() {
-    // The demo's own parts are named in the refusal: "glenz is not ported yet"
-    // is a different answer from "glenzz is not a part", and a script can act
-    // on the first.
-    let out = run(&["--headless", "--part", "glenz", "--dump-dir", "/tmp/x", "--frames", "1"]);
-    assert_eq!(out.status.code(), Some(USAGE));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("glenz is not ported yet"),
+fn a_part_the_port_has_runs_from_its_own_numbering() {
+    // GLENZ was the last part of the demo's order the port had not reached; Task
+    // 6 gives it its MUSIC1 row, so `--part glenz` is a run. It has no measured
+    // boot anchor, so its frames are its own — the manifest says so — and its
+    // first frames are inside the part's music wait (`MAIN.C:290`: the picture
+    // holds while `musplus < -19`). Two ticks there are enough for the smoke
+    // test: the run starts, the row installs MUSIC1 at order 0, and the dump
+    // numbers itself from zero.
+    let dir = scratch("glenz-part");
+    let out = run(&[
+        "--headless",
+        "--part",
+        "glenz",
+        "--dump-frames",
+        "0,1",
+        "--dump-dir",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(OK),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    let manifest = manifest(&dir);
+    assert_eq!(manifest["part"], "glenz");
+    assert_eq!(manifest["index_origin"], "part");
+    assert_eq!(manifest["anchor"], serde_json::Value::Null);
+    assert_eq!(manifest["music"]["module"], "MUSIC1");
+    assert_eq!(manifest["music"]["start_order"], 0);
+    assert_eq!(manifest["music"]["start_frame"], 0, "the run's own numbering");
+    let frames = manifest["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 2, "both asked-for frames were dumped");
+    for (frame, index) in frames.iter().zip([0u32, 1]) {
+        assert_eq!(frame["index"], index);
+        assert_eq!(frame["part"], "glenz");
+        assert_eq!(frame["width"], 320);
+        assert_eq!(frame["height"], 400, "the inherited Mode X screen, waiting on the music");
+        assert!(
+            dir.join(frame["idx"].as_str().unwrap()).is_file(),
+            "frame {index} wrote the .idx it names"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // --- the run's music ---------------------------------------------------------
@@ -360,14 +394,26 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // index — including at the gate frame 6,988 and at PAM's measured first
     // drawn frame 7,710 — and a part boundary that moves is recorded as
     // measured, not absorbed into an offset.
-    let frames = "900,6007,6008,6500,6988,7300,7507,7508,7618,7709,7710,7712";
+    // The first twelve frames are the PAM stretch Task 6 inherits; the last
+    // eleven cross PAM's end into BEGLOGO, BEGLOGO's 172 ticks into GLENZ and
+    // GLENZ's music wait to the first zoomer body. 8,766..8,771 is the
+    // measured hold→zoom transition (the last four are the held picture).
+    let frames = "900,6007,6008,6500,6988,7300,7507,7508,7618,7709,7710,7712,\
+                  7884,7885,8055,8056,8057,8766,8767,8768,8769,8770,8771";
     let (dir, manifest) = block_dump("block1", "1", frames);
     assert_eq!(manifest["part"], "alku");
     assert_eq!(manifest["index_origin"], "boot");
     assert_eq!(manifest["anchor"], 404);
-    assert_eq!(manifest["music"]["module"], "MUSIC0");
+    // **The manifest's music is the player last installed**, and this run
+    // restarts it: the entry install was block 1's initial `_zplaysong(0)` —
+    // MUSIC0 at order 0 from 400, pre-polled to the run's 404 — and the
+    // `MAIN/U2.ASM:813-818` site replaces it before GLENZ with MUSIC1 at order
+    // 0, seeked at the boundary 8,057. A block-2 run's manifest names the same
+    // module and order at its entry install instead; see
+    // `a_block_two_run_reaches_glenz_without_reloading_music_one`.
+    assert_eq!(manifest["music"]["module"], "MUSIC1");
     assert_eq!(manifest["music"]["start_order"], 0);
-    assert_eq!(manifest["music"]["start_frame"], 404);
+    assert_eq!(manifest["music"]["start_frame"], 8_057);
 
     let expected: &[(u32, &str, u16, u16)] = &[
         (900, "alku", 320, 400),
@@ -382,6 +428,22 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
         (7709, "pam", 320, 200),
         (7710, "pam", 320, 200),
         (7712, "pam", 320, 200),
+        // PAM's last frame, and BEGLOGO's first: PAM's 45 four-tick steps end
+        // the part on 7,884.
+        (7884, "pam", 320, 200),
+        (7885, "beglogo", 320, 400),
+        // BEGLOGO's 172 ticks from 7,885: last frame 8,056, and GLENZ's first
+        // tick on 8,057 under the `:813-818` restart's fresh player.
+        (8055, "beglogo", 320, 400),
+        (8056, "beglogo", 320, 400),
+        (8057, "glenz", 320, 400),
+        // The wait's hold, and the first zoomer body at 8,770 (below).
+        (8766, "glenz", 320, 400),
+        (8767, "glenz", 320, 400),
+        (8768, "glenz", 320, 400),
+        (8769, "glenz", 320, 400),
+        (8770, "glenz", 320, 400),
+        (8771, "glenz", 320, 400),
     ];
     let dumped = manifest["frames"].as_array().unwrap();
     assert_eq!(dumped.len(), expected.len(), "every asked-for frame was dumped");
@@ -399,7 +461,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // reference holds in `second1b` as 12:55 even though the port's U2A has
     // already retired at its stream's end; 7,710 is PAM's measured first drawn
     // frame (`reference-indices.md` §6.1, §6.4).
-    for index in [900u32, 6008, 6988, 7508, 7618, 7710] {
+    for index in [900u32, 6008, 6988, 7508, 7618, 7710, 7884, 7885] {
         let (order, row) = block1_trace_position(index);
         assert_eq!(
             frame_position(dumped, index),
@@ -410,10 +472,124 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     assert_eq!(block1_trace_position(6_988), (11, 47), "U2A's first gate");
     assert_eq!(block1_trace_position(7_618), (12, 55), "U2A's second gate");
 
+    // **The GLENZ boundary's music, measured** (Task 6 Step 5; D38).
+    //
+    // The source-faithful restart seeks MUSIC1 to order 0 row 0 at 8,057. The
+    // part's wait is `while (dis_musplus() < -19)` (`GLENZ/MAIN.C:290`), and
+    // `musplus` is −19 at order 2 row 45 — the very position the reference's
+    // own wait exits on (8,521 is `2:45` in `second1d`). The port's published
+    // position reaches it at **8,770**, whose frame is the first that differs
+    // from the held picture: the zoomer's first body. That is 713 ticks after
+    // the boundary, and **249 frames after the reference's measured 8,521**.
+    //
+    // The difference is the source-faithful seek's and is recorded, not fitted:
+    // the reference's player had already played a stretch of MUSIC1 when its
+    // part chain reached GLENZ, while the port's starts at 0:0 at the boundary.
+    // `docs/fidelity/glenz.md` §10 and D38 name it for Task 7/8.
+    let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
+    let hold = rgb(8_057);
+    for index in [8_766u32, 8_767, 8_768, 8_769] {
+        assert_eq!(
+            rgb(index),
+            hold,
+            "frame {index} still holds BEGLOGO's last picture"
+        );
+    }
+    assert_ne!(rgb(8_770), hold, "the zoomer's first body draws over it");
+    assert_eq!(frame_position(dumped, 8_769), "2:44", "the wait's last holding tick");
+    assert_eq!(frame_position(dumped, 8_770), "2:45", "musplus −19: the wait's exit");
+    // The reference's own exit, read from the filed trace, publishes the same
+    // position the port's 8,770 answers: the wait's condition is the source's.
+    assert_eq!(
+        trace_position("second1d", 8_521),
+        (2, 45),
+        "the reference's measured block-1 wait exit"
+    );
+    let zoomer_start = 8_770u32;
+    assert_eq!(
+        zoomer_start - 8_057,
+        713,
+        "the port's WaitMusic: the boundary to its first zoomer body"
+    );
+    assert_eq!(
+        zoomer_start - 8_521,
+        249,
+        "the measured difference from the reference's exit (D38's assigned consequence)"
+    );
+
     // The dump names the run's numbering and wrote the files it claims.
     assert!(dir.join("alku_000900.idx").is_file(), "the dump wrote the frame it named");
     assert!(dir.join("alku_000900.rgb").is_file());
     assert!(dir.join("pam_007710.rgb").is_file());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_block_two_run_reaches_glenz_without_reloading_music_one() {
+    // `SECOND 2`'s mask is `0x1e`: BEGLOGO first (`MAIN/U2.ASM:801-811`), then
+    // GLENZ (`:812-815`). BEGLOGO is 172 ticks from the boot's 404 — 32 vertical
+    // blanks, the mode set's tick, 129 fade steps and the closing write at
+    // `BEG/BEG.C:86` — so its last frame is 575 and GLENZ's first is **576**.
+    //
+    // Block 2's `whattorun & 1` is **clear**, so `:813-814` skips the restart the
+    // block-1 run takes; its initial start already sought MUSIC1 to order 0
+    // (`:772-775`). The manifest proves the equality check kept the player: the
+    // music is still the entry install at 408, not a reload at 576.
+    let frames = "574,575,576,577,1100,1116,1117";
+    let (dir, manifest) = block_dump("block2-glens", "2", frames);
+    assert_eq!(manifest["part"], "beglogo");
+    assert_eq!(manifest["index_origin"], "boot");
+    assert_eq!(manifest["anchor"], 404);
+    assert_eq!(manifest["music"]["module"], "MUSIC1");
+    assert_eq!(manifest["music"]["start_order"], 0);
+    assert_eq!(
+        manifest["music"]["start_frame"],
+        408,
+        "the initial start's clock, four ticks after the boot's 404 — not a restart at 576"
+    );
+
+    let expected: &[(u32, &str, u16, u16)] = &[
+        // BEGLOGO's last two frames.
+        (574, "beglogo", 320, 400),
+        (575, "beglogo", 320, 400),
+        // GLENZ's first ticks: the part's `init` installs the 320×400 view the
+        // zoomer closes over (BEGLOGO's own, inherited and re-set), and the
+        // music wait holds the picture until the zoomer's first body.
+        (576, "glenz", 320, 400),
+        (577, "glenz", 320, 400),
+        (1100, "glenz", 320, 400),
+        (1116, "glenz", 320, 400),
+        (1117, "glenz", 320, 400),
+    ];
+    let dumped = manifest["frames"].as_array().unwrap();
+    assert_eq!(dumped.len(), expected.len(), "every asked-for frame was dumped");
+    for (frame, (index, part, width, height)) in dumped.iter().zip(expected) {
+        assert_eq!(frame["index"], *index);
+        assert_eq!(frame["part"], *part, "chain frame {index}");
+        assert_eq!(frame["width"], *width, "chain frame {index}'s width");
+        assert_eq!(frame["height"], *height, "chain frame {index}'s height");
+    }
+
+    // **The wait's measured exit, recorded for Task 7.** The reference's
+    // `second2b` holds order 2 row 44 at 1,110 and exits at 1,111 (`2:45`, the
+    // `musplus` −19 the wait ends on); the port's position is `2:44` through
+    // 1,116 and `2:45` at **1,117**, the first frame whose picture differs from
+    // the hold. The six-tick difference is a session-phase difference of A12's
+    // class — larger than A12's measured three-frame worst, so Task 7 registers
+    // it rather than absorbing it, and aligns GLENZ's moving keyframes by this
+    // measured offset (`L_p − L_r`), never by a fitted one.
+    let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
+    let hold = rgb(576);
+    assert_eq!(rgb(1_116), hold, "1,116 still holds the picture");
+    assert_ne!(rgb(1_117), hold, "the zoomer's first body draws at 1,117");
+    assert_eq!(frame_position(dumped, 1_116), "2:44");
+    assert_eq!(frame_position(dumped, 1_117), "2:45", "the wait's exit condition");
+    assert_eq!(
+        1_117 - 1_111,
+        6,
+        "the measured difference from the reference's block-2 wait exit"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

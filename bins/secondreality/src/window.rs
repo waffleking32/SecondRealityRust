@@ -446,8 +446,11 @@ mod tests {
             // The other anchored block entry, retiring at once, so a run of it
             // reaches the hold.
             "endlogo" => Some(Box::new(Stub { retires: Some(0) })),
-            // A part the port has not written.
-            "glenz" => None,
+            // A demo part this stub declines, which is what a part the port has
+            // not written looks like to `Sequence`: the run holds and names it.
+            // (Every part of the demo's order is registered now, so the hold
+            // path is reached through a source that does not build one.)
+            "techno" => None,
             _ => Some(Box::new(Stub { retires: None })),
         }
     }
@@ -562,7 +565,7 @@ mod tests {
         // "get me out", and a window that consumed it would need a third press
         // to close. It waits instead, and acts as soon as there is nothing left
         // to play.
-        let mut run = run_of(vec!["endlogo", "glenz"]);
+        let mut run = run_of(vec!["endlogo", "techno"]);
         let mut escape = EscapeKey::default();
 
         run.tick();
@@ -571,7 +574,7 @@ mod tests {
         assert!(!escape.apply(&mut run), "nothing to ask, and somewhere to go: the press waits");
 
         run.tick();
-        assert!(run.holding(), "the next part is one the port has not written");
+        assert!(run.holding(), "the next part is one this run's source does not build");
         assert!(escape.apply(&mut run), "and now the press is the way out");
     }
 
@@ -682,17 +685,19 @@ mod tests {
 
     #[test]
     fn a_run_that_stopped_says_so_and_names_the_part_that_holds_the_screen() {
-        // `SECOND 2` runs BEGLOGO and then GLENZ, which the port has not
-        // written: the run holds BEGLOGO's screen rather than ending silently,
-        // and the status line is where the reason is. The part it names is the
-        // one whose picture is up — not the one the run could not reach.
-        let mut run = run_of(vec!["endlogo", "glenz"]);
+        // A plan whose next part the run's source does not build: the run holds
+        // the screen it has rather than ending silently, and the status line is
+        // where the reason is. The part it names is the one whose picture is up
+        // — not the one the run could not reach. (Every part of the demo's
+        // order is registered now, so this stub declines TECHNO to reach the
+        // path a not-yet-written part used to reach.)
+        let mut run = run_of(vec!["endlogo", "techno"]);
         run_out(&mut run, 4);
         assert_eq!(
             status_line(&run, Some('2')),
-            "Second Reality — block 2 — endlogo — frame 407 — holding; glenz is not ported yet"
+            "Second Reality — block 2 — endlogo — frame 407 — holding; techno is not ported yet"
         );
-        assert_eq!(run.stopped_at(), Some("glenz"));
+        assert_eq!(run.stopped_at(), Some("techno"));
 
         // And a run whose own plan simply ran out says that instead.
         let mut run = run_of(vec!["endlogo"]);

@@ -559,10 +559,9 @@ pub const MUSIC_RESTARTS: &[MusicRow] = &[
 ];
 
 /// The parts whose start is a **mid-run** `restartmus` site, and the module and order
-/// each restarts: a part-keyed transcription of the block-guarded rows in
-/// [`MUSIC_RESTARTS`].
+/// each restarts: a part-keyed transcription of the demo's two mid-run sites.
 ///
-/// There is one row, and it is `MAIN/U2.ASM:880-885`:
+/// **`u2e`** is `MAIN/U2.ASM:880-885`:
 ///
 /// ```text
 /// test    cs:whattorun,8
@@ -575,17 +574,43 @@ pub const MUSIC_RESTARTS: &[MusicRow] = &[
 /// call    partexecute
 /// ```
 ///
-/// The original's guard is `whattorun & 8` **alone** — not a block number — and every block
-/// whose mask carries bit 3 reaches the site (`SECOND 1` `0x1f`, `2` `0x1e`, `3` `0x1c`, `4`
-/// `0x18`). The port therefore keys the restart by the part the site precedes: U2E's presence
-/// in a plan implies the guard, so a plan that reaches `u2e` through [`Sequence::take_next`]
+/// Its guard is `whattorun & 8` **alone** — not a block number — and every block whose mask
+/// carries bit 3 reaches the site (`SECOND 1` `0x1f`, `2` `0x1e`, `3` `0x1c`, `4` `0x18`).
+/// The port therefore keys the restart by the part the site precedes: U2E's presence in a
+/// plan implies the guard, so a plan that reaches `u2e` through [`Sequence::take_next`]
 /// restarts MUSIC0 at order 18 before it starts. For `SECOND 4` the same call is the run's
-/// *entry* install and goes through [`Sequence::with_run`], not this table; only block 3
-/// reaches it mid-plan today (`SECOND 1` and `2` stop at GLENZ).
+/// *entry* install and goes through [`Sequence::with_run`], not this table; blocks 1–3 reach
+/// it mid-plan.
+///
+/// **`glenz`** is `MAIN/U2.ASM:813-818`, between BEGLOGO (`exe3`) and GLENZ (`exe4`):
+///
+/// ```text
+/// test    cs:whattorun,1
+/// jz      @@skip2b
+/// mov     ax,1
+/// mov     bx,0
+/// mov     cx,48700
+/// call    restartmus
+/// @@skip2b:
+/// mov     si,OFFSET exe4
+/// call    partexecute
+/// ```
+///
+/// Its guard is **two** bits — `whattorun & 2` (the region `:801-802` opens and `:855`
+/// closes) **and** `whattorun & 1` (`:813-814`) — which is not `:880`'s shape. Every block
+/// whose mask has bit 0 also has bit 1, so the plan reaching GLENZ under block 1 implies
+/// the guard; block 2 (`0x1e`) skips the site at its second test and is already playing
+/// MUSIC1 at order 0 (`:772-775`), which is what the site would install. The equality check
+/// in [`Sequence::restart_music`] is therefore what keeps block 2 from reloading the player
+/// it is already playing.
 ///
 /// D34 has the measurement: the new player waits four engine ticks and the block-3 chain's
-/// restarted session is `second4`'s shifted by 17,441–17,442 frames.
-pub const MUSIC_RESTART_AT: &[(&str, ModuleId, u8)] = &[("u2e", ModuleId::Music0, 18)];
+/// restarted session is `second4`'s shifted by 17,441–17,442 frames. D38 has the two seams'
+/// record, including the block-1 restart's measured port timing.
+pub const MUSIC_RESTART_AT: &[(&str, ModuleId, u8)] = &[
+    ("u2e", ModuleId::Music0, 18),
+    ("glenz", ModuleId::Music1, 0),
+];
 
 /// The module and order `SECOND block` starts its music at — the restart table's row for
 /// the block, or [`ShellError::UnknownPart`] for a block the original rejects.
@@ -679,6 +704,14 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // start is not established (the track has played on since the start), so the start's
         // own order — 0 — is the value the evidence names.
         "alku" | "u2a" | "pam" => Some((ModuleId::Music0, 0)),
+        // GLENZ is block 2's second part and block 1's fifth, and neither block
+        // plan *starts* at it. Both sequences reach it under **MUSIC1 at order
+        // 0**: `SECOND 2` takes the initial start's `mov ax,1 / mov bx,0`
+        // (`MAIN/U2.ASM:772-775`), and `SECOND 1` takes the mid-run restart that
+        // does the same (`:813-818`, [`MUSIC_RESTART_AT`]) between BEGLOGO and
+        // GLENZ. A `--part glenz` run is therefore MUSIC1 from the top, numbered
+        // in its own frame space (the part has no measured boot anchor).
+        "glenz" => Some((ModuleId::Music1, 0)),
         "tunneli" => Some((ModuleId::Music1, 0)),
         "cred" => Some((ModuleId::Music0, 26)),
         "endscrl" => Some((ModuleId::Music0, 43)),
@@ -812,6 +845,17 @@ pub struct Sequence {
     /// player, so the shell needs the loader again at the boundary, not only at the start.
     /// `None` for a run with no music at all.
     music_source: Option<MusicSource>,
+    /// Whether the part that just retired was the demo's `panicend`, so the next
+    /// [`take_next`](Sequence::take_next) installs the shell's cue wait
+    /// (`MAIN/U2.ASM:826-853`). Set only when `panicend` retires by reporting
+    /// [`PartStatus::Finished`] itself — the original reaches the wait after
+    /// PANICEND's EXE ends — and not when the exit flag retires it, which is the
+    /// original's `bx=2` exit check skipping the wait.
+    cue_pending: bool,
+    /// Whether `live` is the shell's [`CueWait`] rather than a part from the plan.
+    /// Its own retirement must not arm `cue_pending` again: the wait's `current`
+    /// is still `panicend`, whose picture is up.
+    live_cue: bool,
 }
 
 /// The music a run was built with: the player, which module and order it began at, how its
@@ -866,6 +910,90 @@ impl Part for Holding {
 
     fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus {
         PartStatus::Continuing
+    }
+}
+
+/// The shell's wait between PANICEND and the next part of the plan —
+/// `MAIN/U2.ASM:826-853`'s `@@zh5`/`@@zh4`, entered after `exe7` (PANICEND)
+/// returns and skipped only by Ctrl or the exit flag:
+///
+/// ```text
+/// @@zh5: mov bx,1
+///        int 0fch              ; dis_waitb — one tick, and it checks the keys
+///        mov bx,2
+///        int 0fch              ; dis_exit
+///        or ax,ax
+///        jnz @@skip5
+///        mov bx,6
+///        int 0fch              ; dis_musplus
+///        cmp dx,0
+///        jge @@zh5             ; while musplus >= 0
+/// @@zh4: mov bx,1
+///        int 0fch
+///        mov bx,2
+///        int 0fch
+///        or ax,ax
+///        jnz @@skip5
+///        mov bx,6
+///        int 0fch
+///        cmp dx,0
+///        jg @@skip5            ; leave on the first positive
+///        jmp @@zh4
+/// ```
+///
+/// So the wait is **two-phase**: it waits while `musplus` is non-negative, then,
+/// once a negative has been seen, while it is non-positive, and it continues the
+/// moment one comes back positive. That is the measured 8903 (musplus 19, still
+/// waiting) → 8953 (−32, the first negative) → 9219 (1, the exit) of
+/// `reference/music/second2` (`docs/decisions.md` D38).
+///
+/// It draws nothing and touches nothing — PANICEND's screen is what is up while
+/// the music reaches the cue — so a tick's frame is the surface the retiring part
+/// left. One call is one `dis_waitb`.
+struct CueWait {
+    /// Whether the first phase has seen a negative yet. Only after it has does
+    /// `@@zh4`'s "wait until positive" apply; before it, a non-negative reading
+    /// is the first phase's own condition to keep waiting.
+    saw_negative: bool,
+}
+
+impl Part for CueWait {
+    fn name(&self) -> &'static str {
+        // The picture on screen is PANICEND's, and this wait belongs to the
+        // shell rather than to a part of the plan; `Sequence::part` still names
+        // `panicend`.
+        "panicend"
+    }
+
+    fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
+        Ok(())
+    }
+
+    fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
+        // `mov bx,2; int 0fch; or ax,ax; jnz @@skip5`: the exit flag skips the
+        // wait and the run goes on to the next part (it does not end here).
+        if ctx.exit_requested {
+            return PartStatus::Finished;
+        }
+        // There is no cue to wait for in a run with no player. The shell only
+        // arms this wait after PANICEND's own tick, and PANICEND needs no music
+        // to reach it; a hand-built music-less run must not wait for ever on a
+        // player that does not exist.
+        let Some(music) = ctx.music() else {
+            return PartStatus::Finished;
+        };
+        let plus = music.musplus();
+        if !self.saw_negative {
+            if plus >= 0 {
+                return PartStatus::Continuing;
+            }
+            self.saw_negative = true;
+        }
+        if plus > 0 {
+            PartStatus::Finished
+        } else {
+            PartStatus::Continuing
+        }
     }
 }
 
@@ -960,6 +1088,8 @@ impl Sequence {
             finished: false,
             music: None,
             music_source: music,
+            cue_pending: false,
+            live_cue: false,
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
@@ -1068,7 +1198,16 @@ impl Sequence {
         if status == PartStatus::Finished
             || (self.engine.exit_requested() && !drains)
         {
+            // PANICEND's own `Finished` is what reaches `@@zh5` in the
+            // original: its EXE ends and the shell's wait begins. An exit flag
+            // retiring it is the wait's own `bx=2` check, which skips the wait.
+            // The cue wait itself also reports `Finished`; `live_cue` keeps it
+            // from arming another one.
+            if status == PartStatus::Finished && !self.live_cue && self.current == "panicend" {
+                self.cue_pending = true;
+            }
             self.live = None;
+            self.live_cue = false;
         }
         // The music, after the part has drawn: the fade while there is nothing left to
         // play, and the tick's own samples to the dump. Both are the *shell's* acts — a
@@ -1119,6 +1258,13 @@ impl Sequence {
         if self.holding {
             return true;
         }
+        // `@@zh5`/`@@zh4` (`MAIN/U2.ASM:826-853`): the wait comes between
+        // PANICEND and whatever the plan does next — the part after it, or the
+        // hold when PANICEND was the plan's last. Consumed here, before either.
+        if self.cue_pending {
+            self.cue_pending = false;
+            return self.start_cue_wait();
+        }
         let Some(&name) = self.plan.get(self.next) else {
             return self.hold(None);
         };
@@ -1151,15 +1297,18 @@ impl Sequence {
     }
 
     /// Install the restart site's player when the part the run is about to start
-    /// is one ([`MUSIC_RESTART_AT`], `MAIN/U2.ASM:880-885`).
+    /// is one ([`MUSIC_RESTART_AT`], `MAIN/U2.ASM:880-885` and `:813-818`).
     ///
     /// The original's `restartmus` stops and unloads the player, loads the new module and
     /// seeks it, every time the site runs. The port installs a fresh player too — the
     /// modules are different files and `Player` owns its module — but only when the row's
     /// module/order **differs** from the player the run already has: a plan that reaches a
     /// restart site under the very same module and order would otherwise throw away a
-    /// player's position for nothing. The first part of a plan never comes through here
-    /// (it is [`with_run`](Sequence::with_run)'s entry install).
+    /// player's position for nothing. That is what keeps block 2 from reloading at GLENZ:
+    /// its `:813-818` guard is clear (`whattorun & 1` is 0), and its initial start already
+    /// sought MUSIC1 to order 0 (`:772-775`), the row's own module and order. The first
+    /// part of a plan never comes through here (it is [`with_run`](Sequence::with_run)'s
+    /// entry install).
     fn restart_music(&mut self, name: &'static str) -> Result<(), ShellError> {
         let Some(&(_, module, order)) = MUSIC_RESTART_AT
             .iter()
@@ -1182,6 +1331,24 @@ impl Sequence {
         self.install_music(module, order, source, MusicStart::restart(self.index))
     }
 
+    /// Install the shell's post-PANICEND cue wait (`MAIN/U2.ASM:826-853`).
+    ///
+    /// `current` stays `panicend`: the picture on screen is PANICEND's, and the
+    /// wait is the shell's, not a part of the plan. The wait consumes one tick a
+    /// call and does not advance the plan; [`take_next`](Sequence::take_next)
+    /// starts the next plan part — or the hold — when it retires.
+    fn start_cue_wait(&mut self) -> bool {
+        let mut part = Box::new(CueWait { saw_negative: false });
+        if let Err(error) = self.engine.start(&mut *part) {
+            eprintln!("secondreality: {error}; the run ends here");
+            self.finished = true;
+            return false;
+        }
+        self.live = Some(part);
+        self.live_cue = true;
+        true
+    }
+
     /// Start holding the screen the run's last part left. `stopped_at` is the
     /// plan name the run stopped at, when that is why the hold began.
     fn hold(&mut self, stopped_at: Option<&'static str>) -> bool {
@@ -1192,6 +1359,7 @@ impl Sequence {
             return false;
         }
         self.live = Some(part);
+        self.live_cue = false;
         self.holding = true;
         self.stopped_at = stopped_at;
         true
@@ -1220,6 +1388,7 @@ impl Sequence {
         self.engine.start(&mut *part)?;
         self.live = Some(part);
         self.current = name;
+        self.live_cue = false;
         Ok(())
     }
 
@@ -1601,6 +1770,10 @@ pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sr_engine::copper::CopperRegistry;
+    use sr_engine::music::Music;
+    use sr_engine::palette::PaletteTimeline;
+    use sr_engine::surface::Surface;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     #[test]
@@ -1956,6 +2129,9 @@ mod tests {
             ("u2a", Some((ModuleId::Music0, 0))),
             ("pam", Some((ModuleId::Music0, 0))),
             ("beglogo", Some((ModuleId::Music1, 0))),
+            // Block 2's initial start (`:772-775`) and block 1's `:813-818`
+            // restart both put MUSIC1 at order 0 under GLENZ.
+            ("glenz", Some((ModuleId::Music1, 0))),
             ("tunneli", Some((ModuleId::Music1, 0))),
             ("mntscrl", Some((ModuleId::Music1, 42))),
             // The order in force at the part's start window (2452, 2456]:
@@ -2572,24 +2748,29 @@ mod tests {
 
     #[test]
     fn the_mid_run_restart_waits_the_restart_recipes_four_ticks() {
-        // **The restart site.** `MAIN/U2.ASM:880-885`'s `restartmus(ax=0, bx=18, cx=45000)`
-        // is the one restart the demo reaches mid-plan: its guard is `whattorun & 8` alone
-        // (`:880`), and every block whose plan reaches U2E carries bit 3 — so the site is
-        // keyed by the part's presence rather than by a block. Block 4 is the same
-        // `restartmus`, fired at the run's entry instead of mid-run.
-        assert_eq!(MUSIC_RESTART_AT.len(), 1);
+        // **The restart sites.** `MAIN/U2.ASM:880-885`'s
+        // `restartmus(ax=0, bx=18, cx=45000)` is the demo's `SECOND 4` entry and the
+        // mid-plan restart every block-1-to-3 run takes before U2E: its guard is
+        // `whattorun & 8` alone (`:880`), and every block whose plan reaches U2E
+        // carries bit 3 — so the site is keyed by the part's presence rather than by a
+        // block. `:813-818`'s `restartmus(ax=1, bx=0, cx=48700)` is block 1's own,
+        // between BEGLOGO and GLENZ (`MUSIC_RESTART_AT`'s second row).
         assert_eq!(
-            MUSIC_RESTART_AT[0],
-            ("u2e", ModuleId::Music0, 18),
-            "the part, its module and the order the restart seeks"
+            MUSIC_RESTART_AT,
+            &[
+                ("u2e", ModuleId::Music0, 18),
+                ("glenz", ModuleId::Music1, 0),
+            ],
+            "each part, its module and the order the restart seeks"
         );
         assert_eq!(
             music_for('4').unwrap(),
             (MUSIC_RESTART_AT[0].1, MUSIC_RESTART_AT[0].2),
             "the site's row is block 4's `restartmus`, the same call"
         );
-        // And it is the music `u2e` is reached under, by the entry table's own answer.
+        // And each is the music its part is reached under, by the entry table's own answer.
         assert_eq!(music_for_part("u2e"), Some((ModuleId::Music0, 18)));
+        assert_eq!(music_for_part("glenz"), Some((ModuleId::Music1, 0)));
 
         // **D34's measured wait.** A restarted player is seeked at the boundary and its
         // clock starts four engine ticks later — `MUSIC_START_FRAME - FIRST_GRAPHICS_FRAME`,
@@ -2676,9 +2857,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_separates_a_part_the_port_has_from_one_it_has_not_reached() {
+    fn glenz_resolves_under_part() {
+        // GLENZ is registered (Task 5) and Task 6 gives it its music row: a
+        // `--part glenz` run is the part's own, numbered from zero, under the
+        // module and order both block sequences reach it at (`:772-775` for
+        // block 2, the `:813-818` restart for block 1).
+        assert_eq!(resolve("glenz").unwrap(), "glenz");
+        assert_eq!(crate::parts::registered("glenz"), Some("glenz"));
+        assert_eq!(music_for_part("glenz"), Some((ModuleId::Music1, 0)));
+        assert_eq!(boot_anchor("glenz"), None, "no measured first drawn frame");
+        let run = sequence_of(vec!["glenz"]).unwrap();
+        assert_eq!(run.index(), 0);
+        assert!(!run.index_is_reference(), "its own numbering, and it says so");
+    }
+
+    #[test]
+    fn resolve_rejects_a_name_the_demo_never_had() {
+        // Every name in the demo's run order is registered now (GLENZ was the
+        // last), so `resolve` can no longer show the `NotPorted` arm: the only
+        // name left for it to answer is one that is not a part at all. The
+        // unported arm is still exercised through a source that declines a demo
+        // name (`a_run_that_stopped_says_which_part_it_stopped_at`), which is
+        // where a run meets it.
         assert_eq!(resolve("testcard").unwrap(), "testcard");
-        assert!(matches!(resolve("glenz"), Err(ShellError::NotPorted { name: "glenz" })));
         assert!(matches!(resolve("nope"), Err(ShellError::UnknownPart { name }) if name == "nope"));
         // An empty name is a name that matched nothing, and the message has to
         // say *which* name was empty: `--part ""` is a shell variable that was
@@ -2711,6 +2912,16 @@ mod tests {
             // music's fade. `pam` is the demo's own part and no block *starts* at it, which
             // is why it is played from the demo's beginning (MUSIC0 at order 0).
             "pam" => Some(Box::new(Stub { name: "pam", fill: None, retires: Some(0) })),
+            // The part Task 6 gives its music row: it never retires, so a run that
+            // reaches it stays there for the music assertions to read.
+            "glenz" => Some(Box::new(Stub { name: "glenz", fill: None, retires: None })),
+            // PANICEND: it fills the surface and retires at once, so a run reaches the
+            // shell's cue wait with a picture to hold.
+            "panicend" => Some(Box::new(Stub {
+                name: "panicend",
+                fill: Some(9),
+                retires: Some(0),
+            })),
             // `--block 1`'s first part, for the test that watches the *block-1* music:
             // it draws nothing and never retires, so the run ticks to the trace's last
             // frame with the numbering its anchor gave it.
@@ -2837,11 +3048,12 @@ mod tests {
         run_out(&mut run, 8);
         assert_eq!(run.part(), "beglogo");
 
-        // And with the block's own plan, where the next part is a name the
-        // source cannot build rather than one the helper left out.
-        let mut run = sequence_of(vec!["a", "glenz"]).unwrap();
+        // And with a demo name the source declines (TECHNO is registered now, but
+        // this stub does not build it): the run holds where it stands rather than
+        // skipping over the part.
+        let mut run = sequence_of(vec!["a", "techno"]).unwrap();
         run_out(&mut run, 8);
-        assert_eq!(run.part(), "a", "the unported part must not be skipped to");
+        assert_eq!(run.part(), "a", "the part the source lacks must not be skipped to");
         assert!(!run.finished(), "the port ran out of parts; the run has not ended");
         assert_eq!(run.index(), 8, "and it holds rather than stopping: the index keeps counting");
     }
@@ -2863,21 +3075,15 @@ mod tests {
         // not go on to (`stopped_at`, which the window's status line prints as
         // "holding; <name> is not ported yet").
         //
-        // This is the block-level claim the end-to-end runs rest on: `--block 1` plays
-        // ALKU, U2A, PAM and BEGLOGO, and stops at GLENZ; block 3 runs its whole tier
-        // — MNTSCRL, LNS&ZOOM, PLZPART, MINVBALL, RAYSCRL, COMAN, JPLOGO, U2E — and
-        // then the block-4 entry and the end sequence, because U2E's mask bit (8) is
-        // in block 3's (0x1c); block 4 starts at U2E (`SECOND 4`) and runs it and the
-        // scrollers. Both stop only where the registry lacks a name, and since U2E
-        // landed none of blocks 3, 4, 5 and U does. Block 2 still stops at GLENZ,
-        // which leaves TECHNO and PANICEND unreachable through a block until GLENZ
-        // lands (Phase 7).
+        // This is the block-level claim the end-to-end runs rest on: **every block's plan
+        // is now fully ported** — GLENZ was the last name any of them lacked (Phase 7) — so
+        // each plan runs to its own end and stops nowhere. Block 1 runs ALKU → … → GLENZ →
+        // … → ENDSCRL, block 2 BEGLOGO → GLENZ → … → ENDSCRL, block 3 its whole tier and
+        // the end sequence (U2E's bit 8 is in 0x1c), block 4 U2E and the scrollers, block 5
+        // the scrollers and block U the hidden part alone.
         let expected: &[(char, Option<&str>)] = &[
-            ('1', Some("glenz")),
-            ('2', Some("glenz")),
-            // U2E is ported: block 3's tail through U2E (and on into the end
-            // sequence) is complete, and block 4 — `SECOND 4`, U2E first —
-            // runs.
+            ('1', None),
+            ('2', None),
             ('3', None),
             ('4', None),
             ('5', None),
@@ -3253,6 +3459,375 @@ mod tests {
         );
     }
 
+    /// Block 1's first part and GLENZ: the block's own `_zplaysong(0)` runs the
+    /// first, and the `:813-818` restart precedes the second.
+    fn block_one_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            "alku" => Some(Box::new(Stub { name: "alku", fill: None, retires: Some(0) })),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn the_block_one_run_restarts_music1_at_glenz() {
+        // Block 1 runs under the initial `_zplaysong(0)` — MUSIC0 at order 0 with
+        // the block-1 clock's 400 (`MAIN/U2.ASM:766-775`, `:790-799`) — until the
+        // `:813-818` site between BEGLOGO and GLENZ restarts `restartmus(1, 0)`
+        // under a fresh player. A plan of ALKU then GLENZ is that sequence's
+        // shortest form.
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["alku", "glenz"],
+            block_one_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(
+            run.music_module(),
+            Some((ModuleId::Music0, 0)),
+            "block 1's entry is the initial start, not a restart"
+        );
+        assert_eq!(
+            run.music.as_ref().unwrap().start,
+            MusicStart { frame: 404, waiting: 0, pre: 4 },
+            "the block-1 clock starts at 400 and the run's 404 pre-polls the four frames"
+        );
+        let entry_player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+
+        // Tick 0: ALKU draws and retires. Tick 1: the boundary — the restart
+        // installs MUSIC1@0 before GLENZ's `init`, and the part starts.
+        run.tick();
+        assert_eq!(run.part(), "alku");
+        run.tick();
+        assert_eq!(run.part(), "glenz", "the boundary part started");
+        assert_eq!(
+            run.music_module(),
+            Some((ModuleId::Music1, 0)),
+            "`MAIN/U2.ASM:813-818`'s restartmus(1, 0)"
+        );
+        let music = run.music.as_ref().expect("the restart installed a player");
+        assert_eq!(music.start.waiting, 4, "D38: the restart's four-tick wait");
+        assert_eq!(
+            music.start,
+            MusicStart { frame: 405, waiting: 4, pre: 0 },
+            "the boundary's own run index, four ticks of waiting, no pre-poll"
+        );
+        assert_ne!(
+            std::sync::Arc::as_ptr(&music.player),
+            entry_player,
+            "a fresh player, as `restartmus` loads the module again"
+        );
+    }
+
+    /// Block 2's first part and GLENZ: the block already plays MUSIC1@0.
+    fn block_two_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            "beglogo" => Some(Box::new(Stub { name: "beglogo", fill: None, retires: Some(0) })),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn the_block_two_run_does_not_reload_at_glenz() {
+        // `SECOND 2`'s mask (`0x1e`) has bit 1 but not bit 0, so `:813-814`'s
+        // `test whattorun,1 / jz @@skip2b` skips the restart — and the module the
+        // site would install is the one its initial start already sought
+        // (`:772-775`: MUSIC1 at order 0). The equality check must keep the
+        // player, its clock and its position.
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["beglogo", "glenz"],
+            block_two_source,
+            Some(crate::audio::test_player),
+        )
+        .unwrap();
+        assert_eq!(run.music_module(), Some((ModuleId::Music1, 0)));
+        let entry = run.music.as_ref().unwrap().start;
+        assert_eq!(entry, MusicStart { frame: 408, waiting: 4, pre: 0 });
+        let entry_player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+
+        run.tick();
+        assert_eq!(run.part(), "beglogo");
+        run.tick();
+        assert_eq!(run.part(), "glenz", "the boundary part started");
+        assert_eq!(run.music_module(), Some((ModuleId::Music1, 0)), "still the entry's module");
+        let music = run.music.as_ref().unwrap();
+        assert_eq!(
+            std::sync::Arc::as_ptr(&music.player),
+            entry_player,
+            "the same player: the run already plays the row's module and order"
+        );
+        assert_eq!(music.start, entry, "and the same clock, not a fresh four-tick wait");
+    }
+
+    // --- the post-PANICEND cue wait (`MAIN/U2.ASM:826-853`) -------------------
+
+    /// A scripted [`Music`] for the cue wait: `musplus` hands out the next
+    /// scripted answer a call, which is what makes the two phases' decisions
+    /// readable one tick at a time.
+    struct ScriptedMusic {
+        plus: std::collections::VecDeque<i32>,
+    }
+
+    impl ScriptedMusic {
+        fn new(plus: impl IntoIterator<Item = i32>) -> ScriptedMusic {
+            ScriptedMusic { plus: plus.into_iter().collect() }
+        }
+    }
+
+    impl Music for ScriptedMusic {
+        fn poll(&mut self) {}
+        fn position(&self) -> MusicPosition { MusicPosition::default() }
+        fn musplus(&mut self) -> i32 { self.plus.pop_front().unwrap_or(-32) }
+        fn musrow(&mut self) -> i32 { 0 }
+        fn muscode(&mut self, wanted: i32) -> i32 {
+            sr_engine::muscode_from(MusicPosition::default(), wanted)
+        }
+        fn sync(&mut self) -> i32 { 0 }
+        fn getmframe(&mut self) -> i32 { 0 }
+        fn setmframe(&mut self, _frame: i32) {}
+    }
+
+    /// The borrowed pieces a [`PartCtx`] needs, so one cue can be driven tick
+    /// by tick without a `Sequence`'s engine in the way.
+    struct CueRig {
+        surface: Surface,
+        view: View,
+        palette: Palette,
+        timeline: PaletteTimeline,
+        copper: CopperRegistry,
+    }
+
+    impl CueRig {
+        fn new() -> CueRig {
+            CueRig {
+                surface: Surface::new(TEST_SURFACE, TEST_SURFACE),
+                view: View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+                palette: Palette::new(),
+                timeline: PaletteTimeline::new(Palette::new()),
+                copper: CopperRegistry::new(),
+            }
+        }
+
+        fn tick(&mut self, cue: &mut CueWait, music: &mut ScriptedMusic, exit: bool) -> PartStatus {
+            let mut ctx = PartCtx::new(
+                &mut self.surface,
+                &mut self.view,
+                &mut self.palette,
+                &mut self.timeline,
+                &mut self.copper,
+                Some(music),
+                0,
+                0,
+                1,
+                true,
+                exit,
+                false,
+            );
+            cue.frame(&mut ctx)
+        }
+
+        fn tick_without_music(&mut self, cue: &mut CueWait) -> PartStatus {
+            let mut ctx = PartCtx::new(
+                &mut self.surface,
+                &mut self.view,
+                &mut self.palette,
+                &mut self.timeline,
+                &mut self.copper,
+                None,
+                0,
+                0,
+                1,
+                true,
+                false,
+                false,
+            );
+            cue.frame(&mut ctx)
+        }
+    }
+
+    #[test]
+    fn the_post_panicend_wait_ends_on_a_positive_musplus() {
+        // `@@zh5` waits while `musplus >= 0`; `@@zh4`, entered once a negative
+        // has been seen, waits while it is `<= 0` and leaves on `> 0`. The
+        // scripted sequence has negatives from the first call, a zero that still
+        // waits, and the positive that finishes — five calls, the last one the
+        // first positive.
+        let mut cue = CueWait { saw_negative: false };
+        let mut rig = CueRig::new();
+        let mut music = ScriptedMusic::new([-3, -1, -32, 0, 1]);
+        let statuses: Vec<PartStatus> =
+            (0..5).map(|_| rig.tick(&mut cue, &mut music, false)).collect();
+        assert_eq!(
+            statuses,
+            [
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Finished,
+            ],
+            "the fifth call is the first positive"
+        );
+
+        // **The measured calibration** (`reference/music/second2`, D38): PANICEND
+        // retires at boot 8903 with musplus 19 — non-negative, so `@@zh5` keeps
+        // waiting rather than ending there — 8953 is the first negative (−32 at
+        // row 32, zplus 2), and 9219 is the first positive (order 42 row 1 → 1).
+        assert_eq!(sr_engine::musplus_from(2, 19), 19);
+        assert_eq!(sr_engine::musplus_from(2, 32), -32);
+        assert_eq!(sr_engine::musplus_from(2, 1), 1);
+        // The same wait with the measured 8903 value first: the non-negative
+        // reading is the *first* phase's condition, not a reason to finish.
+        let mut cue = CueWait { saw_negative: false };
+        let mut music = ScriptedMusic::new([19, 19, -32, 0, 1]);
+        let statuses: Vec<PartStatus> =
+            (0..5).map(|_| rig.tick(&mut cue, &mut music, false)).collect();
+        assert_eq!(
+            statuses,
+            [
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Continuing,
+                PartStatus::Finished,
+            ],
+            "the first phase waits through a positive reading"
+        );
+
+        // The exit flag skips the wait on the tick it is seen (`mov bx,2;
+        // int 0fch; or ax,ax; jnz @@skip5`), and the run goes on.
+        let mut cue = CueWait { saw_negative: false };
+        let mut music = ScriptedMusic::new([-3]);
+        assert_eq!(rig.tick(&mut cue, &mut music, true), PartStatus::Finished);
+        // And a run with no player has no cue to wait for.
+        let mut cue = CueWait { saw_negative: false };
+        assert_eq!(rig.tick_without_music(&mut cue), PartStatus::Finished);
+    }
+
+    /// A run of PANICEND and then GLENZ, with PANICEND drawing a picture and
+    /// retiring at once so the shell reaches its wait.
+    fn cue_source(name: &str) -> Option<Box<dyn Part>> {
+        match name {
+            "panicend" => Some(Box::new(Stub { name: "panicend", fill: Some(9), retires: Some(0) })),
+            other => stub_source(other),
+        }
+    }
+
+    #[test]
+    fn the_cue_wait_holds_the_screen() {
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["panicend", "glenz"],
+            cue_source,
+        )
+        .unwrap();
+        run.engine.set_music(Box::new(ScriptedMusic::new([-32; 8])));
+        run.tick();
+        assert_eq!(run.part(), "panicend");
+        let held = run.frame().pixels.clone();
+        assert!(held.iter().all(|pixel| *pixel == 9), "PANICEND's picture is up");
+        for tick in 0..4 {
+            run.tick();
+            assert_eq!(run.part(), "panicend", "the wait is still the shell's");
+            assert!(!run.holding(), "the hold has not begun");
+            assert_eq!(
+                run.frame().pixels, held,
+                "tick {tick} of the wait drew nothing over the surface"
+            );
+        }
+    }
+
+    #[test]
+    fn the_post_panicend_wait_is_between_the_part_and_the_next_one() {
+        // The wait is installed by `take_next` in place of the next plan part and
+        // advances the plan only when it finishes: PANICEND draws on tick 1, the
+        // five scripted cue ticks are 2-6, and GLENZ starts on tick 7.
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["panicend", "glenz"],
+            cue_source,
+        )
+        .unwrap();
+        run.engine.set_music(Box::new(ScriptedMusic::new([-3, -1, -32, 0, 1])));
+        let start = run.index();
+        run.tick();
+        assert_eq!(run.part(), "panicend");
+        for tick in 0..5 {
+            run.tick();
+            assert_eq!(run.part(), "panicend", "cue tick {tick} holds PANICEND's picture");
+            assert!(!run.holding());
+        }
+        assert_eq!(run.index(), start + 6, "one index a tick: the part, then five cue ticks");
+        run.tick();
+        assert_eq!(run.part(), "glenz", "the plan goes on when the cue turns positive");
+        assert_eq!(run.index(), start + 7, "and the next part keeps the run's numbering");
+    }
+
+    #[test]
+    fn a_plan_that_ends_at_panicend_waits_and_then_holds() {
+        // The wait is installed even when PANICEND is the plan's last part; the
+        // hold begins after it, as the original's `@@zh5` runs before the next
+        // region rather than inside it.
+        let mut run = Sequence::with_source(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["panicend"],
+            cue_source,
+        )
+        .unwrap();
+        run.engine.set_music(Box::new(ScriptedMusic::new([-32, -32, 1])));
+        run.tick(); // PANICEND's one frame
+        assert_eq!(run.part(), "panicend");
+        run.tick(); // cue: -32
+        assert_eq!(run.part(), "panicend");
+        assert!(!run.holding(), "the wait comes before the hold");
+        run.tick(); // cue: -32
+        run.tick(); // cue: 1, the exit
+        assert!(!run.holding(), "the wait retires at the end of its exit tick");
+        run.tick(); // the hold
+        assert!(run.holding(), "and then the run holds PANICEND's screen");
+        assert_eq!(run.stopped_at(), None, "the plan ran out; no part is to blame");
+        assert_eq!(run.part(), "panicend");
+    }
+
+    #[test]
+    fn blocks_one_and_two_have_no_stop() {
+        // Block 1 and block 2 are the two plans that reach GLENZ, and with the
+        // part registered they run their whole sequence to ENDSCRL — neither
+        // stops at a part, and the plan's end is the hold, not a stopped-at name.
+        for block in ['1', '2'] {
+            let plan = block_plan(block).unwrap();
+            assert!(plan.contains(&"glenz"), "{block} reaches GLENZ");
+            assert_eq!(
+                plan.iter().copied().find(|name| crate::parts::registered(name).is_none()),
+                None,
+                "{block}: every part in the plan is registered"
+            );
+            let mut run = Sequence::with_source(
+                TEST_SURFACE,
+                TEST_SURFACE,
+                View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+                plan,
+                registered_stub_source,
+            )
+            .unwrap();
+            run_out(&mut run, 64);
+            assert!(run.holding(), "{block}: the plan ran out");
+            assert_eq!(run.stopped_at(), None, "{block}: no part stopped it");
+            assert_eq!(run.part(), "endscrl", "{block}: the last part's screen is held");
+        }
+    }
+
     // --- the keyboard (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`) ------
 
     /// What a watching part has recorded: the frames it has drawn, and whether
@@ -3375,15 +3950,24 @@ mod tests {
 
     #[test]
     fn a_run_that_stopped_says_which_part_it_stopped_at() {
-        // `SECOND 2` after BEGLOGO runs GLENZ, which the port has not written:
-        // the run holds BEGLOGO's screen and can name the part it could not go
-        // on to, which is what a window's status line has to say out loud.
-        let mut run = sequence_of(vec!["a", "glenz"]).unwrap();
+        // Every part in the demo's order is registered now, so the hold-with-a-name
+        // path is reached through a source that declines a demo name — which is what
+        // a broken build or a missing part would look like. The run holds the screen
+        // it has and can name the part it could not go on to, which is what a
+        // window's status line has to say out loud.
+        let mut run = sequence_of(vec!["a", "techno"]).unwrap();
         assert_eq!(run.stopped_at(), None, "nothing has stopped yet");
         run_out(&mut run, 8);
         assert!(run.holding());
-        assert_eq!(run.stopped_at(), Some("glenz"));
+        assert_eq!(run.stopped_at(), Some("techno"));
         assert_eq!(run.part(), "a", "and the held screen is still a's");
+        // `unbuildable` answers `NotPorted` for a demo name: TECHNO is the demo's,
+        // the source merely did not build it.
+        assert_eq!(
+            run.unbuildable("techno").to_string(),
+            "techno is not ported yet",
+            "a demo name the port has not written, not a typo"
+        );
     }
 
     #[test]
