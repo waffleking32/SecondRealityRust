@@ -203,9 +203,19 @@ pub fn dodots2(dots: &mut [Dot], screen: &mut [u8]) {
 ///
 /// `depthcol` is 8192 bytes with only 0..3099 written (`BA.ASM:221-222`,
 /// `BP.C:128-133`). A z whose low word is negative (bit 15 set) passes the
-/// signed test and indexes past the array; in the source that read lands in
-/// BSS and is zero, which is what the `else` below reproduces. Task 7 builds
-/// the table; this task pins the rule.
+/// signed test. The source then reads `cs:_depthcol[bp]` with a **16-bit**
+/// effective address, which for a negative low word wraps *before* the array
+/// (0xFF00 reads `_depthcol - 0x100`, a code byte — 0x07 with the shipped
+/// link map — not BSS zero). The `else` below returns zero as a **model of
+/// an unreachable branch**: part 2's projected z' is 1134..2866 with a
+/// positive low word, so no filed frame depends on the byte. Task 7 measures
+/// the part-2 domain and owns the table.
+///
+/// The `count <= 0`, record-length, shadow and offset bounds checks below are
+/// likewise guards for inputs part 2 never produces (the projected x is
+/// bounded); they are not source behaviour. The source's `rows[y] + x` is a
+/// 16-bit offset that wraps within the A2D0 segment; the port's guards never
+/// fire in the reachable domain.
 pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
     let count = points[0];
     if count <= 0 {
@@ -213,6 +223,7 @@ pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
     }
     let mut at = 2usize; // `add si,4` past the count word
     for _ in 0..count {
+        // Unreachable for part 2's record count (the doc comment above).
         if at + 8 > points.len() {
             break;
         }
@@ -239,8 +250,9 @@ pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
         let colour = if index < depthcol.len() {
             depthcol[index]
         } else {
-            // The source reads past its 8192-byte BSS array; the bytes there
-            // are zero.
+            // A model of the unreachable negative-low-word branch: the
+            // source's 16-bit address wraps before `_depthcol` into code
+            // bytes, which this task cannot reproduce without a load map.
             0
         };
         let y = points[at + 1] as u16 as usize;
@@ -252,6 +264,8 @@ pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
         let x = points[at] as u16 as usize;
         let pos = y * 320 + x;
         points[at + 3] = pos as i16;
+        // A guard for the unreachable out-of-band x; the source's 16-bit
+        // `rows[y] + x` would wrap within the A2D0 segment (doc comment).
         if pos < screen.len() {
             screen[pos] = colour;
         }
@@ -490,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shadow_grid_dot_reads_bss_zero_past_3100() {
+    fn the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word() {
         // The mode-4 spawn leaves the trail at index 189 after 65 draws: the
         // colour starts at 254 and `dec dl` runs before every draw
         // (`BA.ASM:144`). The last drawn value is 254 - 65 = 189, which is
@@ -513,10 +527,10 @@ mod tests {
         }
         assert_eq!(last, 189);
 
-        // `do3dots`' 16-bit z load and its signed `cmp bp,3000`:
+        // `do3dots`' 16-bit z load and its signed `cmp bp,3000` (`BA.ASM:232-235`):
         let depthcol = {
             let mut table = [0u8; 8192];
-            for (a, slot) in table.iter_mut().enumerate().take(3100) {
+            for (a, slot) in table.iter_mut().take(3100).enumerate() {
                 *slot = if a < 1000 {
                     127
                 } else {
@@ -525,32 +539,46 @@ mod tests {
             }
             table
         };
-        let mut screen = vec![0u8; 64_000];
         let mut points = vec![0i16; 2 + 8];
-        points[0] = 1;
+        points[0] = 1; // count
         points[2] = 40; // x
         points[3] = 60; // y
-        points[4] = 0; // word 2
-        points[5] = 0; // last
         points[6] = 1500; // z low word -> depthcol[1500]
-        points[7] = 0; // z high word
+        let mut screen = vec![0u8; 64_000];
         do3dots(&mut points, &depthcol, &mut screen);
         assert_eq!(screen[60 * 320 + 40], depthcol[1500]);
         assert_eq!(points[5], (60 * 320 + 40) as i16);
 
-        // z = 0xFF00 (negative as the 16-bit load): the signed `jg` does not
-        // skip it, and the index past the 8,192-byte table reads BSS zero.
-        points[6] = 0xFF00u16 as i16;
-        points[5] = 0;
-        do3dots(&mut points, &depthcol, &mut screen);
-        assert_eq!(screen[60 * 320 + 40], 0);
-
-        // z low word 3001..32767 is positive and skipped without a read.
+        // A positive z above 3000 is signed-skipped: the draw is skipped and
+        // the record's last offset is cleared (`@@2`, `BA.ASM:276-278`). The
+        // old-pixel and shadow clears still run, so exactly those two band
+        // pixels change.
         points[6] = 3001;
         points[5] = 0;
-        let before = screen.clone();
+        let mut screen = vec![0xFFu8; 64_000];
         do3dots(&mut points, &depthcol, &mut screen);
-        assert_eq!(screen, before);
+        assert_eq!(screen[60 * 320 + 40], 0xFF, "no draw");
+        assert_eq!(screen[0], 0, "the old-pixel clear at offset 0");
+        assert_eq!(screen[320], 0, "the shadow clear");
         assert_eq!(points[5], 0, "a skipped record clears its last offset");
+
+        // A negative low word (0xFF00) is *not* skipped by the signed test.
+        // The source's 16-bit `cs:_depthcol[bp]` wraps 0x100 bytes before the
+        // array and reads a code byte (0x07 with the reviewer's link map),
+        // not BSS zero; the port's zero is a documented model of this
+        // unreachable branch, not the source's address arithmetic. Part 2's
+        // z' is 1134..2866 and positive, so no filed frame depends on it.
+        points[6] = 0xFF00u16 as i16;
+        points[5] = 0;
+        let mut screen = vec![0xFFu8; 64_000];
+        do3dots(&mut points, &depthcol, &mut screen);
+        assert_eq!(screen[60 * 320 + 40], 0, "the model's colour");
+        let changed: Vec<usize> = screen
+            .iter()
+            .enumerate()
+            .filter(|(_, &pixel)| pixel != 0xFF)
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(changed, vec![0, 320, 60 * 320 + 40]);
     }
 }

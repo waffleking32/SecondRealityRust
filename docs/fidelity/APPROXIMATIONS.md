@@ -2163,6 +2163,15 @@ event, and the gate is before `K0`, so no compared picture sees it.
 for byte; reproduce with `cargo test -p secondreality --test vault -- --nocapture
 hard_matches_the_reference_in_its_early_modes`.
 
+**Exit polling.** The source polls `dis_exit` at exactly two places: the 70-wait loop
+(`B.C:162`) and the main loop's condition (`B.C:203`). The wipe and the fill (`B.C:143-161`)
+do not poll. The port polls at the same points: a flag set during the wipe or the fill is
+ignored until the next wait, the wait loop breaks without consuming a wait, the letterbox
+still runs (`B.C:164-182`), and the main loop's first check retires the part without an
+iteration. The substitution is only the source of the flag (the shell's ESC rather than the
+DIS's `exitflag`), not its polling points;
+`the_exit_flag_is_polled_where_the_source_polls_it` pins them.
+
 ## A47 — HARD: one 70.086 Hz tick stands for one waitb, with the display phase measured (registered mapping; measured difference 0)
 
 **Part:** HARD (`HARD/B.C:203-324`, `BP.C:29`), Phase 8 Task 6.
@@ -2207,11 +2216,19 @@ byte-identical and 956 first differing.
 `the_first_half_mode_sequence_is_the_sources`). It cannot express the three extra displayed
 frames because its tick is fixed.
 
-**Why (the lead).** The extra frames are the shape of a missed-retrace overrun (D22): the
-mode-4 loop's heavy frame — the count-0 `memset(background)` plus 2,048 `doit2` calls — or the
-late palette upload can overrun one retrace, and the source's `dis_waitb` then waits for the
-following one. This task's evidence is only the boundary shift; the per-frame position is
-Task 7's measurement against the part-2 keyframes.
+**Why (the lead).** The extra frames are the shape of a missed-retrace overrun (D22), but
+**not** at mode 4's count 0: port 495 and 496 (reference 851 and 852) match the capture at 0
+pixels, so the count-0 `memset(background)` plus 2,048 `doit2` calls did not overrun. The
+candidate is a later mode-4 iteration; the 768-byte palette upload at the top of every
+iteration (`B.C:208`) is the remaining per-frame work of that size. No per-frame position is
+measured; Task 7 owns the boundary and the part-2 keyframes.
+
+**Mode 5's init palette is not the literal source's.** The held 956/957 pair (RGB-only) shows
+the 100 index-189 trail pixels at `(4,255,255)` — 6-bit `(1,63,63)` — not the white that
+`BP.C:135-138`'s literal `pal[1] = (63,63,63)` would produce after `B.C:299`'s conversion to
+index 1. Either the artifact's `part2init` palette writes differ from the vendored `BP.C` or
+the capture caught a partial DAC upload of the init pair. Task 7 must measure the artifact's
+mode-5 palette (the held pair may allow an indexed read) before pinning part 2.
 
 **Measured difference:** **3 display frames** at the boundary (artifact 956 against the
 source-derived 953); no keyframe at or before 910 differs (A47). Reproduce the artifact's
@@ -2264,3 +2281,31 @@ same pair. The capture's keyframes are exact with the file's values, which is th
 **Measured difference:** **0** in the seven compared keyframes (and none of them exercises the
 100th pair's y). Reproduce the data checks with
 `cargo test -p secondreality --bin secondreality vault::hard::dots`.
+
+## A51 — HARD: `do3dots`' out-of-array guard is a model for an unreachable branch (registered model; measured difference 0)
+
+**Part:** HARD (`HARD/BA.ASM:221-222,262-270`), Phase 8 Task 6; part 2 is Task 7's.
+
+**Original.** `_depthcol db 8192 dup(0)` sits in the code segment with 0..3,099 written
+(`BP.C:128-133`). `do3dots` loads z's low word into `bp`, signed-skips values above 3,000
+(`cmp bp,3000; jg`, `BA.ASM:233-235`), and reads `cs:_depthcol[bp]` with a **16-bit**
+effective address. A negative low word passes the signed test; for `bp = 0xFF00` the 16-bit
+address wraps to `_depthcol - 0x100` and reads a code byte (0x07 with the shipped link map),
+not BSS zero. The branch is unreachable in part 2: the projected z′ is 1134..2866 with a
+positive low word.
+
+**Port.** The guard returns colour 0 for a `bp` whose unsigned index is past the 8,192-byte
+table. That is a **model of the unreachable branch**, not the source's address arithmetic;
+the port has no load map for the code bytes before `_depthcol`. The `count <= 0`,
+record-length, shadow and offset bounds checks are likewise guards for inputs part 2 never
+produces (the projected x is bounded; the source's `rows[y] + x` is a 16-bit offset that
+wraps within the A2D0 segment).
+
+**Why.** Reproducing the wrap would need the link map's code byte, and nothing in the effect's
+reachable domain reads it. The test pins the signed skip, the 16-bit load and the guard as a
+model; it does not assert BSS zero as fact.
+
+**Measured difference:** **0** in the reachable domain (the guard never fires for the filed
+frames); the unreachable byte is not reproduced. Reproduce the rule with
+`cargo test -p secondreality --bin secondreality
+the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`.

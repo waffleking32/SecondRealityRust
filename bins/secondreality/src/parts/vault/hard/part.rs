@@ -481,9 +481,10 @@ impl Part for Hard {
         // No pre-roll: the vendored `B.C` burns no `rand()` calls before its
         // first spawn, and the capture says the artifact agrees. The plan's
         // and the research's "60-call pre-roll" (`B.C:122`) does not exist in
-        // the tree; with the burn the first drawn frame is a different 92
-        // pixels from reference 512's 93, without it the 93 are exact
-        // (`docs/fidelity/hard.md`, `APPROXIMATIONS.md` A46).
+        // the tree (the 60-call loop is `EDGE.C:122`, a different program).
+        // The port's first drawn frame matches reference 512 exactly
+        // (`docs/fidelity/hard.md` records the scratch burn experiment that
+        // decided it).
         // `int 10h` mode 13h, `waitb()`, `memset(vram0,15,64000)` (`B.C:133-137`).
         self.screen = [15; SCREEN_BYTES];
         self.phase = Phase::Wipe { next_x: 319 };
@@ -516,12 +517,10 @@ impl Part for Hard {
     }
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        // `while(!dis_exit() && mode!=-1)` (`B.C:203`); the pre-roll's wipe
-        // and fill do not poll, the 70 waits do (`B.C:162`). The port ends on
-        // the exit tick wherever it is seen, as the other parts do.
-        if ctx.exit_requested {
-            return PartStatus::Finished;
-        }
+        // The source polls `dis_exit` at exactly two places: the 70-wait loop
+        // (`B.C:162`) and the main loop's condition (`B.C:203`). The wipe and
+        // the fill (`B.C:143-161`) do not poll, so the port does not end
+        // there either; a flag set during them is seen by the next wait.
         let finished = match self.phase {
             Phase::Wipe { .. } => {
                 self.wipe_tick();
@@ -532,14 +531,29 @@ impl Part for Hard {
                 false
             }
             Phase::Wait { .. } => {
-                self.wait_tick();
+                if ctx.exit_requested {
+                    // The wait loop's condition breaks; the pre-roll then
+                    // continues through the letterbox (`B.C:164-182`) and the
+                    // main loop exits at its own check.
+                    self.phase = Phase::Letterbox;
+                } else {
+                    self.wait_tick();
+                }
                 false
             }
             Phase::Letterbox => {
                 self.letterbox_tick();
                 false
             }
-            Phase::Main => self.main_tick(),
+            Phase::Main => {
+                // `while(!dis_exit() && mode!=-1)`: the first tick with the
+                // flag set runs no iteration and retires the part.
+                if ctx.exit_requested {
+                    true
+                } else {
+                    self.main_tick()
+                }
+            }
         };
         ctx.surface.pixels_mut()[..SCREEN_BYTES].copy_from_slice(&self.screen);
         ctx.set_palette(self.shown);
@@ -981,5 +995,50 @@ mod tests {
         // And the array's rest is dead: only the 256 slots just written are
         // live, the other 1792 keep the initial `0x100`.
         assert_eq!(part.dots.iter().filter(|d| d.colour != 0).count(), 256);
+    }
+
+    #[test]
+    fn the_exit_flag_is_polled_where_the_source_polls_it() {
+        let (mut engine, mut part, mut frame) = start();
+        // `B.C:143-161` does not poll: a flag set before the wipe runs the
+        // wipe and the fill to the waits.
+        engine.request_exit();
+        for _ in 0..20 {
+            assert_eq!(
+                tick(&mut engine, &mut part, &mut frame),
+                PartStatus::Continuing
+            );
+        }
+        assert!(matches!(part.phase, Phase::Fill { .. }));
+        for _ in 0..28 {
+            assert_eq!(
+                tick(&mut engine, &mut part, &mut frame),
+                PartStatus::Continuing
+            );
+        }
+        assert!(matches!(part.phase, Phase::Wait { .. }));
+
+        // The wait loop's condition (`B.C:162`) breaks without consuming a
+        // wait; the letterbox still runs, then the main loop's first check
+        // retires the part with no iteration (`B.C:203`).
+        assert_eq!(
+            tick(&mut engine, &mut part, &mut frame),
+            PartStatus::Continuing
+        );
+        assert_eq!(part.phase, Phase::Letterbox);
+        assert_eq!(
+            tick(&mut engine, &mut part, &mut frame),
+            PartStatus::Continuing
+        );
+        assert_eq!(part.phase, Phase::Main);
+        assert_eq!(
+            tick(&mut engine, &mut part, &mut frame),
+            PartStatus::Finished
+        );
+        assert_eq!(
+            (part.mode, part.count),
+            (0, -1),
+            "the main loop ran no iteration"
+        );
     }
 }

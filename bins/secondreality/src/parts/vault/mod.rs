@@ -33,10 +33,11 @@ mod tests {
             VAULT,
             [("grid", "GRID"), ("hard", "HARD"), ("twist", "TWIST")]
         );
-        // The names are the registry's: a menu row and `--part` agree. `grid`
-        // and `twist` are ported; Task 5 adds `hard` to the registry, and this
-        // table already carries its place.
+        // The names are the registry's: a menu row and `--part` agree. All
+        // three are ported — `grid` by Task 3, `twist` by Task 4 and `hard`
+        // by Task 6 — and this table carries their menu order.
         assert_eq!(crate::parts::registered("grid"), Some("grid"));
+        assert_eq!(crate::parts::registered("hard"), Some("hard"));
         assert_eq!(crate::parts::registered("twist"), Some("twist"));
         for (_, label) in VAULT {
             assert!(!label.is_empty());

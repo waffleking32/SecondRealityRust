@@ -183,6 +183,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | START | `START/HZPIC.LBM` | 59352 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: START/DOHZ.BAT:1 lbm2p hzpic.lbm |
 | GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 320x200 canvas of 32-pixel cells on its first 160 rows, linked into nothing — dropped as a font strip by A7 (§E.14) (floor list) |
 | GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
+| HARD | `HARD/FCRZ.U` | 64000 | `00 00 00 00` | 64000 bytes, no magic: an unheadered 320×200 screen. The effect's four `_dots*.tmp` streams are its build-time extraction, 40-row bands of `(value, 0, x-160, y-20)` records for `0 < value < 4` (`BDO.C:12-41`) | standalone | the effect's only asset: `HARD/BDO.C:34` reads `fcrz.u`; `B.EXE` links the four streams (`LINK.TMP:1-3`). Curated by Phase 8 Task 6 as `assets/HARD/FCRZ.U`; the port extracts the streams at run time |
 
 ### A.2 Assets whose bytes exist only inside a build blob: one recovered, two answered
 
@@ -195,7 +196,6 @@ section is A5's result as much as A1's list. `bytes` is the size of the blob's `
 | TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | **recovered by A5** as `assets/TECHNO/CIRCLE2.EGA`: a 320×200 one-bit mask (8,000 = 320×200/8), byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes | recovered | linked: `TECHNO/MAKEFILE:6` and `:23` link it into `koe.exe`; it sits in the shipped image (`TECHNO/KOE.MAP:11`, `DATA__circle2` = 0x1F40 bytes) and `TECHNO/KOEA.ASM:665` reads it |
 | TECHNO | `TECHNO/_PIC1.OBK` | 50000 | `FD FC` | Origin RLE container, 320×400 by its header, but the stream stops 119 bytes into row 282 — **281 of the 400 rows** (§E.13); the loader refuses it as truncation | blob-only | **not linked**: `TECHNO/MAKEFILE:7` comments `_pic1.obk _pic2.obk` out |
 | TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic; A5 measured it as `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859) | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
-| HARD | `HARD/FCRZ.U` | 64000 | `00 00 00 00` | 64000 bytes, no magic: an unheadered 320×200 screen. The effect's four `_dots*.tmp` streams are its build-time extraction, 40-row bands of `(value, 0, x-160, y-20)` records for `0 < value < 4` (`BDO.C:12-41`) | standalone | the effect's only asset: `HARD/BDO.C:34` reads `fcrz.u`; `B.EXE` links the four streams (`LINK.TMP:1-3`). Curated by Phase 8 Task 6 as `assets/HARD/FCRZ.U`; the port extracts the streams at run time |
 
 Every other blob in the tree whose payload is an asset has a standalone twin, and §A carries
 that twin's row; §D names the pairing. The exception is `ALKU/INCLUDE.OBJ`, whose payload

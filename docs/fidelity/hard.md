@@ -85,9 +85,14 @@ tools/vault_capture.sh hard --frames "$(seq -s, 948 962)"     --out out/task2/ha
 
 The dense batches are contiguous or five apart, so D19's read never sits between two grabs;
 the 100-frame map (`--frames "$(seq -s, 475 100 2175)"`) is the coarse cross-check. The
-`930-1000` batch is where the 948–955 hold is byte-identical and 956 first differs (by 100
-pixels: the band's index-189 trails become mode 5's index 1 under part 2's palette, which is
-white in both, so only the non-189 dot pixels change).
+`930-1000` batch is where the 948–955 hold is byte-identical and 956 first differs. The 955
+band is 40,860 background `(0,0,81)` pixels plus the 100 white index-189 trail pixels; 956
+and 957 replace exactly those 100 with `(4,255,255)` — 6-bit `(1,63,63)`, **not** the literal
+white `pal[1] = (63,63,63)` that `BP.C:135-138` writes. So the artifact's `part2init`
+palette or its upload phase is not the source's literal init pair (the pixels are the ones
+mode 5's rebuild converts, `B.C:299`), and Task 7 must measure the artifact's mode-5 palette
+before pinning part 2. The 956/957 pair is held, so an indexed read may settle it; the filed
+pair is RGB-only.
 
 ### Keyframes
 
@@ -232,13 +237,18 @@ colour is 189 after 65 frames; the 66th call kills it without drawing. The 930�
 record, the restore, the 66-frame life, the clips and the decrement.
 
 Part 2's `do3dots` (`BA.ASM:224-280`) is ported and pinned now for Task 7: it clears the
-previous pixel and a two-row shadow, loads z's **low word** into `bp`, skips it when the
-16-bit value is signed `> 3000`, then reads `depthcol[bp]` and draws at `rows[y] + x` when
+previous pixel and a two-row shadow, loads z's **low word** into `bp`, signed-skips values
+`> 3000` (`BA.ASM:233-235`), then reads `depthcol[bp]` and draws at `rows[y] + x` when
 `y <= 127`. `depthcol` is 8,192 bytes with 0..3,099 written (`BA.ASM:221-222`,
-`BP.C:128-133`); a z whose low word is negative passes the signed test and indexes past the
-array, where the BSS is zero. `the_shadow_grid_dot_reads_bss_zero_past_3100` pins that rule
-and the 16-bit load. (The plan's "z>3099 reads colour 0" is not reachable for a positive z —
-the `jg` skips it; the reachable BSS read is the negative low word.)
+`BP.C:128-133`). A negative low word passes the signed test and indexes past the array: the
+source's 16-bit `cs:_depthcol[bp]` wraps to `_depthcol - 0x100` for 0xFF00 and reads a code
+byte (0x07 with the shipped link map), **not** BSS zero. The port returns zero there as a
+documented **model of an unreachable branch** — part 2's projected z′ is 1134..2866 with a
+positive low word (Task 7's measurement), so no filed frame depends on it.
+`the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word` pins the signed skip, the
+16-bit load and the model; the `count`, record-length, shadow and offset bounds checks in the
+port are guards for inputs part 2 never produces, not source behaviour (the source's
+`rows[y] + x` is a 16-bit offset that wraps within the A2D0 segment).
 
 ### The data
 
@@ -261,21 +271,27 @@ is `0x4F` in the binary against `0x00` in the file, so the binary's last word wo
 100th pair, and no filed keyframe depends on it.
 
 There is **no `rand()` pre-roll**. The plan and the research put a 60-call burn at `B.C:122`;
-the vendored `B.C` has no such loop, and the capture agrees: with the burn the port's first
-drawn frame (port 156) is 92 pixels where the capture's 512 has 93 and the four logo
-keyframes differ by thousands of pixels; without it the first-draw set is the capture's 93/93
-and all seven keyframes are exact. `the_first_spawn_is_the_sources_rand_sequence` pins the
-first spawned record's six words against the MS C 6.0 LCG (`MsRand`, `minvball.rs:243-265`)
-with no burn. The 60-call figure in the research is `EDGE.C:122`'s loop, a different program.
+the vendored `B.C` has no such loop (the 60-call loop is `EDGE.C:122`, a different program).
+A **scratch experiment** during this task — the burn reinstated by hand and removed again,
+not a committed reproduction — put the burn's first drawn frame at 92 pixels against the
+capture's 93 and separated the logo keyframes. The committed model has no burn: its first
+drawn frame is reference 512 exactly (0 differing pixels; reproduce with
+`cargo run --release --bin secondreality -- --part hard --headless --dump-frames 156
+--dump-dir out/hard-512` against `out/task2/hard-470-520/frame_000512.rgb`), and all seven
+keyframes are exact. `the_first_spawn_is_the_sources_rand_sequence` pins the first spawned
+record's six words against the MS C 6.0 LCG (`MsRand`, `minvball.rs:243-265`) with no burn.
 
 ### The mode-5 boundary
 
 Mode 4's last iteration is count 101, so the source's part 2 starts at the port tick 102
 iterations after mode 4's count 0: reference **953** (851 + 102). The filed artifact's first
 mode-5 frame is **956** (`out/task2/hard-948-962`: 948–955 hold, 956 first changes). Three
-display frames are unaccounted for by the source's loop — the lead is a missed-retrace
-overrun (D22), which the port's fixed tick cannot model; Task 7 owns the boundary and the
-part-2 keyframes. The port retires on the mode-4 advance tick (port 596) and the shell holds;
+display frames are unaccounted for by the source's loop. The overrun is **not** mode 4's
+count 0: port 495 and 496 (reference 851 and 852) match the capture exactly, so the heavy
+count-0 rebuild did not overrun. The candidate is a later mode-4 iteration — the 768-byte
+palette upload at the top of every iteration is the remaining per-frame work of that size —
+but no per-frame position is measured; Task 7 owns the boundary and the part-2 keyframes.
+The port retires on the mode-4 advance tick (port 596) and the shell holds;
 `hard_ends_at_the_mode_five_boundary` pins the hold and
 `the_first_half_mode_sequence_is_the_sources` the tick.
 
@@ -283,8 +299,10 @@ part-2 keyframes. The port retires on the mode-4 advance tick (port 596) and the
 
 Modes 5 and 6 (`part2init`/`part2`, `part3init`/`part3`), the `part2init` uninitialised `b`,
 the `0xff` cut, `fadepal` and the final `default` exit; the compositor band seeding and the
-clipper's `Norm`/`Hide` passes (Task 5's deferred minors). The port's `do3dots`, `GRID1`,
-`Dot` and the engine interfaces are in place for it.
+clipper's `Norm`/`Hide` passes (Task 5's deferred minors). The artifact's mode-5 `part2init`
+palette/upload phase is a measured Task 7 lead (the 956/957 `(4,255,255)` observation above;
+APPROXIMATIONS A48). The port's `do3dots`, `GRID1`, `Dot` and the engine interfaces are in
+place for it.
 
 ## Verification
 
