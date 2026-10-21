@@ -4920,3 +4920,100 @@ that one is sub-frame rather than a phase (§13.6). Block 2's moving screens wer
 for every keyframe it filed, which is what §1.8 was written for; the difference is the anchor: a part
 whose timeline is pinned to one music cue draws the same frames at the same indices, and a part whose
 *start* is a music wait with a *pinned* end (PLZPART's plasma) is the one case that drifts.
+
+---
+
+---
+
+## 24. The vault capture route (Phase 8 Task 1)
+
+The three unreleased effects are separate programs: each links the DIS client and needs the
+vendored standalone `DIS/DIS.EXE` resident, and none draws `SECOND.EXE`'s sound-card setup
+screen. `--boot autoexec` always waited for that screen's text, so Task 1 added
+`--boot-wait graphics` (`xtask/src/reference.rs`'s `BootWait`), and
+`tools/vault_capture.sh` stages and captures one effect. Nothing here is a filed reference:
+Task 2 writes `reference/parts/<part>`; these runs went to `out/vault-smoke/`.
+
+### 24.1 The recipe
+
+```
+tools/vault_capture.sh <grid|hard|twist> --frames <A,B,...> --out out/vault-smoke/<part>
+```
+
+stages `upstream/SecondReality/DIS/DIS.EXE` (`270f5fe2…`) and the effect EXE — `GRID/P.EXE`
+(`d4e7f1d6…`), `HARD/B.EXE` (`1f8a7bda…`), `TWIST/T.EXE` (`88d5e695…`) — into a fresh
+`out/vault-stage/<part>` after checking all four digests, writes `RUN.BAT` (`@ECHO OFF`,
+`DIS.EXE`, the effect), and runs
+
+```
+cargo xtask reference capture --exe <stage>/RUN.BAT --cwd <stage> \
+    --boot autoexec --boot-wait graphics --cycles 30000 --out out/vault-smoke/<part> \
+    [--keys KBD_space]
+```
+
+`--keys KBD_space` is GRID's and HARD's starter key: the autoexec recipe writes
+`AUTOTYPE -w 5 space` before the program, so one key reaches DIS's `checkkeys`
+(`DIS/DISINT.ASM:112-157`) after the effect has started — GRID's `getch()`
+(`GRID/MAIN.C:153`) and HARD's `while (dis_muscode(1) != 1 …)` (`HARD/B.C:138`). TWIST has
+no key gate (`TWIST/MAIN.C:49`) and takes none. Every smoke manifest says `exe: "RUN.BAT"`,
+`arguments: []`, `boot: "autoexec"`, `boot_wait: "graphics"`, `cycles: 30000`,
+`frame_origin: "boot"`, 320×200, and `keys: ["KBD_space"]` (GRID) or `[]` (TWIST).
+
+### 24.2 GRID's start moved 351 frames earlier
+
+A dense sweep, all 26 taken before any is read:
+
+```
+tools/vault_capture.sh grid --frames 340,341,...,365 --out out/vault-smoke/grid-start
+```
+
+Frames 340–351 are the same picture, `728e0d87…` — the pre-key art route B measured at 700–702
+(same digest prefix), so this is the same screen, not a different boot. **The last static frame
+is 351 and the first changed is 352** (`d2ac61b7…`; 353 is `4a4ad86e…`), 351 frames before route
+B's 703. The 5 s AUTOTYPE key is scheduled where the 10 s PAUSE batch put its second key, which
+is exactly the shift the recipe change predicts. The keyframes filed by Task 2 must therefore
+use route A's numbering: 352 is the effect's first loop frame.
+
+```
+tools/vault_capture.sh grid --frames 400,500,600 --out out/vault-smoke/grid \
+    --sheet out/vault-smoke/grid-sheet.png
+```
+
+exits 0 with the animated line effect over the eye at all three frames
+(`574a6fa9…`, `0241f663…`, `1fb43740…`, RGB only: the moving screen's indexed read does not
+reproduce its RGB frame, D19).
+
+### 24.3 TWIST starts as soon as DIS and T.EXE load
+
+Without the PAUSE batch there is nothing to hold the guest, so TWIST's graphics are up long
+before route B's 355. Single-index probes (`tools/vault_capture.sh twist --frames <N> --out
+out/vault-smoke/twist-probe<N>`) are 320×200 at **20** (`03b276c7…`), **40** (`edfb150c…`) and
+**80** (`063223de…`), all different — the effect is already animating at frame 20. The main
+smoke
+
+```
+tools/vault_capture.sh twist --frames 355,500,600 --out out/vault-smoke/twist \
+    --sheet out/vault-smoke/twist-sheet.png
+```
+
+exits 0: 320×200, `keys: []`, three distinct pictures (`19acb54c…`, `ed79f360…`, `e8c3e54b…`).
+
+**The brief's `--frames 355,400,600` refuses, reproducibly.** Two runs ended with
+
+```
+error: the emulator reached frame 427 before frame 400 could be captured; the capture would
+not be of the requested frame
+```
+
+(the second named frame 428). This is D19's spacing rule, not a route failure: after taking and
+reading 355, the first frame the next wait could identify was already 427/428, so one indexed
+read of TWIST's planar 320×200 screen costs far more than the 25-frame `INDEXED_READ_FRAMES`
+estimate — the screen is read a plane and a DAC entry at a time. **Task 2 must space TWIST's
+indices by about 100, not 25, and take its dense start sweep in a single batched run**; its
+`355` is still a valid picture (the same frame is the main smoke's first frame).
+
+GRID's 100-frame spacing is unaffected (`400,500,600` exits 0) because GRID is chain-4 mode 13h
+and its framebuffer read is the cheap one (`docs/decisions.md` D14).
+
+`git status` after the runs shows nothing under `upstream/` or `reference/`: the only writes are
+`out/vault-stage/` and `out/vault-smoke/`, both ignored.
