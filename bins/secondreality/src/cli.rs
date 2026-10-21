@@ -59,6 +59,14 @@ pub struct Cli {
     /// Do not open a sound card. The player still runs: the music's position is the tick's
     /// and this only stops the tick's samples from being played.
     pub no_audio: bool,
+    /// Open the vault menu instead of a run: a window-only selection among the
+    /// demo's three unreleased effects (`parts::vault::VAULT`).
+    ///
+    /// The menu starts the parts itself, one at a time, so every flag that
+    /// names a run or bounds a dump contradicts it — [`validate`](Cli::validate)
+    /// refuses those. The presentation flags (`--scale`, `--aspect`,
+    /// `--no-border`, `--no-audio`) apply to it and to the runs it starts.
+    pub vault: bool,
 }
 
 impl Default for Cli {
@@ -77,6 +85,7 @@ impl Default for Cli {
             border: true,
             audio_dump: None,
             no_audio: false,
+            vault: false,
         }
     }
 }
@@ -144,6 +153,7 @@ impl Cli {
                     cli.audio_dump = Some(PathBuf::from(value(&mut args, "--audio-dump")?))
                 }
                 "--no-audio" => cli.no_audio = true,
+                "--vault" => cli.vault = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }
         }
@@ -163,6 +173,24 @@ impl Cli {
     fn validate(&self) -> Result<(), String> {
         if self.scale < 1 {
             return Err("--scale is a magnification, so it must be at least 1".to_string());
+        }
+        // The vault menu is the window's own surface: it starts runs itself, and
+        // a flag that names one (or bounds a dump of it) contradicts it. The
+        // check comes before the headless rules so that the headless vault says
+        // *why* it cannot exist, rather than asking for a dump directory.
+        if self.vault {
+            if self.headless
+                || self.part.is_some()
+                || self.block.is_some()
+                || self.dump_dir.is_some()
+                || self.dump_frames.is_some()
+                || self.frames.is_some()
+                || self.run_seconds.is_some()
+                || self.audio_dump.is_some()
+            {
+                return Err("the vault menu needs a window; name a part with --part".to_string());
+            }
+            return Ok(());
         }
         if self.block.is_some() && self.part.is_some() {
             return Err("give --part or --block, not both".to_string());
@@ -534,5 +562,78 @@ mod tests {
     #[test]
     fn the_square_pixel_aspect_is_accepted() {
         assert_eq!(parse(&["--aspect", "square"]).unwrap().aspect, Aspect::SquarePixels);
+    }
+
+    const VAULT_REFUSAL: &str = "the vault menu needs a window; name a part with --part";
+
+    #[test]
+    fn the_vault_flag_is_parsed() {
+        let cli = parse(&["--vault"]).unwrap();
+        assert!(cli.vault);
+        assert!(!cli.headless, "the vault is a window surface");
+        assert_eq!(cli.part, None, "the menu chooses the part");
+        assert_eq!(cli.block, None);
+        assert!(!parse(&[]).unwrap().vault, "--vault is opt-in");
+    }
+
+    #[test]
+    fn a_vault_run_refuses_headless() {
+        assert_eq!(
+            parse(&["--vault", "--headless"]).unwrap_err(),
+            VAULT_REFUSAL
+        );
+        // Even with everything else a headless run would need: the reason is
+        // the mode, not the missing dump.
+        assert_eq!(
+            parse(&["--vault", "--headless", "--dump-dir", "d", "--frames", "1"]).unwrap_err(),
+            VAULT_REFUSAL
+        );
+    }
+
+    #[test]
+    fn a_vault_run_refuses_a_part_or_block() {
+        let cases: [&[&str]; 3] = [
+            &["--vault", "--part", "grid"],
+            &["--vault", "--block", "1"],
+            &["--vault", "--part", "grid", "--block", "1"],
+        ];
+        for args in cases {
+            assert_eq!(parse(args).unwrap_err(), VAULT_REFUSAL, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn a_vault_run_refuses_a_dump_or_audio_flag() {
+        let flags: [&[&str]; 5] = [
+            &["--dump-dir", "d"],
+            &["--dump-frames", "1"],
+            &["--frames", "1"],
+            &["--run-seconds", "1"],
+            &["--audio-dump", "music.wav"],
+        ];
+        for flag in flags {
+            let mut args = vec!["--vault"];
+            args.extend_from_slice(flag);
+            assert_eq!(parse(&args).unwrap_err(), VAULT_REFUSAL, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn a_vault_run_accepts_the_presentation_flags() {
+        let cli = parse(&[
+            "--vault",
+            "--scale",
+            "2",
+            "--aspect",
+            "square",
+            "--no-border",
+            "--no-audio",
+        ])
+        .unwrap();
+        assert!(cli.vault);
+        assert_eq!(cli.scale, 2);
+        assert_eq!(cli.aspect, Aspect::SquarePixels);
+        assert!(!cli.border);
+        assert!(cli.no_audio);
     }
 }

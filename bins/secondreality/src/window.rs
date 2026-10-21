@@ -20,8 +20,16 @@
 //! the screen holds what the last part left (`MAIN/U2.ASM:935`'s
 //! `@@partsdone`), ESC closes the window, and the title bar says why nothing
 //! is moving.
+//!
+//! `--vault` adds a menu over the three unreleased effects (`parts::vault`):
+//! it draws a 320×200 picture ([`crate::vault_menu`]), starts the chosen one as
+//! a one-part run on the same loop, and — because the menu is where the run
+//! came from — sends ESC at the held screen back to the menu rather than
+//! closing the window. ESC in the menu, or the close button, ends it. The
+//! normal run's keys, status line and pacing are untouched.
 
 use std::error::Error;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,15 +38,34 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Texture, TextureCreator, WindowCanvas};
 use sdl2::video::WindowContext;
+use sdl2::{EventPump, VideoSubsystem};
+use sr_assets::font::Font;
+use sr_assets::load_path;
 use sr_engine::present::{output_size, present, FrameBuffer, PresentOptions};
 use sr_engine::{IndexedFrame, Tick};
 
 use crate::audio::Device;
 use crate::cli::Cli;
 use crate::shell::Sequence;
+use crate::vault_menu::{self, Menu, MenuAction, MenuKey};
 
 /// The window's title, and the first word of the status line.
 const TITLE: &str = "Second Reality";
+
+/// The menu's title bar. A run replaces it with its status line while it
+/// plays; the menu puts it back when the run ends.
+const VAULT_TITLE: &str = "Second Reality — vault";
+
+/// The menu's font: `ALKU/FONA.UH` read as `ALKU/MAIN.C`'s text routine reads
+/// it — 20-column cells, 30 rows, first cell `A` (`sr_assets::font` documents
+/// the geometry). Every part reads its own media by the same relative path.
+const MENU_FONT: &str = "assets/ALKU/FONA.UH";
+const MENU_CELL: (u16, u16) = (20, 30);
+
+/// How long the menu blocks waiting for an event. The menu is static, so this
+/// is a wait and not a poll: nothing happens until a key or the close button
+/// arrives.
+const MENU_WAIT_MS: u32 = 50;
 
 /// The texture format the presented frames are uploaded in.
 ///
@@ -70,6 +97,18 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         scale: cli.scale,
         border: cli.border,
     };
+
+    // The vault menu. It builds its own one-part runs as it plays them, so the
+    // command line cannot name one (the CLI refuses it); nothing below the
+    // branch changes for a normal run.
+    if cli.vault {
+        let sdl = sdl2::init()?;
+        let video = sdl.video()?;
+        let timer = sdl.timer()?;
+        let mut events = sdl.event_pump()?;
+        return vault_loop(&video, &timer, &mut events, &opts);
+    }
+
     // The same run `--headless` dumps: a block's ported parts in the demo's own
     // order, or the one part `--part` named, numbered in the reference's frame
     // space.
@@ -85,8 +124,8 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     // nothing at all, which the music does not notice: its position is the tick's.
     let mut audio = audio_of(&sdl, &mut run, cli)?;
 
-    let mut raster = output_size(run.frame(), &opts);
-    let mut status = status_line(&run, block);
+    let raster = output_size(run.frame(), &opts);
+    let status = status_line(&run, block);
     let window = video
         .window(&status, raster.0 as u32, raster.1 as u32)
         .position_centered()
@@ -94,25 +133,137 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let mut canvas = window.into_canvas().build()?;
     let creator = canvas.texture_creator();
     let mut texture = streaming_texture(&creator, raster)?;
-    let mut buffer = FrameBuffer::new(0, 0);
+    let mut screen = Screen {
+        canvas: &mut canvas,
+        creator: &creator,
+        buffer: FrameBuffer::new(0, 0),
+        raster,
+        status,
+    };
     let mut events = sdl.event_pump()?;
+    let end = present_run(
+        &mut screen,
+        &mut texture,
+        &mut events,
+        &timer,
+        &opts,
+        &mut run,
+        &mut audio,
+        block,
+        false,
+    )?;
+    debug_assert_eq!(end, RunEnd::Close, "a normal run has no menu to return to");
+    drop(screen);
+    // The device is dropped with `audio`, which stops the callback; a dump is complete at
+    // the last tick it wrote, because its header is patched on every write.
+    drop(audio);
+    if let Some(error) = run.audio_error() {
+        return Err(format!("--audio-dump: {error}").into());
+    }
+    Ok(())
+}
 
+/// How a presented run ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunEnd {
+    /// The window closes: the close button, a run that could not start, or —
+    /// for a normal run — ESC at the hold.
+    Close,
+    /// A vault run's ESC at the hold goes back to the menu.
+    Menu,
+}
+
+/// The presentation state a window keeps across the runs it shows: the canvas,
+/// its texture creator, and the upload buffer.
+///
+/// The texture is rebuilt when a frame's output raster changes (a part's
+/// double-scan is the usual reason), and the upload buffer is reused. The
+/// vault menu and the runs it starts share one `Screen`, so the window is
+/// opened once and a run does not have to reopen it.
+struct Screen<'a> {
+    canvas: &'a mut WindowCanvas,
+    creator: &'a TextureCreator<WindowContext>,
+    buffer: FrameBuffer,
+    raster: (usize, usize),
+    /// The line currently on the title bar, so a tick only calls the window
+    /// manager when the title changed.
+    status: String,
+}
+
+impl<'a> Screen<'a> {
+    /// Upload `frame` through `texture` and show it, rebuilding the texture
+    /// and resizing the window first when the frame's output raster changed.
+    ///
+    /// The texture's lifetime is the screen's: both were created from the same
+    /// texture creator, so a rebuilt texture is the same kind of object.
+    fn present(
+        &mut self,
+        texture: &mut Texture<'a>,
+        frame: &IndexedFrame,
+        opts: &PresentOptions,
+    ) -> Result<(), Box<dyn Error>> {
+        let size = output_size(frame, opts);
+        if size != self.raster {
+            self.raster = size;
+            *texture = streaming_texture(self.creator, size)?;
+            self.canvas
+                .window_mut()
+                .set_size(size.0 as u32, size.1 as u32)?;
+        }
+        blit(self.canvas, texture, &mut self.buffer, frame, opts)
+    }
+
+    /// Put `line` on the title bar, if it is not already there.
+    fn title(&mut self, line: String) -> Result<(), Box<dyn Error>> {
+        if line != self.status {
+            self.canvas.window_mut().set_title(&line)?;
+            self.status = line;
+        }
+        Ok(())
+    }
+}
+
+/// Present `run` in `screen` until it ends or the window closes.
+///
+/// This is the loop a window run has always had: poll the keys, advance the
+/// run by wall-clock time, present the newest frame, keep the status line
+/// current, and pace to the tick. The one new outcome is [`RunEnd::Menu`]: a
+/// vault run whose screen is being held and whose ESC was pressed goes back to
+/// the menu that started it. `return_to_menu` is false for every other run, so
+/// that outcome is unreachable for them and their ESC semantics are unchanged.
+///
+/// `audio` is the run's device, if it has one; the vault passes `None` — its
+/// three parts have no music — and the normal path passes what `audio_of`
+/// opened.
+#[allow(clippy::too_many_arguments)] // the window loop's own state, kept as arguments so it stays testable and explicit
+fn present_run<'a>(
+    screen: &mut Screen<'a>,
+    texture: &mut Texture<'a>,
+    events: &mut EventPump,
+    timer: &sdl2::TimerSubsystem,
+    opts: &PresentOptions,
+    run: &mut Sequence,
+    audio: &mut Option<Device>,
+    block: Option<char>,
+    return_to_menu: bool,
+) -> Result<RunEnd, Box<dyn Error>> {
     let mut sampled = Instant::now();
     let mut escape = EscapeKey::default();
     loop {
         let keys = keys_of(events.poll_iter());
         if keys.close {
-            break;
+            return Ok(RunEnd::Close);
         }
         if keys.exit {
             escape.press();
         }
-        if escape.apply(&mut run) {
+        if escape.apply(run) {
             // The exit flag has nothing left to act on: the run's parts are
             // over and the screen the last one left is being held. The
             // original's shell is at `@@partsdone` there (`MAIN/U2.ASM:935`) and
-            // returns to DOS, which is this window closing.
-            break;
+            // returns to DOS, which is this window closing — unless the run
+            // came from the vault menu, where the press goes back to the menu.
+            return Ok(run_end(run.holding(), return_to_menu));
         }
         if keys.skip {
             run.skip_part();
@@ -141,40 +292,138 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         // `Engine::tick` sizes the frame from the view every tick, so a part
         // that changes the picture's geometry — double-scan takes it to 400
         // lines — changes the raster the texture and the window have to fit.
-        let size = output_size(run.frame(), &opts);
-        if size != raster {
-            raster = size;
-            texture = streaming_texture(&creator, raster)?;
-            canvas.window_mut().set_size(size.0 as u32, size.1 as u32)?;
-        }
-        blit(&mut canvas, &mut texture, &mut buffer, run.frame(), &opts)?;
+        screen.present(texture, run.frame(), opts)?;
 
         // The status line, when it has changed. The index in it moves every
         // tick, so this is one window-manager call a tick and not a redraw:
         // only the text is compared, and the frame on the screen is untouched.
-        let line = status_line(&run, block);
-        if line != status {
-            canvas.window_mut().set_title(&line)?;
-            status = line;
-        }
+        screen.title(status_line(run, block))?;
 
         // A run that has *ended* — a part the port has but could not start —
         // has no hold after it and nothing left to show.
         if run.finished() {
-            break;
+            return Ok(RunEnd::Close);
         }
         // SDL's frame delay does the waiting — out the rest of the tick, and
         // never less than a millisecond, so the loop cannot spin.
         let left = TICK_PERIOD.saturating_sub(now.elapsed());
         timer.delay(left.as_millis().max(1) as u32);
     }
-    // The device is dropped with `audio`, which stops the callback; a dump is complete at
-    // the last tick it wrote, because its header is patched on every write.
-    drop(audio);
-    if let Some(error) = run.audio_error() {
-        return Err(format!("--audio-dump: {error}").into());
+}
+
+/// Which way the window goes when an ESC press reaches a held screen.
+///
+/// A normal run's hold is the original's `@@partsdone` and the press returns to
+/// DOS — the window closes. A vault run was started by the menu, so the same
+/// press goes back there instead.
+fn run_end(holding: bool, return_to_menu: bool) -> RunEnd {
+    if holding && return_to_menu {
+        RunEnd::Menu
+    } else {
+        RunEnd::Close
     }
-    Ok(())
+}
+
+/// The menu key an SDL keycode asks for. A key the menu does not use is
+/// [`MenuKey::Other`], which moves nothing; the close button is the caller's
+/// event, not a key.
+fn menu_key(keycode: Option<Keycode>) -> MenuKey {
+    match keycode {
+        Some(Keycode::Up) => MenuKey::Up,
+        Some(Keycode::Down) => MenuKey::Down,
+        Some(Keycode::Return | Keycode::KpEnter) => MenuKey::Enter,
+        Some(Keycode::Escape) => MenuKey::Escape,
+        _ => MenuKey::Other,
+    }
+}
+
+/// The `--vault` window: the menu, the one-part runs it starts, and the way
+/// back.
+///
+/// The menu is drawn once and redrawn only when the selection moves; between
+/// events the loop blocks in SDL, so a static menu costs nothing. A chosen
+/// part runs through the same [`present_run`] a normal run uses, with no
+/// device (the vault's parts are silent) and with `return_to_menu` set; the
+/// close button, or ESC in the menu, ends the window.
+fn vault_loop(
+    video: &VideoSubsystem,
+    timer: &sdl2::TimerSubsystem,
+    events: &mut EventPump,
+    opts: &PresentOptions,
+) -> Result<(), Box<dyn Error>> {
+    let font = menu_font()?;
+    let mut menu = Menu::new();
+    let mut frame = IndexedFrame::new(vault_menu::FRAME_WIDTH, vault_menu::FRAME_HEIGHT);
+    vault_menu::draw(&menu, &font, &mut frame);
+
+    let raster = output_size(&frame, opts);
+    let window = video
+        .window(VAULT_TITLE, raster.0 as u32, raster.1 as u32)
+        .position_centered()
+        .build()?;
+    let mut canvas = window.into_canvas().build()?;
+    let creator = canvas.texture_creator();
+    let mut texture = streaming_texture(&creator, raster)?;
+    let mut screen = Screen {
+        canvas: &mut canvas,
+        creator: &creator,
+        buffer: FrameBuffer::new(0, 0),
+        raster,
+        status: VAULT_TITLE.to_string(),
+    };
+    screen.present(&mut texture, &frame, opts)?;
+
+    loop {
+        // Block on the queue: the menu has nothing to do until a key or the
+        // close button arrives, and a timed wait cannot spin.
+        let Some(event) = events.wait_event_timeout(MENU_WAIT_MS) else {
+            continue;
+        };
+        let action = match event {
+            Event::Quit { .. } => return Ok(()),
+            Event::KeyDown { keycode, .. } => menu.key(menu_key(keycode)),
+            _ => continue,
+        };
+        match action {
+            MenuAction::Redraw => {
+                vault_menu::draw(&menu, &font, &mut frame);
+                screen.present(&mut texture, &frame, opts)?;
+            }
+            MenuAction::Close => return Ok(()),
+            MenuAction::Choose(name) => {
+                let mut run = crate::new_sequence_for_part(name)?;
+                // The vault's parts are silent: `shell::music_for_part` has no
+                // row for them, so the run has no player and no device is
+                // opened. The slot is the same one the normal loop drains.
+                let mut audio: Option<Device> = None;
+                let end = present_run(
+                    &mut screen,
+                    &mut texture,
+                    events,
+                    timer,
+                    opts,
+                    &mut run,
+                    &mut audio,
+                    None,
+                    true,
+                )?;
+                if end == RunEnd::Close {
+                    return Ok(());
+                }
+                // Back in the menu: its title, and the frame it was showing.
+                // The selection did not move while the part played, so the
+                // frame is re-presented rather than redrawn.
+                screen.title(VAULT_TITLE.to_string())?;
+                screen.present(&mut texture, &frame, opts)?;
+            }
+        }
+    }
+}
+
+/// Load the menu's font strip.
+fn menu_font() -> Result<Font, Box<dyn Error>> {
+    let image = load_path(Path::new(MENU_FONT)).map_err(|error| format!("{MENU_FONT}: {error}"))?;
+    Ok(Font::from_image(image, MENU_CELL, 'A').map_err(|error| format!("{MENU_FONT}: {error}"))?)
 }
 
 /// Open what the command line asked the run to play through: a sound card, a WAV file, or
@@ -186,7 +435,11 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 /// silent rather than failing: the demo must still run, and the picture is not the card's.
 /// `--no-audio` is the same state asked for rather than discovered, and is why it prints
 /// nothing.
-fn audio_of(sdl: &sdl2::Sdl, run: &mut Sequence, cli: &Cli) -> Result<Option<Device>, Box<dyn Error>> {
+fn audio_of(
+    sdl: &sdl2::Sdl,
+    run: &mut Sequence,
+    cli: &Cli,
+) -> Result<Option<Device>, Box<dyn Error>> {
     if let Some(path) = cli.audio_dump.as_deref() {
         run.dump_audio(path)?;
         println!(
@@ -266,10 +519,14 @@ fn keys_of(events: impl IntoIterator<Item = Event>) -> Keys {
     for event in events {
         match event {
             Event::Quit { .. } => keys.close = true,
-            Event::KeyDown { keycode: Some(Keycode::Escape), .. } => keys.exit = true,
-            Event::KeyDown { keycode: Some(Keycode::LCtrl | Keycode::RCtrl), .. } => {
-                keys.skip = true
-            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => keys.exit = true,
+            Event::KeyDown {
+                keycode: Some(Keycode::LCtrl | Keycode::RCtrl),
+                ..
+            } => keys.skip = true,
             _ => {}
         }
     }
@@ -397,11 +654,7 @@ fn streaming_texture(
     creator: &TextureCreator<WindowContext>,
     raster: (usize, usize),
 ) -> Result<Texture<'_>, Box<dyn Error>> {
-    Ok(creator.create_texture_streaming(
-        TEXTURE_FORMAT,
-        raster.0 as u32,
-        raster.1 as u32,
-    )?)
+    Ok(creator.create_texture_streaming(TEXTURE_FORMAT, raster.0 as u32, raster.1 as u32)?)
 }
 
 #[cfg(test)]
@@ -456,8 +709,14 @@ mod tests {
     }
 
     fn run_of(plan: Vec<&'static str>) -> Sequence {
-        Sequence::with_source(SURFACE_WIDTH, SURFACE_HEIGHT, start_view(), plan, stub_source)
-            .unwrap()
+        Sequence::with_source(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
+            plan,
+            stub_source,
+        )
+        .unwrap()
     }
 
     fn run_out(run: &mut Sequence, limit: u32) {
@@ -492,13 +751,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_menu_keys_map_to_the_menu_actions() {
+        // The SDL keycodes the menu listens for.
+        assert_eq!(menu_key(Some(Keycode::Up)), MenuKey::Up);
+        assert_eq!(menu_key(Some(Keycode::Down)), MenuKey::Down);
+        assert_eq!(menu_key(Some(Keycode::Return)), MenuKey::Enter);
+        assert_eq!(menu_key(Some(Keycode::KpEnter)), MenuKey::Enter);
+        assert_eq!(menu_key(Some(Keycode::Escape)), MenuKey::Escape);
+        // Everything else — including the keys a *run* acts on, which the menu
+        // does not — is Other, and a key event with no keycode asks nothing.
+        for other in [Keycode::Space, Keycode::LCtrl, Keycode::A, Keycode::F1] {
+            assert_eq!(menu_key(Some(other)), MenuKey::Other, "{other:?}");
+        }
+        assert_eq!(menu_key(None), MenuKey::Other);
+
+        // And the reducer through that mapping: Up and Down move the
+        // selection (wrapping), Enter chooses the row it is on, Escape closes,
+        // and an unhandled key leaves the selection where it was.
+        let mut menu = Menu::new();
+        assert_eq!(menu.key(menu_key(Some(Keycode::Up))), MenuAction::Redraw);
+        assert_eq!(
+            menu.key(menu_key(Some(Keycode::A))),
+            MenuAction::Redraw,
+            "an unhandled key moves nothing"
+        );
+        assert_eq!(
+            menu.key(menu_key(Some(Keycode::Return))),
+            MenuAction::Choose("twist"),
+            "Up wrapped to the last row and A did not move it"
+        );
+        assert_eq!(menu.key(menu_key(Some(Keycode::Down))), MenuAction::Redraw);
+        assert_eq!(
+            menu.key(menu_key(Some(Keycode::Return))),
+            MenuAction::Choose("grid"),
+            "Down wrapped from the last row to the first"
+        );
+        assert_eq!(menu.key(menu_key(Some(Keycode::Escape))), MenuAction::Close);
+    }
+
+    #[test]
+    fn an_escape_on_a_held_vault_part_returns_to_the_menu() {
+        // A run with nothing left to play: `endlogo` retires on its first
+        // tick, and the screen its picture left is held.
+        let mut run = run_of(vec!["endlogo"]);
+        run_out(&mut run, 4);
+        assert!(run.holding(), "the run has nothing left to play");
+
+        let mut escape = EscapeKey::default();
+        escape.press();
+        assert!(escape.apply(&mut run), "the press ends the held screen");
+        assert_eq!(
+            run_end(run.holding(), true),
+            RunEnd::Menu,
+            "a vault run goes back to the menu"
+        );
+        assert_eq!(
+            run_end(run.holding(), false),
+            RunEnd::Close,
+            "a normal run's hold still closes the window"
+        );
+
+        // While a part is playing, the same press is the exit flag and does
+        // not take the window anywhere, vault or not.
+        let mut live = run_of(vec!["beglogo"]);
+        live.tick();
+        let mut escape = EscapeKey::default();
+        escape.press();
+        assert!(!escape.apply(&mut live), "there is a running part to ask");
+        assert_eq!(run_end(live.holding(), true), RunEnd::Close);
+    }
+
     /// The declared format must decode the bytes `present` wrote, in the order
     /// it wrote them. Getting this wrong does not fail loudly: the picture comes
     /// up in wrong colours and every test above still passes, because none of
     /// them touches a texture.
     #[test]
     fn the_texture_format_reads_the_presenters_bytes_in_order() {
-        let masks = TEXTURE_FORMAT.into_masks().expect("SDL knows its own formats");
+        let masks = TEXTURE_FORMAT
+            .into_masks()
+            .expect("SDL knows its own formats");
         // One pixel as `Palette::write_rgba` lays it out in memory: red 10,
         // green 20, blue 30, opaque. `from_ne_bytes` is the bytes as they are,
         // which is what the texture is handed.
@@ -515,12 +847,33 @@ mod tests {
         // The two keys `checkkeys` acts on (`DIS/DISINT.ASM:112-156`), as the
         // decision they are. ESC sets the exit flag, Ctrl is what `partexecute`
         // reads before running a part (`MAIN/U2.ASM:205-207`).
-        assert_eq!(keys_of([key_down(Keycode::Escape)]), Keys { exit: true, ..Keys::default() });
-        assert_eq!(keys_of([key_down(Keycode::LCtrl)]), Keys { skip: true, ..Keys::default() });
-        assert_eq!(keys_of([key_down(Keycode::RCtrl)]), Keys { skip: true, ..Keys::default() });
+        assert_eq!(
+            keys_of([key_down(Keycode::Escape)]),
+            Keys {
+                exit: true,
+                ..Keys::default()
+            }
+        );
+        assert_eq!(
+            keys_of([key_down(Keycode::LCtrl)]),
+            Keys {
+                skip: true,
+                ..Keys::default()
+            }
+        );
+        assert_eq!(
+            keys_of([key_down(Keycode::RCtrl)]),
+            Keys {
+                skip: true,
+                ..Keys::default()
+            }
+        );
         assert_eq!(
             keys_of([Event::Quit { timestamp: 0 }]),
-            Keys { close: true, ..Keys::default() }
+            Keys {
+                close: true,
+                ..Keys::default()
+            }
         );
 
         // Everything else is `passmuscode` (`:154`) and asks nothing of the
@@ -536,7 +889,11 @@ mod tests {
             Keycode::Num9,
             Keycode::Num1,
         ] {
-            assert_eq!(keys_of([key_down(other)]), Keys::default(), "{other:?} asks nothing");
+            assert_eq!(
+                keys_of([key_down(other)]),
+                Keys::default(),
+                "{other:?} asks nothing"
+            );
         }
         // A key *up* is not a press, and an auto-repeat is the same press.
         assert_eq!(keys_of([key_up(Keycode::Escape)]), Keys::default());
@@ -553,8 +910,16 @@ mod tests {
         assert_eq!(run.part(), "cred", "ESC ends the part it was pressed in");
         assert!(run.skip_part(), "Ctrl: there is a running part to skip");
         run.tick();
-        assert_eq!(run.part(), "endscrl", "Ctrl skips the part it was pressed in");
-        assert_eq!(run.index(), 404 + 4, "and the run's numbering never restarts");
+        assert_eq!(
+            run.part(),
+            "endscrl",
+            "Ctrl skips the part it was pressed in"
+        );
+        assert_eq!(
+            run.index(),
+            404 + 4,
+            "and the run's numbering never restarts"
+        );
     }
 
     #[test]
@@ -569,12 +934,21 @@ mod tests {
         let mut escape = EscapeKey::default();
 
         run.tick();
-        assert!(!run.holding(), "the part retired this tick; the hold is next");
+        assert!(
+            !run.holding(),
+            "the part retired this tick; the hold is next"
+        );
         escape.press();
-        assert!(!escape.apply(&mut run), "nothing to ask, and somewhere to go: the press waits");
+        assert!(
+            !escape.apply(&mut run),
+            "nothing to ask, and somewhere to go: the press waits"
+        );
 
         run.tick();
-        assert!(run.holding(), "the next part is one this run's source does not build");
+        assert!(
+            run.holding(),
+            "the next part is one this run's source does not build"
+        );
         assert!(escape.apply(&mut run), "and now the press is the way out");
     }
 
@@ -591,7 +965,10 @@ mod tests {
         assert!(!escape.apply(&mut run), "there is no part to ask yet");
         run.tick();
         assert_eq!(run.part(), "cred");
-        assert!(!escape.apply(&mut run), "the next part is asked, and the window stays open");
+        assert!(
+            !escape.apply(&mut run),
+            "the next part is asked, and the window stays open"
+        );
         assert!(!escape.waiting, "the press has been spent");
 
         run.tick();
@@ -620,7 +997,10 @@ mod tests {
         run.tick();
         // The same run with no block: `--part beglogo` is the same numbering
         // and has no entry point to name.
-        assert_eq!(status_line(&run, None), "Second Reality — beglogo — frame 405");
+        assert_eq!(
+            status_line(&run, None),
+            "Second Reality — beglogo — frame 405"
+        );
     }
 
     #[test]
@@ -680,7 +1060,10 @@ mod tests {
         // A run with no player says nothing about music rather than `0:0`.
         let mut plain = run_of(vec!["beglogo"]);
         plain.tick();
-        assert_eq!(status_line(&plain, None), "Second Reality — beglogo — frame 404");
+        assert_eq!(
+            status_line(&plain, None),
+            "Second Reality — beglogo — frame 404"
+        );
     }
 
     #[test]

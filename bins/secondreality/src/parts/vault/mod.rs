@@ -17,10 +17,10 @@ pub mod twist;
 /// The vault's menu rows, in menu order: the registry name and its label.
 ///
 /// The names are the registry's own (`parts::registry`), so a menu entry and
-/// `--part <name>` start the same program. Task 8's menu consumes the table;
-/// the `hard` and `twist` rows are listed here from the start because the
-/// menu's order is the vault's own, not the order the ports land in.
-#[allow(dead_code)] // Task 8's menu reads it; until then only the test does.
+/// `--part <name>` start the same program. The menu (`crate::vault_menu`)
+/// consumes the table; the `hard` and `twist` rows are listed here from the
+/// start because the menu's order is the vault's own, not the order the ports
+/// land in.
 pub const VAULT: [(&str, &str); 3] = [("grid", "GRID"), ("hard", "HARD"), ("twist", "TWIST")];
 
 #[cfg(test)]

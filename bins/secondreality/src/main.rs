@@ -12,6 +12,7 @@ mod cli;
 mod headless;
 mod parts;
 mod shell;
+mod vault_menu;
 mod window;
 
 use std::error::Error;
@@ -25,9 +26,14 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
+                     [--vault]
 keys:  in a window, ESC ends the part that is playing — and closes the window
        once the run has nothing left to play; Ctrl skips the part that is
        playing. No other key does anything, and nothing waits on a key.
+vault: --vault opens the window's menu for the three unreleased effects — GRID,
+       HARD and TWIST. Up and Down choose, Enter plays, ESC at a held part
+       returns to the menu, and ESC in the menu closes the window. The menu is
+       window-only: a headless run names a part with --part instead.
 music: a window plays the demo's music on the default sound card; --no-audio runs
        silent, and --audio-dump <FILE> writes it to a WAV instead (the ring has one
        consumer, so a dump is silent to watch). The music runs either way.";
@@ -68,14 +74,29 @@ fn main() -> ExitCode {
 /// `--headless` dumps them, which is what keeps a machine with no display able
 /// to run the demo and answer for it.
 fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
-    let plan = match cli.block {
-        Some(block) => shell::block_plan(block)?,
-        None => vec![shell::resolve(cli.part_name())?],
-    };
+    match cli.block {
+        Some(block) => Ok(Sequence::new(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            shell::start_view(),
+            shell::block_plan(block)?,
+        )?),
+        None => new_sequence_for_part(shell::resolve(cli.part_name())?),
+    }
+}
+
+/// A run of one part, by its registry name — the run `--part <name>` builds,
+/// and the run the vault menu starts for the row `Enter` chose.
+///
+/// The vault's three are silent and unanchored (`shell::music_for_part` says
+/// `None`, `shell::boot_anchor` says `None`), so the menu's runs play no music
+/// and number their frames from zero; the window presents them through the
+/// same loop a normal window run uses.
+pub fn new_sequence_for_part(name: &'static str) -> Result<Sequence, Box<dyn Error>> {
     Ok(Sequence::new(
         SURFACE_WIDTH,
         SURFACE_HEIGHT,
         shell::start_view(),
-        plan,
+        vec![name],
     )?)
 }

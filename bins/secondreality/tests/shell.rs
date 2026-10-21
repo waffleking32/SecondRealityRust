@@ -126,6 +126,31 @@ fn a_command_line_that_cannot_produce_a_dump_is_refused_before_it_runs() {
 }
 
 #[test]
+fn the_vault_menu_refuses_a_headless_run() {
+    // The menu is the window's own surface: a headless run names its part with
+    // `--part` instead. The refusal has to be the vault's, not a missing dump
+    // directory — the message says which flag to use instead — and it is the
+    // command line's exit code.
+    let out = run(&["--vault", "--headless"]);
+    assert_eq!(
+        out.status.code(),
+        Some(USAGE),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("the vault menu needs a window; name a part with --part"),
+        "{stderr}"
+    );
+    // The usage the refusal prints names the flag too.
+    assert!(
+        stderr.contains("--vault"),
+        "the usage does not list --vault: {stderr}"
+    );
+}
+
+#[test]
 fn a_part_anchored_at_a_boot_index_refuses_a_dump_before_it() {
     // PAM's first drawn frame is the reference's 7710 (`reference-indices.md`
     // §6.1), so a run that starts there walks away from 7709 — the same
