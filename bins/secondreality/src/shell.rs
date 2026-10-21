@@ -1641,7 +1641,7 @@ impl Sequence {
 ///   A-space with 15 and only writes the DAC at `:25-34`, after the 32 vertical
 ///   blanks. A shell that began from a black palette would render 430 black and
 ///   fail a keyframe before the part did anything.
-fn hardware_default_palette() -> Palette {
+pub(crate) fn hardware_default_palette() -> Palette {
     let mut dac = Palette::new();
     for (index, rgb) in VGA_DEFAULT_PALETTE.iter().enumerate() {
         dac.set_entry(index as u8, *rgb);
@@ -2184,6 +2184,10 @@ mod tests {
             ("endlogo", Some((ModuleId::Music0, 25))),
             ("cred", Some((ModuleId::Music0, 26))),
             ("endscrl", Some((ModuleId::Music0, 43))),
+            // The vault's three unreleased effects never shipped in the demo's
+            // sequence: no block reaches them and no player was ever started
+            // for them. They run silent, so `music_for_part` answers `None`.
+            ("grid", None),
         ];
         for (name, music) in expected {
             assert_eq!(

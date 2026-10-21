@@ -1974,3 +1974,61 @@ frames of moving, rotating and held polygons plus an empty frame, 13 in all; 64,
 frame). Reproduce with
 `cargo test -p secondreality --bin secondreality
 parts::glenz::span::tests::the_full_repaint_equals_the_source_two_list_walk`.
+
+## A40 — GRID: the developer pause is a start event, not a key wait (substitution; measured difference 0)
+
+**Part:** GRID (`GRID/MAIN.C:144-153`), Phase 8 Task 3.
+
+**Original.** After the eye is shifted and copied and 1,024 points are plotted in colour
+15, `getch()` (`MAIN.C:153`) blocks until a BIOS key. The reference capture
+(`tools/vault_capture.sh grid`, `--keys KBD_space`) delivers exactly one `KBD_space`
+there; the dots are overwritten by the eye copy at `MAIN.C:156` and are never part of the
+animation. The loop's only other key-sensitive calls are `dis_exit()` (the `while`
+condition, `MAIN.C:158`) and `dis_muscode(3)` (`:160`), which the standalone DIS answers
+0 until a consumed key, then 3 once.
+
+**Port.** `Grid::init` performs the source's **loop iteration 0** — the frame the
+capture files as the start-up transition, reference 352 — and the first composed frame is
+iteration 1, reference 353 (`K0`). No key is waited on (the engine's contract: nothing
+waits on a key), and `dis_muscode(3)` is not called: the port's `muscode` is 0 with no
+player (D8), and the capture delivers no second key. The dot screen is not drawn; it is
+the measurement that pins `d0` (below), not part of the animation.
+
+**Why.** The reference's one start key selects exactly the state the port starts in — the
+animation after the eye copy. The dots and the transition frame are both overwritten
+before the first byte-reproducible loop frame; the substitution removes the pause without
+moving anything that is compared.
+
+**Measured difference:** **0** in all five compared frames; the anchor is reference 353,
+and the port's frame 0 is that frame (Task 2's ruling puts `K0` on the first stable loop
+frame, not on the change at 352). Reproduce with
+`cargo test -p secondreality --test vault grid_matches_the_reference_at_its_measured_start`
+and the capture command in `docs/fidelity/grid.md`.
+
+## A41 — GRID: the filed RGB frames catch the newest line mid-draw in its top rows (registered)
+
+**Part:** GRID, Phase 8 Task 3.
+
+**Original and capture.** The screen moves during the indexed read, so the oracle keeps
+the RGB frame (D15/D19); `reference/parts/grid` holds five `.rgb` files and no `.idx`.
+At each filed keyframe the emulator published its frame while the original was still
+drawing the top of the current line, so the newest line is missing from, or one red rank
+lower in, rows 14–15 — the topmost rows the curve reaches.
+
+**Port.** The part composes the completed frame after the whole loop body (surface copy
+at the end of `Grid::frame`), as the port's tick model requires.
+
+**Why (registered, not fitted).** The difference is a sampling instant, not a model
+error: every other pixel of every frame — the eye with its 100 unshifted bytes, the three
+line colours, the palettes and the (−10,−8) fill-word artefacts — matches, and the
+residual is an order of magnitude smaller than the ±1 neighbours' (about 10,000–12,000
+pixels; the test prints them). This is the same class the research measured on route B
+(2/24 pixels at frames 800/1000). No constant, anchor or palette phase was changed to
+reduce it (D17/D18/D24).
+
+**Measured difference:** **6 / 2 / 36 / 33 / 14** differing pixels at reference
+400 / 500 / 600 / 700 / 800, all on rows 14–15, max channel delta 41. The minimum is at
+offset 0 (the `K0` mapping) for all five. Reproduce with
+`cargo test -p secondreality --test vault -- --nocapture
+grid_matches_the_reference_at_its_measured_start`, which prints the three counts, the
+minimum's offset, the max delta and the row histogram.
