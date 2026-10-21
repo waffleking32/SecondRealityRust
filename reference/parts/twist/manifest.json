@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "RUN.BAT",
+  "arguments": [],
+  "cycles": 30000,
+  "width": 320,
+  "height": 200,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "boot_wait": "graphics",
+  "keys": [],
+  "frames": [
+    {
+      "index": 103,
+      "rgb": "frame_000103.rgb",
+      "sha256": "6615ba392a8f2ed3c2ffe979c0f3e730b531365eae00e62737ec852ff18513fe"
+    },
+    {
+      "index": 203,
+      "rgb": "frame_000203.rgb",
+      "sha256": "bef51119bc9c880b7f06cf4d32aee13c62a472b58d9831d3107599bba8d291ad"
+    },
+    {
+      "index": 303,
+      "rgb": "frame_000303.rgb",
+      "sha256": "55f222106b2a376529ec73920cb3c834f7dd241793c6d3a7bd57de470f406da1"
+    },
+    {
+      "index": 403,
+      "rgb": "frame_000403.rgb",
+      "sha256": "42aa02f6aeb06deeb31dad96530550b977f7d5d27ce81ce51356f94b84789491"
+    },
+    {
+      "index": 503,
+      "rgb": "frame_000503.rgb",
+      "sha256": "e9ab57c9a7b925a49b54c0ed15486120b4875e494aac2b4d86f593f78ffb3f95"
+    },
+    {
+      "index": 603,
+      "rgb": "frame_000603.rgb",
+      "sha256": "7b288e5abdb02fb60c3f628ed6a81ca8066b51ab484a390cd8586f35527c4780"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "RUN.BAT",
+  "arguments": [],
+  "cycles": 30000,
+  "width": 320,
+  "height": 200,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "boot_wait": "graphics",
+  "keys": [
+    "KBD_space"
+  ],
+  "frames": [
+    {
+      "index": 400,
+      "rgb": "frame_000400.rgb",
+      "sha256": "574a6fa980799b212f2eed29cd44ba182fce6fd994768896f6b3cca476d170ff"
+    },
+    {
+      "index": 500,
+      "rgb": "frame_000500.rgb",
+      "sha256": "0241f663653f5266ca44c1563a2373c4f7f805f1ad2b8fbf40c661dbc65069b7"
+    },
+    {
+      "index": 600,
+      "rgb": "frame_000600.rgb",
+      "sha256": "1fb437409a1881cd9e0fdb7e467926c33e0e77b3d0f3383bf399e7ccb23450d6"
+    },
+    {
+      "index": 700,
+      "rgb": "frame_000700.rgb",
+      "sha256": "1969cf9a10c20744504ebd24a7e60d239bb7f7791de562fb613bf9cbbfa5912b"
+    },
+    {
+      "index": 800,
+      "rgb": "frame_000800.rgb",
+      "sha256": "869aeee7b49dbb8e32b736d14bf419a28e3011533e6bfebf91024fac8e91aa68"
+    }
+  ]
+}

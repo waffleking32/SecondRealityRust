@@ -198,18 +198,19 @@ fn a_manifest_this_tool_does_not_read_cannot_be_checked_and_exits_two() {
 #[test]
 fn the_reference_tree_the_repository_ships_checks_out() {
     // The sentence Phase 1's close-out could not write: **a test reads
-    // `reference/`**. 41 captures and 127 files, every digest against the file
+    // `reference/`**. 44 captures and 148 files, every digest against the file
     // beside it — and, since Phase 3, sixteen music traces under `music/`,
     // which are a second *kind* of capture the verifier reads through its own
     // checks (a flipped byte of one is `xtask/tests/music.rs`'s finding, not
-    // this file's).
+    // this file's). The vault's `grid`, `hard` and `twist` (Phase 8 Task 2)
+    // are the three captures and twenty-one files past the demo's 41/127.
     let reference = repo_root().join("reference");
     let run = xtask(&repo_root(), &reference, "verify");
 
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 41 capture(s), 127 file(s)"),
+            .contains("verdict: ok — 44 capture(s), 148 file(s)"),
         "{}",
         run.output()
     );

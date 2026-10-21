@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "RUN.BAT",
+  "arguments": [],
+  "cycles": 30000,
+  "width": 320,
+  "height": 200,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "boot_wait": "graphics",
+  "keys": [
+    "KBD_space"
+  ],
+  "frames": [
+    {
+      "index": 480,
+      "rgb": "frame_000480.rgb",
+      "sha256": "1930616d436601884fe0f39831ec2ba1309c942d011f238b4c687562756f655b"
+    },
+    {
+      "index": 560,
+      "rgb": "frame_000560.rgb",
+      "sha256": "318503a68ad4dd6489124a0b4496dcecc6db1085eda16323eca1fb5c2281063a"
+    },
+    {
+      "index": 630,
+      "rgb": "frame_000630.rgb",
+      "sha256": "788e0a7ee7d0f58e3865443a1edc7b6f6ebfd37ed9f1aca77a5aa59ac43cfc19"
+    },
+    {
+      "index": 700,
+      "rgb": "frame_000700.rgb",
+      "sha256": "9574495dda2d6aa237bffd29f01ce376a4c7317abe30e16a78f0c99fc572e920"
+    },
+    {
+      "index": 770,
+      "rgb": "frame_000770.rgb",
+      "sha256": "cbdf6e0cb30941281d2bc00ce45b878995f0222ae46b0fe1fad10b7535a331e2"
+    },
+    {
+      "index": 840,
+      "idx": "frame_000840.idx",
+      "rgb": "frame_000840.rgb",
+      "palette": {
+        "0": [
+          0,
+          0,
+          20
+        ],
+        "5": [
+          0,
+          0,
+          20
+        ],
+        "6": [
+          0,
+          0,
+          20
+        ],
+        "7": [
+          0,
+          0,
+          20
+        ],
+        "9": [
+          0,
+          0,
+          20
+        ],
+        "10": [
+          0,
+          0,
+          20
+        ],
+        "11": [
+          0,
+          0,
+          20
+        ],
+        "13": [
+          0,
+          0,
+          20
+        ],
+        "14": [
+          0,
+          0,
+          20
+        ],
+        "15": [
+          0,
+          0,
+          20
+        ],
+        "17": [
+          63,
+          63,
+          62
+        ],
+        "18": [
+          42,
+          42,
+          48
+        ],
+        "19": [
+          21,
+          21,
+          34
+        ],
+        "254": [
+          45,
+          45,
+          45
+        ],
+        "255": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sha256": "f2718de8cb4357740cdc467cc13a511a56e3415bd47c2f6b841b944264c016c7",
+      "idx_sha256": "63ad034cb6203743d8f78752094022b137094eaa0d2763990d42bd8f8275f528"
+    },
+    {
+      "index": 910,
+      "rgb": "frame_000910.rgb",
+      "sha256": "59f2d5fc1cc9d6839344acbc230e8b9c7c2c20457a4fbf3b7ea9ef8c8985caa2"
+    },
+    {
+      "index": 1050,
+      "rgb": "frame_001050.rgb",
+      "sha256": "c1743f6af0375ecb76c4f939724b7f2b1897a2665af9c93f44cabb7aa76a9367"
+    },
+    {
+      "index": 1600,
+      "rgb": "frame_001600.rgb",
+      "sha256": "5894039bea2564ce78bde3c479c80a986f144f59d76af15919e7a238a1b9858d"
+    }
+  ]
+}
