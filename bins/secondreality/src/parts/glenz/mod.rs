@@ -727,16 +727,24 @@ impl Glenz {
 
     /// The Part's `repeat` is one: the port's logic tick is one displayed
     /// frame, so the `while(repeat--)` body runs exactly once per call.
+    ///
+    /// The source's loop condition and music cut (`MAIN.C:409-411`) sit at the
+    /// top of the iteration, which the body reaches *after* `cglenzdone` in
+    /// the same frame: the frame is drawn, then the loop breaks. So this tick
+    /// never checks before drawing; it draws and then retires the part on a
+    /// cut, ESC or the frame-7000 cap. [`Phase::MainWait`] keeps the entry
+    /// check, where a cut already visible breaks before the wait and the
+    /// body, so that tick draws nothing.
     fn main_frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        if self.main_should_end(ctx) {
-            self.phase = Phase::Done;
-            return PartStatus::Finished;
-        }
         self.upload_low_palette(ctx);
         self.main.step(&mut self.bgpic, &mut self.vram);
         self.colour.lightshift = self.main.lightshift;
         self.draw_objects(ctx);
         self.blit(ctx, MAIN_ROWS);
+        if self.main_should_end(ctx) {
+            self.phase = Phase::Done;
+            return PartStatus::Finished;
+        }
         PartStatus::Continuing
     }
 
@@ -1159,6 +1167,26 @@ mod tests {
             assert_eq!(rig.step(part, tick), PartStatus::Continuing);
         }
         panic!("the intro did not reach the main loop in 1,000 ticks");
+    }
+
+    /// Drive the intro with the fast clock until `Phase::MainWait` is
+    /// reached. Returns the tick the MainWait call will occupy.
+    fn to_main_wait(rig: &mut Rig, part: &mut Glenz) -> u32 {
+        for tick in 0..1000u32 {
+            if part.phase == Phase::MainWait {
+                return tick;
+            }
+            assert_eq!(rig.step(part, tick), PartStatus::Continuing);
+        }
+        panic!("the intro did not reach the main wait in 1,000 ticks");
+    }
+
+    /// Pixels of the main frame's buffer that differ from `bgpic` above the
+    /// floor: the object's drawn pixels at the frames before the band clear.
+    fn object_pixels(part: &Glenz) -> usize {
+        (0..150 * 320)
+            .filter(|&at| part.vram[at] != part.bgpic[at])
+            .count()
     }
 
     /// Drive the measured intro and return the phases' transition ticks —
@@ -1627,22 +1655,19 @@ mod tests {
         );
     }
 
-    /// The music cut: `a<0 && a>-16` at the top of a main tick retires the
-    /// part without drawing (`MAIN.C:411`).
+    /// A cut present at the loop's entry (`Phase::MainWait`) breaks before the
+    /// wait and the body, so that tick draws nothing (`MAIN.C:409-411`).
     #[test]
-    fn the_music_cut_finishes_without_drawing() {
+    fn the_music_cut_at_the_main_wait_draws_nothing() {
         let (mut rig, mut part) = started(Player::fast());
-        let mut tick = to_main(&mut rig, &mut part);
-        // Frame 1.
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
-        tick += 1;
+        let tick = to_main_wait(&mut rig, &mut part);
         let before = part.vram.clone();
         let surface_before = rig.surface.pixels().to_vec();
         // -1 is inside (-16, 0): the cue.
         rig.player.as_mut().unwrap().cue(tick as usize, -1);
         assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 1, "the cut tick draws no frame");
+        assert_eq!(part.main.frame, 0, "the entry check draws no frame");
         assert_eq!(part.vram, before, "the buffer is untouched");
         assert_eq!(
             rig.surface.pixels(),
@@ -1658,19 +1683,87 @@ mod tests {
         }
     }
 
-    /// ESC at the top of a main tick retires the part on that tick, and the
-    /// part asks for no drain (no teardown exists).
+    /// A cut first visible on a body tick draws that frame and retires the
+    /// part on the same tick: the source's loop top (`MAIN.C:409-411`) is
+    /// reached after `cglenzdone`, so the frame is kept. Frame 44 is the
+    /// object's first drawn frame, which makes "drawn" visible.
     #[test]
-    fn escape_finishes_without_a_drain() {
+    fn the_music_cut_on_a_body_tick_draws_then_finishes() {
         let (mut rig, mut part) = started(Player::fast());
-        let mut tick = to_main(&mut rig, &mut part);
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
-        tick += 1;
+        let start = to_main(&mut rig, &mut part);
+        for frame in 1..44i16 {
+            let tick = start + frame as u32 - 1;
+            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(part.main.frame, frame);
+        }
+        let tick = start + 43;
+        rig.player.as_mut().unwrap().cue(tick as usize, -1);
+        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        assert_eq!(part.phase, Phase::Done);
+        assert_eq!(part.main.frame, 44, "the cut tick's frame is drawn");
+        assert!(
+            object_pixels(&part) > 0,
+            "frame 44's object is on the screen"
+        );
+    }
+
+    /// ESC at the loop's entry draws nothing, and the part asks for no drain.
+    #[test]
+    fn escape_at_the_main_wait_finishes_without_a_drain() {
+        let (mut rig, mut part) = started(Player::fast());
+        let tick = to_main_wait(&mut rig, &mut part);
         let before = part.vram.clone();
         assert!(!part.drains_after_exit());
         assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
+        assert_eq!(part.main.frame, 0, "ESC at the entry draws no frame");
         assert_eq!(part.vram, before, "ESC draws nothing on its tick");
+    }
+
+    /// ESC first visible on a body tick draws that frame and retires the part
+    /// on the same tick, with no drain.
+    #[test]
+    fn escape_on_a_body_tick_draws_then_finishes() {
+        let (mut rig, mut part) = started(Player::fast());
+        let start = to_main(&mut rig, &mut part);
+        for frame in 1..44i16 {
+            let tick = start + frame as u32 - 1;
+            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(part.main.frame, frame);
+        }
+        let tick = start + 43;
+        assert!(!part.drains_after_exit());
+        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
+        assert_eq!(part.phase, Phase::Done);
+        assert_eq!(part.main.frame, 44, "the ESC tick's frame is drawn");
+        assert!(
+            object_pixels(&part) > 0,
+            "frame 44's object is on the screen"
+        );
+    }
+
+    /// `frame < 7000` is the loop condition checked at the same top after the
+    /// body: frame 7000 is drawn and the part retires on that tick.
+    #[test]
+    fn the_frame_cap_draws_7000_then_finishes() {
+        let (mut rig, mut part) = started(Player::fast());
+        let tick = to_main(&mut rig, &mut part);
+        part.main.frame = 6999;
+        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        assert_eq!(part.phase, Phase::Done);
+        assert_eq!(part.main.frame, 7000, "frame 7000 is drawn before the cap");
+    }
+
+    /// The cap already reached at the loop's entry breaks without a body.
+    #[test]
+    fn the_frame_cap_at_the_main_wait_draws_nothing() {
+        let (mut rig, mut part) = started(Player::fast());
+        let tick = to_main_wait(&mut rig, &mut part);
+        part.main.frame = 7000;
+        let before = part.vram.clone();
+        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        assert_eq!(part.main.frame, 7000);
+        assert_eq!(part.vram, before, "no body runs");
     }
 
     /// ESC during the music wait does **not** retire the part: `MAIN.C:290`'s

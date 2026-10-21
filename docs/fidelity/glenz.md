@@ -372,8 +372,20 @@ The reference decides each; nothing here was fitted.
   part retires on its first main-loop check. The port follows exactly that:
   `WaitMusic` continues into the zoomer on ESC, the zoomer ignores it, and
   the bounce and both waits see it.
-- The main loop ends on ESC, on the music cut `-16 < musplus < 0`, or after
-  frame 7000; it has no teardown, so `drains_after_exit()` is false.
+- The main loop's exit order (`MAIN.C:409-411`). The loop condition and the
+  music cut sit at the top of the iteration, but the body reaches that top
+  **after** `cglenzdone` in the same frame: the frame is drawn and the loop
+  then breaks, so a cut, ESC or the frame-7000 cap first visible on a body
+  tick keeps that frame and retires the part on the same tick. A cut or ESC
+  already visible at the loop entry (the port's `MainWait`) breaks before the
+  wait and the body, so that tick draws nothing. Tests:
+  `the_music_cut_at_the_main_wait_draws_nothing` /
+  `the_music_cut_on_a_body_tick_draws_then_finishes`,
+  `escape_at_the_main_wait_finishes_without_a_drain` /
+  `escape_on_a_body_tick_draws_then_finishes`, and
+  `the_frame_cap_draws_7000_then_finishes` /
+  `the_frame_cap_at_the_main_wait_draws_nothing`. The part has no teardown,
+  so `drains_after_exit()` is false.
 - The source's `dis_setcopper(0,copper)` and its teardown
   `dis_setcopper(0,NULL)` are not ported as callbacks (see §3); there is
   nothing to remove on exit.

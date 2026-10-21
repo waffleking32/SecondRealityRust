@@ -381,6 +381,14 @@ mod tests {
         // GLENZ was the last name the demo's order had and the port had not;
         // Task 6 gives it its music row, so `--part glenz` parses. (The
         // unknown-name side is `an_unknown_part_is_rejected`.)
+        //
+        // `shell::resolve`'s `NotPorted` arm is consequently unreachable from
+        // any `--part` string — every demo name is registered — but it is
+        // retained for the vault (the next demo part a later phase ports):
+        // `resolve` still distinguishes a demo name the port lacks from a
+        // typo, and the error path is exercised through the shell's stub
+        // source, whose `unbuildable("techno")` test pins
+        // "techno is not ported yet" (`a_run_that_stopped_says_which_part_it_stopped_at`).
         let cli = parse(&["--part", "glenz"]).unwrap();
         assert_eq!(cli.part, Some("glenz"));
         assert_eq!(cli.part_name(), "glenz");

@@ -2643,14 +2643,18 @@ and the full-repaint substitution), D37 (the source's phase machine: reset 1,111
 with `pal` after *N−1*) and D38 (both seams, the restart interval and the measured 8,770/8,521
 consequence) are finalized. **A36–A39** are the register: the K+5 phase and the capture's
 surface/DAC lead, the adopted low-byte key with the 711/839 px registered-unexplained residual,
-the block-1 hold, and the zero-difference span repaint. The **13 carried/registered items** are
-four registered and nine the note carries: A36, A37, A38, A39; `cross`'s short-list guard
+the block-1 hold, and the zero-difference span repaint. The **14
+carried/registered items** are four registered and ten the note carries: A36, A37, A38, A39;
+`cross`'s short-list guard
 (not reachable in the measured frames, not registered); `NEW.ASM`'s `nep`/`ne` bound (worst
 shipped y≈252, not exercised, not registered); the clear-before-paint order; the ESC flow (the
 wait continues into the zoomer, the bounce and both waits see the flag, no teardown); the
 copper callbacks not registered as callbacks; the mode-set tick's one-frame 320×400
 composition; the standalone-entry substitution of `--part glenz`; the block-2 wait's +6 exit;
-and the surface-*N*/`pal`-after-*N−1* pairing. The traces' own limits are recorded where they
+the surface-*N*/`pal`-after-*N−1* pairing; and **TUNNELI's start order** — the order in force
+when the part begins is not established, and the restart's own order 0 is the value the evidence
+names (`docs/fidelity/music.md`'s TUNNELI row; `music_for_part`). The traces' own limits are
+recorded where they
 live: the (8,049, 8,100) restart interval in **A38** and `music-clock.md` §2.2;
 SECOND 2's 401.1-by-rows against 408-by-`zframe` boot anchor in `music-clock.md` §2; and
 `second1d`'s back-extrapolated **7,815** sr-audio anchor in
@@ -2685,25 +2689,25 @@ $ cargo xtask reference verify --tree reference
 verdict: ok — 41 capture(s), 127 file(s), 28534303 bytes        exit 0
 ```
 
-**The suite and both clippy gates.** `cargo test --workspace` is green — **1,290 passed, 0
-failed, 8 ignored**, summed over the 49 `test result:` lines (the binary's 549 tests are 542
-passed and 7 ignored) — and both `cargo clippy --workspace --all-targets -- -D warnings` and its
-`--release` form exit 0.
+**The suite and both clippy gates.** `cargo test --workspace` is green — **1,294 passed, 0
+failed, 8 ignored**, summed over the 49 `test result:` lines (the binary's 553 tests are 546
+passed and 7 ignored; the final review's fix wave added the six exit-order tests) — and both
+`cargo clippy --workspace --all-targets -- -D warnings` and its `--release` form exit 0.
 
 ```text
 $ cargo test --workspace
 (…)
-test result: ok. 542 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 49.86s
+test result: ok. 546 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 50.09s
 (… all 49 `test result:` lines are `ok`; …)
 exit: 0
 
 $ cargo clippy --workspace --all-targets -- -D warnings
 (…)
-Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.19s     exit 0
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.16s     exit 0
 
 $ cargo clippy --workspace --all-targets --release -- -D warnings
 (…)
-Finished `release` profile [optimized] target(s) in 2.63s               exit 0
+Finished `release` profile [optimized] target(s) in 2.52s               exit 0
 ```
 
 **The tag is withheld** until the whole-branch final review is clean, per Phase 1–6's practice;
