@@ -25,7 +25,9 @@
 //! 28 fill iterations, 70 waits and the letterbox — so **port frame `j` =
 //! reference `356 + j`**; the letterbox is port 118 (reference 474), the first
 //! drawn dots port 156 (reference 512), and mode 4's count 0 port 495
-//! (reference 851, a picture identical to mode 3's hold).
+//! (reference 851, a picture identical to mode 3's hold). The two measured
+//! boundary displays put part 2's `part2init` at port 599 (reference 955), the
+//! first grid frame at 600 (956) and `part3init` at 1100 (1456; A48).
 //!
 //! The candidate for a reference `R` is port `R − K0`, with the ±1 search
 //! reproduced here so the test reports the same three counts the comparison
@@ -68,15 +70,15 @@ const TWIST_RESIDUALS: [(u32, usize); 6] =
 /// §24.7): the first wipe frame, 16 black pixels at row 100, reference 356.
 const HARD_K0: u32 = 356;
 
-/// The seven filed HARD keyframes before the mode-5 boundary: mode 0's
-/// letterbox, the four logo phases, mode 3's hold and mode 4's band.
-const HARD_KEYFRAMES: [u32; 7] = [480, 560, 630, 700, 770, 840, 910];
+/// The nine filed HARD keyframes, one per mode stage: mode 0's letterbox, the
+/// four logo phases, mode 3's hold, mode 4's band, part 2's grid and part 3's
+/// cube.
+const HARD_KEYFRAMES: [u32; 9] = [480, 560, 630, 700, 770, 840, 910, 1050, 1600];
 
-/// All seven are exact at offset 0: the letterbox, the four logo phases, the
-/// held mode 3 and the mode-4 band reproduce every filed pixel, and 840's
-/// `.idx` reproduces byte for byte (`hard_matches_the_reference_in_its_early_modes`
+/// All nine are exact at offset 0: every filed pixel reproduces, and 840's
+/// `.idx` reproduces byte for byte (`hard_matches_the_reference_at_its_keyframes`
 /// prints the three candidates).
-const HARD_RESIDUALS: [(u32, usize, i32); 7] = [
+const HARD_RESIDUALS: [(u32, usize, i32); 9] = [
     (480, 0, 0),
     (560, 0, 0),
     (630, 0, 0),
@@ -84,6 +86,8 @@ const HARD_RESIDUALS: [(u32, usize, i32); 7] = [
     (770, 0, 0),
     (840, 0, 0),
     (910, 0, 0),
+    (1050, 0, 0),
+    (1600, 0, 0),
 ];
 
 /// Where a `cargo run` of the acceptance command starts, and where the part's
@@ -425,7 +429,7 @@ fn a_part_run_of_hard_is_silent_and_numbers_itself_from_zero() {
 }
 
 #[test]
-fn hard_matches_the_reference_in_its_early_modes() {
+fn hard_matches_the_reference_at_its_keyframes() {
     let reports = compare_keyframes("hard", HARD_K0, &HARD_KEYFRAMES);
     for report in &reports {
         print_report(report);
@@ -443,21 +447,32 @@ fn hard_matches_the_reference_in_its_early_modes() {
 }
 
 #[test]
-fn hard_ends_at_the_mode_five_boundary() {
-    // Mode 4's `count>100` branch (`B.C:288-292`) is the last iteration this
-    // task ports: the port retires on port tick 596 and the shell holds the
-    // picture. Task 7 replaces this with modes 5..6; until then frames after
-    // the boundary must not change.
-    let (dir, manifest) = dump("hard", "milestone", "595,596,597,600");
-    for index in [595u32, 596, 597, 600] {
+fn hard_draws_the_whole_effect_and_holds() {
+    // Part 3's last drawn frame is its count 800 (port 1900, reference 2256).
+    // Mode 7's one iteration and the `default` arm draw nothing (1901, 1902),
+    // and the shell holds the same picture after the part retires; the
+    // source's `if(!dis_indemo())` text-mode restore (`B.C:325-329`) is the
+    // window's close, not a frame.
+    let (dir, manifest) = dump("hard", "hold", "1898,1899,1900,1901,1902,1903,1920");
+    for index in [1898u32, 1899, 1900, 1901, 1902, 1903, 1920] {
         assert_eq!(entry(&manifest, index)["part"], "hard", "frame {index}");
     }
-    let boundary = dumped_file(&dir, &manifest, 596, "rgb");
-    for hold in [597u32, 600] {
+    let last = dumped_file(&dir, &manifest, 1900, "rgb");
+    assert_ne!(
+        dumped_file(&dir, &manifest, 1899, "rgb"),
+        last,
+        "the cube still moves on count 799"
+    );
+    for hold in [1901u32, 1902, 1903, 1920] {
         assert_eq!(
             dumped_file(&dir, &manifest, hold, "rgb"),
-            boundary,
-            "frame {hold} is the hold after the mode-5 boundary"
+            last,
+            "frame {hold} is the hold after the last drawn cube"
+        );
+        assert_eq!(
+            dumped_file(&dir, &manifest, hold, "idx"),
+            dumped_file(&dir, &manifest, 1900, "idx"),
+            "frame {hold} holds the indexed frame too"
         );
     }
 }

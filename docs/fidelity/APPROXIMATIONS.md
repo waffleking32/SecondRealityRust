@@ -2152,16 +2152,17 @@ the cut.
 
 **Port.** The vault run has no player and no key: the part starts at `init` with the gate
 passed and never models the echo. The `0xff` cut cannot fire (the port's `muscode` is 0 and
-the capture sends no second key); Task 7 pins that on the full run. This is the port's input
-model — nothing waits on a key (spec §6, D8's measurement that the demo's own `muscode` is 0).
+the capture sends no second key); `the_0xff_cut_is_unreachable_with_one_start` pins it on
+the full run, where part 3 ends at its own count 800. This is the port's input model —
+nothing waits on a key (spec §6, D8's measurement that the demo's own `muscode` is 0).
 
 **Why.** A literal `muscode(1)` wait would hang for ever against the port's `muscode`, exactly
 as it does against the reference's 0. The capture's one key is the source-supported start
 event, and the gate is before `K0`, so no compared picture sees it.
 
-**Measured difference:** **0**. The seven keyframes 480…910 are exact and 840's `.idx` is byte
-for byte; reproduce with `cargo test -p secondreality --test vault -- --nocapture
-hard_matches_the_reference_in_its_early_modes`.
+**Measured difference:** **0**. The nine keyframes 480…1600 are exact and 840's `.idx` is
+byte for byte; reproduce with `cargo test -p secondreality --test vault -- --nocapture
+hard_matches_the_reference_at_its_keyframes`.
 
 **Exit polling.** The source polls `dis_exit` at exactly two places: the 70-wait loop
 (`B.C:162`) and the main loop's condition (`B.C:203`). The wipe and the fill (`B.C:143-161`)
@@ -2188,52 +2189,80 @@ fixed 70.086 Hz tick (`crates/sr-engine/src/tick.rs`, `HZ_MILLI = 70_086`). The 
 `t` is the capture's reference `356 + t` (`K0 = 356`): the pre-roll is 119 ticks (20 wipe
 steps, 28 fill iterations, 70 waits, the letterbox), `part1init` adds the measured extra
 display tick, and the palette is shown one iteration behind in mode 4 and in the same
-iteration in part 1. The port does not model a missed retrace: if a draw overran a frame the
-original would silently slow below 70.086 Hz while its loop still counted one iteration. The
-one place the capture shows that cost is the mode-5 boundary (A48).
+iteration in part 1. The port does not model a missed retrace inside a mode: if a draw
+overran a frame the original would silently slow below 70.086 Hz while its loop still
+counted one iteration. The one place the capture shows that cost is the mode-5 boundary's
+two displays (A48), which the port inserts as two static ticks.
 
 **Why.** The retrace is the source's clock and the fixed tick is the port's model of it for
 every part (spec §6). The approximation is the rate, not the frame sequence: with the phase
 above every filed keyframe before mode 5 is exact.
 
-**Measured difference:** **0** pixels at 480/560/630/700/770/840/910, offset 0; 840's indexed
-plane is byte-identical. Reproduce with `cargo test -p secondreality --test vault --
---nocapture hard_matches_the_reference_in_its_early_modes`; the tick model's own counts are
-pinned by `parts::vault::hard::part::tests::the_pre_roll_is_the_sources_tick_counts` and
-`the_first_half_mode_sequence_is_the_sources`.
+**Measured difference:** **0** pixels at all nine keyframes 480/560/630/700/770/840/910/
+1050/1600, offset 0; 840's indexed plane is byte-identical. Reproduce with `cargo test -p
+secondreality --test vault -- --nocapture hard_matches_the_reference_at_its_keyframes`; the
+tick model's own counts are pinned by
+`parts::vault::hard::part::tests::the_pre_roll_is_the_sources_tick_counts`,
+`the_first_half_mode_sequence_is_the_sources` and `the_full_mode_sequence_is_the_sources`.
 
-## A48 — HARD: the mode-5 boundary drifts by three display frames (registered divergence; measured difference 3 frames, Task 7 carries it)
+## A48 — HARD: the mode-5 boundary's two displays are inserted as static ticks (registered divergence; measured difference 0 on every compared frame)
 
-**Part:** HARD (`HARD/B.C:242-293`), Phase 8 Task 6; the full run is Task 7's.
+**Part:** HARD (`HARD/B.C:242-293`, `HARD/BP.C:124-167`), Phase 8 Tasks 6–7.
 
 **Original.** Mode 4 is 102 loop iterations (`count` 0..101, `count>100` → `NEXTMODE`), so
-with mode 4's count 0 at reference 851 the source's part 2 begins at reference 953.
-The filed capture's first mode-5 frame is **956**: `out/task2/hard-948-962` shows 948–955
-byte-identical and 956 first differing.
+with mode 4's count 0 at reference 851 the source's part-2 count 0 is reference 953. The
+artifact's is **955**. One contiguous Task 7 capture (`out/task7/hard-950-960`) shows 950–955
+byte-identical — 40,860 band pixels at `(0,0,81)` and 100 at `(255,255,255)`, the mode-4
+trail's index-189 last pixels — and 956/957 replacing exactly those 100 with `(4,255,255)`.
+The first *visibly* changed frame is three after the source's 953 (which is what the Task 6
+record counted); the count-0 frame itself is two after, and it is pixel-identical to the
+mode-4 hold because `part2init`'s `pal[1] = (63,63,63)` is white like index 189.
 
-**Port.** The port runs the source's 102 mode-4 iterations and retires on the advance tick
-(port 596, reference 952 for the last drawn frame; `hard_ends_at_the_mode_five_boundary` and
-`the_first_half_mode_sequence_is_the_sources`). It cannot express the three extra displayed
-frames because its tick is fixed.
+**The palette lead is closed.** 956/957's `(4,255,255)` is 6-bit `(1,63,63)` and it is
+**entry 65**, not entry 1: at `zp = 3500` the first grid frame draws only the lattice's
+`x = -500` face, every point of it projects to `depthcol[3000] = 65`, and `part2init`'s
+gradient entry 65 (a=1, d=56) is `(1,63,63)`. 958 is count 3 — the first frame after the
+state advances — with 71 pixels at `(4,255,255)` and 22 at `(8,255,255)` = entry 66. The
+artifact's mode-5 palette is the vendored `BP.C:135-154` literally; nothing is substituted.
+`the_first_grid_frame_is_the_shipped_grid1_list` pins entry 65, `depthcol[3000]` and the
+GRID1 correspondence.
 
-**Why (the lead).** The extra frames are the shape of a missed-retrace overrun (D22), but
-**not** at mode 4's count 0: port 495 and 496 (reference 851 and 852) match the capture at 0
-pixels, so the count-0 `memset(background)` plus 2,048 `doit2` calls did not overrun. The
-candidate is a later mode-4 iteration; the 768-byte palette upload at the top of every
-iteration (`B.C:208`) is the remaining per-frame work of that size. No per-frame position is
-measured; Task 7 owns the boundary and the part-2 keyframes.
+**Port.** The fixed tick cannot express a retrace overrun inside mode 4, so the port inserts
+**two display frames with no loop iteration** between mode 4's advanced tick (port 596,
+reference 952) and part 2's count 0 (port 599, reference 955); part 2's count 1 is port 600
+(reference 956, the first grid frame). The inserted pictures are the static mode-4 band,
+which is what the artifact shows at 953/954.
 
-**Mode 5's init palette is not the literal source's.** The held 956/957 pair (RGB-only) shows
-the 100 index-189 trail pixels at `(4,255,255)` — 6-bit `(1,63,63)` — not the white that
-`BP.C:135-138`'s literal `pal[1] = (63,63,63)` would produce after `B.C:299`'s conversion to
-index 1. Either the artifact's `part2init` palette writes differ from the vendored `BP.C` or
-the capture caught a partial DAC upload of the init pair. Task 7 must measure the artifact's
-mode-5 palette (the held pair may allow an indexed read) before pinning part 2.
+**Why.** The two extra displays are the shape of a missed-retrace overrun (D22), but not at
+mode 4's count 0: port 495/496 (references 851/852) match at 0 pixels, so the heavy rebuild
+did not overrun. The candidate remains the 768-byte palette upload at the top of a later
+mode-4 iteration (`B.C:208`); the capture measures the total cost (two displays), not its
+position. No keyframe depends on the position: 1050 (port 694) and 1600 (port 1244) are
+exact.
 
-**Measured difference:** **3 display frames** at the boundary (artifact 956 against the
-source-derived 953); no keyframe at or before 910 differs (A47). Reproduce the artifact's
-boundary with
-`tools/vault_capture.sh hard --frames "$(seq -s, 948 962)" --out out/task2/hard-948-962`.
+**Measured difference:** **0 pixels** at references 950–960 and 2245–2257, offset 0 (the
+port's numbering is reference − 356). Reproduce with
+
+```bash
+tools/vault_capture.sh hard --frames "$(seq -s, 950 960)"  --out out/task7/hard-950-960
+tools/vault_capture.sh hard --frames "$(seq -s, 2245 2257)" --out out/task7/hard-2245-2257
+target/debug/secondreality --part hard --headless \
+    --dump-frames "$(seq -s, 594 604)" --dump-dir out/task7/port-boundary
+target/debug/secondreality --part hard --headless \
+    --dump-frames "$(seq -s, 1889 1901)" --dump-dir out/task7/port-end
+python3 - <<'PY'
+for capture, port, refs in [
+    ("out/task7/hard-950-960", "out/task7/port-boundary", range(950, 961)),
+    ("out/task7/hard-2245-2257", "out/task7/port-end", range(2245, 2258)),
+]:
+    for reference in refs:
+        a = open(f"{capture}/frame_{reference:06}.rgb", "rb").read()
+        b = open(f"{port}/hard_{reference - 356:06}.rgb", "rb").read()
+        print(reference, sum(a[i:i + 3] != b[i:i + 3] for i in range(0, len(a), 3)))
+PY
+```
+
+(every line prints 0). The keyframes themselves are exact (A46).
 
 ## A49 — HARD: the optional argument, its debug strip and the border are not ported (substitution; measured difference 0)
 

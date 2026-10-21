@@ -300,6 +300,60 @@ pub fn dots_from_fcrz(image: &[u8; 64_000]) -> [Vec<u8>; 4] {
     streams
 }
 
+/// `_depthcol db 8192 dup(0)` (`BA.ASM:221-222`). Only the first
+/// [`DEPTHCOL_WRITTEN`] bytes are written (`BP.C:128-133`); the rest is BSS
+/// zero.
+pub const DEPTHCOL_LEN: usize = 8192;
+/// The entries `part2init` writes.
+pub const DEPTHCOL_WRITTEN: usize = 3100;
+
+/// `part2init`'s `depthcol` build (`BP.C:128-133`), including the carried
+/// `b`.
+///
+/// The source's `int b` is uninitialised before the loop, and the brief names
+/// entries 1000..3099 a read of it. The loop assigns it at `a = 0` (and at
+/// every `a < 1000`, which short-circuits the `b >= 3000` operand), so at
+/// `a = 1000` it carries 127; the `else` branch runs there and at every later
+/// entry because the value stays below 3000. Both branches give 127 at
+/// `a = 1000` anyway, so the table is determinate: 127 below 1032 and
+/// `127 - (a-1000)/32` down to 62 at 3099. `part2init_reads_the_uninitialised_b`
+/// pins it.
+pub fn depthcol_table() -> [u8; DEPTHCOL_LEN] {
+    let mut table = [0u8; DEPTHCOL_LEN];
+    let mut b: i16 = 0; // the source's uninitialised local; written at a = 0
+    for a in 0..DEPTHCOL_WRITTEN as i32 {
+        b = if a < 1000 || b >= 3000 {
+            127
+        } else {
+            127 - ((a - 1000) / 32) as i16
+        };
+        table[a as usize] = b as u8;
+    }
+    table
+}
+
+/// `part2init`'s lattice (`BP.C:156-164`): the shell of a 10×10×10 cube of
+/// `(x-5)*100` cells, in the source's `x`/`y`/`z` loop order.
+///
+/// The shell criterion (any index 0 or 9) selects `10³ - 8³` = **488**
+/// points, not the 1,000 the plan and the research report: `gridpoints[0] =
+/// (a-1)/3` (`BP.C:164`) is 488 with the shipped loops. The first projected
+/// frame draws the 100-point `x = -500` face, which is exactly the
+/// `_GRID1.TMP` pair list mode 4's trails end on (`docs/fidelity/hard.md`).
+pub fn grid_points() -> Vec<[i32; 3]> {
+    let mut points = Vec::new();
+    for x in 0..10i32 {
+        for y in 0..10i32 {
+            for z in 0..10i32 {
+                if x == 0 || y == 0 || z == 0 || x == 9 || y == 9 || z == 9 {
+                    points.push([(x - 5) * 100, (y - 5) * 100, (z - 5) * 100]);
+                }
+            }
+        }
+    }
+    points
+}
+
 /// The 400-byte `_GRID1.TMP` table: 200 words, 100 `(x, y)` pairs reused by
 /// `doit2` (`B.C:112-121`) as a 200-word cycle.
 ///
@@ -580,5 +634,72 @@ mod tests {
             .map(|(at, _)| at)
             .collect();
         assert_eq!(changed, vec![0, 320, 60 * 320 + 40]);
+    }
+
+    #[test]
+    fn the_grid_is_the_ten_cube_shell() {
+        let points = grid_points();
+        // 10³ lattice cells, 8³ interior: 488 on the shell, not the 1,000
+        // the plan and research report (`gridpoints[0] = (a-1)/3`,
+        // `BP.C:164`).
+        assert_eq!(points.len(), 488);
+        assert_eq!(points.len(), 1000 - 512);
+        assert_eq!(points[0], [-500, -500, -500]);
+        assert_eq!(points[487], [400, 400, 400]);
+
+        // The source's nested loops (`BP.C:157-163`): x outer, then y, then
+        // z, and only cells with an index 0 or 9.
+        let mut expected = Vec::new();
+        for x in 0..10 {
+            for y in 0..10 {
+                for z in 0..10 {
+                    if x == 0 || y == 0 || z == 0 || x == 9 || y == 9 || z == 9 {
+                        expected.push([(x - 5) * 100, (y - 5) * 100, (z - 5) * 100]);
+                    }
+                }
+            }
+        }
+        assert_eq!(points, expected);
+        // Every coordinate is `(index-5)*100` and every point is on the
+        // shell.
+        for point in &points {
+            assert!(
+                point
+                    .iter()
+                    .any(|&coordinate| coordinate == -500 || coordinate == 400),
+                "{point:?}"
+            );
+            for &coordinate in point {
+                assert!((-500..=400).contains(&coordinate));
+                assert_eq!(coordinate % 100, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn part2init_reads_the_uninitialised_b() {
+        let table = depthcol_table();
+        for (a, &value) in table.iter().enumerate().take(1000) {
+            assert_eq!(value, 127, "a {a}");
+        }
+        // The carried b at a=1000 is 127 (set at a=999), so the else branch
+        // runs; the value falls by one every 32 entries after 1032.
+        assert_eq!(table[1000], 127);
+        assert_eq!(table[1031], 127);
+        assert_eq!(table[1032], 126);
+        assert_eq!(table[3096], 62);
+        assert_eq!(table[3099], 62);
+        let mut b: i16 = 127;
+        for a in 1000..3100i32 {
+            b = if b >= 3000 {
+                127
+            } else {
+                127 - ((a - 1000) / 32) as i16
+            };
+            assert_eq!(table[a as usize], b as u8, "a {a}");
+            assert!(b < 3000, "a {a}: the carried b never reaches 3000");
+        }
+        // 3100..8191 are BSS zero (`BA.ASM:221-222`).
+        assert!(table[3100..].iter().all(|&value| value == 0));
     }
 }

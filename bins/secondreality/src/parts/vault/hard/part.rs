@@ -1,5 +1,5 @@
-//! HARD's first half: the pre-roll, the letterbox and modes 0..4
-//! (`HARD/B.C:125-324`, `HARD/BP.C:1-72`).
+//! HARD: the pre-roll, the letterbox, the logo dots and the two 3-D phases
+//! (`HARD/B.C:125-324`, `HARD/BP.C:1-299`).
 //!
 //! `B.EXE` is a Demo Interrupt Server part (`B.C:131`). Entry clears the
 //! screen to index 15, waits for the start cue, wipes a line at row 100 and
@@ -12,10 +12,19 @@
 //!
 //! The state machine (`B.C:203-324`) runs one loop iteration a tick:
 //! `count++`, `setborder(255)`, one `waitb`, the palette uploads, the dots,
-//! then `switch(mode)`. Modes 0..4 are ported here — 34 frames of `dots1`,
-//! four 73-frame logo phases (`part1init`/`part1`), four one-frame rotations,
-//! 42 dot frames and 102 mode-4 frames — and the part retires when mode 4
-//! would advance; Task 7 adds modes 5..6 and the full run.
+//! then `switch(mode)`. Modes 0..4 are 34 frames of `dots1`, four 73-frame
+//! logo phases (`part1init`/`part1`), four one-frame rotations, 42 dot frames
+//! and 102 mode-4 frames. Mode 5 is part 2 (`BP.C:124-215`): a 488-point
+//! 10×10×10 lattice shell projected through `crotprojlist` and drawn by
+//! `do3dots`, 500 frames of it, dimmed by 255/256 over the last sixteen (the
+//! source's negative-`a` fade; `docs/fidelity/hard.md`). Mode 6 is
+//! part 3 (`BP.C:220-299`): a 128-row glenz cube drawn twice through the
+//! `clipz = 4000` clipper — a magnified copy with `ceasymode(0)`/`demo_hide`
+//! and the cube itself with `ceasymode(1)`/`demo_norm` — 800 frames, the
+//! palette ramped in over the first twenty. Mode 7 and the `default` arm
+//! retire the part (`B.C:313-323`). The band is **not cleared** between
+//! part-3 frames (`VNEW.ASM:27-56`); the compositor is seeded from the A2D0
+//! band part 2 left.
 //!
 //! **The display phase is measured, not fitted** (D17/D18): a tick's frame is
 //! the state the capture shows at `K0 + tick`, `K0 = 356`. The pre-roll is 119
@@ -39,9 +48,17 @@ use std::path::Path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
+use crate::parts::glenz::math::{matrix_yxz, Matrix};
+use crate::parts::glenz::tables::SIN1024;
 use crate::parts::minvball::MsRand;
 
-use super::dots::{add_dot, dodots, dodots2, dots_from_fcrz, initial_dots, Dot, DOT_COUNT, GRID1};
+use super::dots::{
+    add_dot, depthcol_table, do3dots, dodots, dodots2, dots_from_fcrz, grid_points, initial_dots,
+    Dot, DOT_COUNT, GRID1,
+};
+use super::math::{project, rotate, rotate_project, PVert};
+use super::poly::{clip_easy_list, FaceMode, Poly, PolyDef};
+use super::span::Compositor;
 
 /// The registry name (`parts::registry`).
 pub const HARD_NAME: &str = "hard";
@@ -63,10 +80,99 @@ const BAND_ROWS: usize = 128;
 const BAND_START: usize = BAND_TOP * SCREEN_WIDTH;
 const BAND_END: usize = (BAND_TOP + BAND_ROWS) * SCREEN_WIDTH;
 
+/// The `A2D0` band's byte count: `128*320` (`B.C:297`). The compositor's
+/// 64,000-byte work buffer holds 200 rows, but `ng_pass2` paints 128
+/// (`VNEW.ASM:4,162`) and only those are displayed.
+const BAND_BYTES: usize = BAND_END - BAND_START;
+
 /// `loadpal(pal,32*3)` (`BP.C:59`): part 1's upload is 32 entries.
 pub const PART1_UPLOAD_BYTES: usize = 32 * 3;
 /// Every other upload in the first half.
 pub const FULL_UPLOAD_BYTES: usize = 768;
+
+/// `if(count>=500) NEXTMODE` (`BP.C:172`): part 2's end.
+const PART2_END: i16 = 500;
+/// `if(count>=800) NEXTMODE` (`BP.C:262`): part 3's end.
+const PART3_END: i16 = 800;
+/// `if(count>500-16)` (`BP.C:173`): the fade's first count.
+const PART2_FADE_START: i16 = 500 - 16;
+/// `if(mode==5 && count>500-17) loadpal(pal,768-6)` (`B.C:209`): the faded
+/// palette's first upload, `762` bytes (entries 0..253, six bytes short).
+const PART2_FADE_UPLOAD_START: i16 = 500 - 17;
+/// `if(vram[u]==254-65) vram[u]=1` (`B.C:299`): mode 4's trail index.
+const MODE_FOUR_TRAIL: u8 = 254 - 65;
+
+/// `cubepoints` (`BP.C:85-94`): the cube is `-510`..`410`, **not** symmetric —
+/// the plan's and the research's "±510" is a transcription error.
+pub const CUBE_POINTS: [[i32; 3]; 8] = [
+    [-510, -510, -510],
+    [410, -510, -510],
+    [410, 410, -510],
+    [-510, 410, -510],
+    [-510, -510, 410],
+    [410, -510, 410],
+    [410, 410, 410],
+    [-510, 410, 410],
+];
+
+/// `cubepolys` (`BP.C:95-102`): six quads, colours `0x4001..0x4020`, indices
+/// 0..7 of the projected list.
+pub const CUBE_POLYS: [PolyDef; 6] = [
+    PolyDef {
+        colour: 0x4001,
+        points: &[3, 2, 1, 0],
+    },
+    PolyDef {
+        colour: 0x4002,
+        points: &[4, 5, 6, 7],
+    },
+    PolyDef {
+        colour: 0x4004,
+        points: &[0, 1, 5, 4],
+    },
+    PolyDef {
+        colour: 0x4008,
+        points: &[1, 2, 6, 5],
+    },
+    PolyDef {
+        colour: 0x4010,
+        points: &[2, 3, 7, 6],
+    },
+    PolyDef {
+        colour: 0x4020,
+        points: &[3, 0, 4, 7],
+    },
+];
+
+/// `cubepolyss` (`BP.C:103-110`): the same six quads, every colour `0x4040`,
+/// indexing the magnified copy at records 8..15.
+#[allow(clippy::identity_op)] // the source's `3+8, 2+8, …, 0+8` form (`BP.C:104-109`)
+pub const CUBE_SHADOW_POLYS: [PolyDef; 6] = [
+    PolyDef {
+        colour: 0x4040,
+        points: &[3 + 8, 2 + 8, 1 + 8, 0 + 8],
+    },
+    PolyDef {
+        colour: 0x4040,
+        points: &[4 + 8, 5 + 8, 6 + 8, 7 + 8],
+    },
+    PolyDef {
+        colour: 0x4040,
+        points: &[0 + 8, 1 + 8, 5 + 8, 4 + 8],
+    },
+    PolyDef {
+        colour: 0x4040,
+        points: &[1 + 8, 2 + 8, 6 + 8, 5 + 8],
+    },
+    PolyDef {
+        colour: 0x4040,
+        points: &[2 + 8, 3 + 8, 7 + 8, 6 + 8],
+    },
+    PolyDef {
+        colour: 0x4040,
+        points: &[3 + 8, 0 + 8, 4 + 8, 7 + 8],
+    },
+];
 
 /// One tick of the source's `main` (`B.C:125`), as a display phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +209,6 @@ pub struct Hard {
     /// `pal`, `pal1`, `pal2`, `defpal` (`B.C:20-22`, `BP.C:3`) and the DAC.
     pal: [u8; 768],
     pal1: [u8; 768],
-    #[allow(dead_code)] // part 3's fade source; Task 7 consumes it
     pal2: [u8; 768],
     defpal: [u8; 768],
     dac: [u8; 768],
@@ -114,6 +219,26 @@ pub struct Hard {
     phase: Phase,
     /// `part1init`'s internal `waitb` (`BP.C:29`): one extra display tick.
     pause: bool,
+    /// `gridpoints` (`BP.C:156-164`): the lattice shell, and the `points3`
+    /// records `crotprojlist` writes and `do3dots` reads and updates.
+    grid: Vec<[i32; 3]>,
+    points3: Vec<i16>,
+    /// `depthcol` (`BA.ASM:221-222`, `BP.C:128-133`).
+    depthcol: [u8; 8192],
+    /// `rx/ry/rz/zp` (`BP.C:118`): part 2 sets `zp = 3500`; part 3 continues
+    /// the angles (`BP.C:166,248-253`).
+    rx: i16,
+    ry: i16,
+    rz: i16,
+    zp: i16,
+    /// `static int ct2` in part 3 (`BP.C:260`).
+    ct2: i16,
+    /// The 128-row opaque compositor (`VNEW.ASM`), seeded from the A2D0 band
+    /// at `part3init` — one compositor for the run, as `newdata1`/`vram` are.
+    compositor: Compositor,
+    /// A48's measured mode-5 boundary: two display frames with no loop
+    /// iteration between mode 4's last iteration and part 2's count 0.
+    mode_five_hold: u8,
 }
 
 impl Hard {
@@ -140,6 +265,16 @@ impl Hard {
             pal1colp: 0,
             phase: Phase::Wipe { next_x: 319 },
             pause: false,
+            grid: Vec::new(),
+            points3: Vec::new(),
+            depthcol: [0; 8192],
+            rx: 0,
+            ry: 0,
+            rz: 0,
+            zp: 5600,
+            ct2: 0,
+            compositor: Compositor::new(),
+            mode_five_hold: 0,
         }
     }
 
@@ -366,11 +501,199 @@ impl Hard {
         mode_four_init_palette(&mut self.pal);
     }
 
+    /// `part2init` (`BP.C:124-167`).
+    fn part2init(&mut self) {
+        self.depthcol = depthcol_table();
+        // `memcpy(pal,defpal,768)`; `pal[1] = (63,63,63)`; `pal[250] =
+        // (0,0,40)`; the 64-entry gradient at 64..127 (`BP.C:135-154`). The
+        // red channel is `a` itself — the source computes `b=a+d`, clamps it
+        // and then stores `a` (`BP.C:145-146`).
+        self.pal.copy_from_slice(&self.defpal);
+        self.pal[3..6].copy_from_slice(&[63, 63, 63]);
+        self.pal[250 * 3..250 * 3 + 3].copy_from_slice(&[0, 0, 40]);
+        let mut d: i16 = 64;
+        for a in 0..64usize {
+            let at = 64 * 3 + a * 3;
+            let mut g = a as i16 + 20 + d;
+            if g > 63 {
+                g = 63;
+            }
+            let mut b = a as i16 + 40 + d;
+            if b > 63 {
+                b = 63;
+            }
+            self.pal[at] = a as u8;
+            self.pal[at + 1] = g as u8;
+            self.pal[at + 2] = b as u8;
+            if d > 0 {
+                d -= 8;
+            }
+        }
+        self.loadpal(FULL_UPLOAD_BYTES);
+        self.pal2 = self.pal;
+        // `gridpoints` and `zp` (`BP.C:156-166`).
+        self.grid = grid_points();
+        self.points3 = vec![0i16; 2 + 8 * self.grid.len()];
+        self.zp = 3500;
+    }
+
+    /// One `part2` iteration (`BP.C:169-215`).
+    fn part2(&mut self) {
+        if self.count >= PART2_END {
+            self.nextmode();
+        }
+        if self.count > PART2_FADE_START {
+            // `a=(500-16)-count; fadepal(pal,pal2,a*16)` (`BP.C:173-177`).
+            // `a` is negative for every count that reaches here (485..499),
+            // so `a*16` is a negative 16-bit `int` and `fadepal` reads it as
+            // `>= 256` and clamps `dl` to 255: the fade only dims the palette
+            // by 255/256. The capture agrees (reference 1441 onward has
+            // blue 251 where it was 255); `docs/fidelity/hard.md` records it.
+            let a = PART2_FADE_START.wrapping_sub(self.count);
+            fadepal(&mut self.pal, &self.pal2, a.wrapping_mul(16));
+        }
+        let matrix = matrix_yxz(self.rx, self.ry, self.rz);
+        grid_records(
+            &mut self.points3,
+            &self.grid,
+            &matrix,
+            [0, 0, i32::from(self.zp)],
+        );
+        do3dots(
+            &mut self.points3,
+            &self.depthcol,
+            &mut self.screen[BAND_START..BAND_END],
+        );
+        if self.count > 1 {
+            self.rx = self.rx.wrapping_add(9);
+            self.ry = self.ry.wrapping_add(10);
+            self.rz = self.rz.wrapping_add(11);
+            if self.zp > 2000 {
+                self.zp -= 10;
+            }
+        }
+    }
+
+    /// `part3init` (`BP.C:220-254`).
+    fn part3init(&mut self) {
+        self.pal.copy_from_slice(&self.defpal);
+        // `pal2[1..127]` is the bit-coded ramp; everything else in `pal2`
+        // keeps part 2's palette (`BP.C:224-240`).
+        for a in 1..128usize {
+            let mut r = 0i16;
+            let mut g = 0i16;
+            let mut b = 20i16;
+            if a & 0x1 != 0 {
+                g += 20;
+                r += 20;
+            }
+            if a & 0x2 != 0 {
+                g += 22;
+                r += 22;
+            }
+            if a & 0x4 != 0 {
+                g += 24;
+                r += 24;
+            }
+            if a & 0x8 != 0 {
+                g += 26;
+                r += 26;
+            }
+            if a & 0x10 != 0 {
+                g += 28;
+                r += 28;
+            }
+            if a & 0x20 != 0 {
+                g += 30;
+                r += 30;
+            }
+            if a & 0x40 != 0 {
+                b = 15;
+            }
+            let at = a * 3;
+            self.pal2[at] = r.min(63) as u8;
+            self.pal2[at + 1] = g.min(63) as u8;
+            self.pal2[at + 2] = b.min(63) as u8;
+        }
+        // `for(a=2;a<254;a++) pal[a] = (0,0,20)` (`BP.C:241-246`); entry 1
+        // stays `defpal[1]` = black, which is why the cube is invisible on
+        // its first frame and only appears as the fade uploads the ramp.
+        for a in 2..254usize {
+            let at = a * 3;
+            self.pal[at..at + 3].copy_from_slice(&[0, 0, 20]);
+        }
+        self.loadpal(FULL_UPLOAD_BYTES);
+        // `ng_init`'s destination is `gs:vram` = A2D0 (`VNEW.ASM:29-31`):
+        // the compositor paints into the band part 2 left and never clears it.
+        // The boundary lists start fresh (the source's BSS `newdata1`); the
+        // work buffer's rows 128..199 are never painted or displayed.
+        let band = self.screen[BAND_START..BAND_END].to_vec();
+        self.compositor.pixels[..BAND_BYTES].copy_from_slice(&band);
+    }
+
+    /// One `part3` iteration (`BP.C:256-299`).
+    fn part3(&mut self) {
+        if self.count >= PART3_END {
+            self.nextmode();
+        }
+        if self.muscode(0xff) == 0xff {
+            self.nextmode();
+        }
+        // `ct2+=4; lix=sin1024[ct2&1023]/2+160;
+        // liy=sin1024[(ct2+256)&1023]/2+64` (`BP.C:265-267`).
+        self.ct2 = self.ct2.wrapping_add(4);
+        let lix = SIN1024[(self.ct2 as u16 & 1023) as usize] / 2 + 160;
+        let liy = SIN1024[(self.ct2.wrapping_add(256) as u16 & 1023) as usize] / 2 + 64;
+        let matrix = matrix_yxz(self.rx, self.ry, self.rz);
+        let mut rotated: Vec<[i32; 3]> = Vec::with_capacity(CUBE_POINTS.len());
+        rotate(
+            &mut rotated,
+            &CUBE_POINTS,
+            &matrix,
+            [0, 0, i32::from(self.zp)],
+        );
+        let mut verts: Vec<PVert> = Vec::with_capacity(2 * CUBE_POINTS.len());
+        project(&mut verts, &rotated);
+        let copy = magnified_copy(&verts[..CUBE_POINTS.len()], lix, liy);
+        verts.extend(copy);
+        // `ceasymode(0)`/Hide for the magnified copy, then
+        // `ceasymode(1)`/Norm for the real cube (`BP.C:289-294`).
+        let (shadow, cube) = part3_lists(&verts);
+        self.compositor.add(&shadow);
+        self.compositor.add(&cube);
+        self.compositor.paint();
+        self.screen[BAND_START..BAND_END].copy_from_slice(&self.compositor.pixels[..BAND_BYTES]);
+        self.rx = self.rx.wrapping_add(9);
+        self.ry = self.ry.wrapping_add(10);
+        self.rz = self.rz.wrapping_add(11);
+        if self.count < 20 {
+            fadepal(&mut self.pal, &self.pal2, self.count.wrapping_mul(16));
+        }
+    }
+
+    /// `dis_muscode(wanted)` under the vault's single-start model
+    /// (`DIS/DISINT.ASM:275-280`, `APPROXIMATIONS.md` A46): the capture's one
+    /// key was consumed by the gate at `B.C:138`, so every later call returns
+    /// 0 and part 3's `0xff` cut (`BP.C:263`) cannot fire.
+    fn muscode(&self, _wanted: i16) -> i16 {
+        0
+    }
+
     /// One main-loop iteration (`B.C:203-324`). Returns true when the part
-    /// retires: mode 4 would advance, which is this task's boundary.
+    /// retires: the `default` arm sets `mode = -1` (`B.C:320-323`).
     fn main_tick(&mut self) -> bool {
         if self.pause {
             self.pause = false;
+            return false;
+        }
+        if self.mode_five_hold > 0 {
+            // A48: the artifact's mode-4 loop lost two retraces, so two
+            // display frames pass with no loop iteration before part 2's
+            // count 0. The port's fixed tick cannot express the overrun
+            // inside mode 4; it inserts the same two static displays here so
+            // every later frame keeps the artifact's numbering.
+            self.mode_five_hold -= 1;
+            self.shown = palette_from_mirror(&self.dac);
             return false;
         }
         self.count += 1;
@@ -379,6 +702,14 @@ impl Hard {
         if self.mode == 4 && self.count > 0 {
             // `loadpal(pal,768)` (`B.C:208`): the band built last iteration.
             self.loadpal(FULL_UPLOAD_BYTES);
+        }
+        if self.mode == 5 && self.count > PART2_FADE_UPLOAD_START {
+            // `loadpal(pal,768-6)` (`B.C:209`): 762 bytes, entries 0..253.
+            self.loadpal(FULL_UPLOAD_BYTES - 6);
+        }
+        if self.mode == 6 && self.count > 0 && self.count < 20 {
+            // The part-3 fade's upload (`B.C:210`), also 762 bytes.
+            self.loadpal(FULL_UPLOAD_BYTES - 6);
         }
         // `setborder(0)` (`B.C:211`).
         if self.mode < 4 {
@@ -440,17 +771,43 @@ impl Hard {
                 if self.count > 100 {
                     self.kill_all();
                     self.nextmode();
+                    self.mode_five_hold = 2;
+                }
+            }
+            5 => {
+                if self.count == 0 {
+                    // `for(u=0;u<128*320;u++) if(vram[u]==254-65) vram[u]=1;
+                    // else vram[u]=0;` (`B.C:297-301`): the band is cleared
+                    // and mode 4's last trail becomes index 1.
+                    for pixel in &mut self.screen[BAND_START..BAND_END] {
+                        *pixel = if *pixel == MODE_FOUR_TRAIL { 1 } else { 0 };
+                    }
+                    self.part2init();
+                } else {
+                    self.part2();
+                }
+            }
+            6 => {
+                if self.count == 0 {
+                    self.part3init();
+                } else {
+                    self.part3();
+                }
+            }
+            7 => {
+                self.nextmode();
+                if self.count > 100 {
+                    self.nextmode();
                 }
             }
             _ => {
-                // Modes 5..6 and the final `default` are Task 7's.
+                // `default: mode=-1` (`B.C:320-323`): the loop ends after
+                // this iteration, whose frame is the last picture.
+                self.mode = -1;
             }
         }
         self.shown = palette_from_mirror(&self.dac);
-        // The mode-4 advance tick is this task's boundary: mode 4's
-        // `count>100` branch (`B.C:288-292`) has killed the dots and run
-        // `NEXTMODE`, and Task 7 replaces this return with modes 5..6.
-        self.mode >= 5
+        self.mode == -1
     }
 }
 
@@ -501,6 +858,16 @@ impl Part for Hard {
         self.pal2 = [0; 768];
         self.defpal = [0; 768];
         self.dac = [0; 768];
+        self.grid.clear();
+        self.points3.clear();
+        self.depthcol = [0; 8192];
+        self.rx = 0;
+        self.ry = 0;
+        self.rz = 0;
+        self.zp = 5600;
+        self.ct2 = 0;
+        self.compositor = Compositor::new();
+        self.mode_five_hold = 0;
         // The mode set leaves this DAC in place until the pre-roll's first
         // `loadpal(defpal,768)`.
         self.shown = crate::shell::hardware_default_palette();
@@ -566,6 +933,101 @@ impl Part for Hard {
 
     fn band_count(&self) -> u16 {
         1
+    }
+}
+
+// ----------------------------------------------------------- part 2/3 data --
+
+/// `crotprojlist`'s record layout (`VEC.ASM:250-344`, `BP.C:183`): a 16-bit
+/// count at word 0 and 16-byte records — x at word 0, y at word 1 and the
+/// 32-bit z at words 4/5 — for [`do3dots`].
+///
+/// The record's other words are **not** written by the projection: word 3 is
+/// the last screen offset and word 6 the shadow offset, both owned by
+/// `do3dots`. They live in the caller's `points3`, so they persist across
+/// frames exactly as the source's BSS array does.
+pub fn grid_records(
+    points3: &mut [i16],
+    grid: &[[i32; 3]],
+    matrix: &Matrix,
+    add: [i32; 3],
+) -> usize {
+    let mut verts: Vec<PVert> = Vec::with_capacity(grid.len());
+    rotate_project(&mut verts, grid, matrix, add);
+    points3[0] = verts.len() as i16;
+    for (index, vert) in verts.iter().enumerate() {
+        let at = 2 + index * 8;
+        points3[at] = vert.x;
+        points3[at + 1] = vert.y;
+        points3[at + 4] = vert.z as i16;
+        points3[at + 5] = (vert.z >> 16) as i16;
+    }
+    verts.len()
+}
+
+/// The magnified copy's projection (`BP.C:275-288`): each projected cube
+/// point is pulled toward `(lix, liy)` by `z' = 3000` over `z + 2000`.
+///
+/// The source's `z` is a `long` assigned from `points3[...+4]`, an `int` — so
+/// it is the **low word** of the projected z, sign-extended, plus 2000, not
+/// the 32-bit z (`BP.C:280-281`). `x-lix` is likewise an `int` and wraps in
+/// 16 bits before the cast to `long`; the quotient truncates toward zero and
+/// the `+ lix` result is stored back through an `int`.
+pub fn magnified_copy(verts: &[PVert], lix: i16, liy: i16) -> Vec<PVert> {
+    verts
+        .iter()
+        .map(|vert| {
+            let dx = i32::from(vert.x.wrapping_sub(lix));
+            let dy = i32::from(vert.y.wrapping_sub(liy));
+            let z = i32::from(vert.z as i16) + 2000;
+            // The source would fault on a zero divisor; part 3's z' is
+            // 3118..4882, so this guard models an unreachable branch.
+            let x = (dx * 5000)
+                .checked_div(z)
+                .unwrap_or(0)
+                .wrapping_add(i32::from(lix)) as i16;
+            let y = (dy * 5000)
+                .checked_div(z)
+                .unwrap_or(0)
+                .wrapping_add(i32::from(liy)) as i16;
+            PVert {
+                x,
+                y,
+                flags: 0,
+                z: 3000,
+                // The second block's raw fields are BSS zero: the source's
+                // copy loop writes only x, y and the z dword (`BP.C:285-287`),
+                // and the clipper's interpolation is unreachable for it
+                // (every z' is 3000, below `clipz`).
+                raw_x: 0,
+                raw_y: 0,
+            }
+        })
+        .collect()
+}
+
+/// The two clipper passes (`BP.C:289-294`): `ceasymode(0)`/`demo_hide` for
+/// the magnified copy (`CUBE_SHADOW_POLYS`, records 8..15) and
+/// `ceasymode(1)`/`demo_norm` for the real cube (`CUBE_POLYS`, records 0..7).
+pub fn part3_lists(verts: &[PVert]) -> (Vec<Poly>, Vec<Poly>) {
+    (
+        clip_easy_list(&CUBE_SHADOW_POLYS, verts, FaceMode::Hide),
+        clip_easy_list(&CUBE_POLYS, verts, FaceMode::Norm),
+    )
+}
+
+/// `fadepal` (`BA.ASM:174-215`): every source channel times `dl` in the high
+/// byte of an 8-bit multiply, plus `20*(255-dl)/256` added to blue.
+///
+/// `dl` is a 16-bit `int` and the range test is unsigned (`cmp dx,256; jb`),
+/// so a negative or oversized value clamps to 255.
+pub fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
+    let dl: u8 = if (dl as u16) < 256 { dl as u8 } else { 255 };
+    let blue_bias = ((20 * u32::from(255 - dl)) >> 8) as u8;
+    for (out, source) in dst.chunks_exact_mut(3).zip(src.chunks_exact(3)) {
+        out[0] = ((u32::from(source[0]) * u32::from(dl)) >> 8) as u8;
+        out[1] = ((u32::from(source[1]) * u32::from(dl)) >> 8) as u8;
+        out[2] = (((u32::from(source[2]) * u32::from(dl)) >> 8) as u8).wrapping_add(blue_bias);
     }
 }
 
@@ -671,6 +1133,8 @@ pub fn mode_four_band(pal: &mut [u8; 768], pal1colp: i16) {
 #[cfg(test)]
 mod tests {
     use sr_engine::{Engine, IndexedFrame, View};
+
+    use crate::parts::vault::hard::poly::shoelace;
 
     use super::*;
 
@@ -874,19 +1338,18 @@ mod tests {
         // The pre-roll, then walk the modes and note each transition.
         let mut seen: Vec<(u32, i16, i16)> = Vec::new();
         let mut previous = (part.mode, part.count);
-        let mut finished_at = None;
         for part_frame in 0..700u32 {
             let status = tick(&mut engine, &mut part, &mut frame);
             if (part.mode, part.count) != previous {
                 seen.push((part_frame, part.mode, part.count));
                 previous = (part.mode, part.count);
             }
-            if status == PartStatus::Finished {
-                finished_at = Some(part_frame);
-                break;
-            }
+            assert_eq!(
+                status,
+                PartStatus::Continuing,
+                "the first half does not retire; modes 5..6 run to port 1902"
+            );
         }
-        let finished_at = finished_at.expect("the first half ends at the mode-5 boundary");
         // 119 pre-roll ticks, then mode 0's 34 iterations (counts 0..33),
         // part1's four 73-frame phases (counts 0..72) with four one-frame
         // rotations, mode 3's 42 frames and mode 4's 102; the count-0 of each
@@ -905,10 +1368,16 @@ mod tests {
         // 119 pre-roll ticks, mode 0's 34, the four phases' 4*73 frames and
         // their 4 rotation frames, and mode 3's 42.
         assert_eq!(mode_four_start, 119 + 34 + 4 * (73 + 1) + 4 + 42);
+        // Mode 4's `count>100` branch (`B.C:288-292`) kills the dots and
+        // advances at count 101; the post-state is mode 5, count -1, and the
+        // two measured boundary displays follow (A48).
+        let advance = seen
+            .iter()
+            .find(|(_, mode, count)| *mode == 5 && *count == -1);
         assert_eq!(
-            finished_at,
-            mode_four_start + 101,
-            "mode 4 runs counts 0..101 and the part retires on the last"
+            advance.map(|(frame, _, _)| *frame),
+            Some(mode_four_start + 101),
+            "mode 4 runs counts 0..101 and advances on the last"
         );
 
         // The mode-2 rotations are one frame each: after four of them the
@@ -1040,5 +1509,288 @@ mod tests {
             (0, -1),
             "the main loop ran no iteration"
         );
+    }
+
+    /// The part-2 projection is `crotprojlist` (`VEC.ASM:250-344`): the same
+    /// rotation as `rotlist`, then a 16-bit `imul word ptr`/`idiv bx`
+    /// projection that reads the low words only and writes no raw fields.
+    #[test]
+    fn the_part2_projection_is_the_16_bit_crotprojlist() {
+        let identity = Matrix([32767, 0, 0, 0, 32767, 0, 0, 0, 32767]);
+        let mut points3 = vec![0i16; 2 + 8];
+        let count = grid_records(&mut points3, &[[200, 200, 300]], &identity, [0, 0, 65536]);
+        assert_eq!(count, 1);
+        assert_eq!(points3[0], 1);
+        // HARD's axis stores rotate (200,200,300) to (299,199,199); a z
+        // translation of 65536 lifts z to 65735, whose low word is 199:
+        // x = 299*240/199 + 160 = 520, y = 199*200/199 + 64 = 264.
+        assert_eq!((points3[2], points3[3]), (520, 264));
+        // The record carries the dword z at words 4/5; `do3dots` loads word
+        // 4 (`BA.ASM:232`), which is 199 here.
+        assert_eq!((points3[6], points3[7]), (199, 1));
+        // The 32-bit `projlist` on the same rotated point divides by 65735
+        // and gives (161, 64); the part must not take that path.
+        let mut wide = Vec::new();
+        project(&mut wide, &[[299, 199, 65_735]]);
+        assert_eq!((wide[0].x, wide[0].y), (161, 64));
+        assert_ne!((points3[2], points3[3]), (wide[0].x, wide[0].y));
+    }
+
+    /// The first part-2 frame's drawn list is the shipped `GRID1` table: at
+    /// `zp = 3500`, `rx = ry = rz = 0`, only the lattice face `x = -500`
+    /// passes `do3dots`' signed `z <= 3000` test, and its projection is
+    /// exactly the 100 pairs mode 4's trails end on.
+    #[test]
+    fn the_first_grid_frame_is_the_shipped_grid1_list() {
+        let grid = grid_points();
+        let matrix = matrix_yxz(0, 0, 0);
+        let mut points3 = vec![0i16; 2 + 8 * grid.len()];
+        grid_records(&mut points3, &grid, &matrix, [0, 0, 3500]);
+        let mut drawn = Vec::new();
+        for index in 0..grid.len() {
+            let at = 2 + index * 8;
+            if points3[at + 4] <= 3000 {
+                drawn.push((points3[at], points3[at + 1]));
+            }
+        }
+        assert_eq!(drawn.len(), 100, "the x = -500 face");
+        let table: Vec<(i16, i16)> = GRID1
+            .chunks_exact(2)
+            .map(|pair| (pair[0], pair[1]))
+            .collect();
+        assert_eq!(drawn, table);
+        // Every drawn point uses `depthcol[3000] = 65`, and `part2init`'s
+        // entry 65 is `(1,63,63)` — the capture's `(4,255,255)` at reference
+        // 956 (`docs/fidelity/hard.md`).
+        assert_eq!(depthcol_table()[3000], 65);
+        let mut part = Hard::new();
+        part.part2init();
+        assert_eq!(&part.pal[65 * 3..65 * 3 + 3], &[1, 63, 63]);
+        assert_eq!(&part.pal[3..6], &[63, 63, 63]);
+        assert_eq!(&part.pal[250 * 3..250 * 3 + 3], &[0, 0, 40]);
+    }
+
+    /// `cubepoints`/`cubepolys`/`cubepolyss` and the magnified copy
+    /// (`BP.C:85-110,275-288`).
+    #[test]
+    fn the_cube_geometry_and_colours_are_the_sources() {
+        // The cube is -510..410, not ±510: the plan's and the research's
+        // "±510" is a transcription error.
+        assert_eq!(CUBE_POINTS[0], [-510, -510, -510]);
+        assert_eq!(CUBE_POINTS[4], [-510, -510, 410]);
+        assert_eq!(CUBE_POINTS[7], [-510, 410, 410]);
+        for point in CUBE_POINTS {
+            for coordinate in point {
+                assert!(coordinate == -510 || coordinate == 410, "{point:?}");
+            }
+        }
+        // The six colour words in table order (`BP.C:95-102`).
+        let colours: Vec<u16> = CUBE_POLYS.iter().map(|poly| poly.colour).collect();
+        assert_eq!(colours, [0x4001, 0x4002, 0x4004, 0x4008, 0x4010, 0x4020]);
+        // The +8 copy: the same indices in the same order, all 0x4040
+        // (`BP.C:103-110`).
+        for (real, shadow) in CUBE_POLYS.iter().zip(&CUBE_SHADOW_POLYS) {
+            assert_eq!(shadow.colour, 0x4040);
+            assert_eq!(shadow.points.len(), real.points.len());
+            for (far, near) in shadow.points.iter().zip(real.points) {
+                assert_eq!(*far, near + 8);
+            }
+        }
+
+        // The magnified copy's projection: the denominator is the **low
+        // word** of z plus 2000, z' is 3000, and the quotient truncates
+        // toward zero.
+        let verts: Vec<PVert> = (0..8)
+            .map(|_| PVert {
+                x: 250,
+                y: 70,
+                flags: 0,
+                z: 5000 + 65536,
+                raw_x: 0,
+                raw_y: 0,
+            })
+            .collect();
+        let copy = magnified_copy(&verts, 190, 80);
+        assert_eq!(copy.len(), 8);
+        // (250-190)*5000/(5000+2000) = 42, +190 = 232;
+        // (70-80)*5000/7000 = -7, +80 = 73.
+        assert_eq!((copy[0].x, copy[0].y), (232, 73));
+        assert_eq!(copy[0].z, 3000);
+        // A 32-bit z would divide by 72536 and give 194 instead.
+        let wide = (250i32 - 190) * 5000 / (5000 + 65536 + 2000) + 190;
+        assert_eq!(wide, 194);
+        assert_ne!(i32::from(copy[0].x), wide);
+    }
+
+    /// `ceasymode(0)` selects `demo_hide` and `ceasymode(1)` `demo_norm`
+    /// (`VEC.ASM:904-916`): part 3 passes the magnified copy through Hide and
+    /// the real cube through Norm (`BP.C:289-294`).
+    #[test]
+    fn the_part3_mode_selects_hide_and_norm() {
+        let matrix = matrix_yxz(0, 0, 0);
+        let mut rotated = Vec::new();
+        rotate(&mut rotated, &CUBE_POINTS, &matrix, [0, 0, 2000]);
+        let mut verts = Vec::new();
+        project(&mut verts, &rotated);
+        let copy = magnified_copy(&verts[..8], 190, 80);
+        verts.extend(copy);
+
+        let (shadow, cube) = part3_lists(&verts);
+        assert_eq!(
+            shadow,
+            clip_easy_list(&CUBE_SHADOW_POLYS, &verts, FaceMode::Hide)
+        );
+        assert_eq!(cube, clip_easy_list(&CUBE_POLYS, &verts, FaceMode::Norm));
+        assert_eq!(shadow.len(), 6);
+        assert_eq!(cube.len(), 6);
+        // Norm keeps every face's colour.
+        assert!(cube.iter().all(|poly| poly.colour != 0));
+        // Hide zeroes exactly the faces whose shoelace is negative, on the
+        // same block and on the magnified copy.
+        let norm = clip_easy_list(&CUBE_POLYS, &verts, FaceMode::Norm);
+        let hide = clip_easy_list(&CUBE_POLYS, &verts, FaceMode::Hide);
+        for (visible, hidden) in norm.iter().zip(&hide) {
+            assert_eq!(visible.points, hidden.points);
+            assert_eq!(
+                hidden.colour == 0,
+                shoelace(&visible.points) < 0,
+                "{:?}",
+                visible.points
+            );
+        }
+        let shadow_zeroed = shadow.iter().filter(|poly| poly.colour == 0).count();
+        let cube_zeroed = hide.iter().filter(|poly| poly.colour == 0).count();
+        assert!(
+            (1..6).contains(&cube_zeroed),
+            "the identity view shows both signs: {cube_zeroed}"
+        );
+        assert!(
+            (0..6).contains(&shadow_zeroed),
+            "the magnified copy clips its own faces: {shadow_zeroed}"
+        );
+    }
+
+    /// The band is the `A2D0` work buffer the source's compositor paints
+    /// into; `ng_init` never touches a pixel (`VNEW.ASM:27-56`), so part 3
+    /// must seed its compositor from part 2's band and leave untouched spans
+    /// alone.
+    #[test]
+    fn the_band_is_not_cleared_between_frames() {
+        let (mut engine, mut part, mut frame) = start();
+        while !(part.mode == 6 && part.count == 0) {
+            assert_eq!(
+                tick(&mut engine, &mut part, &mut frame),
+                PartStatus::Continuing
+            );
+        }
+        // Plant a sentinel before the init seeds the compositor, so the seed
+        // is visible; pixel 0 is far outside the cube (the centre is 160,64
+        // and the cube spans about ±80).
+        part.screen[BAND_START] = 99;
+        part.part3init();
+        assert_eq!(part.compositor.pixels[0], 99, "seeded from the A2D0 band");
+        let seeded = part.compositor.pixels;
+        part.count = 1;
+        part.part3();
+        assert_ne!(part.compositor.pixels, seeded, "the cube painted");
+        assert_eq!(part.screen[BAND_START], 99, "an untouched span keeps it");
+        part.count = 2;
+        part.part3();
+        assert_eq!(part.screen[BAND_START], 99, "and the next frame too");
+    }
+
+    #[test]
+    fn fadepal_is_the_high_byte_multiply() {
+        let mut src = [0u8; 768];
+        src[3..6].copy_from_slice(&[63, 63, 63]);
+        src[6..9].copy_from_slice(&[1, 63, 63]);
+        let mut dst = [0u8; 768];
+        // dl = 0: every channel zero, blue takes the whole bias 19.
+        fadepal(&mut dst, &src, 0);
+        assert_eq!(&dst[3..6], &[0, 0, 19]);
+        assert_eq!(&dst[6..9], &[0, 0, 19]);
+        // dl = 16: 63*16 >> 8 = 3, bias 20*239 >> 8 = 18.
+        fadepal(&mut dst, &src, 16);
+        assert_eq!(&dst[3..6], &[3, 3, 21]);
+        assert_eq!(&dst[6..9], &[0, 3, 21]);
+        // dl = 128: 63*128 >> 8 = 31, bias 20*127 >> 8 = 9.
+        fadepal(&mut dst, &src, 128);
+        assert_eq!(&dst[3..6], &[31, 31, 40]);
+        // dl = 255: no bias, the channel loses its low bit.
+        fadepal(&mut dst, &src, 255);
+        assert_eq!(&dst[3..6], &[62, 62, 62]);
+        // 256 and a negative int both clamp to 255 (`cmp dx,256; jb` is an
+        // unsigned compare) — the mode-5 fade's `a*16` goes negative.
+        for dl in [256i16, -16, -240] {
+            fadepal(&mut dst, &src, dl);
+            assert_eq!(&dst[3..6], &[62, 62, 62], "dl {dl}");
+        }
+    }
+
+    #[test]
+    fn the_full_mode_sequence_is_the_sources() {
+        let (mut engine, mut part, mut frame) = start();
+        // The plan's sum of the mode limits.
+        assert_eq!(34 + 4 * 73 + 4 + 42 + 102 + 500 + 800, 1774);
+        let mut transitions: Vec<(u32, i16, i16)> = Vec::new();
+        let mut previous = (part.mode, part.count);
+        let mut finished_at = None;
+        for tick_index in 0..2000u32 {
+            let status = tick(&mut engine, &mut part, &mut frame);
+            if (part.mode, part.count) != previous {
+                transitions.push((tick_index, part.mode, part.count));
+                previous = (part.mode, part.count);
+            }
+            if status == PartStatus::Finished {
+                finished_at = Some(tick_index);
+                break;
+            }
+        }
+        assert_eq!(finished_at, Some(1902), "the `default` arm's tick");
+        assert_eq!(part.mode, -1);
+        let has = |tick_index: u32, mode: i16, count: i16| {
+            transitions.contains(&(tick_index, mode, count))
+        };
+        // 119 pre-roll ticks; modes 0..4 (478 ticks); the two measured A48
+        // boundary displays 953-954; part 2's 501 iterations (counts 0..500,
+        // reference 955..1455); part 3's 801 (counts 0..800, reference
+        // 1456..2256); mode 7 and `default` (references 2257-2258).
+        assert!(has(596, 5, -1), "mode 4's advance (reference 952)");
+        assert!(has(599, 5, 0), "part2init (reference 955)");
+        assert!(has(600, 5, 1), "the first grid frame (reference 956)");
+        assert!(has(1099, 6, -1), "part 2's count 500 advances");
+        assert!(has(1100, 6, 0), "part3init (reference 1456)");
+        assert!(has(1101, 6, 1), "the first cube frame (reference 1457)");
+        assert!(has(1900, 7, -1), "part 3's count 800 advances");
+        assert!(has(1901, 8, -1), "mode 7's one iteration");
+        assert!(has(1902, -1, 0), "the `default` arm");
+        assert_eq!(119 + 478 + 2 + 501 + 801 + 2, 1903);
+    }
+
+    #[test]
+    fn the_0xff_cut_is_unreachable_with_one_start() {
+        let (mut engine, mut part, mut frame) = start();
+        // The vault run delivers no later key: the standalone DIS's one echo
+        // was consumed by the gate (`B.C:138`), so every later `muscode`
+        // returns 0 (`DIS/DISINT.ASM:275-280`; A46).
+        assert_eq!(part.muscode(0xff), 0);
+        assert_ne!(part.muscode(0xff), 0xff);
+        while !(part.mode == 6 && part.count == 0) {
+            assert_eq!(
+                tick(&mut engine, &mut part, &mut frame),
+                PartStatus::Continuing
+            );
+        }
+        // Part 3 reaches its own limit: counts 1..799 leave it in mode 6 and
+        // count 800 advances it (`BP.C:262`).
+        for count in 1..800 {
+            assert_eq!(
+                tick(&mut engine, &mut part, &mut frame),
+                PartStatus::Continuing
+            );
+            assert_eq!((part.mode, part.count), (6, count), "count {count}");
+        }
+        tick(&mut engine, &mut part, &mut frame);
+        assert_eq!(part.mode, 7, "count 800 is the source's own end");
     }
 }

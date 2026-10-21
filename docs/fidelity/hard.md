@@ -5,14 +5,15 @@ includes `BP.C` (`B.C:123`) and links `BA.ASM` (the dots), the c-prefixed `VEC.A
 (`VEC.ASM:1-15`) and the four generated dot streams plus the grid table (`LINK.TMP:1-3`).
 `GMAIN.C`/`V.EXE` is an interactive engine harness, not the effect (`HARD/V.EXE` has no DIS,
 no `muscode` and a palette the program zeroes), and `ASM.A`, `LINEBLIT.INC` and the working
-art are not on any link line. This note covers the whole effect; the sections marked **Task
-7** are the second half's and are written when it lands.
+art are not on any link line. This note covers the whole effect: the first half's sections
+were written by Task 6 and the second half's by Task 7.
 
 The port translates the source literally, including the bugs the pictures depend on: the
 16-bit `int` arithmetic, `part2init`'s uninitialised `b`, `do3dots`' 16-bit z load, the dot
 engine's `sar 6` and unsigned clips, `dot3d2`'s colour decrement, and the mode-4 palette's
-forced entries. The first half (modes 0..4) is exact against every filed keyframe; the
-measured corrections to the plan's and the research's summary are recorded below.
+forced entries. The whole effect — the first half's modes, the grid and the cube — is exact
+against all nine filed keyframes; the measured corrections to the plan's and the research's
+summary are recorded below.
 
 ## Capture (Phase 8 Task 2)
 
@@ -189,7 +190,7 @@ spawn at 511 (tick 155), the first drawn dots at 512 (tick 156) and phase 1's co
 palette the capture shows — at 560 (tick 204). Mode 3's count 0 is reference 809 (tick 453);
 mode 4's count 0 is reference 851 (tick 495, a picture identical to the mode-3 hold), and its
 count 1 is the first visible band frame, 852. `the_first_half_mode_sequence_is_the_sources`
-pins the counts and ticks; `hard_matches_the_reference_in_its_early_modes` is the measurement.
+pins the counts and ticks; `hard_matches_the_reference_at_its_keyframes` is the measurement.
 
 Mode 4's palette is deliberately one iteration behind: `B.C:208` uploads at the top of the
 iteration, before the switch rebuilds the band, so the frame at count n shows the band built
@@ -281,39 +282,145 @@ drawn frame is reference 512 exactly (0 differing pixels; reproduce with
 keyframes are exact. `the_first_spawn_is_the_sources_rand_sequence` pins the first spawned
 record's six words against the MS C 6.0 LCG (`MsRand`, `minvball.rs:243-265`) with no burn.
 
-### The mode-5 boundary
+### The mode-5 boundary: two displays, measured in Task 7
 
-Mode 4's last iteration is count 101, so the source's part 2 starts at the port tick 102
-iterations after mode 4's count 0: reference **953** (851 + 102). The filed artifact's first
-mode-5 frame is **956** (`out/task2/hard-948-962`: 948–955 hold, 956 first changes). Three
-display frames are unaccounted for by the source's loop. The overrun is **not** mode 4's
-count 0: port 495 and 496 (reference 851 and 852) match the capture exactly, so the heavy
-count-0 rebuild did not overrun. The candidate is a later mode-4 iteration — the 768-byte
-palette upload at the top of every iteration is the remaining per-frame work of that size —
-but no per-frame position is measured; Task 7 owns the boundary and the part-2 keyframes.
-The port retires on the mode-4 advance tick (port 596) and the shell holds;
-`hard_ends_at_the_mode_five_boundary` pins the hold and
-`the_first_half_mode_sequence_is_the_sources` the tick.
+Mode 4's last iteration is count 101, so the source's part-2 count 0 is reference **953**
+(851 + 102). The artifact's is **955**: the Task 7 capture `out/task7/hard-950-960` shows
+950–955 byte-identical and 956 the first visibly changed frame. The overrun is **not** mode
+4's count 0 — port 495/496 (references 851/852) match at 0 pixels — so it is a later mode-4
+iteration's missed retrace; the port inserts the artifact's two extra displays as two static
+ticks between mode 4's advance (port 596, reference 952) and part 2's count 0 (port 599,
+reference 955). The measurement and the 0-pixel comparison are in the Task 7 section below
+and A48.
 
-### What is Task 7's
+## The second half (Phase 8 Task 7)
 
-Modes 5 and 6 (`part2init`/`part2`, `part3init`/`part3`), the `part2init` uninitialised `b`,
-the `0xff` cut, `fadepal` and the final `default` exit; the compositor band seeding and the
-clipper's `Norm`/`Hide` passes (Task 5's deferred minors). The artifact's mode-5 `part2init`
-palette/upload phase is a measured Task 7 lead (the 956/957 `(4,255,255)` observation above;
-APPROXIMATIONS A48). The port's `do3dots`, `GRID1`, `Dot` and the engine interfaces are in
-place for it.
+### Part 2: the grid (`BP.C:124-215`)
+
+`part2init` writes `depthcol` for 0..3,099, the mode-5 palette and the lattice
+(`BP.C:128-167`). The lattice is the shell of a 10×10×10 cube of `(x-5)*100` cells:
+**488 points** (`10³ − 8³`), not the 1,000 the plan and the research report —
+`gridpoints[0] = (a-1)/3` (`BP.C:164`) is 488 with the shipped loops.
+`the_grid_is_the_ten_cube_shell` pins the count, the loop order and the criterion.
+
+`depthcol`'s `b` is uninitialised at the loop's first test, but the loop assigns it at
+`a = 0`, the `a < 1000` operand short-circuits every `b >= 3000` read until `a = 1000`, and
+at `a = 1000` it carries 127; the `else` runs and the value stays below 3000, so the table is
+determinate: 127 below 1032 and `127-(a-1000)/32` down to 62 at 3099.
+`part2init_reads_the_uninitialised_b` pins all 3,100 entries with the carried `b` and the
+BSS zeros after them.
+
+Each frame rotates, translates by `(0,0,zp)`, projects through `crotprojlist` — HARD's
+16-bit `imul word ptr`/`idiv bx` path, whose record keeps the dword z at words 4/5 and whose
+`do3dots` load is the low word — and draws through `do3dots`; after `count>1` the state
+advances `rx+=9; ry+=10; rz+=11` and `zp-=10` down to 2000 (`BP.C:209-213`). The first
+frame's 100 drawn points are exactly the shipped `_GRID1.TMP` pair list (the lattice's
+`x = -500` face, `depthcol[3000] = 65`), which is also where mode 4's trails end — each
+mode-4 dot reaches its `doit2` destination on its 65th draw.
+`the_first_grid_frame_is_the_shipped_grid1_list` pins the correspondence and
+`the_part2_projection_is_the_16_bit_crotprojlist` the 16-bit divide.
+
+**The fade is the source's bug.** `if(count>500-16)` computes `a=(500-16)-count`
+(`BP.C:173-176`), which is negative for every count that reaches the call (485..499);
+`a*16` is a negative 16-bit `int`, and `fadepal`'s unsigned `cmp dx,256` clamps `dl` to
+255. The palette only dims by 255/256: entry 0's blue 20 renders 19 (8-bit 77 from 81) and
+a channel of 63 renders 62 (251 from 255). The capture agrees — `out/task2/hard-1430-1500`
+(captured by `tools/vault_capture.sh hard --frames "$(seq -s, 1430 5 1500)"`) has the band
+background `(0,0,81)` at 1440 and `(0,0,77)` at 1445 — and the port's 1050 and 1600 frames
+are exact with it. `fadepal_is_the_high_byte_multiply` pins the clamp and the multiply.
+
+### The mode-5 palette is the source's literal (A48's lead closed)
+
+The held 956/957 pair's 100 `(4,255,255)` pixels are **entry 65**, not entry 1. At
+`zp = 3500` the first grid frame draws only the lattice's `x = -500` face; every one of its
+100 points projects to `depthcol[3000] = 65`, and `part2init`'s gradient entry 65 (a=1,
+d=56) is 6-bit `(1,63,63)` = 8-bit `(4,255,255)`. The 955 frame is `part2init` itself: it
+converts mode 4's 100 trail pixels from index 189 to index 1, and entry 1 is `(63,63,63)`
+white like index 189, so the frame is pixel-identical to the mode-4 hold. 956/957 are counts
+1 and 2 (identical because the state advances only after count 1's draw); 958 is count 3.
+The artifact's mode-5 palette is `BP.C:135-154` literally, and the port matches references
+950–960 at 0 pixels.
+
+### Part 3: the cube (`BP.C:220-299`)
+
+`cubepoints` is **-510..410**, not ±510 (`BP.C:85-94`); `cubepolys` carries the six colour
+words `0x4001,0x4002,0x4004,0x4008,0x4010,0x4020` and `cubepolyss` the same six quads at
+indices 8..15 with every colour `0x4040`.
+`the_cube_geometry_and_colours_are_the_sources` pins the data, the +8 copy and the
+magnified copy's arithmetic: `x' = (x-lix)*5000/(z_low+2000)+lix`, `z' = 3000`, where the
+source's `long z` is assigned from an `int` record word — the **low word** of the projected
+z sign-extended, plus 2000 — and `x-lix` wraps in 16 bits before the cast.
+
+Each frame: `ct2+=4`, `lix=sin1024[ct2&1023]/2+160`,
+`liy=sin1024[(ct2+256)&1023]/2+64`; `cglenzinit`; the cube rotated by
+`cmatrix_yxz(rx,ry,rz)` and translated by `(0,0,zp)`; `crotlist`/`cprojlist`; the magnified
+copy; then `ceasymode(0)`/`cclipeasypolylist`/`cglenzpolylist` for the copy and
+`ceasymode(1)`/…/… for the cube; `cglenzdone`.
+`the_part3_mode_selects_hide_and_norm` pins the mode selection: Hide zeroes exactly the
+faces whose shoelace is negative and Norm keeps every colour.
+
+**The band is not cleared.** `ng_init` resets the span lists and never touches a pixel
+(`VNEW.ASM:27-56`); the compositor's destination is the same A2D0 band part 2 drew into, so
+`part3init` seeds the port's compositor from the band and copies the work buffer back each
+frame. Spans that are colour 0 in both frames keep whatever part 2 left.
+`the_band_is_not_cleared_between_frames` plants a sentinel outside the cube and pins it.
+
+The palette ramps in over counts 1..19 (`if(count<20) fadepal(pal,pal2,count*16)`,
+`BP.C:298`), uploaded 762 bytes at the top of counts 1..19 (`B.C:210`), so count 1 draws its
+cube with `pal[1]` black over a black background — invisible — and the first *visible* cube
+is count 2 (reference 1458). From count 17 the fade has clamped to `dl=255` and the palette
+is the ramp dimmed by 255/256; reference 1600's colours are exactly that (its top colour
+`(215,215,57)` is entry 88 = `0x58`, the compositor's XOR of the shadow's `0x40` with faces
+`0x08|0x10`, at ramp value 54 dimmed to 53).
+
+Part 3 runs 801 iterations (counts 0..800, the last one's `NEXTMODE` still drawing), then
+mode 7's one iteration and the `default` arm (`B.C:313-323`) retire the part after port
+frame 1902.
+
+### The end, measured to the window's close
+
+The artifact's last drawn cube is reference **2256** (part 3's count 800); 2257 is mode 7's
+no-draw iteration and is byte-identical to 2256. `out/task7/hard-2245-2257` (one contiguous
+capture: `tools/vault_capture.sh hard --frames "$(seq -s, 2245 2257)" --out
+out/task7/hard-2245-2257`) compares against the port's frames 1889–1901 at **0 differing
+pixels at every index** (the comparison is A48's). Reference 2258 — the `default` iteration
+— is followed by the `if(!dis_indemo())` text-mode restore (`B.C:325-329`), and the capture of
+2245–2258 was refused ("the emulator reached frame 2259 before frame 2258 could be
+captured"), so the close after 2258 is **source-derived**, not captured; the port retires
+after composing the default iteration's held picture (port 1902) and the shell holds it.
+
+### The full run
+
+The pre-roll is 119 ticks; the main loop then displays, in order, modes 0..4 (478 ticks),
+the two boundary displays, part 2's 501 iterations, part 3's 801, and mode 7 plus the
+`default` arm (2) — **1,903 port frames, 0..1902**. The plan's 34 + 4×73 + 4 + 42 + 102 +
+500 + 800 = **1,774** is the sum of the source's count limits; the source's extra iterations
+(the `NEXTMODE` ticks of modes 5 and 6, four `part1init` waits and the two exit arms) and the
+two measured boundary displays make up the difference.
+`the_full_mode_sequence_is_the_sources` pins every transition and the retirement at 1902;
+`the_0xff_cut_is_unreachable_with_one_start` pins the cut;
+`hard_draws_the_whole_effect_and_holds` pins the process's last cube, the two no-draw ticks
+and the shell's hold.
 
 ## Verification
 
-The first-half comparison is exact. `cargo test -p secondreality --test vault -- --nocapture
-hard_matches_the_reference_in_its_early_modes` prints, for every filed keyframe before mode 5,
-the three ±1 candidates and their differing-pixel counts; all seven minima are **0 pixels at
-offset 0**, and reference 840's `.idx` compares byte for byte (the comparison helper compares
-the indexed plane only at the offset the RGB search chose, which is this task's carried Task-3
-minor). The unit tests above pin the pre-roll, the letterbox and `defpal`, the 96-byte upload,
-the mode-4 band, the mode counts, the first spawn and the dot engine.
+All nine filed HARD keyframes are exact at `K0` = 356, offset 0: 480, 560, 630, 700, 770,
+840, 910, **1050** (port 694) and **1600** (port 1244), and 840's `.idx` is byte-identical.
+`cargo test -p secondreality --test vault -- --nocapture
+hard_matches_the_reference_at_its_keyframes` prints the three ±1 candidates and their
+differing-pixel counts for each. The mode-5 boundary and the part-3 end are measured against
+captures of their own: references 950–960 against ports 594–604 and 2245–2257 against
+1889–1901 both compare **0 differing pixels at every index** (A48 names the commands);
+2258's close is source-derived because the artifact's text-mode restore ends the 320×200
+window.
 
-A reference `R` is port frame `R - 356`; `docs/fidelity/reference-indices.md` §24.7 carries the
-capture. The substitutions — the start gate, the fixed tick and the dropped argument path — are
-`docs/fidelity/APPROXIMATIONS.md` A46–A50, each with its measured difference.
+The unit tests pin the pre-roll, the letterbox and `defpal`, the 96-byte upload, the mode-4
+band and its 189/1 entries, the 488-point lattice shell, `depthcol`'s carried `b`, the
+16-bit `crotprojlist` and its GRID1 correspondence, the cube's data and magnified copy,
+Hide/Norm, the un-cleared band, `fadepal`, the full mode sequence and its 1,903-frame run,
+the unreachable `0xff` cut and the process's hold.
+
+A reference `R` is port frame `R - 356`; `docs/fidelity/reference-indices.md` §24.7 carries
+the capture. The substitutions — the start gate, the fixed tick, the dropped argument path
+and the mode-5 boundary's two inserted displays — are `docs/fidelity/APPROXIMATIONS.md`
+A46–A50, each with its measured difference.

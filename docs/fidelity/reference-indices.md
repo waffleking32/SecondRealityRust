@@ -5250,15 +5250,17 @@ tools/vault_capture.sh hard --frames "$(seq -s, 948 962)"     --out out/task2/ha
 `hard-470-520` is where 474 is the first letterbox frame (473 the half-black screen) and the
 letterbox holds to 511; `hard-500-830` is the 10-frame phase map; `hard-846-860` puts 852's
 first band frame after the mode-3 hold; `hard-948-962` puts the mode-5 init at 956 after the
-948–955 hold. The port's first-half comparison reaches reference 910
-(`hard_matches_the_reference_in_its_early_modes`); 956 is the **Task 7** boundary.
+948–955 hold. The port's comparison reaches every filed index
+(`hard_matches_the_reference_at_its_keyframes`); 955 is part 2's count 0 and 956 the first
+visible grid frame (Task 7's measurement, below).
 
-The **mode-5 boundary is the one measured divergence**: the source's mode 4 is 102 iterations,
-so with count 0 at 851 the source-derived part-2 start is 953, while the artifact's first
-mode-5 frame is 956. Three display frames are unaccounted for by the source's loop — the lead
-is a missed-retrace overrun in the mode-4 loop (D22) — and the port's fixed tick cannot carry
-them. Registered as `APPROXIMATIONS.md` A48 and carried to Task 7; no keyframe at or before
-910 depends on it.
+The **mode-5 boundary is measured to two display frames** (Task 7): the source's mode 4 is
+102 iterations, so with count 0 at 851 the source-derived part-2 count 0 is 953; the
+artifact's `part2init` is **955** (`out/task7/hard-950-960`: 950–955 byte-identical, 956 the
+first visible grid frame — the first *changed* frame is three after 953). The extra displays
+are a missed-retrace overrun in the mode-4 loop (D22); the port inserts two static ticks
+between its mode-4 advance and part 2's count 0 (`APPROXIMATIONS.md` A48). No keyframe at or
+before 910 depends on it, and 1050/1600 are exact with the insertion.
 
 The one key never reaches the `0xff` cut (`BP.C:263` needs a second key), so part 3 runs to
 its own `count>=800` end; the 320×200 window closes just after the last cube frame (mode 7's
