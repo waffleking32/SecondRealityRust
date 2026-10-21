@@ -7,7 +7,7 @@
 //!
 //! - [`math::rotate`] uses the source's own axis stores: x is the third sum
 //!   (matrix words 12/14/16), y the second (6/8/10), z the first (0/2/4)
-//!   (`VEC.ASM:171-176`), where GLENZ's rotation assigns x to the first sum,
+//!   (`VEC.ASM:172-176`), where GLENZ's rotation assigns x to the first sum,
 //!   y to the third and z to the second (`GLENZ/VEC.ASM:155-160`).
 //! - [`math::project`] runs the 240/200/160/64/512 profile `VDATA.ASM:30-36`
 //!   defines and keeps the raw x/y words `projlist` stores at `+12`/`+14`

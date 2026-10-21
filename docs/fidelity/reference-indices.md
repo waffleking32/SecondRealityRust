@@ -4941,7 +4941,8 @@ Task 2's three filed captures, their `K0` and their repeats are §24.4–§24.8.
 tools/vault_capture.sh <grid|hard|twist> --frames <A,B,...> --out out/vault-smoke/<part>
 ```
 
-stages `upstream/SecondReality/DIS/DIS.EXE` (`270f5fe2…`) and the effect EXE — `GRID/P.EXE`
+stages `upstream/SecondReality/DIS/DIS.EXE`
+(`270f5fe2c7c7d17b4720c2019c2832f4bd3863f97e750315974692911f0ead08`) and the effect EXE — `GRID/P.EXE`
 (`d4e7f1d6…`), `HARD/B.EXE` (`1f8a7bda…`), `TWIST/T.EXE` (`88d5e695…`) — into a fresh
 `out/vault-stage/<part>` after checking all four digests, writes `RUN.BAT` (`@ECHO OFF`,
 `DIS.EXE`, the effect), and runs
@@ -5057,14 +5058,19 @@ Task 2 files one version-1 capture per effect, in the script's default `--out`:
 |---|---|---|---|---|---|
 | `reference/parts/grid` | `RUN.BAT` = `DIS.EXE`, `P.EXE` | `KBD_space` | `400,500,600,700,800` | 5 | none |
 | `reference/parts/twist` | `RUN.BAT` = `DIS.EXE`, `T.EXE` | none | `103,203,303,403,503,603` | 6 | none |
-| `reference/parts/hard` | `RUN.BAT` = `DIS.EXE`, `B.EXE` | `KBD_space` | `480,560,630,700,770,840,910,1050,1600` | 9 | `840` |
+| `reference/parts/hard` | `RUN.BAT` = `DIS.EXE`, `B.EXE` | `KBD_space` | `480,560,630,700,770,840,910,1050,1600` | 9 | `840` (`480` optional) |
 
 All three manifests carry `version: 1`, `oracle: "dosbox-automation 0.85.1 (6d100)"`,
 `upstream_commit: "071a82e"`, `exe: "RUN.BAT"`, `arguments: []`, `cycles: 30000`,
 `width/height: 320/200`, `frame_origin: "boot"`, `skip_boot_frames: 0`, `boot: "autoexec"`,
 `boot_wait: "graphics"`, and `keys: ["KBD_space"]` (GRID, HARD) or `[]` (TWIST) — §24.1's
 recipe with the default output. Each manifest lists every frame with its `.rgb` name and
-`sha256`; `840` additionally carries `frame_000840.idx` and `idx_sha256`.
+`sha256`; `840` additionally carries `frame_000840.idx`, `idx_sha256`, and the manifest's
+`palette` map (entry index → the 6-bit DAC value the oracle widened the indexed plane with),
+which is what makes the record self-contained. `480` is RGB-only — in the filed run its read
+landed after mode 0 had ended — and the trial session
+`out/task2/hard-reference-trial`'s `.idx` for it is scratch, not the reference, so an indexed
+read of `480` is optional rather than required.
 
 Reproduce all three exactly (the default `--out` is `reference/parts/<part>`; each run
 re-stages the two binaries, re-checks the four SHA-256s and mounts the stage read-only):
@@ -5228,8 +5234,9 @@ is what `compare`'s ±1 searches; the anchor is not moved off the first drawn st
 | 810–851 | mode 3: dots dead, FOREVER held (810, the first sampled identical frame, through 851 are byte-identical) | `f2718de8cb4357740cdc467cc13a511a56e3415bd47c2f6b841b944264c016c7` |
 | 852 | first mode-4 band frame (851 is still the mode-3 hold) | `963a0272243acd9488092fddf49912afb511f789f538ce4148b8e6794568208f` |
 | 852–955 | mode 4 band; 930–955 hold the last band state | `9cced0af…` |
-| 956 | first mode-5 frame (`part2init`; the band is rebuilt) | `0495730ecff1097c279926c72dac44fd180f89b103dc6c09bd888109982e519d` |
-| 958 | first part-2 grid frame distinct from the init pair (956/957) | — |
+| 955 | `part2init` (mode 5's count 0; pixel-identical to the mode-4 hold — the port's model) | `9cced0af…` (the hold) |
+| 956 | first visible part-2 grid frame (count 1; the 100 trail pixels become entry 65) | `0495730ecff1097c279926c72dac44fd180f89b103dc6c09bd888109982e519d` |
+| 958 | part 2's count 3: the first frame after the state advances | — |
 | 1455 | last part-2 frame (fading grid) | `996c4880…` |
 | 1456 | part 2's fade leaves the empty band (same bytes as the 474 letterbox) | `1930616d…` |
 | 1458 | first part-3 cube frame | `e31eb951ac946b583e1ea7b073662abd2b99baafaa1a808e32a03b6f29a1052f` |
@@ -5249,15 +5256,18 @@ tools/vault_capture.sh hard --frames "$(seq -s, 948 962)"     --out out/task2/ha
 
 `hard-470-520` is where 474 is the first letterbox frame (473 the half-black screen) and the
 letterbox holds to 511; `hard-500-830` is the 10-frame phase map; `hard-846-860` puts 852's
-first band frame after the mode-3 hold; `hard-948-962` puts the mode-5 init at 956 after the
-948–955 hold. The port's comparison reaches every filed index
-(`hard_matches_the_reference_at_its_keyframes`); 955 is part 2's count 0 and 956 the first
-visible grid frame (Task 7's measurement, below).
+first band frame after the mode-3 hold; `hard-948-962` puts `part2init`'s picture (the port's
+model of part 2's count 0) at 955, byte-identical to the 948–955 hold, and the first visible
+grid frame at 956 — the source's counts 0/1 would be 953/954; the artifact's are 955/956,
+two displays later. The port's comparison reaches every filed index
+(`hard_matches_the_reference_at_its_keyframes`); 956 is part 2's count 1 (Task 7's
+measurement, below).
 
 The **mode-5 boundary is measured to two display frames** (Task 7): the source's mode 4 is
 102 iterations, so with count 0 at 851 the source-derived part-2 count 0 is 953; the
-artifact's `part2init` is **955** (`out/task7/hard-950-960`: 950–955 byte-identical, 956 the
-first visible grid frame — the first *changed* frame is three after 953). The extra displays
+artifact's `part2init` is **955** on the port's model (`out/task7/hard-950-960`: 950–955
+byte-identical, 956 the first visible grid frame — the first *changed* frame is three after
+953). The extra displays
 are a missed-retrace overrun in the mode-4 loop (D22); the port inserts two static ticks
 between its mode-4 advance and part 2's count 0 (`APPROXIMATIONS.md` A48). No keyframe at or
 before 910 depends on it, and 1050/1600 are exact with the insertion.
@@ -5281,11 +5291,12 @@ one no-draw frame), and every filed index is inside it.
 | 1600 | 6 | part 3's glenz cube | `5894039bea2564ce78bde3c479c80a986f144f59d76af15919e7a238a1b9858d` |
 
 **`840` and `480` are the held keyframes.** `840` is the one whose indexed read reproduced
-its RGB: `frame_000840.idx` with `idx_sha256` is in the manifest. The filed `480` is RGB-only
-because in the filed run its read landed after mode 0 had ended (the trial session
-`out/task2/hard-reference-trial` caught it while it still held and wrote `.idx` then; that
-file stays scratch so the reference census does not change); the filed manifest records what
-its session actually read. The seven moving frames are RGB-only, as D15/D19 require.
+its RGB: `frame_000840.idx`, `idx_sha256` and the widening `palette` map are in the manifest.
+The filed `480` is RGB-only because in the filed run its read landed after mode 0 had ended
+(the trial session `out/task2/hard-reference-trial` caught it while it still held and wrote
+`.idx` then; that file stays scratch so the reference census does not change); an indexed read
+of `480` is optional, and the filed manifest records what its session actually read. The seven
+moving frames are RGB-only, as D15/D19 require.
 
 ### 24.8 The repeats, and one measured ±1
 

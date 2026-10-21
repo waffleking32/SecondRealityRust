@@ -66,8 +66,9 @@ tools/vault_capture.sh hard --frames "$(seq -s, 350 362)"  --out out/task2/hard-
 | 810–851 | mode 3: dots dead, FOREVER held (810, the first sampled identical frame, through 851 are byte-identical) | `f2718de8cb4357740cdc467cc13a511a56e3415bd47c2f6b841b944264c016c7` |
 | 852 | first mode-4 band frame (851 is still the mode-3 hold) | `963a0272243acd9488092fddf49912afb511f789f538ce4148b8e6794568208f` |
 | 852–955 | mode 4 band; 930–955 hold the last band state | `9cced0af…` |
-| 956 | first mode-5 frame (`part2init`; the band is rebuilt) | `0495730ecff1097c279926c72dac44fd180f89b103dc6c09bd888109982e519d` |
-| 958 | first part-2 grid frame distinct from the init pair (956/957) | — |
+| 955 | `part2init` (mode 5's count 0; pixel-identical to the mode-4 hold — the port's model) | `9cced0af…` (the hold) |
+| 956 | first visible part-2 grid frame (count 1; the 100 trail pixels become entry 65) | `0495730ecff1097c279926c72dac44fd180f89b103dc6c09bd888109982e519d` |
+| 958 | part 2's count 3: the first frame after the state advances | — |
 | 1455 | last part-2 frame (fading grid) | `996c4880…` |
 | 1456 | part 2's fade leaves the empty band (same bytes as the 474 letterbox) | `1930616d…` |
 | 1458 | first part-3 cube frame | `e31eb951ac946b583e1ea7b073662abd2b99baafaa1a808e32a03b6f29a1052f` |
@@ -89,11 +90,13 @@ the 100-frame map (`--frames "$(seq -s, 475 100 2175)"`) is the coarse cross-che
 `930-1000` batch is where the 948–955 hold is byte-identical and 956 first differs. The 955
 band is 40,860 background `(0,0,81)` pixels plus the 100 white index-189 trail pixels; 956
 and 957 replace exactly those 100 with `(4,255,255)` — 6-bit `(1,63,63)`, **not** the literal
-white `pal[1] = (63,63,63)` that `BP.C:135-138` writes. So the artifact's `part2init`
-palette or its upload phase is not the source's literal init pair (the pixels are the ones
-mode 5's rebuild converts, `B.C:299`), and Task 7 must measure the artifact's mode-5 palette
-before pinning part 2. The 956/957 pair is held, so an indexed read may settle it; the filed
-pair is RGB-only.
+white `pal[1] = (63,63,63)` that `BP.C:135-138` writes. Task 7 measured it: 955 is the
+port's model of `part2init` (mode 5's count 0), pixel-identical to the mode-4 hold because
+`part2init` converts the index-189 pixels to entry 1, also white; 956/957 are counts 1/2 at
+entry 65 (`part2init`'s gradient a = 1, d = 56); the source's first visible grid frame
+(count 1) would be 954, so the artifact's 956 is two displays later. The captured pair is
+RGB-only, so the 955 attribution is the port's model; an indexed read of a later session
+would settle it.
 
 ### Keyframes
 
@@ -238,14 +241,19 @@ colour is 189 after 65 frames; the 66th call kills it without drawing. The 930�
 record, the restore, the 66-frame life, the clips and the decrement.
 
 Part 2's `do3dots` (`BA.ASM:224-280`) is ported and pinned now for Task 7: it clears the
-previous pixel and a two-row shadow, loads z's **low word** into `bp`, signed-skips values
+previous pixel (one byte) and then the source's second clear, two **word** stores at
+`[si+12]`/`[si+12]+320` (`BA.ASM:229-231`); the code that writes `[si+12]` is unreachable
+behind `jmp @@4` (`:235`), so it stays 0 and the port's one-byte-per-row clear (0 and 320) is
+a documented model of the unreachable branch, differing only in bytes 1/321 at offset 0 that
+no reached frame depends on. It loads z's **low word** into `bp`, signed-skips values
 `> 3000` (`BA.ASM:233-235`), then reads `depthcol[bp]` and draws at `rows[y] + x` when
 `y <= 127`. `depthcol` is 8,192 bytes with 0..3,099 written (`BA.ASM:221-222`,
 `BP.C:128-133`). A negative low word passes the signed test and indexes past the array: the
 source's 16-bit `cs:_depthcol[bp]` wraps to `_depthcol - 0x100` for 0xFF00 and reads a code
 byte (0x07 with the shipped link map), **not** BSS zero. The port returns zero there as a
-documented **model of an unreachable branch** — part 2's projected z′ is 1134..2866 with a
-positive low word (Task 7's measurement), so no filed frame depends on it.
+documented **model of an unreachable branch** — part 2's projected z′ is full ≈1134..4366,
+every drawn point is ≤3000 (the signed `jg` skips the rest) and the low word is always
+positive, so no filed frame depends on it.
 `the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word` pins the signed skip, the
 16-bit load and the model; the `count`, record-length, shadow and offset bounds checks in the
 port are guards for inputs part 2 never produces, not source behaviour (the source's
@@ -278,8 +286,8 @@ not a committed reproduction — put the burn's first drawn frame at 92 pixels a
 capture's 93 and separated the logo keyframes. The committed model has no burn: its first
 drawn frame is reference 512 exactly (0 differing pixels; reproduce with
 `cargo run --release --bin secondreality -- --part hard --headless --dump-frames 156
---dump-dir out/hard-512` against `out/task2/hard-470-520/frame_000512.rgb`), and all seven
-keyframes are exact. `the_first_spawn_is_the_sources_rand_sequence` pins the first spawned
+--dump-dir out/hard-512` against `out/task2/hard-470-520/frame_000512.rgb`), and all nine
+filed keyframes are exact. `the_first_spawn_is_the_sources_rand_sequence` pins the first spawned
 record's six words against the MS C 6.0 LCG (`MsRand`, `minvball.rs:243-265`) with no burn.
 
 ### The mode-5 boundary: two displays, measured in Task 7
@@ -334,10 +342,11 @@ are exact with it. `fadepal_is_the_high_byte_multiply` pins the clamp and the mu
 The held 956/957 pair's 100 `(4,255,255)` pixels are **entry 65**, not entry 1. At
 `zp = 3500` the first grid frame draws only the lattice's `x = -500` face; every one of its
 100 points projects to `depthcol[3000] = 65`, and `part2init`'s gradient entry 65 (a=1,
-d=56) is 6-bit `(1,63,63)` = 8-bit `(4,255,255)`. The 955 frame is `part2init` itself: it
-converts mode 4's 100 trail pixels from index 189 to index 1, and entry 1 is `(63,63,63)`
-white like index 189, so the frame is pixel-identical to the mode-4 hold. 956/957 are counts
-1 and 2 (identical because the state advances only after count 1's draw); 958 is count 3.
+d=56) is 6-bit `(1,63,63)` = 8-bit `(4,255,255)`. The 955 frame is the port's model of
+`part2init`: it converts mode 4's 100 trail pixels from index 189 to index 1, and entry 1 is
+`(63,63,63)` white like index 189, so the frame is pixel-identical to the mode-4 hold.
+956/957 are counts 1 and 2 (identical because the state advances only after count 1's draw);
+958 is count 3.
 The artifact's mode-5 palette is `BP.C:135-154` literally, and the port matches references
 950–960 at 0 pixels.
 
@@ -366,9 +375,11 @@ frame. Spans that are colour 0 in both frames keep whatever part 2 left.
 `the_band_is_not_cleared_between_frames` plants a sentinel outside the cube and pins it.
 
 The palette ramps in over counts 1..19 (`if(count<20) fadepal(pal,pal2,count*16)`,
-`BP.C:298`), uploaded 762 bytes at the top of counts 1..19 (`B.C:210`), so count 1 draws its
-cube with `pal[1]` black over a black background — invisible — and the first *visible* cube
-is count 2 (reference 1458). From count 17 the fade has clamped to `dl=255` and the palette
+`BP.C:298`), uploaded 762 bytes at the top of counts 1..19 (`B.C:210`), so the first cube
+display is a uniform band: `part3init`'s palette has `pal[2..253] = (0,0,20)`, the same as
+the band's entry 0 — the background is not black — and the cube's face colours and their
+opposite-face colour pairs XOR into that range. The first *visible* cube is count 2 (reference
+1458). From count 17 the fade has clamped to `dl=255` and the palette
 is the ramp dimmed by 255/256; reference 1600's colours are exactly that (its top colour
 `(215,215,57)` is entry 88 = `0x58`, the compositor's XOR of the shadow's `0x40` with faces
 `0x08|0x10`, at ramp value 54 dimmed to 53).

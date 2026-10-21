@@ -196,10 +196,15 @@ pub fn dodots2(dots: &mut [Dot], screen: &mut [u8]) {
 /// 16-bit count at word 0, then 16-byte records whose word 0 is x, word 1 y,
 /// word 3 the previous screen offset, words 4/5 the 32-bit z (so the load at
 /// `BA.ASM:232` is a **16-bit** load of z's low word) and word 6 the shadow
-/// offset. The routine clears the previous pixel, clears the two shadow words,
-/// skips a record whose z low word is greater than 3000 *signed*
-/// (`cmp bp,3000; jg`), otherwise reads `depthcol[bp]` and draws at
-/// `rows[y] + x` when `y <= 127`.
+/// offset. The routine clears the previous pixel (one byte, `BA.ASM:227-228`),
+/// then does the source's second clear: two **word** stores at `[si+12]` and
+/// `[si+12]+320` (`BA.ASM:229-231`). The code that would write `[si+12]` is
+/// unreachable behind the unconditional `jmp @@4` (`BA.ASM:235`), so that word
+/// stays BSS zero and the source clears bytes 0/1 and 320/321; the port clears
+/// one byte per row instead, a documented model of the unreachable branch that
+/// no reached frame depends on. It skips a record whose z low word is greater
+/// than 3000 *signed* (`cmp bp,3000; jg`), otherwise reads `depthcol[bp]` and
+/// draws at `rows[y] + x` when `y <= 127`.
 ///
 /// `depthcol` is 8192 bytes with only 0..3099 written (`BA.ASM:221-222`,
 /// `BP.C:128-133`). A z whose low word is negative (bit 15 set) passes the
@@ -207,9 +212,10 @@ pub fn dodots2(dots: &mut [Dot], screen: &mut [u8]) {
 /// effective address, which for a negative low word wraps *before* the array
 /// (0xFF00 reads `_depthcol - 0x100`, a code byte — 0x07 with the shipped
 /// link map — not BSS zero). The `else` below returns zero as a **model of
-/// an unreachable branch**: part 2's projected z' is 1134..2866 with a
-/// positive low word, so no filed frame depends on the byte. Task 7 measures
-/// the part-2 domain and owns the table.
+/// an unreachable branch**: part 2's projected z' is full ≈1134..4366, and
+/// every drawn point is ≤3000, so the low word is always positive and no filed
+/// frame depends on the byte. Task 7 measures the part-2 domain and owns the
+/// table.
 ///
 /// The `count <= 0`, record-length, shadow and offset bounds checks below are
 /// likewise guards for inputs part 2 never produces (the projected x is
@@ -621,7 +627,8 @@ mod tests {
         // array and reads a code byte (0x07 with the reviewer's link map),
         // not BSS zero; the port's zero is a documented model of this
         // unreachable branch, not the source's address arithmetic. Part 2's
-        // z' is 1134..2866 and positive, so no filed frame depends on it.
+        // z' is full ≈1134..4366 and every drawn point is ≤3000, so the low
+        // word is positive and no filed frame depends on it.
         points[6] = 0xFF00u16 as i16;
         points[5] = 0;
         let mut screen = vec![0xFFu8; 64_000];

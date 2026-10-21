@@ -1,6 +1,6 @@
 //! HARD's hidden-face test and polygon lists: `checkhiddenbx`
-//! (`VEC.ASM:369-400`), `ceasypolylist` (`:582-622`), `cclipeasypolylist`
-//! (`:833-902`) and their two colour rules `demo_norm`/`demo_hide`
+//! (`VEC.ASM:369-400`), `ceasypolylist` (`:583-622`), `cclipeasypolylist`
+//! (`:834-902`) and their two colour rules `demo_norm`/`demo_hide`
 //! (`:486-507`).
 //!
 //! HARD's hidden-face test is the **full shoelace**: for every edge
@@ -22,7 +22,7 @@
 //! endpoint is visible when z < 4000 (`xclipsidi` is the reverse of the
 //! unused `zclipsidi`). The clipped list starts at the polygon's last vertex
 //! (the first edge is last→first), keeps a closing duplicate (the source's
-//! drop is commented out at `:884-889`) and is dropped when it has no
+//! drop is commented out at `:883-884`) and is dropped when it has no
 //! points. `checkhiddenbx` then runs and the source inverts the carry
 //! (`cmc`, `:895`) before calling the colour rule, so `demo_hide` still
 //! zeroes the negative-shoelace faces.
@@ -32,7 +32,7 @@ use super::math::{PVert, HARD_PROJECTION};
 /// `clipz dd 4000` (`VEC.ASM:673`): the clipper's plane.
 pub const CLIP_Z: i32 = 4000;
 
-/// `mov eax,080008000h ;both hidden` (`VEC.ASM:700,719`): `xclipsidi`'s
+/// `mov eax,080008000h ;both hidden` (`VEC.ASM:687,755`): `xclipsidi`'s
 /// sentinel, which `cclipeasypolylist` compares the whole pair against.
 const BOTH_HIDDEN: (i16, i16) = (i16::MIN, i16::MIN);
 
@@ -120,7 +120,7 @@ fn face_colour(def: &PolyDef, points: &[(i16, i16)], mode: FaceMode) -> u16 {
     }
 }
 
-/// `ceasypolylist` (`VEC.ASM:582-622`): build each polygon's point list.
+/// `ceasypolylist` (`VEC.ASM:583-622`): build each polygon's point list.
 ///
 /// A point whose index equals the one last copied is skipped (`adddot`'s
 /// `cmp ax,bp`); the tracker starts at -1 per call and is carried across
@@ -130,13 +130,13 @@ fn face_colour(def: &PolyDef, points: &[(i16, i16)], mode: FaceMode) -> u16 {
 /// [`FaceMode::Hide`] sets a hidden face's colour word to 0.
 pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly> {
     let mut polys = Vec::with_capacity(defs.len());
-    // `mov bp,-1` (`VEC.ASM:588`): adddot's index tracker, per call and
+    // `mov bp,-1` (`VEC.ASM:593`): adddot's index tracker, per call and
     // carried across polygons.
     let mut last_index: i32 = -1;
     for def in defs {
         let mut points = Vec::with_capacity(def.points.len());
         for &index in def.points {
-            // `cmp ax,bp; je @@3` (`VEC.ASM:356-358`): a repeated neighbour
+            // `cmp ax,bp; je @@3` (`VEC.ASM:353`): a repeated neighbour
             // is not stored.
             if i32::from(index) == last_index {
                 continue;
@@ -146,7 +146,7 @@ pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly>
             points.push((vertex.x, vertex.y));
         }
         // `mov eax,es:[bx]; cmp eax,es:[di-4]; jne @@4; sub di,4`
-        // (`VEC.ASM:602-606`): the closing duplicate is dropped.
+        // (`VEC.ASM:607-611`): the closing duplicate is dropped.
         if points.len() > 1 && points.first() == points.last() {
             points.pop();
         }
@@ -158,7 +158,7 @@ pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly>
     polys
 }
 
-/// `xclipsidi` (`VEC.ASM:706-763`): clip one end of an edge against
+/// `xclipsidi` (`VEC.ASM:743-810`): clip one end of an edge against
 /// `clipz`, keeping the near half (z < 4000).
 ///
 /// With both endpoints at or behind the plane the sentinel [`BOTH_HIDDEN`]
@@ -167,18 +167,18 @@ pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly>
 /// words (`+12`/`+14`), projected at z = 4000 with the 240/200 multipliers
 /// and 160/64 centres, and returned as the `si` end's replacement.
 fn clip_end(si: &PVert, di: &PVert) -> (i16, i16) {
-    // `xclipsidi` (`VEC.ASM:706-763`) is the reverse clip: the kept half is
+    // `xclipsidi` (`VEC.ASM:743-810`) is the reverse clip: the kept half is
     // z < clipz.
     if si.z < CLIP_Z {
         // `;si is visible, just return it.` — the projected pair.
         return (si.x, si.y);
     }
     if di.z >= CLIP_Z {
-        // `mov eax,080008000h ;both hidden` (`VEC.ASM:719-721`).
+        // `mov eax,080008000h ;both hidden` (`VEC.ASM:754-755`).
         return BOTH_HIDDEN;
     }
 
-    // `xor eax,eax; div ecx; shr eax,16` (`VEC.ASM:730-735`): the 16.16
+    // `xor eax,eax; div ecx; shr eax,16` (`VEC.ASM:767-770`): the 16.16
     // fraction from si toward di, (zs - clipz) * 65536 / (zs - zd). The
     // quotient cannot overflow 32 bits because zd < clipz <= zs.
     let scaled = ((si.z - CLIP_Z) as u64) << 32;
@@ -186,7 +186,7 @@ fn clip_end(si: &PVert, di: &PVert) -> (i16, i16) {
 
     // `mov ax,fs:[di+12]; sub ax,fs:[si+12]; movsx eax,ax; imul ecx;
     // shld edx,eax,16; movsx eax,word ptr fs:[si+12]; add edx,eax`
-    // (`VEC.ASM:737-747`): the raw difference wraps in the word, the 32x32
+    // (`VEC.ASM:772-781`): the raw difference wraps in the word, the 32x32
     // product shifted right 16 keeps its low 32 bits, and the si-side raw
     // coordinate is added at 32 bits.
     let interpolate = |from: i16, to: i16| -> i32 {
@@ -198,7 +198,7 @@ fn clip_end(si: &PVert, di: &PVert) -> (i16, i16) {
     let y = interpolate(si.raw_y, di.raw_y);
 
     // `imul gs:projymul; idiv cs:clipz; add ax,gs:projyadd` and the x pair
-    // (`VEC.ASM:751-760`): the intersection is projected at z = clipz.
+    // (`VEC.ASM:791-800`): the intersection is projected at z = clipz.
     let project = |value: i32, mul: i32, add: i16| -> i16 {
         let quotient = (i64::from(value) * i64::from(mul) / i64::from(CLIP_Z)) as i32;
         (quotient as i16).wrapping_add(add)
@@ -209,7 +209,7 @@ fn clip_end(si: &PVert, di: &PVert) -> (i16, i16) {
     )
 }
 
-/// `eclipsidi` (`VEC.ASM:822-843`): both ends of one edge, `si` first. The
+/// `eclipsidi` (`VEC.ASM:812-831`): both ends of one edge, `si` first. The
 /// source calls `xclipsidi` with the two pointers and then with them
 /// swapped (the two `pop`s exchange them); `eax` is the `si` end and `edx`
 /// the `di` end.
@@ -217,7 +217,7 @@ fn clipped_edge(prev: &PVert, cur: &PVert) -> ((i16, i16), (i16, i16)) {
     (clip_end(prev, cur), clip_end(cur, prev))
 }
 
-/// `cclipeasypolylist` (`VEC.ASM:833-902`): clip each polygon against
+/// `cclipeasypolylist` (`VEC.ASM:834-902`): clip each polygon against
 /// `clipz = 4000` and build its list.
 ///
 /// The first edge is the last index to the first (the tracker starts at the
@@ -231,7 +231,7 @@ fn clipped_edge(prev: &PVert, cur: &PVert) -> ((i16, i16), (i16, i16)) {
 pub fn clip_easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly> {
     let mut polys = Vec::with_capacity(defs.len());
     for def in defs {
-        // `mov ax,ds:[si-2]; mov cs:cllastdi,ax` (`VEC.ASM:859-863`): the
+        // `mov ax,ds:[si-2]; mov cs:cllastdi,ax` (`VEC.ASM:854-855`): the
         // tracker starts at the table's last index, so the first edge is
         // last -> first.
         let Some(&last) = def.points.last() else {
@@ -239,7 +239,7 @@ pub fn clip_easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<
         };
         let mut previous_index = usize::from(last);
         let mut points: Vec<(i16, i16)> = Vec::new();
-        // `mov ebp,-1` (`VEC.ASM:865`): adddotxy's 32-bit adjacent-dedupe
+        // `mov ebp,-1` (`VEC.ASM:857`): adddotxy's 32-bit adjacent-dedupe
         // tracker, initialised to the pair (-1,-1).
         let mut last_pair = (-1i16, -1i16);
         for &index in def.points {
@@ -257,7 +257,7 @@ pub fn clip_easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<
                 points.push(pair);
             }
         }
-        // `cmp ax,0; jne @@10; mov di,cs:cntoff; sub di,4` (`VEC.ASM:876-884`):
+        // `cmp ax,0; jne @@10; mov di,cs:cntoff; sub di,4` (`VEC.ASM:888-891`):
         // a polygon that clipped away entirely is dropped.
         if points.is_empty() {
             continue;

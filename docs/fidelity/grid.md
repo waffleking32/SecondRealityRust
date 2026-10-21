@@ -101,9 +101,14 @@ truncating.
 **`d` is never initialised** (`:33`; only `b` and `c` are zeroed at `:51`). The compiled
 object's own frame predicts `0x116`, but the shipped `P.EXE` does something else: an
 exhaustive match over every `d0` in 0..65535 against the capture's 982-pixel static dot
-screen found only the class `0x7FE (mod 0x2000)` matching all 982, while `0x116` matches 47
-(`research/grid.md` §2.1; D24 — the binary is the artifact, not the object). The minimal
-representative is **`d0 = 0x07FE`**.
+screen (`out/task2/grid-start`'s 340 frame) found only the class `0x7FE (mod 0x2000)` matching
+all 982, while `0x116` matches 47 (D24 — the binary is the artifact, not the object). The
+scan was run in Task 3 and `research/grid.md` §2.1 is git-ignored scratch; the durable record
+is the committed tests: `the_measured_d_is_the_only_residue_whose_tables_match` scans the
+0x2000 residues over the whole 16-bit word (adding 0x2000 adds 1,024 to `d >> 3`, which the
+`& 1023` index discards) and finds only `0x07FE`, and `the_initial_d_is_the_measured_0x7fe`
+pins the 982-pixel set, its bbox and the object's 1,004-pixel/47-shared disagreement. The
+minimal representative is **`d0 = 0x07FE`**.
 
 The tests pin the result:
 `parts::vault::grid::tests::the_sine_tables_are_the_sources_own` (the first values,
@@ -179,7 +184,12 @@ The emitter writes `mov al,gs:[di+off]; xor al,dl; mov gs:[di+off],al; mov es:[d
 (or a 16-bit pair when two adjacent pixels are set), so every pixel is the colour XORed
 into **both** `bufdata` and VRAM, at the 16-bit address `di + x + y*320`. The research
 regenerated `LINEBLIT.INC` byte-identically from this algorithm after CRLF normalisation
-(`research/grid.md` §3.4).
+(`research/grid.md` §3.4, scratch). The durable check is committed:
+`the_line_blit_is_the_committed_generated_code` reads
+`upstream/SecondReality/GRID/LINEBLIT.INC`, pairs its 357 routines with the generator's
+y = −8..=8, x = −10..=10 order, and asserts that every routine's 16-bit `di` stores are
+exactly the pixels the port's blit XORs for that delta; the older
+`the_line_blit_is_the_generated_xor_bresenham` is the independent `DOLINE.C` translation.
 
 `asmloop1` selects a routine by the **low byte** of the two deltas:
 `(bh<<8 | bl)` with `bl = X2−X1`, `bh = Y2−Y1` (`ASM.ASM:189-192`). The 357 filled entries
@@ -267,14 +277,17 @@ the full line-blit domain; the process tests run the real binary:
 - `grid_matches_the_reference_at_its_measured_start` — for every filed keyframe `R`, dumps
   port frames `R−K0−1`, `R−K0`, `R−K0+1` and compares each RGB with
   `reference/parts/grid/frame_{R:06}.rgb`, printing the three counts, the minimum's
-  offset, the max channel delta and the residual rows.
+  offset, the max channel delta and the residual rows. It asserts that every differing row is
+  14 or 15 and that the row histogram sums to the residual.
 
 **Residual (registered, `APPROXIMATIONS.md` A41).** The minimum differing-pixel count is
 **6 / 2 / 36 / 33 / 14** at 400 / 500 / 600 / 700 / 800, at offset 0 (max channel delta
 41); the ±1 neighbours differ by about 10,000–12,000 pixels. Every residual pixel is on
 rows 14–15, the topmost rows the curve reaches: the capture published its frame while the
 original was still drawing the top of the newest line, so those pixels are missing it or
-carry the previous red rank. This is a sampling instant, not a model error — the eye, the
-100 unshifted bytes, the three line colours, the palettes and the (−10,−8) artefacts match
-everywhere else. The same class was measured on route B (2/24 pixels at 800/1000). No
-constant, anchor or palette phase was fitted to reduce it (D17/D18/D24/D25).
+carry the previous red rank. The test asserts this row claim (every histogram key is 14 or
+15, and the histogram sums to the residual), not only prints it. This is a sampling instant,
+not a model error — the eye, the 100 unshifted bytes, the three line colours, the palettes
+and the (−10,−8) artefacts match everywhere else. The same class was measured on route B
+(2/24 pixels at 800/1000). No constant, anchor or palette phase was fitted to reduce it
+(D17/D18/D24/D25).

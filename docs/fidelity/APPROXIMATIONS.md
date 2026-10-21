@@ -1999,9 +1999,11 @@ animation after the eye copy. The dots and the transition frame are both overwri
 before the first byte-reproducible loop frame; the substitution removes the pause without
 moving anything that is compared.
 
-**Measured difference:** **0** in all five compared frames; the anchor is reference 353,
-and the port's frame 0 is that frame (Task 2's ruling puts `K0` on the first stable loop
-frame, not on the change at 352). Reproduce with
+**Measured difference:** **not separately measurable** — the start key selects the state the
+port starts in, and the five compared frames carry **A41**'s 6/2/36/33/14 sampling residual,
+not a difference from this substitution. The anchor is reference 353, and the port's frame 0
+is that frame (Task 2's ruling puts `K0` on the first stable loop frame, not on the change at
+352). Reproduce with
 `cargo test -p secondreality --test vault grid_matches_the_reference_at_its_measured_start`
 and the capture command in `docs/fidelity/grid.md`.
 
@@ -2031,7 +2033,8 @@ reduce it (D17/D18/D24).
 offset 0 (the `K0` mapping) for all five. Reproduce with
 `cargo test -p secondreality --test vault -- --nocapture
 grid_matches_the_reference_at_its_measured_start`, which prints the three counts, the
-minimum's offset, the max delta and the row histogram.
+minimum's offset, the max delta and the row histogram, and asserts that every differing row is
+14 or 15.
 
 ## A42 — TWIST: the copper test is not registered (substitution; measured difference 0)
 
@@ -2216,7 +2219,9 @@ byte-identical — 40,860 band pixels at `(0,0,81)` and 100 at `(255,255,255)`, 
 trail's index-189 last pixels — and 956/957 replacing exactly those 100 with `(4,255,255)`.
 The first *visibly* changed frame is three after the source's 953 (which is what the Task 6
 record counted); the count-0 frame itself is two after, and it is pixel-identical to the
-mode-4 hold because `part2init`'s `pal[1] = (63,63,63)` is white like index 189.
+mode-4 hold because `part2init`'s `pal[1] = (63,63,63)` is white like index 189. The source's
+count 1 (the first visible grid frame) would be 954; the artifact's 956 is two displays after
+it.
 
 **The palette lead is closed.** 956/957's `(4,255,255)` is 6-bit `(1,63,63)` and it is
 **entry 65**, not entry 1: at `zp = 3500` the first grid frame draws only the lattice's
@@ -2307,7 +2312,7 @@ y of the 100th pair. `the_dot_streams_are_the_bdo_extraction` and
 builds, and the grid word is only read when `doit2` reaches the 100th pair with its x from the
 same pair. The capture's keyframes are exact with the file's values, which is the measurement.
 
-**Measured difference:** **0** in the seven compared keyframes (and none of them exercises the
+**Measured difference:** **0** in the nine compared keyframes (and none of them exercises the
 100th pair's y). Reproduce the data checks with
 `cargo test -p secondreality --bin secondreality vault::hard::dots`.
 
@@ -2320,15 +2325,19 @@ same pair. The capture's keyframes are exact with the file's values, which is th
 (`cmp bp,3000; jg`, `BA.ASM:233-235`), and reads `cs:_depthcol[bp]` with a **16-bit**
 effective address. A negative low word passes the signed test; for `bp = 0xFF00` the 16-bit
 address wraps to `_depthcol - 0x100` and reads a code byte (0x07 with the shipped link map),
-not BSS zero. The branch is unreachable in part 2: the projected z′ is 1134..2866 with a
-positive low word.
+not BSS zero. The branch is unreachable in part 2: the projected z′ is full ≈1134..4366,
+every drawn point is ≤3000 (the signed `jg` skips the rest), and the low word is always
+positive.
 
 **Port.** The guard returns colour 0 for a `bp` whose unsigned index is past the 8,192-byte
 table. That is a **model of the unreachable branch**, not the source's address arithmetic;
 the port has no load map for the code bytes before `_depthcol`. The `count <= 0`,
 record-length, shadow and offset bounds checks are likewise guards for inputs part 2 never
 produces (the projected x is bounded; the source's `rows[y] + x` is a 16-bit offset that
-wraps within the A2D0 segment).
+wraps within the A2D0 segment). The source's second clear is two **word** stores at
+`[si+12]`/`[si+12]+320` (`BA.ASM:229-231`); the code that writes `[si+12]` is unreachable
+behind `jmp @@4` (`:235`), so it stays 0 and the port's one-byte-per-row clear (0 and 320) is
+a documented model of the unreachable branch, differing only in bytes 1/321 at offset 0.
 
 **Why.** Reproducing the wrap would need the link map's code byte, and nothing in the effect's
 reachable domain reads it. The test pins the signed skip, the 16-bit load and the guard as a
@@ -2338,3 +2347,32 @@ model; it does not assert BSS zero as fact.
 frames); the unreachable byte is not reproduced. Reproduce the rule with
 `cargo test -p secondreality --bin secondreality
 the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`.
+
+## A52 — The vault's silent run: no player, no music service, and one modelled start key (substitution; measured difference 0)
+
+**Parts:** GRID, HARD and TWIST under `--part` and `--vault`, Phase 8.
+
+**Original.** The three effects are linked with the DIS client and run behind the vendored
+standalone `DIS/DIS.EXE`, which is built without `INDEMO`: its music service returns 0 until
+`checkkeys` consumes a key and then echoes the requested code once (`DIS/DISINT.ASM:242-282`,
+`:154`), there is no player, and the copper service is a bare `ret` (`:294-316`). The
+reference captures are therefore silent and deliver exactly one `KBD_space` to GRID and HARD
+and none to TWIST (`tools/vault_capture.sh`; `reference-indices.md` §24.4).
+
+**Port.** No vault part installs a player: `music_for_part` returns `None`, the registry rows
+carry no `boot_anchor`, `ctx.music()` is `None`, and a silent run refuses `--audio-dump`. The
+single start key is modelled per part at `init` (GRID's `getch()`, A40; HARD's `muscode(1)`
+gate, A46; TWIST takes no key, A43), and the later key cuts are unreachable (GRID's
+`muscode(3)`, HARD's `0xff`). A `--part` run numbers its frames from zero; the reference's
+boot-relative indices are only the captures'.
+
+**Why.** The artifact is silent; installing the demo's player would invent sound the
+reference does not make. The one key is a start event, not a running input: nothing in the
+port waits on a key, and every compared frame is after the gate.
+
+**Measured difference:** **0** in all twenty compared frames (GRID 5 + TWIST 6 + HARD 9), and
+the silent manifests have `music: null`, `anchor: null` and `index_origin: "part"`. Reproduce
+with `cargo test -p secondreality --test vault -- --nocapture`; the manifest checks are
+`a_part_run_of_grid_numbers_itself_from_zero_and_is_silent`,
+`a_part_run_of_twist_is_silent_and_numbers_itself_from_zero` and
+`a_part_run_of_hard_is_silent_and_numbers_itself_from_zero`.

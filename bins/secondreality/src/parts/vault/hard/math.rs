@@ -1,5 +1,5 @@
 //! HARD's rotation and projections: `rotlist`, `projlist` and `rotprojlist`
-//! (`VEC.ASM:105-330`) under the profile `VDATA.ASM:30-36` sets.
+//! (`VEC.ASM:105-345`) under the profile `VDATA.ASM:30-36` sets.
 //!
 //! The rotation arithmetic is GLENZ's — three signed 16-bit matrix words
 //! sign-extended and multiplied by the point's 32-bit coordinates, summed in
@@ -7,7 +7,7 @@
 //! axes in a different order. In `rotlist` the first sum (matrix words
 //! 0/2/4) is pushed, the third (12/14/16) stays in `ecx`, `pop edx` takes
 //! the second (6/8/10) and `pop eax` the first; the stores at
-//! `VEC.ASM:171-176` then write x = third, y = second, z = first. GLENZ's
+//! `VEC.ASM:172-176` then write x = third, y = second, z = first. GLENZ's
 //! stores (`GLENZ/VEC.ASM:155-160`) put x = first, y = third, z = second, so
 //! reusing its `rotate` rotates about different axes.
 //!
@@ -21,16 +21,16 @@
 
 use crate::parts::glenz::math::Matrix;
 
-/// `or bp,16` (`VEC.ASM:207`): z was below `projminz`, so the divide used the
+/// `or bp,16` (`VEC.ASM:212`): z was below `projminz`, so the divide used the
 /// clamp. (Only the dead `cpolylist` reads the flag word.)
 pub const FLAG_Z: u16 = 16;
-/// `or bp,8` (`VEC.ASM:214`): the projected y word is above `wmaxy`.
+/// `or bp,8` (`VEC.ASM:220`): the projected y word is above `wmaxy`.
 pub const FLAG_Y_MAX: u16 = 8;
-/// `or bp,4` (`VEC.ASM:217`): the projected y word is below `wminy`.
+/// `or bp,4` (`VEC.ASM:223`): the projected y word is below `wminy`.
 pub const FLAG_Y_MIN: u16 = 4;
-/// `or bp,2` (`VEC.ASM:223`): the projected x word is right of `wmaxx`.
+/// `or bp,2` (`VEC.ASM:233`): the projected x word is right of `wmaxx`.
 pub const FLAG_X_MAX: u16 = 2;
-/// `or bp,1` (`VEC.ASM:226`): the projected x word is left of `wminx`.
+/// `or bp,1` (`VEC.ASM:236`): the projected x word is left of `wminx`.
 pub const FLAG_X_MIN: u16 = 1;
 
 /// `wminx/wminy/wmaxx/wmaxy` (`VDATA.ASM:14-19`): the window `projlist`'s
@@ -93,7 +93,7 @@ pub struct PVert {
 
 /// One `rotlist` axis: three signed matrix words, sign-extended to 32 bits,
 /// times the point's 32-bit coordinates, summed in 64 bits and shifted right
-/// 15 (`shld ecx,ebx,17`, `VEC.ASM:121`).
+/// 15 (`shld ecx,ebx,17`, `VEC.ASM:137`).
 fn rotate_axis(point: [i32; 3], m: &Matrix, words: [usize; 3]) -> i32 {
     let sum = i64::from(m.0[words[0]]) * i64::from(point[0])
         + i64::from(m.0[words[1]]) * i64::from(point[1])
@@ -109,14 +109,14 @@ fn rotate_axis(point: [i32; 3], m: &Matrix, words: [usize; 3]) -> i32 {
 /// crotlist(points2,cubepoints)`, `BP.C:273`), so `dst` is cleared.
 ///
 /// The axis stores are HARD's, not GLENZ's: x uses matrix words 12/14/16, y
-/// uses 6/8/10 and z uses 0/2/4 (`VEC.ASM:171-176`). With the identity
+/// uses 6/8/10 and z uses 0/2/4 (`VEC.ASM:172-176`). With the identity
 /// matrix the point `(1000,2000,3000)` becomes `(2999,1999,999)`, where
 /// GLENZ's mapping gives `(999,2999,1999)`.
 pub fn rotate(dst: &mut Vec<[i32; 3]>, src: &[[i32; 3]], m: &Matrix, add: [i32; 3]) {
     dst.clear();
     dst.reserve(src.len());
     for &point in src {
-        // The stores at `VEC.ASM:171-176`: x is the third sum (words
+        // The stores at `VEC.ASM:172-176`: x is the third sum (words
         // 12/14/16), y the second (6/8/10), z the first (0/2/4).
         let x = rotate_axis(point, m, [6, 7, 8]);
         let y = rotate_axis(point, m, [3, 4, 5]);
@@ -148,7 +148,7 @@ pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]]) {
             flags |= FLAG_Z;
         }
 
-        // `VEC.ASM:203-218`: y first. The source's `imul` forms a 64-bit
+        // `VEC.ASM:208-223`: y first. The source's `imul` forms a 64-bit
         // product and `idiv` divides it by the 32-bit z, truncating toward
         // zero; the quotient's low word takes the centre with a 16-bit add.
         let y_quotient =
@@ -161,7 +161,7 @@ pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]]) {
             flags |= FLAG_Y_MIN;
         }
 
-        // `VEC.ASM:220-230`: then x.
+        // `VEC.ASM:225-236`: then x.
         let x_quotient =
             (i64::from(x) * i64::from(HARD_PROJECTION.mul_x) / i64::from(div_z)) as i32;
         let x16 = (x_quotient as i16).wrapping_add(HARD_PROJECTION.add_x);
@@ -176,10 +176,10 @@ pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]]) {
             x: x16,
             y: y16,
             flags,
-            // `mov dword ptr es:[di+8],ebx` (`VEC.ASM:205`): before the
+            // `mov dword ptr es:[di+8],ebx` (`VEC.ASM:208`): before the
             // clamp.
             z,
-            // `mov es:[di+12],cx` / `mov es:[di+14],ax` (`VEC.ASM:213,226`):
+            // `mov es:[di+12],cx` / `mov es:[di+14],ax` (`VEC.ASM:214,226`):
             // the raw coordinates' low words, for the clipper.
             raw_x: x as i16,
             raw_y: y as i16,
@@ -188,7 +188,7 @@ pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]]) {
 }
 
 /// One `imul word ptr`/`idiv bx` pair from `rotprojlist`
-/// (`VEC.ASM:320-329`): the coordinate's **low word** times the constant's
+/// (`VEC.ASM:326-335`): the coordinate's **low word** times the constant's
 /// low word gives a 32-bit `DX:AX` product, which `idiv` divides by the low
 /// word of z; the quotient's low word takes the centre with a 16-bit add.
 fn project_word(coordinate: i16, multiplier: i16, add: i16, z: i16) -> i16 {
@@ -203,7 +203,7 @@ fn project_word(coordinate: i16, multiplier: i16, add: i16, z: i16) -> i16 {
     (quotient as i16).wrapping_add(add)
 }
 
-/// `rotprojlist` (`VEC.ASM:250-330`): the same rotation as [`rotate`], then
+/// `rotprojlist` (`VEC.ASM:250-345`): the same rotation as [`rotate`], then
 /// the 16-bit projection [`project_word`] implements.
 ///
 /// This is `crotprojlist`, the part-2 grid's path (`BP.C:182`). It differs
@@ -216,12 +216,12 @@ pub fn rotate_project(dst: &mut Vec<PVert>, src: &[[i32; 3]], m: &Matrix, add: [
     dst.clear();
     dst.reserve(src.len());
     for &point in src {
-        // The rotation is `rotlist`'s, stores and all (`VEC.ASM:283-310`).
+        // The rotation is `rotlist`'s, stores and all (`VEC.ASM:276-322`).
         let x = rotate_axis(point, m, [6, 7, 8]).wrapping_add(add[0]);
         let y = rotate_axis(point, m, [3, 4, 5]).wrapping_add(add[1]);
         let z = rotate_axis(point, m, [0, 1, 2]).wrapping_add(add[2]);
         dst.push(PVert {
-            // `VEC.ASM:320-329`: `imul word ptr gs:projymul` / `idiv bx` for
+            // `VEC.ASM:326-335`: `imul word ptr gs:projymul` / `idiv bx` for
             // y, then `mov ax,word ptr gs:projxmul` / `imul cx` / `idiv bx`
             // for x. Both read the low words.
             x: project_word(
@@ -236,7 +236,7 @@ pub fn rotate_project(dst: &mut Vec<PVert>, src: &[[i32; 3]], m: &Matrix, add: [
                 HARD_PROJECTION.add_y,
                 z as i16,
             ),
-            // The raw-field stores (`VEC.ASM:315,327`) are commented out and
+            // The raw-field stores (`VEC.ASM:325,331`) are commented out and
             // no flag word is written.
             flags: 0,
             z,

@@ -26,9 +26,9 @@
 //! colours XOR as the walk crosses them.
 //!
 //! The source also merges a coincident edge into an earlier one by XORing
-//! its low colour byte (`@@h1-@@h3`, `:376-403`) and tries to merge a
+//! its low colour byte (`@@h1-@@h3`, `:369-387`) and tries to merge a
 //! boundary into the previous one when a register that holds the previous
-//! **colour word** equals the clamped column (`cmp cx,ax`, `:255-260`). The
+//! **colour word** equals the clamped column (`cmp cx,ax`, `:240-246`). The
 //! first is equivalent to keeping both edges because the walk XORs every
 //! boundary at a position; the second can never fire in HARD, whose colour
 //! words are `0x40xx` and whose columns are 1..319, so the port does not
@@ -36,14 +36,14 @@
 
 use super::poly::Poly;
 
-/// The visible width in pixels (`yrowad` advances by 320, `VNEW.ASM:267`).
+/// The visible width in pixels (`yrowad` advances by 320, `VNEW.ASM:261`).
 const WIDTH: i32 = 320;
 /// `NROWS equ 128` (`VNEW.ASM:4`): the rows `ng_pass2` walks.
 const ROWS: i16 = 128;
 /// The sentinel the walk fills up to but never paints (`VNEW.ASM:266`).
 const LAST_PIXEL: u16 = 63_999;
 /// The second sentinel's position word, `dw -1` (`VNEW.ASM:269`); the walk
-/// ends when the new list reaches it (`cmp cx,-1`, `:291`).
+/// ends when the new list reaches it (`cmp cx,-1`, `:108`).
 const END_OF_LIST: u16 = u16::MAX;
 
 /// One edge of the source's `ne` arena (`VNEW.ASM:16-22`): `NE_X`, `NE_Y1`,
@@ -63,9 +63,14 @@ struct Edge {
 
 /// HARD's 128-row opaque compositor.
 ///
-/// `pixels` is the A2D0 band (D36's linear 320-pixel-row buffer); it is never
-/// cleared, by [`Compositor::new`] or by a paint. A part owns one compositor
-/// for the run, as the source's `newdata1` and `vram` persist.
+/// `pixels` is the A2D0 band (D36's linear 320-pixel-row buffer). `new`
+/// starts it from zeroes — the port's model of the source's BSS, not a source
+/// clear: `VNEW.ASM`'s `ng_init` never touches a pixel, and the band is zeroed
+/// where `B.C` zeroes it (the pre-roll's `memset`, `B.C:168-172`, and mode 5's
+/// rebuild, `B.C:297-301`). A paint never clears either: a span that was 0 in
+/// both frames keeps its bytes. A part owns one compositor for the run, as the
+/// source's `newdata1` and `vram` persist, and `part3init` seeds it from the
+/// band part 2 left.
 pub struct Compositor {
     /// The 64,000-byte work band the engine draws into.
     pub pixels: [u8; 64_000],
@@ -80,8 +85,9 @@ pub struct Compositor {
 impl Compositor {
     /// The source's first `cglenzinit`: an empty edge arena, zeroed pixels
     /// and a fresh half holding only the `-1` sentinel (`ng_init`,
-    /// `VNEW.ASM:27-56`; the band itself is not cleared — the zeroes are the
-    /// part's own initial BSS).
+    /// `VNEW.ASM:27-56`). `ng_init` never touches the band; the zero array is
+    /// the port's BSS model, and the part seeds it from the A2D0 band at
+    /// `part3init`.
     pub fn new() -> Self {
         Compositor {
             pixels: [0; 64_000],
@@ -154,7 +160,7 @@ impl Compositor {
     ///
     /// The edge arena is consumed, as `cglenzdone` ends the frame's list.
     pub fn paint(&mut self) {
-        // `ng_pass2` (`VNEW.ASM:159-276`): one boundary per live edge per
+        // `ng_pass2` (`VNEW.ASM:159-273`): one boundary per live edge per
         // row, the 16.16 x advanced by the slope each row.
         let mut boundaries: Vec<(u16, u16)> = Vec::new();
         for edge in &self.edges {

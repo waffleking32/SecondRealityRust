@@ -364,6 +364,18 @@ fn grid_matches_the_reference_at_its_measured_start() {
     for (report, (reference, residual)) in reports.iter().zip(GRID_RESIDUALS) {
         assert_eq!(report.reference, reference);
         print_report(report);
+        // The note's claim is asserted, not only printed: every residual pixel
+        // is on rows 14–15, the topmost rows the curve reaches.
+        assert!(
+            report.rows.keys().all(|&row| row == 14 || row == 15),
+            "reference {reference}: the residual leaves rows 14-15: {:?}",
+            report.rows
+        );
+        assert_eq!(
+            report.rows.values().sum::<usize>(),
+            report.pixels,
+            "reference {reference}: the row histogram does not add up"
+        );
         assert_eq!(
             (report.pixels, report.offset),
             (residual, 0),

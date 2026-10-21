@@ -2510,3 +2510,70 @@ PANICEND's last tick skips the wait, the `@@skip5` first-poll path
 `every_blocks_plan_stops_at_the_first_part_the_registry_lacks`). The block-1 wait's
 8,770/713/249 is **A38**; the reference's restart interval (8,049, 8,100) stays recorded as
 the trace's limit. Nothing was fitted.
+
+## D39 — The vault boots the vendored effects behind the standalone DIS (2026-10-21)
+
+Decided: the vault's references are the three unreleased effects run as their own programs —
+`GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` — staged with the vendored standalone
+`DIS/DIS.EXE` (`270f5fe2c7c7d17b4720c2019c2832f4bd3863f97e750315974692911f0ead08`) by
+`tools/vault_capture.sh` and mounted read-only. The capture is route A: the config's
+`[autoexec]` writes `RUN.BAT` (`@ECHO OFF`, `DIS.EXE`, the effect) and the tool waits for the
+first graphics frame (`--boot autoexec --boot-wait graphics --cycles 30000`). One
+`KBD_space` is delivered for GRID and HARD, none for TWIST.
+
+**The standalone DIS is the non-INDEMO server.** `DISINT.ASM`'s service 6 returns 0 until
+`checkkeys` consumes a key, then echoes the requested code once (`:242-282`, `:154`); there is
+no player, and service 7 (copper) is a bare `ret` (`:294-316`). The captures are therefore
+silent. GRID's `getch()` (`MAIN.C:153`), HARD's `while (dis_muscode(1) != 1 …)`
+(`B.C:138`) and TWIST's no key (`MAIN.C:49`) are the whole input vocabulary; the later cuts —
+GRID's `dis_muscode(3)` (`MAIN.C:160`) and HARD's `muscode(0xff)` (`BP.C:263`) — need a second
+key and never fire.
+
+**The port's side.** The three registry rows carry no `boot_anchor`; `music_for_part` returns
+`None`, no player is installed and `ctx.music()` is `None`; a silent run refuses
+`--audio-dump`. The single start key is modelled at the part's start, not waited on: GRID's
+`init` performs the state the key selects (A40), HARD's gate is passed at `init` (A46), TWIST
+takes no key (A43). A `--part` run numbers its frames from zero (`index_origin: "part"`,
+`anchor: null`, `music: null`). `--vault` and `--part` run the same programs.
+
+**Measured.** The filed captures' `K0`s are GRID **353 ±1**, TWIST **3 ±1** and HARD
+**356 ±1** (`reference-indices.md` §24); the twenty filed frames compare at the residuals
+recorded in the evidence section (A40/A41, A43–A45, A46–A51), and the silent manifests are
+pinned by `a_part_run_of_{grid,hard,twist}_is_silent_and_numbers_itself_from_zero`.
+
+**Cost if wrong.** If the vault ever wants music or the demo's own `muscode`, the silent-run
+rows and the start substitutes are the seams to change; the pictures do not move. The
+alternative — booting `SECOND.EXE`'s `zinfo` — would be a different program and is not what
+the artifacts do.
+
+## D40 — The vault menu is window-only, and `--part` is the headless surface (2026-10-21)
+
+Decided: `--vault` opens a window-only 320×200 menu (`vault_menu.rs`) over the demo's own
+`ALKU/FONA.UH` strip: the title `SECOND REALITY` / `VAULT`, the three rows GRID/HARD/TWIST, a
+`>` marker on the selection, and the footer `UP DOWN  ENTER  ESC`. Up/Down wrap, Enter starts
+the selected part, ESC closes the window. The flag is refused with `--headless`, `--part`,
+`--block`, `--dump-dir`, `--dump-frames`, `--frames`, `--run-seconds` and `--audio-dump`
+("the vault menu needs a window; name a part with --part"), and accepts the presentation
+flags. `--part grid|hard|twist` is the headless/tests surface and starts the same programs.
+
+**The return split is the source's own.** In a running part the first ESC is the part's exit
+(the original's `dis_exit`), so the shell retires it and the run holds; a second ESC on the
+held run returns to the menu rather than closing the window. A part that finished by itself
+(HARD's `default` arm, TWIST's 4,444-frame cap) is already holding, so one ESC returns. ESC in
+the menu closes. The normal, non-`--vault` path's ESC/close semantics are unchanged.
+
+**Deferred.** Phase 9's settings screen and loop mode are deliberately not here; the menu is a
+new, non-fidelity surface (there is no original frame to compare), and its layout/colours are
+the port's choice. The three parts stay silent (D39).
+
+**Measured.** The manual window check (title, three selections, ESC return, ESC exit, close
+button) and the tests: `the_selection_wraps_up_and_down`, `enter_chooses_the_selected_part`,
+`escape_closes_the_menu`, `an_unhandled_key_redraws_nothing`,
+`the_menu_frame_is_three_entries_with_a_selected_row` (the `>` marker and `VAULT` subtitle are
+asserted directly), `the_vault_flag_is_parsed`, the three refusal tests,
+`a_vault_run_accepts_the_presentation_flags` and
+`an_escape_on_a_held_vault_part_returns_to_the_menu`.
+
+**Cost if wrong.** The menu is one small module and one outer loop; the normal path is
+untouched. A wrong ESC rule would return from a live part instead of ending it (or close the
+window instead of returning); the reducer and window tests pin both.

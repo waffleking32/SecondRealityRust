@@ -250,6 +250,86 @@ keep the boundaries independent (the source's merge is inert) and never clear be
 **Evidence.** The tests above; the reference's 1499 held frame (0 differing indices) and the
 2300/3000/3400 keyframes (`docs/fidelity/glenz.md` §11).
 
+## 6. GRID's `sinus1` reads an uninitialised `d` — `GRID` (the vault)
+
+**What it is.** `sinus1`'s third cursor `d` is never initialised, so the shipped `P.EXE`'s
+x waveform — and every curve of the effect — depends on whatever its stack frame held. The
+object's own static prediction is `0x116`; the binary measures `0x7FE (mod 0x2000)`.
+
+**Where the source does it.** `GRID/MAIN.C:33` declares `d` without a value and `:51` zeroes
+only `b` and `c`; `:51-58` advances `d += 67` and indexes `sin1[(d>>3)&1023]`. The 1,024-point
+developer screen before `getch()` is what pins the artifact's value: an exhaustive match over
+0..65535 against the capture's 982-pixel screen finds only the `0x7FE` class, while `0x116`
+matches 47 (D24: the binary is the artifact, not the object).
+
+**What the port must do.** Start the tables from `d0 = 0x07FE`
+(`the_initial_d_is_the_measured_0x7fe`, `the_measured_d_is_the_only_residue_whose_tables_match`);
+do not "clean" it to 0 or to the object's `0x116`. A clean table moves the whole curve.
+
+**Evidence.** `reference/parts/grid/` 400/500/600/700/800, which differ only by A41's
+6/2/36/33/14-pixel sampling residual; `docs/fidelity/grid.md` §2.
+
+## 7. HARD's `part2init` loop reads an uninitialised `b` — `HARD` (the vault)
+
+**What it is.** `part2init`'s `int b` is not initialised before the `depthcol` loop reads it
+in the `a < 1000 || b >= 3000` test. The loop assigns it at `a = 0` and the short-circuit
+keeps every later read after an assignment, so the shipped table is determinate: 127 for
+0..1031 and `127 - (a-1000)/32` down to 62 at 3099. The read is benign, but the table it
+produces is the depth-colour ramp the grid's dots are drawn with.
+
+**Where the source does it.** `HARD/BP.C:124-132`: `int a,r,g,b,...;` then
+`for(a=0;a<3100;a++) { if(a<1000 || b>=3000) b=127; else b=127-(a-1000)/32;
+depthcol[a]=b; }`. The first test's `b` is uninitialised; `a = 0` writes 127 before the
+second iteration reads it.
+
+**What the port must do.** Reproduce the carried value and the table, not a "clean"
+initialisation (`part2init_reads_the_uninitialised_b`). The port's `b` starts at 0 as a model
+of the uninitialised local, but the first read is an `a < 1000` short-circuit, so the value
+never reaches the table.
+
+**Evidence.** `reference/parts/hard/` 1050 (part 2's grid) is exact; `depthcol[3000] = 65` is
+what makes the first grid frame's 100 pixels `(1,63,63)` (A48). `docs/fidelity/hard.md`, the
+part-2 section.
+
+## 8. HARD's mode-4 band forces entries 189 and 1 to white — `HARD` (the vault)
+
+**What it is.** The mode-4 band's falling palette ramp forces `pal[254-65]` = `pal[189]` and
+`pal[1]` to `(63,63,63)`, not the `251`/`3` the plan and the research report assumed. The
+trail's last-drawn colour is 189, so the forced entries are what leave the 100 white trail
+pixels the mode-5 rebuild looks for.
+
+**Where the source does it.** `HARD/B.C:281-286`: `a=(254-65); pal[a*3+{0,1,2}]=63;
+pal[1*3+{0,1,2}]=63;`. `B.C:297-301`'s mode-5 rebuild tests `vram[u]==254-65` and converts
+those pixels to index 1.
+
+**What the port must do.** Force 189 and 1, not 251/3; the 66-entry ramp is
+`a = 252 - pal1colp`, clamped at 254. `the_mode_four_band_palette_is_the_sources` pins the
+entries.
+
+**Evidence.** `reference/parts/hard/` 910 is exact; the held 930–955 band's only
+distinguishable trail pixels are 100 white ones at index 189
+(`out/task2/hard-930-1000`). `docs/fidelity/hard.md`, "The palettes are the source's byte
+writes".
+
+## 9. HARD's part-2 fade dims by 255/256, not by its intended ramp — `HARD` (the vault)
+
+**What it is.** `part2`'s fade calls `fadepal(pal,pal2,a*16)` with `a = (500-16)-count`,
+which is negative for every count that reaches the call (485..499). `a*16` is a negative
+16-bit `int`; `fadepal`'s unsigned `cmp dx,256` clamps `dl` to 255, so the multiply is
+`src*255/256`: the palette dims by 255/256 and the intended fade never runs.
+
+**Where the source does it.** `HARD/BP.C:173-176` and `HARD/BA.ASM:174-215` (`fadepal`'s
+`mov al,[si]; mul dl; mov [di],ah` per channel, the blue bias, and the unsigned clamp). The
+capture shows the consequence: the band background `(0,0,81)` at 1440 and `(0,0,77)` at 1445 —
+6-bit blue 20 → 19, one 256th per fade step.
+
+**What the port must do.** Reproduce the clamp and the 8-bit multiply's high byte; do not
+"fix" the negative `a`. `fadepal_is_the_high_byte_multiply` pins the clamp, the blue bias and
+the negative `dl`; the part-2 keyframe 1050 and the part-3 1600 carry the dimmed palette.
+
+**Evidence.** `reference/parts/hard/` 1050; `out/task2/hard-1430-1500`'s 1440/1445 pixels;
+`docs/fidelity/hard.md`, the part-2 fade paragraph.
+
 ---
 
 ## Adding an entry

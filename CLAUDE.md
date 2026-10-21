@@ -120,6 +120,33 @@ reference's — `--part tunneli` numbers its own frames from zero — says that 
 `--headless` runs the same sequence on a machine with no display, and is what the comparisons below
 use.
 
+### The vault
+
+The three unreleased development effects are playable without touching the demo's sequence:
+
+```bash
+cargo run --release --bin secondreality -- --vault      # the window-only menu
+cargo run --release --bin secondreality -- --part grid  # GRID, HARD or TWIST directly
+```
+
+GRID, HARD and TWIST are registered as silent, unanchored parts (`music_for_part` → `None`,
+no player; `--part <name>` numbers its frames from zero) and are deliberately **not** in
+`PART_ORDER`, `BLOCKS` or any boot anchor. `--vault` opens a 320×200 menu built from the demo's
+own `ALKU/FONA.UH` strip and starts the chosen part; it is window-only and refuses
+`--headless`, `--part`, `--block`, the dump/frames flags and `--audio-dump` ("the vault menu
+needs a window; name a part with --part"). In the menu, ESC closes the window. In a running
+part, the first ESC is the part's own exit (the original's `dis_exit`), and the second ESC —
+on the held run — returns to the menu; a part that has finished by itself (HARD's `default`
+arm, TWIST's 4,444-frame cap) is already holding, so one ESC returns. The normal,
+non-`--vault` path is unchanged.
+
+The references are `reference/parts/{grid,hard,twist}`, captured from the vendored
+`GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` behind the standalone `DIS/DIS.EXE` by
+`tools/vault_capture.sh` (route A: `--boot autoexec --boot-wait graphics --cycles 30000`, one
+`KBD_space` for GRID/HARD and none for TWIST). The parts are verified against them at
+`K0` = 353 / 3 / 356; the notes are `docs/fidelity/{grid,hard,twist}.md`, the capture record
+`docs/fidelity/reference-indices.md` §24, and the decisions **D39/D40**.
+
 ## Verification
 
 `dosbox-automation` is the preferred reference oracle, behind a trait — not a hard

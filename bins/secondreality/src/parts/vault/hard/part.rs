@@ -616,8 +616,10 @@ impl Hard {
             self.pal2[at + 2] = b.min(63) as u8;
         }
         // `for(a=2;a<254;a++) pal[a] = (0,0,20)` (`BP.C:241-246`); entry 1
-        // stays `defpal[1]` = black, which is why the cube is invisible on
-        // its first frame and only appears as the fade uploads the ramp.
+        // stays `defpal[1]` = black. The band's entry 0 is also `(0,0,20)`,
+        // so the cube's opposite-face colour pairs XOR into the background's
+        // entry on the first frame; the cube appears only as the ramp
+        // separates the entries (docs/fidelity/hard.md, part 3).
         for a in 2..254usize {
             let at = a * 3;
             self.pal[at..at + 3].copy_from_slice(&[0, 0, 20]);

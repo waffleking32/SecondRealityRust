@@ -73,7 +73,12 @@ pub fn sin1() -> [i16; 1024] {
 /// Published so the measured `d0` can be compared against the object's own
 /// static prediction (`0x116`) in a test, not fitted.
 fn sinus_tables(d0: u16) -> ([i16; 1024], [i16; 1024]) {
-    let s = sin1();
+    sinus_tables_from(&sin1(), d0)
+}
+
+/// [`sinus_tables`] with the sine table supplied, so a scan over every initial
+/// `d` builds `sin1` once.
+fn sinus_tables_from(s: &[i16; 1024], d0: u16) -> ([i16; 1024], [i16; 1024]) {
     let mut b: u16 = 0;
     let mut c: u16 = 0;
     let mut d: u16 = d0;
@@ -411,7 +416,7 @@ impl Part for Grid {
         }
         let i = self.iteration;
         // The capture displays iteration `i` under the palette the source
-        // uploaded at the end of iteration `i - 1`: `pal[i & 3]`. The engine
+        // uploaded at the end of iteration `i - 1`: `pal[i % 3]`. The engine
         // stamps a palette set during `frame` onto this tick's frame, so the
         // upload is performed at the **start** of the tick it presents
         // (recorded in `docs/fidelity/grid.md`).
@@ -498,6 +503,24 @@ mod tests {
         let object = dot_set(0x0116);
         assert_eq!(object.len(), 1004);
         assert_eq!(measured.intersection(&object).count(), 47);
+    }
+
+    #[test]
+    fn the_measured_d_is_the_only_residue_whose_tables_match() {
+        // The whole 16-bit word is covered by the 0x2000 residues: adding
+        // 0x2000 adds 1,024 to `d >> 3`, which the `& 1023` index discards.
+        let s = sin1();
+        let measured = sinus_tables_from(&s, INITIAL_D);
+        let matching: Vec<u16> = (0..0x2000u16)
+            .filter(|&d0| sinus_tables_from(&s, d0) == measured)
+            .collect();
+        assert_eq!(matching, vec![0x07FE]);
+        for step in 0..8u16 {
+            assert_eq!(
+                sinus_tables_from(&s, INITIAL_D.wrapping_add(step * 0x2000)),
+                measured
+            );
+        }
     }
 
     #[test]
@@ -830,5 +853,90 @@ mod tests {
         blit.line(10, 10, 20, 18, 1);
         blit.line(10, 18, 20, 10, 1);
         assert_eq!(blit.vram[15 + 14 * 320], 0);
+    }
+
+    /// The generated routines `LINEBLIT.INC` writes, parsed from the committed
+    /// file: each routine's label and the 16-bit `di` offsets its stores
+    /// touch. The word form (`mov ax,gs:[di+N]`) sets two adjacent bytes.
+    fn committed_routines() -> Vec<((i8, i8), BTreeSet<u16>)> {
+        let text = std::fs::read_to_string("../../upstream/SecondReality/GRID/LINEBLIT.INC")
+            .expect("the committed GRID/LINEBLIT.INC");
+        let mut routines: Vec<((i8, i8), BTreeSet<u16>)> = Vec::new();
+        let mut current: Option<((i8, i8), BTreeSet<u16>)> = None;
+        for line in text.lines() {
+            let line = line.trim_end_matches('\r');
+            if let Some(label) = line.strip_suffix(':') {
+                let (x, y) = label
+                    .strip_prefix("lblt_")
+                    .and_then(|rest| rest.split_once('b'))
+                    .map(|(x, y)| {
+                        (
+                            x.parse::<i8>().expect("the label's x"),
+                            y.parse::<i8>().expect("the label's y"),
+                        )
+                    })
+                    .unwrap_or_else(|| panic!("unexpected LINEBLIT label {label}"));
+                if let Some(done) = current.take() {
+                    routines.push(done);
+                }
+                current = Some(((x, y), BTreeSet::new()));
+                continue;
+            }
+            let Some((_, offsets)) = current.as_mut() else {
+                continue;
+            };
+            let (rest, width) = if let Some(rest) = line.strip_prefix("mov al,gs:[di+") {
+                (rest, 1u16)
+            } else if let Some(rest) = line.strip_prefix("mov ax,gs:[di+") {
+                (rest, 2u16)
+            } else {
+                continue;
+            };
+            let offset = rest
+                .trim_end_matches(']')
+                .parse::<i32>()
+                .expect("the store's offset") as u16;
+            for delta in 0..width {
+                offsets.insert(offset.wrapping_add(delta));
+            }
+        }
+        if let Some(done) = current.take() {
+            routines.push(done);
+        }
+        routines
+    }
+
+    #[test]
+    fn the_line_blit_is_the_committed_generated_code() {
+        // The generator's loops (`DOLINE.C:64-85`, `:102-121`) emit 21×17
+        // routines in y = −8..=8, x = −10..=10 order, labelled by the
+        // endpoint's low six bits. This reads the committed include, not a
+        // translation of the generator: each routine's stores must be exactly
+        // the pixels the port's blit XORs for that delta.
+        let routines = committed_routines();
+        assert_eq!(routines.len(), 21 * 17, "the filled table's routines");
+        assert_eq!(routines[0].0, (54, 56), "the (−10,−8) fill word");
+        for (index, ((label_x, label_y), offsets)) in routines.iter().enumerate() {
+            let index = index as i32;
+            let dy = index / 21 - 8;
+            let dx = index % 21 - 10;
+            assert_eq!(
+                (i32::from(*label_x), i32::from(*label_y)),
+                (dx & 63, dy & 63),
+                "routine {index}'s label"
+            );
+            let mut blit = LineBlitter::new();
+            blit.line(0, 0, dx as i16, dy as i16, 1);
+            let expected: BTreeSet<u16> = blit
+                .vram
+                .iter()
+                .enumerate()
+                .filter(|(_, &pixel)| pixel != 0)
+                .map(|(at, _)| at as u16)
+                .collect();
+            assert_eq!(offsets, &expected, "dx {dx} dy {dy}");
+        }
+        // The table's dot entry is the (1,0) routine.
+        assert!(routines.iter().any(|((x, y), _)| (*x, *y) == (1, 0)));
     }
 }

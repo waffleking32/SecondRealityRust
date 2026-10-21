@@ -17,20 +17,21 @@ Phase status board. **Read this first if you are resuming work.**
 | 5 | Mid tier | **done** — spec §10's criterion met: PLZPART, TECHNO, LENS (`lnszoom`), PANIC (`panicend`), JPLOGO and COMAN (`3dsinfld`) verified against their reference keyframes (18 of the 27 keyframes byte-identical; the nine residuals are PLZPART's five — A24's three plasma frames and A23's two cube frames — LNS&ZOOM's three picture residues (A25) and JPLOGO's filed 17700 (A27), each registered with its measured count); the five cuing parts wait on the music as their originals do, and PANICEND has no cue (its shell row is only for the seek), on the three new traces (`second2`, `second3a`, `second3d`) and the mid-chain `music_fresh` seam; block 3 then ran MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO and stopped at U2E, block 2 still at GLENZ and block 1 at U2A (closed by Phase 6: block 1 now stops at GLENZ and block 3 runs through U2E into ENDLOGO → CRED → ENDSCRL). Evidence below. The final whole-branch review ran (fable, `e4f467e..7dae540`): **With fixes** — 0 Critical / 3 Important / 8 Minor — its findings are applied in `96ff6cc` and the scoped re-review is clean; **the tag is applied at this commit** | [05-mid-tier.md](docs/plans/05-mid-tier.md) | `phase-5` |
 | 6 | Vector engine | **done** — spec §10's U2A and U2E verified against their references with every residual registered and measured: U2A's 6500 and 7640 keyframes compare at 0 and 7300 is A28 (426 px at the reference's own state 294, the release-vs-tree Gouraud difference) + A29 (1098 px at the port's boot index, session phase); U2E's intro is byte-exact at nine indices and its four keyframes are A30 (189/7,118/231/1,177 at the reference's own state) + A31 (11,006/11,805/17,278/16,234 at K, the four-tick session phase). The mid-run MUSIC0@18 restart is measured at chain 17,418 against D34's derived 17,427 (the gapless-handover seam) and waits 4; the ESC drain (`Part::drains_after_exit`) and the sound card's follow seam are in. Three new traces (`second1c`, `second4`, `second3e`). Evidence below. The final whole-branch review ran (fable, `8b1b99a..5cc532c`): **no Criticals**; its two Important and four Minor findings are fixed in `5cc532c` and the scoped re-review is clean; **the tag is applied at this commit** | [06-vector-engine.md](docs/plans/06-vector-engine.md) | `phase-6` |
 | 7 | GLENZ | **done** — spec §10's "GLENZ verified": the held opening at 1499 compares at **0 differing indices of 64,000**, and the moving keyframes are measured at the capture's surface-aligned phase — **2305/2300** 5,208 px (every difference a palette 0..15 fade entry, **0** at an index ≥ 16; the object is the reference's 9,989-px box exactly), **3004/3000** 2,289 px (711 registered-unexplained) and **3404/3400** 5,941 px (839), with **`L_p = 1567`** against `L_r = 1562` (**K + 5**) — A36/A37. D24 (b) is settled by the reference's picture: the in-bounds **low-byte** colour key is adopted (one shared slot map; the tree's full-word key exhausts the pool and is rejected). The two shell seams are in: the block-1 `MUSIC1@0` restart (boundary **8,057**, inside the reference's (8,049, 8,100)), whose source-faithful seek puts the first zoomer body at **8,770** — **249 frames after 8,521** (registered **A38**) — and the post-PANICEND cue wait (**8,903 / 8,953 / 9,219**). Blocks 1 and 2 run to ENDSCRL with no stop, and `--part glenz` runs. The span compositor's full-repaint substitution is **A39** (measured difference 0). Evidence below. The final whole-branch review ran (fable, `4223266..f6bd2fb`): **NEEDS FIXES** — 1 Important (the main loop's double exit check could drop the frame the source draws) and 3 Minor record defects; fixed in `40d83e6` (draw-then-finish; the plan's K+5/hold/`double_scan` lines; the 14th carried item; the CLI note), and the scoped re-review is clean. **The tag is applied at this commit** | [07-glens.md](docs/plans/07-glens.md) | `phase-7` |
-| 8 | Vault | **in progress** — the plan is landed; the capture route, the three references, GRID, TWIST, HARD's engine/part, the vault menu and the close-out are Tasks 1–9 | [08-vault.md](docs/plans/08-vault.md) | — |
+| 8 | Vault | **complete — untagged** — GRID, HARD and TWIST play standalone and are verified: GRID's five filed keyframes differ by the measured A41 sampling residual **6/2/36/33/14** px at offset 0 (max channel delta 41, rows 14–15 only); TWIST's six keyframes are **0** px; HARD's nine are **0** px (840's `.idx` byte-identical), and its mode-5 boundary (references 950–960 vs ports 594–604) and part-3 end (2245–2257 vs 1889–1901) compare at **0** over the full 1,903-frame run, which retires at 1902. The references are `reference/parts/{grid,hard,twist}` (`K0` 353/3/356) captured from `GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` behind the standalone `DIS/DIS.EXE`; the runs are silent and a window-only `--vault` menu selects the three (D39/D40). The tag is withheld until the final whole-branch review is clean. Evidence below | [08-vault.md](docs/plans/08-vault.md) | — |
 | 9 | Assembly & fidelity pass | not started | — | — |
 
 ## Where to pick up
 
-**Phase 8 (Vault) is in progress** on `phase-8-vault`; its plan is
+**Phase 8 (Vault) is complete — untagged** on `phase-8-vault`; its plan is
 `docs/plans/08-vault.md` and its per-task ledger is
-`.superpowers/sdd/08-vault/progress.md` (git-ignored scratch; the durable record is
-copied into the notes, decisions and this file as tasks land). The phase ports GRID,
-HARD and TWIST as silent standalone parts under `parts/vault/`, with references
-captured from `GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` under the vendored
-standalone `DIS/DIS.EXE`, and a window-only `--vault` menu. Task 1 (the capture
-route) is running; the GRID source study is finishing and refines Task 3 before it
-dispatches. Phase 7 is **done, tagged `phase-7`** and merged to `main`.
+`.superpowers/sdd/08-vault/progress.md` (git-ignored scratch; the durable record is in the
+notes, decisions and this file). GRID, HARD and TWIST run as silent standalone parts under
+`parts/vault/`, verified against `reference/parts/{grid,hard,twist}` (captured from the three
+EXEs behind the standalone `DIS/DIS.EXE` with `tools/vault_capture.sh`), and the window-only
+`--vault` menu selects them. The close-out commit records the evidence and closes the
+deferred minors; **the next step is the final whole-branch review**, and the `phase-8` tag is
+withheld until it is clean (Phase 1–7 practice). Phase 7 is **done, tagged `phase-7`** and
+merged to `main`.
 
 **Phase 7 (GLENZ) is done, tagged `phase-7` at this commit**, on `phase-7-glens`. Its exit
 criterion is spec §10's "GLENZ verified", and it is met (evidence below): the held 1499 frame is
@@ -2724,6 +2725,137 @@ Finished `release` profile [optimized] target(s) in 2.52s               exit 0
 
 **The tag is withheld** until the whole-branch final review is clean, per Phase 1–6's practice;
 this close-out commit is the phase's record, and the branch's tag is `phase-7` (not applied
+here).
+
+### Phase 8's evidence (close-out, Task 9, 2026-10-21)
+
+**Exit criterion (spec §10 and success criterion 2): GRID, HARD and TWIST playable standalone
+and verified.** Each part runs from `--part` (silent, unanchored) and from the window-only
+`--vault` menu, and every filed keyframe is compared at its measured `K0`. Every number below
+was re-run at the committed state; the blocks are pastes, `(…)` marks an elision, and a number
+in the prose that is not in a command block is asserted by the named test (D25).
+
+| comparison | the measured result |
+|---|---|
+| GRID 400 / 500 / 600 / 700 / 800 vs `reference/parts/grid` | **6 / 2 / 36 / 33 / 14** differing pixels at offset 0, every residual row 14 or 15, max channel delta **41** (A41: the capture catches the newest line mid-draw) |
+| TWIST 103 / 203 / 303 / 403 / 503 / 603 vs `reference/parts/twist` | **0** differing pixels at offset 0, max channel delta 0 (effect frames 100..600, `K0` = 3) |
+| HARD 480 / 560 / 630 / 700 / 770 / 840 / 910 / 1050 / 1600 vs `reference/parts/hard` | **0** differing pixels at offset 0; 840's `.idx` **byte-identical** (`K0` = 356) |
+| HARD references 950–960 vs ports 594–604 | **0** at every index (A48's mode-5 boundary) |
+| HARD references 2245–2257 vs ports 1889–1901 | **0** at every index (the part-3 end) |
+| the full HARD run | **1,903 frames** (0..1902), retiring at 1902 |
+
+The three references are the vendored `GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` behind the
+standalone `DIS/DIS.EXE`; reproduce each with its one-line capture command (D39,
+`reference-indices.md` §24):
+
+```bash
+tools/vault_capture.sh grid  --frames 400,500,600,700,800
+tools/vault_capture.sh twist --frames 103,203,303,403,503,603
+tools/vault_capture.sh hard  --frames 480,560,630,700,770,840,910,1050,1600
+```
+
+**The comparisons**, at the committed state:
+
+```text
+$ cargo test -p secondreality --test vault -- --nocapture
+(…)
+reference 400: offsets -1/0/+1 give [(-1, 9990), (0, 6), (1, 9883)]; minimum 6 pixel(s) at offset +0 (max channel delta 41); rows {14: 6}
+reference 500: offsets -1/0/+1 give [(-1, 10179), (0, 2), (1, 10173)]; minimum 2 pixel(s) at offset +0 (max channel delta 41); rows {14: 2}
+reference 600: offsets -1/0/+1 give [(-1, 11249), (0, 36), (1, 11209)]; minimum 36 pixel(s) at offset +0 (max channel delta 41); rows {14: 14, 15: 22}
+reference 700: offsets -1/0/+1 give [(-1, 11696), (0, 33), (1, 11685)]; minimum 33 pixel(s) at offset +0 (max channel delta 41); rows {14: 13, 15: 20}
+reference 800: offsets -1/0/+1 give [(-1, 11036), (0, 14), (1, 10937)]; minimum 14 pixel(s) at offset +0 (max channel delta 41); rows {14: 5, 15: 9}
+(…)
+reference 103: offsets -1/0/+1 give [(-1, 3104), (0, 0), (1, 3460)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 203: offsets -1/0/+1 give [(-1, 2512), (0, 0), (1, 3220)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 303: offsets -1/0/+1 give [(-1, 3732), (0, 0), (1, 3616)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 403: offsets -1/0/+1 give [(-1, 3064), (0, 0), (1, 3324)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 503: offsets -1/0/+1 give [(-1, 2884), (0, 0), (1, 3404)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 603: offsets -1/0/+1 give [(-1, 3284), (0, 0), (1, 3280)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+(…)
+reference 480: offsets -1/0/+1 give [(-1, 0), (0, 0), (1, 0)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 560: offsets -1/0/+1 give [(-1, 2656), (0, 0), (1, 2593)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 630: offsets -1/0/+1 give [(-1, 3100), (0, 0), (1, 2506)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 700: offsets -1/0/+1 give [(-1, 3379), (0, 0), (1, 3291)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 770: offsets -1/0/+1 give [(-1, 3288), (0, 0), (1, 3264)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 840: offsets -1/0/+1 give [(-1, 0), (0, 0), (1, 0)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 910: offsets -1/0/+1 give [(-1, 3393), (0, 0), (1, 3382)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 1050: offsets -1/0/+1 give [(-1, 581), (0, 0), (1, 581)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+reference 1600: offsets -1/0/+1 give [(-1, 1070), (0, 0), (1, 703)]; minimum 0 pixel(s) at offset +0 (max channel delta 0); rows {}
+(…)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+**The suite and both clippy gates.** `cargo test --workspace` is green — **1,365 passed, 0
+failed, 8 ignored** over the 50 `test result:` lines (the binary suite is 603 passed and 7
+ignored) — and both `cargo clippy --workspace --all-targets -- -D warnings` and its
+`--release` form exit 0.
+
+```text
+$ cargo test --workspace
+(…)
+test result: ok. 603 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 114.78s
+(… all 50 `test result:` lines are `ok`; …)
+exit: 0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+(…)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.97s     exit 0
+
+$ cargo clippy --workspace --all-targets --release -- -D warnings
+(…)
+Finished `release` profile [optimized] target(s) in 4.14s               exit 0
+```
+
+**The reference and asset trees.** `cargo xtask reference verify --tree reference` passes
+over **44 captures / 148 files** (32,438,303 bytes), and `cargo xtask assets verify --tree
+--decode` decodes **159 assets** with 0 findings (45 headerless, 1 refused on record):
+
+```text
+$ cargo xtask reference verify --tree reference
+verdict: ok — 44 capture(s), 148 file(s), 32438303 bytes        exit 0
+
+$ cargo xtask assets verify --tree --decode
+decode: 159 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene file(s), 45 headerless with no decoder, 1 refused on record, 0 finding(s)
+verdict: ok                                                      exit 0
+```
+
+**The decisions and the register.** **D39** (the vendored effect EXEs behind the standalone
+`DIS.EXE`, route A's `--boot-wait graphics`, the one-start-key semantics and the silent runs)
+and **D40** (the window-only `--vault` menu, `--part` for headless/tests, the two-ESC return
+split, and Phase 9's settings screen/loop mode deferred) are finalized. The approximations are
+**A40–A52** — the three parts' start/key substitutions (A40, A43, A46), the TWIST copper
+no-op (A42), the fixed 70.086 Hz ticks and their measured display phases (A44, A47), the GRID
+sampling residual (A41), the
+RGB-only TWIST comparison (A45), the HARD mode-5 boundary (A48), the dropped argument path
+(A49), the two one-byte data questions (A50), the `do3dots` unreachable-branch model (A51),
+and the vault's silent run (A52). The preserved bugs the pictures depend on are **`bugs.md`
+§6–§9**: GRID's uninitialised `d` (`0x07FE`), HARD's uninitialised `b` (the carried 127..62
+`depthcol` ramp), mode 4's forced entries 189/1, and the part-2 fade's negative `a*16` (the
+unsigned clamp makes `dl` 255, so it dims by 255/256).
+
+**The deferred minors closed in this task.** GRID's `pal[i % 3]` comment; the A41 residual-row
+claim is now asserted, not only printed; the whole-word `d0` class and the committed
+`LINEBLIT.INC` are pinned by committed tests, so the D25 claims no longer rest on git-ignored
+research; A40 points at A41 for the comparison. HARD's source-line citations are corrected
+(including `xclipsidi` 743–810 and `eclipsidi` 812–831), `span.rs`'s "never cleared" doc now
+distinguishes the port's BSS model from `ng_init`, and A51's z′ range is full ≈1134..4366,
+drawn ≤3000. The HARD note's stale mode-5 lead and 956 labels are corrected (955 is the port's
+model of `part2init`; 956 is count 1, two displays after the source's count 1 at 954), the
+"seven" keyframe counts are nine, the first-cube explanation is the `(0,0,20)` band/opposite-
+face pair, `do3dots`' second clear is documented as two word stores versus the port's
+one-byte-per-row model, and the part-2 fade is in `bugs.md`. The menu frame test asserts the
+`>` marker and the `VAULT` subtitle, and both clippy gates are named in the record. The HARD
+480 `.idx` is optional (the trial's scratch idx is not the reference), and the reference
+record now carries the full DIS digest and the manifest's `palette` map.
+
+**Carried items, and what remains a limit.** The commit-message line-number nit Task 5's
+review found is history — the current comments carry the verified lines. The 955/`part2init`
+attribution is the port's model (the 956/957 capture is RGB-only; an indexed read of a later
+session would settle it). The mode-5 overrun's *position* remains unmeasured: the capture
+measures its total cost, two displays (A48). The `do3dots` shadow clear is a documented model
+of the unreachable branch. The `assets/PROVENANCE.md`/`asset-inventory.md` FCRZ.U rows were
+already in place from Task 6. **The tag is withheld** until the final whole-branch review is
+clean; this close-out is the phase's record and the branch's tag is `phase-8` (not applied
 here).
 
 ## Phase log

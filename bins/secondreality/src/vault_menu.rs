@@ -434,6 +434,70 @@ mod tests {
             "an unselected row changed when the selection moved"
         );
 
+        // The selection's `>` marker is a specific glyph at MARKER_X, in the
+        // selection's full ink; deleting it leaves every other assertion here
+        // green, so it is pinned directly.
+        let marker_top = (ENTRY_TOP + 2) as u16;
+        let marker_at = |frame: &IndexedFrame, row: u16| {
+            frame.pixels[row as usize * FRAME_WIDTH as usize + MARKER_X as usize]
+        };
+        assert_eq!(
+            marker_at(&first, marker_top),
+            SELECT_INK + 2,
+            "the selected row has no `>` marker"
+        );
+        assert_eq!(
+            marker_at(&second, marker_top),
+            0,
+            "row 0 keeps its marker after the selection moved"
+        );
+        assert_eq!(
+            marker_at(&second, marker_top + ENTRY_STEP as u16),
+            SELECT_INK + 2,
+            "row 1's marker was not drawn"
+        );
+        // No unselected row draws anything left of the label column.
+        for row in 1..VAULT.len() {
+            let band = entry_band(&first, row);
+            assert!(
+                band.iter().enumerate().all(|(at, &pixel)| {
+                    pixel == 0 || (at % first.width as usize) >= LABEL_X as usize
+                }),
+                "row {row} draws left of the label column"
+            );
+        }
+
+        // The subtitle is the word `VAULT`, centred under the title; compare
+        // its ink with a separately drawn copy, so deleting the subtitle line
+        // fails here even though the rest of the frame is unchanged.
+        let centered = (FRAME_WIDTH as i32 - text_width(&font, "VAULT")) / 2;
+        let mut subtitle = IndexedFrame::new(FRAME_WIDTH, FRAME_HEIGHT);
+        draw_text(
+            &mut subtitle,
+            &font,
+            centered,
+            SUBTITLE_TOP,
+            "VAULT",
+            TITLE_INK,
+        );
+        let subtitle_ink: Vec<usize> = subtitle
+            .pixels
+            .iter()
+            .enumerate()
+            .filter(|(_, &pixel)| pixel != 0)
+            .map(|(at, _)| at)
+            .collect();
+        assert!(!subtitle_ink.is_empty(), "the VAULT subtitle drew no ink");
+        for at in subtitle_ink {
+            assert_eq!(
+                first.pixels[at],
+                subtitle.pixels[at],
+                "the VAULT subtitle is missing at ({}, {})",
+                at % FRAME_WIDTH as usize,
+                at / FRAME_WIDTH as usize
+            );
+        }
+
         // The title and footer are drawn as well as the entries.
         assert!(first.row(TITLE_TOP as u16).iter().any(|&pixel| pixel != 0));
         assert!(first.row(FOOTER_TOP as u16).iter().any(|&pixel| pixel != 0));
