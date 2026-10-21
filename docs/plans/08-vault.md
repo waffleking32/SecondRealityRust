@@ -85,7 +85,7 @@ Every row is from the carried Phase 1–7 surveys and this phase's capture study
 ### Task 2: The three references and their anchors
 
 **Files:**
-- Create: `reference/parts/grid/`, `reference/parts/hard/`, `reference/parts/twist/` (frames + `manifest.json`), `docs/fidelity/reference-indices.md` §8 (the vault boot)
+- Create: `reference/parts/grid/`, `reference/parts/hard/`, `reference/parts/twist/` (frames + `manifest.json`), `docs/fidelity/reference-indices.md` §24 (the vault capture section)
 - Modify: `docs/fidelity/grid.md`, `docs/fidelity/hard.md`, `docs/fidelity/twist.md` (the capture section of each; the rest is written by its part's task)
 - Test: `cargo xtask reference verify --tree reference`; `cargo test -p xtask --test verify`
 
@@ -102,7 +102,7 @@ Every row is from the carried Phase 1–7 surveys and this phase's capture study
 - [ ] **Step 2: TWIST sweep and keyframes.** Probe the text→graphics transition in single-index captures (a geometry change cannot be crossed in one capture); record the first graphics frame. Capture at least five keyframes across the animation phase (e.g. 450, 550, 650, 750, 850 — adjust to the measured start) into `reference/parts/twist`. Repeat one; confirm.
 - [ ] **Step 3: HARD sweep and keyframes.** Capture the start sweep and record the last static/first changed. Use the source's frame counts (`B.C:203-322`: 34 + 4×73 + 4 + 42 + 102 + 500 + 800 after the pre-roll) and picture content to find one keyframe in each mode: mode 0 dots, each of the four part-1 logo phases, mode 3, mode 4's band, part 2's grid, and part 3's cube — at least eight keyframes. Capture them into `reference/parts/hard`; repeat the two most different and confirm. The `0xff` cut is not reachable with one key, so part 3 must be captured at its own `count>=800` end.
 - [ ] **Step 4: Measure `K0` for each part.** The port's frame 0 is the first frame the effect draws after the start event. Match a port-independent picture feature: GRID's first changed frame is the first loop frame; HARD's first changed frame is the pre-roll wipe, whose first frame is the port's tick 0 only if the port counts the wipe as a tick (it does); TWIST's first graphics frame after `doit()` begins. Record `K0` with the picture evidence and the ±1 tolerance; do not fit it to a later keyframe.
-- [ ] **Step 5: Write the record.** In `docs/fidelity/reference-indices.md` §8: the boot (DIS.EXE + effect + one key or none), the four hashes, the staging script, the manifest fields, the measured start indices, `K0` per part and the keyframe lists. In each `docs/fidelity/<part>.md`'s capture section: the same for that part, plus the command that reproduces it.
+- [ ] **Step 5: Write the record.** In `docs/fidelity/reference-indices.md` §24: the boot (DIS.EXE + effect + one key or none), the four hashes, the staging script, the manifest fields, the measured start indices, `K0` per part and the keyframe lists. In each `docs/fidelity/<part>.md`'s capture section: the same for that part, plus the command that reproduces it.
 - [ ] **Step 6: Verify and commit.** `cargo xtask reference verify --tree reference`; `cargo test -p xtask --test verify`; commit the references and the record.
 
 **Acceptance:** three capture directories with version-1 manifests and per-frame digests; `reference verify` clean; each part has at least five keyframes and a measured `K0`; the staged binaries and batch contents are recorded with hashes and a reproducing command.
@@ -322,7 +322,7 @@ Every row is from the carried Phase 1–7 surveys and this phase's capture study
 ### Task 9: Close-out — the register, the record and the evidence
 
 **Files:**
-- Modify: `PROGRESS.md`, `docs/decisions.md` (D39: the vault's boot and standalone-DIS semantics; D40: the vault menu and the silent run), `docs/fidelity/{grid,hard,twist}.md` (the finished notes), `docs/fidelity/APPROXIMATIONS.md` (the silent run, the dropped key waits, the TWIST fixed-rate mapping and any measured residuals), `docs/fidelity/bugs.md` (the preserved source bugs the pictures depend on: GRID's uninitialised `d`, HARD's uninitialised `b`, the 16 KB background allocation, the BSS-zero depth read), `docs/fidelity/reference-indices.md` §8 (the final capture facts), `CLAUDE.md` (the vault commands), `docs/plans/08-vault.md` (the self-review notes), `assets/PROVENANCE.md`/`docs/fidelity/asset-inventory.md` (FCRZ.U)
+- Modify: `PROGRESS.md`, `docs/decisions.md` (D39: the vault's boot and standalone-DIS semantics; D40: the vault menu and the silent run), `docs/fidelity/{grid,hard,twist}.md` (the finished notes), `docs/fidelity/APPROXIMATIONS.md` (the silent run, the dropped key waits, the TWIST fixed-rate mapping and any measured residuals), `docs/fidelity/bugs.md` (the preserved source bugs the pictures depend on: GRID's uninitialised `d`, HARD's uninitialised `b`, the 16 KB background allocation, the BSS-zero depth read), `docs/fidelity/reference-indices.md` §24 (the final capture facts), `CLAUDE.md` (the vault commands), `docs/plans/08-vault.md` (the self-review notes), `assets/PROVENANCE.md`/`docs/fidelity/asset-inventory.md` (FCRZ.U)
 - Test: the full workspace suite; both clippy gates; `cargo xtask reference verify --tree reference`; the three vault comparison tests
 
 **Interfaces:**
