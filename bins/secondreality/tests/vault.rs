@@ -20,13 +20,21 @@
 //! frame 3, matched from the phase at boot 4/5/6 (effect frames 1/2/3). The
 //! six filed keyframes 103..603 are effect frames 100..600.
 //!
+//! **HARD's `K0` = 356** (`reference-indices.md` §24.7): the first wipe frame,
+//! 16 black pixels at row 100. The pre-roll is 119 port ticks — 20 wipe steps,
+//! 28 fill iterations, 70 waits and the letterbox — so **port frame `j` =
+//! reference `356 + j`**; the letterbox is port 118 (reference 474), the first
+//! drawn dots port 156 (reference 512), and mode 4's count 0 port 495
+//! (reference 851, a picture identical to mode 3's hold).
+//!
 //! The candidate for a reference `R` is port `R − K0`, with the ±1 search
 //! reproduced here so the test reports the same three counts the comparison
-//! workflow would. Every filed frame of both parts is RGB-only: the screen
-//! moves during the indexed read (D15/D19), and for TWIST an odd frame's page
-//! is not at plane offset 0 at all. The shared comparison therefore compares
-//! the `.rgb` at every candidate, and a reference `.idx` — HARD files one at
-//! its held frame 840 — only at the offset the RGB search chose.
+//! workflow would. Every filed frame of the three parts is RGB-only except
+//! HARD's held 840: the screen moves during the indexed read (D15/D19), and
+//! for TWIST an odd frame's page is not at plane offset 0 at all. The shared
+//! comparison therefore compares the `.rgb` at every candidate, and a
+//! reference `.idx` — HARD files one at its held frame 840 — only at the
+//! offset the RGB search chose.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +63,28 @@ const TWIST_KEYFRAMES: [u32; 6] = [103, 203, 303, 403, 503, 603];
 /// `effect = index − 3`, and the port's model reproduces every filed byte.
 const TWIST_RESIDUALS: [(u32, usize); 6] =
     [(103, 0), (203, 0), (303, 0), (403, 0), (503, 0), (603, 0)];
+
+/// The reference index of HARD's composed frame 0 (`reference-indices.md`
+/// §24.7): the first wipe frame, 16 black pixels at row 100, reference 356.
+const HARD_K0: u32 = 356;
+
+/// The seven filed HARD keyframes before the mode-5 boundary: mode 0's
+/// letterbox, the four logo phases, mode 3's hold and mode 4's band.
+const HARD_KEYFRAMES: [u32; 7] = [480, 560, 630, 700, 770, 840, 910];
+
+/// All seven are exact at offset 0: the letterbox, the four logo phases, the
+/// held mode 3 and the mode-4 band reproduce every filed pixel, and 840's
+/// `.idx` reproduces byte for byte (`hard_matches_the_reference_in_its_early_modes`
+/// prints the three candidates).
+const HARD_RESIDUALS: [(u32, usize, i32); 7] = [
+    (480, 0, 0),
+    (560, 0, 0),
+    (630, 0, 0),
+    (700, 0, 0),
+    (770, 0, 0),
+    (840, 0, 0),
+    (910, 0, 0),
+];
 
 /// Where a `cargo run` of the acceptance command starts, and where the part's
 /// own `assets/...` paths resolve.
@@ -363,6 +393,71 @@ fn twist_matches_the_reference_at_its_measured_start() {
             "reference {reference}: {:?}; effect frame {} must match at the K0 mapping",
             report.counts,
             reference - TWIST_K0
+        );
+    }
+}
+
+#[test]
+fn a_part_run_of_hard_is_silent_and_numbers_itself_from_zero() {
+    let (dir, manifest) = dump("hard", "silent", "0,1,10");
+
+    assert_eq!(manifest["part"], "hard");
+    // The vault is not in the demo's sequence and carries no measured boot
+    // anchor: a `--part hard` run numbers its own frames from zero.
+    assert_eq!(manifest["index_origin"], "part");
+    assert!(manifest["anchor"].is_null(), "{}", manifest["anchor"]);
+    // Silent: HARD's only music call is the start gate and the 0xff cut; no
+    // player is installed and `music_for_part("hard")` is `None`.
+    assert!(manifest["music"].is_null(), "{}", manifest["music"]);
+
+    let frames = manifest["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 3);
+    for (frame, index) in frames.iter().zip([0u32, 1, 10]) {
+        assert_eq!(frame["index"].as_u64(), Some(u64::from(index)));
+        assert_eq!(frame["part"], "hard");
+        assert_eq!(frame["width"], 320);
+        assert_eq!(frame["height"], 200);
+        let rgb = std::fs::read(dir.join(frame["rgb"].as_str().unwrap())).unwrap();
+        assert_eq!(rgb.len(), 320 * 200 * 3);
+        let idx = std::fs::read(dir.join(frame["idx"].as_str().unwrap())).unwrap();
+        assert_eq!(idx.len(), 64_000);
+    }
+}
+
+#[test]
+fn hard_matches_the_reference_in_its_early_modes() {
+    let reports = compare_keyframes("hard", HARD_K0, &HARD_KEYFRAMES);
+    for report in &reports {
+        print_report(report);
+    }
+    for (report, (reference, residual, offset)) in reports.iter().zip(HARD_RESIDUALS) {
+        assert_eq!(report.reference, reference);
+        assert_eq!(
+            (report.pixels, report.offset),
+            (residual, offset),
+            "reference {reference}: {:?}; the minimum must be the measured residual at the K0 \
+             mapping",
+            report.counts
+        );
+    }
+}
+
+#[test]
+fn hard_ends_at_the_mode_five_boundary() {
+    // Mode 4's `count>100` branch (`B.C:288-292`) is the last iteration this
+    // task ports: the port retires on port tick 596 and the shell holds the
+    // picture. Task 7 replaces this with modes 5..6; until then frames after
+    // the boundary must not change.
+    let (dir, manifest) = dump("hard", "milestone", "595,596,597,600");
+    for index in [595u32, 596, 597, 600] {
+        assert_eq!(entry(&manifest, index)["part"], "hard", "frame {index}");
+    }
+    let boundary = dumped_file(&dir, &manifest, 596, "rgb");
+    for hold in [597u32, 600] {
+        assert_eq!(
+            dumped_file(&dir, &manifest, hold, "rgb"),
+            boundary,
+            "frame {hold} is the hold after the mode-5 boundary"
         );
     }
 }

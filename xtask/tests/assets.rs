@@ -252,8 +252,8 @@ fn every_asset_in_the_tree_decodes() {
     // is exactly what this pin is here to catch.
     assert!(
         output.contains(
-            "decode: 158 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene \
-             file(s), 44 headerless with no decoder, 1 refused on record, 0 finding(s)"
+            "decode: 159 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene \
+             file(s), 45 headerless with no decoder, 1 refused on record, 0 finding(s)"
         ),
         "{output}"
     );
@@ -271,11 +271,15 @@ fn every_asset_in_the_tree_decodes() {
         ),
         "{output}"
     );
-    // A1's record: 149 curated files in the main table and one recovered file
-    // in the table A5 added. The count is the phase's, and a tree that gains or
-    // loses a file without the record changing has a problem this test cannot
-    // see — so the number is pinned here too.
-    assert!(output.contains("150"), "{output}");
+    // The record's own walk: every provenance row is on disk and hashes, and
+    // the tree holds nothing the record does not name. Phase 8 Task 6 added
+    // `HARD/FCRZ.U` (the row is in the main table), so the walk's own line is
+    // pinned here: a tree that gains or loses a file without the record
+    // changing has a problem this test cannot see.
+    assert!(
+        output.contains("tree: 159 file(s) recorded, 159 in the tree, 0 finding(s)"),
+        "{output}"
+    );
     assert!(!output.contains("FAIL"), "{output}");
 }
 
@@ -288,11 +292,11 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     );
 
     assert_eq!(run.code, 0, "sheets are not a check:\n{}", run.output());
-    // The provenance's `parts` column names 21 parts. One sheet each, named
+    // The provenance's `parts` column names 22 parts. One sheet each, named
     // after the part, is what makes "look at the sheets" a thing a person can
     // do — so every one of them is asserted, not a count.
     for part in [
-        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "GRAB",
+        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
         "JPLOGO", "LNS&ZOOM", "MAIN", "MNTSCRL", "PAM", "PANICEND", "RAYSCRL", "START", "TECHNO",
         "TUNNELI", "U2A", "U2E",
     ] {
@@ -330,13 +334,13 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     // by counting.
     let mut tiles = Vec::new();
     for part in [
-        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "GRAB",
+        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
         "JPLOGO", "LNS&ZOOM", "MAIN", "MNTSCRL", "PAM", "PANICEND", "RAYSCRL", "START", "TECHNO",
         "TUNNELI", "U2A", "U2E",
     ] {
         tiles.extend(sheet_tiles(&output, &format!("{part}.png")));
     }
-    assert_eq!(tiles.len(), 151, "one tile per curated file");
+    assert_eq!(tiles.len(), 152, "one tile per curated file");
     assert!(
         !output.contains("names no part for this file"),
         "every recorded file has a part: {output}"

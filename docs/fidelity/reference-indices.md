@@ -5234,6 +5234,32 @@ is what `compare`'s ±1 searches; the anchor is not moved off the first drawn st
 | 1456 | part 2's fade leaves the empty band (same bytes as the 474 letterbox) | `1930616d…` |
 | 1458 | first part-3 cube frame | `e31eb951ac946b583e1ea7b073662abd2b99baafaa1a808e32a03b6f29a1052f` |
 
+Every row above is measured from one of these `vault_capture.sh hard` batches, one run each
+(the D19 shape: contiguous, or five apart, so no read sits between two grabs):
+
+```bash
+tools/vault_capture.sh hard --frames "$(seq -s, 470 520)"     --out out/task2/hard-470-520
+tools/vault_capture.sh hard --frames "$(seq -s, 500 10 830)"  --out out/task2/hard-500-830
+tools/vault_capture.sh hard --frames 840,845,850,855,860,865,870,875,880 \
+                              --out out/task2/hard-840-880
+tools/vault_capture.sh hard --frames "$(seq -s, 846 860)"     --out out/task2/hard-846-860
+tools/vault_capture.sh hard --frames "$(seq -s, 930 5 1000)"  --out out/task2/hard-930-1000
+tools/vault_capture.sh hard --frames "$(seq -s, 948 962)"     --out out/task2/hard-948-962
+```
+
+`hard-470-520` is where 474 is the first letterbox frame (473 the half-black screen) and the
+letterbox holds to 511; `hard-500-830` is the 10-frame phase map; `hard-846-860` puts 852's
+first band frame after the mode-3 hold; `hard-948-962` puts the mode-5 init at 956 after the
+948–955 hold. The port's first-half comparison reaches reference 910
+(`hard_matches_the_reference_in_its_early_modes`); 956 is the **Task 7** boundary.
+
+The **mode-5 boundary is the one measured divergence**: the source's mode 4 is 102 iterations,
+so with count 0 at 851 the source-derived part-2 start is 953, while the artifact's first
+mode-5 frame is 956. Three display frames are unaccounted for by the source's loop — the lead
+is a missed-retrace overrun in the mode-4 loop (D22) — and the port's fixed tick cannot carry
+them. Registered as `APPROXIMATIONS.md` A48 and carried to Task 7; no keyframe at or before
+910 depends on it.
+
 The one key never reaches the `0xff` cut (`BP.C:263` needs a second key), so part 3 runs to
 its own `count>=800` end; the 320×200 window closes just after the last cube frame (mode 7's
 one no-draw frame), and every filed index is inside it.
@@ -5252,12 +5278,12 @@ one no-draw frame), and every filed index is inside it.
 | 1050 | 5 | part 2's 3-D dot grid | `c1743f6af0375ecb76c4f939724b7f2b1897a2665af9c93f44cabb7aa76a9367` |
 | 1600 | 6 | part 3's glenz cube | `5894039bea2564ce78bde3c479c80a986f144f59d76af15919e7a238a1b9858d` |
 
-`840` is the one **held** keyframe, and it is the one frame whose indexed read reproduced its
-RGB: `frame_000840.idx` with `idx_sha256` is in the manifest. `480` also holds on screen, but
-in the filed run its read landed after mode 0 had ended (the trial session in
-`out/task2/hard-reference-trial` caught it while it still held and wrote `.idx` then); the
-filed manifest records what its session actually read. The seven moving frames are RGB-only,
-as D15/D19 require.
+**`840` and `480` are the held keyframes.** `840` is the one whose indexed read reproduced
+its RGB: `frame_000840.idx` with `idx_sha256` is in the manifest. The filed `480` is RGB-only
+because in the filed run its read landed after mode 0 had ended (the trial session
+`out/task2/hard-reference-trial` caught it while it still held and wrote `.idx` then; that
+file stays scratch so the reference census does not change); the filed manifest records what
+its session actually read. The seven moving frames are RGB-only, as D15/D19 require.
 
 ### 24.8 The repeats, and one measured ±1
 

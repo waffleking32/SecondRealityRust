@@ -102,6 +102,7 @@ setup menu); a later task's `recovered assets` table uses paths under the same t
 | `BEG/SRTITLE.LBM` | `upstream/SecondReality/BEG/SRTITLE.LBM` | `071a82e` | 53254 | `ba40adf1f0d546f22ef4276da301dc8d4a4884f5f4bd1d75036e6fcd26e2f5c4` | Unlicense / public domain | BEGLOGO |
 | `GLENZ/FC.UH` | `upstream/SecondReality/GLENZ/FC.UH` | `071a82e` | 64784 | `c63d6290b66b679440643e003cc879fa8e85c9a78ef723e1a2f913c39e3ac15e` | Unlicense / public domain | GLENZ |
 | `GLENZ/FC.LBM` | `upstream/SecondReality/GLENZ/FC.LBM` | `071a82e` | 25552 | `8ccc36046013c9bb36407680e6c4a8f38a7e961212784b610353d6674f6bb2da` | Unlicense / public domain | GLENZ |
+| `HARD/FCRZ.U` | `upstream/SecondReality/HARD/FCRZ.U` | `071a82e` | 64000 | `e2c068fe26c00ab3cfc6816e240d1a2670a1ba31bce8ea543861d3c154a1da5c` | Unlicense / public domain | HARD |
 | `TUNNELI/TUNNEL.DAT` | `upstream/SecondReality/TUNNELI/TUNNEL.DAT` | `071a82e` | 35328 | `7ae9ab3ca755a60709451e4e1d8e11944ad49df022e3bc30f3772acb0e698e33` | Unlicense / public domain | TUNNELI |
 | `TUNNELI/SINIT.DAT` | `upstream/SecondReality/TUNNELI/SINIT.DAT` | `071a82e` | 12292 | `282ac11e5943b4d0a775f95e67830a244f5872ae92b859278ddd2ed9cd4e31a3` | Unlicense / public domain | TUNNELI |
 | `TECHNO/TROLL.UP` | `upstream/SecondReality/TECHNO/TROLL.UP` | `071a82e` | 70718 | `6a9fe2c5ec513b9dd33912ad7fd7ec6606be0ffce0a0c97332731074bc07032e` | Unlicense / public domain | TECHNO |

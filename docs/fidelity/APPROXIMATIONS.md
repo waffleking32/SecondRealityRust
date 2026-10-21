@@ -2138,3 +2138,129 @@ is exact, so nothing is lost for this effect. No constant or anchor was fitted t
 with `cargo test -p secondreality --test vault -- --nocapture
 twist_matches_the_reference_at_its_measured_start`; the capture command is in
 `docs/fidelity/twist.md`.
+
+## A46 — HARD: the start gate is the capture's one key, and the 0xff cut is unreachable (substitution; measured difference 0)
+
+**Part:** HARD (`HARD/B.C:138`, `HARD/BP.C:263`), Phase 8 Task 6.
+
+**Original.** The standalone DIS is the non-INDEMO server: `muscode_6` returns 0 until
+`checkkeys` consumes a key, then echoes the caller's wanted code once (`DIS/DISINT.ASM:242-282`,
+`:154`). `B.EXE` opens with `while (dis_muscode(1) != 1 && !dis_exit());` and part 3 checks
+`if (dis_muscode(0xff) == 0xff) NEXTMODE` once a frame; a **second** key would cut part 3 early.
+The capture delivers exactly one key (`KBD_space`), which releases the gate and never reaches
+the cut.
+
+**Port.** The vault run has no player and no key: the part starts at `init` with the gate
+passed and never models the echo. The `0xff` cut cannot fire (the port's `muscode` is 0 and
+the capture sends no second key); Task 7 pins that on the full run. This is the port's input
+model — nothing waits on a key (spec §6, D8's measurement that the demo's own `muscode` is 0).
+
+**Why.** A literal `muscode(1)` wait would hang for ever against the port's `muscode`, exactly
+as it does against the reference's 0. The capture's one key is the source-supported start
+event, and the gate is before `K0`, so no compared picture sees it.
+
+**Measured difference:** **0**. The seven keyframes 480…910 are exact and 840's `.idx` is byte
+for byte; reproduce with `cargo test -p secondreality --test vault -- --nocapture
+hard_matches_the_reference_in_its_early_modes`.
+
+## A47 — HARD: one 70.086 Hz tick stands for one waitb, with the display phase measured (registered mapping; measured difference 0)
+
+**Part:** HARD (`HARD/B.C:203-324`, `BP.C:29`), Phase 8 Task 6.
+
+**Original.** The source has no timer; every loop iteration ends in `dis_waitb`
+(`B.C:207`), which polls VGA input status 0x3DA for the retrace. The display runs behind the
+logic by one retrace: the frame at a retrace shows the previous iteration's drawing and the
+palette that iteration uploaded. `part1init` calls its own `waitb` (`BP.C:29`), so mode 1's
+count 0 occupies two display frames, and mode 4's band is uploaded at the top of the iteration
+before the switch rebuilds it, so a frame shows the previous iteration's band.
+
+**Port.** One engine logic tick is one source iteration, i.e. one displayed frame, at the
+fixed 70.086 Hz tick (`crates/sr-engine/src/tick.rs`, `HZ_MILLI = 70_086`). The port's frame
+`t` is the capture's reference `356 + t` (`K0 = 356`): the pre-roll is 119 ticks (20 wipe
+steps, 28 fill iterations, 70 waits, the letterbox), `part1init` adds the measured extra
+display tick, and the palette is shown one iteration behind in mode 4 and in the same
+iteration in part 1. The port does not model a missed retrace: if a draw overran a frame the
+original would silently slow below 70.086 Hz while its loop still counted one iteration. The
+one place the capture shows that cost is the mode-5 boundary (A48).
+
+**Why.** The retrace is the source's clock and the fixed tick is the port's model of it for
+every part (spec §6). The approximation is the rate, not the frame sequence: with the phase
+above every filed keyframe before mode 5 is exact.
+
+**Measured difference:** **0** pixels at 480/560/630/700/770/840/910, offset 0; 840's indexed
+plane is byte-identical. Reproduce with `cargo test -p secondreality --test vault --
+--nocapture hard_matches_the_reference_in_its_early_modes`; the tick model's own counts are
+pinned by `parts::vault::hard::part::tests::the_pre_roll_is_the_sources_tick_counts` and
+`the_first_half_mode_sequence_is_the_sources`.
+
+## A48 — HARD: the mode-5 boundary drifts by three display frames (registered divergence; measured difference 3 frames, Task 7 carries it)
+
+**Part:** HARD (`HARD/B.C:242-293`), Phase 8 Task 6; the full run is Task 7's.
+
+**Original.** Mode 4 is 102 loop iterations (`count` 0..101, `count>100` → `NEXTMODE`), so
+with mode 4's count 0 at reference 851 the source's part 2 begins at reference 953.
+The filed capture's first mode-5 frame is **956**: `out/task2/hard-948-962` shows 948–955
+byte-identical and 956 first differing.
+
+**Port.** The port runs the source's 102 mode-4 iterations and retires on the advance tick
+(port 596, reference 952 for the last drawn frame; `hard_ends_at_the_mode_five_boundary` and
+`the_first_half_mode_sequence_is_the_sources`). It cannot express the three extra displayed
+frames because its tick is fixed.
+
+**Why (the lead).** The extra frames are the shape of a missed-retrace overrun (D22): the
+mode-4 loop's heavy frame — the count-0 `memset(background)` plus 2,048 `doit2` calls — or the
+late palette upload can overrun one retrace, and the source's `dis_waitb` then waits for the
+following one. This task's evidence is only the boundary shift; the per-frame position is
+Task 7's measurement against the part-2 keyframes.
+
+**Measured difference:** **3 display frames** at the boundary (artifact 956 against the
+source-derived 953); no keyframe at or before 910 differs (A47). Reproduce the artifact's
+boundary with
+`tools/vault_capture.sh hard --frames "$(seq -s, 948 962)" --out out/task2/hard-948-962`.
+
+## A49 — HARD: the optional argument, its debug strip and the border are not ported (substitution; measured difference 0)
+
+**Part:** HARD (`HARD/B.C:187-201`), Phase 8 Task 6.
+
+**Original.** `B.EXE 1|2|3` selects `dots4`, jumps to part 2 or jumps to part 3, writes a
+256-byte debug strip into the top two rows and sets `border = 1`; the code immediately after
+overwrites the strip with 255 and sets `border = 0`, so a normal run's border is black and the
+strip is the letterbox's own row 0/1. The border attribute write at `:166-167` is a one-off
+black overscan.
+
+**Port.** The vault runs take no arguments; the strip write and its overwrite are modelled
+(the rows are already 255) and the border is the view's black `border = Some(0)`. Nothing
+waits on or reads an argument.
+
+**Why.** The capture's `RUN.BAT` runs `B.EXE` with no argument, and the argument's visible
+effect is undone at `:200-201`; porting the phase-skip paths would add state no filed frame
+uses. A run with an argument is a developer shortcut, not the effect.
+
+**Measured difference:** **0**. The letterbox row 0/1 are 255 in the capture's 474–955 frames
+and in the port; reproduce as in A47.
+
+## A50 — HARD: two one-byte data questions are recorded, not fitted (registered data divergence; measured difference 0 in the compared frames)
+
+**Part:** HARD's build-time data (`HARD/BDO.C`, `HARD/_GRID1.TMP`, `HARD/B.EXE`), Phase 8
+Task 6.
+
+**Original.** The four BDO streams are linked into `B.EXE` (`LINK.TMP:1-3`). Bands 0 and 3
+match the extraction byte for byte at 55,875 and 64,977; bands 1 and 2 differ in their **last
+terminator byte** only (56 and 72 where the extraction has 0), because the next linked
+object's bytes abut. The 400-byte `_GRID1.TMP` matches `B.EXE`'s table at 69,265 for 399 of
+400 bytes; the last byte is `0x4F` in the binary and `0x00` in the file, so the binary's last
+word is `0x4F5A` rather than `0x005A`.
+
+**Port.** The port extracts the streams from the curated `assets/HARD/FCRZ.U` with `BDO.C`'s
+rule (terminator 0) and compiles `GRID1` from `_GRID1.TMP`. The terminator bytes are never
+read as records (the spawner resets on a zero value), and the one-byte grid difference is the
+y of the 100th pair. `the_dot_streams_are_the_bdo_extraction` and
+`the_grid_table_is_the_shipped_grid1` pin both differences against the binaries.
+
+**Why.** Neither byte changes a drawn pixel: the terminator is the stream's end marker in both
+builds, and the grid word is only read when `doit2` reaches the 100th pair with its x from the
+same pair. The capture's keyframes are exact with the file's values, which is the measurement.
+
+**Measured difference:** **0** in the seven compared keyframes (and none of them exercises the
+100th pair's y). Reproduce the data checks with
+`cargo test -p secondreality --bin secondreality vault::hard::dots`.

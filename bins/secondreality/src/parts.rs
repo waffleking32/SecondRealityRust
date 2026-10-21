@@ -101,6 +101,11 @@ pub fn registry() -> &'static [PartEntry] {
         // (`GRID/P.EXE`). Not in the demo's sequence; silent and unanchored,
         // so a `--part grid` run numbers its own frames from zero.
         ("grid", || Box::new(vault::grid::Grid::new())),
+        // `HARD/B.C` + `BP.C` over `BA.ASM` and the c-prefixed `VEC.ASM`
+        // engine — the vault's dots, grid and glenz cube (`HARD/B.EXE`). Not
+        // in the demo's sequence; silent and unanchored, so a `--part hard`
+        // run numbers its own frames from zero.
+        ("hard", || Box::new(vault::hard::part::Hard::new())),
         // `TWIST/MAIN.C` over `TWIST.ASM`, `ASM.ASM` and the generated
         // `TWSTLOOP.INC` — the vault's planar twister (`TWIST/T.EXE`). Not in
         // the demo's sequence; silent and unanchored, so a `--part twist` run

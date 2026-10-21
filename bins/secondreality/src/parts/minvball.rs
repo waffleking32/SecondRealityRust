@@ -243,7 +243,7 @@ const MUSIC_PRE_ROLL: u32 = 256;
 /// Microsoft C 6.0's `rand()`: a 32-bit LCG, modulus 2³², seed 1, returning
 /// `(seed >> 16) & 0x7FFF`. See the module docs for the evidence that this,
 /// not Turbo C's generator, is the source's.
-struct MsRand {
+pub(crate) struct MsRand {
     seed: u32,
 }
 
@@ -256,12 +256,12 @@ impl MsRand {
     const MODULUS: u64 = 1 << 32;
 
     /// `holdrand = 1L` — the library's initial seed; the source never seeds.
-    fn new() -> MsRand {
+    pub(crate) fn new() -> MsRand {
         MsRand { seed: 1 }
     }
 
     /// One `rand()`: 0 through 32,767.
-    fn next(&mut self) -> i32 {
+    pub(crate) fn next(&mut self) -> i32 {
         self.seed = self
             .seed
             .wrapping_mul(Self::MULTIPLIER)

@@ -35,6 +35,8 @@
 //! tests use it.
 #![allow(dead_code)]
 
+pub mod dots;
 pub mod math;
+pub mod part;
 pub mod poly;
 pub mod span;
