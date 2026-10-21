@@ -4931,8 +4931,9 @@ The three unreleased effects are separate programs: each links the DIS client an
 vendored standalone `DIS/DIS.EXE` resident, and none draws `SECOND.EXE`'s sound-card setup
 screen. `--boot autoexec` always waited for that screen's text, so Task 1 added
 `--boot-wait graphics` (`xtask/src/reference.rs`'s `BootWait`), and
-`tools/vault_capture.sh` stages and captures one effect. Nothing here is a filed reference:
-Task 2 writes `reference/parts/<part>`; these runs went to `out/vault-smoke/`.
+`tools/vault_capture.sh` stages and captures one effect. Nothing in §24.1–§24.3 is a filed
+reference: Task 2 writes `reference/parts/<part>`; these Task 1 runs went to `out/vault-smoke/`.
+Task 2's three filed captures, their `K0` and their repeats are §24.4–§24.8.
 
 ### 24.1 The recipe
 
@@ -4955,9 +4956,13 @@ cargo xtask reference capture --exe <stage>/RUN.BAT --cwd <stage> \
 `AUTOTYPE -w 5 space` before the program, so one key reaches DIS's `checkkeys`
 (`DIS/DISINT.ASM:112-157`) after the effect has started — GRID's `getch()`
 (`GRID/MAIN.C:153`) and HARD's `while (dis_muscode(1) != 1 …)` (`HARD/B.C:138`). TWIST has
-no key gate (`TWIST/MAIN.C:49`) and takes none. Every smoke manifest says `exe: "RUN.BAT"`,
-`arguments: []`, `boot: "autoexec"`, `boot_wait: "graphics"`, `cycles: 30000`,
-`frame_origin: "boot"`, 320×200, and `keys: ["KBD_space"]` (GRID) or `[]` (TWIST).
+no key gate (`TWIST/MAIN.C:49`) and takes none. Every **route-A script capture's** manifest
+says `exe: "RUN.BAT"`, `arguments: []`, `boot: "autoexec"`, `boot_wait: "graphics"`,
+`cycles: 30000`, `frame_origin: "boot"`, 320×200, and `keys: ["KBD_space"]` (GRID, HARD) or
+`[]` (TWIST). The route-B smoke under `out/vault-smoke/grid-routeb` is a different recipe
+and is not described by that sentence: its manifest says `exe: "RUNP.BAT"`,
+`boot_wait: "setup"`, `keys: []`. The default `--out` is `reference/parts/<part>`, which is
+where Task 2 files the three references; only Task 1's smoke runs passed `out/vault-smoke/`.
 
 ### 24.2 GRID's start moved 351 frames earlier
 
@@ -4969,7 +4974,8 @@ tools/vault_capture.sh grid --frames "$(seq -s, 340 365)" --out out/vault-smoke/
 ```
 
 Frames 340–351 are the same picture, `728e0d87…`. Route B's own start was re-measured for the
-comparison with this batch (`out/vault-stage/grid-routeb/RUNP.BAT`):
+comparison with this batch (`out/vault-stage/grid-routeb/RUNP.BAT`, CRLF like every batch the
+guest's shell reads):
 
 ```
 @ECHO OFF
@@ -5042,3 +5048,247 @@ and its framebuffer read is the cheap one (`docs/decisions.md` D14).
 
 `git status` after the runs shows nothing under `upstream/` or `reference/`: the only writes are
 `out/vault-stage/` and `out/vault-smoke/`, both ignored.
+
+### 24.4 The three filed captures
+
+Task 2 files one version-1 capture per effect, in the script's default `--out`:
+
+| directory | staged batch | key | `--frames` | frames | indexed |
+|---|---|---|---|---|---|
+| `reference/parts/grid` | `RUN.BAT` = `DIS.EXE`, `P.EXE` | `KBD_space` | `400,500,600,700,800` | 5 | none |
+| `reference/parts/twist` | `RUN.BAT` = `DIS.EXE`, `T.EXE` | none | `103,203,303,403,503,603` | 6 | none |
+| `reference/parts/hard` | `RUN.BAT` = `DIS.EXE`, `B.EXE` | `KBD_space` | `480,560,630,700,770,840,910,1050,1600` | 9 | `840` |
+
+All three manifests carry `version: 1`, `oracle: "dosbox-automation 0.85.1 (6d100)"`,
+`upstream_commit: "071a82e"`, `exe: "RUN.BAT"`, `arguments: []`, `cycles: 30000`,
+`width/height: 320/200`, `frame_origin: "boot"`, `skip_boot_frames: 0`, `boot: "autoexec"`,
+`boot_wait: "graphics"`, and `keys: ["KBD_space"]` (GRID, HARD) or `[]` (TWIST) — §24.1's
+recipe with the default output. Each manifest lists every frame with its `.rgb` name and
+`sha256`; `840` additionally carries `frame_000840.idx` and `idx_sha256`.
+
+Reproduce all three exactly (the default `--out` is `reference/parts/<part>`; each run
+re-stages the two binaries, re-checks the four SHA-256s and mounts the stage read-only):
+
+```bash
+tools/vault_capture.sh grid  --frames 400,500,600,700,800
+tools/vault_capture.sh twist --frames 103,203,303,403,503,603
+tools/vault_capture.sh hard  --frames 480,560,630,700,770,840,910,1050,1600
+```
+
+`cargo xtask reference verify --tree reference` passes over all 44 captures (148 files); the
+three new directories are `parts/grid` (5 frames, 5 files), `parts/twist` (6, 6) and
+`parts/hard` (9, 10 — the ninth file is `frame_000840.idx`).
+
+### 24.5 GRID — `K0` = 353 ±1, five keyframes
+
+**The start, re-measured.** Task 1's route-A dense sweep was re-run in this task:
+
+```bash
+tools/vault_capture.sh grid --frames "$(seq -s, 340 365)" --out out/task2/grid-start
+```
+
+and reproduced Task 1 byte for byte: **340–351** are the static pre-key dot screen
+`728e0d8798c22369cdb20a953bc3242d51d2a66c2b6193e57495abe5d6de0c68`, **352** is
+`d2ac61b7f6b5a550ab0d47ba61887aef3fc8b289054d2f545e145f12a5df597f`, and **353** is
+`4a4ad86e2b918693179a5196a6de02a1e5ac813af0113151ff6466e8368dccbf`. Route B's 704 is
+**byte-identical to route A's 353** (`4a4ad86e…`), while its 703 (`e1ac8916…`) is the same
+kind of start-up transition as 352 and differs between the routes. The 351-frame route shift
+is exact from the first stable frame onward.
+
+**`K0` = 353.** The port's frame 0 is its first composed loop frame (`GRID/MAIN.C:161-171`);
+the reference index that shows it is **353**. 352 is the start-up
+transition — a one-off frame as the key is consumed, whose picture differs between the two
+routes while the next frame agrees exactly — so `K0` is not put on it, exactly as Task 1's
+review ruled. Tolerance **±1** (D17/D18: `compare` searches one frame
+either side; the anchor is not moved back onto 352). Effect frame `j = index − 353`; the
+palette plane advances one step per effect frame in a 3-frame cycle (`research/grid.md`
+§1.2, which numbers the same pictures one higher — its `j = 1` is reference 353), so the five
+keyframes, 100 apart, cover all three planes.
+
+| index | effect `j` | what is on screen | `sha256` |
+|---|---|---|---|
+| 400 | 47 | line-work over the eye | `574a6fa980799b212f2eed29cd44ba182fce6fd994768896f6b3cca476d170ff` |
+| 500 | 147 | line-work over the eye, other phase | `0241f663653f5266ca44c1563a2373c4f7f805f1ad2b8fbf40c661dbc65069b7` |
+| 600 | 247 | line-work over the eye | `1fb437409a1881cd9e0fdb7e467926c33e0e77b3d0f3383bf399e7ccb23450d6` |
+| 700 | 347 | line-work over the eye | `1969cf9a10c20744504ebd24a7e60d239bb7f7791de562fb613bf9cbbfa5912b` |
+| 800 | 447 | line-work over the eye | `869aeee7b49dbb8e32b736d14bf419a28e3011533e6bfebf91024fac8e91aa68` |
+
+All five are **RGB-only**: the screen moves during the indexed read, so
+`indexed_matches_rgb` fails and the tool keeps the RGB frame (D15/D19). The three frames at
+400/500/600 were also captured by Task 1's smoke in a different session and are the same
+bytes (`574a6fa9…`, `0241f663…`, `1fb43740…`), and 600 was repeated a third time in
+`out/task2/grid-repeat-600` — **byte-identical**.
+
+### 24.6 TWIST — `K0` = 3 ±1, six keyframes
+
+**The boot anchor returns at frame 5.** A probe for frame 0 is refused before anything is
+taken, and the refusal names the counter:
+
+```
+$ tools/vault_capture.sh twist --frames 0 --out out/task2/twist-probe0
+error: the emulator reached frame 5 before frame 0 could be captured; the capture would not be of the requested frame
+```
+
+Six probes for frame 4 were refused the same way: five named frame 5, one named frame 6. So
+boot frames 0–4 cannot be named by this oracle, and the first graphics frame the capture can
+take is 5.
+
+**The phase at 5 and 6, measured twice.** A dense early sweep was taken in one capture (all
+adjacent, so all taken before any read):
+
+```bash
+tools/vault_capture.sh twist --frames "$(seq -s, 5 30)" --out out/task2/twist-start
+# and again: --out out/task2/twist-start-b
+```
+
+TWIST's frame 0 is the two-band fingerprint — rows 0..63 are generated row 0 and rows
+64..199 are generated row 199 — and for early frame `f` the first row that differs from row
+0 is `ceil(64/(f+1))` (`research/twist.md` §6.2). Both sessions measured:
+
+| boot index | boundary row | effect frame | hash (both sessions) |
+|---|---|---|---|
+| 5 | 22 = `ceil(64/3)` | **2** | `e385838c11b4fde89a822a5929d2110ae1eba774342ae2deec3f5a4e8db3ca79` |
+| 6 | 16 = `ceil(64/4)` | **3** | `d5ce27ce8f27f63a6f8d60f47c8be7c9a977a0932166f089883d176f57b46d68` |
+
+One effect frame per boot frame at 5→6 in both sessions, and index 5 is effect frame 2 in
+both, so no displayed-frame duplicate lies before 5 in either session and the boundary-64
+frame 0 sits at boot index **3**: `K0` = 3 ±1. A direct check of frame 1 came from a loaded
+session: boot frame 4 is normally below the anchor (probes for it are refused), but one probe
+under host load returned at frame 4 and captured it (`out/task2/twist-probe4-load-8`) —
+boundary **32** = `ceil(64/2)`, effect frame **1**, hash
+`595bdf3276daf6912d10fd66906d939b051a1f864b9b9c219fa5d0cdc1d33318`. The phase is therefore
+matched at three consecutive boot indices (4→1, 5→2, 6→3). Frame 3 itself stayed below the
+anchor in twelve loaded probes (ten refused naming frame 4 or 5, two reported *"the emulator
+has no frame yet"*), so the frame-0 picture cannot be captured; the measurement is the matched
+phase, not the key (TWIST has no key).
+The ±1 is measured, not assumed: the first session displayed effect frame 3 twice (boot 6 and
+7 are the same bytes; boot 7 in the second session is frame 4), and a later six-frame trial
+session was one effect frame off at every keyframe (§24.8). The effect frame of a keyframe is
+therefore `index − 3` nominally, with the comparison's ±1 absorbing the session's alignment.
+The 4,444-frame cap puts the end at boot `3 + 4444 = 4447`; all filed keyframes are far
+inside it.
+
+**Keyframes, effect frames 100–600.** ~100 apart, the spacing Task 1 measured safe for TWIST
+(a 45-frame gap — the brief's `355,400,600` — refuses; `355,500,600` and this set exit 0):
+
+| index | effect frame | `sha256` |
+|---|---|---|
+| 103 | 100 | `6615ba392a8f2ed3c2ffe979c0f3e730b531365eae00e62737ec852ff18513fe` |
+| 203 | 200 | `bef51119bc9c880b7f06cf4d32aee13c62a472b58d9831d3107599bba8d291ad` |
+| 303 | 300 | `55f222106b2a376529ec73920cb3c834f7dd241793c6d3a7bd57de470f406da1` |
+| 403 | 400 | `42aa02f6aeb06deeb31dad96530550b977f7d5d27ce81ce51356f94b84789491` |
+| 503 | 500 | `e9ab57c9a7b925a49b54c0ed15486120b4875e494aac2b4d86f593f78ffb3f95` |
+| 603 | 600 | `7b288e5abdb02fb60c3f628ed6a81ca8066b51ab484a390cd8586f35527c4780` |
+
+All six are **RGB-only**, and TWIST has no `.idx` even in principle: even part frames draw and
+display buffer 1 at pixel origin 0, odd frames buffer 2 at 131,072 (`TWIST/MAIN.C:60-76`), and
+the oracle's indexed read always starts at plane offset 0 — it never reads CRTC 0x0C/0x0D — so
+an odd frame would be read from the wrong buffer; the moving screen then fails the coherence
+check anyway (`research/twist.md` §6.4).
+
+### 24.7 HARD — `K0` = 356 ±1, nine keyframes and the mode starts
+
+**The start, measured in two sessions.** HARD's gate is the same one key as GRID's
+(`while (dis_muscode(1) != 1 …)`, `HARD/B.C:138`), followed by four `waitb` calls
+(`B.C:139-142`) and then the pre-roll wipe: one row-100 pixel cleared per x with a `waitb`
+every 16 columns (`B.C:143-147`), then the accelerating fill from row 100 downwards
+(`B.C:148-161`), then 70 waits (`B.C:162`). The script's staging branch was exercised for the
+first time here:
+
+```bash
+tools/vault_capture.sh hard --frames "$(seq -s, 340 380)" --out out/task2/hard-start
+tools/vault_capture.sh hard --frames "$(seq -s, 350 362)" --out out/task2/hard-start-b
+```
+
+Both sessions: **340–355 are the same white screen**
+`20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8`; **356 is the first
+changed frame** `e7d2f71620f10ce4cbb92a7e42f402c47635a57deeca300100b31d928d1c632d`, with
+**16 black pixels at row 100, x=304..319**; 357 has 32, 358 48, … and 375 the whole row (320);
+376–378 repeat 375 (the fill loop's first iterations clear no new row), 379 has rows 100–101
+black and 380 rows 100–102. The 16-pixel first step and every step after it are
+**byte-identical across the two sessions**, so this is not GRID's kind of transition frame.
+
+**`K0` = 356.** The port counts the wipe as a tick, so the first wipe frame is the port's
+frame 0; its picture is the unique 16-pixel state at reference **356**. Tolerance **±1**: 355
+is still white and 357 is the 32-pixel step, so a one-frame session alignment is visible and
+is what `compare`'s ±1 searches; the anchor is not moved off the first drawn step.
+
+**The measured mode starts** (all from `out/task2/hard-*` batches; the frame counts are
+`B.C:203-324`'s and `BP.C`'s, the indices are this oracle's):
+
+| boot index | what changes | picture hash |
+|---|---|---|
+| 474 | first letterbox frame (473 is the half-black filled screen) | `1930616d436601884fe0f39831ec2ba1309c942d011f238b4c687562756f655b` |
+| 474–511 | letterbox holds with no dots (38 frames: the letterbox frame, mode 0's 34 iterations, `part1init`'s two `waitb` frames and the first part1 iteration's `waitb`) | `1930616d…` |
+| 512 | first spawned dots (mode 1, logo phase 1) | — |
+| ~512–585 | logo phase 1, `dots1`; **FUTURE** traced in | 560 = `318503a6…` |
+| ~587–660 | logo phase 2, `dots2`; **CREW** traced over FUTURE | 630 = `788e0a7e…` |
+| ~662–735 | logo phase 3, `dots3`; **RULES** over CREW | 700 = `9574495d…` |
+| ~737–809 | logo phase 4, `dots4`; **FOREVER** over RULES | 770 = `cbdf6e0c…` |
+| 810–851 | mode 3: dots dead, FOREVER held (810, the first sampled identical frame, through 851 are byte-identical) | `f2718de8cb4357740cdc467cc13a511a56e3415bd47c2f6b841b944264c016c7` |
+| 852 | first mode-4 band frame (851 is still the mode-3 hold) | `963a0272243acd9488092fddf49912afb511f789f538ce4148b8e6794568208f` |
+| 852–955 | mode 4 band; 930–955 hold the last band state | `9cced0af…` |
+| 956 | first mode-5 frame (`part2init`; the band is rebuilt) | `0495730ecff1097c279926c72dac44fd180f89b103dc6c09bd888109982e519d` |
+| 958 | first part-2 grid frame distinct from the init pair (956/957) | — |
+| 1455 | last part-2 frame (fading grid) | `996c4880…` |
+| 1456 | part 2's fade leaves the empty band (same bytes as the 474 letterbox) | `1930616d…` |
+| 1458 | first part-3 cube frame | `e31eb951ac946b583e1ea7b073662abd2b99baafaa1a808e32a03b6f29a1052f` |
+
+The one key never reaches the `0xff` cut (`BP.C:263` needs a second key), so part 3 runs to
+its own `count>=800` end; the 320×200 window closes just after the last cube frame (mode 7's
+one no-draw frame), and every filed index is inside it.
+
+**The nine keyframes**, one per mode stage, 70–550 frames apart:
+
+| index | mode / phase | what is on screen | `sha256` |
+|---|---|---|---|
+| 480 | 0 | letterbox, empty band (no dots yet) | `1930616d436601884fe0f39831ec2ba1309c942d011f238b4c687562756f655b` |
+| 560 | 1 / phase 1 | `dots1` tracing FUTURE | `318503a68ad4dd6489124a0b4496dcecc6db1085eda16323eca1fb5c2281063a` |
+| 630 | 1 / phase 2 | `dots2` tracing CREW over FUTURE | `788e0a7ee7d0f58e3865443a1edc7b6f6ebfd37ed9f1aca77a5aa59ac43cfc19` |
+| 700 | 1 / phase 3 | `dots3` tracing RULES over CREW | `9574495dda2d6aa237bffd29f01ce376a4c7317abe30e16a78f0c99fc572e920` |
+| 770 | 1 / phase 4 | `dots4` tracing FOREVER over RULES | `cbdf6e0cb30941281d2bc00ce45b878995f0222ae46b0fe1fad10b7535a331e2` |
+| 840 | 3 | FOREVER held, dots dead | `f2718de8cb4357740cdc467cc13a511a56e3415bd47c2f6b841b944264c016c7` |
+| 910 | 4 | the grey/blue band | `59f2d5fc1cc9d6839344acbc230e8b9c7c2c20457a4fbf3b7ea9ef8c8985caa2` |
+| 1050 | 5 | part 2's 3-D dot grid | `c1743f6af0375ecb76c4f939724b7f2b1897a2665af9c93f44cabb7aa76a9367` |
+| 1600 | 6 | part 3's glenz cube | `5894039bea2564ce78bde3c479c80a986f144f59d76af15919e7a238a1b9858d` |
+
+`840` is the one **held** keyframe, and it is the one frame whose indexed read reproduced its
+RGB: `frame_000840.idx` with `idx_sha256` is in the manifest. `480` also holds on screen, but
+in the filed run its read landed after mode 0 had ended (the trial session in
+`out/task2/hard-reference-trial` caught it while it still held and wrote `.idx` then); the
+filed manifest records what its session actually read. The seven moving frames are RGB-only,
+as D15/D19 require.
+
+### 24.8 The repeats, and one measured ±1
+
+| part | repeated index | second session | result |
+|---|---|---|---|
+| GRID | 600 | `out/task2/grid-repeat-600` | **byte-identical** (`1fb43740…`) |
+| TWIST | 603 | `out/task2/twist-repeat-603` | **byte-identical** (`7b288e5a…`); 103 also identical in two more sessions |
+| HARD | 480 | `out/task2/hard-repeat-480-1600` | **byte-identical** (`1930616d…`) |
+| HARD | 1600 | `out/task2/hard-repeat-480-1600` | **byte-identical** (`5894039b…`) |
+
+The whole nine-frame HARD set was also captured in a separate trial session
+(`out/task2/hard-reference-trial`) and is byte-identical at all nine indices; GRID's
+400/500/600 also agree with Task 1's smoke session, and TWIST's 103/603 with their own
+single-frame sessions.
+
+**The one session that aligned by ±1** is TWIST's six-frame trial
+`out/task2/twist-reference-trial`: it differs from the filed capture at **every** keyframe —
+`6a898f21…` at 103 where the filed frame is `6615ba39…`, `3d33fdcb…` at 603 where the filed
+frame is `7b288e5a…` — the same one-effect-frame shift at every index, not a new anchor. The
+filed session matches the two single-frame sessions at 103 and 603 and the repeat at 603, so
+the filed bytes are the majority picture; a later port capture can sit one frame either side
+and `compare`'s ±1 search is what answers it (D17/D18). This is recorded, not re-anchored.
+
+**Refusals met and adjusted around (D19).** `tools/vault_capture.sh hard --frames
+"$(seq -s, 475 25 2200)"` refuses after the first frame:
+
+```
+error: the emulator reached frame 538 before frame 500 could be captured; the capture would not be of the requested frame
+```
+
+— 25-frame spacing is inside one read's cost on this host. The successful maps used 100-frame
+spacing (`475,575,…,2175`, exit 0) and dense contiguous batches (adjacent indices are all taken
+before any is read, so e.g. `--frames "$(seq -s, 470 520)"` and the nine-keyframe set both exit
+0). TWIST's `--frames 0` and `--frames 4` probes are the other refusals above.
