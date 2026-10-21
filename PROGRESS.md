@@ -2838,8 +2838,9 @@ claim is now asserted, not only printed; the whole-word `d0` class and the commi
 `LINEBLIT.INC` are pinned by committed tests, so the D25 claims no longer rest on git-ignored
 research; A40 points at A41 for the comparison. HARD's source-line citations are corrected
 (including `xclipsidi` 743–810 and `eclipsidi` 812–831), `span.rs`'s "never cleared" doc now
-distinguishes the port's BSS model from `ng_init`, and A51's z′ range is full ≈1134..4366,
-drawn ≤3000. The HARD note's stale mode-5 lead and 956 labels are corrected (955 is the port's
+distinguishes the port's BSS model from `ng_init`, and A51's z′ range is full 1139..3964,
+every drawn low word 1139..3000 (pinned by
+`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`). The HARD note's stale mode-5 lead and 956 labels are corrected (955 is the port's
 model of `part2init`; 956 is count 1, two displays after the source's count 1 at 954), the
 "seven" keyframe counts are nine, the first-cube explanation is the `(0,0,20)` band/opposite-
 face pair, `do3dots`' second clear is documented as two word stores versus the port's

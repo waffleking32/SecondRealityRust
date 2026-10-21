@@ -222,9 +222,18 @@ impl LineBlitter {
     }
 
     /// One generated routine, selected the way `asmloop1` selects it: by the
-    /// **low byte** of `(y1−y0, x1−x0)` (`ASM.ASM:189-192`). The table covers
-    /// dx ∈ −10..=10, dy ∈ −8..=8; every other entry of the 64 KB dispatch
-    /// table is the fill word `lblt_54b56`, the line to (−10,−8), because
+    /// **low bytes** of `(y1−y0, x1−x0)` (`ASM.ASM:183-192`). `sub cl,bl`
+    /// keeps only the y delta's low byte, and `mov bh,cl; add bx,bx` doubles
+    /// the 16-bit key: the doubling drops bit 7 of that byte, so the table's y
+    /// key is the 7-bit signed `dy_low & 0x7F` — low bytes `0x78..=0x7F`
+    /// select the negative-dy routines (−8..−1) and `0x80..=0x88` the positive
+    /// ones (0..8). This signed-byte range test agrees outside that band and
+    /// picks the fill word inside it; the static y waveform's adjacent deltas
+    /// are −7..=56, so no segment reaches it
+    /// (`the_static_y_waveform_never_reaches_the_dropped_bit`). The table
+    /// covers dx ∈ −10..=10, dy ∈ −8..=8; every other entry of the 64 KB
+    /// dispatch table is the fill word `lblt_54b56`, the line to (−10,−8),
+    /// because
     /// `lineblit_init` reads the first table entry (`ASM.ASM:213-217`,
     /// `LINEBLIT.INC:2-4`). The endpoint is not plotted (`DOLINE.C:64` marks
     /// it 1 and the emitter ignores it); the start is.
@@ -235,6 +244,9 @@ impl LineBlitter {
         let base = (y0 as u16)
             .wrapping_mul(SCREEN_WIDTH as u16)
             .wrapping_add(x0 as u16);
+        // The source's y key drops bit 7 (`ASM.ASM:189-191`); the reachable
+        // deltas never enter the band where that matters (the doc comment
+        // above and `the_static_y_waveform_never_reaches_the_dropped_bit`).
         let (key_dx, key_dy) = match ((dx as u8) as i8, (dy as u8) as i8) {
             (dx, dy) if (-10..=10).contains(&dx) && (-8..=8).contains(&dy) => (dx, dy),
             _ => (-10, -8),
@@ -853,6 +865,32 @@ mod tests {
         blit.line(10, 10, 20, 18, 1);
         blit.line(10, 18, 20, 10, 1);
         assert_eq!(blit.vram[15 + 14 * 320], 0);
+    }
+
+    /// The dispatch's dropped bit. `GRID/ASM.ASM:183-191` keeps the y delta's
+    /// **low byte** and then doubles the 16-bit key (`mov bh,cl; add bx,bx`),
+    /// discarding bit 7 of that byte: the table's y key is the 7-bit signed
+    /// `dy_low & 0x7F`, so low bytes `0x78..=0x7F` select the negative-dy
+    /// routines (−8..−1) and `0x80..=0x88` the positive ones (0..8), where the
+    /// port's signed-byte range test would take the fill word. The static y
+    /// waveform never reaches that band: its 1,000 adjacent deltas are
+    /// −7..=56, measured here rather than assumed.
+    #[test]
+    fn the_static_y_waveform_never_reaches_the_dropped_bit() {
+        let s2 = sinus2();
+        let mut min = i16::MAX;
+        let mut max = i16::MIN;
+        for k in 0..1000usize {
+            let dy = s2[k + 1] - s2[k];
+            min = min.min(dy);
+            max = max.max(dy);
+            let low = dy as u8;
+            assert!(
+                !(0x78..=0x88).contains(&low),
+                "segment {k}: dy {dy} has low byte {low:#04x}"
+            );
+        }
+        assert_eq!((min, max), (-7, 56));
     }
 
     /// The generated routines `LINEBLIT.INC` writes, parsed from the committed

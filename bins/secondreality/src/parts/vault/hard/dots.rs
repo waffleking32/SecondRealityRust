@@ -212,10 +212,12 @@ pub fn dodots2(dots: &mut [Dot], screen: &mut [u8]) {
 /// effective address, which for a negative low word wraps *before* the array
 /// (0xFF00 reads `_depthcol - 0x100`, a code byte — 0x07 with the shipped
 /// link map — not BSS zero). The `else` below returns zero as a **model of
-/// an unreachable branch**: part 2's projected z' is full ≈1134..4366, and
-/// every drawn point is ≤3000, so the low word is always positive and no filed
-/// frame depends on the byte. Task 7 measures the part-2 domain and owns the
-/// table.
+/// an unreachable branch**: part 2's projected z' is full 1139..3964 over its
+/// 501 states, and every drawn point's low word is 1139..3000, so the low word
+/// is always positive and no filed frame depends on the byte. Task 7 measures
+/// the part-2 domain and owns the table;
+/// `the_part2_grid_z_range_and_drawn_words_are_the_measured_domain` walks the
+/// 488-point grid through `part2`'s recurrence and pins the range.
 ///
 /// The `count <= 0`, record-length, shadow and offset bounds checks below are
 /// likewise guards for inputs part 2 never produces (the projected x is
@@ -627,8 +629,9 @@ mod tests {
         // array and reads a code byte (0x07 with the reviewer's link map),
         // not BSS zero; the port's zero is a documented model of this
         // unreachable branch, not the source's address arithmetic. Part 2's
-        // z' is full ≈1134..4366 and every drawn point is ≤3000, so the low
-        // word is positive and no filed frame depends on it.
+        // z' is full 1139..3964 and every drawn point's low word is
+        // 1139..3000 (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`),
+        // so the low word is positive and no filed frame depends on it.
         points[6] = 0xFF00u16 as i16;
         points[5] = 0;
         let mut screen = vec![0xFFu8; 64_000];

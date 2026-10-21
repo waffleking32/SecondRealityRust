@@ -290,10 +290,6 @@ impl Hard {
         self.dac[..count].copy_from_slice(&self.pal[..count]);
     }
 
-    fn band_mut(&mut self) -> &mut [u8] {
-        &mut self.screen[BAND_START..BAND_END]
-    }
-
     /// One tick of the row-100 wipe.
     fn wipe_tick(&mut self) {
         let next_x = match self.phase {
@@ -1570,6 +1566,67 @@ mod tests {
         assert_eq!(&part.pal[65 * 3..65 * 3 + 3], &[1, 63, 63]);
         assert_eq!(&part.pal[3..6], &[63, 63, 63]);
         assert_eq!(&part.pal[250 * 3..250 * 3 + 3], &[0, 0, 40]);
+    }
+
+    /// A51's measured domain: part 2's 501 states (`BP.C:169-215`) walked
+    /// through the real recurrence — `part2init`'s count 0, then `part2`'s
+    /// counts 1..=500, the angles advancing after every count above 1 and
+    /// `zp` falling ten a step to its 2000 floor. The record's full z′ range,
+    /// the drawn low-word bound and the first frame's `depthcol[3000]` face
+    /// all come from this walk, not from the note.
+    #[test]
+    fn the_part2_grid_z_range_and_drawn_words_are_the_measured_domain() {
+        let mut part = Hard::new();
+        part.part2init();
+        assert_eq!(part.grid.len(), 488);
+        assert_eq!((part.rx, part.ry, part.rz, part.zp), (0, 0, 0, 3500));
+
+        let mut full = (i32::MAX, i32::MIN);
+        let mut drawn = (i16::MAX, i16::MIN);
+        let mut drawn_count = 0usize;
+        let mut first_drawn: Vec<i16> = Vec::new();
+        let mut projected_states = 0;
+
+        // Count 0 is `part2init` alone; counts 1..=500 each project one state
+        // (`BP.C:178-213`).
+        for count in 1..=500i16 {
+            part.count = count;
+            part.part2();
+            projected_states += 1;
+            for index in 0..part.grid.len() {
+                let at = 2 + index * 8;
+                // The record's dword z at words 4/5 (`VEC.ASM:326-335`); word
+                // 5 must stay 0 for the low word to be the whole z′.
+                assert_eq!(part.points3[at + 5], 0, "count {count}: z high word");
+                let z = u32::from(part.points3[at + 4] as u16) as i32;
+                full = (full.0.min(z), full.1.max(z));
+                let low = part.points3[at + 4];
+                // `do3dots`' signed `cmp bp,3000; jg` (`BA.ASM:233-235`):
+                // every point that reaches `depthcol` has a positive low word
+                // no larger than 3000.
+                if low <= 3000 {
+                    assert!(low >= 1, "count {count}: drawn low word {low}");
+                    drawn = (drawn.0.min(low), drawn.1.max(low));
+                    drawn_count += 1;
+                    if count == 1 {
+                        first_drawn.push(low);
+                    }
+                }
+            }
+        }
+        assert_eq!(projected_states, 500, "counts 1..=500");
+        // Count 0 plus the 500 projections are part 2's 501 states; counts 1
+        // and 2 project the same state because the advance follows the draw.
+        assert_eq!(first_drawn.len(), 100, "the first frame's x = -500 face");
+        assert!(first_drawn.iter().all(|&low| low == 3000));
+        // The range is the walk's, not the loose `zp ± 500*√3` envelope A51
+        // once carried: `zp` is 3500 only while the angles are still zero (so
+        // z′ is the lattice x plus 3500, at most 3900), and by the time the
+        // rotation can align a corner with z the translation has fallen. The
+        // measured maximum is 3964 and the minimum 1139.
+        assert_eq!((full.0, full.1), (1139, 3964), "full z′ range");
+        assert_eq!((drawn.0, drawn.1), (1139, 3000), "drawn low-word range");
+        assert_eq!(drawn_count, 218_961, "z-passing points over 500 projections");
     }
 
     /// `cubepoints`/`cubepolys`/`cubepolyss` and the magnified copy

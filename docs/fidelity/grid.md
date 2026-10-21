@@ -288,6 +288,8 @@ original was still drawing the top of the newest line, so those pixels are missi
 carry the previous red rank. The test asserts this row claim (every histogram key is 14 or
 15, and the histogram sums to the residual), not only prints it. This is a sampling instant,
 not a model error — the eye, the 100 unshifted bytes, the three line colours, the palettes
-and the (−10,−8) artefacts match everywhere else. The same class was measured on route B
-(2/24 pixels at 800/1000). No constant, anchor or palette phase was fitted to reduce it
-(D17/D18/D24/D25).
+and the (−10,−8) artefacts match everywhere else. The same class appeared in a scratch
+route-B comparison (2/24 pixels at 800/1000; historical — the route-B capture is the
+`RUNP.BAT` recipe of `reference-indices.md` §24.2 and the mapping is `K0` = 704, so the port
+frames are 96 and 296; it is not a filed claim). No constant, anchor or palette phase was
+fitted to reduce it (D17/D18/D24/D25).

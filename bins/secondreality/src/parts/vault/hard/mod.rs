@@ -11,7 +11,7 @@
 //!   y to the third and z to the second (`GLENZ/VEC.ASM:155-160`).
 //! - [`math::project`] runs the 240/200/160/64/512 profile `VDATA.ASM:30-36`
 //!   defines and keeps the raw x/y words `projlist` stores at `+12`/`+14`
-//!   (`VEC.ASM:213,226`) for the clipper.
+//!   (`VEC.ASM:214,226`) for the clipper.
 //! - [`math::rotate_project`] is `crotprojlist` (`VEC.ASM:250-330`): the same
 //!   rotation followed by a **16-bit** `imul word ptr`/`idiv bx` projection
 //!   that reads only the low words, writes no raw fields and sets no flags.
@@ -31,9 +31,10 @@
 //! index-only — `demo_norm` is a no-op and `demo_glz` is dead (`VEC.ASM:486-580`),
 //! so there is no slot allocator and no DAC shading.
 //!
-//! This layer is consumed by the HARD part (Tasks 6-7); until then only the
-//! tests use it.
-#![allow(dead_code)]
+//! This layer is consumed by the HARD part. [`poly::easy_list`] is the
+//! source's non-clipping `ceasypolylist`; no live path calls it (part 3 clips
+//! through `clip_easy_list`), so it carries its own `dead_code` allow and is
+//! kept for its test.
 
 pub mod dots;
 pub mod math;

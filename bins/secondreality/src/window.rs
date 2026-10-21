@@ -33,7 +33,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Texture, TextureCreator, WindowCanvas};
@@ -337,11 +337,29 @@ fn menu_key(keycode: Option<Keycode>) -> MenuKey {
     }
 }
 
+/// Whether an SDL event is a window expose.
+///
+/// The menu is static — no part is running — so an expose needs no redraw,
+/// but the frame must be presented again after a minimise/restore, an
+/// occlusion or any other expose, or the menu can stay blank or stale until
+/// a key arrives.
+fn is_expose(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Window {
+            win_event: WindowEvent::Exposed,
+            ..
+        }
+    )
+}
+
 /// The `--vault` window: the menu, the one-part runs it starts, and the way
 /// back.
 ///
 /// The menu is drawn once and redrawn only when the selection moves; between
-/// events the loop blocks in SDL, so a static menu costs nothing. A chosen
+/// events the loop blocks in SDL, so a static menu costs nothing. An expose
+/// re-presents the same frame rather than redrawing it, so a minimise/restore
+/// or an occlusion cannot leave the menu blank until a key. A chosen
 /// part runs through the same [`present_run`] a normal run uses, with no
 /// device (the vault's parts are silent) and with `return_to_menu` set; the
 /// close button, or ESC in the menu, ends the window.
@@ -374,11 +392,16 @@ fn vault_loop(
     screen.present(&mut texture, &frame, opts)?;
 
     loop {
-        // Block on the queue: the menu has nothing to do until a key or the
-        // close button arrives, and a timed wait cannot spin.
+        // Block on the queue: the menu has nothing to do until a key, an
+        // expose or the close button arrives, and a timed wait cannot spin.
         let Some(event) = events.wait_event_timeout(MENU_WAIT_MS) else {
             continue;
         };
+        if is_expose(&event) {
+            // The frame has not changed; only its presentation was lost.
+            screen.present(&mut texture, &frame, opts)?;
+            continue;
+        }
         let action = match event {
             Event::Quit { .. } => return Ok(()),
             Event::KeyDown { keycode, .. } => menu.key(menu_key(keycode)),
@@ -749,6 +772,25 @@ mod tests {
             keymod: sdl2::keyboard::Mod::NOMOD,
             repeat: false,
         }
+    }
+
+    /// The static menu's one non-key event: an expose re-presents the frame
+    /// (`vault_loop`'s `is_expose` branch) where another event falls through.
+    #[test]
+    fn an_expose_is_recognised_and_a_key_is_not() {
+        let expose = Event::Window {
+            timestamp: 0,
+            window_id: 0,
+            win_event: WindowEvent::Exposed,
+        };
+        assert!(is_expose(&expose));
+        assert!(!is_expose(&key_down(Keycode::Up)));
+        let other = Event::Window {
+            timestamp: 0,
+            window_id: 0,
+            win_event: WindowEvent::FocusGained,
+        };
+        assert!(!is_expose(&other));
     }
 
     #[test]

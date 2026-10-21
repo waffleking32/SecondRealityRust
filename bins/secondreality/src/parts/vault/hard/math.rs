@@ -179,8 +179,9 @@ pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]]) {
             // `mov dword ptr es:[di+8],ebx` (`VEC.ASM:208`): before the
             // clamp.
             z,
-            // `mov es:[di+12],cx` / `mov es:[di+14],ax` (`VEC.ASM:214,226`):
-            // the raw coordinates' low words, for the clipper.
+            // `mov es:[di+12],cx` (x, `VEC.ASM:226`) / `mov es:[di+14],ax`
+            // (y, `VEC.ASM:214`): the raw coordinates' low words, for the
+            // clipper.
             raw_x: x as i16,
             raw_y: y as i16,
         });

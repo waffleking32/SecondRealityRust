@@ -128,6 +128,11 @@ fn face_colour(def: &PolyDef, points: &[(i16, i16)], mode: FaceMode) -> u16 {
 /// equals the first (the closing duplicate). The full [`shoelace`] then picks
 /// the colour: [`FaceMode::Norm`] keeps the colour word's low byte, and
 /// [`FaceMode::Hide`] sets a hidden face's colour word to 0.
+///
+/// No live path calls this non-clipping builder — part 3's lists go through
+/// [`clip_easy_list`] — so it carries an item-level allow and is kept as the
+/// source's `ceasypolylist` port with its test.
+#[allow(dead_code)]
 pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly> {
     let mut polys = Vec::with_capacity(defs.len());
     // `mov bp,-1` (`VEC.ASM:593`): adddot's index tracker, per call and

@@ -87,7 +87,7 @@ tools/vault_capture.sh hard --frames "$(seq -s, 948 962)"     --out out/task2/ha
 
 The dense batches are contiguous or five apart, so D19's read never sits between two grabs;
 the 100-frame map (`--frames "$(seq -s, 475 100 2175)"`) is the coarse cross-check. The
-`930-1000` batch is where the 948–955 hold is byte-identical and 956 first differs. The 955
+`948-962` batch is where the 948–955 hold is byte-identical and 956 first differs. The 955
 band is 40,860 background `(0,0,81)` pixels plus the 100 white index-189 trail pixels; 956
 and 957 replace exactly those 100 with `(4,255,255)` — 6-bit `(1,63,63)`, **not** the literal
 white `pal[1] = (63,63,63)` that `BP.C:135-138` writes. Task 7 measured it: 955 is the
@@ -251,9 +251,12 @@ no reached frame depends on. It loads z's **low word** into `bp`, signed-skips v
 `BP.C:128-133`). A negative low word passes the signed test and indexes past the array: the
 source's 16-bit `cs:_depthcol[bp]` wraps to `_depthcol - 0x100` for 0xFF00 and reads a code
 byte (0x07 with the shipped link map), **not** BSS zero. The port returns zero there as a
-documented **model of an unreachable branch** — part 2's projected z′ is full ≈1134..4366,
-every drawn point is ≤3000 (the signed `jg` skips the rest) and the low word is always
-positive, so no filed frame depends on it.
+documented **model of an unreachable branch** — over part 2's 501 states the projected z′ is
+full 1139..3964, every drawn point's low word is 1139..3000 (the signed `jg` skips the rest)
+and the low word is always positive, so no filed frame depends on it.
+`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain` walks the actual 488-point
+grid through `part2`'s recurrence and pins the full range, the drawn bound, the zero high
+word and the first frame's 100 points at `depthcol[3000]`;
 `the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word` pins the signed skip, the
 16-bit load and the model; the `count`, record-length, shadow and offset bounds checks in the
 port are guards for inputs part 2 never produces, not source behaviour (the source's

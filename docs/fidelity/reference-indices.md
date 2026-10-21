@@ -5083,7 +5083,7 @@ tools/vault_capture.sh hard  --frames 480,560,630,700,770,840,910,1050,1600
 
 `cargo xtask reference verify --tree reference` passes over all 44 captures (148 files); the
 three new directories are `parts/grid` (5 frames, 5 files), `parts/twist` (6, 6) and
-`parts/hard` (9, 10 — the ninth file is `frame_000840.idx`).
+`parts/hard` (9, 10 — the tenth file is `frame_000840.idx`).
 
 ### 24.5 GRID — `K0` = 353 ±1, five keyframes
 

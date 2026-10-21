@@ -1,0 +1,4 @@
+# The reference captures are raw bytes: `cargo xtask reference verify` hashes
+# them, and a CRLF-converting checkout must never rewrite them.
+reference/**/*.rgb binary
+reference/**/*.idx binary

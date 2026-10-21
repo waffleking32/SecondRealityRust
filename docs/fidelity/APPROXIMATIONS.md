@@ -2024,8 +2024,10 @@ at the end of `Grid::frame`), as the port's tick model requires.
 error: every other pixel of every frame — the eye with its 100 unshifted bytes, the three
 line colours, the palettes and the (−10,−8) fill-word artefacts — matches, and the
 residual is an order of magnitude smaller than the ±1 neighbours' (about 10,000–12,000
-pixels; the test prints them). This is the same class the research measured on route B
-(2/24 pixels at frames 800/1000). No constant, anchor or palette phase was changed to
+pixels; the test prints them). The same class appeared in a scratch route-B comparison
+(2/24 pixels at frames 800/1000; historical — the route-B capture is the `RUNP.BAT` recipe of
+`reference-indices.md` §24.2 and the mapping is `K0` = 704, so the port frames are 96 and 296;
+it is not a filed claim). No constant, anchor or palette phase was changed to
 reduce it (D17/D18/D24).
 
 **Measured difference:** **6 / 2 / 36 / 33 / 14** differing pixels at reference
@@ -2325,9 +2327,9 @@ same pair. The capture's keyframes are exact with the file's values, which is th
 (`cmp bp,3000; jg`, `BA.ASM:233-235`), and reads `cs:_depthcol[bp]` with a **16-bit**
 effective address. A negative low word passes the signed test; for `bp = 0xFF00` the 16-bit
 address wraps to `_depthcol - 0x100` and reads a code byte (0x07 with the shipped link map),
-not BSS zero. The branch is unreachable in part 2: the projected z′ is full ≈1134..4366,
-every drawn point is ≤3000 (the signed `jg` skips the rest), and the low word is always
-positive.
+not BSS zero. The branch is unreachable in part 2: over the 501 states the projected z′ is
+full **1139..3964**, every drawn point's low word is 1139..3000 (the signed `jg` skips the
+rest), and the low word is always positive.
 
 **Port.** The guard returns colour 0 for a `bp` whose unsigned index is past the 8,192-byte
 table. That is a **model of the unreachable branch**, not the source's address arithmetic;
@@ -2340,13 +2342,20 @@ behind `jmp @@4` (`:235`), so it stays 0 and the port's one-byte-per-row clear (
 a documented model of the unreachable branch, differing only in bytes 1/321 at offset 0.
 
 **Why.** Reproducing the wrap would need the link map's code byte, and nothing in the effect's
-reachable domain reads it. The test pins the signed skip, the 16-bit load and the guard as a
-model; it does not assert BSS zero as fact.
+reachable domain reads it. The rule's test pins the signed skip, the 16-bit load and the guard
+as a model; it does not assert BSS zero as fact. The range is measured, not bounded:
+`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain` builds the actual 488-point
+grid and walks part 2's 501 states, pinning the full 1139..3964 range, every z-passing low
+word in 1139..3000, and the first frame's 100 points at `depthcol[3000]`. (A51 previously
+carried 1134..4366, the loose `zp ± 500·√3` envelope; the recurrence never reaches either
+end — `zp` is 3500 only while the angles are still zero.)
 
 **Measured difference:** **0** in the reachable domain (the guard never fires for the filed
 frames); the unreachable byte is not reproduced. Reproduce the rule with
 `cargo test -p secondreality --bin secondreality
-the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`.
+the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`, and the domain with
+`cargo test -p secondreality --bin secondreality
+the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`.
 
 ## A52 — The vault's silent run: no player, no music service, and one modelled start key (substitution; measured difference 0)
 
