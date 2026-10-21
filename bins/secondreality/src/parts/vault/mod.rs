@@ -11,6 +11,7 @@
 //! consumes, in menu order.
 
 pub mod grid;
+pub mod hard;
 pub mod twist;
 
 /// The vault's menu rows, in menu order: the registry name and its label.
