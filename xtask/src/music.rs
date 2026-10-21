@@ -51,8 +51,9 @@ use sr_assets::omf::symbols::{self, Symbol, Walk};
 
 use crate::oracle::{sleep_frames, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIGIN};
 use crate::reference::{
-    keys_from_script, sha256_hex, validate_recipe, BootRecipe, CaptureError, CaptureOptions,
-    MANIFEST_VERSION, REFERENCE_ROOT, SETUP_ANSWER_TIMEOUT, SETUP_SCREEN_TEXT, UPSTREAM_COMMIT,
+    keys_from_script, sha256_hex, validate_recipe, BootRecipe, BootWait, CaptureError,
+    CaptureOptions, MANIFEST_VERSION, REFERENCE_ROOT, SETUP_ANSWER_TIMEOUT, SETUP_SCREEN_TEXT,
+    UPSTREAM_COMMIT,
 };
 
 /// The tree the traces live in. `reference/` is input-only, and this is the one
@@ -1111,6 +1112,7 @@ impl TraceOptions {
             skip_boot_frames: 0,
             keys: self.keys.clone(),
             boot: self.boot,
+            boot_wait: BootWait::Setup,
             sheet: None,
         };
         Ok(options.autoexec_lines()?)

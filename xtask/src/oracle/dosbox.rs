@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{sleep_frames, sleep_until_close, CapturedFrame, Oracle, OracleError, DEFAULT_WAIT};
+use crate::reference::BootWait;
 
 /// Where the emulator is mounted by default on this machine (D10).
 const DEFAULT_SR_DOSBOX: &str = "/home/ew/workspace/reality/dosbox-automation";
@@ -376,9 +377,13 @@ pub struct DosboxOracle {
     api: Box<dyn EmulatorApi + Send>,
     scratch: PathBuf,
     /// The guest ran its own boot recipe out of `[autoexec]`
-    /// (`BootRecipe::Autoexec`), so `boot` waits for the setup screen instead
-    /// of typing one (D17).
+    /// (`BootRecipe::Autoexec`), so `boot` waits for the configured anchor
+    /// instead of typing one (D17).
     autoexec: bool,
+    /// What `boot` waits for under the autoexec recipe: the demo's setup
+    /// screen text, or the first graphics frame for a program that never draws
+    /// it. [`BootWait::Setup`] until [`Oracle::set_boot_wait`] says otherwise.
+    boot_wait: BootWait,
     /// The frames [`Oracle::wait_for_frame`] has taken and not yet handed
     /// over, oldest first.
     ///
@@ -461,6 +466,7 @@ impl DosboxOracle {
             }),
             scratch,
             autoexec: !autoexec.is_empty(),
+            boot_wait: BootWait::Setup,
             pending: VecDeque::new(),
         };
         match oracle.wait_for_api(&log_path) {
@@ -811,10 +817,17 @@ impl Oracle for DosboxOracle {
         if self.autoexec {
             // The guest's shell already ran the whole recipe out of
             // `[autoexec]`, `AUTOTYPE` included, so there is nothing to type
-            // and no key to send: this waits for the screen every route has to
-            // pass through, which also catches a mount the policy refused
-            // before the capture waits on frames that would never come (D17).
-            return self.wait_for_text(crate::reference::SETUP_SCREEN_TEXT, SHELL_TIMEOUT);
+            // and no key to send: this waits for the anchor the capture asked
+            // for. The demo's anchor also catches a mount the policy refused
+            // before the capture waits on frames that would never come (D17);
+            // a program that never draws that screen is waited for at its
+            // first graphics frame instead.
+            return match self.boot_wait {
+                BootWait::Setup => {
+                    self.wait_for_text(crate::reference::SETUP_SCREEN_TEXT, SHELL_TIMEOUT)
+                }
+                BootWait::Graphics => self.wait_for_graphics(SHELL_TIMEOUT),
+            };
         }
         let cwd = absolute(cwd)?;
         // The mount policy is enforced by the guest MOUNT command, so a
@@ -845,6 +858,13 @@ impl Oracle for DosboxOracle {
                 "the emulator did not pin {cycles} cycles/ms: {answer}"
             )));
         }
+        Ok(())
+    }
+
+    fn set_boot_wait(&mut self, wait: BootWait) -> Result<(), OracleError> {
+        // Stored for `boot`'s autoexec branch; the typed recipe has one
+        // anchor and ignores it (validation refuses the combination).
+        self.boot_wait = wait;
         Ok(())
     }
 
@@ -1380,6 +1400,7 @@ mod tests {
             api: Box::new(script),
             scratch: std::env::temp_dir().join("xtask-scripted-oracle"),
             autoexec: false,
+            boot_wait: BootWait::Setup,
             pending: VecDeque::new(),
         }
     }

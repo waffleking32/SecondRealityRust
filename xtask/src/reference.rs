@@ -146,6 +146,29 @@ pub enum BootRecipe {
     Autoexec,
 }
 
+/// What the `[autoexec]` boot waits for before the capture starts taking
+/// frames.
+///
+/// The demo is reached through its sound-card setup screen, and every capture
+/// written so far waited for that screen's text (D17). A program that never
+/// draws it — the vault's `DIS.EXE` + effect batch — switches to graphics on
+/// its own, so its anchor is the first graphics frame instead. The anchor is
+/// part of the recipe exactly like the cycles are, and the manifest records it,
+/// because the same boot index is a different screen under a different wait.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum BootWait {
+    /// The setup screen's text (`SETUP_SCREEN_TEXT`): the demo's anchor, and
+    /// what every manifest written before this field existed used.
+    #[default]
+    Setup,
+    /// The first graphics frame: what a program that never draws the setup
+    /// screen shows when it has started.
+    Graphics,
+}
+
 /// Everything a capture needs, and everything the manifest records about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureOptions {
@@ -170,6 +193,10 @@ pub struct CaptureOptions {
     /// written before this field existed used, so their indices keep meaning
     /// what they meant when they were taken (D17).
     pub boot: BootRecipe,
+    /// What the autoexec boot waits for before the capture starts. Only the
+    /// autoexec recipe can choose: the typed recipe always waits for the setup
+    /// screen, because that is the only screen its keys answer.
+    pub boot_wait: BootWait,
     /// Where to write one PNG of the frames this capture takes — the sheet a
     /// person looks at to see *what* was captured. `None` writes none.
     ///
@@ -479,6 +506,11 @@ pub struct CaptureManifest {
     /// a different screen under a different recipe.
     #[serde(default)]
     pub boot: BootRecipe,
+    /// What the autoexec boot waited for before the capture started. Absent
+    /// from every manifest filed before this field existed, which is the
+    /// setup-screen wait they were all taken with.
+    #[serde(default)]
+    pub boot_wait: BootWait,
     pub keys: Vec<String>,
     pub frames: Vec<FrameRef>,
 }
@@ -498,6 +530,17 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
         &options.keys,
         options.boot,
     )?;
+    // The typed recipe waits for the setup screen itself and its keys answer
+    // it; only the guest-run boot has an anchor to choose. Refusing here keeps
+    // a `--boot-wait graphics` that could never take effect from looking like
+    // it did.
+    if options.boot_wait != BootWait::Setup && options.boot != BootRecipe::Autoexec {
+        return Err(CaptureError::Options(format!(
+            "--boot-wait {:?} needs --boot autoexec: the typed recipe waits for the setup screen \
+             itself, because that is the screen its keys answer",
+            options.boot_wait
+        )));
+    }
     if options.frames.is_empty() {
         return Err(CaptureError::Options(
             "at least one frame index is required (--frames I,J,K)".into(),
@@ -615,7 +658,12 @@ pub fn capture(
     // Pinned before the first frame. The emulator was already started with
     // `cpu_cycles`; this is the runtime pin the API documents, and it is what
     // makes a capture reproducible (D14).
+    // Pin the cycles, tell the oracle where the boot is expected to land, and
+    // only then boot. The wait is read by `boot`, so setting it afterwards
+    // would leave the default anchor — a 60 s timeout on a screen the vault's
+    // batch never draws.
     oracle.set_cycles(options.cycles)?;
+    oracle.set_boot_wait(options.boot_wait)?;
 
     oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
     let answering = !options.keys.is_empty();
@@ -716,6 +764,7 @@ pub fn capture(
         frame_origin: FRAME_ORIGIN.to_owned(),
         skip_boot_frames: options.skip_boot_frames,
         boot: options.boot,
+        boot_wait: options.boot_wait,
         keys: options.keys.clone(),
         frames,
     };
@@ -875,6 +924,7 @@ mod tests {
             skip_boot_frames: 5000,
             keys: keys_from_script("KBD_left KBD_enter"),
             boot: BootRecipe::default(),
+            boot_wait: BootWait::default(),
             sheet: None,
         }
     }
@@ -902,6 +952,7 @@ mod tests {
             frame_origin: "boot".into(),
             skip_boot_frames: 5000,
             boot: BootRecipe::Autoexec,
+            boot_wait: BootWait::Setup,
             keys: vec!["KBD_left".into(), "KBD_enter".into()],
             frames: vec![FrameRef {
                 index: 100,
@@ -995,6 +1046,7 @@ mod tests {
             frame_origin: "boot".into(),
             skip_boot_frames: 5000,
             boot: BootRecipe::Autoexec,
+            boot_wait: BootWait::Setup,
             keys: vec!["KBD_left".into(), "KBD_enter".into()],
             frames: vec![FrameRef {
                 index: 100,
@@ -1014,6 +1066,7 @@ mod tests {
         assert_eq!(value["frame_origin"], "boot");
         assert_eq!(value["skip_boot_frames"], 5000);
         assert_eq!(value["boot"], "autoexec");
+        assert_eq!(value["boot_wait"], "setup");
         assert_eq!(value["keys"][1], "KBD_enter");
         assert_eq!(value["width"], 320);
         assert_eq!(value["height"], 400);
@@ -1040,6 +1093,173 @@ mod tests {
         }"#;
         let manifest = CaptureManifest::from_json(json).unwrap();
         assert_eq!(manifest.boot, BootRecipe::Typed);
+    }
+
+    #[test]
+    fn boot_wait_defaults_to_the_demo_setup_screen() {
+        // Every capture written before this field existed waited for the setup
+        // screen, so `Setup` is what an omitted `--boot-wait` and a manifest
+        // without the key have to mean (D17).
+        assert_eq!(BootWait::default(), BootWait::Setup);
+    }
+
+    #[test]
+    fn a_boot_wait_round_trips_through_the_manifest() {
+        // The manifest's serde name is the lowercase word, and the field is
+        // part of the recipe: the same boot index is a different screen if the
+        // capture waited somewhere else.
+        let mut manifest = sample_manifest();
+        manifest.boot_wait = BootWait::Graphics;
+        let json = serde_json::to_string(&manifest).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["boot_wait"], "graphics");
+        assert_eq!(CaptureManifest::from_json(&json).unwrap(), manifest);
+
+        manifest.boot_wait = BootWait::Setup;
+        let json = serde_json::to_string(&manifest).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["boot_wait"], "setup");
+        assert_eq!(CaptureManifest::from_json(&json).unwrap(), manifest);
+
+        // A manifest filed before the field existed is the setup-screen
+        // recipe, which is what every capture in the tree waited for. Reading
+        // it must not invent a wait it was not taken under.
+        let old = r#"{
+            "version": 1,
+            "oracle": "dosbox-automation 0.85.1 (6d100)",
+            "upstream_commit": "071a82e",
+            "exe": "SECOND.EXE",
+            "arguments": ["2"],
+            "cycles": 25000,
+            "width": 320,
+            "height": 400,
+            "frame_origin": "boot",
+            "skip_boot_frames": 300,
+            "boot": "autoexec",
+            "keys": ["KBD_left", "KBD_enter"],
+            "frames": [{"index": 400, "idx": "frame_000400.idx", "rgb": "frame_000400.rgb"}]
+        }"#;
+        assert_eq!(
+            CaptureManifest::from_json(old).unwrap().boot_wait,
+            BootWait::Setup
+        );
+    }
+
+    #[test]
+    fn a_boot_wait_without_an_autoexec_boot_is_refused() {
+        // The typed recipe waits for the setup screen itself before it types
+        // the keys, so another anchor has nothing to attach to. The autoexec
+        // recipe is the only one where the guest runs the whole boot and an
+        // anchor is a choice.
+        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
+        opts.boot = BootRecipe::Typed;
+        opts.boot_wait = BootWait::Graphics;
+        match validate_options(&opts) {
+            Err(CaptureError::Options(message)) => assert!(
+                message.contains("boot-wait") && message.contains("autoexec"),
+                "the refusal must name the flag and the recipe it needs: {message}"
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+
+        // The setup screen stays the typed recipe's anchor and is accepted.
+        opts.boot_wait = BootWait::Setup;
+        assert!(validate_options(&opts).is_ok());
+
+        // And the vault's anchor is accepted where the guest runs the boot.
+        opts.boot = BootRecipe::Autoexec;
+        opts.boot_wait = BootWait::Graphics;
+        assert!(validate_options(&opts).is_ok());
+    }
+
+    #[test]
+    fn the_capture_parses_a_vault_boot_wait() {
+        // The vault's batch runs DIS and the effect under the guest's own
+        // shell and waits for the first graphics frame; the flag has to reach
+        // `CaptureOptions` with the recipe that can use it.
+        use clap::Parser as _;
+
+        let cli = crate::Cli::try_parse_from([
+            "xtask",
+            "reference",
+            "capture",
+            "--exe",
+            "out/vault-stage/grid/P.EXE",
+            "--cwd",
+            "out/vault-stage/grid",
+            "--boot",
+            "autoexec",
+            "--boot-wait",
+            "graphics",
+            "--cycles",
+            "30000",
+            "--frames",
+            "400,500,600",
+            "--out",
+            "out/vault-smoke/grid",
+        ])
+        .unwrap();
+        match cli.command {
+            crate::Command::Reference {
+                command:
+                    crate::ReferenceCommand::Capture {
+                        boot, boot_wait, ..
+                    },
+            } => {
+                assert_eq!(boot, BootRecipe::Autoexec);
+                assert_eq!(boot_wait, BootWait::Graphics);
+            }
+            _ => panic!("expected a reference capture"),
+        }
+
+        // Omitted, it is the setup screen: every existing command line keeps
+        // meaning what it meant before the flag existed.
+        let cli = crate::Cli::try_parse_from([
+            "xtask",
+            "reference",
+            "capture",
+            "--cycles",
+            "30000",
+            "--frames",
+            "400",
+            "--out",
+            "out/vault-smoke/default",
+        ])
+        .unwrap();
+        match cli.command {
+            crate::Command::Reference {
+                command:
+                    crate::ReferenceCommand::Capture {
+                        boot, boot_wait, ..
+                    },
+            } => {
+                assert_eq!(boot, BootRecipe::Typed);
+                assert_eq!(boot_wait, BootWait::Setup);
+            }
+            _ => panic!("expected a reference capture"),
+        }
+    }
+
+    #[test]
+    fn the_capture_tells_the_oracle_which_anchor_to_wait_for() {
+        // `boot()` is where the anchor is used, so the value has to reach the
+        // oracle before it boots; setting it after would silently leave the
+        // setup-screen wait in place and time the run out at 60 s.
+        let out = scratch_dir("boot-wait-oracle");
+        let mut opts = options(vec![5100], &out);
+        opts.boot = BootRecipe::Autoexec;
+        opts.boot_wait = BootWait::Graphics;
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        capture(&mut oracle, &opts).unwrap();
+        assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Graphics)));
+        std::fs::remove_dir_all(&out).unwrap();
+
+        let out = scratch_dir("boot-wait-oracle-default");
+        let opts = options(vec![5100], &out);
+        let mut oracle = FakeOracle::new(vec![indexed_frame()]);
+        capture(&mut oracle, &opts).unwrap();
+        assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Setup)));
+        std::fs::remove_dir_all(&out).unwrap();
     }
 
     #[test]
@@ -1512,6 +1732,10 @@ mod tests {
         keys: Option<String>,
         waited_for_text: Vec<String>,
         waited_for_graphics: Vec<String>,
+        /// The anchor `capture` set, and what `boot` saw when it ran: the
+        /// anchor is read by `boot`, so the capture has to set it first.
+        boot_wait: Option<BootWait>,
+        boot_saw_wait: Option<Option<BootWait>>,
         /// Whether the setup screen goes away when the keys are sent, as the
         /// real one does when they answer it.
         setup_screen_clears: bool,
@@ -1528,6 +1752,8 @@ mod tests {
                 keys: None,
                 waited_for_text: Vec::new(),
                 waited_for_graphics: Vec::new(),
+                boot_wait: None,
+                boot_saw_wait: None,
                 setup_screen_clears: true,
                 cycles: None,
             }
@@ -1549,6 +1775,11 @@ mod tests {
             Ok("dosbox-automation test build".into())
         }
         fn boot(&mut self, _exe: &Path, _cwd: &Path, _args: &[String]) -> Result<(), OracleError> {
+            self.boot_saw_wait = Some(self.boot_wait);
+            Ok(())
+        }
+        fn set_boot_wait(&mut self, wait: BootWait) -> Result<(), OracleError> {
+            self.boot_wait = Some(wait);
             Ok(())
         }
         fn set_cycles(&mut self, cycles: u32) -> Result<(), OracleError> {

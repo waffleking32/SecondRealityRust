@@ -816,7 +816,7 @@ fn serialise(manifest: &CaptureManifest, path: &Path) -> Result<String, VerifyEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reference::BootRecipe;
+    use crate::reference::{BootRecipe, BootWait};
     use std::collections::BTreeMap;
 
     /// The capture the tests check: 2×2 pixels, frame 10 with an index plane
@@ -841,6 +841,7 @@ mod tests {
             frame_origin: "boot".into(),
             skip_boot_frames: 0,
             boot: BootRecipe::Autoexec,
+            boot_wait: BootWait::Setup,
             keys: vec!["KBD_left".into(), "KBD_enter".into()],
             frames: vec![
                 FrameRef {

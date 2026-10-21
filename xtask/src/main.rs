@@ -36,7 +36,9 @@ use clap::{Parser, Subcommand};
 
 use oracle::dosbox::DosboxOracle;
 use oracle::Oracle;
-use reference::{capture, keys_from_script, BootRecipe, CaptureManifest, CaptureOptions};
+use reference::{
+    capture, keys_from_script, BootRecipe, BootWait, CaptureManifest, CaptureOptions,
+};
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "Repository tooling")]
@@ -364,6 +366,14 @@ enum ReferenceCommand {
         /// screen on the emulated clock, which makes the boot repeat (D17).
         #[arg(long, value_enum, default_value_t = BootRecipe::Typed)]
         boot: BootRecipe,
+        /// What the autoexec boot waits for before the capture starts.
+        /// `setup` is the demo's sound-card setup screen, which every capture
+        /// filed so far waited for. `graphics` waits for the first graphics
+        /// frame instead, for a program that never draws that screen (the
+        /// vault's DIS + effect batch). Only `--boot autoexec` can choose;
+        /// the typed recipe always waits for the setup screen.
+        #[arg(long, value_enum, default_value_t = BootWait::Setup)]
+        boot_wait: BootWait,
         /// Write one PNG of the frames this capture takes, to look at. The
         /// tiles are the frames, in the order they were captured, and their
         /// indices are printed as they are laid out. A path inside the
@@ -438,6 +448,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                     skip_boot_frames,
                     keys,
                     boot,
+                    boot_wait,
                     sheet,
                 },
         } => {
@@ -451,6 +462,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 skip_boot_frames,
                 keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
                 boot,
+                boot_wait,
                 sheet,
             };
             // Refuse what cannot be reproduced before starting anything. The
@@ -470,7 +482,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             )?)?;
             println!(
                 "captured {} frame(s) of {}x{} at {} cycles/ms into {} (oracle {}, origin {}, \
-                 boot {:?})",
+                 boot {:?}, boot wait {:?})",
                 written.frames.len(),
                 written.width,
                 written.height,
@@ -479,6 +491,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 written.oracle,
                 written.frame_origin,
                 written.boot,
+                written.boot_wait,
             );
             for frame in &written.frames {
                 match &frame.idx {

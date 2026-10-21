@@ -12,6 +12,8 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::reference::BootWait;
+
 /// The frame counter counts rendered frames from the emulator's first frame at
 /// process start, and every captured index is counted from there too. Recorded
 /// in the manifest so an index means the same thing in two runs.
@@ -366,6 +368,17 @@ pub trait Oracle {
     fn boot(&mut self, exe: &Path, cwd: &Path, args: &[String]) -> Result<(), OracleError>;
     /// Pin the emulated CPU. Must happen before the first captured frame.
     fn set_cycles(&mut self, cycles: u32) -> Result<(), OracleError>;
+    /// Tell the oracle what a [`crate::reference::BootRecipe::Autoexec`] boot
+    /// waits for before returning ([`BootWait::Setup`] or
+    /// [`BootWait::Graphics`]). Called before [`Oracle::boot`], which reads it.
+    ///
+    /// The default is a no-op: an oracle that does not run a guest boot of its
+    /// own has no anchor to wait for, and a typed boot always waits for the
+    /// setup screen its keys answer.
+    fn set_boot_wait(&mut self, wait: BootWait) -> Result<(), OracleError> {
+        let _ = wait;
+        Ok(())
+    }
     /// Run forward `frames` rendered frames.
     fn step_frames(&mut self, frames: u32) -> Result<(), OracleError>;
     /// The earliest frame [`Oracle::wait_for_frame`] settled on, when it kept
