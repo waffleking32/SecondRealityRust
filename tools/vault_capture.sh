@@ -55,12 +55,15 @@ Usage:
   tools/vault_capture.sh <grid|hard|twist> --frames A,B,... [--out DIR]
                          [--stage DIR] [--sheet PATH]
 
-  --out    where the capture (frames + manifest.json) goes
-           (default: reference/parts/<part>, Task 2's home for it)
-  --stage  where DIS.EXE, the effect EXE and RUN.BAT are staged; made fresh
-           for every run (default: out/vault-stage/<part>)
-  --sheet  one PNG of the captured frames, for a person to look at
-           (the capture tool refuses a sheet inside reference/)
+  --out    where the capture (frames + manifest.json) goes; must be under
+           out/ or reference/parts/ (default: reference/parts/<part>, Task 2's
+           home for it)
+  --stage  where DIS.EXE, the effect EXE and RUN.BAT are staged; must resolve
+           under out/ (symlinks and `..` included) and is made fresh for every
+           run (default: out/vault-stage/<part>)
+  --sheet  one PNG of the captured frames, for a person to look at; must not
+           be under upstream/ or reference/ (the capture tool refuses the
+           latter itself)
 
 `upstream/` and `reference/` are input-only: the script writes nothing there
 except the capture itself under --out. The smoke runs of Task 1 pass
@@ -145,18 +148,55 @@ esac
 
 OUT=${OUT:-reference/parts/$PART}
 STAGE=${STAGE:-out/vault-stage/$PART}
-
-# The stage is deleted and re-made, so never let it name anything the
-# repository owns: upstream/ and reference/ are input-only, and the root is not
-# a staging directory.
-STAGE_ABS=$(realpath -m -- "$STAGE")
 ROOT_ABS=$(realpath -m -- "$ROOT")
+
+# The stage is deleted and re-made, so it has to be a path this project's
+# scratch tree owns: resolved to absolute form (symlinks and `..` included),
+# under out/ (which .gitignore excludes wholesale), never a symlink itself, and
+# never / or the repository root. `--stage ..` resolves to the repository's
+# parent and `--stage .git` to the metadata; both are refused by name. An
+# existing path must be a directory: `rm -rf` on a file would replace it.
+[ -L "$STAGE" ] && die "--stage must not be a symlink: $STAGE"
+STAGE_ABS=$(realpath -m -- "$STAGE")
 [ "$STAGE_ABS" != "/" ] || die "refusing to use / as a staging directory"
 [ "$STAGE_ABS" != "$ROOT_ABS" ] || die "refusing to use the repository root as a staging directory"
 case "$STAGE_ABS/" in
     "$ROOT_ABS/upstream/"*) die "--stage must not be under upstream/ (input-only)" ;;
     "$ROOT_ABS/reference/"*) die "--stage must not be under reference/ (input-only)" ;;
+    "$ROOT_ABS/out/"*) ;;
+    *)
+        die "--stage must be a directory under out/ (the project's scratch tree), got $STAGE_ABS"
+        ;;
 esac
+[ "$STAGE_ABS" != "$ROOT_ABS/out" ] || die "--stage must be below out/, not out/ itself"
+if [ -e "$STAGE_ABS" ] && [ ! -d "$STAGE_ABS" ]; then
+    die "--stage exists and is not a directory: $STAGE_ABS"
+fi
+
+# The capture tool guards the reference tree against a sheet and the capture's
+# own directory, but it does not know that upstream/ is input-only either, and
+# it takes --out wherever it is told. Refuse the input trees here. A capture
+# may go to the sanctioned reference/parts/ or to out/ scratch; a sheet may not
+# go into any reference tree or upstream/ at all.
+OUT_ABS=$(realpath -m -- "$OUT")
+case "$OUT_ABS/" in
+    "$ROOT_ABS/upstream/"*) die "--out must not be under upstream/ (input-only)" ;;
+    "$ROOT_ABS/reference/parts/"*) ;;
+    "$ROOT_ABS/out/"*) ;;
+    *)
+        die "--out must be under out/ or reference/parts/ (the capture's sanctioned home), \
+got $OUT_ABS"
+        ;;
+esac
+if [ -n "$SHEET" ]; then
+    SHEET_ABS=$(realpath -m -- "$SHEET")
+    case "$SHEET_ABS/" in
+        "$ROOT_ABS/upstream/"*) die "--sheet must not be under upstream/ (input-only)" ;;
+        "$ROOT_ABS/reference/"*)
+            die "--sheet must not be under reference/ (input-only); pass e.g. out/<name>.png"
+            ;;
+    esac
+fi
 
 # The four shipped binaries, checked wherever they are used: all of them, so a
 # wrong upstream tree is refused before the part is even staged.

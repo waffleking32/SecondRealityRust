@@ -169,6 +169,18 @@ pub enum BootWait {
     Graphics,
 }
 
+impl BootWait {
+    /// The lowercase word serde writes into the manifest and clap accepts on
+    /// the command line. Used in messages so a refusal names the flag the way
+    /// the user would have to type it, not Rust's `Debug` spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            BootWait::Setup => "setup",
+            BootWait::Graphics => "graphics",
+        }
+    }
+}
+
 /// Everything a capture needs, and everything the manifest records about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureOptions {
@@ -536,9 +548,9 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
     // it did.
     if options.boot_wait != BootWait::Setup && options.boot != BootRecipe::Autoexec {
         return Err(CaptureError::Options(format!(
-            "--boot-wait {:?} needs --boot autoexec: the typed recipe waits for the setup screen \
+            "--boot-wait {} needs --boot autoexec: the typed recipe waits for the setup screen \
              itself, because that is the screen its keys answer",
-            options.boot_wait
+            options.boot_wait.name()
         )));
     }
     if options.frames.is_empty() {
@@ -1156,8 +1168,9 @@ mod tests {
         opts.boot_wait = BootWait::Graphics;
         match validate_options(&opts) {
             Err(CaptureError::Options(message)) => assert!(
-                message.contains("boot-wait") && message.contains("autoexec"),
-                "the refusal must name the flag and the recipe it needs: {message}"
+                message.contains("--boot-wait graphics") && message.contains("autoexec"),
+                "the refusal must name the flag as clap spells it and the recipe it needs: \
+                 {message}"
             ),
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -1250,15 +1263,20 @@ mod tests {
         opts.boot = BootRecipe::Autoexec;
         opts.boot_wait = BootWait::Graphics;
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
-        capture(&mut oracle, &opts).unwrap();
+        let manifest = capture(&mut oracle, &opts).unwrap();
         assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Graphics)));
+        // And the record says which anchor produced the frames: a capture that
+        // set the oracle but wrote `Setup` into the manifest would misdescribe
+        // its own boot.
+        assert_eq!(manifest.boot_wait, BootWait::Graphics);
         std::fs::remove_dir_all(&out).unwrap();
 
         let out = scratch_dir("boot-wait-oracle-default");
         let opts = options(vec![5100], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
-        capture(&mut oracle, &opts).unwrap();
+        let manifest = capture(&mut oracle, &opts).unwrap();
         assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Setup)));
+        assert_eq!(manifest.boot_wait, BootWait::Setup);
         std::fs::remove_dir_all(&out).unwrap();
     }
 

@@ -4961,18 +4961,43 @@ no key gate (`TWIST/MAIN.C:49`) and takes none. Every smoke manifest says `exe: 
 
 ### 24.2 GRID's start moved 351 frames earlier
 
-A dense sweep, all 26 taken before any is read:
+A dense sweep, all 26 taken before any is read (the `$(seq …)` is expanded by the shell, because
+the script accepts only comma-separated indices):
 
 ```
-tools/vault_capture.sh grid --frames 340,341,...,365 --out out/vault-smoke/grid-start
+tools/vault_capture.sh grid --frames "$(seq -s, 340 365)" --out out/vault-smoke/grid-start
 ```
 
-Frames 340–351 are the same picture, `728e0d87…` — the pre-key art route B measured at 700–702
-(same digest prefix), so this is the same screen, not a different boot. **The last static frame
-is 351 and the first changed is 352** (`d2ac61b7…`; 353 is `4a4ad86e…`), 351 frames before route
-B's 703. The 5 s AUTOTYPE key is scheduled where the 10 s PAUSE batch put its second key, which
-is exactly the shift the recipe change predicts. The keyframes filed by Task 2 must therefore
-use route A's numbering: 352 is the effect's first loop frame.
+Frames 340–351 are the same picture, `728e0d87…`. Route B's own start was re-measured for the
+comparison with this batch (`out/vault-stage/grid-routeb/RUNP.BAT`):
+
+```
+@ECHO OFF
+ECHO Soundcard
+AUTOTYPE -w 5 space
+PAUSE
+DIS.EXE
+AUTOTYPE -w 5 space
+P.EXE
+```
+
+```
+cargo xtask reference capture --exe out/vault-stage/grid-routeb/RUNP.BAT \
+    --cwd out/vault-stage/grid-routeb --boot autoexec --cycles 30000 \
+    --frames 700,701,702,703,704 --out out/vault-smoke/grid-routeb
+```
+
+Its 700–702 are the same `728e0d87…` picture, its last static frame is 702 and its first changed
+is 703 (`e1ac8916…`), 704 being `4a4ad86e…`. **Route A's last static frame is 351 and its first
+changed is 352** (`d2ac61b7…`; 353 is `4a4ad86e…`), 351 frames before route B's 703 — the
+difference between a second key at 10 s and the command line's `AUTOTYPE` at 5 s, which is what
+the recipe change predicts.
+
+**The first changed frame is a transition frame, not a stable loop frame.** Route A's 352
+(`d2ac61b7…`) and route B's 703 (`e1ac8916…`) differ, while route A's 353 and route B's 704 are
+byte-identical (`4a4ad86e…`) — one frame later the effect is phase-locked and the 351 index shift
+is exact. Task 2 must put `K0` on the first *stable* loop frame (353 under route A, 704 under
+route B) and not on the first changed index.
 
 ```
 tools/vault_capture.sh grid --frames 400,500,600 --out out/vault-smoke/grid \
