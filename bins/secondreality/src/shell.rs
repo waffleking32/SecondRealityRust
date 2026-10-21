@@ -2188,6 +2188,7 @@ mod tests {
             // sequence: no block reaches them and no player was ever started
             // for them. They run silent, so `music_for_part` answers `None`.
             ("grid", None),
+            ("twist", None),
         ];
         for (name, music) in expected {
             assert_eq!(

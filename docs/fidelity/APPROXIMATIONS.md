@@ -2032,3 +2032,109 @@ offset 0 (the `K0` mapping) for all five. Reproduce with
 `cargo test -p secondreality --test vault -- --nocapture
 grid_matches_the_reference_at_its_measured_start`, which prints the three counts, the
 minimum's offset, the max delta and the row histogram.
+
+## A42 — TWIST: the copper test is not registered (substitution; measured difference 0)
+
+**Part:** TWIST (`TWIST/ASM.ASM:220-269`), Phase 8 Task 4.
+
+**Original.** `main` calls `initcoppers` (`TWIST/MAIN.C:89`) after `inittwk`. It registers
+`testcopper` in DIS service-7 slots 0 and 1; `testcopper` sets DAC entry 0 white, spins 100
+`loop` iterations and sets it black again. It writes no CRTC register, no line compare and
+no split.
+
+**Port.** `Twist::init` registers no copper callback. The standalone `DIS/DIS.EXE` — the
+only server the vault's T.EXE recipe can use — is built without `INDEMO`, and its service 7
+is a bare `ret` (`DISINT.ASM:294-316` is inside `IFDEF INDEMO`; the shipped image's
+`setcopper_7` at offset 0x2f7 is a `ret`). The reference therefore shows no flash, and the
+engine's palette timeline could not express the intra-frame white→black band without a
+non-literal translation and an unmeasured duration (research/twist.md §2.5).
+
+**Why.** Registering the callback would invent a visible flash the artifact cannot produce;
+registering a documented no-op adds state with no effect. The comparison's 0 residual at
+all six keyframes is the measurement that the flash is absent.
+
+**Measured difference:** **0**. Reproduce with
+`cargo test -p secondreality --test vault -- --nocapture
+twist_matches_the_reference_at_its_measured_start`; see also the capture in
+`docs/fidelity/twist.md`.
+
+## A43 — TWIST: any-key exit and the Scroll-Lock border become ESC/Ctrl (substitution; measured difference 0)
+
+**Part:** TWIST (`TWIST/MAIN.C:21-28,49,102`), Phase 8 Task 4.
+
+**Original.** `doit` exits on any pending BIOS key (`kbhit()`), and `main` consumes it with
+`getch()`. `waitb` tests BIOS keyboard-flags byte `0000:0417` bit 4 — **Scroll Lock**, despite
+the variable's `shiftstatus` name — and toggles the overscan colour to 0 before and 31 after
+the retrace wait. Both are developer input; the reference capture sends no key, so neither
+path runs.
+
+**Port.** The part ends on `ctx.exit_requested`, which the shell sets for **ESC/Ctrl only**;
+the Scroll-Lock border is not tested and the overscan stays black (`view.border = Some(0)`).
+This is the port's input model, the same one every other part has: nothing waits on a key,
+and the capture's vocabulary is one start/exit event, not arbitrary keys.
+
+**Why.** The reference behaviour the captures exercise (no key at all) is identical; the
+substitution removes a BIOS flag and a border colour the port cannot set from the same
+source. The original's "any key" is wider than the port's ESC/Ctrl, which is recorded here
+rather than hidden.
+
+**Measured difference:** **0** in all six compared frames (and in the 4,444-frame run,
+which never sees a key). Reproduce with
+`cargo test -p secondreality --test vault -- --nocapture
+twist_matches_the_reference_at_its_measured_start` and
+`twist_draws_exactly_4444_frames_and_holds`.
+
+## A44 — TWIST: one 70.086 Hz tick stands for one VGA retrace (registered mapping; no overrun model)
+
+**Part:** TWIST (`TWIST/MAIN.C:21-28,49`), Phase 8 Task 4.
+
+**Original.** The source has no timer. `doit`'s only time base is `waitb`, which polls VGA
+input status 0x3DA for the start and then the end of vertical retrace and returns 1
+unconditionally; `frame += waitb()` therefore counts retraces. `inittwk` leaves mode 13h's
+vertical timing untouched (0x09's "400 rows" write is commented out), whose nominal rate is
+25.175 MHz / (800 × 449) = **70.086 Hz**.
+
+**Port.** One engine logic tick is one `doit` iteration, i.e. one displayed frame, at the
+fixed 70.086 Hz tick (`crates/sr-engine/src/tick.rs`, `HZ_MILLI = 70_086`). The port does
+not model a missed retrace: if a draw overran a frame the original would silently slow below
+70.086 Hz while its `frame` still counted one per iteration, and the port cannot observe the
+difference because the source cannot either. The draw is 200 × 80 = 16,000 plane bytes; the
+capture report's timing estimate (`research/twist.md` §4.5, at the capture's 30,000
+cycles/ms) puts it inside a frame, but that is the report's estimate, not this task's
+measurement. The 4,444-iteration cap is 4,444 / 70.086 = **63.41 s** nominal; the compared
+frames are phase-locked by tick index, never by wall clock.
+
+**Why.** The retrace is the source's clock, and the fixed tick is the port's model of it for
+every part (spec §6). The approximation is the rate, not the frame sequence; the six
+keyframes match at 0 pixels, so no per-frame phase depends on it.
+
+**Measured difference:** **0** per compared frame; the nominal duration is a derived
+mapping, not a measurement. Reproduce the frame sequence with
+`cargo test -p secondreality --test vault -- --nocapture
+twist_matches_the_reference_at_its_measured_start`; the cap with
+`twist_draws_exactly_4444_frames_and_holds`.
+
+## A45 — TWIST: the comparison is RGB-only (registered limitation; measured difference 0)
+
+**Part:** TWIST reference and port, Phase 8 Task 4.
+
+**Capture.** The filed reference (`reference/parts/twist`, six frames 103..603) is RGB-only.
+The moving screen fails the indexed read's coherence check (D15/D19), and TWIST has no
+`.idx` even in principle: an odd part frame draws and displays page 2 at pixel 131,072, and
+the oracle's indexed read always starts at plane offset 0, so it would read page 1. All six
+keyframes are even part frames (effect frames 100..600), so their page is the right one, but
+the read still cannot pass the coherence check while the picture moves.
+
+**Port.** The comparison test dumps the port's `.rgb` at `R-K0-1, R-K0, R-K0+1` and compares
+RGB. Indexed is normally the stricter side; the shared helper compares a reference `.idx`
+where one exists (HARD's held 840) and only at the offset the RGB search chose, but no TWIST
+reference in this tree carries one and the oracle as built cannot supply one for either
+page.
+
+**Why.** The limitation is the oracle's, not a substitution in the port; the RGB comparison
+is exact, so nothing is lost for this effect. No constant or anchor was fitted to it.
+
+**Measured difference:** **0** differing pixels at all six keyframes, offset 0. Reproduce
+with `cargo test -p secondreality --test vault -- --nocapture
+twist_matches_the_reference_at_its_measured_start`; the capture command is in
+`docs/fidelity/twist.md`.

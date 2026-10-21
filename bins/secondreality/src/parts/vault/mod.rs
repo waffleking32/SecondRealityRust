@@ -11,6 +11,7 @@
 //! consumes, in menu order.
 
 pub mod grid;
+pub mod twist;
 
 /// The vault's menu rows, in menu order: the registry name and its label.
 ///
@@ -31,10 +32,11 @@ mod tests {
             VAULT,
             [("grid", "GRID"), ("hard", "HARD"), ("twist", "TWIST")]
         );
-        // The names are the registry's: a menu row and `--part` agree. Only
-        // `grid` is ported so far; Tasks 4 and 5 add the other two rows to
-        // the registry, and this table already carries their place.
+        // The names are the registry's: a menu row and `--part` agree. `grid`
+        // and `twist` are ported; Task 5 adds `hard` to the registry, and this
+        // table already carries its place.
         assert_eq!(crate::parts::registered("grid"), Some("grid"));
+        assert_eq!(crate::parts::registered("twist"), Some("twist"));
         for (_, label) in VAULT {
             assert!(!label.is_empty());
         }

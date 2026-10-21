@@ -101,6 +101,11 @@ pub fn registry() -> &'static [PartEntry] {
         // (`GRID/P.EXE`). Not in the demo's sequence; silent and unanchored,
         // so a `--part grid` run numbers its own frames from zero.
         ("grid", || Box::new(vault::grid::Grid::new())),
+        // `TWIST/MAIN.C` over `TWIST.ASM`, `ASM.ASM` and the generated
+        // `TWSTLOOP.INC` — the vault's planar twister (`TWIST/T.EXE`). Not in
+        // the demo's sequence; silent and unanchored, so a `--part twist` run
+        // numbers its own frames from zero.
+        ("twist", || Box::new(vault::twist::Twist::new())),
     ]
 }
 

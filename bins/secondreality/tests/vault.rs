@@ -1,36 +1,60 @@
-//! GRID through the real binary: the silent, unanchored run, and the five
-//! filed reference keyframes at the measured `K0`.
+//! GRID and TWIST through the real binary: the silent, unanchored runs, and
+//! each part's filed reference keyframes at its measured `K0`.
 //!
-//! The part's arithmetic is unit-tested beside it (`parts::vault::grid`): the
-//! sine tables and the measured `d0`, the eye shift bound, the three palettes
-//! and the generated line blit over its whole table. What is left for a
-//! process is the wiring only a run can answer: the registry, the numbering,
-//! silence, and the frames the shell actually composes.
+//! The parts' arithmetic is unit-tested beside them (`parts::vault::{grid,
+//! twist}`): the sine tables and the measured `d0`, the eye shift bound, the
+//! three palettes and the generated line blit for GRID; the 16-bit row phase,
+//! the shipped texture, the two pages, the masked palette and the 4,444-frame
+//! cap for TWIST. What is left for a process is the wiring only a run can
+//! answer: the registry, the numbering, silence, and the frames the shell
+//! actually composes.
 //!
-//! **`K0` = 353** (`docs/fidelity/reference-indices.md` §24.5): the filed
-//! capture is route A, whose 353 is byte-identical to route B's 704 — the
+//! **GRID's `K0` = 353** (`docs/fidelity/reference-indices.md` §24.5): the
+//! filed capture is route A, whose 353 is byte-identical to route B's 704 — the
 //! first byte-reproducible loop frame. The port's composed frame 0 is source
 //! iteration 1 (iteration 0 is the start-up transition frame, reference 352,
-//! and is drawn in `init`), so **port frame `j` = reference `353 + j`** and the
-//! candidate for reference `R` is port `R − K0`, with ±1 searched.
+//! and is drawn in `init`), so **port frame `j` = reference `353 + j`**.
 //!
-//! All five filed frames are RGB-only: the screen moves during the indexed
-//! read, so the oracle keeps the RGB frame (D15/D19). The test compares the
-//! `.rgb` and would compare an `.idx` if a later capture ever carried one.
+//! **TWIST's `K0` = 3 ±1** (`reference-indices.md` §24.6): the two-band
+//! fingerprint (rows 0..63 = generated row 0, rows 64..199 = row 199) is boot
+//! frame 3, matched from the phase at boot 4/5/6 (effect frames 1/2/3). The
+//! six filed keyframes 103..603 are effect frames 100..600.
+//!
+//! The candidate for a reference `R` is port `R − K0`, with the ±1 search
+//! reproduced here so the test reports the same three counts the comparison
+//! workflow would. Every filed frame of both parts is RGB-only: the screen
+//! moves during the indexed read (D15/D19), and for TWIST an odd frame's page
+//! is not at plane offset 0 at all. The shared comparison therefore compares
+//! the `.rgb` at every candidate, and a reference `.idx` — HARD files one at
+//! its held frame 840 — only at the offset the RGB search chose.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The reference index of the port's composed frame 0.
-const K0: u32 = 353;
+/// The reference index of GRID's composed frame 0.
+const GRID_K0: u32 = 353;
 
-/// The measured residual at each filed keyframe, in differing pixels.
+/// The measured residual at each filed GRID keyframe, in differing pixels.
 ///
 /// They are the capture catching the newest line mid-draw in its top rows
 /// (rows 14–15, where the curve turns); the port composes the finished frame.
 /// `docs/fidelity/APPROXIMATIONS.md` A41 carries the per-frame numbers and the
 /// candidate cause.
-const RESIDUALS: [(u32, usize); 5] = [(400, 6), (500, 2), (600, 36), (700, 33), (800, 14)];
+const GRID_RESIDUALS: [(u32, usize); 5] = [(400, 6), (500, 2), (600, 36), (700, 33), (800, 14)];
+
+/// The reference index of TWIST's composed frame 0 (`reference-indices.md`
+/// §24.6): the frame-0 two-band picture is boot index 3, measured from the
+/// boundary phase at boot 4/5/6.
+const TWIST_K0: u32 = 3;
+
+/// The six filed TWIST keyframes: effect frames 100..600, ~100 apart.
+const TWIST_KEYFRAMES: [u32; 6] = [103, 203, 303, 403, 503, 603];
+
+/// TWIST is exact: the six keyframes are effect frames 100..600 under
+/// `effect = index − 3`, and the port's model reproduces every filed byte.
+const TWIST_RESIDUALS: [(u32, usize); 6] =
+    [(103, 0), (203, 0), (303, 0), (403, 0), (503, 0), (603, 0)];
 
 /// Where a `cargo run` of the acceptance command starts, and where the part's
 /// own `assets/...` paths resolve.
@@ -38,18 +62,20 @@ fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A run of GRID alone, dumping the frames asked for.
+/// A run of one part alone, dumping the frames asked for.
 ///
 /// The run must exit 0: every requested index is produced, and a hole in a
-/// dump reads as a keyframe that matched.
-fn dump(name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
-    let dir = std::env::temp_dir().join(format!("sr-vault-{}-{name}", std::process::id()));
+/// dump reads as a keyframe that matched. The directory carries the part's
+/// name as well as the test's, so two parts' runs of the same test name cannot
+/// share a dump.
+fn dump(part: &str, name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
+    let dir = std::env::temp_dir().join(format!("sr-vault-{}-{part}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
         .current_dir(repository_root())
         .args([
             "--part",
-            "grid",
+            part,
             "--headless",
             "--dump-frames",
             indices,
@@ -86,11 +112,13 @@ fn dumped_file(dir: &Path, manifest: &serde_json::Value, index: u32, suffix: &st
         .unwrap_or_else(|error| panic!("{}/{name}: {error}", dir.display()))
 }
 
-/// The reference's own file for a GRID frame, from the tree it is committed
+/// The reference's own file for a part's frame, from the tree it is committed
 /// in.
-fn reference_frame(index: u32, suffix: &str) -> Vec<u8> {
-    std::fs::read(repository_root().join(format!("reference/parts/grid/frame_{index:06}.{suffix}")))
-        .unwrap()
+fn reference_frame(part: &str, index: u32, suffix: &str) -> Vec<u8> {
+    std::fs::read(
+        repository_root().join(format!("reference/parts/{part}/frame_{index:06}.{suffix}")),
+    )
+    .unwrap()
 }
 
 /// How many pixels of `rendered` differ from `expected`, and the largest
@@ -121,9 +149,130 @@ fn differing_pixels(rendered: &[u8], expected: &[u8]) -> (usize, u8) {
     (pixels, max)
 }
 
+/// One keyframe's measured comparison.
+struct KeyframeReport {
+    reference: u32,
+    /// `(offset, differing pixels, max channel delta)` for the three candidates.
+    counts: Vec<(i32, usize, u8)>,
+    /// The winning offset (`rendered index − reference index`).
+    offset: i32,
+    pixels: usize,
+    max: u8,
+    /// Differing pixels per displayed row at the winning offset.
+    rows: BTreeMap<usize, usize>,
+}
+
+/// Compare every `keyframe` against `part`'s filed reference at `K0`, over the
+/// port-side candidates `R − K0 − 1, R − K0, R − K0 + 1`.
+///
+/// The minimum is chosen by `(pixels, |offset|, rendered index)`: D18's rule
+/// (fewest differing pixels, then the smaller offset), so a held or exactly
+/// repeated frame reports offset 0 rather than a coin flip. **The indexed
+/// comparison follows the RGB choice** — a reference that carries an `.idx`
+/// (HARD's held 840) is compared only at the offset whose RGB picture won; a
+/// `±1` loop that compared every candidate's `.idx` would fail on the wrong
+/// picture.
+fn compare_keyframes(part: &str, k0: u32, keyframes: &[u32]) -> Vec<KeyframeReport> {
+    let mut indices = Vec::new();
+    for &reference in keyframes {
+        for offset in -1i32..=1 {
+            let port_index = reference as i64 - i64::from(k0) + i64::from(offset);
+            assert!(port_index >= 0, "reference {reference} is before K0");
+            indices.push(port_index as u32);
+        }
+    }
+    indices.sort_unstable();
+    indices.dedup();
+    let list = indices
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let (dir, manifest) = dump(part, "keyframes", &list);
+
+    let mut reports = Vec::new();
+    for &reference in keyframes {
+        let mut counts = Vec::new();
+        // (differing pixels, signed offset, max delta, rendered index).
+        let mut best: Option<(usize, i32, u8, u32)> = None;
+        for offset in -1i32..=1 {
+            let port_index = (reference as i64 - i64::from(k0) + i64::from(offset)) as u32;
+            let rendered = dumped_file(&dir, &manifest, port_index, "rgb");
+            let expected = reference_frame(part, reference, "rgb");
+            let (pixels, max) = differing_pixels(&rendered, &expected);
+            counts.push((offset, pixels, max));
+            let better = match best {
+                None => true,
+                Some((fewest, best_offset, _, best_index)) => {
+                    (pixels, offset.abs(), port_index) < (fewest, best_offset.abs(), best_index)
+                }
+            };
+            if better {
+                best = Some((pixels, offset, max, port_index));
+            }
+        }
+        let (pixels, offset, max, port_index) = best.unwrap();
+
+        // Indexed is the stricter side, where the reference files one. It is
+        // compared at the winner only.
+        let reference_idx =
+            repository_root().join(format!("reference/parts/{part}/frame_{reference:06}.idx"));
+        if reference_idx.is_file() {
+            let idx = std::fs::read(&reference_idx).unwrap();
+            let rendered_idx = dumped_file(&dir, &manifest, port_index, "idx");
+            assert_eq!(
+                rendered_idx, idx,
+                "reference {reference} at offset {offset:+}: indexed plane"
+            );
+        }
+
+        // The residual's own rows, so a note's claim about where the pixels
+        // differ is printed by the command that measures it (D25).
+        let rendered = dumped_file(&dir, &manifest, port_index, "rgb");
+        let expected = reference_frame(part, reference, "rgb");
+        let mut rows = BTreeMap::new();
+        for (pixel, (a, b)) in rendered
+            .chunks_exact(3)
+            .zip(expected.chunks_exact(3))
+            .enumerate()
+        {
+            if a != b {
+                *rows.entry(pixel / 320).or_insert(0usize) += 1;
+            }
+        }
+
+        reports.push(KeyframeReport {
+            reference,
+            counts,
+            offset,
+            pixels,
+            max,
+            rows,
+        });
+    }
+    reports
+}
+
+fn print_report(report: &KeyframeReport) {
+    println!(
+        "reference {}: offsets -1/0/+1 give {:?}; minimum {} pixel(s) at offset {:+} (max \
+         channel delta {}); rows {:?}",
+        report.reference,
+        report
+            .counts
+            .iter()
+            .map(|(offset, pixels, _)| (*offset, *pixels))
+            .collect::<Vec<_>>(),
+        report.pixels,
+        report.offset,
+        report.max,
+        report.rows
+    );
+}
+
 #[test]
 fn a_part_run_of_grid_numbers_itself_from_zero_and_is_silent() {
-    let (dir, manifest) = dump("silent", "0,1,10");
+    let (dir, manifest) = dump("grid", "silent", "0,1,10");
 
     assert_eq!(manifest["part"], "grid");
     // The vault is not in the demo's sequence and carries no measured boot
@@ -148,82 +297,106 @@ fn a_part_run_of_grid_numbers_itself_from_zero_and_is_silent() {
 }
 
 #[test]
-fn grid_matches_the_reference_at_its_measured_start() {
-    // The candidate for every keyframe, and its two neighbours: the anchor is
-    // on the measured K0, and D18's ±1 search is reproduced here so the test
-    // reports the same three counts the comparison workflow would.
-    let mut indices = Vec::new();
-    for (reference, _) in RESIDUALS {
-        indices.push(reference - K0 - 1);
-        indices.push(reference - K0);
-        indices.push(reference - K0 + 1);
-    }
-    let list = indices
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    let (dir, manifest) = dump("keyframes", &list);
+fn a_part_run_of_twist_is_silent_and_numbers_itself_from_zero() {
+    let (dir, manifest) = dump("twist", "silent", "0,1,10");
 
-    for (reference, residual) in RESIDUALS {
-        let mut counts = Vec::new();
-        let mut best: Option<(usize, i32, u8)> = None;
-        for offset in -1i32..=1 {
-            let port_index = (reference as i32 - K0 as i32 + offset) as u32;
-            let rendered = dumped_file(&dir, &manifest, port_index, "rgb");
-            let expected = reference_frame(reference, "rgb");
-            let (pixels, max) = differing_pixels(&rendered, &expected);
-            counts.push((offset, pixels, max));
-            let better = match best {
-                None => true,
-                Some((fewest, _, _)) => pixels < fewest,
-            };
-            if better {
-                best = Some((pixels, offset, max));
-            }
-            // GRID's filed capture has no `.idx` (D15/D19: the indexed read
-            // cannot reproduce the moving screen). If a later capture carries
-            // one, compare it too — indexed is the stricter side.
-            let reference_idx =
-                repository_root().join(format!("reference/parts/grid/frame_{reference:06}.idx"));
-            if reference_idx.is_file() {
-                let idx = std::fs::read(&reference_idx).unwrap();
-                let rendered_idx = dumped_file(&dir, &manifest, port_index, "idx");
-                assert_eq!(
-                    rendered_idx, idx,
-                    "reference {reference} at offset {offset:+}: indexed plane"
-                );
-            }
-        }
-        let (fewest, offset, max) = best.unwrap();
-        // The residual's own rows, so the note's "top rows" claim is printed
-        // by the command that measures it (D25).
-        let port_index = (reference as i32 - K0 as i32 + offset) as u32;
-        let rendered = dumped_file(&dir, &manifest, port_index, "rgb");
-        let expected = reference_frame(reference, "rgb");
-        let mut rows = std::collections::BTreeMap::new();
-        for (pixel, (a, b)) in rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .enumerate()
-        {
-            if a != b {
-                *rows.entry(pixel / 320).or_insert(0usize) += 1;
-            }
-        }
-        println!(
-            "reference {reference}: offsets -1/0/+1 give {:?}; minimum {fewest} pixel(s) \
-             at offset {offset:+} (max channel delta {max}); rows {rows:?}",
-            counts
-                .iter()
-                .map(|(offset, pixels, _)| (*offset, *pixels))
-                .collect::<Vec<_>>()
+    assert_eq!(manifest["part"], "twist");
+    // The vault is not in the demo's sequence and carries no measured boot
+    // anchor: a `--part twist` run numbers its own frames from zero.
+    assert_eq!(manifest["index_origin"], "part");
+    assert!(manifest["anchor"].is_null(), "{}", manifest["anchor"]);
+    // Silent: TWIST calls no music service and `music_for_part("twist")` is
+    // `None`; a stray key would have ended the original, and none is sent.
+    assert!(manifest["music"].is_null(), "{}", manifest["music"]);
+
+    let frames = manifest["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 3);
+    for (frame, index) in frames.iter().zip([0u32, 1, 10]) {
+        assert_eq!(frame["index"].as_u64(), Some(u64::from(index)));
+        assert_eq!(frame["part"], "twist");
+        assert_eq!(frame["width"], 320);
+        assert_eq!(frame["height"], 200);
+        let rgb = std::fs::read(dir.join(frame["rgb"].as_str().unwrap())).unwrap();
+        assert_eq!(rgb.len(), 320 * 200 * 3);
+        let idx = std::fs::read(dir.join(frame["idx"].as_str().unwrap())).unwrap();
+        assert_eq!(idx.len(), 64_000);
+    }
+}
+
+#[test]
+fn grid_matches_the_reference_at_its_measured_start() {
+    let keyframes: Vec<u32> = GRID_RESIDUALS.iter().map(|(frame, _)| *frame).collect();
+    let reports = compare_keyframes("grid", GRID_K0, &keyframes);
+    for (report, (reference, residual)) in reports.iter().zip(GRID_RESIDUALS) {
+        assert_eq!(report.reference, reference);
+        print_report(report);
+        assert_eq!(
+            (report.pixels, report.offset),
+            (residual, 0),
+            "reference {reference}: {:?}; the minimum must be the measured residual at the K0 \
+             mapping",
+            report.counts
+        );
+    }
+}
+
+#[test]
+fn twist_matches_the_reference_at_its_measured_start() {
+    // All six filed frames are RGB-only: the moving screen fails the indexed
+    // read's coherence check, and an odd TWIST frame draws page 2, which the
+    // oracle's plane read (always from plane offset 0) would see as page 1.
+    for reference in TWIST_KEYFRAMES {
+        let idx = repository_root().join(format!("reference/parts/twist/frame_{reference:06}.idx"));
+        assert!(
+            !idx.is_file(),
+            "TWIST's filed capture is RGB-only (reference {reference})"
+        );
+    }
+
+    let reports = compare_keyframes("twist", TWIST_K0, &TWIST_KEYFRAMES);
+    for (report, (reference, residual)) in reports.iter().zip(TWIST_RESIDUALS) {
+        assert_eq!(report.reference, reference);
+        print_report(report);
+        assert_eq!(
+            (report.pixels, report.offset),
+            (residual, 0),
+            "reference {reference}: {:?}; effect frame {} must match at the K0 mapping",
+            report.counts,
+            reference - TWIST_K0
+        );
+    }
+}
+
+#[test]
+fn twist_draws_exactly_4444_frames_and_holds() {
+    // 4,444 iterations (`while(!kbhit() && frame<4444)`): 4,442, 4,443 and the
+    // held frames after the part retires. The 4,445th check returns `Finished`
+    // before drawing, so 4,444 and 4,500 are the picture 4,443 left.
+    let (dir, manifest) = dump("twist", "cap", "4442,4443,4444,4500");
+    for index in [4442u32, 4443, 4444, 4500] {
+        let frame = entry(&manifest, index);
+        assert_eq!(frame["part"], "twist", "frame {index}");
+        assert_eq!(frame["width"], 320, "frame {index}");
+        assert_eq!(frame["height"], 200, "frame {index}");
+    }
+
+    let previous = dumped_file(&dir, &manifest, 4442, "rgb");
+    let last = dumped_file(&dir, &manifest, 4443, "rgb");
+    assert_ne!(
+        previous, last,
+        "frame 4443 is the last drawn frame and is a new picture"
+    );
+
+    for hold in [4444u32, 4500] {
+        assert_eq!(
+            dumped_file(&dir, &manifest, hold, "rgb"),
+            last,
+            "frame {hold} is the hold, not a 4,445th drawn frame"
         );
         assert_eq!(
-            (fewest, offset),
-            (residual, 0),
-            "reference {reference}: {counts:?}; the minimum must be the measured residual at the \
-             K0 mapping"
+            dumped_file(&dir, &manifest, hold, "idx"),
+            dumped_file(&dir, &manifest, 4443, "idx"),
+            "frame {hold} holds the indexed frame too"
         );
     }
 }
