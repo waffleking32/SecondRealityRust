@@ -28,9 +28,14 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
-                     [--vault]
+                     [--vault] [--loop] [/gravis]
 run:   with no --part and no --block, the demo plays from its beginning: no
        argument is SECOND 1, as it is in the original.
+loop:  --loop plays a block's run for ever, as the setup screen's looping row
+       does: no end scroller, and after CRED the music fades and the demo
+       begins again at ALKU (close the window to leave). /gravis plays once
+       without the end scroller. Any other /switch is ignored, as SECOND.EXE
+       ignores it.
 keys:  in a window, ESC ends the part that is playing, and Ctrl skips it.
        A block's run ends the way the demo does: once its last part is over
        (one ESC leaves ENDSCRL) the music fades, the screen goes blank, the
@@ -92,7 +97,7 @@ fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
             SURFACE_WIDTH,
             SURFACE_HEIGHT,
             shell::start_view(),
-            shell::block_plan(block)?,
+            shell::run_plan(block, cli.run_settings().looping)?,
             cli.run_settings(),
         )?),
         None => new_sequence_for_part(shell::resolve(cli.part_name())?),
@@ -151,6 +156,8 @@ mod tests {
     fn the_end_screen_is_printed_after_a_windowed_demo_run_only() {
         assert!(prints_end_screen(&parse(&[])), "no argument is the demo");
         assert!(prints_end_screen(&parse(&["--block", "5"])));
+        assert!(prints_end_screen(&parse(&["--loop"])), "a looping run prints it when it closes");
+        assert!(prints_end_screen(&parse(&["/gravis"])));
         assert!(!prints_end_screen(&parse(&["--part", "glenz"])), "a part run holds");
         assert!(!prints_end_screen(&parse(&["--vault"])), "the vault's runs are parts");
         assert!(

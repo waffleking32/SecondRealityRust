@@ -493,7 +493,10 @@ mod tests {
             vec!["short"],
             |name| (name == "short").then(|| Box::new(Short(1)) as Box<dyn Part>),
             None,
-            crate::shell::RunSettings { ending: crate::shell::Ending::Exit },
+            crate::shell::RunSettings {
+                ending: crate::shell::Ending::Exit,
+                ..crate::shell::RunSettings::default()
+            },
         )
         .unwrap();
         let frames = by_index(&mut run, &dir, &[1, 100]).unwrap();

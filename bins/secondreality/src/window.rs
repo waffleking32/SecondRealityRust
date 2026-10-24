@@ -23,6 +23,10 @@
 //! ever: its hold is the exit stage (the fade, the blank), the window closes by
 //! itself when the stage has run (`Sequence::ended`), and an ESC during the
 //! stage closes it at once (D41). `main` then prints the end box.
+//! A **looping** run (`--loop`, D42) never gets there: it goes round from CRED
+//! to ALKU for ever, the title bar names the pass from the second on, ESC in the
+//! seam between two passes acts on nothing, and the close button is the way out
+//! (the box is printed then).
 //!
 //! `--vault` adds a menu over the three unreleased effects (`parts::vault`):
 //! it draws a 320×200 picture ([`crate::vault_menu`]), starts the chosen one as
@@ -639,6 +643,11 @@ fn status_line(run: &Sequence, block: Option<char>) -> String {
         line.push_str(" — block ");
         line.push(block);
     }
+    // A looping run's later passes (`MAIN/U2.ASM:933`): the index keeps counting across
+    // the seam, so the pass is what says the run has gone round.
+    if run.pass() > 1 {
+        line.push_str(&format!(" — pass {}", run.pass()));
+    }
     line.push_str(" — ");
     line.push_str(run.part());
     match run.frame_index() {
@@ -699,8 +708,8 @@ fn streaming_texture(
 mod tests {
     use super::*;
     use crate::shell::{
-        start_view, Ending, RunSettings, Sequence, SequenceStatus, EXIT_BLANK_TICKS,
-        EXIT_FADE_TICKS, SURFACE_HEIGHT, SURFACE_WIDTH,
+        start_view, Ending, Looping, RunSettings, Sequence, SequenceStatus, EXIT_BLANK_TICKS,
+        EXIT_FADE_TICKS, LOOP_RELOAD_TICKS, SURFACE_HEIGHT, SURFACE_WIDTH,
     };
     use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 
@@ -892,7 +901,7 @@ mod tests {
             plan,
             stub_source,
             None,
-            RunSettings { ending: Ending::Exit },
+            RunSettings { ending: Ending::Exit, ..RunSettings::default() },
         )
         .unwrap()
     }
@@ -932,6 +941,62 @@ mod tests {
         escape.press();
         assert!(escape.apply(&mut run), "ESC during the stage closes the window");
         assert_eq!(run_end(run.holding(), false), RunEnd::Close);
+    }
+
+    /// A looping demo run (`--loop`) of stub parts: `endlogo` retires on its first
+    /// tick, so the loop seam begins on the second, and pass 2's `alku` never retires.
+    fn looping_run_of(plan: Vec<&'static str>) -> Sequence {
+        Sequence::with_run(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
+            plan,
+            stub_source,
+            None,
+            RunSettings { ending: Ending::Exit, looping: Looping::On },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_looping_run_is_left_by_closing_the_window() {
+        // ESC ends only the running part (`DIS/DISINT.ASM:151-153`); the seam between
+        // two passes is not one, so a press there closes nothing, and a looping run
+        // never ends by itself. The original's way out is its sticky Ctrl
+        // (`MAIN/U2.ASM:920`); the port's Ctrl is D21's one-part skip, so the way out is
+        // the window's close button.
+        let mut run = looping_run_of(vec!["endlogo"]);
+        run_out(&mut run, 10);
+        assert!(!run.holding(), "ten ticks into the seam, the run is not at its end");
+        let mut escape = EscapeKey::default();
+        escape.press();
+        assert!(!escape.apply(&mut run), "ESC in the seam does not close the window");
+        run_out(&mut run, EXIT_FADE_TICKS + LOOP_RELOAD_TICKS);
+        assert_eq!(run.pass(), 2);
+        assert_eq!(run.part(), "alku", "and the press did not reach pass 2's first part");
+        run_out(&mut run, 1_000);
+        assert!(!run_is_over(&run), "a looping run never ends by itself");
+        escape.press();
+        assert!(!escape.apply(&mut run), "ESC in a part ends the part");
+    }
+
+    #[test]
+    fn the_status_line_counts_the_pass_from_the_second_on() {
+        let mut run = looping_run_of(vec!["endlogo"]);
+        run.tick();
+        assert_eq!(
+            status_line(&run, Some('5')),
+            "Second Reality — block 5 — endlogo — frame 404",
+            "pass 1 says nothing about passes"
+        );
+        run_out(&mut run, EXIT_FADE_TICKS + LOOP_RELOAD_TICKS);
+        assert_eq!(run.pass(), 1, "the seam is the end of pass 1");
+        run.tick();
+        let first = 405 + EXIT_FADE_TICKS + LOOP_RELOAD_TICKS;
+        assert_eq!(
+            status_line(&run, Some('5')),
+            format!("Second Reality — block 5 — pass 2 — alku — frame {first}")
+        );
     }
 
     /// The declared format must decode the bytes `present` wrote, in the order

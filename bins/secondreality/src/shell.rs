@@ -811,11 +811,66 @@ pub enum Ending {
     Exit,
 }
 
+/// The original's `looping` byte (`MAIN/U2.ASM:746`, from the setup's `ip[3]`,
+/// `START.C:103`): 0, 1 or 2.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Looping {
+    /// 0: play once, with the end scroller, and exit (`MENU.C:233`, "Disabled").
+    #[default]
+    Off,
+    /// 1: no end scroller (`:914-917`), and after CRED the music fades, MUSIC0 restarts at
+    /// order 0 and the run begins again at ALKU (`:919-933`) — for ever. The setup's
+    /// looping row ("Enabled (no end scroller shown)", `MENU.C:236`); the port's `--loop`.
+    On,
+    /// 2: no end scroller, and no loop either — `:923-924` sends it to `@@partsdone`. Only
+    /// `/gravis` sets it (`START.C:89-93`), which also skips the setup screen.
+    NoEndScroller,
+}
+
 /// What a run is asked to be, beyond its plan.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RunSettings {
     /// How the run ends.
     pub ending: Ending,
+    /// The original's `looping` ([`Looping`]). It changes a run built from a block only:
+    /// its plan ([`run_plan`]) and what happens when the plan runs out.
+    pub looping: Looping,
+}
+
+/// The loop's music: `mov ax,0; mov bx,0; mov cx,45000; call restartmus`
+/// (`MAIN/U2.ASM:929-932`) reloads MUSIC0 and seeks it to order 0 (`_zplaysong(bx)`,
+/// `:390-394`).
+pub const LOOP_RESTART: (ModuleId, u8) = (ModuleId::Music0, 0);
+
+/// The ticks between the loop fade's last and pass 2's ALKU, with CRED's screen still up:
+/// `restartmus`'s reload of the module (`MAIN/U2.ASM:347-396`) and ALKU's own load before
+/// its mode set (`ALKU/MAIN.C:158`).
+///
+/// **One constant, measured (D24, D42).** The original's seam is `C` = 9029 (CRED's closed
+/// iris) to `L` = 9104 (ALKU's first 320×400 frame): **75** frames (`reference-indices.md`
+/// §25.3; 9090–9101 and 9103 are still CRED's 320×200 black). The port's CRED draws its
+/// closed iris on two ticks before it retires (8833, 8834 under `--block 5`) and the fade
+/// is [`EXIT_FADE_TICKS`], so `75 − 2 − 64` = 9 ticks put the port's `L` at `C + 75`.
+/// ALKU's three held keyframes compare at 0 with it (`tests/loop.rs`).
+pub const LOOP_RELOAD_TICKS: u32 = 9;
+
+/// The parts a run of `block` plays under `looping`: [`block_plan`], without ENDSCRL
+/// whenever `looping` is not 0 (`MAIN/U2.ASM:914-917`: `cmp cs:looping,0; jne @@skipp6`
+/// jumps over `exe23`).
+pub fn run_plan(block: char, looping: Looping) -> Result<Vec<&'static str>, ShellError> {
+    let mut plan = block_plan(block)?;
+    if looping != Looping::Off {
+        plan.retain(|name| *name != "endscrl");
+    }
+    Ok(plan)
+}
+
+/// Every pass after the first: `mov cs:whattorun,07fh` (`MAIN/U2.ASM:919`) gates the parts
+/// `SECOND 1` runs (its `partsmask` 1fh is 7fh's low five bits, and bits 5–6 gate nothing;
+/// bit 7, the hidden part, is clear), so pass 2 is block 1's plan, without ENDSCRL —
+/// whichever block pass 1 began at.
+fn loop_plan() -> Vec<&'static str> {
+    run_plan('1', Looping::On).expect("block 1 is a block")
 }
 
 /// The exit stage's fade: `@@partsdone`'s `mov cx,1; call fademusic` (`MAIN/U2.ASM:937-939`)
@@ -854,6 +909,11 @@ pub const EXIT_BLANK_TICKS: u32 = 20;
 /// has run out, its hold is `SECOND.EXE`'s own way out — [`EXIT_FADE_TICKS`] of the
 /// music's fade over the last picture, [`EXIT_BLANK_TICKS`] of text mode's blank
 /// screen — and then it has [`ended`](Sequence::ended) (D41).
+///
+/// **A looping run goes round.** A [`Looping::On`] run's plan has no ENDSCRL
+/// ([`run_plan`]); when it runs out, the shell's loop seam fades the music over CRED's
+/// picture, restarts MUSIC0 at order 0 and begins the next [`pass`](Sequence::pass) at ALKU
+/// with block 1's plan (`MAIN/U2.ASM:914-933`, D42). It never ends by itself.
 pub struct Sequence {
     engine: Engine,
     source: PartSource,
@@ -902,6 +962,14 @@ pub struct Sequence {
     /// How many ticks of the exit stage have run: the hold's ticks, for an
     /// [`Ending::Exit`] run whose plan ran out. Zero for every other run.
     exit_ticks: u32,
+    /// The original's `looping` ([`RunSettings::looping`]): whether a plan that runs out
+    /// begins the demo again.
+    looping: Looping,
+    /// The pass the run is on: 1, and one more each time a loop seam starts ALKU again.
+    pass: u32,
+    /// The loop seam's ticks so far, while `live` is the shell's [`LoopSeam`]; `None`
+    /// otherwise.
+    seam: Option<u32>,
 }
 
 /// The music a run was built with: the player, which module and order it began at, how its
@@ -956,6 +1024,36 @@ impl Part for Holding {
 
     fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus {
         PartStatus::Continuing
+    }
+}
+
+/// The shell's seam between two passes of a looping run (`MAIN/U2.ASM:919-933`): it draws
+/// nothing and touches nothing, so CRED's last picture is what is up while the music fades
+/// and reloads. [`Sequence::loop_seam`] counts it and ends it.
+///
+/// It **drains after exit**: the original's `fademusic` and `restartmus` never read the
+/// exit flag, so an ESC here is not the seam's to act on, and pass 2's first part's
+/// `Engine::start` clears it — as `dis_partstart` does in the original.
+struct LoopSeam {
+    /// The part whose screen is up, for `name`.
+    of: &'static str,
+}
+
+impl Part for LoopSeam {
+    fn name(&self) -> &'static str {
+        self.of
+    }
+
+    fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
+        Ok(())
+    }
+
+    fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus {
+        PartStatus::Continuing
+    }
+
+    fn drains_after_exit(&self) -> bool {
+        true
     }
 }
 
@@ -1142,6 +1240,9 @@ impl Sequence {
             live_cue: false,
             ending: settings.ending,
             exit_ticks: 0,
+            looping: settings.looping,
+            pass: 1,
+            seam: None,
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
@@ -1267,7 +1368,49 @@ impl Sequence {
         // part never restarts, fades or drains the player — and neither can change what
         // the tick drew.
         self.music_after_tick();
+        // The loop seam's count comes after the tick's fade step, so the restart it
+        // installs at the fade's end is never itself faded.
+        self.loop_seam();
         SequenceStatus::Continuing
+    }
+
+    /// The loop seam, on a tick it has just composed: `MAIN/U2.ASM:919-933` for a
+    /// [`Looping::On`] run whose plan has run out.
+    ///
+    /// - Ticks 1..=[`EXIT_FADE_TICKS`]: `mov cx,1; call fademusic` (`:926-928`) — the
+    ///   module's global-volume byte steps down a `dis_waitb` (`:333-346`) with CRED's
+    ///   picture up; [`music_after_tick`](Sequence::music_after_tick) takes the step.
+    /// - At the fade's end, `restartmus` with `ax=0, bx=0` (`:929-932`): MUSIC0 is loaded
+    ///   again and seeked to order 0 ([`LOOP_RESTART`]), installed at the next tick's
+    ///   boundary under [`MusicStart::restart`]'s rule.
+    /// - [`LOOP_RELOAD_TICKS`] more of CRED's screen — the reload and ALKU's load — and then
+    ///   `jmp @@partsagain` (`:933`): the plan is block 1's again ([`loop_plan`]), from its
+    ///   first part, on the next pass.
+    fn loop_seam(&mut self) {
+        let Some(ticks) = self.seam.as_mut() else {
+            return;
+        };
+        *ticks += 1;
+        let ticks = *ticks;
+        if ticks == EXIT_FADE_TICKS {
+            if let Some(source) = self.music_source.filter(|_| self.music.is_some()) {
+                let (module, order) = LOOP_RESTART;
+                let start = MusicStart::restart(self.index);
+                if let Err(error) = self.install_music(module, order, source, start) {
+                    eprintln!("secondreality: {error}; the run ends here");
+                    self.finished = true;
+                    return;
+                }
+            }
+        }
+        if ticks == EXIT_FADE_TICKS + LOOP_RELOAD_TICKS {
+            self.seam = None;
+            self.live = None;
+            // The pass is counted when its first part starts (`take_next`), so the
+            // seam's last frame is still pass 1's.
+            self.plan = loop_plan();
+            self.next = 0;
+        }
     }
 
     /// The exit stage, on a tick the hold has just composed: `SECOND.EXE`'s own way out
@@ -1307,8 +1450,9 @@ impl Sequence {
         // (that is `fademusic`'s own `dis_waitb`), and the demo deinits and returns to DOS.
         // The port's hold *is* that moment — the plan has run out, or the next part is one
         // the port has not written — so the fade runs here, once per tick, until the byte
-        // reaches zero.
-        if self.holding {
+        // reaches zero. A loop seam's fade is the same `fademusic` (`:926-928`), for its
+        // first `EXIT_FADE_TICKS` ticks.
+        if self.holding || self.seam.is_some_and(|ticks| ticks < EXIT_FADE_TICKS) {
             crate::audio::fade_music(&mut crate::audio::lock(&music.player), 1);
         }
         // The dump's samples are the tick's: `take_samples` is the ring's only consumer,
@@ -1357,8 +1501,17 @@ impl Sequence {
             }
         }
         let Some(&name) = self.plan.get(self.next) else {
+            // `:920-925`: a run looping 1 goes round again; 0 and 2 reach `@@partsdone`.
+            if self.looping == Looping::On {
+                return self.start_seam();
+            }
             return self.hold(None);
         };
+        // Only a loop seam rewinds the plan to its first name (`with_run` starts it
+        // and leaves `next` at 1), so this is the next pass's first part.
+        if self.next == 0 {
+            self.pass += 1;
+        }
         self.next += 1;
         // `MAIN/U2.ASM:880-885` runs **before** `partexecute`: a restart site
         // replaces the player the incoming part will read, so it must be
@@ -1437,6 +1590,21 @@ impl Sequence {
         }
         self.live = Some(part);
         self.live_cue = true;
+        true
+    }
+
+    /// Install the shell's loop seam ([`loop_seam`](Sequence::loop_seam)): CRED's picture,
+    /// held while the music fades and reloads. `current` stays the part whose screen it is.
+    fn start_seam(&mut self) -> bool {
+        let mut part = Box::new(LoopSeam { of: self.current });
+        if let Err(error) = self.engine.start(&mut *part) {
+            eprintln!("secondreality: {error}; the run ends here");
+            self.finished = true;
+            return false;
+        }
+        self.live = Some(part);
+        self.live_cue = false;
+        self.seam = Some(0);
         true
     }
 
@@ -1549,6 +1717,12 @@ impl Sequence {
     /// until the window's ESC or close button.
     pub fn holding(&self) -> bool {
         self.holding
+    }
+
+    /// The pass of the demo the run is on: 1 on the first, and one more each time a
+    /// [`Looping::On`] run's seam starts ALKU again (`MAIN/U2.ASM:933`).
+    pub fn pass(&self) -> u32 {
+        self.pass
     }
 
     /// The part the run stopped at: the plan's next name, when the hold began
@@ -1666,7 +1840,9 @@ impl Sequence {
     /// Returns whether there was a part to ask: false when none is live —
     /// between two parts, or with the plan exhausted and the screen being held,
     /// which is where the original's shell has already reached `@@partsdone`
-    /// (`MAIN/U2.ASM:935`).
+    /// (`MAIN/U2.ASM:935`). In a loop seam the press is taken and has no effect: the seam
+    /// is the shell's [`LoopSeam`], which drains after exit, and pass 2's first part's
+    /// start clears the flag.
     pub fn request_exit(&mut self) -> bool {
         if self.holding || self.live.is_none() {
             return false;
@@ -1692,9 +1868,10 @@ impl Sequence {
     /// with the next, which is what the window's Ctrl is for; a run-wide skip is
     /// the window's close button's job.
     ///
-    /// Returns whether there was a part to skip.
+    /// Returns whether there was a part to skip — never in a loop seam, which is the
+    /// shell's and not a part.
     pub fn skip_part(&mut self) -> bool {
-        if self.holding || self.live.is_none() {
+        if self.holding || self.live.is_none() || self.seam.is_some() {
             return false;
         }
         self.live = None;
@@ -2370,7 +2547,7 @@ mod tests {
             vec!["pam", "a"],
             stub_source,
             Some(crate::audio::test_player),
-            RunSettings { ending: Ending::Exit },
+            RunSettings { ending: Ending::Exit, ..RunSettings::default() },
         )
         .unwrap();
         for _ in 0..3 {
@@ -2431,7 +2608,7 @@ mod tests {
             vec!["a"],
             stub_source,
             None,
-            RunSettings { ending: Ending::Hold },
+            RunSettings { ending: Ending::Hold, ..RunSettings::default() },
         )
         .unwrap();
         run.tick();
@@ -2445,6 +2622,260 @@ mod tests {
         assert!(!run.ended(), "and a held run never ends");
         assert_eq!(colours(run.frame()), picture, "the held picture is still up");
         assert_eq!(RunSettings::default().ending, Ending::Hold, "and Hold is the default");
+    }
+
+    // --- loop mode (`MAIN/U2.ASM:914-933`) ------------------------------------
+
+    /// The loop's parts: every demo name builds a part that draws nothing and never
+    /// retires — a test walks the plan with Ctrl ([`Sequence::skip_part`]) — except CRED,
+    /// which fills the screen and retires on its second tick, so its picture is the one the
+    /// seam holds.
+    fn loop_source(name: &str) -> Option<Box<dyn Part>> {
+        let name = demo_part(name)?;
+        if name == "cred" {
+            return Some(Box::new(Stub { name, fill: Some(7), retires: Some(1) }));
+        }
+        Some(Box::new(Stub { name, fill: None, retires: None }))
+    }
+
+    /// A loop-mode run of `block`'s plan from [`loop_source`], with the real players.
+    fn loop_run(block: char, looping: Looping) -> Sequence {
+        Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            run_plan(block, looping).unwrap(),
+            loop_source,
+            Some(crate::audio::test_player),
+            RunSettings { ending: Ending::Exit, looping },
+        )
+        .unwrap()
+    }
+
+    /// Tick `run`, pressing Ctrl after every tick that leaves a part other than CRED
+    /// live, until `until` holds after a tick. Returns the parts the run drew frames of
+    /// on the way, one entry per part start (the tick `until` holds on is not counted),
+    /// and every player install as the part current at it and the module it seeked.
+    #[allow(clippy::type_complexity)]
+    fn walk(
+        run: &mut Sequence,
+        until: impl Fn(&Sequence) -> bool,
+    ) -> (Vec<&'static str>, Vec<(&'static str, (ModuleId, u8))>) {
+        let mut parts = Vec::new();
+        let mut installs = Vec::new();
+        let mut player = run.audio_player();
+        let mut last = None;
+        for _ in 0..10_000 {
+            run.tick();
+            let now = run.audio_player();
+            let fresh = match (&player, &now) {
+                (Some(a), Some(b)) => !std::sync::Arc::ptr_eq(a, b),
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            if fresh {
+                installs.push((run.part(), run.music_module().unwrap()));
+            }
+            player = now;
+            if until(run) {
+                return (parts, installs);
+            }
+            if last != Some((run.part(), run.pass())) && run.live.is_some() && run.seam.is_none() {
+                parts.push(run.part());
+            }
+            last = Some((run.part(), run.pass()));
+            if run.part() != "cred" {
+                run.skip_part();
+            }
+        }
+        panic!("the run never got there; it drew {parts:?}");
+    }
+
+    #[test]
+    fn a_looping_plan_has_no_end_scroller() {
+        // `MAIN/U2.ASM:914-917`: `cmp cs:looping,0; jne @@skipp6` jumps over `exe23`
+        // (ENDSCRL) for any `looping` but 0 — the menu's 1 and `/gravis`'s 2 alike.
+        for block in ['1', '5'] {
+            let full = block_plan(block).unwrap();
+            let without: Vec<_> = full.iter().copied().filter(|name| *name != "endscrl").collect();
+            assert_ne!(full, without, "block {block} ends in ENDSCRL");
+            assert_eq!(run_plan(block, Looping::On).unwrap(), without, "block {block}, looping 1");
+            assert_eq!(
+                run_plan(block, Looping::NoEndScroller).unwrap(),
+                without,
+                "block {block}, looping 2"
+            );
+            assert_eq!(run_plan(block, Looping::Off).unwrap(), full, "block {block}, looping 0");
+        }
+        assert_eq!(Looping::default(), Looping::Off);
+        assert_eq!(RunSettings::default().looping, Looping::Off);
+    }
+
+    #[test]
+    fn a_loop_pass_fades_then_restarts_music0_at_order_0_and_starts_alku() {
+        // `MAIN/U2.ASM:919-933`: after CRED (no ENDSCRL), `mov cx,1; call fademusic`
+        // walks the module's 0x40 down a step a `dis_waitb` (`:333-346`) with CRED's
+        // picture up; `restartmus` with `ax=0, bx=0` reloads MUSIC0 and seeks order 0
+        // (`:929-932`, `_zplaysong(0)` at `:394`); `jmp @@partsagain` (`:933`) starts
+        // ALKU again. Between the fade and ALKU's first frame the original shows
+        // CRED's screen for `LOOP_RELOAD_TICKS` more frames (the module's and ALKU's
+        // loads, `reference-indices.md` §25.3).
+        let mut run = loop_run('5', Looping::On);
+        assert_eq!(run.pass(), 1, "the first pass is pass 1");
+        assert_eq!(run.music_module(), Some((ModuleId::Music0, 25)), "block 5's own start");
+        walk(&mut run, |run| run.part() == "cred");
+        // CRED's two ticks: the second fills and retires.
+        run.tick();
+        assert_eq!(run.part(), "cred");
+        assert!(run.live.is_none(), "CRED has retired");
+        let picture = colours(run.frame());
+        assert!(picture.iter().all(|colour| *colour != [0, 0, 0]), "CRED's picture is up");
+        let volume = run.music_volume().unwrap();
+        assert_eq!(volume, 0x40, "nothing has faded yet");
+
+        let pass_one = run.audio_player().unwrap();
+        for tick in 1..=EXIT_FADE_TICKS {
+            assert_eq!(run.tick(), SequenceStatus::Continuing);
+            assert_eq!(run.part(), "cred", "fade tick {tick}: CRED's picture");
+            assert_eq!(colours(run.frame()), picture, "fade tick {tick}: the picture is held");
+            assert!(!run.holding(), "fade tick {tick}: a loop seam is not the run's end");
+            assert!(!run.ended(), "fade tick {tick}");
+            assert_eq!(run.pass(), 1, "fade tick {tick}");
+            assert_eq!(
+                crate::audio::lock(&pass_one).global_volume(),
+                (0x40 - tick) as u8,
+                "fade tick {tick}: the global volume steps down one a tick"
+            );
+            if tick < EXIT_FADE_TICKS {
+                assert_eq!(run.music_module(), Some((ModuleId::Music0, 25)), "fade tick {tick}");
+            }
+        }
+        assert!(crate::audio::is_faded(&crate::audio::lock(&pass_one)), "the fade reached 0");
+        // The restart is installed at the fade's end, for the reload's first tick.
+        assert_eq!(run.music_module(), Some(LOOP_RESTART));
+        assert_eq!(LOOP_RESTART, (ModuleId::Music0, 0));
+        assert_eq!(run.music_volume(), Some(0x40), "a reloaded module is at its own 0x40");
+        assert_eq!(run.music_start_frame(), Some(run.index()), "installed at this boundary");
+        for tick in 1..=LOOP_RELOAD_TICKS {
+            run.tick();
+            assert_eq!(run.part(), "cred", "reload tick {tick}: still CRED's screen");
+            assert_eq!(colours(run.frame()), picture, "reload tick {tick}");
+            assert_eq!(run.music_module(), Some(LOOP_RESTART), "reload tick {tick}");
+            assert_eq!(run.music_volume(), Some(0x40), "reload tick {tick}: no fade");
+            assert_eq!(run.pass(), 1, "reload tick {tick}");
+        }
+        run.tick();
+        assert_eq!(run.part(), "alku", "`jmp @@partsagain`: ALKU begins the next pass");
+        assert_eq!(run.pass(), 2);
+        assert_eq!(run.music_module(), Some(LOOP_RESTART));
+        assert!(!run.holding());
+    }
+
+    #[test]
+    fn the_seam_is_not_a_part_escape_and_ctrl_leave_it_alone() {
+        // ESC ends only the running part, and the seam is none: the original's
+        // `fademusic` and `restartmus` read no exit flag, and ALKU's start clears it
+        // (`Engine::start`). Ctrl is D21's one-part skip, and there is no part to skip.
+        let mut run = loop_run('5', Looping::On);
+        walk(&mut run, |run| run.part() == "cred");
+        run.tick();
+        let at = run.index();
+        run.tick();
+        assert!(!run.skip_part(), "no part to skip in the seam");
+        run.request_exit();
+        for _ in 0..EXIT_FADE_TICKS + LOOP_RELOAD_TICKS - 1 {
+            run.tick();
+            assert_eq!(run.part(), "cred");
+        }
+        assert_eq!(run.index(), at + EXIT_FADE_TICKS + LOOP_RELOAD_TICKS, "the seam's length");
+        run.tick();
+        assert_eq!(run.part(), "alku");
+        run.tick();
+        assert_eq!(run.part(), "alku", "the press did not reach ALKU");
+        assert!(run.live.is_some());
+    }
+
+    #[test]
+    fn a_loop_pass_runs_every_block_whatever_the_entry() {
+        // `MAIN/U2.ASM:919`: `mov cs:whattorun,07fh` on every pass, so pass 2 runs
+        // blocks 1-4 and 5 whatever `SECOND n` began at — and 7fh has no bit 7, so the
+        // hidden part (`:889-896`) never appears.
+        let mut run = loop_run('3', Looping::On);
+        let (first, _) = walk(&mut run, |run| run.pass() == 2);
+        assert_eq!(first, run_plan('3', Looping::On).unwrap(), "pass 1 is block 3's");
+        let expected = run_plan('1', Looping::On).unwrap();
+        assert_eq!(run.plan, expected, "pass 2's plan is block 1's without ENDSCRL");
+        let (second, _) = walk(&mut run, |run| run.pass() == 3);
+        assert_eq!(second, expected, "and pass 2 plays it");
+        assert!(!second.contains(&"ddstars"));
+        assert!(!second.contains(&"endscrl"));
+        assert_eq!(run.plan, expected, "pass 3 is the same");
+
+        // A hidden-part run loops into the demo too.
+        let mut run = loop_run('U', Looping::On);
+        let (first, _) = walk(&mut run, |run| run.pass() == 2);
+        assert_eq!(first, ["ddstars"]);
+        assert_eq!(run.plan, expected);
+    }
+
+    #[test]
+    fn a_loop_pass_fires_only_the_full_runs_restarts() {
+        // Pass 2 is block 1's sequence under `whattorun` 7fh: `:813-818` restarts MUSIC1
+        // at order 0 before GLENZ (bit 0 set), `:880-885` MUSIC0 at order 18 before U2E
+        // (bit 3 set); `:858-863`'s MUSIC1@42 needs bit 1 clear and `:900-905`'s MUSIC0@25
+        // bit 3 clear, so neither fires — whichever block pass 1 began at.
+        for block in ['3', '5'] {
+            let mut run = loop_run(block, Looping::On);
+            walk(&mut run, |run| run.pass() == 2);
+            let (_, installs) = walk(&mut run, |run| run.pass() == 3);
+            assert_eq!(
+                installs,
+                [
+                    ("glenz", (ModuleId::Music1, 0)),
+                    ("u2e", (ModuleId::Music0, 18)),
+                    ("cred", LOOP_RESTART),
+                ],
+                "block {block}: pass 2's restarts are the full run's, then the loop's"
+            );
+        }
+    }
+
+    #[test]
+    fn gravis_runs_once_without_the_end_scroller_and_ends() {
+        // `looping` 2 (`START.C:89-93`): ENDSCRL is skipped (`:914-917`) and `:923-924`
+        // goes to `@@partsdone` — the exit stage, then the end.
+        let mut run = loop_run('5', Looping::NoEndScroller);
+        walk(&mut run, |run| run.part() == "cred");
+        run.tick();
+        for _ in 0..EXIT_FADE_TICKS + EXIT_BLANK_TICKS {
+            assert!(!run.ended());
+            run.tick();
+            assert!(run.holding(), "the exit stage is the hold");
+            assert_eq!(run.part(), "cred");
+            assert_eq!(run.pass(), 1);
+        }
+        assert!(run.ended());
+        assert_eq!(run.music_module(), Some((ModuleId::Music0, 25)), "no restart");
+    }
+
+    #[test]
+    fn looping_leaves_pass_ones_music_alone() {
+        // The music clock is the picture: until the seam, a looping run's published
+        // position is the plain run's at every tick.
+        let mut plain = loop_run('5', Looping::Off);
+        let mut looping = loop_run('5', Looping::On);
+        // ENDLOGO for 2,001 ticks, then CRED's two: the seam would begin on the next.
+        for tick in 0..=2_002 {
+            plain.tick();
+            looping.tick();
+            assert_eq!(plain.music_position(), looping.music_position(), "tick {tick}");
+            assert_eq!(plain.music_volume(), looping.music_volume(), "tick {tick}");
+            assert_eq!(plain.part(), looping.part(), "tick {tick}");
+            if tick == 2_000 {
+                plain.skip_part();
+                looping.skip_part();
+            }
+        }
     }
 
     // --- the run's music against the filed trace -----------------------------

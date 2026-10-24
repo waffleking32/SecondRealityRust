@@ -328,9 +328,19 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
   the hidden part never appears on a loop pass.
 - **Conditions** (lines 920-925): re-enter only if Ctrl is not held **and** `looping != 0`
   **and** `looping != 2`.
-- **Music:** `fademusic` with `cx = 1` (lines 926-928, routine at 333-346 — steps the
-  module's tempo byte at `module[0x30]` down to 0), then MUSIC0 at order 0, speed 45000
-  (lines 929-932), then `jmp @@partsagain` (933).
+- **Music:** `fademusic` with `cx = 1` (lines 926-928), then MUSIC0 at order 0, speed 45000
+  (lines 929-932), then `jmp @@partsagain` (933). `fademusic` (lines 333-346) steps the
+  module's **global-volume** byte `module[0x30]` — the S3M header's offset 0x30, **0x40** in
+  both `MUSIC0.S3M` and `MUSIC1.S3M` — down by `cx` once a `dis_waitb` (`int 0fch` function 1,
+  line 340), and stores 0 when it is done: at `cx = 1` the fade is **64** frames. (This note
+  called it the tempo byte until Phase 9; it is not — the tempo is offset 0x32. Corrected in
+  Phase 9 Task 4; `audio.rs`'s `fade_music` and D41 already walk the global volume.)
+- **The port** (Phase 9 Task 4, D42): `--loop` is `looping` 1. `shell::run_plan` drops
+  ENDSCRL; when the plan runs out the shell's loop seam holds CRED's picture for the 64
+  fade ticks (`EXIT_FADE_TICKS`), installs `LOOP_RESTART` (MUSIC0, order 0) at the fade's
+  end, holds `LOOP_RELOAD_TICKS` = 9 more ticks — the original's `C` → `L` is 75 frames
+  (`reference-indices.md` §25.3) — and starts pass 2 at ALKU with block 1's plan without
+  ENDSCRL. `/gravis` is `looping` 2: no ENDSCRL, then `@@partsdone` (§9).
 - `looping` is the setup menu's answer, read at lines 745-746 from `msg[6]`. `MENU.C:167-168`
   clamps the menu toggle to 0 or 1; the value **2** is set only by `/gravis`
   (`START.C:91`) and means "no menu, Gravis, and do not loop" — with 2 the demo skips the
@@ -353,3 +363,29 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
   its dependents: `BEG/` shipped (§1), so BEGLOGO calls no music service at all.
 - **The order-42 and order-25 correspondence** to where a full run's music actually is at
   those moments is the evident intent of the code (§3); it is not measured here.
+
+## 9. How the demo ends: `@@partsdone` and `fatalexit`
+
+`MAIN/U2.ASM:935-994`, transcribed, with what the port does at each line. `@@partsdone` is
+reached from `:921`, `:923` or `:925` (§7): Ctrl held, `looping` 0, or `looping` 2.
+
+| line(s) | the original | the port |
+|---|---|---|
+| 935-936 | `@@partsdone: mov cs:notextmode,0` | — (no text mode to keep or restore) |
+| 937-939 | `mov cx,1; call fademusic` — 64 `dis_waitb`s of the global-volume fade (§7) | the exit stage's fade: the hold's first `EXIT_FADE_TICKS` = 64 ticks, the last part's picture up and the volume stepping down a tick (`Sequence::exit_stage`, `music_after_tick`; D41) |
+| 940-942 | `_asmcopperdeinit`, `_zsoundoff` | nothing to stop: the player is at volume 0, and the run's end drops it |
+| 943-960 | `@@exitnow`: hand the EMS page frame and handle to the music loader and run it with `ds:[bx+12] = -1`, "shut down all music" | — (no EMS, no separate loader) |
+| 962-964 | `fatalexit: mov cs:notextmode,0; call vmode_deinit` | — |
+| 965-968 | `fatalexit0: call dis_resetint; mov ax,3; int 10h` — the interrupt server off, text mode on | the exit stage's blank: every pixel index 0 through an all-black palette |
+| 969-973 | `mov cx,20` / `@@cwb1: call copperwaitborder` / `loop @@cwb1` — twenty retraces | `EXIT_BLANK_TICKS` = 20 of the blank, then `Sequence::ended()` and the window closes |
+| 974 | `call printend` — `U2END.BIN` into text-mode memory (`:506-535`) | `main` prints the box to the launching terminal, for a windowed demo run (D41) |
+| 975-976 | `printdebug`, `file_resetint` | — |
+| 977-987 | `fatalexit00`: restore the interrupt vector table from `zeropage` | — |
+| 988 | `call printerror` — the error text, if `errorcode` is set | an error is the run's own `Err`, printed by `main` after the box |
+| 989-992 | `IF DEBUG … int 3` | — |
+| 993-994 | `mov ax,4c00h; int 21h` — return to DOS | the process exits |
+
+**A looping run never reaches `@@partsdone`** except by Ctrl at `:920`; the port's Ctrl is
+D21's one-part skip, so a `--loop` run is left by closing the window, and the box is printed
+then (D42). `/gravis` (`looping` 2) reaches it after CRED, through the same exit stage as a
+`looping` 0 run reaches after ENDSCRL.

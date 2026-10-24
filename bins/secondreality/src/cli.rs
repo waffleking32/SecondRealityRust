@@ -75,6 +75,13 @@ pub struct Cli {
     /// refuses those. The presentation flags (`--scale`, `--aspect`,
     /// `--no-border`, `--no-audio`) apply to it and to the runs it starts.
     pub vault: bool,
+    /// The original's `looping` (`MAIN/U2.ASM:746`): `--loop` is the setup menu's
+    /// "Demo looping: Enabled" (`MENU.C:236`, 1), and `/gravis` is 2 (`START.C:89-93`).
+    /// Only a block's run loops.
+    pub looping: shell::Looping,
+    /// Whether the run asks for its settings first — the original's setup screen, which
+    /// `START.C:89-95` skips for `/gravis` and runs (`menu()`) otherwise.
+    pub setup: bool,
 }
 
 impl Default for Cli {
@@ -95,6 +102,8 @@ impl Default for Cli {
             audio_dump: None,
             no_audio: false,
             vault: false,
+            looping: shell::Looping::Off,
+            setup: true,
         }
     }
 }
@@ -163,6 +172,16 @@ impl Cli {
                 }
                 "--no-audio" => cli.no_audio = true,
                 "--vault" => cli.vault = true,
+                "--loop" => cli.looping = shell::Looping::On,
+                // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
+                // characters, any case — is `m_looping=2` and no setup menu.
+                switch if is_gravis(switch) => {
+                    cli.looping = shell::Looping::NoEndScroller;
+                    cli.setup = false;
+                }
+                // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at a `/`, so any other
+                // switch is no block and no error. It is ignored here too.
+                switch if switch.starts_with('/') => {}
                 other => return Err(format!("unknown argument {other:?}")),
             }
         }
@@ -196,6 +215,9 @@ impl Cli {
             } else {
                 shell::Ending::Hold
             },
+            // `validate` refuses looping for anything but a block, so this is the
+            // command line's own word.
+            looping: self.looping,
         }
     }
 
@@ -209,6 +231,10 @@ impl Cli {
         // check comes before the headless rules so that the headless vault says
         // *why* it cannot exist, rather than asking for a dump directory.
         if self.vault {
+            if self.looping != shell::Looping::Off {
+                return Err("the vault's parts do not loop; --loop and /gravis are a block's run"
+                    .to_string());
+            }
             if self.headless
                 || self.part.is_some()
                 || self.block.is_some()
@@ -224,6 +250,12 @@ impl Cli {
         }
         if self.block.is_some() && self.part.is_some() {
             return Err("give --part or --block, not both".to_string());
+        }
+        // Looping is the demo's sequence going round (`MAIN/U2.ASM:914-933`); one part
+        // holds where it ends, and the vault (refused above for its own reasons) starts
+        // parts.
+        if self.looping != shell::Looping::Off && self.block.is_none() {
+            return Err("--loop and /gravis are a block's run; give --block, not --part".to_string());
         }
         // A dump of a run with no music would be a file with a header and nothing in it,
         // which reads as a recording that captured silence. Which runs have music is the
@@ -325,6 +357,12 @@ impl Cli {
     }
 }
 
+/// Whether `arg` is `/gravis` as `START.C:89` reads it: `memicmp(argv[1], "/gravis", 7)`,
+/// its first seven characters in any case — so `/GRAVIS` and `/gravisultrasound` too.
+fn is_gravis(arg: &str) -> bool {
+    arg.len() >= 7 && arg.as_bytes()[..7].eq_ignore_ascii_case(b"/gravis")
+}
+
 /// The argument after `flag`, which the flag requires.
 fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     args.next().ok_or_else(|| format!("{flag} needs a value"))
@@ -397,7 +435,7 @@ fn known_blocks() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::Ending;
+    use crate::shell::{Ending, Looping};
 
     fn parse(args: &[&str]) -> Result<Cli, String> { Cli::parse(args.iter().map(|s| s.to_string())) }
 
@@ -436,6 +474,59 @@ mod tests {
         assert_eq!(parse(&[]).unwrap().run_settings().ending, Ending::Exit);
         // The vault's runs are one-part runs the menu starts: they hold.
         assert_eq!(parse(&["--vault"]).unwrap().run_settings().ending, Ending::Hold);
+    }
+
+    #[test]
+    fn the_loop_flag_is_looping_on() {
+        // The setup menu's looping row (`MENU.C:229-238`) is `looping` 1, which
+        // `MAIN/U2.ASM:920-933` turns into a run that plays for ever.
+        let c = parse(&["--loop"]).unwrap();
+        assert_eq!(c.looping, Looping::On);
+        assert_eq!(c.block, Some('1'), "with no block it is still the demo");
+        assert_eq!(c.run_settings().looping, Looping::On);
+        assert_eq!(c.run_settings().ending, Ending::Exit);
+        assert!(c.setup, "--loop says nothing about the setup screen");
+        let c = parse(&["--block", "5", "--loop"]).unwrap();
+        assert_eq!((c.block, c.looping), (Some('5'), Looping::On));
+        assert_eq!(parse(&[]).unwrap().looping, Looping::Off);
+        assert_eq!(Cli::default().looping, Looping::Off);
+        // Looping is the demo's sequence: a part holds where it ends, and the vault
+        // starts parts.
+        assert!(parse(&["--part", "glenz", "--loop"]).is_err());
+        assert!(parse(&["--vault", "--loop"]).is_err());
+    }
+
+    #[test]
+    fn gravis_is_looping_two() {
+        // `START.C:89-93`: `if(!memicmp(argv[1],"/gravis",7)) { m_looping=2;
+        // m_soundcard=3; } else menu();` — no setup screen, and ENDSCRL skipped
+        // without looping (`U2.ASM:914-925`).
+        for spelling in ["/gravis", "/GRAVIS", "/Gravis", "/gravisultrasound"] {
+            let c = parse(&[spelling]).unwrap();
+            assert_eq!(c.looping, Looping::NoEndScroller, "{spelling}");
+            assert!(!c.setup, "{spelling}: the setup screen is skipped");
+            assert_eq!(c.block, Some('1'), "{spelling}: `checkcmdline` stops at the slash");
+            assert_eq!(c.run_settings().looping, Looping::NoEndScroller);
+        }
+        assert!(parse(&[]).unwrap().setup, "a plain run asks its settings");
+        assert!(Cli::default().setup);
+        assert!(parse(&["--part", "glenz", "/gravis"]).is_err());
+    }
+
+    #[test]
+    fn unknown_slash_switches_are_ignored() {
+        // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at a `/` with `whattorun`
+        // left at its 7fh — a switch is never a block and never an error. Only
+        // `/gravis` (its first seven characters, any case, `START.C:89`) means
+        // anything.
+        for switch in ["/x", "/grav", "/gravi", "/?", "/nosound"] {
+            let c = parse(&[switch]).unwrap();
+            assert_eq!(c.block, Some('1'), "{switch}");
+            assert_eq!(c.looping, Looping::Off, "{switch}");
+            assert!(c.setup, "{switch}");
+        }
+        let c = parse(&["--block", "5", "/x"]).unwrap();
+        assert_eq!((c.block, c.looping), (Some('5'), Looping::Off));
     }
 
     #[test]
