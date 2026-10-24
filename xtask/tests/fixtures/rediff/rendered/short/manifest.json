@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "width": 4,
+  "height": 2,
+  "frames": [
+    {
+      "index": 0,
+      "part": "fixture",
+      "width": 4,
+      "height": 2,
+      "idx": "fixture_000000.idx",
+      "rgb": "fixture_000000.rgb",
+      "music_position": null
+    }
+  ],
+  "part": "fixture",
+  "index_origin": "part",
+  "anchor": null
+}

@@ -15,6 +15,11 @@
 //! filed before `capture` recorded them — see `verify.rs`, which is the one
 //! place in this repository allowed to write inside `reference/`.
 //!
+//! `rediff` is `compare` over the whole tree at once: every filed reference frame
+//! re-rendered by the release binary at the mapping its own test states, and each
+//! frame's differing-pixel count checked against the count registered for it — see
+//! `rediff.rs` and its table.
+//!
 //! `assets verify` is the same idea one phase earlier: it checks the curated
 //! asset tree against its own record, decodes every asset, and writes a contact
 //! sheet per part — see `assets.rs`, which also carries the exit-code contract
@@ -25,6 +30,7 @@ mod compare;
 mod frames;
 mod music;
 mod oracle;
+mod rediff;
 mod reference;
 mod sheet;
 mod verify;
@@ -92,6 +98,38 @@ enum Command {
         /// pixels: each pair is still compared exactly.
         #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
         align: i32,
+    },
+    /// Re-render every filed reference frame and check each one's differing-pixel
+    /// count against the count registered for it.
+    ///
+    /// One headless run of the release binary per filed capture under
+    /// `reference/parts`, with all of that capture's rendered indices in one
+    /// `--dump-frames`, at the mapping the part's own test states (no ±1 search).
+    /// Exit code 0 when every frame is at its registered count, 1 when any is off
+    /// it, 2 when something could not be compared (a missing frame, a geometry
+    /// mismatch, a capture with neither a table entry nor a PENDING line, an entry
+    /// with no capture, a failed run).
+    Rediff {
+        /// The binary to run. Without it, `cargo build --release -p secondreality`
+        /// runs first and its executable is used.
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Only this capture, or the captures below this directory (`loop`,
+        /// `techno/troll`). May be given more than once.
+        #[arg(long)]
+        only: Vec<String>,
+        /// Where the dumps, the run logs and `report.json` go. Defaults to
+        /// `out/rediff`; a directory inside `reference/` is refused.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// The tree the table's capture paths are below. Defaults to
+        /// `reference/parts`; for the command's own tests.
+        #[arg(long, hide = true)]
+        reference: Option<PathBuf>,
+        /// A JSON table to use in place of the compiled one; for the command's own
+        /// tests.
+        #[arg(long, hide = true)]
+        table: Option<PathBuf>,
     },
     /// Look at a directory of frames the port or a capture wrote: one PNG of
     /// every frame in it, to read with the eyes rather than a percentage.
@@ -523,6 +561,19 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.as_deref(),
             align,
         )?),
+        Command::Rediff {
+            binary,
+            only,
+            out,
+            reference,
+            table,
+        } => Ok(rediff::command(&rediff::Options {
+            binary,
+            only,
+            out,
+            reference,
+            table,
+        })?),
         Command::Frames {
             command: FramesCommand::Sheet { dir, out },
         } => frames::sheet(&frames::SheetOptions { dir, out }),

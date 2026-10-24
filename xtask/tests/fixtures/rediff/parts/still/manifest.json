@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "width": 4,
+  "height": 2,
+  "frames": [
+    {
+      "index": 10,
+      "idx": "frame_000010.idx",
+      "rgb": "frame_000010.rgb"
+    },
+    {
+      "index": 11,
+      "rgb": "frame_000011.rgb"
+    }
+  ]
+}

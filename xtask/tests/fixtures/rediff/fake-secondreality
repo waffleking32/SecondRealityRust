@@ -1,0 +1,27 @@
+#!/bin/sh
+# A stand-in for `secondreality --headless`, for `xtask/tests/rediff.rs`: it renders nothing.
+# `--part NAME` picks which of `rendered/NAME/` it hands back as the dump, `--dump-dir DIR`
+# is where it copies it, and the whole command line is written to `DIR/argv.txt` so a test
+# can read what `rediff` asked for. `--part fails` exits 3 having written nothing.
+here=$(dirname "$0")
+part=
+dir=
+previous=
+for argument in "$@"; do
+    case "$previous" in
+        --part) part=$argument ;;
+        --dump-dir) dir=$argument ;;
+    esac
+    previous=$argument
+done
+if [ "$part" = fails ]; then
+    echo "fake-secondreality: asked to fail" >&2
+    exit 3
+fi
+if [ -z "$dir" ] || [ ! -d "$here/rendered/$part" ]; then
+    echo "fake-secondreality: no --dump-dir, or no rendered/$part" >&2
+    exit 2
+fi
+mkdir -p "$dir"
+cp "$here/rendered/$part/"* "$dir/"
+echo "$@" > "$dir/argv.txt"

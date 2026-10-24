@@ -899,6 +899,11 @@ that a later phase is most likely to trip over:
   cannot slip past is therefore not unconditionally true. It needs a contrived path, not the
   accidental one the guard was added for, which is why it was deferred — but the fix is one line:
   lexically collapse `.`/`..` in the tail after canonicalising the deepest existing ancestor.
+  **Closed.** `acfe436` made that fix (`compare::resolve`/`collapse`, shared by every `--out` and
+  `--sheet` guard through `refuse_output_inside`), and Phase 9 Task 5 pins it for both writers
+  that land frames next to the reference: `xtask/tests/rediff.rs`'s
+  `an_out_through_dot_dot_into_the_reference_is_refused` runs `compare` and `rediff` with
+  `--out <tmp>/missing/../ref/nested` and asserts exit 2 with nothing created.
 - **`phase_beam_compose_staircases_the_palette_down_the_frame` cannot tell a monotonic ramp from a
   sawtooth.** It passes against both. The property is currently guaranteed by the constant
   (`8 + band * 7`) rather than by a test; a strict-increase walk over all eight band boundaries
