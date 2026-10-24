@@ -168,7 +168,14 @@ impl Run {
 }
 
 fn xtask(args: &[&str]) -> Run {
+    xtask_in(&std::env::current_dir().unwrap(), args)
+}
+
+/// The built `xtask`, run from `dir` — the repository root, for a run whose defaults
+/// (`reference/parts`, the compiled table) are the phase run's.
+fn xtask_in(dir: &Path, args: &[&str]) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .current_dir(dir)
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("cannot run {}: {e}", env!("CARGO_BIN_EXE_xtask")));
@@ -370,7 +377,133 @@ fn a_capture_with_no_entry_and_no_pending_line_is_exit_2() {
         "{}",
         run.stdout
     );
-    assert_eq!(report(&dir.join("out"))["pending"][0]["capture"], "extra");
+    let report = report(&dir.join("out"));
+    assert_eq!(report["pending"][0]["capture"], "extra");
+
+    // A substituted table and tree are not the phase run, and say so in both places.
+    assert_eq!(report["scope"], "partial");
+    assert_eq!(report["table"], table.to_str().unwrap());
+    assert_eq!(report["reference"], reference.to_str().unwrap());
+    assert_eq!(report["only"], serde_json::json!([]));
+    let banner = run
+        .stdout
+        .lines()
+        .find(|line| line.starts_with("NOT THE PHASE RUN: "))
+        .unwrap_or_else(|| panic!("no banner: {}", run.stdout));
+    assert!(
+        banner.contains(&format!("--table {}", table.display())),
+        "{banner}"
+    );
+    assert!(
+        banner.contains(&format!("--reference {}", reference.display())),
+        "{banner}"
+    );
+    let verdict = run
+        .stdout
+        .lines()
+        .position(|line| line.starts_with("verdict: "));
+    let banner_at = run
+        .stdout
+        .lines()
+        .position(|line| line.starts_with("NOT THE PHASE RUN"));
+    assert!(
+        banner_at < verdict,
+        "the banner comes before the verdict: {}",
+        run.stdout
+    );
+}
+
+#[test]
+fn an_only_that_names_only_pending_captures_is_refused() {
+    // Comparing nothing is not "every frame at its registered count".
+    let dir = scratch("only-pending");
+    let reference = dir.join("parts");
+    for capture in ["still", "extra"] {
+        let to = reference.join(capture);
+        fs::create_dir_all(&to).unwrap();
+        for file in fs::read_dir(fixtures().join("parts/still")).unwrap() {
+            let file = file.unwrap().path();
+            fs::copy(&file, to.join(file.file_name().unwrap())).unwrap();
+        }
+    }
+    let table = write_table(&dir, "same", [0, 0, 0], &["extra"]);
+    let out = dir.join("out");
+    let run = xtask(&[
+        "rediff",
+        "--binary",
+        fixtures().join("fake-secondreality").to_str().unwrap(),
+        "--reference",
+        reference.to_str().unwrap(),
+        "--table",
+        table.to_str().unwrap(),
+        "--only",
+        "extra",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(run.code, 2, "{}", run.output());
+    assert!(
+        run.output().contains("nothing to compare"),
+        "{}",
+        run.output()
+    );
+    assert!(
+        !out.join("report.json").exists(),
+        "a refused run writes no report"
+    );
+}
+
+#[test]
+fn only_the_default_run_is_the_full_scope() {
+    // The compiled table over the default `reference/parts`, from the repository root,
+    // with the fake binary: it cannot render the demo, so every entry is a failed run and
+    // the exit is 2 — but the report it writes is the phase run's shape, and says `full`.
+    let dir = scratch("full-scope");
+    let fake = fixtures().join("fake-secondreality");
+    let out = dir.join("out");
+    let run = xtask_in(
+        &repository_root(),
+        &[
+            "rediff",
+            "--binary",
+            fake.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(run.code, 2, "{}", run.output());
+    let full = report(&out);
+    assert_eq!(full["scope"], "full");
+    assert_eq!(full["table"], "compiled");
+    assert_eq!(full["reference"], "reference/parts");
+    assert_eq!(full["only"], serde_json::json!([]));
+    assert!(!run.stdout.contains("NOT THE PHASE RUN"), "{}", run.stdout);
+
+    // The same run narrowed by `--only` is partial, on the console and in the report.
+    let run = xtask_in(
+        &repository_root(),
+        &[
+            "rediff",
+            "--binary",
+            fake.to_str().unwrap(),
+            "--only",
+            "loop/alku",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(run.code, 2, "{}", run.output());
+    assert!(
+        run.stdout
+            .lines()
+            .any(|line| line == "NOT THE PHASE RUN: --only loop/alku"),
+        "{}",
+        run.stdout
+    );
+    let partial = report(&out);
+    assert_eq!(partial["scope"], "partial");
+    assert_eq!(partial["only"], serde_json::json!(["loop/alku"]));
+    assert_eq!(partial["table"], "compiled");
 }
 
 #[test]

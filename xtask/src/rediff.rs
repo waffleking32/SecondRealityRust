@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compare::{
     capture_directories, compare_indexed, compare_rgb, read_manifest, refuse_output_inside,
-    FrameDiff, FrameRef, Manifest,
+    resolve, FrameDiff, FrameRef, Manifest,
 };
 
 /// Where the per-entry dumps and `report.json` go when `--out` is not given.
@@ -205,11 +205,67 @@ struct Summary {
 #[derive(Debug, Serialize)]
 struct Report {
     version: u32,
+    /// `full` only for the compiled table over the default reference tree with no
+    /// `--only`: the run that is the phase's evidence. Anything else is `partial`, and
+    /// says so here and on the console, so a narrowed or substituted run can never be
+    /// read as the phase run.
+    scope: &'static str,
+    /// `compiled`, or the `--table` file the run used in its place.
+    table: String,
+    /// The tree the captures were read from.
+    reference: String,
+    /// The `--only` list, empty for every capture.
+    only: Vec<String>,
     binary: String,
     frames: Vec<Row>,
     pending: Vec<PendingRow>,
     problems: Vec<String>,
     summary: Summary,
+}
+
+/// What a run measured against: the whole compiled table over `reference/parts`, or
+/// less, or something else.
+struct Scope {
+    /// `compiled`, or the `--table` path.
+    table: String,
+    /// What makes the run partial, one phrase each; empty for the full run.
+    narrowed: Vec<String>,
+}
+
+impl Scope {
+    fn of(options: &Options, reference: &Path) -> Result<Scope, String> {
+        let mut narrowed = Vec::new();
+        if !options.only.is_empty() {
+            narrowed.push(format!("--only {}", options.only.join(" --only ")));
+        }
+        let table = match &options.table {
+            Some(path) => {
+                narrowed.push(format!("--table {}", path.display()));
+                path.display().to_string()
+            }
+            None => "compiled".to_string(),
+        };
+        // By where it resolves, not how it is spelled: `./reference/parts/` is the
+        // default tree, and a different tree named `reference/parts` from elsewhere is not.
+        if resolve(reference)? != resolve(Path::new(DEFAULT_REFERENCE))? {
+            narrowed.push(format!("--reference {}", reference.display()));
+        }
+        Ok(Scope { table, narrowed })
+    }
+
+    fn name(&self) -> &'static str {
+        if self.narrowed.is_empty() {
+            "full"
+        } else {
+            "partial"
+        }
+    }
+
+    /// The console's line for a partial run, printed before the verdict.
+    fn banner(&self) -> Option<String> {
+        (!self.narrowed.is_empty())
+            .then(|| format!("NOT THE PHASE RUN: {}", self.narrowed.join("; ")))
+    }
 }
 
 /// What one entry's run produced.
@@ -257,6 +313,7 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
             pending: PENDING.to_vec(),
         },
     };
+    let scope = Scope::of(options, &reference)?;
     let selected = |capture: &str| {
         options.only.is_empty() || options.only.iter().any(|only| covers(only, capture))
     };
@@ -334,6 +391,20 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
             options.only.join(", ")
         ));
     }
+    // A run that would compare no frame at all — an `--only` that names only PENDING
+    // captures, or a table of PENDING lines — is refused rather than reported as at its
+    // registered count: an exit 0 over nothing is the green run that lies.
+    if entries.is_empty() {
+        return Err(format!(
+            "nothing to compare: {} has no table entry ({} PENDING, not compared)",
+            if options.only.is_empty() {
+                "the tree".to_string()
+            } else {
+                format!("--only {}", options.only.join(", "))
+            },
+            pending_rows.len()
+        ));
+    }
 
     let binary = match &options.binary {
         Some(binary) => binary.clone(),
@@ -379,6 +450,9 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
         pending_rows.len(),
         problems.len()
     );
+    if let Some(banner) = scope.banner() {
+        println!("{banner}");
+    }
     println!(
         "verdict: {}",
         match exit {
@@ -400,6 +474,10 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
     };
     let report = Report {
         version: REPORT_VERSION,
+        scope: scope.name(),
+        table: scope.table.clone(),
+        reference: reference.display().to_string(),
+        only: options.only.clone(),
         binary: binary.display().to_string(),
         frames: rows,
         pending: pending_rows,
