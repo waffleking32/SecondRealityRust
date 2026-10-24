@@ -9,14 +9,19 @@
 //! - The port's CRED ends **81** frames before the original's, in B1 numbering: the closed
 //!   iris — the seam's first frame, `C` — is the port's 8833 and the original's 9029 − 115
 //!   = 8914. That is CRED's own chain drift (`cred.md` §7, `endscrl.md` §6.1 — measured
-//!   there as 82 from ENDSCRL's start), not this task's, and it is pinned below by the
-//!   port's frames themselves: 8832 is still the iris and 8833 is the filed `C`'s bytes.
+//!   there as 82 from ENDSCRL's start), not the loop's, and the test reads it off the
+//!   port's frames: 8832 is still the iris and 8833 is the filed `C`'s bytes.
 //!
 //! So the seam is compared **from `C`**: the port's frame at `C_port + (n − C)` answers the
-//! original's `n`. Every filed frame is a held one (§25.4), and each compares at 0.
+//! original's `n`. The capture holds `.rgb` only (§25.4: neither screen's `.idx` survives the
+//! read), so the comparison is RGB, byte for byte.
 //!
-//! The capture holds `.rgb` only (§25.4: neither screen's `.idx` survives the read), so the
-//! comparison is RGB, byte for byte.
+//! **What the seam does not match, pinned as measured (D24; Task 10 registers it).** The
+//! port's CRED shows its closed iris on two ticks before it retires (8833, 8834), so its
+//! fade is 8835–8898 — the original's 9031–9094, **2 frames** after the original's
+//! 9029–9092 (§25.3). `LOOP_RELOAD_TICKS` is the original's own 11 frames from the fade's
+//! end to `L` (9093–9103), so the port's `L` is 2 frames late too: the original's 9104 is
+//! the port's 8910, not 8908, and the port's 8908 is still CRED's 320×200 screen.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,14 +32,16 @@ const LOOP_RECIPE_SHIFT: u32 = 115;
 /// `C` in the loop capture's own numbering: CRED's closed screen (§25.3).
 const C: u32 = 9029;
 
-/// The port's `C`: its first closed-iris frame in `--block 5`'s numbering.
+/// The port's `C`: its first closed-iris frame in `--block 5`'s numbering (asserted on the
+/// dumped frames below).
 const PORT_C: u32 = 8833;
-
-/// The port's CRED ends this much earlier than the original's (B1 numbering).
-const CRED_CHAIN_OFFSET: u32 = C - LOOP_RECIPE_SHIFT - PORT_C;
 
 /// `L` in the loop capture's numbering: ALKU's first frame on pass 2 (§25.3).
 const L: u32 = 9104;
+
+/// How late the port's seam is against `C`: CRED's closed iris is on screen for two port
+/// ticks before the fade begins.
+const CRED_TAIL: u32 = 2;
 
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -104,69 +111,108 @@ fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
         .count()
 }
 
-/// The filed seam: (screen, index, width, height, part).
-const SEAM: &[(&str, u32, u64, u64, &str)] = &[
-    ("cred", 9029, 320, 200, "cred"),
-    ("cred", 9055, 320, 200, "cred"),
-    ("cred", 9081, 320, 200, "cred"),
-    ("alku", 9104, 320, 400, "alku"),
-    ("alku", 9600, 320, 400, "alku"),
-    ("alku", 10419, 320, 400, "alku"),
-    ("alku", 11419, 320, 400, "alku"),
+/// The filed seam: (screen, index).
+const SEAM: &[(&str, u32)] = &[
+    ("cred", 9029),
+    ("cred", 9055),
+    ("cred", 9081),
+    ("alku", 9104),
+    ("alku", 9600),
+    ("alku", 10419),
+    ("alku", 11419),
 ];
+
+/// What the port's frame at a filed index is against the original's.
+#[derive(Debug, PartialEq, Eq)]
+enum Count {
+    /// The same geometry, and this many pixels differ.
+    Pixels(usize),
+    /// A different screen: the port's part and geometry at that index.
+    Geometry(String, u64, u64),
+}
 
 #[test]
 fn the_loop_seam_is_the_originals() {
-    assert_eq!(CRED_CHAIN_OFFSET, 81, "CRED's chain drift, measured from C");
-    let mut indices = vec![PORT_C - 1, PORT_C, port_index(L) - 1];
-    indices.extend(SEAM.iter().map(|(_, index, ..)| port_index(*index)));
-    // The restarted song's first published row, and ALKU's pass-2 fade-in (below).
-    indices.extend(port_index(L)..=port_index(L) + 16);
+    let mut indices: Vec<u32> = (PORT_C - 8..=PORT_C + 8).collect();
+    indices.extend(SEAM.iter().map(|(_, index)| port_index(*index)));
+    // The seam's ALKU start, the restarted song's first published row, and ALKU's pass-2
+    // fade-in (below).
+    indices.extend(port_index(L) - 2..=port_index(L) + 16);
     indices.extend(10_040..=10_047);
     indices.extend(10_100..=10_107);
     let (dir, manifest) = dump("seam", &["--loop"], &indices);
 
-    // `C` is where the port's frames say it is: the iris is still closing at 8832, and
-    // 8833 is the filed `C`'s own bytes.
+    // `C` is where the port's frames put it: the first of 8825..=8841 that is the filed
+    // `C`'s own bytes (the iris is still closing before it). CRED's chain drift is then
+    // 9029 − 115 − that index.
     let c_bytes = reference_frame("cred", C);
-    let (before, ..) = rendered(&dir, &manifest, PORT_C - 1);
-    assert_ne!(differing_pixels(&before, &c_bytes), 0, "8832 is the iris's last step");
-    let (at, ..) = rendered(&dir, &manifest, PORT_C);
-    assert_eq!(differing_pixels(&at, &c_bytes), 0, "8833 is C");
+    let measured_c = (PORT_C - 8..=PORT_C + 8)
+        .find(|index| differing_pixels(&rendered(&dir, &manifest, *index).0, &c_bytes) == 0)
+        .expect("the port's CRED closes its iris near 8833");
+    assert_eq!(measured_c, PORT_C, "the port's C");
+    assert_eq!(C - LOOP_RECIPE_SHIFT - measured_c, 81, "CRED's chain drift");
 
-    // `L − C` is the original's 75: the frame before `L` is still CRED's 320×200 screen
-    // (the original's 9103, §25.3), and `L` is ALKU's first 320×400 frame.
-    let (_, part, width, height) = rendered(&dir, &manifest, port_index(L) - 1);
-    assert_eq!((part.as_str(), width, height), ("cred", 320, 200), "L − 1 is CRED's screen");
-    assert_eq!(L - C, 75);
-
+    // Each filed frame at the port's `C_port + (n − C)`.
     let mut counts = Vec::new();
-    for &(screen, index, width, height, part) in SEAM {
+    for &(screen, index) in SEAM {
         let at = port_index(index);
-        let (bytes, drawn_by, w, h) = rendered(&dir, &manifest, at);
-        assert_eq!((w, h), (width, height), "{screen} {index}: the port's {at} geometry");
-        assert_eq!(drawn_by, part, "{screen} {index}: the port's {at} is {part}'s");
-        counts.push((index, differing_pixels(&bytes, &reference_frame(screen, index))));
+        let (bytes, part, width, height) = rendered(&dir, &manifest, at);
+        let expected = reference_frame(screen, index);
+        counts.push((
+            index,
+            if bytes.len() == expected.len() && part == screen {
+                Count::Pixels(differing_pixels(&bytes, &expected))
+            } else {
+                Count::Geometry(part, width, height)
+            },
+        ));
     }
     assert_eq!(
         counts,
-        SEAM.iter().map(|(_, index, ..)| (*index, 0)).collect::<Vec<_>>(),
-        "every held frame of the seam is the original's"
+        [
+            (9029, Count::Pixels(0)),
+            (9055, Count::Pixels(0)),
+            (9081, Count::Pixels(0)),
+            // `L` is 2 frames late: the port still shows CRED's closed iris here.
+            (9104, Count::Geometry("cred".to_string(), 320, 200)),
+            (9600, Count::Pixels(0)),
+            (10419, Count::Pixels(0)),
+            (11419, Count::Pixels(0)),
+        ],
+        "the seam's held frames, and its one late frame"
     );
 
-    // **Measured, not fitted (D24): pass 2's music runs 3 to 5 frames later than the
-    // original's against `C`.** The seam trace has the restarted song at (0,1) at 9112
-    // (§25.3), port 8916; the port publishes it at 8921 — `MusicStart::restart`'s four
-    // waiting polls from the fade's end. ALKU's pass-2 fade-in follows the music: the
-    // original's first non-black frame is in (10236, 10238] and its "A Future Crew
-    // Production" hold starts in (10296, 10298] (two-frame sampling, §25.3), port
-    // (10040, 10042] and (10100, 10102]; the port's are 10045 and 10106. The held frames
-    // above sit inside their holds either way. Task 10 registers the difference.
-    let first_row = (port_index(L)..=port_index(L) + 16)
+    // The port's `L`: its first ALKU frame is `CRED_TAIL` after the original's, and it is
+    // the original's `L` byte for byte. `L − C` is 75 in the original and 77 in the port.
+    let port_l = (port_index(L) - 2..=port_index(L) + 16)
+        .find(|index| entry(&manifest, *index)["part"] == "alku")
+        .expect("ALKU starts within 16 frames of L");
+    assert_eq!(port_l, port_index(L) + CRED_TAIL);
+    assert_eq!(port_l, 8910);
+    let (_, part, width, height) = rendered(&dir, &manifest, port_l - 1);
+    assert_eq!((part.as_str(), width, height), ("cred", 320, 200), "L − 1 is CRED's screen");
+    let (bytes, ..) = rendered(&dir, &manifest, port_l);
+    assert_eq!(differing_pixels(&bytes, &reference_frame("alku", L)), 0, "the port's L is L");
+    assert_eq!((L - C, port_l - PORT_C), (75, 77));
+
+    // **Pass 2's music: 5 frames late against `C`.** The seam trace has the restarted song
+    // at (0,1) at 9112 (§25.3) — the port's 8916 — 20 frames after the original's fade
+    // ends (9092). The port's fade ends at 8898 (CRED's 2-tick tail) and the restart,
+    // installed there under `MusicStart::restart`, publishes (0,1) 23 frames later, at
+    // 8921: 2 frames of tail and 3 of the restart's recipe.
+    let first_row = (port_index(L) - 2..=port_index(L) + 16)
         .find(|index| entry(&manifest, *index)["music_position"] == "0:1")
         .expect("the restarted song publishes order 0, row 1 within 16 frames of L");
     assert_eq!(first_row, 8921);
     assert_eq!(first_row - port_index(9112), 5);
+    let port_fade_end = PORT_C + CRED_TAIL + 63;
+    assert_eq!((port_fade_end, first_row - port_fade_end, 9112 - 9092), (8898, 23, 20));
+
+    // **ALKU's pass-2 fade-in follows the music: 3 to 5 frames late, and its hold 4 to 6.**
+    // The original's first lit frame is in (10236, 10238] and its "A Future Crew
+    // Production" hold starts in (10296, 10298] (two-frame sampling, §25.3): the port's
+    // (10040, 10042] and (10100, 10102]. The port's are 10045 and 10106. The held frames
+    // above sit inside their holds either way.
     let lit = (10_040..=10_047)
         .find(|index| rendered(&dir, &manifest, *index).0.iter().any(|byte| *byte != 0))
         .expect("ALKU's fade-in has begun by 10047");

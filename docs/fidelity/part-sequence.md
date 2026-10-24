@@ -336,11 +336,14 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
   called it the tempo byte until Phase 9; it is not — the tempo is offset 0x32. Corrected in
   Phase 9 Task 4; `audio.rs`'s `fade_music` and D41 already walk the global volume.)
 - **The port** (Phase 9 Task 4, D42): `--loop` is `looping` 1. `shell::run_plan` drops
-  ENDSCRL; when the plan runs out the shell's loop seam holds CRED's picture for the 64
-  fade ticks (`EXIT_FADE_TICKS`), installs `LOOP_RESTART` (MUSIC0, order 0) at the fade's
-  end, holds `LOOP_RELOAD_TICKS` = 9 more ticks — the original's `C` → `L` is 75 frames
-  (`reference-indices.md` §25.3) — and starts pass 2 at ALKU with block 1's plan without
-  ENDSCRL. `/gravis` is `looping` 2: no ENDSCRL, then `@@partsdone` (§9).
+  ENDSCRL; when the plan runs out the shell's loop seam holds the last part's picture
+  (CRED's on every block but U) for the 64 fade ticks (`EXIT_FADE_TICKS`), installs
+  `LOOP_RESTART` (MUSIC0, order 0) at the fade's end, holds `LOOP_RELOAD_TICKS` = **11**
+  more ticks — the original's 9093–9103, from its fade's end (9092) to ALKU's first frame
+  `L` (9104), `reference-indices.md` §25.3 — and starts pass 2 at ALKU with block 1's plan
+  without ENDSCRL. The port's seam is 2 frames late against `C` (its CRED shows the closed
+  iris on two ticks before it retires; `tests/loop.rs` pins it). `/gravis` is `looping` 2:
+  no ENDSCRL, then `@@partsdone` (§9).
 - `looping` is the setup menu's answer, read at lines 745-746 from `msg[6]`. `MENU.C:167-168`
   clamps the menu toggle to 0 or 1; the value **2** is set only by `/gravis`
   (`START.C:91`) and means "no menu, Gravis, and do not loop" — with 2 the demo skips the

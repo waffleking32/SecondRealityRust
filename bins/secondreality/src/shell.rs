@@ -842,17 +842,26 @@ pub struct RunSettings {
 /// `:390-394`).
 pub const LOOP_RESTART: (ModuleId, u8) = (ModuleId::Music0, 0);
 
-/// The ticks between the loop fade's last and pass 2's ALKU, with CRED's screen still up:
-/// `restartmus`'s reload of the module (`MAIN/U2.ASM:347-396`) and ALKU's own load before
-/// its mode set (`ALKU/MAIN.C:158`).
+/// The ticks between the loop fade's last and pass 2's ALKU, with the last part's screen
+/// still up: `restartmus`'s reload of the module (`MAIN/U2.ASM:347-396`) and ALKU's own
+/// load before its mode set (`ALKU/MAIN.C:158`).
 ///
-/// **One constant, measured (D24, D42).** The original's seam is `C` = 9029 (CRED's closed
-/// iris) to `L` = 9104 (ALKU's first 320×400 frame): **75** frames (`reference-indices.md`
-/// §25.3; 9090–9101 and 9103 are still CRED's 320×200 black). The port's CRED draws its
-/// closed iris on two ticks before it retires (8833, 8834 under `--block 5`) and the fade
-/// is [`EXIT_FADE_TICKS`], so `75 − 2 − 64` = 9 ticks put the port's `L` at `C + 75`.
-/// ALKU's three held keyframes compare at 0 with it (`tests/loop.rs`).
-pub const LOOP_RELOAD_TICKS: u32 = 9;
+/// **One constant, the release's measured interval (D24, D42).** In the loop capture the
+/// fade is 9029–9092 and ALKU's first 320×400 frame `L` is 9104 (`reference-indices.md`
+/// §25.3), so the frames between are 9093–9103: **11**, CRED's 320×200 black throughout
+/// but for the unpublished mode set at 9102. §25.3's commands measure them: the
+/// `--frames "$(seq -s, 8951 9050)"` batch (`out/p9-loop-c`, `C` at 9029),
+/// `--frames "$(seq -s, 9090 9101)"` (`out/p9-loop-l-a`), `--frames 9103`
+/// (`out/p9-loop-l-9103`, 320×200) and `--frames "$(seq -s, 9104 2 9150)"`
+/// (`out/p9-loop-l-even`, 9104 the first 320×400).
+///
+/// The port's seam is **2 frames late** with it: the port's CRED shows its closed iris on
+/// two ticks before it retires (8833, 8834 under `--block 5`), so its fade and its `L` both
+/// fall 2 frames after the original's against `C` — a residual of CRED's, pinned in
+/// `tests/loop.rs`, not absorbed here. Were 404 ALKU's mode set rather than its first frame
+/// (§25.3's Δ = 8698 reading), `L`'s counterpart would be 9102 and the interval 9093–9101,
+/// **9**.
+pub const LOOP_RELOAD_TICKS: u32 = 11;
 
 /// The parts a run of `block` plays under `looping`: [`block_plan`], without ENDSCRL
 /// whenever `looping` is not 0 (`MAIN/U2.ASM:914-917`: `cmp cs:looping,0; jne @@skipp6`
@@ -911,8 +920,8 @@ pub const EXIT_BLANK_TICKS: u32 = 20;
 /// screen — and then it has [`ended`](Sequence::ended) (D41).
 ///
 /// **A looping run goes round.** A [`Looping::On`] run's plan has no ENDSCRL
-/// ([`run_plan`]); when it runs out, the shell's loop seam fades the music over CRED's
-/// picture, restarts MUSIC0 at order 0 and begins the next [`pass`](Sequence::pass) at ALKU
+/// ([`run_plan`]); when it runs out, the shell's loop seam fades the music over the last
+/// part's picture (CRED's on every block but U), restarts MUSIC0 at order 0 and begins the next [`pass`](Sequence::pass) at ALKU
 /// with block 1's plan (`MAIN/U2.ASM:914-933`, D42). It never ends by itself.
 pub struct Sequence {
     engine: Engine,
@@ -1028,8 +1037,9 @@ impl Part for Holding {
 }
 
 /// The shell's seam between two passes of a looping run (`MAIN/U2.ASM:919-933`): it draws
-/// nothing and touches nothing, so CRED's last picture is what is up while the music fades
-/// and reloads. [`Sequence::loop_seam`] counts it and ends it.
+/// nothing and touches nothing, so the last part's picture — CRED's on every block but U,
+/// whose plan is DDSTARS alone — is what is up while the music fades and reloads.
+/// [`Sequence::loop_seam`] counts it and ends it.
 ///
 /// It **drains after exit**: the original's `fademusic` and `restartmus` never read the
 /// exit flag, so an ESC here is not the seam's to act on, and pass 2's first part's
@@ -1378,12 +1388,12 @@ impl Sequence {
     /// [`Looping::On`] run whose plan has run out.
     ///
     /// - Ticks 1..=[`EXIT_FADE_TICKS`]: `mov cx,1; call fademusic` (`:926-928`) — the
-    ///   module's global-volume byte steps down a `dis_waitb` (`:333-346`) with CRED's
-    ///   picture up; [`music_after_tick`](Sequence::music_after_tick) takes the step.
+    ///   module's global-volume byte steps down a `dis_waitb` (`:333-346`) with the last
+    ///   part's picture up (CRED's on every block but U); [`music_after_tick`](Sequence::music_after_tick) takes the step.
     /// - At the fade's end, `restartmus` with `ax=0, bx=0` (`:929-932`): MUSIC0 is loaded
     ///   again and seeked to order 0 ([`LOOP_RESTART`]), installed at the next tick's
     ///   boundary under [`MusicStart::restart`]'s rule.
-    /// - [`LOOP_RELOAD_TICKS`] more of CRED's screen — the reload and ALKU's load — and then
+    /// - [`LOOP_RELOAD_TICKS`] more of that screen — the reload and ALKU's load — and then
     ///   `jmp @@partsagain` (`:933`): the plan is block 1's again ([`loop_plan`]), from its
     ///   first part, on the next pass.
     fn loop_seam(&mut self) {
@@ -1593,8 +1603,9 @@ impl Sequence {
         true
     }
 
-    /// Install the shell's loop seam ([`loop_seam`](Sequence::loop_seam)): CRED's picture,
-    /// held while the music fades and reloads. `current` stays the part whose screen it is.
+    /// Install the shell's loop seam ([`loop_seam`](Sequence::loop_seam)): the last part's
+    /// picture (CRED's on every block but U), held while the music fades and reloads.
+    /// `current` stays the part whose screen it is.
     fn start_seam(&mut self) -> bool {
         let mut part = Box::new(LoopSeam { of: self.current });
         if let Err(error) = self.engine.start(&mut *part) {
