@@ -5700,3 +5700,417 @@ BEGLOGO `b6fe147d33fe708952b81e31cf004141fe9c430791740de7e01bcc6f44c7c31b` (447,
 eight new ones are `parts/loop/cred` (3 frames, 3 files), `parts/loop/alku` (4, 4),
 `parts/beglogo-leadin/even` (11, 11), `/odd` (10, 10), `/plane-436` (1, 2),
 `parts/endlogo-leadin/even` (10, 10), `/odd` (10, 10) and `/plane-440` (1, 2).
+
+---
+
+## 26. The full `SECOND 1` run (Phase 9 Task 2)
+
+Task 2 measures; it ports nothing. It surveys the original's whole block-1 run, pins every part
+boundary, files **one capture per screen geometry** the run passes through
+(`reference/parts/fullrun/01-alku` … `13-endscrl`, 44 frames) and **two music traces**
+(`reference/music/second1e`, `second1f`, split at the U2E restart), and repeats the held frames.
+Task 6 compares the port's `--block 1` against §26.3's table, the `fullrun` captures and the
+traces; Task 10 restates register entries at these numbers.
+
+**The recipe is B1's two-key one**, so every index here is in the same boot space as the per-part
+references and `FIRST_GRAPHICS_FRAME` = 404 (§1.12; not Task 1's five-key loop recipe, which runs
+115 frames later, §25.1). Every capture command in this section is
+
+```bash
+cargo xtask reference capture --arg 1 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames <F> --out <D>
+```
+
+with `<F>` and `<D>` given in the tables, run from the repository root with CLAUDE.md's
+prerequisites (`SR_DOSBOX=/home/ew/workspace/reality/dosbox-automation`, `LD_LIBRARY_PATH` over its
+six `_deps/*-build` directories). `$(seq …)` is expanded by the shell. Every session is its own boot
+(one emulator at a time: the API port is fixed). Scratch runs went to `out/` (ignored); the only
+writes under `reference/` are `parts/fullrun/*` and `music/second1{e,f}`, and no existing capture
+was touched.
+
+### 26.1 The survey
+
+The brief's single survey (`--frames` every 100 from 400 to 50000) cannot be one capture: a capture
+holds one geometry (§25.2) and the run changes geometry twelve times. It was therefore run as
+**consecutive sessions, each restarted at the index the previous one was refused at**, with
+`<D>` = `out/p9-fullrun-survey/sNN-<first>` and `--sheet out/p9-fullrun-survey/sNN-<first>.png`:
+
+| session | `<F>` | result line | what it shows |
+|---|---|---|---|
+| s01 | `$(seq -s, 400 100 50000)` | `error: the emulator reached frame 410 before frame 400 could be captured; …` | the capture's demo-start wait returns after 404 |
+| s02–s09 | `40N,$(seq -s, 500 100 50000)`, N = 1…8 | `… reached frame 409` (s02, s03, s05, s07, s08, s09) or `410` (s04, s06) `before frame 40N could be captured` | 400–408 cannot be captured (§25.3 saw 404–407) |
+| s10 | `409,$(seq -s, 500 100 50000)` | `error: the display changed geometry between frames: frame 6000 is 320x200 where the capture started at 320x400; capture one screen at a time` | 409–5900: ALKU, 320×400 |
+| s11 | `$(seq -s, 6000 100 50000)` | `… frame 8000 is 320x400 where the capture started at 320x200 …` | U2A, PAM |
+| s12 | `$(seq -s, 8000 100 50000)` | `… frame 8600 is 320x200 …` | BEGLOGO |
+| s13 | `$(seq -s, 8600 100 50000)` | `… frame 15700 is 320x400 …` | GLENZ, TUNNELI, TECHNO's rings |
+| s14 | `$(seq -s, 15700 100 50000)` | `… frame 16200 is 320x200 …` | TECHNO's troll |
+| s15 | `$(seq -s, 16200 100 50000)` | `… frame 22000 is 320x400 …` | PANICEND, MNTSCRL, LNS&ZOOM |
+| s16 | `$(seq -s, 22000 100 50000)` | `… frame 24600 is 320x200 …` | PLZPART's plasma |
+| s17 | `$(seq -s, 24600 100 50000)` | `… frame 33300 is 320x400 …` | PLZPART's cube, MINVBALL, RAYSCRL, 3DSINFLD |
+| s18 | `$(seq -s, 33300 100 50000)` | `… frame 34200 is 320x200 …` | JPLOGO |
+| s19 | `$(seq -s, 34200 100 50000)` | `… frame 38000 is 320x400 …` | U2E |
+| s20 | `$(seq -s, 38000 100 50000)` | `… frame 38600 is 320x200 …` | ENDLOGO |
+| s21 | `$(seq -s, 38600 100 50000)` | `… frame 46300 is 640x400 where the capture started at 320x200 …` | CRED |
+| s22 | `$(seq -s, 46300 100 50000)` | exit 0 | ENDSCRL, 46300–50000 (3,700 frames into it) |
+
+(`…` elides the fixed wording shown in full on s01 and s10.) A refused session writes the frames it
+read before the refusal and no manifest or sheet; only s22 wrote a sheet. The pictures were named by
+hash against every filed reference frame — e.g. 1700–1900 are `alku`'s 1719 (`6a27ec50…`), 6000–6900
+`u2a`'s 6500 (`11a66eb0…`), 8100–8500 `beglogo`'s 900 (`cbdc67eb…`), 8800–9000 `glenz`'s 1499
+(`e45ab076…`), 15800–16100 `techno/troll`'s 8400 (`40044edc…`), 16400–16600 `panicend`'s 9000
+(`b412a265…`), 18700–19100 `lnszoom`'s 2700 (`6a152a31…`), 29300–29800 `rayscrl`'s 13500
+(`92dc2c9e…`), 33800–34000 the JPLOGO state `ec3de2bb…` (§17.3), 34200–34300 U2E's opening hold
+(`befaf38a…`, §18.1), 38200–38500 `endlogo`'s 900 (`f2514b29…`), and CRED's five filed holds at
+38700, 40500, 42700, 44900 and 46000 — and by eye for the moving screens. Two moving frames match
+exactly, which pins the offsets of their blocks: 12310 is `techno/interference`'s 4900 (`3dc29660…`,
+L1 `d`, §26.2) — **block 2 + 7,410** — and 32200 is `3dsinfld`'s 16000 (`2d349ada…`) — **block 3 +
+16,200**. Block 4's U2E sits at **+33,647** (§26.6) and block 5's CRED iris at **+37,358** (46271
+is `loop/cred`'s 9028, `88532193…`, which is two-key 8913).
+
+### 26.2 Refining the boundaries
+
+Two levels, as the brief asks: a ≤ 10-frame survey at 10-frame steps across each 100-frame bracket
+(**L1**), then 1-frame steps across each 10-frame bracket (**L2**). Windows of one geometry boundary
+end a session (the refusal *is* the measurement), so each session refines the boundaries inside one
+geometry segment plus the one that ends it, spaced per D19 (a run of *k* indices is followed by
+nothing nearer than ~25·*k*). Each session also takes `K−1, K, K+1` around a candidate hold.
+
+Two refusals carry information, and the second needed a rule:
+
+- **`the display changed geometry … frame N is …`** names the first frame of the new geometry *in
+  that session*.
+- **`the emulator reached frame X before frame Y could be captured`** means Y was never grabbed. A
+  single-index **probe** session (`p…`, below) then decides whether Y is a frame the counter steps
+  over in every session (refused again: **reproduced**) or a host stall in one (captured: **not
+  reproduced**). Reproduced: **7921, 8568, 16192, 24520, 33260, 38580, 46276** (two sessions each;
+  33260 three times, once as 33259). Not reproduced: 15603, 21925, 26570, 34114, 37965 (each captured
+  by its probe). Every reproduced one sits at a part load or mode change, which is §1.2's and music-
+  clock §7's "a video-mode stop publishes no frame"; the traces skip the same places (§26.6).
+  Adjacent 320×400 grabs also slip, as §25.6 found (b2r 7929, k2r 38566, i3 34116).
+
+`<D>` = `out/p9-fullrun-l1/<s>` (L1), `out/p9-fullrun-l2/<s>` (L2) and `out/p9-fullrun-l2c/<s>`
+(the reruns and probes). The per-session table, every one a fresh boot:
+
+| s | `<F>` | result line |
+|---|---|---|
+| L1 a | `1718,1719,1720,$(seq -s, 5910 10 5990)` | `… frame 5970 is 320x200 where the capture started at 320x400 …` |
+| L1 b | `6499,6500,6501,$(seq -s, 7710 10 7890),7899,7900,7901,$(seq -s, 7910 10 7990)` | `… frame 7930 is 320x400 where the capture started at 320x200 …` |
+| L1 c | `8299,8300,8301,$(seq -s, 8510 10 8590)` | `… frame 8570 is 320x200 …` |
+| L1 d | `8899,8900,8901,$(seq -s, 11110 10 11190),11499,11500,11501,11899,11900,11901,$(seq -s, 12110 10 12390),12399,12400,12401,$(seq -s, 15610 10 15690)` | `… frame 15610 is 320x400 …` |
+| L1 e | `15999,16000,16001,$(seq -s, 16110 10 16190)` | exit 0 (16190 is still 320×400) |
+| L1 f | `16499,16500,16501,$(seq -s, 16610 10 16690),16999,17000,17001,$(seq -s, 18610 10 18690),18999,19000,19001,$(seq -s, 21910 10 21990)` | `… frame 21930 is 320x400 …` |
+| L1 g | `22499,22500,22501,$(seq -s, 24510 10 24540),24549,24550,24551,$(seq -s, 24560 10 24590)` | `… reached frame 24521 before frame 24520 …` |
+| L1 h | `25499,25500,25501,$(seq -s, 26510 10 26690),27499,27500,27501,$(seq -s, 29010 10 29190),29799,29800,29801,$(seq -s, 31110 10 31290),31899,31900,31901,32499,32500,32501,$(seq -s, 33210 10 33290)` | `… reached frame 26571 before frame 26570 …` |
+| L1 i | `33899,33900,33901,$(seq -s, 34110 10 34190)` | `… frame 34120 is 320x200 …` |
+| L1 j | `34249,34250,34251,$(seq -s, 37910 10 37990)` | `… frame 37970 is 320x400 …` |
+| L1 k | `38299,38300,38301,$(seq -s, 38510 10 38590)` | `… reached frame 38581 before frame 38580 …` |
+| L1 l | `40599,40600,40601,$(seq -s, 46210 10 46290)` | `… frame 46280 is 640x400 …` |
+| L2 a2 | `$(seq -s, 5961 5969)` | exit 0 (all 320×200) |
+| L2 b2 | `$(seq -s, 7701 7709),$(seq -s, 7720 20 7900),$(seq -s, 7911 7929)` | `… reached frame 7922 before frame 7921 …` |
+| L2 c2 | `$(seq -s, 8521 2 8569)` | exit 0 (all 320×400) |
+| L2 c3 | `$(seq -s, 8522 2 8568)` | `… reached frame 8569 before frame 8568 …` |
+| L2 d2 | `$(seq -s, 11101 11109),11130,$(seq -s, 11151 11161),$(seq -s, 12181 12189),12200,$(seq -s, 12211 12219),$(seq -s, 15601 15609)` | `… reached frame 15604 before frame 15603 …` (everything up to 12219 was read first) |
+| L2 e2 | `$(seq -s, 16191 16199)` | `… reached frame 16193 before frame 16192 …` |
+| L2 f2 | `$(seq -s, 16631 16639),16650,16660,16670,16679,16680,16681,$(seq -s, 18641 18659),$(seq -s, 21921 21929)` | `… reached frame 21926 before frame 21925 …` (up to 18659 read first) |
+| L2 g2 | `23999,24000,24001,24499,24500,24501,24505,24510,24515,24521,24525,$(seq -s, 24530 10 24590)` | `… frame 24521 is 320x200 where the capture started at 320x400 …` |
+| L2 g3 | `24520` | `… reached frame 24521 before frame 24520 …` |
+| L2 h2 | `26499,26500,26501,26505,$(seq -s, 26510 10 26550),$(seq -s, 26560 26569),$(seq -s, 26571 26579),$(seq -s, 26580 10 26690),26699,26700,26701,27999,28000,28001,$(seq -s, 29010 10 29190),29799,29800,29801,$(seq -s, 31110 10 31240),31249,31250,31251,$(seq -s, 31260 10 31290),31899,31900,31901,32499,32500,32501,$(seq -s, 33210 10 33290)` | `… reached frame 33261 before frame 33260 …` (up to 32501 read first) |
+| L2 h4 | `26570` | exit 0 (26570 is black) |
+| L2 i2 | `$(seq -s, 34111 34119)` | `… reached frame 34116 before frame 34114 …` |
+| L2 j2 | `$(seq -s, 37951 37969)` | `… reached frame 37966 before frame 37965 …` |
+| L2 k2 | `$(seq -s, 38510 10 38570),38572,38574,38576,38578,38582,38584,38586,38588,38590` | `… frame 38584 is 320x200 where the capture started at 320x400 …` |
+| L2 k3 | `38580` | `… reached frame 38581 before frame 38580 …` |
+| L2 l2 | `$(seq -s, 46271 46279)` | `… reached frame 46277 before frame 46276 …` |
+| b2r | `$(seq -s, 7701 7709),$(seq -s, 7720 20 7900),$(seq -s, 7911 7920),$(seq -s, 7922 7929)` | `… reached frame 7930 before frame 7929 …` (adjacent 320×400) |
+| c3r | `8519,8520,8521` | exit 0 |
+| p7921 | `6499,6500,6501,7921` | `… reached frame 7922 before frame 7921 …` |
+| p8568 | `8299,8300,8301,8568` | `… reached frame 8569 before frame 8568 …` |
+| p15603 | `12399,12400,12401,15603` | exit 0 (15603 is 320×200) |
+| e2r | `16189,16191,16193,16195,16197,16199` | `… frame 16195 is 320x200 where the capture started at 320x400 …` |
+| p16192 | `15999,16000,16001,16192` | `… reached frame 16193 before frame 16192 …` |
+| f2r | `$(seq -s, 21921 21924),$(seq -s, 21926 21929)` | `… frame 21927 is 320x400 where the capture started at 320x200 …` |
+| p21925 | `18999,19000,19001,21925` | exit 0 |
+| h3 | `$(seq -s, 29061 29069),$(seq -s, 31211 31219),33110,33130,33150,33260` | `… reached frame 33261 before frame 33260 …` (all before read first) |
+| h5 | `$(seq -s, 29171 29179),$(seq -s, 31271 31279),$(seq -s, 33251 33259),$(seq -s, 33261 33269)` | `… reached frame 33260 before frame 33259 …` (up to 31279 read first) |
+| i2r | `34111,34113,34116,34118` | `… reached frame 34114 before frame 34113 …` |
+| p34114 | `33899,33900,33901,34114` | exit 0 (34114 is 320×400) |
+| j2r | `$(seq -s, 37951 37964),$(seq -s, 37966 37969)` | `… frame 37967 is 320x400 where the capture started at 320x200 …` |
+| p37965 | `34249,34250,34251,37965` | exit 0 |
+| k2r | `$(seq -s, 38561 38569),38579,38581,38583` | `… reached frame 38567 before frame 38566 …` (adjacent 320×400) |
+| l2r | `46271,46273,46275,46277,46279` | `… frame 46277 is 640x400 where the capture started at 320x200 …` |
+| p46276 | `40599,40600,40601,46276` | `… reached frame 46277 before frame 46276 …` |
+| b2r2 | `$(seq -s, 7701 7709),$(seq -s, 7720 20 7900),$(seq -s, 7911 7920),7922` | exit 0 (7922 is still 320×200) |
+| h6 | `33261,33263,33265,33267` | `… frame 33263 is 320x400 where the capture started at 320x200 …` |
+| i3 | `$(seq -s, 34115 34119)` | `… reached frame 34117 before frame 34116 …` |
+| k4 | `38561,38563,38565,38567,38569,38583` | `… frame 38583 is 320x200 where the capture started at 320x400 …` |
+| h7 | `$(seq -s, 26671 26679),$(seq -s, 29131 29139),$(seq -s, 33155 5 33195)` | exit 0 |
+
+Every frame a refused session read before its refusal is on disk and was hashed; a session refused
+at *take* time (`reached frame …`) loses the unread batch before it, which is why b2, c3, i2, j2, k2r
+and l2 were taken again. The `sha256` of each frame below is printed by
+
+```bash
+sha256sum out/p9-fullrun-l2/d2/frame_011159.rgb   # and so on
+```
+
+### 26.3 The boundary table
+
+"First" is the first frame that is the part's — its own geometry, or its own first change to the
+screen; "last" is the last frame of the previous part's picture. **Where a black gap separates two
+parts of one geometry, the handover is invisible**, and the row gives the last visible frame of one,
+the first visible frame of the next, and the gap; the moment the shell starts the next part inside
+the gap is not observable from the screen. Indices that differ between sessions are given with the
+sessions that measured them (D17's ±1; three boundaries move by 2).
+
+| # | part | first frame | last frame | session(s) | geometry |
+|---|---|---|---|---|---|
+| 1 | ALKU | **404** — `FIRST_GRAPHICS_FRAME` (D17); this tool refuses 400–408 (s01–s09); 409 is the black `fec9afb5…` = `alku`'s 900 | **5960** (still 320×400, the screen being split, §4.5) | s10, L1 a | 320×400 |
+| 2 | U2A | **5961** — the first 320×200 frame: in a2 it is `0a68ffb9…`; in the filed session it is already `0b95e3d6…` (a2's 5962), i.e. one frame earlier | **7706** (U2A's landscape `0a68ffb9…` through 7706) | a2, L1 a, b2r2, `fullrun/02` | 320×200 |
+| 3 | PAM | **7707** (`1fef46de…`, PAM's white; U2A's picture through 7706) | **7919** (L1 b, where 7920 is BEGLOGO's) / **7920** (b2r2 and `fullrun/02`, where 7920 is still PAM's white) | b2r2, L1 b, `fullrun/02` | 320×200 |
+| 4 | BEGLOGO | **7920** (L1 b) / **7922** (b2r2): `b94ba42a…`, rows 0–110 index-15 white (255) over PAM's 251 — the `memset(vram,15,…)` of `BEG.C:18-21` in progress; **7921 is never published** (b2, p7921); first 320×400 frame in (7922, 7930] (b2r2, L1 b) | **8520 or 8521** — the hold `cbdc67eb…` (L1 c 8520, c3r 8521) | L1 b, b2r2, p7921, L1 c, c3r | 320×200 → 320×400 |
+| 5 | GLENZ | **8521** (c2) / **8522** (c3r, and music-clock §2.2's `p7-b1-collapse-dense`): the collapse's first changed frame, `GLENZ/MAIN.C`'s `dis_setmframe(0)` at 8521 (`second1d`); 320×400 through 8569 (c2), **8568 never published** (c3, p8568), 320×200 from 8570 (L1 c) | **11102** — last visible (11103–11158 black) | c2, c3r, c3, p8568, L1 c, d2 | 320×400 → 320×200 |
+| 6 | TUNNELI | **11159** (d2: 64 px) / **11158** (`fullrun/04` has d2's 11160 bytes at 11159) | **12184** — last dots (12185–12213 black) | d2, `fullrun/04` | 320×200 |
+| 7 | TECHNO | **12214** (d2 and `fullrun/04`, `eb6b85c9…`; 12310 is `techno/interference`'s 4900) | **16191** — the troll `40044edc…` (e2r); rings 320×200 through 15603 (p15603), troll 320×400 from ≤ 15610 (L1 d) | d2, p15603, L1 d, e2r | 320×200 → 320×400 |
+| 8 | PANICEND | **16193** — `1f039cb7…`, the troll squashed by PANICEND's CRTC write, **still 320×400** (e2r, `fullrun/05`); **16192 never published** (e2, p16192); 320×200 from 16195 (e2r) | **16636** — the dot `b412a265…` (f2, `fullrun/06`) | e2r, p16192, f2 | 320×400 → 320×200 |
+| — | **PANICEND's cue wait** (`MAIN/U2.ASM:833-853`) | exits at **16630**: the first frame `musplus` > 0 (`second1e`, §26.6); the dot stays up to **16636**, and **16637** is the first changed frame | | `second1e`, f2, `fullrun/06` | |
+| 9 | MNTSCRL | **16637** — black `ea0787f6…` (the mode set); the forest fades in from 16640 (L1 f) | **18648** — last visible (18649–18655 black) | f2, L1 f | 320×200 |
+| 10 | LNS&ZOOM | **18656** (`c3ac679a…`, f2 and `fullrun/06`) | **21926** — its white `20f3d62f…` (f2r; `lnszoom`'s 5650 is the same white) | f2, f2r | 320×200 |
+| 11 | PLZPART | **21927** — the first 320×400 frame, white `85789170…` (f2r, `fullrun/07`); plasma → cube: 320×400 through 24515 (g2), **24520 never published** (L1 g, g3), 320×200 from 24521 in g2 but still 320×400 black at 24521 in the first filing session | **26561** — last visible cube (26562–26672 black) | f2r, g2, g3, h2 | 320×400 → 320×200 |
+| 12 | MINVBALL | **26673** (`d43168f0…`, h7 and `fullrun/08`) | **29133** — the end of its own white→black fade (`DOTS/MAIN.C:242-266`; 29134 black) | h7 | 320×200 |
+| 13 | RAYSCRL | **29174** (`d37d5b68…`, h5 and `fullrun/08`; 29134–29173 black) | **31216** — last visible (31217–31271 black) | h5, h3 | 320×200 |
+| 14 | 3DSINFLD | **31272** (h5: 8 px, `d69d90c5…`); still black at 31272 in `fullrun/08`'s session | in **(33190, 33195]** — last visible 33190 (104 px), 33195 black | h5, h7 | 320×200 |
+| 15 | JPLOGO | first 320×400 frame in **(33261, 33263]** (h6: 33261 is 320×200 black, 33263 320×400 black `fec9afb5…`); **33260 never published** (h2, h3; h5 33259) | **34114** — its white `668f1e13…`, 320×400 (p34114); the white is up from ≤ 34100 (s18) | h6, h2, h3, h5, p34114 | 320×400 |
+| — | **the U2E `MUSIC0@18` restart** (`MAIN/U2.ASM:880-885`) | the restarted clock starts at **34,055 ± 2**; the reload runs under JPLOGO's white: `second1e` is valid through 33949, and windows ending at 34004 and 34069 are refused (§26.6) | | `second1e`, `second1f` | |
+| 16 | U2E | first 320×200 frame in **(34114, 34120]**; **34120** is U2E's band `6eb4e4cd…` (`u2e`'s first visible frame, §18.7's 467); 34113, 34114 and 34116 were refused in i2r, i2 and i3 and 34114 captured in p34114 | **37966** — U2E's fade to white is complete at 37962 (`20f3d62f…`) and 320×200 lasts to 37966 (j2r) | L1 i, i2, i2r, i3, p34114, `fullrun/10`, j2r | 320×200 |
+| 17 | ENDLOGO | **37967** — first 320×400 frame (j2r); in the first filing session 37967 was refused (`… reached frame 37968 before frame 37967 …`) and `second1f` skips it | **38569** — last visible (k4; 38570–38582 black, k2) | j2r, k4, k2 | 320×400 |
+| 18 | CRED | **38583** — first 320×200 frame (k4; k2's 38582 is 320×400); **38580 never published** (L1 k, k3) | **46275** — the closed black (46271 is the iris's last step `88532193…`, 46273 and 46275 black) | k4, k2, k3, l2r | 320×200 |
+| 19 | ENDSCRL | **46277** — first 640×400 frame (l2r); **46276 never published** (l2, p46276); in the first filing session 46277 was still 320×200 black | — (it never ends; surveyed to 50000) | l2r, p46276 | 640×400 |
+
+**The run's length to ENDSCRL is 46277 − 404 = 45,873 frames** — 654.5 s, 10 min 54.5 s at
+70.086 Hz — from the demo's first graphics frame to ENDSCRL's first 640×400 frame.
+
+**Holds, measured** (`K−1 = K = K+1`, one `sha256`): ALKU 1718–1720 (L1 a), U2A 6499–6501 (L1 b,
+p7921), PAM 7899–7901 (L1 b), BEGLOGO 8299–8301 (L1 c, p8568), GLENZ 8899–8901 (L1 d), TECHNO
+12399–12401 (the white, L1 d and p15603) and 15999–16001 (the troll, L1 e and p16192), PANICEND
+16499–16501 (L1 f), MNTSCRL 16679–16681 (f2), LNS&ZOOM 18999–19001 (L1 f, p21925), RAYSCRL
+29799–29801 (h2), JPLOGO 33899–33901 (L1 i, p34114), U2E 34249–34251 (L1 j, p37965), ENDLOGO
+38299–38301 (L1 k), CRED 40599–40601 (L1 l, p46276). **Four parts have none**, and the filed frame is
+the least-moving one measured, by the differing pixels to each neighbour
+(`python3 -c` over the three `.rgb` files, 3 bytes a pixel):
+
+| part | triplet | `K−1/K`, `K/K+1` | filed |
+|---|---|---|---|
+| TUNNELI | 11499–11501 / **11899–11901** (L1 d) | 6,384, 6,274 / **4,125, 3,939** of 64,000 | 11900 |
+| PLZPART | 22499–22501 (L1 g) / **24499–24501** (g2) / 25499–25501 (h) | 89,379, 89,413 / **22,166, 20,662** of 128,000 / 56,999, 57,054 of 64,000 | 24500 |
+| MINVBALL | **26699–26701** (h2) / 27999–28001 (h2) | **0, 31,360** / 4,557, 4,527 of 64,000 | 26700 |
+| 3DSINFLD | **31899–31901** / 32499–32501 (h2) | **27,978, 0** / 26,592, 0 — it draws every second frame | 31901 |
+
+g2's 23999–24001 are three black frames, but the survey's 24000 in another session is not black
+(`6d2dc87c…`), so that is a moment of the plasma's fade, not a hold.
+
+### 26.4 The filed captures
+
+One session per geometry segment, `--sheet out/p9-fullrun-sheet-<segment>.png`:
+
+```bash
+cargo xtask reference capture --arg 1 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 1719 --out reference/parts/fullrun/01-alku
+… --frames 5961,6500,7707,7880,7920 --out reference/parts/fullrun/02-u2a-pam
+… --frames 7930,8300,8522 --out reference/parts/fullrun/03-beglogo
+… --frames 8572,8900,11159,11900,12214,12400 --out reference/parts/fullrun/04-glenz-techno
+… --frames 16000,16193 --out reference/parts/fullrun/05-troll-panicend
+… --frames 16500,16636,16637,16690,18656,19000 --out reference/parts/fullrun/06-panicend-lnszoom
+… --frames 21927,24500 --out reference/parts/fullrun/07-plasma
+… --frames 24540,26673,26700,29174,29800,31272,31901 --out reference/parts/fullrun/08-cube-3dsinfld
+… --frames 33263,33900,34110 --out reference/parts/fullrun/09-jplogo
+… --frames 34120,34250 --out reference/parts/fullrun/10-u2e
+… --frames 37970,38300 --out reference/parts/fullrun/11-endlogo
+… --frames 38583,40600 --out reference/parts/fullrun/12-cred
+… --frames 46280,46283,46286 --out reference/parts/fullrun/13-endscrl
+```
+
+(`…` is the fixed prefix of the first line.) All thirteen exit 0. Three first attempts were refused
+and moved out of the tree before their segment was taken again (to `out/p9-fullrun-file-refused/`):
+`08` asked for 24521, which was still 320×400 in that session (`… frame 26673 is 320x200 where the
+capture started at 320x400 …`); `11` asked for 37967 (`… reached frame 37968 before frame 37967 …`);
+`13` asked for 46277, still 320×200 (`… frame 46280 is 640x400 where the capture started at
+320x200 …`). The segments' first indices are therefore 24540, 37970 and 46280 — the first frames
+every session agrees are in the new geometry — and §26.3 carries the exact first frames.
+
+**Every `.idx` is from an unbatched read.** The indices of each capture are ≥ 25 apart except the
+cue-wait pair 16636/16637 and ENDSCRL's 46280/46283/46286, which are batched and carry **no**
+`.idx` (§25.6's rule); the 16 index planes are on frames read alone. JPLOGO's 33900 and 34110 have
+the **same** index plane (`201e9833…`): the white is a DAC change over the logo's pixels.
+
+| capture | index | what | `sha256` | `.idx` |
+|---|---|---|---|---|
+| `01-alku` | 1719 | ALKU, held (= `alku`'s 1719) | `6a27ec502abe606d39c25af842594335fb71d30e14a1f245e9492f3b4148cebe` | — |
+| `02-u2a-pam` | 5961 | U2A's first frame (a2's 5962 bytes) | `0b95e3d6f8c5b82421e3262683893d751e8df8a894e6bb99e47f4e1cb2c302e5` | — |
+| | 6500 | U2A, held (= `u2a`'s 6500) | `11a66eb08a14b3cf65528ff982c272791393af06d9afacd3a2e85eb1dc81cf7e` | — |
+| | 7707 | PAM's first frame, its white | `1fef46de229b96373d36639c7250856afa2d5b39c1401a2f4d55511cd597aee0` | `4f798803…` |
+| | 7880 | PAM, held | `1fef46de…` (same) | `f5480708…` |
+| | 7920 | PAM's white, the last 320×200 index before BEGLOGO's fill in this session | `1fef46de…` (same) | — |
+| `03-beglogo` | 7930 | BEGLOGO's ramp (= `beglogo-leadin`'s 449) | `54b03e8ed440c42c8fc577e08e72602f8ea93676be72b3d3c7e888b2c94617dc` | — |
+| | 8300 | BEGLOGO, held (= `beglogo`'s 900) | `cbdc67eba977d5a58f09e5e14cfd04f04acdee716304ec3f15b830142cae1abc` | `e10481c7…` |
+| | 8522 | GLENZ's first frame, the collapse | `da1f9be6c5d02992005f1b083e1f5ac30a950f6fd7b608a848c6e3e0a0bf8967` | — |
+| `04-glenz-techno` | 8572 | GLENZ's first 320×200 index | `35ad5005c97b92eabca29c55bfc66f1739d832e6f3125d9cd6085c9d2d591989` | `f1a7aa1a…` |
+| | 8900 | GLENZ, held (= `glenz`'s 1499) | `e45ab0764b860f50376d560cf5a4d0f0e7ecca935021780385e3735e865fc28e` | `75d561dc…` |
+| | 11159 | TUNNELI's first frame (d2's 11160) | `d0f33e4adc7ff419bb1ffbbd7bb43fcce4f87072f077694cf6805b7443615aa1` | — |
+| | 11900 | TUNNELI, least-moving (= L1 d's 11900) | `a2e824309a5cd1d06d4758f874cbadc0e988754f815d87370012d962b1363921` | — |
+| | 12214 | TECHNO's first frame (= d2's 12214) | `eb6b85c96a5c0cfb384acc767bf8f3983a7044a2f150288045805e44c72c1a5a` | — |
+| | 12400 | TECHNO, held white | `20f3d62fced3ac8938933a1f3aca1dbe92b058808f88bdea2937ce5d788f9df8` | — |
+| `05-troll-panicend` | 16000 | TECHNO's troll, held (= `techno/troll`'s 8400) | `40044edca7d81510908734f1a3b15d670e724dff68d767348533e079f73fd81e` | — |
+| | 16193 | PANICEND's first frame (= e2r's 16193) | `1f039cb769c47c0e24e227e6f50b8d51c1805898c7afa7e4b27f59f3103f02c6` | — |
+| `06-panicend-lnszoom` | 16500 | PANICEND, held dot (= `panicend`'s 9000) | `b412a26518f5e0281790d05c16ed0c7644b7382c5debb8f16a9437b7a6aa84e7` | `9d7106ca…` |
+| | 16636 | the last dot frame, after the cue wait's exit at 16630 | `b412a265…` (same) | — |
+| | 16637 | MNTSCRL's first frame, black | `ea0787f65f73b0013d03b359490e3125211b28ad5c1502ffb1544c0ded4192f5` | — |
+| | 16690 | MNTSCRL, held (= `mntscrl`'s 500) | `e68aa8870c98cbc4757f46dbea41ccb8dbbe68bbd2b5526c1d8eb05c9a5d7646` | — |
+| | 18656 | LNS&ZOOM's first frame (= f2's 18656) | `c3ac679a4425a02bb70accf0549ee25ebbc75790f2cf568668158025de14b804` | — |
+| | 19000 | LNS&ZOOM, held (= `lnszoom`'s 2700) | `6a152a319d26f6c4f0c6cea6f9127f5a5b7b07c00da1d99a215446e1d4d21fd3` | `70175500…` |
+| `07-plasma` | 21927 | PLZPART's first frame, 320×400 white | `857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561` | — |
+| | 24500 | PLZPART, least-moving (= g2's 24500) | `e161804ce9e8ec45cdff91de88dafee86838ab265afc44d3029be41ca3fb1144` | — |
+| `08-cube-3dsinfld` | 24540 | PLZPART's cube screen, first 320×200 index every session agrees on (black) | `ea0787f6…` | `4f798803…` |
+| | 26673 | MINVBALL's first frame (= h7's 26673) | `d43168f0d0b89855eec0625d7fc114e792b48da2cfa4bb48d897fac55b7d3b29` | — |
+| | 26700 | MINVBALL, least-moving (= h2's 26700) | `bbdf2ae7a4dc34eebf9426b40009b92e3a91a3295e1f54c25f706c5c2be32e2e` | — |
+| | 29174 | RAYSCRL's first frame (= h5's 29174) | `d37d5b686e19c64a8d25c7209cd9b839664331035549a3cd7e7e3505dfd347d9` | — |
+| | 29800 | RAYSCRL, held (= `rayscrl`'s 13500) | `92dc2c9e51af55183c05db9e643e8209ff96d2235f0689278cdd4c518982db20` | `afda560c…` |
+| | 31272 | 3DSINFLD's first frame in h5; black in this session | `ea0787f6…` | — |
+| | 31901 | 3DSINFLD, least-moving | `7f1d2fd14509fbca9bb0dd6d91c2f6bb7d62a22f64f0f550f86002a5c475b4e9` | `6bbaf70b…` |
+| `09-jplogo` | 33263 | JPLOGO's first 320×400 index, black | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` | `eec19bc6…` |
+| | 33900 | JPLOGO, held (`ec3de2bb…`, §17.3's state) | `ec3de2bb823772bf275387ab122e12e17b1d27a140ec9be8a71faa7d1bd3cb37` | `201e9833…` |
+| | 34110 | JPLOGO's white, held under the U2E restart | `668f1e1364bdd570bd695e686268d63bc6b54c730cfc5db81738a3477f92e42b` | `201e9833…` |
+| `10-u2e` | 34120 | U2E's first visible frame, the band (§18.7's `6eb4e4cd…`) | `6eb4e4cde52af29a4eda297e9ad0fb10b0625ae823106a995976af4968edbe7c` | — |
+| | 34250 | U2E, held (§18.1's `befaf38a…`) | `befaf38ae151e8323a3828aaa98473009923a08f00aa0b96ef5a90e1597f1596` | `09b1f319…` |
+| `11-endlogo` | 37970 | ENDLOGO's white | `857891706b16…` (as 21927) | `4ebd6f58…` |
+| | 38300 | ENDLOGO, held (= `endlogo`'s 900) | `f2514b291f572e3dbd028cadd7b2795be972740b5466f8520b5b8da468ace94d` | `c0e0e259…` |
+| `12-cred` | 38583 | CRED's first frame, black | `ea0787f6…` | — |
+| | 40600 | CRED, held (= `cred`'s 3240) | `98de65f369992a08f966d671b1ef52c3376121741ec4ffe0171c55b8467d925a` | — |
+| `13-endscrl` | 46280 | ENDSCRL, its 4th frame | `b231a5f2a93d7465c29c0e502a6898ecee691f91e0937e26a27bfae7e933aa5a` | — |
+| | 46283 | | `6b5e1a45c14df788179dbe1b1a8250fa59e36db27847c5a8f6b9621ca79491f6` | — |
+| | 46286 | | `4a120a81de0fa61755163f08379d34af1eade7534a0b34b1bf31d5c74d5216e9` | — |
+
+Full `.idx` digests are in each manifest (`idx_sha256`). **Nine moving frames reproduce a
+refinement session's bytes exactly** — 12214, 16193, 18656, 24500, 26673, 26700 and 29174 at their
+own index, 5961 and 11159 one index later (a2's 5962, d2's 11160) — and 34120 is the `SECOND 4`
+boot's band (§18.7) byte for byte; where a filed first frame differs from the refinement session's
+(31272 black here, 8 px in h5) it is the session phase D17 measures.
+
+### 26.5 The repeat
+
+The held frames, once more, one session per segment, into `out/p9-fullrun-repeat/<segment>`:
+
+```bash
+cargo xtask reference capture --arg 1 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 1719 --out out/p9-fullrun-repeat/01-alku
+… --frames 6500,7880 --out out/p9-fullrun-repeat/02-u2a-pam
+… --frames 8300 --out out/p9-fullrun-repeat/03-beglogo
+… --frames 8900,12400 --out out/p9-fullrun-repeat/04-glenz-techno
+… --frames 16000 --out out/p9-fullrun-repeat/05-troll-panicend
+… --frames 16500,16636,16690,19000 --out out/p9-fullrun-repeat/06-panicend-lnszoom
+… --frames 29800 --out out/p9-fullrun-repeat/08-cube-3dsinfld
+… --frames 33900,34110 --out out/p9-fullrun-repeat/09-jplogo
+… --frames 34250 --out out/p9-fullrun-repeat/10-u2e
+… --frames 38300 --out out/p9-fullrun-repeat/11-endlogo
+… --frames 40600 --out out/p9-fullrun-repeat/12-cred
+```
+
+All eleven exit 0, and **all seventeen frames' `sha256` equal the filed capture's** — 1719, 6500,
+7880, 8300, 8900, 12400, 16000, 16500, 16636, 16690, 19000, 29800, 33900, 34110, 34250, 38300 and
+40600 — and **so do all ten index planes both sessions read** (7880, 8300, 8900, 16500, 19000, 29800,
+33900, 34110, 34250, 38300). The comparison is the two manifests' digests:
+
+```bash
+python3 -c 'import json,glob; [print(m, all(f["sha256"]==g["sha256"] for f in json.load(open(m))["frames"] for g in json.load(open(m.replace("out/p9-fullrun-repeat","reference/parts/fullrun")))["frames"] if f["index"]==g["index"])) for m in sorted(glob.glob("out/p9-fullrun-repeat/*/manifest.json"))]'
+```
+
+prints `True` for all eleven. The moving frames (first frames, least-moving frames, ENDSCRL) are not
+repeated: §26.3 and §1.12 already say they differ by session.
+
+### 26.6 The music traces
+
+```bash
+cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..33950 --out reference/music/second1e
+cargo xtask music trace --arg 1 --cycles 30000 --frames 34105..48277 --out reference/music/second1f
+```
+
+Both exit 0. `second1e` is MUSIC1 orders 4…98 (`traced 25143 frame(s) … 7 frame(s) missing (12207,
+15603, 16192, 21926, 24520, 26570, 33261)`), `second1f` MUSIC0 orders 18…45 (`traced 14168 frame(s)
+… 4 frame(s) missing (34116, 37967, 38569, 46264)`). **The traces' missing frames are the captures'
+refusals**: 16192 and 24520 exactly, 15603, 21926 (≈ 21925), 26570, 33261 (≈ 33260), 34116 and 37967
+at the same loads, and 12207 is TECHNO's mode change, inside the TUNNELI→TECHNO black gap
+(12185–12213).
+
+**The `second1e` window is narrowed**, as `second3d`'s was (music-clock.md §1's table). The brief's
+end is the restart − 50 = 34005; with the restart unknown, the first attempt was set from §26.3's
+frames, and two were refused:
+
+```
+$ cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..34070 --out reference/music/second1e
+error: _np_ord reads -1, which is not a byte value: the base 0x0051F0 is not this segment's
+$ cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..34005 --out out/p9-trace-second1e-b
+error: the needle is in 2 places and the bytes around them are NOT one memory: the copy at 0x1051F0 differs from the one at 0x0051F0 at offset 0x0068 (192 against 64), so one of them is a stale copy and a trace read through it would be a record of dead bytes
+```
+
+so the reload is already under way by the end-of-trace re-scan after 34004, and the filed window
+ends at 33949. `second1f`'s first attempt (`--frames 34170..48280`, now `out/p9-trace-second1f-a`,
+exit 0) was set the same way; the filed one was re-taken at the restart + 50 once the restart was
+measured, and the two sessions agree on the row-change frames to within −2…+3.
+
+**The restart is 34,055 ± 2.** `restartmus` does not zero `_np_zframe` (music-clock §2.1), so the
+restart is read the way `second3e`'s was: `second1f`'s rows at order 18 sit 33,644–33,647 frames
+after `second4`'s (the block-4 boot's own restart, whose columns derive its start at 408.2), so the
+block-1 restart's clock starts at 408.2 + 33,647 ≈ **34,055**. U2E's band follows at 34120 (R + 65;
+block 4: 467 = R + 59). **The two sessions drift**: the offset falls from 33,647 at order 18 to
+33,635 at order 25 (orders 19…25 start 33,646, 33,644, 33,642, 33,641, 33,639, 33,636, 33,635 frames
+after `second4`'s), and stays there — 11 frames over the 3,421 frames of orders 19–25.
+
+**The PANICEND cue wait exits at 16630.** `musplus` from `second1e`'s `zplus` and `row` (the
+`DIS/DISINT.ASM:252-271` rule, `musplus_from`): −32 from 16363 to 16618 (order 39 row 32 … order 40
+row 31), 0 at 16622 (order 42 row 0 — order 40 breaks to 42), **1 at 16630** (order 42 row 1). The
+wait (`MAIN/U2.ASM:833-853`) loops while `musplus` ≥ 0, then while ≤ 0, and leaves on the first
+value > 0 — 16630, whichever loop PANICEND's retirement entered. The dot is up to 16636 (§26.3).
+
+```bash
+python3 -c 'import csv; [print(r["frame"],r["ord"],r["row"],r["zplus"]) for r in csv.DictReader(open("reference/music/second1e/trace.csv")) if 16616<=int(r["frame"])<=16632]'
+```
+
+**The port's player against them** (`cargo test -p sr-audio --test trace`, with the two traces in
+`RESTART_TRACES`: `second1e` from `second1d`'s `MUSIC1@0` restart at 7,815, `second1f` from 34,055 at
+order 18) — **it fails, and these are the rows**:
+
+- **`second1e`: content identical, placement out by 8.** Every word's value sequence matches the
+  trace (order 81 values, row 5,025, pattern 74, speed 7, tempo 1, zplus 39 — no difference), the
+  phase aligns at −2, and the port's row changes drift early by 0 → −8 frames over the 25,136
+  compared frames (−1 by 10,827, −4 by 19,981, −8 from order 96 row 58 at 33,264 to the end). The
+  test's line: `second1e (MUSIC1): 8087 of 25136 frames agree (32.173 %); worst displacement 8
+  frame(s)` — one past `JITTER_FRAMES` = 7.
+- **`second1f`: one row the trace never publishes.** The test stops at `second1f: the row sequence
+  differs at index Some(502): trace 27, port 26`: in order 26 (pattern 71) the module runs at
+  **speed 1** (frames 38328–38370, a row every 1.46 frames, music analyse's `frames 38328..38370 at
+  speed 1 tempo 120`), and the trace's one sample a frame publishes row 25 at 38364 and row 27 at
+  38366 — row 26 is never current at a sample — while the port, ten frames later in phase, publishes
+  `(26, 26)` at 38376. Every other word's sequence is identical, and the placement drift is 0 → +8…+12
+  frames over orders 18–25 and then constant (+9). No earlier trace holds a speed-1 stretch.
+
+Both are findings for Task 6, not player changes (the brief's acceptance line): the first is the
+exact clock's accumulated difference over a window four times `second1`'s, the second a row shorter
+than one sample. The per-row comparison was printed by a temporary copy of the test that wrote the
+port's and the trace's published words per frame to `out/p9-port-second1{e,f}.csv`; the copy was
+removed.
+
+### 26.7 What Task 6 and Task 10 inherit
+
+- **§26.3's table** in the reference's boot numbering, with the sessions that measured each row;
+  indices given as two values are session-dependent.
+- **The never-published frames** 7921, 8568, 16192, 24520, 33260, 38580 and 46276: a port frame at
+  those indices has no reference to pair with.
+- **The restart at 34,055 ± 2**, the reload under JPLOGO's white (≤ 34100 … 34114), U2E's band at
+  34120; **the cue-wait exit at 16630**, the screen's change at 16637.
+- **The total length to ENDSCRL: 45,873 frames.**
+- **Block offsets**: block 2 + 7,410, block 3 + 16,200, block 4 + 33,647 (at order 18), block 5 +
+  37,358 at CRED's last iris step.
+- **The trace test fails on `second1e` (8 frames' drift) and `second1f` (one unsampled speed-1
+  row)**.
+
+`cargo xtask reference verify --tree reference` passes over **67 captures (262 files)**: the
+thirteen `parts/fullrun/*` captures (44 frames, 60 files) and the two traces (one file each).

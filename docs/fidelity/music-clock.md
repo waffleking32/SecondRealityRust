@@ -28,6 +28,8 @@ traces below are committed under `reference/music/`:
 | `reference/music/second3e` | `cargo xtask music trace --arg 3 --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 18000..22000 --out reference/music/second3e` | the mid-run MUSIC0@18 restart and U2E's opening, on block 3's session (Phase 6) |
 | `reference/music/second2b` | `cargo xtask music trace --arg 2 --cycles 30000 --frames 380..3800 --out reference/music/second2b` | **`SECOND 2`'s boot**: the block-2 BEGLOGO→GLENZ boundary, the GLENZ music-wait exit and the intro (Phase 7) |
 | `reference/music/second1d` | `cargo xtask music trace --arg 1 --cycles 30000 --frames 8100..8800 --out reference/music/second1d` | the block-1 `MUSIC1@0` restart's post-reload session and GLENZ's block-1 wait exit (Phase 7) |
+| `reference/music/second1e` | `cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..33950 --out reference/music/second1e` | block 1 from 8800 to JPLOGO: the rest of the `MUSIC1@0` session, PANICEND's cue wait; narrowed from the plan's `8800..<restart − 50>` (§2.3) (Phase 9) |
+| `reference/music/second1f` | `cargo xtask music trace --arg 1 --cycles 30000 --frames 34105..48277 --out reference/music/second1f` | block 1 from the U2E `MUSIC0@18` restart + 50 to ENDSCRL's first frame + 2000 (§2.3) (Phase 9) |
 
 The Phase 6 traces were captured with the same recipe as the first four, written out in their
 rows above: `--boot autoexec --keys "KBD_left KBD_enter"` (D17) and `--cycles 30000`,
@@ -72,6 +74,8 @@ cargo xtask music analyse --trace reference/music/second4
 cargo xtask music analyse --trace reference/music/second3e
 cargo xtask music analyse --trace reference/music/second2b
 cargo xtask music analyse --trace reference/music/second1d
+cargo xtask music analyse --trace reference/music/second1e
+cargo xtask music analyse --trace reference/music/second1f
 ```
 
 ## 1. What the trace reads, and what it guarantees
@@ -154,6 +158,8 @@ words — and the sessions below show how little it moves within a recipe.
 | `second3e` | 18000..21999 | MUSIC0 | 14 (a window) | *4718.9* — a mixed-tempo extrapolation that is **not** the restart's start (§2.1) | 18000 |
 | `second2b` | 380..3799 | MUSIC1 | 15 (**`SECOND 2`'s boot**) | **401.1** | 408 |
 | `second1d` | 8100..8799 | MUSIC1 | 16 (a window, after a reload) | *997.0* — an extrapolation across the `MUSIC1@0` reload, not a boot anchor | 8100 |
+| `second1e` | 8800..33949 | MUSIC1 | 17 (a window, the same `MUSIC1@0` session) | *8523.4* — the last tick reset before the window, GLENZ's `dis_setmframe(0)` at 8521 (§2.2), not a boot anchor | 8800 |
+| `second1f` | 34105..48276 | MUSIC0 | 18 (a window, after the U2E reload) | *20927.5* — an extrapolation over a `zframe` the restart does not zero (§2.1); the restart itself is 34,055 (§2.3) | 34105 |
 
 Each row's frames are the manifest's own coverage (`first..last`), and its module the one
 `music analyse` identifies from the trace's `(ord, pat)` pairs.
@@ -570,6 +576,54 @@ cannot separate a seek that left the row from a play that began during the modul
 wait's **exit** (8521) is what Task 6 consumes and it is measured twice; the restart frame is
 recorded as the interval **(8049, 8100)**. `docs/decisions.md` D38 carries the consequence.
 
+### The block-1 full run: `second1e` and `second1f` (Phase 9)
+
+Phase 9 Task 2 traces block 1 from 8800 to ENDSCRL, split at the U2E restart because a trace cannot
+follow a reload (§1's fixed-base read, the `second3d` and `second1d` refusals above).
+`reference-indices.md` §26.6 carries the record; the numbers are these.
+
+**`second1e`'s window is narrowed.** The plan's end is the restart − 50, 34,005. Two windows were
+refused before one passed:
+
+```
+$ cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..34070 --out reference/music/second1e
+error: _np_ord reads -1, which is not a byte value: the base 0x0051F0 is not this segment's
+$ cargo xtask music trace --arg 1 --cycles 30000 --frames 8800..34005 --out out/p9-trace-second1e-b
+error: the needle is in 2 places and the bytes around them are NOT one memory: the copy at 0x1051F0 differs from the one at 0x0051F0 at offset 0x0068 (192 against 64), so one of them is a stale copy and a trace read through it would be a record of dead bytes
+```
+
+and `8800..33950` passes — so the reload is under way by the end-of-trace re-scan that follows
+34004, and the filed window ends 105 frames before the restart. It holds MUSIC1 orders 4…98 and, at
+33693–33872, speed 127.
+
+**The U2E restart's clock starts at 34,055 ± 2**, read as `second3e`'s was (§2.1): `second1f`'s rows
+at order 18 sit 33,644–33,647 frames after `second4`'s, so 408.2 + 33,647 ≈ 34,055. The order
+boundaries then drift: orders 19…25 start 33,646, 33,644, 33,642, 33,641, 33,639, 33,636 and 33,635
+frames after `second4`'s, and the offset stays at 33,635 to the window's end —
+
+```bash
+awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second1f/trace.csv
+awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second4/trace.csv
+```
+
+— 11 frames over the 3,421 frames of orders 19–25, where `second3e` against `second4` held
+17,441–17,442 at every boundary. `second1f`'s first attempt, `--frames 34170..48280` into
+`out/p9-trace-second1f-a` (exit 0), agrees with the filed one at every row change within −2…+3.
+
+**PANICEND's cue wait (`MAIN/U2.ASM:833-853`) exits at 16630.** `musplus` from `second1e`'s columns
+is −32 from 16363 to 16618, 0 at 16622 (order 40 breaks to order 42 row 0) and **1 at 16630**
+(order 42 row 1), the first value above 0 after the negative stretch — the exit, whichever of the
+wait's two loops PANICEND's retirement entered.
+
+**What the port's player does with them** (`cargo test -p sr-audio --test trace`, both in
+`RESTART_TRACES`): **`second1e`'s content is identical** — every word's value sequence over 25,136
+frames — **and its placement drifts to 8 frames**, the port early by −1 at 10,827, −4 at 19,981 and
+−8 from 33,264, one past `JITTER_FRAMES`; **`second1f` has one row the trace never publishes**:
+order 26 runs at **speed 1** (frames 38328–38370, 1.46 frames a row, the first speed-1 stretch in
+any filed trace), the trace publishes row 25 at 38364 and row 27 at 38366, and the port, ten frames
+later in phase, publishes row 26 at 38376 (`second1f: the row sequence differs at index Some(502):
+trace 27, port 26`). Task 6 inherits both as findings; the player was not changed.
+
 ## 3. The tick rate, and the rule behind it
 
 A tick is `2.5/tempo` seconds and a row lasts `speed` ticks, so the row rate is
@@ -851,6 +905,8 @@ trace's line as the tool prints it:
 | `second3e` | `frames 18000..21999 of the requested 18000..21999: 3999 sample(s), 1 frame(s) missing (21761) — this trace is NOT per-frame (…)` |
 | `second2b` | `frames 380..3799 of the requested 380..3799: 3418 sample(s), 2 frame(s) missing (405, 1158) — this trace is NOT per-frame (…)` |
 | `second1d` | `frames 8100..8799 of the requested 8100..8799: 699 sample(s), 1 frame(s) missing (8568) — this trace is NOT per-frame (…)` |
+| `second1e` | `frames 8800..33949 of the requested 8800..33949: 25143 sample(s), 7 frame(s) missing (12207, 15603, 16192, 21926, 24520, 26570, 33261) — this trace is NOT per-frame (…)` |
+| `second1f` | `frames 34105..48276 of the requested 34105..48276: 14168 sample(s), 4 frame(s) missing (34116, 37967, 38569, 46264) — this trace is NOT per-frame (…)` |
 
 **A count of the absent frames belongs to that line and not to this sentence.** Among the
 Phase 3 four, `second5b` misses four where the other three miss three, and its two kinds are
@@ -878,7 +934,11 @@ and the manifest lists without a `skipped` entry), `second1b` 1 (frame 7920, the
 counter went 4319 → 4321), `second3e` 1 (21761, the counter went 21760 → 21762), `second2b` 2
 (405 — the boot's first graphics frame region, the counter went 404 → 406 — and 1158, the
 GLENZ mode change, the counter went 1157 → 1159) and `second1d` 1 (8568, the counter went
-8567 → 8569). **`second2b`'s 1158 is the hypothesis's clearest case after `second5`'s 1220**:
+8567 → 8569). **`second1e` and `second1f` (Phase 9) put eleven more on the same footing**: their
+missing frames are where the frame captures of the same run cannot grab one either —
+`reference-indices.md` §26.2's refused indices 16192 and 24520 exactly, and 15603, 21926, 26570,
+33261, 34116 and 37967 at the same part loads — and 12207 is TECHNO's start (block 2's `second2`
+misses 4796, 7,410 earlier). **`second2b`'s 1158 is the hypothesis's clearest case after `second5`'s 1220**:
 it sits exactly at GLENZ's `mov ax,13h` (`GLENZ/MAIN.C:295-299`), where the reference's own
 captures cannot grab 1155…1159 either, and both are a video-mode stop that publishes no frame.
 Apart from that, none of them is the boot's first graphics frame: `second1`'s are spread from

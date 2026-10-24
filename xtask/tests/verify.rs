@@ -198,7 +198,7 @@ fn a_manifest_this_tool_does_not_read_cannot_be_checked_and_exits_two() {
 #[test]
 fn the_reference_tree_the_repository_ships_checks_out() {
     // The sentence Phase 1's close-out could not write: **a test reads
-    // `reference/`**. 52 captures and 200 files, every digest against the file
+    // `reference/`**. 67 captures and 262 files, every digest against the file
     // beside it — and, since Phase 3, sixteen music traces under `music/`,
     // which are a second *kind* of capture the verifier reads through its own
     // checks (a flipped byte of one is `xtask/tests/music.rs`'s finding, not
@@ -207,13 +207,16 @@ fn the_reference_tree_the_repository_ships_checks_out() {
     // Phase 9 Task 1's loop seam and two lead-in windows (`loop/{cred,alku}`,
     // `{beglogo,endlogo}-leadin/{even,odd,plane-*}`) the eight captures and
     // fifty-two files past that (`docs/fidelity/reference-indices.md` §25).
+    // Phase 9 Task 2's full `SECOND 1` run adds fifteen captures and sixty-two
+    // files: the thirteen `fullrun/*` screens (44 frames, 16 index planes) and
+    // the two traces `music/second1e` and `music/second1f` (§26).
     let reference = repo_root().join("reference");
     let run = xtask(&repo_root(), &reference, "verify");
 
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 52 capture(s), 200 file(s)"),
+            .contains("verdict: ok — 67 capture(s), 262 file(s)"),
         "{}",
         run.output()
     );

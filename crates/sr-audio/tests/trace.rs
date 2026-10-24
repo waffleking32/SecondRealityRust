@@ -126,9 +126,18 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 /// The reload hides the restart frame itself from the trace (the wide window refuses, §7), so
 /// this is a back-extrapolation from the window's first sample rather than a measured boot
 /// frame; the comparison's phase alignment absorbs its few-frame error.
+///
+/// `second1e` and `second1f` are block 1's full run (Phase 9 Task 2,
+/// `docs/fidelity/reference-indices.md` §26). `second1e` (8,800…) is the same `MUSIC1@0`
+/// session `second1d` is in, so it shares that restart. `second1f` opens after the shell's
+/// `MUSIC0@18` restart between JPLOGO and U2E (`MAIN/U2.ASM:880-885`); its order boundaries sit
+/// 33,647 frames after `second4`'s at its first rows, so its clock starts at
+/// 408.2 + 33,647 ≈ **34,055** — `second3e`'s derivation.
 const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[
     ("second3e", "MUSIC0", 17_850, 18),
     ("second1d", "MUSIC1", 7_815, 0),
+    ("second1e", "MUSIC1", 7_815, 0),
+    ("second1f", "MUSIC0", 34_055, 18),
 ];
 
 /// The port's logic tick, in millihertz (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). A
