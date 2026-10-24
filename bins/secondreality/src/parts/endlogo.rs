@@ -1307,6 +1307,7 @@ mod tests {
                     .then(|| Box::new(Endlogo::at("../../assets/END/PIC.UH")) as Box<dyn Part>)
             },
             Some(crate::audio::test_player),
+            crate::shell::RunSettings::default(),
         )
         .unwrap();
         assert_eq!(run.anchor(), Some(FIRST_INDEX), "the run's indices are the reference's");

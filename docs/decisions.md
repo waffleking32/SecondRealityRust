@@ -2577,3 +2577,65 @@ asserted directly), `the_vault_flag_is_parsed`, the three refusal tests,
 **Cost if wrong.** The menu is one small module and one outer loop; the normal path is
 untouched. A wrong ESC rule would return from a live part instead of ending it (or close the
 window instead of returning); the reducer and window tests pin both.
+
+## D41 — The demo's own run, and how it ends (2026-10-24)
+
+Decided: a run with no argument is the demo — `SECOND` with no argument is `SECOND 1`
+(`MAIN/U2.ASM:108`'s default `whattorun` 7fh and `partsmask[1]`'s 1fh gate the same parts,
+`docs/fidelity/part-sequence.md` §4), so `Cli::parse` makes it `--block 1` and the Phase 0 test
+card is reached only by `--part testcard`. A run built from a block (`--block`, or no argument)
+is `Ending::Exit` and ends the way `SECOND.EXE` does; `--part`, the vault's runs and the shell's
+own test constructors are `Ending::Hold` and hold for ever, as before (`RunSettings`, passed to
+`Sequence::with_run`; `Cli::run_settings`).
+
+**The exit stage is the hold.** When an `Exit` run's plan runs out, `@@partsdone`
+(`MAIN/U2.ASM:935-939`) is `mov cx,1; call fademusic`: `fademusic` (`:333-346`) steps the
+module's global-volume byte `module[0x30]` down by `cx` once a `dis_waitb`, and the byte is 0x40,
+so the fade is **64** frames (`EXIT_FADE_TICKS`) with the last part's picture still up — which is
+what the existing hold already shows while it fades the music a step a tick. `fatalexit` then
+sets text mode (`:967-968`) and waits twenty `copperwaitborder`s (`:969-973`, `EXIT_BLANK_TICKS`)
+on its blank screen: the port composes those **20** ticks as index 0 through an all-black
+palette, the border index left as the part set it (it reads the same black palette, and
+dropping it would resize the window). After the 84th tick of the hold the run has
+`Sequence::ended()` — distinct from `finished()`, a part that could not start — and the window
+closes on it. An ended run keeps ticking and composing the blank, so a headless dump past it is
+answered rather than cut short. A hold that began at a part the port has not written is not the
+plan running out, and has no exit stage.
+
+**ESC during the stage closes at once.** The original's stage acts on no key — `fademusic`
+waits through `dis_waitb` and never tests the exit flag, and the `copperwaitborder` loop runs
+after `dis_resetint` (`:966`) and reads only the retrace bit (`MAIN/COPPER.ASM:72-81`) — so it
+cannot be skipped.
+The port's stage is the hold, where ESC has always closed the window, and it keeps doing so:
+a deliberate ESC is not made to wait out up to 84 ticks. That is the port's courtesy and a
+recorded difference. Leaving ENDSCRL is therefore **one** ESC (the part's own `dis_exit`), then
+the stage, then the close — where it used to be two.
+
+**The end box goes to the launching terminal.** `printend` (`MAIN/U2.ASM:506-535`) copies
+`U2END.BIN` (80×25 cells of CP437 character and attribute) into text-mode memory and puts the
+cursor on row 14 (`:530-533`); `fatalexit` calls it on every exit (`:974`). The port has no text
+mode, so `main` prints rows `0..14` of the file to stdout once, after the window closes, for
+every **windowed demo run** however it closed — the close button and an error path included,
+before the error line, as `printerror` follows `printend` — and never for `--part`, `--vault` or
+`--headless`. CP437 is mapped to Unicode by `endscreen.rs`'s own table (no new dependency), each
+row's trailing blanks are trimmed, and when `std::io::IsTerminal` says stdout is a terminal each
+attribute change is an SGR sequence (low nibble foreground, bits 4–6 background, blink ignored)
+and every line ends with `ESC[0m`.
+
+**Unchanged.** `--part` runs hold at their end; the vault's ESC semantics (D40); Ctrl skips one
+part (D21); headless runs never open SDL and never wait on a key; no part's registered test
+count moved.
+
+**Measured.** The tests: `a_demo_run_fades_then_blanks_then_ends` (volume 0x40 → 0 over ticks
+1..=64 with the picture held, every pixel `(0, 0, 0)` over 65..=84, `ended()` from 84),
+`a_part_run_still_holds_after_its_end`, `a_run_with_no_arguments_is_the_demo`,
+`the_test_card_is_still_a_part`, `a_part_run_holds_and_a_block_run_exits`,
+`the_end_screen_is_the_shipped_box`, `the_end_screen_colours_are_its_attributes`,
+`an_ended_run_closes_the_window`, `escape_during_the_exit_stage_closes_at_once`,
+`an_index_past_a_demo_runs_exit_stage_is_its_blank_screen` and
+`the_end_screen_is_printed_after_a_windowed_demo_run_only`. Task 11 adds the evidence numbers.
+
+**Cost if wrong.** The stage is one counter on the hold and one predicate in the window; the
+parts' frames are untouched, because the stage only begins once the plan has run out. If the
+original's stage should be honoured exactly, ESC during it is one branch in
+`EscapeKey::apply`; if the box should not print on an error path, it is one condition in `main`.

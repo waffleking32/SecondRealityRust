@@ -85,8 +85,11 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 ///
 /// N ticks, whether or not the run's parts last that long: a run past its last
 /// part holds the screen that part left, so its later frames are that screen
-/// and not nothing. A run that *ends* stops the dump early, because a finished
-/// sequence produces no further frames.
+/// and not nothing. A demo run past its exit stage has *ended*
+/// ([`Sequence::ended`]) and keeps composing its last frame — the blank screen —
+/// so it is dumped like any other: nothing here waits for it, and nothing closes.
+/// A run that has *finished* stops the dump early, because a finished sequence
+/// produces no further frames.
 fn by_tick(
     run: &mut Sequence,
     dir: &Path,
@@ -473,6 +476,35 @@ mod tests {
         let error = by_index(&mut run, &dir, &[0, 5]).unwrap_err().to_string();
         assert!(error.contains("before reaching 5"), "{error}");
         assert!(run.finished(), "the run ended, so there is no hold to answer from");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_index_past_a_demo_runs_exit_stage_is_its_blank_screen() {
+        // A demo run (`Ending::Exit`) fades and blanks after its last part and then
+        // has ended — and an ended run keeps composing its last frame, so a dump
+        // past it is answered, with the blank, rather than cut short.
+        let dir = scratch("exit");
+        let mut run = crate::shell::Sequence::with_run(
+            8,
+            8,
+            View::new(8, 8),
+            vec!["short"],
+            |name| (name == "short").then(|| Box::new(Short(1)) as Box<dyn Part>),
+            None,
+            crate::shell::RunSettings { ending: crate::shell::Ending::Exit },
+        )
+        .unwrap();
+        let frames = by_index(&mut run, &dir, &[1, 100]).unwrap();
+        assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [1, 100]);
+        assert!(run.ended(), "two frames and 84 exit ticks are behind index 100");
+        assert!(!run.finished(), "ended is not finished");
+
+        let picture = std::fs::read(dir.join("short_000001.rgb")).unwrap();
+        assert!(picture.iter().any(|&byte| byte != 0), "the part's own picture");
+        let blank = std::fs::read(dir.join("short_000100.rgb")).unwrap();
+        assert!(blank.iter().all(|&byte| byte == 0), "the exit stage's blank screen");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

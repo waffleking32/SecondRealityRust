@@ -19,7 +19,10 @@
 //! part runs to its own end, and a run of parts to the end of its plan — where
 //! the screen holds what the last part left (`MAIN/U2.ASM:935`'s
 //! `@@partsdone`), ESC closes the window, and the title bar says why nothing
-//! is moving.
+//! is moving. A **demo run** — a block's, or no argument's — does not hold for
+//! ever: its hold is the exit stage (the fade, the blank), the window closes by
+//! itself when the stage has run (`Sequence::ended`), and an ESC during the
+//! stage closes it at once (D41). `main` then prints the end box.
 //!
 //! `--vault` adds a menu over the three unreleased effects (`parts::vault`):
 //! it draws a 320×200 picture ([`crate::vault_menu`]), starts the chosen one as
@@ -299,9 +302,10 @@ fn present_run<'a>(
         // only the text is compared, and the frame on the screen is untouched.
         screen.title(status_line(run, block))?;
 
-        // A run that has *ended* — a part the port has but could not start —
-        // has no hold after it and nothing left to show.
-        if run.finished() {
+        // A run that has *finished* — a part the port has but could not start —
+        // has no hold after it and nothing left to show; a demo run that has
+        // *ended* has shown its exit stage's last blank frame, just presented.
+        if run_is_over(run) {
             return Ok(RunEnd::Close);
         }
         // SDL's frame delay does the waiting — out the rest of the tick, and
@@ -309,6 +313,14 @@ fn present_run<'a>(
         let left = TICK_PERIOD.saturating_sub(now.elapsed());
         timer.delay(left.as_millis().max(1) as u32);
     }
+}
+
+/// Whether the run has nothing left to show, so the window closes by itself:
+/// it has *finished* (a part the port has could not start, and there is no hold
+/// after it), or it has *ended* — a demo run's exit stage has faded and blanked,
+/// and `fatalexit` returns to DOS (`MAIN/U2.ASM:962-994`).
+fn run_is_over(run: &Sequence) -> bool {
+    run.finished() || run.ended()
 }
 
 /// Which way the window goes when an ESC press reaches a held screen.
@@ -589,7 +601,10 @@ impl EscapeKey {
     ///
     /// With nothing left to play — the run is holding the screen its parts left
     /// (`@@partsdone`, `MAIN/U2.ASM:935`) — the press is the way out of the
-    /// window. The other state with nothing to play, a run that has *ended*, is
+    /// window. A demo run's exit stage is that hold, so a press during its fade or
+    /// its blank closes the window there and then: the original's stage reads no
+    /// key, and not making a deliberate ESC wait it out is the port's courtesy
+    /// (D41). The other state with nothing to play, a run that has *ended*, is
     /// not reached here: the loop breaks in the iteration the run ends in,
     /// before the next press can arrive.
     fn apply(&mut self, run: &mut Sequence) -> bool {
@@ -683,7 +698,10 @@ fn streaming_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::{start_view, Sequence, SequenceStatus, SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::shell::{
+        start_view, Ending, RunSettings, Sequence, SequenceStatus, EXIT_BLANK_TICKS,
+        EXIT_FADE_TICKS, SURFACE_HEIGHT, SURFACE_WIDTH,
+    };
     use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 
     /// A part that draws nothing. `retires` is the first `ctx.frame` it reports
@@ -862,6 +880,58 @@ mod tests {
         escape.press();
         assert!(!escape.apply(&mut live), "there is a running part to ask");
         assert_eq!(run_end(live.holding(), true), RunEnd::Close);
+    }
+
+    /// A demo run (`Ending::Exit`) of stub parts: `endlogo` retires on its
+    /// first tick, so the run's exit stage begins on the second.
+    fn demo_run_of(plan: Vec<&'static str>) -> Sequence {
+        Sequence::with_run(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
+            plan,
+            stub_source,
+            None,
+            RunSettings { ending: Ending::Exit },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_ended_run_closes_the_window() {
+        // `fatalexit` returns to DOS once `printend` has run (`MAIN/U2.ASM:962-994`): the
+        // window closes the tick the exit stage's last blank frame is up.
+        let mut run = demo_run_of(vec!["endlogo"]);
+        run.tick();
+        assert!(!run_is_over(&run), "the part has retired; the exit stage is next");
+        for _ in 0..EXIT_FADE_TICKS + EXIT_BLANK_TICKS - 1 {
+            run.tick();
+            assert!(!run_is_over(&run), "the fade and the blank are still on screen");
+        }
+        run.tick();
+        assert!(run.ended());
+        assert!(run_is_over(&run), "the stage is done and the window closes");
+
+        // A held run never ends, so it never closes by itself.
+        let mut held = run_of(vec!["endlogo"]);
+        run_out(&mut held, 1_000);
+        assert!(held.holding());
+        assert!(!run_is_over(&held), "a part run holds until ESC or the close button");
+    }
+
+    #[test]
+    fn escape_during_the_exit_stage_closes_at_once() {
+        // The original's `fademusic` and twenty `copperwaitborder`s cannot be skipped
+        // (`MAIN/U2.ASM:333-346`, `:969-973` — neither acts on a key); closing on a
+        // deliberate ESC is the port's courtesy (D41).
+        let mut run = demo_run_of(vec!["endlogo"]);
+        run_out(&mut run, 10);
+        assert!(run.holding(), "the run is ten ticks into its exit stage");
+        assert!(!run.ended(), "and the stage has not run out");
+        let mut escape = EscapeKey::default();
+        escape.press();
+        assert!(escape.apply(&mut run), "ESC during the stage closes the window");
+        assert_eq!(run_end(run.holding(), false), RunEnd::Close);
     }
 
     /// The declared format must decode the bytes `present` wrote, in the order
@@ -1075,6 +1145,7 @@ mod tests {
                 other => stub_source(other),
             },
             Some(crate::audio::test_player),
+            crate::shell::RunSettings::default(),
         )
         .unwrap()
     }

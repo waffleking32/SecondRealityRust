@@ -797,6 +797,36 @@ pub enum SequenceStatus {
     Finished,
 }
 
+/// How a run ends once its plan has nothing left to play.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Ending {
+    /// Hold the screen the last part left, for ever: `--part`, the vault's runs, and the
+    /// shell's own test runs.
+    #[default]
+    Hold,
+    /// End the way `SECOND.EXE` does (`MAIN/U2.ASM:935-994`): the hold fades the music for
+    /// [`EXIT_FADE_TICKS`], shows text mode's blank screen for [`EXIT_BLANK_TICKS`], and the
+    /// run has [`ended`](Sequence::ended). A run built from a block — `--block`, or no
+    /// argument at all, which is `SECOND 1`.
+    Exit,
+}
+
+/// What a run is asked to be, beyond its plan.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunSettings {
+    /// How the run ends.
+    pub ending: Ending,
+}
+
+/// The exit stage's fade: `@@partsdone`'s `mov cx,1; call fademusic` (`MAIN/U2.ASM:937-939`)
+/// walks the module's global-volume byte from 0x40 to zero, `cx` = 1 a `dis_waitb`
+/// (`:333-346`) — 0x40 ÷ 1 frames.
+pub const EXIT_FADE_TICKS: u32 = 64;
+
+/// The exit stage's blank: `fatalexit` sets text mode (`MAIN/U2.ASM:967-968`) and waits
+/// twenty `copperwaitborder`s (`:969-973`) before `printend` (`:974`).
+pub const EXIT_BLANK_TICKS: u32 = 20;
+
 /// A run of the demo's parts, numbered in the reference's own frame space.
 ///
 /// One engine, one output frame, one counter. The counter starts at the run's
@@ -819,6 +849,11 @@ pub enum SequenceStatus {
 /// has not written) therefore keeps ticking and keeps composing the surface it
 /// has, through an internal part that draws nothing, rather than stopping. See
 /// [`holding`](Sequence::holding).
+///
+/// **A demo run ends.** A run built from a block is [`Ending::Exit`]: once its plan
+/// has run out, its hold is `SECOND.EXE`'s own way out — [`EXIT_FADE_TICKS`] of the
+/// music's fade over the last picture, [`EXIT_BLANK_TICKS`] of text mode's blank
+/// screen — and then it has [`ended`](Sequence::ended) (D41).
 pub struct Sequence {
     engine: Engine,
     source: PartSource,
@@ -862,6 +897,11 @@ pub struct Sequence {
     /// Its own retirement must not arm `cue_pending` again: the wait's `current`
     /// is still `panicend`, whose picture is up.
     live_cue: bool,
+    /// How the run ends once its plan has run out ([`RunSettings::ending`]).
+    ending: Ending,
+    /// How many ticks of the exit stage have run: the hold's ticks, for an
+    /// [`Ending::Exit`] run whose plan ran out. Zero for every other run.
+    exit_ticks: u32,
 }
 
 /// The music a run was built with: the player, which module and order it began at, how its
@@ -1015,6 +1055,7 @@ impl Sequence {
         surface_height: usize,
         view: View,
         plan: Vec<&'static str>,
+        settings: RunSettings,
     ) -> Result<Sequence, ShellError> {
         Sequence::with_run(
             surface_width,
@@ -1023,6 +1064,7 @@ impl Sequence {
             plan,
             parts::new_part,
             Some(crate::audio::load_player),
+            settings,
         )
     }
 
@@ -1045,6 +1087,7 @@ impl Sequence {
             plan,
             source,
             None,
+            RunSettings::default(),
         )
     }
 
@@ -1067,6 +1110,7 @@ impl Sequence {
         plan: Vec<&'static str>,
         source: PartSource,
         music: Option<MusicSource>,
+        settings: RunSettings,
     ) -> Result<Sequence, ShellError> {
         // A run of nothing has no part to name and no frame to draw; the
         // binary never builds one, because every block has at least one part
@@ -1096,6 +1140,8 @@ impl Sequence {
             music_source: music,
             cue_pending: false,
             live_cue: false,
+            ending: settings.ending,
+            exit_ticks: 0,
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
@@ -1198,6 +1244,7 @@ impl Sequence {
         let drains = part.drains_after_exit();
         let status = self.engine.tick(&mut **part, &mut self.frame);
         self.index += 1;
+        self.exit_stage();
         // Finished, or asked to quit: either way this part's loop has ended and
         // the next tick hands the screen to the next part. The engine keeps the
         // surface and the DAC, which is what the original's separate EXEs do.
@@ -1221,6 +1268,33 @@ impl Sequence {
         // the tick drew.
         self.music_after_tick();
         SequenceStatus::Continuing
+    }
+
+    /// The exit stage, on a tick the hold has just composed: `SECOND.EXE`'s own way out
+    /// (`MAIN/U2.ASM:935-994`), for an [`Ending::Exit`] run whose plan has run out.
+    ///
+    /// **It is the hold.** `@@partsdone`'s `mov cx,1; call fademusic` (`:937-939`) runs with
+    /// the last part's picture still on the screen, and the hold already fades the music a
+    /// step a tick ([`music_after_tick`](Sequence::music_after_tick)) — so the first
+    /// [`EXIT_FADE_TICKS`] are the hold's frames unchanged. Then `fatalexit` sets text mode
+    /// (`:967-968`), which blanks the screen, and waits twenty `copperwaitborder`s
+    /// (`:969-973`): those [`EXIT_BLANK_TICKS`] compose every pixel as index 0 through a
+    /// palette whose every entry is black. The border is left as the part set it — it reads
+    /// the same black palette, and dropping it would resize the window for twenty ticks.
+    /// After the last, the run has [`ended`](Sequence::ended), and it keeps composing the
+    /// blank for whoever is still ticking it.
+    ///
+    /// A hold that began at a part the port has not written is not the plan running out,
+    /// and is left to hold: there is no `@@partsdone` to reach.
+    fn exit_stage(&mut self) {
+        if self.ending != Ending::Exit || !self.holding || self.stopped_at.is_some() {
+            return;
+        }
+        self.exit_ticks = self.exit_ticks.saturating_add(1);
+        if self.exit_ticks > EXIT_FADE_TICKS {
+            self.frame.pixels.fill(0);
+            self.frame.palettes.reset(Palette::BLACK);
+        }
     }
 
     /// What the shell does to the music once a tick has drawn.
@@ -1454,13 +1528,25 @@ impl Sequence {
         self.finished
     }
 
+    /// Whether the run's exit stage has run: true from the last of its
+    /// [`EXIT_BLANK_TICKS`] on. Only an [`Ending::Exit`] run gets there.
+    ///
+    /// Distinct from [`finished`](Sequence::finished), a part that could not start: an
+    /// ended run went all the way through `fatalexit`'s fade and blank, and the window
+    /// closes on it. It still ticks, composing the blank screen.
+    pub fn ended(&self) -> bool {
+        self.exit_ticks >= EXIT_FADE_TICKS + EXIT_BLANK_TICKS
+    }
+
     /// Whether the run has nothing left to play and is holding the screen its
     /// last part left — every part in the plan has retired, or the next one is
     /// a part the port has not written.
     ///
     /// This is the original's `@@partsdone` (`MAIN/U2.ASM:935-968`): the shell
-    /// fades the music out, deinits the demo and returns to DOS. The port's
-    /// window takes it as the moment there is nothing left to watch.
+    /// fades the music out, deinits the demo and returns to DOS. An
+    /// [`Ending::Exit`] run's hold *is* that exit stage — the fade, then the blank,
+    /// then [`ended`](Sequence::ended) — and an [`Ending::Hold`] run's lasts for ever,
+    /// until the window's ESC or close button.
     pub fn holding(&self) -> bool {
         self.holding
     }
@@ -2225,6 +2311,7 @@ mod tests {
             vec!["pam"],
             stub_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         let start = run.music_volume().expect("pam's run plays MUSIC0");
@@ -2248,6 +2335,116 @@ mod tests {
         run.tick();
         run.tick();
         assert_eq!(run.music_volume(), Some(0), "the byte saturates at zero");
+    }
+
+    /// Every pixel of `frame` as the colour the beam shows it in: the pixel's
+    /// index through the palette in force on its scanline.
+    fn colours(frame: &IndexedFrame) -> Vec<[u8; 3]> {
+        (0..frame.height)
+            .flat_map(|y| {
+                frame
+                    .row(y)
+                    .iter()
+                    .map(move |&pixel| frame.palette_for(y).entry(pixel))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_demo_run_fades_then_blanks_then_ends() {
+        // `@@partsdone` (`MAIN/U2.ASM:935-939`): `mov cx,1; call fademusic` walks the
+        // module's 0x40 down a step a `dis_waitb` (`:333-346`) — 64 frames with the last
+        // part's picture still up — and `fatalexit` sets text mode (`:967-968`) and waits
+        // twenty `copperwaitborder`s on the blank screen (`:969-973`) before `printend`
+        // (`:974`).
+        // The port's exit stage is that: the hold's 64 fade ticks, 20 black ones, and
+        // then the run has ended.
+        //
+        // `pam` gives the run MUSIC0 and retires at once; `a` fills the screen with 7 and
+        // retires on its second tick, so its picture is what the fade holds.
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["pam", "a"],
+            stub_source,
+            Some(crate::audio::test_player),
+            RunSettings { ending: Ending::Exit },
+        )
+        .unwrap();
+        for _ in 0..3 {
+            assert_eq!(run.tick(), SequenceStatus::Continuing);
+            assert!(!run.holding(), "the plan's parts are still playing");
+        }
+        let picture = colours(run.frame());
+        assert!(
+            picture.iter().all(|colour| *colour != [0, 0, 0]),
+            "the last part's picture is up, and it is not black"
+        );
+        assert_eq!(run.music_volume(), Some(0x40), "nothing has faded yet");
+
+        // Ticks 1..=64: the fade, over the last part's picture.
+        for tick in 1..=EXIT_FADE_TICKS {
+            assert_eq!(run.tick(), SequenceStatus::Continuing);
+            assert!(run.holding(), "tick {tick}: the exit stage is the hold");
+            assert_eq!(colours(run.frame()), picture, "tick {tick}: the picture is held");
+            assert_eq!(
+                run.music_volume(),
+                Some((0x40 - tick) as u8),
+                "tick {tick}: the global volume steps down one a tick"
+            );
+            assert!(!run.ended(), "tick {tick}: the fade is not the end");
+        }
+        assert_eq!(run.music_volume(), Some(0), "the fade reaches zero on its 64th tick");
+
+        // Ticks 65..=84: text mode's blank screen, twenty `copperwaitborder`s long.
+        let last = EXIT_FADE_TICKS + EXIT_BLANK_TICKS;
+        for tick in EXIT_FADE_TICKS + 1..=last {
+            assert_eq!(run.tick(), SequenceStatus::Continuing);
+            assert!(
+                colours(run.frame()).iter().all(|colour| *colour == [0, 0, 0]),
+                "tick {tick}: every pixel is black"
+            );
+            assert!(run.frame().pixels.iter().all(|&pixel| pixel == 0), "tick {tick}: index 0");
+            assert_eq!(run.ended(), tick == last, "tick {tick}: the run ends on tick {last}");
+        }
+        assert_eq!(last, 84);
+
+        // An ended run is not a finished one (a part that could not start), and it
+        // keeps composing its last frame for whoever is still asking.
+        assert!(!run.finished());
+        assert_eq!(run.tick(), SequenceStatus::Continuing);
+        assert!(run.ended());
+        assert!(colours(run.frame()).iter().all(|colour| *colour == [0, 0, 0]));
+        assert_eq!(run.music_volume(), Some(0));
+    }
+
+    #[test]
+    fn a_part_run_still_holds_after_its_end() {
+        // `--part`, the vault and the shell's own test runs are `Ending::Hold`: the
+        // hold has no exit stage and the screen stays up for ever.
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["a"],
+            stub_source,
+            None,
+            RunSettings { ending: Ending::Hold },
+        )
+        .unwrap();
+        run.tick();
+        run.tick();
+        let picture = colours(run.frame());
+        assert!(picture.iter().all(|colour| *colour != [0, 0, 0]));
+        for _ in 0..1_000 {
+            assert_eq!(run.tick(), SequenceStatus::Continuing);
+        }
+        assert!(run.holding(), "a thousand ticks past its plan, the run holds");
+        assert!(!run.ended(), "and a held run never ends");
+        assert_eq!(colours(run.frame()), picture, "the held picture is still up");
+        assert_eq!(RunSettings::default().ending, Ending::Hold, "and Hold is the default");
     }
 
     // --- the run's music against the filed trace -----------------------------
@@ -2359,6 +2556,7 @@ mod tests {
             plan,
             stub_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         assert_eq!(run.anchor(), Some(404), "block 5 draws from the boot's 404");
@@ -2592,6 +2790,7 @@ mod tests {
             plan,
             stub_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         assert_eq!(run.anchor(), Some(404), "block 1 draws from the boot's 404");
@@ -3352,6 +3551,7 @@ mod tests {
             vec!["mntscrl", "u2e"],
             restart_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         // The entry install is the plan's first part's own row: MNTSCRL runs
@@ -3460,6 +3660,7 @@ mod tests {
             vec!["u2e", "u2e"],
             same_order_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         assert_eq!(run.music_module(), Some((ModuleId::Music0, 18)));
@@ -3510,6 +3711,7 @@ mod tests {
             vec!["alku", "glenz"],
             block_one_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         assert_eq!(
@@ -3571,6 +3773,7 @@ mod tests {
             vec!["beglogo", "glenz"],
             block_two_source,
             Some(crate::audio::test_player),
+            RunSettings::default(),
         )
         .unwrap();
         assert_eq!(run.music_module(), Some((ModuleId::Music1, 0)));
@@ -4135,7 +4338,14 @@ mod tests {
     /// The test card through the shell's own source: the one part the port has,
     /// at the demo's real geometry.
     fn testcard_run() -> Sequence {
-        Sequence::new(SURFACE_WIDTH, SURFACE_HEIGHT, start_view(), vec!["testcard"]).unwrap()
+        Sequence::new(
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
+            vec!["testcard"],
+            RunSettings::default(),
+        )
+        .unwrap()
     }
 
     #[test]

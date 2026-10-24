@@ -9,6 +9,7 @@
 
 mod audio;
 mod cli;
+mod endscreen;
 mod headless;
 mod parts;
 mod shell;
@@ -16,9 +17,10 @@ mod vault_menu;
 mod window;
 
 use std::error::Error;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use crate::shell::{Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
+use crate::shell::{Ending, Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
 
 /// Printed when the command line does not parse.
 const USAGE: &str = "\
@@ -27,9 +29,15 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
                      [--vault]
-keys:  in a window, ESC ends the part that is playing — and closes the window
-       once the run has nothing left to play; Ctrl skips the part that is
-       playing. No other key does anything, and nothing waits on a key.
+run:   with no --part and no --block, the demo plays from its beginning: no
+       argument is SECOND 1, as it is in the original.
+keys:  in a window, ESC ends the part that is playing, and Ctrl skips it.
+       A block's run ends the way the demo does: once its last part is over
+       (one ESC leaves ENDSCRL) the music fades, the screen goes blank, the
+       window closes and the demo's end box is printed here; ESC during the
+       fade closes the window at once. A --part run holds its last screen
+       until ESC closes the window. No other key does anything, and nothing
+       waits on a key.
 vault: --vault opens the window's menu for the three unreleased effects — GRID,
        HARD and TWIST. Up and Down choose, Enter plays, ESC at a held part
        returns to the menu, and ESC in the menu closes the window. The menu is
@@ -53,6 +61,11 @@ fn main() -> ExitCode {
     } else {
         window::run(&cli)
     };
+    // `fatalexit` prints the end box on every exit, the error path's included, and
+    // before the error itself (`MAIN/U2.ASM:974`, `printerror` after it).
+    if prints_end_screen(&cli) {
+        print_end_screen();
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -80,6 +93,7 @@ fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
             SURFACE_HEIGHT,
             shell::start_view(),
             shell::block_plan(block)?,
+            cli.run_settings(),
         )?),
         None => new_sequence_for_part(shell::resolve(cli.part_name())?),
     }
@@ -98,5 +112,51 @@ pub fn new_sequence_for_part(name: &'static str) -> Result<Sequence, Box<dyn Err
         SURFACE_HEIGHT,
         shell::start_view(),
         vec![name],
+        shell::RunSettings::default(),
     )?)
+}
+
+/// Whether this command line's run ends by printing the demo's end box: a **windowed
+/// demo run** — one built from a block, which is also the run with no argument
+/// ([`Ending::Exit`]) — however its window closed. Never a `--part` run, the vault, or
+/// `--headless`, whose stdout is the dump's console and not a DOS screen.
+fn prints_end_screen(cli: &cli::Cli) -> bool {
+    !cli.headless && cli.run_settings().ending == Ending::Exit
+}
+
+/// Print `U2END.BIN` to stdout — the terminal the run was launched from is the port's
+/// stand-in for the text mode `printend` writes it into (D41) — with its colours when
+/// stdout is a terminal and as plain text when it is piped.
+fn print_end_screen() {
+    match std::fs::read(endscreen::END_SCREEN) {
+        Ok(screen) => {
+            let ansi = std::io::stdout().is_terminal();
+            print!("{}", endscreen::render(&screen, ansi));
+        }
+        // The box is the demo's goodbye, not its result: a missing file is said, and
+        // the run's own outcome is what the exit code reports.
+        Err(error) => eprintln!("secondreality: {}: {error}", endscreen::END_SCREEN),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> cli::Cli {
+        cli::Cli::parse(args.iter().map(|s| s.to_string())).unwrap()
+    }
+
+    #[test]
+    fn the_end_screen_is_printed_after_a_windowed_demo_run_only() {
+        assert!(prints_end_screen(&parse(&[])), "no argument is the demo");
+        assert!(prints_end_screen(&parse(&["--block", "5"])));
+        assert!(!prints_end_screen(&parse(&["--part", "glenz"])), "a part run holds");
+        assert!(!prints_end_screen(&parse(&["--vault"])), "the vault's runs are parts");
+        assert!(
+            !prints_end_screen(&parse(&["--headless", "--block", "5", "--dump-dir", "d",
+                                        "--frames", "1"])),
+            "a headless run is a dump"
+        );
+    }
 }

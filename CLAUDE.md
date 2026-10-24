@@ -51,7 +51,9 @@ in any new crate manifest.
 
 ## Running it
 
-`cargo run --bin secondreality` opens a window and plays a run. The port has twenty-one parts: the
+`cargo run --bin secondreality` opens a window and plays **the demo**: no argument is `SECOND 1`,
+as it is in the original (`docs/fidelity/part-sequence.md` §4), so it runs block 1 from ALKU to
+ENDSCRL and ends the way `SECOND.EXE` does (below). The port has twenty-one parts: the
 Phase 0 test card, and the demo's own **twenty** — **ALKU**, **U2A**, **PAM**, **BEGLOGO**,
 **GLENZ**, **TUNNELI**, **TECHNO**, **PANIC** (`panicend`), **MNTSCRL**, **LNS&ZOOM**
 (`lnszoom`), **PLZPART**, **MINVBALL**, **RAYSCRL**, **3DSINFLD** (`3dsinfld` — not a legal
@@ -60,6 +62,7 @@ Rust identifier, so its module is `coman.rs`), **JPLOGO**, **U2E**, **DDSTARS**,
 refused as unknown rather than starting something else.
 
 ```bash
+cargo run --release --bin secondreality                  # the demo: the same run as --block 1
 cargo run --release --bin secondreality -- --block 1     # ALKU -> ... -> ENDSCRL, no stop
 cargo run --release --bin secondreality -- --block 2     # BEGLOGO -> ... -> ENDSCRL, no stop
 cargo run --release --bin secondreality -- --block 3     # MNTSCRL -> ... -> ENDSCRL, no stop
@@ -67,6 +70,7 @@ cargo run --release --bin secondreality -- --block 4     # U2E -> ENDLOGO -> CRE
 cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> ENDSCRL
 cargo run --release --bin secondreality -- --block U     # DDSTARS (the hidden part)
 cargo run --release --bin secondreality -- --part glenz
+cargo run --release --bin secondreality -- --part testcard   # the Phase 0 test card
 ```
 
 `--block 1` runs **ALKU → U2A → PAM → BEGLOGO → GLENZ → TUNNELI → TECHNO → PANIC → MNTSCRL →
@@ -98,16 +102,26 @@ end of the tick it was set in. **After PANICEND retires** (by its own `Finished`
 shell runs the original's cue wait (`MAIN/U2.ASM:826-853`, the wait at `:833-853`): it holds the
 screen and polls `musplus`, waiting while it is `>= 0` and then while it is `<= 0`, and continues
 on the first `> 0`. The wait is exit-aware — an ESC already set when it would be installed skips it
-(`@@skip5`) — and a plan that ends at PANICEND enters the wait and then the hold. Once the run
-has nothing left to play, ESC closes the window, where
-the original's shell returns to DOS (`MAIN/U2.ASM:935`). **Ctrl** skips the part that is playing
+(`@@skip5`) — and a plan that ends at PANICEND enters the wait and then the hold. Once a
+`--part` run has nothing left to play it holds its last screen, and ESC closes the window, where
+the original's shell returns to DOS (`MAIN/U2.ASM:935`); a block's run ends by itself instead
+(below). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
 `ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
 a key.
 
 `--block 1` through `--block 5` end in ENDSCRL, whose own loop is `while(!dis_exit())`
 (`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it does in the demo, so leaving it
-is ESC twice: once to end the part, once to close the window (or the window's close button).
+is **one** ESC. A run built from a block (`--block`, or no argument) then ends the way `SECOND.EXE`
+does (D41): the hold fades the music for **64** ticks over the last picture (`@@partsdone`'s
+`fademusic`, `MAIN/U2.ASM:937-939`, `:333-346`), shows text mode's blank screen for **20** ticks
+(`fatalexit`, `:967-973`), and the window closes by itself; ESC during that stage closes it at once
+(the original's stage acts on no key — closing early is the port's courtesy). The end box,
+`assets/MAIN/DATA/U2END.BIN` (`printend`, `:506-535`), is then printed to the terminal the run was
+launched from — the stand-in for the text mode it is written into — with its colours when stdout is
+a terminal and as plain text when it is not. It is printed for every windowed demo run however its
+window closed (the close button too, as `fatalexit` prints it on every exit), and never for
+`--part`, `--vault` or `--headless`. A `--part` run, and a vault run, still hold at their end.
 
 A block plays the parts of that block, in the demo's own order; every block's plan is now fully
 ported, so no block stops. A run whose source cannot build the next part still holds at the first

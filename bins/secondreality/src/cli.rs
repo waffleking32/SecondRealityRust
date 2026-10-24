@@ -12,10 +12,18 @@ use sr_engine::present::Aspect;
 use crate::parts;
 use crate::shell;
 
-/// The part a run names when the command line names none. The demo's own
-/// default is `SECOND 1`, which needs parts the port does not have; a run with
-/// no argument is the test card, as it has been since Phase 0.
+/// The part [`Cli::part_name`] falls back to for a `Cli` that names neither a
+/// part nor a block — one built by hand, since the command line never leaves
+/// both unset. A run with no argument is the demo: `SECOND` with no argument is
+/// `SECOND 1` (`part-sequence.md` §4), so [`Cli::parse`] makes it
+/// [`DEFAULT_BLOCK`]. The Phase 0 test card is still a part, and `--part
+/// testcard` names it.
 const DEFAULT_PART: &str = "testcard";
+
+/// The block a command line that names no part and no block runs: `SECOND 1`,
+/// which the original treats exactly as no argument (`MAIN/U2.ASM:108`'s default
+/// `whattorun` 7fh and `partsmask[1]`'s 1fh gate the same parts).
+const DEFAULT_BLOCK: char = '1';
 
 /// What to run, and how to show it.
 #[derive(Debug, Clone)]
@@ -70,7 +78,8 @@ pub struct Cli {
 }
 
 impl Default for Cli {
-    /// The test card in a window, 1:1 in a 4:3 box with its border.
+    /// Nothing named yet, in a window, 1:1 in a 4:3 box with its border.
+    /// [`Cli::parse`] turns "nothing named" into the demo ([`DEFAULT_BLOCK`]).
     fn default() -> Cli {
         Cli {
             part: None,
@@ -157,6 +166,11 @@ impl Cli {
                 other => return Err(format!("unknown argument {other:?}")),
             }
         }
+        // No part and no block is the demo's own run, `SECOND 1`. The vault names
+        // neither and starts its own runs, so it is left alone.
+        if cli.part.is_none() && cli.block.is_none() && !cli.vault {
+            cli.block = Some(DEFAULT_BLOCK);
+        }
         cli.validate()?;
         Ok(cli)
     }
@@ -167,6 +181,22 @@ impl Cli {
     /// parts and [`block`](Cli::block) is how a caller tells.
     pub fn part_name(&self) -> &'static str {
         self.part.unwrap_or(DEFAULT_PART)
+    }
+
+    /// What the run this command line names is to be, beyond its plan.
+    ///
+    /// A run built from a block — `--block`, or no argument — is the demo's own and
+    /// ends the way `SECOND.EXE` does ([`Ending::Exit`](shell::Ending::Exit)); one part
+    /// holds where it ends ([`Ending::Hold`](shell::Ending::Hold)), and so do the
+    /// vault's, which name no block.
+    pub fn run_settings(&self) -> shell::RunSettings {
+        shell::RunSettings {
+            ending: if self.block.is_some() {
+                shell::Ending::Exit
+            } else {
+                shell::Ending::Hold
+            },
+        }
     }
 
     /// The rules that span more than one argument.
@@ -367,18 +397,45 @@ fn known_blocks() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shell::Ending;
 
     fn parse(args: &[&str]) -> Result<Cli, String> { Cli::parse(args.iter().map(|s| s.to_string())) }
 
     #[test]
-    fn defaults_to_the_test_card_in_a_window() {
+    fn a_run_with_no_arguments_is_the_demo() {
+        // `SECOND` with no argument is `SECOND 1` (`part-sequence.md` §4: the
+        // default `whattorun` 7fh and `partsmask[1]` 1fh run the same parts), so
+        // the port's no-argument run is block 1 — in a window, 1:1 in a 4:3 box
+        // with its border, as the default run has always been presented.
         let c = parse(&[]).unwrap();
-        assert_eq!(c.part_name(), "testcard");
-        assert_eq!(c.block, None);
+        assert_eq!(c.block, Some('1'));
+        assert_eq!(c.part, None);
         assert!(!c.headless);
         assert_eq!(c.scale, 1);
         assert_eq!(c.aspect, Aspect::FourThree);
         assert!(c.border);
+    }
+
+    #[test]
+    fn the_test_card_is_still_a_part() {
+        // The Phase 0 test card is no longer the default run, but it is still
+        // the port's own part and `--part` still names it.
+        let c = parse(&["--part", "testcard"]).unwrap();
+        assert_eq!(c.part, Some("testcard"));
+        assert_eq!(c.block, None, "a named part is not a block run");
+        assert_eq!(c.part_name(), "testcard");
+    }
+
+    #[test]
+    fn a_part_run_holds_and_a_block_run_exits() {
+        // A run built from a block ends the way `SECOND.EXE` does
+        // (`MAIN/U2.ASM:935-994`: the fade, text mode, the end box); one part
+        // holds where it ends, as it always has.
+        assert_eq!(parse(&["--part", "glenz"]).unwrap().run_settings().ending, Ending::Hold);
+        assert_eq!(parse(&["--block", "3"]).unwrap().run_settings().ending, Ending::Exit);
+        assert_eq!(parse(&[]).unwrap().run_settings().ending, Ending::Exit);
+        // The vault's runs are one-part runs the menu starts: they hold.
+        assert_eq!(parse(&["--vault"]).unwrap().run_settings().ending, Ending::Hold);
     }
 
     #[test]
@@ -444,7 +501,10 @@ mod tests {
 
     #[test]
     fn a_repeated_dump_index_is_dropped_and_the_order_is_kept() {
-        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "5,5"]).unwrap();
+        // `--part testcard`: the no-argument run is the demo now, which begins
+        // at 404, and index 5 is below it.
+        let cli = parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
+                          "--dump-frames", "5,5"]).unwrap();
         assert_eq!(cli.dump_frames, Some(vec![5]));
         // First occurrence wins, and the list is not reordered: the run walks
         // its indices in its own order, so the list is a set, not a schedule.
@@ -455,8 +515,10 @@ mod tests {
     #[test]
     fn dump_frames_is_a_way_to_bound_a_headless_run_on_its_own() {
         // No --frames and no --run-seconds: the largest requested index is the
-        // end of the run.
-        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "7"]).unwrap();
+        // end of the run. (Of a part numbered from zero: the no-argument run is
+        // the demo, which begins at 404.)
+        let cli = parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
+                          "--dump-frames", "7"]).unwrap();
         assert!(cli.headless);
         assert_eq!(cli.frames, None);
     }
@@ -508,10 +570,15 @@ mod tests {
         // against an anchor. (`--part alku` carries one now, so a block or part
         // run asking for an index below 404 is refused by `--block 5`'s case
         // above.)
-        assert!(parse(&["--headless", "--dump-dir", "d", "--dump-frames", "0"]).is_ok());
+        assert!(parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
+                        "--dump-frames", "0"]).is_ok());
         assert!(parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
                         "--dump-frames", "0,9000"])
             .is_ok());
+        // The no-argument run is `SECOND 1`, which begins at ALKU's 404: index 0
+        // is below it, and the same rule refuses it.
+        let message = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "0"]).unwrap_err();
+        assert!(message.contains("begins at 404"), "{message}");
     }
 
     #[test]
