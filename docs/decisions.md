@@ -2639,3 +2639,104 @@ count moved.
 parts' frames are untouched, because the stage only begins once the plan has run out. If the
 original's stage should be honoured exactly, ESC during it is one branch in
 `EscapeKey::apply`; if the box should not print on an error path, it is one condition in `main`.
+
+## D42 — Loop mode: `--loop`, `/gravis`, and the seam between two passes (2026-10-24)
+
+Decided: the original's `looping` byte (`MAIN/U2.ASM:746`, the setup's `ip[3]`, `START.C:103`)
+is `shell::Looping` — `Off` (0), `On` (1), `NoEndScroller` (2) — carried in `RunSettings::looping`
+and set by the command line: `--loop` is the setup menu's "Demo looping: Enabled (no end scroller
+shown)" (`MENU.C:229-238`, 1), and `/gravis` is 2 (`START.C:89-93`: `memicmp(argv[1],"/gravis",7)`,
+the first seven characters in any case), which also clears `Cli::setup` — the field Task 8's
+settings screen reads, because `/gravis` skips `menu()`. Any other `/` switch is ignored
+(`U2.ASM:605-606`: `checkcmdline` returns at a `/` with `whattorun` at its 7fh), so `/x` is the
+demo. Looping is a block's run: `--loop` or `/gravis` with `--part` or `--vault` is refused.
+
+**The plan.** `shell::run_plan(block, looping)` is `block_plan(block)` without ENDSCRL whenever
+`looping` is not 0 (`:914-917`: `cmp cs:looping,0; jne @@skipp6` jumps over `exe23`).
+
+**The loop pass** (`:919-933`). When a `Looping::On` run's plan runs out, the shell starts its loop
+seam instead of the hold — CRED's last picture, held by a part that draws nothing:
+
+- ticks 1..=64 (`EXIT_FADE_TICKS`): `mov cx,1; call fademusic` (`:926-928`), the global-volume
+  byte stepping down a tick (`:333-346`) — D41's fade, not the hold's;
+- at the fade's end `LOOP_RESTART` = (MUSIC0, order 0) is installed (`:929-932`, `restartmus` with
+  `ax=0, bx=0`; `_zplaysong(0)` at `:394`) under `MusicStart::restart`'s rule (D34: four waiting
+  polls), at the next tick's boundary;
+- `LOOP_RELOAD_TICKS` = **9** more ticks of CRED's screen, then `jmp @@partsagain` (`:933`): the
+  plan is `run_plan('1', On)` from ALKU, and `Sequence::pass()` is 2. `whattorun` is 7fh on every
+  pass (`:919`), so pass 2 is block 1's sequence whatever pass 1 began at, and never the hidden
+  part (7fh has no bit 7). Pass 2's restarts are `MUSIC_RESTART_AT`'s two — MUSIC1@0 at GLENZ,
+  MUSIC0@18 at U2E — and the block-entry restarts (MUSIC1@42, `:858-863`; MUSIC0@25,
+  `:900-905`) never fire: they are `with_run`'s entry installs, never `take_next`'s. The
+  "already playing" check in `restart_music` cannot suppress pass 2's sites: the run's player is
+  then `LOOP_RESTART` (MUSIC0@0) at GLENZ and MUSIC1@0 at U2E, neither the row's own.
+- `/gravis` (`NoEndScroller`) goes to `@@partsdone` after CRED (`:923-925`): D41's exit stage, then
+  the end.
+
+**`LOOP_RELOAD_TICKS` is one constant, adopted under D24.** The original's seam is `C` = 9029
+(CRED's closed iris) to `L` = 9104 (ALKU's first 320×400 frame), **75** frames, with 9090–9101 and
+9103 still CRED's 320×200 black (`reference-indices.md` §25.3; 9102 is the unpublished mode set).
+The port's CRED draws its closed iris on two ticks (8833, 8834 under `--block 5`) before it
+retires, so `75 − 2 − 64` = 9 puts the port's `L` at `C + 75`. With it, all seven filed seam frames
+compare at **0** differing pixels, and the frame before `L` is CRED's 320×200 screen. Without it
+(measured with the constant at 0) the seven also compare at 0 — the held keyframes cannot tell the
+two apart — but the port's 9095–9103 equivalents are ALKU's 320×400 where the original's are CRED's
+320×200, so 9 is the value the observed frames fix. The constant moves only ALKU's start: the
+music is installed at the fade's end either way.
+
+**The seam is compared from `C`.** The loop capture's recipe numbers its frames 115 later than the
+B1 recipe the port's `--block 5` is in (§25.1), and the port's CRED ends **81** frames earlier than
+the original's (its `C` is 8833 against the original's 9029 − 115 = 8914): that is CRED's own
+chain drift (`cred.md` §7; `endscrl.md` §6.1 measures it as 82 from ENDSCRL's start), not the
+loop's. The port's 8826–8832 — the iris's last seven steps — are byte-identical to the original's
+9022–9028 at that offset, and 8833 is the filed `C`'s bytes. So `tests/loop.rs` pairs the port's
+`C_port + (n − C)` with the original's `n`. In those terms the port's `C`, fade, `L` and Δ are
+8833, 8835–8898, 8908 and `L − 404` = 8504, against the original's 9029, 9029–9092 (derived, ±1),
+9104 and 8700 (8698 if 404 is a mode set, §25.3); the 196-frame difference between the two Δ is the
+115 of the recipe and the 81 of CRED.
+
+**The race.** ALKU's first pass-2 `dis_sync()` (`ALKU/MAIN.C:59`) races the restarted player in the
+original: in six sessions of seven it reads the new song and waits for order 2; in one it reads the
+stale (43,43), sync 10, and leaves at once (§25.3). The port installs the restart nine ticks before
+ALKU starts, and a fresh player publishes (0,0) until its clock runs, so ALKU's first read is the
+new song's: the port is in **the majority group**, the filed one — its fade-in begins at 10045, not
+at the early group's ≈ 8916.
+
+**Measured, not fitted: pass 2's music is 3–5 frames late against `C`.** The seam trace has the
+restarted song at (0,1) at 9112 (§25.3) — 8916 in the port's terms; the port publishes it at
+**8921**. ALKU's pass-2 fade-in follows: the original's first lit frame is in (10236, 10238] and its
+hold starts in (10296, 10298] (two-frame sampling), i.e. (10040, 10042] and (10100, 10102] in the
+port's terms; the port's are **10045** and **10106**. A second constant (the restart's waiting polls)
+would close it; D24 allows one, so the seam keeps `MusicStart::restart` and Task 10 registers the
+difference. Every held frame sits inside its hold either way.
+
+**The exits.** ESC ends only the running part: the seam is the shell's, drains after exit
+(`fademusic` and `restartmus` read no flag), and pass 2's first `Engine::start` clears the flag,
+so a press there is spent on nothing. Ctrl (D21's one-part skip) has no part to skip in the seam.
+The original's way out of a loop is its sticky Ctrl at `:920`; the port's is the window's close
+button, and the end box is printed then (D41). The title bar names `pass N` from pass 2 on.
+
+**Unchanged.** Pass 1 of a `--loop` run is the plain run's, frame for frame and row for row, up to
+the seam (`looping_leaves_pass_one_alone`, `looping_leaves_pass_ones_music_alone`); `--part`
+holds; the vault (D40); Ctrl (D21); headless never opens SDL; no part's registered test count
+moved.
+
+**Measured.** `tests/loop.rs`'s `the_loop_seam_is_the_originals` (the seven seam frames at 0, `C`,
+`L − C`, 8921, 10045, 10106) and `looping_leaves_pass_one_alone`; `shell.rs`'s
+`a_looping_plan_has_no_end_scroller`, `a_loop_pass_fades_then_restarts_music0_at_order_0_and_starts_alku`,
+`the_seam_is_not_a_part_escape_and_ctrl_leave_it_alone`, `a_loop_pass_runs_every_block_whatever_the_entry`,
+`a_loop_pass_fires_only_the_full_runs_restarts`, `gravis_runs_once_without_the_end_scroller_and_ends`;
+`cli.rs`'s `the_loop_flag_is_looping_on`, `gravis_is_looping_two`, `unknown_slash_switches_are_ignored`;
+`window.rs`'s `a_looping_run_is_left_by_closing_the_window`,
+`the_status_line_counts_the_pass_from_the_second_on`. The iris's seven-frame agreement is
+reproduced by §25.3's `out/p9-loop-c` capture command against
+`cargo run --release --bin secondreality -- --block 5 --headless --dump-frames "$(seq -s, 8755 8840)" --dump-dir out/t4/b5-iris`;
+the constant-0 measurement by building with `LOOP_RELOAD_TICKS = 0` and dumping
+`--block 5 --loop --headless --dump-frames 8833,8859,8885,8899,8907,8908,9404,10223,11223`. Task 11
+adds the evidence numbers.
+
+**Cost if wrong.** If 404 is ALKU's mode set rather than its first frame, `L` should be `C + 73`
+and the constant 7 — one number, and the test's `L − 1` check. If the pass-2 music lag should be
+closed, it is `MusicStart::restart`'s `waiting` for the loop's install only — a second constant D24
+does not allow without a new measurement. If a looping run should be left with ESC, it is one
+branch in `EscapeKey::apply`.
