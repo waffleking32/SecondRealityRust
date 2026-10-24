@@ -140,6 +140,94 @@ const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[
     ("second1f", "MUSIC0", 34_055, 18),
 ];
 
+/// One content difference the comparison measured: the word, the index in its sequence of
+/// distinct values, the two values there (`None` past a sequence's end), and whether the
+/// sequences are identical once that one value is set aside — an extra value in the longer
+/// sequence, or a substitution when they are the same length.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ContentMismatch {
+    key: &'static str,
+    index: usize,
+    trace: Option<u8>,
+    port: Option<u8>,
+    rest_identical: bool,
+}
+
+/// A filed trace whose measured disagreement with the port is pinned, not tolerated: the
+/// comparison must find **exactly** these content differences, exactly these frames at which
+/// the port publishes an `(order, row)` the trace never publishes, and exactly this worst
+/// placement displacement. Better or worse is a failure — a row that starts to agree is a
+/// change to the player this table must be edited for, the same as one that stops agreeing.
+/// Every trace not listed here is held to the unchanged rule (content identical, no
+/// unreachable value, worst displacement within [`JITTER_FRAMES`]).
+struct KnownDisagreement {
+    trace: &'static str,
+    content: &'static [ContentMismatch],
+    unreachable: &'static [i64],
+    worst_displacement: i64,
+}
+
+/// The measured disagreements of block 1's full-run traces (Phase 9 Task 2,
+/// `docs/fidelity/reference-indices.md` §26.6, `docs/fidelity/music-clock.md` §2.3).
+const KNOWN_DISAGREEMENTS: &[KnownDisagreement] = &[
+    // **Task 6 owns this row: resolve it or register it** (Phase 9 plan). `second1e`
+    // (8,800…33,949, MUSIC1 orders 4…98) matches the port in every word's value sequence; its
+    // placement drifts with the port early, to 8 frames from order 96 row 58 (frame 33,264)
+    // on — one past `JITTER_FRAMES`, over a window four times `second1`'s 5,538 frames.
+    KnownDisagreement {
+        trace: "second1e",
+        content: &[],
+        unreachable: &[],
+        worst_displacement: 8,
+    },
+    // **Task 6 owns this row: resolve it or register it** (Phase 9 plan). `second1f`
+    // (34,105…48,276, MUSIC0 orders 18…45) holds the first speed-1 stretch of any filed trace —
+    // order 26, pattern 71, frames 38,328…38,370, a row every 1.46 frames. The trace's one
+    // sample a frame publishes row 25 at 38,364 and row 27 at 38,366, so row 26 is never
+    // current at a sample; the port, later in phase, publishes order 26 row 26 at frame
+    // 38,376. That is the one content difference (index 502 of the row sequence: trace 27,
+    // port 26, every other value of every word identical) and the one frame whose value the
+    // trace never publishes. Its placement drifts with the port late, by up to 12 frames over
+    // orders 18…25 and about 9 after — the session's MUSIC0 rows run 11 frames ahead of
+    // `second4`'s over orders 19…25 (`music-clock.md` §2.3).
+    KnownDisagreement {
+        trace: "second1f",
+        content: &[ContentMismatch {
+            key: "row",
+            index: 502,
+            trace: Some(27),
+            port: Some(26),
+            rest_identical: true,
+        }],
+        unreachable: &[38_376],
+        worst_displacement: 12,
+    },
+];
+
+/// Whether two sequences agree once the value at `at` is set aside — a value only one side
+/// holds (an extra row in the port's sequence or in the trace's), or a value each holds
+/// differently — under the rule every other trace is held to: the common prefix identical,
+/// and at most one leftover value at the end (the window-edge tolerance of
+/// `the_port_reproduces_every_filed_trace`, which can leave the two sequences the same length
+/// even when one of them holds an extra value).
+fn identical_but_one<T: PartialEq>(trace: &[T], port: &[T], at: usize) -> bool {
+    fn without<T>(items: &[T], skip: Option<usize>) -> Vec<&T> {
+        items
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != skip)
+            .map(|(_, item)| item)
+            .collect()
+    }
+    [(None, Some(at)), (Some(at), None), (Some(at), Some(at))]
+        .into_iter()
+        .any(|(trace_skip, port_skip)| {
+            let (trace, port) = (without(trace, trace_skip), without(port, port_skip));
+            let common = trace.len().min(port.len());
+            trace.len().abs_diff(port.len()) <= 1 && trace[..common] == port[..common]
+        })
+}
+
 /// The port's logic tick, in millihertz (`crates/sr-engine/src/tick.rs`'s `HZ_MILLI`). A
 /// tick is `2.5/tempo` seconds, so it is `175215/(tempo × 1000)` frames long: the conversion
 /// the anchor derivation needs, and the only place this file knows the engine's rate.
@@ -750,7 +838,11 @@ fn the_port_reproduces_every_filed_trace() {
         //    makes both publish the same zeroes) one such leading value is dropped from
         //    whichever sequence is one row ahead before the content is compared; a row skipped
         //    or invented anywhere else still fails.
-        let content = |name: &str, key: fn(&Published, &Row) -> u8| {
+        let known = KNOWN_DISAGREEMENTS
+            .iter()
+            .find(|known| known.trace == trace.name);
+        let mut content_found: Vec<ContentMismatch> = Vec::new();
+        let mut content = |name: &'static str, key: fn(&Published, &Row) -> u8| {
             let mut trace_sequence =
                 distinct(interior.iter().map(|row| key(&row.published(), row)));
             let mut port_sequence =
@@ -762,6 +854,26 @@ fn the_port_reproduces_every_filed_trace() {
                     port_sequence.remove(0);
                 }
             }
+            let common = trace_sequence.len().min(port_sequence.len());
+            let first = trace_sequence[..common]
+                .iter()
+                .zip(&port_sequence[..common])
+                .position(|(left, right)| left != right);
+            if known.is_some() {
+                // A pinned trace: record what differs, and compare it with the table below.
+                let lengths_close = trace_sequence.len().abs_diff(port_sequence.len()) <= 1;
+                if first.is_some() || !lengths_close {
+                    let at = first.unwrap_or(common);
+                    content_found.push(ContentMismatch {
+                        key: name,
+                        index: at,
+                        trace: trace_sequence.get(at).copied(),
+                        port: port_sequence.get(at).copied(),
+                        rest_identical: identical_but_one(&trace_sequence, &port_sequence, at),
+                    });
+                }
+                return;
+            }
             assert!(
                 trace_sequence.len().abs_diff(port_sequence.len()) <= 1,
                 "{}: the {name} sequences differ in length — {} against {}",
@@ -769,11 +881,6 @@ fn the_port_reproduces_every_filed_trace() {
                 trace_sequence.len(),
                 port_sequence.len()
             );
-            let common = trace_sequence.len().min(port_sequence.len());
-            let first = trace_sequence[..common]
-                .iter()
-                .zip(&port_sequence[..common])
-                .position(|(left, right)| left != right);
             assert_eq!(
                 first, None,
                 "{}: the {name} sequence differs at index {:?}: trace {}, port {}",
@@ -818,6 +925,7 @@ fn the_port_reproduces_every_filed_trace() {
         let mut agreeing = 0usize;
         let mut worst = 0i64;
         let mut unreachable = Vec::new();
+        let mut unreachable_frames: Vec<i64> = Vec::new();
         for row in interior.iter() {
             let published = port[&row.frame];
             if published == row.published() {
@@ -861,6 +969,7 @@ fn the_port_reproduces_every_filed_trace() {
                     if leading_row {
                         continue;
                     }
+                    unreachable_frames.push(row.frame);
                     unreachable.push(format!(
                         "{}: frame {} the trace publishes {key} {theirs:?}, the port {mine:?} — \
                          a value the trace never publishes",
@@ -880,6 +989,36 @@ fn the_port_reproduces_every_filed_trace() {
             100.0 * agreeing as f64 / interior.len() as f64,
             worst,
         );
+        if let Some(known) = known {
+            // Exactly the recorded disagreement: a row that starts to agree fails as surely
+            // as one that stops (the table's doc comment).
+            unreachable_frames.dedup();
+            println!(
+                "  {}: pinned disagreement — content {:?}, unreachable at {:?}, worst \
+                 displacement {worst}",
+                trace.name, content_found, unreachable_frames
+            );
+            if content_found.as_slice() != known.content {
+                failures.push(format!(
+                    "{}: the content differences are {content_found:?}, not the recorded {:?}",
+                    trace.name, known.content
+                ));
+            }
+            if unreachable_frames.as_slice() != known.unreachable {
+                failures.push(format!(
+                    "{}: the port publishes a value the trace never does at {unreachable_frames:?}, \
+                     not the recorded {:?}",
+                    trace.name, known.unreachable
+                ));
+            }
+            if worst != known.worst_displacement {
+                failures.push(format!(
+                    "{}: the worst displacement is {worst} frames, not the recorded {}",
+                    trace.name, known.worst_displacement
+                ));
+            }
+            continue;
+        }
         failures.extend(unreachable.into_iter().take(3));
         if worst > JITTER_FRAMES {
             failures.push(format!(

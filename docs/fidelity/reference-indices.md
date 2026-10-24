@@ -6076,7 +6076,9 @@ python3 -c 'import csv; [print(r["frame"],r["ord"],r["row"],r["zplus"]) for r in
 
 **The port's player against them** (`cargo test -p sr-audio --test trace`, with the two traces in
 `RESTART_TRACES`: `second1e` from `second1d`'s `MUSIC1@0` restart at 7,815, `second1f` from 34,055 at
-order 18) — **it fails, and these are the rows**:
+order 18). The general rule fails on both, and these are the rows. They are **pinned exactly in
+the test's `KNOWN_DISAGREEMENTS`** (music-clock.md §2.3), so the suite passes, and it fails if
+either disagreement grows or shrinks:
 
 - **`second1e`: content identical, placement out by 8.** Every word's value sequence matches the
   trace (order 81 values, row 5,025, pattern 74, speed 7, tempo 1, zplus 39 — no difference), the
@@ -6089,8 +6091,9 @@ order 18) — **it fails, and these are the rows**:
   **speed 1** (frames 38328–38370, a row every 1.46 frames, music analyse's `frames 38328..38370 at
   speed 1 tempo 120`), and the trace's one sample a frame publishes row 25 at 38364 and row 27 at
   38366 — row 26 is never current at a sample — while the port, ten frames later in phase, publishes
-  `(26, 26)` at 38376. Every other word's sequence is identical, and the placement drift is 0 → +8…+12
-  frames over orders 18–25 and then constant (+9). No earlier trace holds a speed-1 stretch.
+  `(26, 26)` at 38376 — the one frame whose value the trace never publishes. Every other word's
+  sequence is identical, and the placement drift is 0 → +8…+12 frames over orders 18–25 and then
+  constant (+9); the test's worst displacement is **12**. No earlier trace holds a speed-1 stretch.
 
 Both are findings for Task 6, not player changes (the brief's acceptance line): the first is the
 exact clock's accumulated difference over a window four times `second1`'s, the second a row shorter
@@ -6109,8 +6112,9 @@ removed.
 - **The total length to ENDSCRL: 45,873 frames.**
 - **Block offsets**: block 2 + 7,410, block 3 + 16,200, block 4 + 33,647 (at order 18), block 5 +
   37,358 at CRED's last iris step.
-- **The trace test fails on `second1e` (8 frames' drift) and `second1f` (one unsampled speed-1
-  row)**.
+- **The trace test's two pinned disagreements**, `KNOWN_DISAGREEMENTS`: `second1e` (no content
+  difference, worst displacement 8) and `second1f` (row index 502, trace 27 / port 26; port-only value
+  at 38376; worst displacement 12). **Task 6 owns resolving or registering each.**
 
 `cargo xtask reference verify --tree reference` passes over **67 captures (262 files)**: the
 thirteen `parts/fullrun/*` captures (44 frames, 60 files) and the two traces (one file each).

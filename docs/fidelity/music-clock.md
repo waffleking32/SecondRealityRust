@@ -622,7 +622,23 @@ frames — **and its placement drifts to 8 frames**, the port early by −1 at 1
 order 26 runs at **speed 1** (frames 38328–38370, 1.46 frames a row, the first speed-1 stretch in
 any filed trace), the trace publishes row 25 at 38364 and row 27 at 38366, and the port, ten frames
 later in phase, publishes row 26 at 38376 (`second1f: the row sequence differs at index Some(502):
-trace 27, port 26`). Task 6 inherits both as findings; the player was not changed.
+trace 27, port 26`), and its placement drifts with the port late by up to 12 frames. The player was
+not changed.
+
+**Both are pinned, exactly, in `KNOWN_DISAGREEMENTS`** (`crates/sr-audio/tests/trace.rs`), and
+**Task 6 owns resolving or registering each row**. `the_port_reproduces_every_filed_trace` holds a
+listed trace to its recorded disagreement rather than to the general rule, and fails if the
+measurement gets better or worse; every other trace keeps the general rule:
+
+| trace | content differences | frames where the port publishes a value the trace never does | worst displacement |
+|---|---|---|---|
+| `second1e` | none | none | **8** (`JITTER_FRAMES` is 7) |
+| `second1f` | one: `row`, index 502, trace 27, port 26, every other value of every word identical | **38376** (order 26 row 26) | **12** |
+
+`cargo test -p sr-audio --test trace` checks the table. Changing a recorded value makes it fail:
+with `second1e` set to 7 and `second1f`'s frame list emptied, it fails with `second1e: the worst
+displacement is 8 frames, not the recorded 7` and `second1f: the port publishes a value the trace
+never does at [38376], not the recorded []`.
 
 ## 3. The tick rate, and the rule behind it
 
