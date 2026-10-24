@@ -5331,3 +5331,372 @@ error: the emulator reached frame 538 before frame 500 could be captured; the ca
 spacing (`475,575,…,2175`, exit 0) and dense contiguous batches (adjacent indices are all taken
 before any is read, so e.g. `--frames "$(seq -s, 470 520)"` and the nine-keyframe set both exit
 0). TWIST's `--frames 0` and `--frames 4` probes are the other refusals above.
+
+## 25. Phase 9 captures: the loop seam and the lead-ins (Phase 9 Task 1)
+
+Task 1 measures; it ports nothing. It files **eight captures in three directories** where the
+plan named three captures, because the capture tool refused three of the shapes the plan asked
+for, each for a reason recorded below:
+
+| directory | captures | why more than one |
+|---|---|---|
+| `reference/parts/loop` | `cred` (320×200), `alku` (320×400) | CRED's end and ALKU's second pass are two geometries, and one capture is one screen (D15): the survey was refused at the first 320×400 frame (§25.2) |
+| `reference/parts/beglogo-leadin` | `even`, `odd`, `plane-436` | adjacent 320×400 indices slip (§25.6), so the window is two runs; a batched run carries no `.idx` (§25.6), so the index plane is a third, unbatched capture |
+| `reference/parts/endlogo-leadin` | `even`, `odd`, `plane-440` | the same |
+
+Every command below is run from the repository root with CLAUDE.md's five capture prerequisites
+(`SR_DOSBOX=/home/ew/workspace/reality/dosbox-automation`, `LD_LIBRARY_PATH` over its six
+`_deps/*-build` directories; `xtask` writes the scratch `XDG_CONFIG_HOME` itself). `$(seq …)` is
+expanded by the shell. Scratch runs went to `out/` (ignored); the only writes under `reference/`
+are the eight directories above, and no existing capture was touched.
+
+### 25.1 The loop recipe, and what it does to the boot's numbering
+
+**The keys are the brief's, checked against `MAIN/MENU.C`.** The defaults are `m_soundcard=3`
+(Gravis) and `m_looping=0` (`:28`, `:30`); the cursor starts at `menuy=0` and is clamped to row 1,
+the soundcard row (`:158`); the key loop reads extended codes as `1000+scan` and moves the row on
+1072/1080 (Up/Down) and the entry on 1075/1077 (Left/Right) (`:94-108`); rows 1, 2, 3 are
+soundcard, quality and looping (`:190`, `:229`), and each entry wraps (`:163-168`). So
+`KBD_left KBD_down KBD_down KBD_right KBD_enter` is soundcard 3→2 (SoundBlaster Pro), row 1→3,
+looping 0→1, continue. `START.C:103` hands `m_looping` to the shell (`ip[3]`), and
+`U2.ASM:746` stores it in `looping`. No correction was needed. Every loop capture's manifest says
+`arguments: ["5"]`, `keys: ["KBD_left","KBD_down","KBD_down","KBD_right","KBD_enter"]`,
+`boot: "autoexec"`, `cycles: 30000`.
+
+**Three more keys move the whole run 115 frames later.** `AUTOTYPE` paces its presses, so this
+recipe leaves the setup screen later than the two-key recipe every other capture uses, and **every
+index in `reference/parts/loop` is in that later boot space, not the B1 recipe's** (§1.12's
+"valid only under the B1 recipe" applies: these indices are valid only under this one). Measured
+two ways:
+
+```bash
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_enter" --frames 498,499,500,501,502 --out out/p9-endlogo-500
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 590 2 650)" --out out/p9-loop-shift-even
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames 611,613,615,617,619 --out out/p9-loop-shift-odd
+```
+
+ENDLOGO's fade-in is frame-locked (`END.C:101-106`, one `dis_waitb` a step), and the two recipes'
+frames agree byte for byte at a **constant offset of 115**: two-key 498/499/500/501/502
+(`b4415a61…`, `8807e602…`, `fb8fbf2a…` — `reference/parts/endlogo`'s 500 —, `bab01979…`,
+`e6b4b1f1…`) are five-key 613/614/615/616/617. The music agrees:
+
+```bash
+cargo xtask music trace --arg 5 --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" --frames 380..700 \
+    --out out/p9-loop-trace-start
+```
+
+puts MUSIC0's rows (25,1), (25,2), … at 543, 551, 560, … where `reference/music/second5` has them
+at 427, 436, 445, …: nineteen row changes, offsets 115 or 116 (the rows' own ±1). **A port run of
+`--block 5` anchored at 404 numbers its frames 115 lower than this capture does** (§25.7).
+
+### 25.2 The survey, and what the sheets showed
+
+The brief's survey was refused at the geometry change, which is itself the first bracket on `L`:
+
+```
+$ cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 8700 50 10700)" --out out/p9-loop-survey --sheet out/p9-loop-survey.png
+error: the display changed geometry between frames: frame 9150 is 320x400 where the capture started at 320x200; capture one screen at a time
+```
+
+So the survey was taken again as its two screens, both exit 0:
+
+```bash
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 8700 50 9100)" --out out/p9-loop-survey-a --sheet out/p9-loop-survey-a.png
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 9150 50 10700)" --out out/p9-loop-survey-b --sheet out/p9-loop-survey-b.png
+```
+
+**Looping is on: no 640×400 frame appears** — ENDSCRL is skipped (`U2.ASM:914-915`), where the
+two-key run shows ENDSCRL's 640×400 screen by 8950 (§20). Sheet a: 8700 is CRED's screen 21
+irising open, 8750–8950 are screen 21's hold (`cd5f27a5…`, §20's last keyframe's bytes, here 115
+frames later), 9000 is its iris closing, and 9050 and 9100 are the closed, **all-black** screen
+(`ea0787f6…`, every RGB byte 0). Sheet b: 9150–10200 are ALKU's black screen (`fec9afb5…`,
+`reference/parts/alku`'s 900), 10250 is "A / Future Crew / Production" fading in, 10300–10600 its
+hold (`6a27ec50…`, `reference/parts/alku`'s 1719), 10650 its fade-out and 10700 black again. CRED's
+closed screen holds through the fade, then ALKU.
+
+### 25.3 `C`, the fade, `L` and Δ
+
+**`C` = 9029**, the first frame of CRED's closed screen. One batch of a hundred adjacent 320×200
+indices (exit 0):
+
+```bash
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 8951 9050)" --out out/p9-loop-c
+```
+
+8951–8975 are screen 21's hold (`cd5f27a5…`), 8976–9028 are 53 distinct frames of the closing iris
+(`CREDITS/MAIN.C:196-212`; 8976 `7f3f38a0…`, 9028 `88532193…`), and **9029–9050 are one picture,
+`ea0787f65f73b0013d03b359490e3125211b28ad5c1502ffb1544c0ded4192f5`**, all black. It holds to 9101
+(`out/p9-loop-l-a`, `--frames "$(seq -s, 9090 9101)"`, twelve frames, one hash) and is still the
+picture at 9103 (the `L` runs below).
+
+**The fade is 64 frames, 9029–9092, and the screen does not change during it.** After CRED returns
+the shell sets `whattorun` to `7fh`, checks Ctrl and `looping` (`U2.ASM:919-925`) and calls
+`fademusic` with `cx=1` (`:927-928`), which lowers the module's global-volume byte `ds:[30h]` by one
+per `int 0fch` function 1 — `waitb_1`, one vertical blank (`DIS/DISINT.ASM:161-181`) — until it is
+0 (`U2.ASM:333-346`). The header byte 0x30 is **64** in both shipped modules (`assets/MAIN/MUSIC0.S3M`,
+`MUSIC1.S3M`; `SECOND 5` restarts MUSIC0 at order 25, `U2.ASM:902-905`), so the fade is the 64 blanks 9029–9092 (derived from the source, ±1 for where CRED's own last
+blank falls).
+The music trace of the seam sees it end:
+
+```bash
+cargo xtask music trace --arg 5 --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" --frames 8960..9200 \
+    --out out/p9-loop-trace-seam
+```
+
+The song keeps playing order 43 through the fade (row 42 at 9088), the player's `zframe` stops at
+5870 from **9092** to 9095 (the volume at 0 and `restartmus`'s `_zstopsong`, `:354`), the old
+position (43,43) is held from 9097 to 9111 while `restartmus` reloads the module (`:347-396`), and
+**the restarted song is at (0,1) at 9112** (`_zplaysong(0)`, `:394`, from `:929-932`'s
+`ax=0, bx=0`). The trace's one missing frame is 9102. The fade's two filed frames are **9055 and
+9081**, inside 9029–9092; both are `ea0787f6…`, the same bytes as `C`.
+
+**`L` = 9104**, ALKU's first frame on pass 2 — the first 320×400 frame:
+
+```
+$ cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" --frames 9102 --out out/p9-loop-l-9102
+error: the emulator reached frame 9103 before frame 9102 could be captured; the capture would not be of the requested frame
+```
+
+refuses in two sessions (alone, and inside `--frames "$(seq -s, 9101 9150)"`, `out/p9-loop-l`) and
+is the one frame the seam trace could not sample, so **9102 is never published** — the counter advances without a picture, which is what a video-mode
+reset does (`xtask/src/oracle/dosbox.rs`'s `grab_identified`, D17): ALKU's `tw_opengraph`
+(`ALKU/MAIN.C:158`). `--frames 9103` (`out/p9-loop-l-9103`) and `--frames 9101,9103`
+(`out/p9-loop-l-pair`) both return **9103 as 320×200**, `ea0787f6…`; `--frames "$(seq -s, 9104 2
+9150)"` (`out/p9-loop-l-even`) returns **9104 as 320×400**, `fec9afb5…` (all black), and so does
+every later run. So **Δ = L − 404 = 8700**.
+
+**What `404` is on pass 1 could not be re-measured with this tool**: under `SECOND 1` the capture
+starts after the first graphics frame and `--frames 404,405,406` and `--frames 405,406,407` both
+refuse (`out/p9-alku-first`, `out/p9-alku-first-405`: `the emulator reached frame 410 before frame
+404 could be captured` / `… before frame 405 …`). 404 is D17's BIOS-mode-byte measurement (mode 19
+at 404). If that frame is the mode set rather than the first 320×400 frame, its pass-2 counterpart
+is 9102 and Δ would be 8698. The held keyframes below do not tell the two apart: they hold for
+hundreds of frames.
+
+**ALKU's screens are music-synchronised, and pass 2's music starts 8 frames earlier relative to
+ALKU than pass 1's**, so ALKU's content on pass 2 sits at pass-1 index + **8692–8694**, not + 8700.
+ALKU's first screen waits on `while(dis_sync()<1 …)` (`ALKU/MAIN.C:59`), and `dis_sync` is a
+lookup of the player's (order, row) in `ordersync1` (`DIS/DISINT.ASM:427-463`). The seam trace's
+(0,1) at 9112 is 8692 after `reference/music/second1`'s (0,1) at 420, and the next nine rows are
+8693–8697 after theirs. The fade-in boundaries agree:
+
+```bash
+cargo xtask reference capture --arg 1 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames "$(seq -s, 1500 2 1620)" --out out/p9-alku-pass1-even
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames "$(seq -s, 10200 2 10320)" --out out/p9-loop-fadein2-even
+```
+
+pass 1's first non-black frame is 1544 (1542 black) and its `6a27ec50…` hold starts at 1606 (1604
+is not); pass 2's are **10238** (10236 black) and **10298** (10296 is not) — offsets 8694 and 8692 at
+two-frame sampling. No fade-in frame of one pass is byte-identical to one of the other.
+
+**One session in seven passed ALKU's first wait at once.** In `out/p9-loop-l-even`, the even samples 9104–9110 are
+black and **9112 is already the fade-in** (`c8feffd2d5486ee18e85f8cc786a2b12dca248321e3b609bde122b9a84e81daf`
+— the same bytes as `out/p9-loop-fadein2-even`'s 10238 — and the fade continues frame for frame to
+9150), while `out/p9-loop-l-odd` (9105–9149) and `out/p9-loop-survey-b` (9150) are black there, and
+`out/p9-loop-fadein2-even` fades in at 10238, as do the trial, filed and repeated `alku` captures
+(their 10419 is the fade-in's hold, §25.4–§25.5) — six sessions in the waiting group. The mechanism is
+read from the source and the trace, not measured inside the early session: (43,43) maps to sync
+**10** (it falls between `ordersync1`'s `0d00h,10` and `3d00h,1`), so an ALKU whose first
+`dis_sync()` runs before the restarted player's first tick (9112 in the trace's session) leaves the
+loop at once, and one that runs after it waits for order 2. Which happens is a race between ALKU's
+`init()` (`ALKU/MAIN.C:154-…`) and the player — the host-timing term of D17 — and **the filed
+capture is the majority group** (six of the seven sessions that show ALKU's start). The early group's frames are not in the reference.
+
+### 25.4 The filed loop seam
+
+```bash
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames 9029,9055,9081 --out reference/parts/loop/cred
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames 9104,9600,10419,11419 --out reference/parts/loop/alku
+```
+
+Both exit 0. The indices are 25 or more apart, so each is read on its own (D19); none carries an
+`.idx` (CRED's black screen's read did not reproduce its RGB, and ALKU's 176-byte rows wrap a
+plane, §1.6 — the same refusals as `reference/parts/{cred,alku}`).
+
+| capture | index | what it is | `sha256` |
+|---|---|---|---|
+| `loop/cred` | 9029 | **`C`**: CRED's closed screen, all black | `ea0787f65f73b0013d03b359490e3125211b28ad5c1502ffb1544c0ded4192f5` |
+| `loop/cred` | 9055 | inside the fade (9029–9092) | `ea0787f6…` (same) |
+| `loop/cred` | 9081 | inside the fade | `ea0787f6…` (same) |
+| `loop/alku` | 9104 | **`L`**: ALKU's first frame, all black | `fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b` |
+| `loop/alku` | 9600 | 900 + Δ: ALKU's black wait | `fec9afb5…` = `reference/parts/alku`'s 900 |
+| `loop/alku` | 10419 | 1719 + Δ: "A Future Crew Production" | `6a27ec502abe606d39c25af842594335fb71d30e14a1f245e9492f3b4148cebe` = `alku`'s 1719 |
+| `loop/alku` | 11419 | 2719 + Δ | `5e3c38846788c1cc4d8d23c65dfdb620779d9691b598e97ee2d79a3f4f0f0bd3` = `alku`'s 2719 |
+
+**The three held keyframes reproduce pass 1 byte for byte at + Δ.** 9029's left neighbour 9028 is
+the iris's last step (`88532193…`), so `C` holds only to its right; every other filed frame holds
+both ways.
+
+### 25.5 The repeat
+
+```bash
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames 9029,9055,9081 --out out/p9-loop-repeat/cred
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 \
+    --keys "KBD_left KBD_down KBD_down KBD_right KBD_enter" \
+    --frames 9104,9600,10419,11419 --out out/p9-loop-repeat/alku
+```
+
+**All seven frames' `sha256`s are equal to the filed capture's**: `ea0787f6…` at 9029, 9055 and
+9081, `fec9afb5…` at 9104 and 9600, `6a27ec50…` at 10419, `5e3c3884…` at 11419. A third session,
+the trial `out/p9-loop-trial/alku` (same `alku` command, taken before the filed one), is equal at
+all four of its indices too.
+
+### 25.6 The lead-in windows
+
+**The brief's batches were refused, and so were their halves.**
+
+```
+$ cargo xtask reference capture --arg 2 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames "$(seq -s, 430 450)" --out out/p9-beglogo-leadin-batch
+error: the emulator reached frame 438 before frame 437 could be captured; the capture would not be of the requested frame
+$ cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames "$(seq -s, 436 455)" --out out/p9-endlogo-leadin-batch
+error: the emulator reached frame 440 before frame 439 could be captured; the capture would not be of the requested frame
+```
+
+Split at the refused index, `--frames "$(seq -s, 430 436)"` and `"$(seq -s, 436 438)"` exit 0 but
+`"$(seq -s, 438 450)"` and `"$(seq -s, 440 455)"` refuse again (`reached frame 447 before frame 446`,
+`reached frame 446 before frame 445`; `out/p9-{beglogo,endlogo}-leadin-{a,b}`). **The refused frames
+are not special**: `--frames 437` (`--arg 2`) and `--frames 439` (`--arg 5`) each capture alone. A
+run of adjacent **320×400** grabs slips after four to nine frames on this host — 437, 439, 445, 446,
+598, 647, 1507, 9109 and 10236 were each missed this way in one run of this task — while a hundred
+adjacent 320×200 grabs (`out/p9-loop-c`) did not slip. **Two-frame spacing never slipped** in
+fourteen runs, so each window is filed as its even and its odd indices, two runs:
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 430,432,434,436,438,440,442,444,446,448,450 --out reference/parts/beglogo-leadin/even
+cargo xtask reference capture --arg 2 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 431,433,435,437,439,441,443,445,447,449 --out reference/parts/beglogo-leadin/odd
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 436,438,440,442,444,446,448,450,452,454 --out reference/parts/endlogo-leadin/even
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 437,439,441,443,445,447,449,451,453,455 --out reference/parts/endlogo-leadin/odd
+```
+
+**A batched run carries no `.idx`, and must not.** A batch is taken and then read (D19), so the
+planes and DAC of its first index are read only after its last — here after the logo's ramp has
+begun — and the coherence check drops every one ("indexed capture does not reproduce the RGB
+frame"). The one batched `.idx` that did survive, `out/p9-beglogo-leadin-a`'s 430, was read after
+436 and is of a later moment than its name; it passed only because the screen had not changed. So
+**the index plane is measured one index per session**, where the planes are read straight after the
+grab (one memory read a plane, `xtask/src/oracle/dosbox.rs`'s `capture_indexed`) and the DAC after
+them (768 port reads):
+
+```bash
+for n in $(seq 430 450); do
+  cargo xtask reference capture --arg 2 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+      --frames $n --out out/p9-leadin-single/beg-$n
+done
+for n in $(seq 436 455); do
+  cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+      --frames $n --out out/p9-leadin-single/end-$n
+done
+```
+
+All 41 exit 0. Counting each `.idx` with a byte histogram, e.g.
+
+```bash
+python3 -c 'import collections,sys; print(collections.Counter(open(sys.argv[1],"rb").read()))' \
+    out/p9-leadin-single/beg-436/frame_000436.idx
+```
+
+gives:
+
+| window | indices | RGB | index plane | count |
+|---|---|---|---|---|
+| BEGLOGO | 430–438 | white, `857891706b16…` | **the white field: every byte index 15** (`283babe8…`, palette `{15: 63,63,63}`) | 128,000 of 128,000 |
+| BEGLOGO | 439, 440, 442 | white | not read: *"this screen's rows are 320 bytes and it is 400 rows tall … the display wraps"* | — |
+| BEGLOGO | 441, 443–446 | white | not kept: *"indexed capture does not reproduce the RGB frame"* | — |
+| BEGLOGO | 447–450 | the ramp (`b6fe147d…` at 447 and 448, `54b03e8e…` 449, `5c73a056…` 450) | not kept (the same) | — |
+| ENDLOGO | 436–443 | white, `857891706b16…` | **the field: every byte index 0** (`eec19bc6…`, palette `{0: 63,63,63}`) | 0 of index 15; 128,000 of index 0 |
+| ENDLOGO | 444–447 | white | not read: the same 320-byte refusal | — |
+| ENDLOGO | 448–451 | white | not kept: the same incoherence | — |
+| ENDLOGO | 452–455 | the ramp (`b3bb52bd…` at 452 and 453, `a330f340…` 454, `83e878d2…` 455) | not kept | — |
+
+**No readable index plane in either window is anything but one value** — the first index whose plane
+is not all one value is not observed; the plane cannot be read from 439 (BEGLOGO) or 444 (ENDLOGO)
+on. ENDLOGO's field is index 0, not 15: `END.C` never fills video memory, it only whitens DAC entries
+0–254 (`:62-63`, `:90-91`), and the screen it inherits is index 0. Both even/odd halves agree with
+the single sessions on every RGB: white through **446** (BEGLOGO) and **451** (ENDLOGO), and the
+ramp's first step displayed twice, at 447 = 448 and 452 = 453 — one frame later than A5's 446 and
+A7's 451, which is D17's session alignment (A5 and A7 measured theirs from `c` at 470/560 and
+500/1180, not from these frames).
+
+**Why the read stops where it does is not settled, and two readings fit.** The 320-byte refusal
+means the chain-4 probe — two API requests, write `3c4h=4` then read `3c5h`
+(`dosbox.rs`'s `chain4_enabled`) — answered with bit 3 set, and the guest's `lineblit` writes
+`3c4h` with map mask `1<<plane` for every row (`BEG/ASM.ASM:65-67`), leaving it at 8 after each row;
+a write between the probe's two requests is read as chain-4. That puts the decode/blit loop
+(`BEG.C:73-78`, `END.C:94-99`) running at 439 and 444. But the boundary is also exactly eight
+frames before each ramp's first displayed step (447 − 439, 452 − 444), and a read whose 768-entry
+DAC pass reaches the ramp is dropped as incoherent whatever the planes hold. What **is** measured:
+the plane is still the field at **436–438** (BEGLOGO) and **440–443** (ENDLOGO) — indices at which
+the port's plane already holds the picture (A5: the port blits at tick 32, index 436; A7: tick 36,
+index 440).
+
+**Those are filed, one unbatched index each**, at the port's own blit index:
+
+```bash
+cargo xtask reference capture --arg 2 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 436 --out reference/parts/beglogo-leadin/plane-436
+cargo xtask reference capture --arg 5 --boot autoexec --cycles 30000 --keys "KBD_left KBD_enter" \
+    --frames 440 --out reference/parts/endlogo-leadin/plane-440
+```
+
+| capture | index | `.rgb` `sha256` | `.idx` `sha256` | plane |
+|---|---|---|---|---|
+| `beglogo-leadin/plane-436` | 436 | `857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561` | `283babe8ef08242dfe2917f4eb6e7e8f050cc70891ccbda5c79ba851c01e130d` | 128,000 × index 15 |
+| `endlogo-leadin/plane-440` | 440 | `857891706b16…` (same) | `eec19bc6af0b3b6dfb97a08782c65f4bb3c3203e789a015d2008b0d689ad08be` | 128,000 × index 0 |
+
+The even/odd captures' distinct RGBs, in full: white `857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561`;
+BEGLOGO `b6fe147d33fe708952b81e31cf004141fe9c430791740de7e01bcc6f44c7c31b` (447, 448),
+`54b03e8ed440c42c8fc577e08e72602f8ea93676be72b3d3c7e888b2c94617dc` (449),
+`5c73a056f5c49b465162670a262be1441fcc5fb0fe2dc70d165b9af6f06dcf2f` (450); ENDLOGO
+`b3bb52bd3a8a56ab930d5f54307dfeaa67952b525051e4034bd75732bc8d6a0e` (452, 453),
+`a330f340731cda076fec6f626422127c8921017709c6e7fcb6e92789a021fa20` (454),
+`83e878d2adf272d9ae1a09652567eb3d7cfe8425b36e941ff1154cf4d9ec6098` (455).
+
+### 25.7 What Tasks 4, 5 and 10 inherit
+
+- **The loop capture's numbering is the five-key recipe's**: 115 frames later than the B1 recipe the
+  port's `--block 5` anchor (404) is in. In that numbering `C` = 9029, the fade 9029–9092, the mode
+  set 9102, `L` = 9104 — 8914, 8914–8977, 8987 and 8989 in the port's.
+- **Δ = 8700** by `L − 404`; ALKU's music-synchronised content is at pass-1 + 8692–8694, because
+  pass 2's song restarts (0,1 at 9112) 8 frames after `L` where pass 1's starts 16 after 404. The
+  three held keyframes sit inside their holds either way.
+- **ALKU's first wait on pass 2 is a race in the original** (§25.3): the filed reference is the
+  majority group, in which ALKU waits for order 2 of the restarted song.
+- **The lead-ins**: the index plane is the field (15 for BEGLOGO, 0 for ENDLOGO) at BEGLOGO 430–438
+  and ENDLOGO 436–443, measured; from 439 / 444 this oracle cannot read it; the RGB is white
+  through 446 / 451 and the ramp is first displayed at 447 / 452 in these sessions.
+
+`cargo xtask reference verify --tree reference` passes over all **52 captures (200 files)**; the
+eight new ones are `parts/loop/cred` (3 frames, 3 files), `parts/loop/alku` (4, 4),
+`parts/beglogo-leadin/even` (11, 11), `/odd` (10, 10), `/plane-436` (1, 2),
+`parts/endlogo-leadin/even` (10, 10), `/odd` (10, 10) and `/plane-440` (1, 2).

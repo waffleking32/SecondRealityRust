@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "SECOND.EXE",
+  "arguments": [
+    "2"
+  ],
+  "cycles": 30000,
+  "width": 320,
+  "height": 400,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "boot_wait": "setup",
+  "keys": [
+    "KBD_left",
+    "KBD_enter"
+  ],
+  "frames": [
+    {
+      "index": 430,
+      "rgb": "frame_000430.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 432,
+      "rgb": "frame_000432.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 434,
+      "rgb": "frame_000434.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 436,
+      "rgb": "frame_000436.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 438,
+      "rgb": "frame_000438.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 440,
+      "rgb": "frame_000440.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 442,
+      "rgb": "frame_000442.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 444,
+      "rgb": "frame_000444.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 446,
+      "rgb": "frame_000446.rgb",
+      "sha256": "857891706b1698637cb83d2e7a6e005c5af26909187cc1426195a088fd1e2561"
+    },
+    {
+      "index": 448,
+      "rgb": "frame_000448.rgb",
+      "sha256": "b6fe147d33fe708952b81e31cf004141fe9c430791740de7e01bcc6f44c7c31b"
+    },
+    {
+      "index": 450,
+      "rgb": "frame_000450.rgb",
+      "sha256": "5c73a056f5c49b465162670a262be1441fcc5fb0fe2dc70d165b9af6f06dcf2f"
+    }
+  ]
+}

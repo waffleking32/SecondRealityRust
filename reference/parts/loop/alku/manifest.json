@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "oracle": "dosbox-automation 0.85.1 (6d100)",
+  "upstream_commit": "071a82e",
+  "exe": "SECOND.EXE",
+  "arguments": [
+    "5"
+  ],
+  "cycles": 30000,
+  "width": 320,
+  "height": 400,
+  "frame_origin": "boot",
+  "skip_boot_frames": 0,
+  "boot": "autoexec",
+  "boot_wait": "setup",
+  "keys": [
+    "KBD_left",
+    "KBD_down",
+    "KBD_down",
+    "KBD_right",
+    "KBD_enter"
+  ],
+  "frames": [
+    {
+      "index": 9104,
+      "rgb": "frame_009104.rgb",
+      "sha256": "fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b"
+    },
+    {
+      "index": 9600,
+      "rgb": "frame_009600.rgb",
+      "sha256": "fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b"
+    },
+    {
+      "index": 10419,
+      "rgb": "frame_010419.rgb",
+      "sha256": "6a27ec502abe606d39c25af842594335fb71d30e14a1f245e9492f3b4148cebe"
+    },
+    {
+      "index": 11419,
+      "rgb": "frame_011419.rgb",
+      "sha256": "5e3c38846788c1cc4d8d23c65dfdb620779d9691b598e97ee2d79a3f4f0f0bd3"
+    }
+  ]
+}

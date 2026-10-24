@@ -2117,14 +2117,18 @@ mod tests {
         // eighteen parts plus the vault's `grid`, `hard` and `twist`), `techno`
         // — whose two screens, the interference and the troll, are separate
         // captures — holds two one level deeper, and `plzpart` holds three (the
-        // plasma, the cube keyframes and the projection fit's band capture). A
-        // scan of the first level measured 18 of the 23 and still said
-        // `verdict: identical`, so the whole-tree form is pinned against the
-        // per-part form: the two have to find the same directories, no more
-        // and no fewer.
+        // plasma, the cube keyframes and the projection fit's band capture).
+        // Phase 9 Task 1 adds three more nested ones: `loop` holds two (CRED's
+        // 320x200 end and ALKU's 320x400 second pass, one screen a capture), and
+        // `beglogo-leadin` and `endlogo-leadin` three each (the even and odd
+        // halves of the window and one unbatched index plane;
+        // `docs/fidelity/reference-indices.md` §25). A scan of the first level
+        // measured 18 of the 23 and still said `verdict: identical`, so the
+        // whole-tree form is pinned against the per-part form: the two have to
+        // find the same directories, no more and no fewer.
         let parts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/parts");
         let whole = resolve_captures(&parts).unwrap();
-        assert_eq!(whole.len(), 26, "the tree's capture directories, reviewed and pinned");
+        assert_eq!(whole.len(), 34, "the tree's capture directories, reviewed and pinned");
 
         let mut per_part: Vec<PathBuf> = Vec::new();
         for entry in fs::read_dir(&parts).unwrap() {
@@ -2133,14 +2137,14 @@ mod tests {
                 continue;
             }
             // Every subdirectory of `parts/` holds captures: twenty-one hold one
-            // each and the two Mode X parts hold two and three — so a
-            // subdirectory with none is a change to the tree this test is
-            // about.
+            // each, the two Mode X parts hold two and three, `loop` holds two
+            // and the two lead-ins three each — so a subdirectory with none is
+            // a change to the tree this test is about.
             let captures = resolve_captures(&path)
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             per_part.extend(captures.into_iter().map(|capture| capture.dir));
         }
-        assert_eq!(per_part.len(), 26, "the same 26, one invocation per part");
+        assert_eq!(per_part.len(), 34, "the same 34, one invocation per part");
 
         // Both directions: a whole-tree run may not miss a capture the per-part
         // form finds, and may not measure one no per-part form finds.
