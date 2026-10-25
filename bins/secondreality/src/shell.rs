@@ -979,6 +979,9 @@ pub struct Sequence {
     /// The loop seam's ticks so far, while `live` is the shell's [`LoopSeam`]; `None`
     /// otherwise.
     seam: Option<u32>,
+    /// Every plan part the run has started, at the index its first tick drew at, in order
+    /// and across passes ([`starts`](Sequence::starts)).
+    starts: Vec<(u32, &'static str)>,
 }
 
 /// The music a run was built with: the player, which module and order it began at, how its
@@ -1253,6 +1256,7 @@ impl Sequence {
             looping: settings.looping,
             pass: 1,
             seam: None,
+            starts: Vec::new(),
         };
         // The DAC the machine already had, installed before the first part
         // starts and never reset: see `hardware_default_palette`.
@@ -1659,6 +1663,7 @@ impl Sequence {
         self.live = Some(part);
         self.current = name;
         self.live_cue = false;
+        self.starts.push((self.index, name));
         Ok(())
     }
 
@@ -1734,6 +1739,19 @@ impl Sequence {
     /// [`Looping::On`] run's seam starts ALKU again (`MAIN/U2.ASM:933`).
     pub fn pass(&self) -> u32 {
         self.pass
+    }
+
+    /// Every part of the plan the run has started, as `(index, name)`: the index its first
+    /// tick drew at, in the order they started, across every [`pass`](Sequence::pass).
+    ///
+    /// Only the plan's parts are starts. The shell's own stretches — the post-PANICEND cue
+    /// wait, a loop seam and the hold — run through [`Engine::start`] too, but they are
+    /// the screen a part left, not a part (`MAIN/U2.ASM:826-853`, `:919-933`, `:935`), and a
+    /// part skipped with Ctrl is still a start at the index it drew its one frame at.
+    /// This is the port's column of the full run's seam table (`reference-indices.md`
+    /// §26.8).
+    pub fn starts(&self) -> &[(u32, &'static str)] {
+        &self.starts
     }
 
     /// The part the run stopped at: the plan's next name, when the hold began
@@ -2827,6 +2845,47 @@ mod tests {
         let (first, _) = walk(&mut run, |run| run.pass() == 2);
         assert_eq!(first, ["ddstars"]);
         assert_eq!(run.plan, expected);
+    }
+
+    #[test]
+    fn starts_records_each_plan_part_at_its_first_index_and_nothing_the_shell_runs() {
+        // `a` draws two frames (0, 1), `b` one (2), and then the plan has run out: the
+        // hold is the shell's, not a part of the plan, and is not a start.
+        let mut run =
+            Sequence::with_source(8, 8, View::new(8, 8), vec!["a", "b"], stub_source).unwrap();
+        assert_eq!(run.starts(), [(0, "a")], "the first part starts when the run is built");
+        for _ in 0..6 {
+            run.tick();
+        }
+        assert!(run.holding());
+        assert_eq!(run.starts(), [(0, "a"), (2, "b")]);
+
+        // PANICEND retires on its first tick (0); the cue wait (no player, so it leaves on
+        // its first tick, 1) is the shell's, and `a` begins at 2.
+        let mut run =
+            Sequence::with_source(8, 8, View::new(8, 8), vec!["panicend", "a"], stub_source)
+                .unwrap();
+        for _ in 0..3 {
+            run.tick();
+        }
+        assert_eq!(run.part(), "a");
+        assert_eq!(run.starts(), [(0, "panicend"), (2, "a")], "the cue wait is not a start");
+    }
+
+    #[test]
+    fn starts_runs_across_passes_and_leaves_the_seam_out() {
+        // A loop pass's ALKU is a start like any other, at the index after the seam's last
+        // tick (`EXIT_FADE_TICKS + LOOP_RELOAD_TICKS` of CRED's screen); the seam is not.
+        let mut run = loop_run('5', Looping::On);
+        walk(&mut run, |run| run.pass() == 2);
+        let names: Vec<&str> = run.starts().iter().map(|(_, name)| *name).collect();
+        assert_eq!(names, ["endlogo", "cred", "alku"]);
+        let (alku, _) = run.starts()[2];
+        assert_eq!(alku, run.index() - 1, "pass 2's ALKU drew the tick that ended the walk");
+        let (cred, _) = run.starts()[1];
+        // CRED's two ticks, then the seam.
+        assert_eq!(alku - cred, 2 + EXIT_FADE_TICKS + LOOP_RELOAD_TICKS);
+        assert_eq!(run.starts()[0], (404, "endlogo"), "block 5's anchor");
     }
 
     #[test]

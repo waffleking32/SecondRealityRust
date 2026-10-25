@@ -82,6 +82,11 @@ pub struct Cli {
     /// Whether the run asks for its settings first — the original's setup screen, which
     /// `START.C:89-95` skips for `/gravis` and runs (`menu()`) otherwise.
     pub setup: bool,
+    /// Write the run's timeline to this file: one CSV line a tick, `index,pass,part,order,row`
+    /// — the frame's index, the loop pass, the part whose picture is up, and the music's
+    /// published position. Headless only; what a full-run comparison against the traces
+    /// reads (`tests/fullrun.rs`).
+    pub positions: Option<PathBuf>,
 }
 
 impl Default for Cli {
@@ -104,6 +109,7 @@ impl Default for Cli {
             vault: false,
             looping: shell::Looping::Off,
             setup: true,
+            positions: None,
         }
     }
 }
@@ -171,6 +177,9 @@ impl Cli {
                     cli.audio_dump = Some(PathBuf::from(value(&mut args, "--audio-dump")?))
                 }
                 "--no-audio" => cli.no_audio = true,
+                "--positions" => {
+                    cli.positions = Some(PathBuf::from(value(&mut args, "--positions")?))
+                }
                 "--vault" => cli.vault = true,
                 "--loop" => cli.looping = shell::Looping::On,
                 // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
@@ -243,6 +252,7 @@ impl Cli {
                 || self.frames.is_some()
                 || self.run_seconds.is_some()
                 || self.audio_dump.is_some()
+                || self.positions.is_some()
             {
                 return Err("the vault menu needs a window; name a part with --part".to_string());
             }
@@ -290,6 +300,9 @@ impl Cli {
                         .to_string(),
                 );
             }
+            if self.positions.is_some() {
+                return Err("--positions needs --headless".to_string());
+            }
             return Ok(());
         }
         if self.dump_dir.is_none() {
@@ -318,6 +331,13 @@ impl Cli {
             if !(seconds.is_finite() && seconds > 0.0) {
                 return Err("--run-seconds must be a positive number of seconds".to_string());
             }
+        }
+        // The timeline is one line a tick, and a wall-clock run takes its ticks in batches.
+        if self.positions.is_some() && self.run_seconds.is_some() {
+            return Err(
+                "--positions records every tick; bound the run with --frames or --dump-frames"
+                    .to_string(),
+            );
         }
         self.dump_indices_are_reachable()
     }
@@ -527,6 +547,40 @@ mod tests {
         }
         let c = parse(&["--block", "5", "/x"]).unwrap();
         assert_eq!((c.block, c.looping), (Some('5'), Looping::Off));
+    }
+
+    #[test]
+    fn positions_names_a_file_for_a_headless_run() {
+        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "500",
+                          "--positions", "p.csv"]).unwrap();
+        assert_eq!(cli.positions, Some(PathBuf::from("p.csv")));
+        assert_eq!(parse(&[]).unwrap().positions, None, "--positions is opt-in");
+        assert!(parse(&["--headless", "--positions"]).is_err(), "it needs a file");
+        assert!(
+            parse(&["--headless", "--dump-dir", "d", "--run-seconds", "1", "--positions", "p"])
+                .unwrap_err()
+                .contains("--frames or --dump-frames"),
+            "a wall-clock run ticks in batches"
+        );
+    }
+
+    #[test]
+    fn positions_needs_a_headless_run() {
+        // The same rule as the dump flags: a window run that silently wrote nothing would
+        // look like a run that recorded its timeline.
+        assert_eq!(
+            parse(&["--positions", "p.csv"]).unwrap_err(),
+            "--positions needs --headless"
+        );
+        assert_eq!(
+            parse(&["--block", "1", "--positions", "p.csv"]).unwrap_err(),
+            "--positions needs --headless"
+        );
+        assert_eq!(
+            parse(&["--vault", "--positions", "p.csv"]).unwrap_err(),
+            VAULT_REFUSAL,
+            "the vault says why it cannot record first"
+        );
     }
 
     #[test]

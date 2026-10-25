@@ -17,7 +17,7 @@
 
 use std::error::Error;
 use std::fs;
-use std::io;
+use std::io::{self, BufWriter, Write as _};
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -61,17 +61,28 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     if let Some(path) = cli.audio_dump.as_deref() {
         run.dump_audio(path)?;
     }
+    let mut positions = match cli.positions.as_deref() {
+        Some(path) => Some(
+            Positions::create(path).map_err(|e| format!("--positions {}: {e}", path.display()))?,
+        ),
+        None => None,
+    };
     let frames = match (cli.frames, cli.run_seconds, cli.dump_frames.as_deref()) {
         // A parsed command line carries exactly one of the three, so the order
         // here is not a precedence rule — the last arm only catches a `Cli`
         // built by hand, which must not silently dump nothing.
-        (Some(count), _, _) => by_tick(&mut run, dir, count)?,
+        (Some(count), _, _) => by_tick(&mut run, dir, count, positions.as_mut())?,
+        // `Cli::validate` refuses `--positions` with `--run-seconds`: a wall-clock run
+        // takes its ticks in batches, and the timeline is one line a tick.
         (None, Some(seconds), _) => vec![run_for(&mut run, dir, seconds)?],
-        (None, None, Some(wanted)) => by_index(&mut run, dir, wanted)?,
+        (None, None, Some(wanted)) => by_index(&mut run, dir, wanted, positions.as_mut())?,
         (None, None, None) => {
             return Err("headless mode needs --frames, --dump-frames or --run-seconds".into())
         }
     };
+    if let Some(positions) = positions {
+        positions.finish()?;
+    }
 
     // A dump that stopped half way is a failure and not a shorter recording (the sink keeps
     // the first write it could not make rather than printing on a tick).
@@ -94,11 +105,15 @@ fn by_tick(
     run: &mut Sequence,
     dir: &Path,
     count: u32,
+    mut positions: Option<&mut Positions>,
 ) -> Result<Vec<FrameEntry>, Box<dyn Error>> {
     let mut frames = Vec::new();
     for _ in 0..count {
         if run.tick() == SequenceStatus::Finished {
             break;
+        }
+        if let Some(positions) = positions.as_deref_mut() {
+            positions.record(run)?;
         }
         // The frame just drawn is the run's cursor minus one, so a part the
         // shell started at its anchor dumps that anchor's own frame first.
@@ -126,6 +141,7 @@ fn by_index(
     run: &mut Sequence,
     dir: &Path,
     wanted: &[u32],
+    mut positions: Option<&mut Positions>,
 ) -> Result<Vec<FrameEntry>, Box<dyn Error>> {
     let start = run.index();
     // An index the run starts after is a mistake in the command, not an empty
@@ -150,6 +166,9 @@ fn by_index(
     loop {
         if run.tick() == SequenceStatus::Finished {
             break;
+        }
+        if let Some(positions) = positions.as_deref_mut() {
+            positions.record(run)?;
         }
         let index = run.index() - 1;
         if wanted.contains(&index) {
@@ -225,6 +244,49 @@ fn run_for(run: &mut Sequence, dir: &Path, seconds: f64) -> Result<FrameEntry, B
         return Err(format!("--run-seconds {seconds} ended before the run drew a frame").into());
     };
     Ok(dump(dir, run, index)?)
+}
+
+/// `--positions FILE`: the run's timeline, one CSV line a tick —
+/// `index,pass,part,order,row`.
+///
+/// `index` is the frame the tick drew at, in the run's numbering (the manifest's
+/// `index_origin` says which); `pass` is [`Sequence::pass`]; `part` is the part whose
+/// picture is up, named as the dump names a frame ([`FrameEntry::part`] — the cue wait's
+/// and a hold's ticks are the last part's); `order` and `row` are the music's published
+/// position, or empty for a run with no player. This is what a comparison of the whole run
+/// against the original's traces reads (`tests/fullrun.rs`): the music clock *is* the
+/// picture (D13), so a run's timeline is where its seams show.
+pub(crate) struct Positions {
+    out: BufWriter<fs::File>,
+}
+
+impl Positions {
+    /// Create (or truncate) `path` and write the header.
+    pub(crate) fn create(path: &Path) -> io::Result<Positions> {
+        let mut out = BufWriter::new(fs::File::create(path)?);
+        writeln!(out, "index,pass,part,order,row")?;
+        Ok(Positions { out })
+    }
+
+    /// The line for the tick `run` has just drawn.
+    fn record(&mut self, run: &Sequence) -> io::Result<()> {
+        let (order, row) = match run.music_position() {
+            Some(position) => (position.order.to_string(), position.row.to_string()),
+            None => (String::new(), String::new()),
+        };
+        writeln!(
+            self.out,
+            "{},{},{},{order},{row}",
+            run.index() - 1,
+            run.pass(),
+            run.part()
+        )
+    }
+
+    /// Flush, so a write that fails is the run's failure and not a short file.
+    pub(crate) fn finish(mut self) -> io::Result<()> {
+        self.out.flush()
+    }
 }
 
 /// The manifest's word for a run's numbering: `boot` when its indices are the
@@ -312,6 +374,11 @@ fn write_manifest(dir: &Path, run: &Sequence, frames: &[FrameEntry]) -> Result<(
                 start_frame: run.music_start_frame()?,
             })
         }),
+        starts: run
+            .starts()
+            .iter()
+            .map(|&(index, part)| Start { index, part })
+            .collect(),
         frames,
     };
     let mut json = serde_json::to_vec_pretty(&manifest)?;
@@ -369,7 +436,18 @@ struct Manifest<'a> {
     /// mid-run restart's — recorded the way a capture records the argument it started the
     /// original with (D13). `null` for a run with no player.
     music: Option<MusicSetup<'a>>,
+    /// Every plan part the run started, at the index its first tick drew at
+    /// ([`Sequence::starts`]) — the run's own boundary table. A hold, a loop seam and the
+    /// post-PANICEND cue wait are the shell's and not listed.
+    starts: Vec<Start>,
     frames: &'a [FrameEntry],
+}
+
+/// One entry of the manifest's `starts`.
+#[derive(Debug, Serialize)]
+struct Start {
+    index: u32,
+    part: &'static str,
 }
 
 /// What a run's music started as, for the manifest.
@@ -453,7 +531,7 @@ mod tests {
         // the picture the part left, because that is what the loader shows.
         let dir = scratch("hold");
         let mut run = run_of(false);
-        let frames = by_index(&mut run, &dir, &[0, 1, 5]).unwrap();
+        let frames = by_index(&mut run, &dir, &[0, 1, 5], None).unwrap();
         assert_eq!(frames.len(), 3, "every requested index was dumped");
         assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [0, 1, 5]);
         assert!(!run.finished(), "and by holding, not by ending the run");
@@ -473,7 +551,7 @@ mod tests {
         // a hole in a dump reads as a keyframe that matched.
         let dir = scratch("ended");
         let mut run = run_of(true);
-        let error = by_index(&mut run, &dir, &[0, 5]).unwrap_err().to_string();
+        let error = by_index(&mut run, &dir, &[0, 5], None).unwrap_err().to_string();
         assert!(error.contains("before reaching 5"), "{error}");
         assert!(run.finished(), "the run ended, so there is no hold to answer from");
 
@@ -499,7 +577,7 @@ mod tests {
             },
         )
         .unwrap();
-        let frames = by_index(&mut run, &dir, &[1, 100]).unwrap();
+        let frames = by_index(&mut run, &dir, &[1, 100], None).unwrap();
         assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [1, 100]);
         assert!(run.ended(), "two frames and 84 exit ticks are behind index 100");
         assert!(!run.finished(), "ended is not finished");
@@ -513,10 +591,47 @@ mod tests {
     }
 
     #[test]
+    fn positions_writes_one_line_a_tick_with_the_part_whose_picture_is_up() {
+        // `short` draws frames 0 and 1 and retires; the hold's frames 2..=5 are its
+        // picture, so they are named for it. A run with no player has no position, and the
+        // two columns are empty rather than a made-up 0:0.
+        let dir = scratch("positions");
+        let path = dir.join("positions.csv");
+        let mut run = run_of(false);
+        let mut log = Positions::create(&path).unwrap();
+        by_index(&mut run, &dir, &[5], Some(&mut log)).unwrap();
+        log.finish().unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "index,pass,part,order,row");
+        assert_eq!(
+            &lines[1..],
+            ["0,1,short,,", "1,1,short,,", "2,1,short,,", "3,1,short,,", "4,1,short,,",
+             "5,1,short,,"]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_manifest_names_every_start() {
+        let dir = scratch("starts");
+        let mut run = run_of(false);
+        let frames = by_index(&mut run, &dir, &[3], None).unwrap();
+        write_manifest(&dir, &run, &frames).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["starts"], serde_json::json!([{ "index": 0, "part": "short" }]));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn an_empty_list_of_indices_is_refused_rather_than_dumped() {
         let dir = scratch("empty");
         let mut run = run_of(false);
-        let error = by_index(&mut run, &dir, &[]).unwrap_err().to_string();
+        let error = by_index(&mut run, &dir, &[], None).unwrap_err().to_string();
         assert!(error.contains("no indices"), "{error}");
 
         let _ = std::fs::remove_dir_all(&dir);
