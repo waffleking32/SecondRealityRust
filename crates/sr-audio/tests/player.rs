@@ -2177,9 +2177,9 @@ fn the_timeline_effects_the_modules_carry() {
 /// **A14(a), settled: the flush clears the accumulator word it reads, so nothing marks the plane.**
 ///
 /// Both flushes load a zero into a 32-bit register before the loop and store that register
-/// back over every accumulator dword they have just read: the mono flush's `mov $0x0,%esp`
+/// back over every accumulator dword they have just read: the stereo flush's `mov $0x0,%esp`
 /// (`+0x2ce5`, with `%esp` saved at `+0x2cde` and interrupts off at `+0x2ce4`) and its
-/// `mov %esp,(%si)` (`+0x2cf1`), and the stereo flush's `mov $0x0,%ecx` (`+0x30d0`) and
+/// `mov %esp,(%si)` (`+0x2cf1`), and the mono flush's `mov $0x0,%ecx` (`+0x30d0`) and
 /// `mov %ecx,(%si)` (`+0x30e8`). The four zero bytes of each immediate are a `LIDATA` run, and
 /// the builder's old misreading of every such run as `0x01` is where the "`0x0101` marker"
 /// came from (`segment_image`'s note; `APPROXIMATIONS.md` A14(a)). So the plane a flush leaves

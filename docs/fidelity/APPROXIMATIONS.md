@@ -983,8 +983,8 @@ that is what the release of record plays in both modules' runs ((b) below).
 
 **(a) The marker — settled (Phase 9 Task 10): there is none, and the code's index is the
 measured one.** The flush loads a zero into a 32-bit register and stores it back over every
-accumulator word it reads: the mono flush's `mov $0x0,%esp` (`+0x2ce5`) and `mov %esp,(%si)`
-(`+0x2cf1`), the stereo flush's `mov $0x0,%ecx` (`+0x30d0`) and `mov %ecx,(%si)` (`+0x30e8`). The
+accumulator word it reads: the stereo flush's `mov $0x0,%esp` (`+0x2ce5`) and `mov %esp,(%si)`
+(`+0x2cf1`), the mono flush's `mov $0x0,%ecx` (`+0x30d0`) and `mov %ecx,(%si)` (`+0x30e8`). The
 immediates' four zero bytes are `LIDATA` runs, and the segment builder in `tests/player.rs` decoded
 every such run as `0x01` until Phase 9 Task 6b fixed it — which is where the `0x0101` "marker" below
 came from. So the plane a flush leaves is zero, the object's index is `0x400 + value` in every
