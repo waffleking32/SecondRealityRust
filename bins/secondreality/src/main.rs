@@ -11,6 +11,8 @@ mod audio;
 mod cli;
 mod endscreen;
 mod headless;
+mod menu_text;
+mod settings;
 mod parts;
 mod shell;
 mod vault_menu;
@@ -28,10 +30,16 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
-                     [--vault] [--loop] [/gravis]
+                     [--vault] [--loop] [--no-setup] [/gravis]
                      [--sound-quality authentic|enhanced]
 run:   with no --part and no --block, the demo plays from its beginning: no
        argument is SECOND 1, as it is in the original.
+setup: a windowed demo run opens on a settings screen first, as the original asked its
+       questions every time: Sound, Sound quality, Demo looping, Aspect and Border.
+       Up and Down choose a row, Left and Right change it, Enter starts the run and
+       ESC leaves (the demo's end box is printed). The flags give the initial values and
+       nothing is saved. --no-setup and /gravis skip it, and --part, --vault and
+       --headless never show it.
 loop:  --loop plays a block's run for ever, as the setup screen's looping row
        does: no end scroller, and after CRED the music fades and the demo
        begins again at ALKU (close the window to leave). /gravis plays once
@@ -43,7 +51,7 @@ keys:  in a window, ESC ends the part that is playing, and Ctrl skips it.
        window closes and the demo's end box is printed here; ESC during the
        fade closes the window at once. A --part run holds its last screen
        until ESC closes the window. No other key does anything, and nothing
-       waits on a key.
+       waits on a key but the setup screen.
 vault: --vault opens the window's menu for the three unreleased effects — GRID,
        HARD and TWIST. Up and Down choose, Enter plays, ESC at a held part
        returns to the menu, and ESC in the menu closes the window. The menu is

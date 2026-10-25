@@ -269,13 +269,14 @@ fn a_machine_with_no_audio_device_says_so_and_keeps_running() {
     //
     // A window on a machine with no display, so SDL's own dummy video driver: the run's
     // *pixels* are not what this test is about, only that it starts, says the line and is
-    // still alive to be killed when it does.
+    // still alive to be killed when it does. `--no-setup`: a windowed demo run opens on the
+    // settings screen, which waits for a key and opens the card only after Enter (D44).
     let mut child = Command::new(env!("CARGO_BIN_EXE_secondreality"))
         .current_dir(repository_root())
         .env("SDL_VIDEODRIVER", "dummy")
         .env("SDL_RENDER_DRIVER", "software")
         .env("SDL_AUDIODRIVER", "sr-not-a-driver")
-        .args(["--block", "5"])
+        .args(["--block", "5", "--no-setup"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -317,5 +318,39 @@ fn a_machine_with_no_audio_device_says_so_and_keeps_running() {
          exited with {:?}, stderr: {}",
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_demo_run_waits_on_the_settings_screen_and_opens_no_card_until_enter() {
+    // **The settings screen, as behaviour.** A windowed demo run with no `--no-setup` shows
+    // it and waits: after three seconds the run is still alive, nothing is playing and no
+    // sound card has been opened — the card is opened after Enter, at the rate the choice
+    // gives (D44). SDL's dummy video driver stands in for a display, and no key arrives, so
+    // the child is killed rather than left to wait.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_secondreality"))
+        .current_dir(repository_root())
+        .env("SDL_VIDEODRIVER", "dummy")
+        .env("SDL_RENDER_DRIVER", "software")
+        .env("SDL_AUDIODRIVER", "dummy")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let alive = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        alive,
+        "the run ended by itself instead of waiting on the settings screen: {:?}, stdout: \
+         {stdout}, stderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !stdout.contains("audio at") && !stdout.contains("no audio device"),
+        "a sound card was looked for before Enter: {stdout}"
     );
 }

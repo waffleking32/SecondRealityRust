@@ -28,6 +28,13 @@
 //! seam between two passes acts on nothing, and the close button is the way out
 //! (the box is printed then).
 //!
+//! A windowed **demo run** opens on the settings screen first ([`crate::settings`], D44):
+//! five rows drawn in the demo's own font, whose choices become the run's settings. Enter
+//! starts the run, ESC leaves without one (`main` prints the end box, as `fatalexit` does),
+//! and `--no-setup` or `/gravis` skip it. The loop is the vault's: draw, wait in bounded
+//! `wait_event_timeout`s, re-present on an expose, and re-present under the new
+//! [`PresentOptions`] when Aspect or Border change.
+//!
 //! `--vault` adds a menu over the three unreleased effects (`parts::vault`):
 //! it draws a 320×200 picture ([`crate::vault_menu`]), starts the chosen one as
 //! a one-part run on the same loop, and — because the menu is where the run
@@ -53,6 +60,7 @@ use sr_engine::{IndexedFrame, Tick};
 
 use crate::audio::Device;
 use crate::cli::Cli;
+use crate::settings::{self, Settings, SettingsAction, SettingsKey, Setup};
 use crate::shell::Sequence;
 use crate::vault_menu::{self, Menu, MenuAction, MenuKey};
 
@@ -62,6 +70,9 @@ const TITLE: &str = "Second Reality";
 /// The menu's title bar. A run replaces it with its status line while it
 /// plays; the menu puts it back when the run ends.
 const VAULT_TITLE: &str = "Second Reality — vault";
+
+/// The settings screen's title bar, until the run replaces it with its status line.
+const SETUP_TITLE: &str = "Second Reality — setup";
 
 /// The menu's font: `ALKU/FONA.UH` read as `ALKU/MAIN.C`'s text routine reads
 /// it — 20-column cells, 30 rows, first cell `A` (`sr_assets::font` documents
@@ -116,6 +127,12 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         return vault_loop(&video, &timer, &mut events, &opts);
     }
 
+    // A windowed demo run asks for its settings first (D44); the run is built from
+    // what they say, so it is not built yet.
+    if cli.shows_setup() {
+        return setup_run(cli);
+    }
+
     // The same run `--headless` dumps: a block's ported parts in the demo's own
     // order, or the one part `--part` named, numbered in the reference's frame
     // space.
@@ -168,6 +185,128 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         return Err(format!("--audio-dump: {error}").into());
     }
     Ok(())
+}
+
+/// A demo run that opens on the settings screen: the screen, then the run it chose.
+///
+/// The window is opened once, on the screen's own frame, and the run is built and its
+/// device opened only after Enter — a changed Sound quality has to reach the card's open
+/// rate (`PlayerOptions::output_rate`), and a changed Sound has to decide whether there is
+/// a card. The window then resizes to the run's frames as it does between a vault menu and
+/// the part it starts. ESC and the close button leave without a run.
+fn setup_run(cli: &Cli) -> Result<(), Box<dyn Error>> {
+    let font = menu_font()?;
+    let sdl = sdl2::init()?;
+    let video = sdl.video()?;
+    let timer = sdl.timer()?;
+
+    let initial = Settings::from_cli(cli);
+    let mut frame = IndexedFrame::new(settings::FRAME_WIDTH, settings::FRAME_HEIGHT);
+    settings::draw(&initial, 0, &mut frame, &font);
+    let opts = initial.present_options(cli.scale);
+    let raster = output_size(&frame, &opts);
+    let window = video
+        .window(SETUP_TITLE, raster.0 as u32, raster.1 as u32)
+        .position_centered()
+        .build()?;
+    let mut canvas = window.into_canvas().build()?;
+    let creator = canvas.texture_creator();
+    let mut texture = streaming_texture(&creator, raster)?;
+    let mut screen = Screen {
+        canvas: &mut canvas,
+        creator: &creator,
+        buffer: FrameBuffer::new(0, 0),
+        raster,
+        status: SETUP_TITLE.to_string(),
+    };
+    let mut events = sdl.event_pump()?;
+
+    let Some(chosen) = setup_loop(&mut screen, &mut texture, &mut events, &font, initial, cli.scale)?
+    else {
+        return Ok(());
+    };
+
+    // The choices are the command line the run is built from.
+    let mut cli = cli.clone();
+    chosen.apply(&mut cli);
+    let opts = chosen.present_options(cli.scale);
+    let mut run = crate::new_sequence(&cli)?;
+    let mut audio = audio_of(&sdl, &mut run, &cli)?;
+    let end = present_run(
+        &mut screen,
+        &mut texture,
+        &mut events,
+        &timer,
+        &opts,
+        &mut run,
+        &mut audio,
+        cli.block,
+        false,
+    )?;
+    debug_assert_eq!(end, RunEnd::Close, "a normal run has no menu to return to");
+    drop(screen);
+    drop(audio);
+    if let Some(error) = run.audio_error() {
+        return Err(format!("--audio-dump: {error}").into());
+    }
+    Ok(())
+}
+
+/// The settings screen's loop: the settings the user chose when Enter was pressed, or
+/// `None` for ESC or the close button.
+///
+/// The screen is static between keys, so the loop blocks in bounded waits and cannot spin.
+/// An expose presents the same frame again; a key that changes Aspect or Border presents the
+/// redrawn frame under the new options, which resizes the window.
+fn setup_loop<'a>(
+    screen: &mut Screen<'a>,
+    texture: &mut Texture<'a>,
+    events: &mut EventPump,
+    font: &Font,
+    initial: Settings,
+    scale: u32,
+) -> Result<Option<Settings>, Box<dyn Error>> {
+    let mut setup = Setup::new(initial);
+    let mut frame = IndexedFrame::new(settings::FRAME_WIDTH, settings::FRAME_HEIGHT);
+    settings::draw(&setup.settings, setup.selected, &mut frame, font);
+    screen.present(texture, &frame, &setup.settings.present_options(scale))?;
+
+    loop {
+        let Some(event) = events.wait_event_timeout(MENU_WAIT_MS) else {
+            continue;
+        };
+        if is_expose(&event) {
+            screen.present(texture, &frame, &setup.settings.present_options(scale))?;
+            continue;
+        }
+        let action = match event {
+            Event::Quit { .. } => return Ok(None),
+            Event::KeyDown { keycode, .. } => setup.key(settings_key(keycode)),
+            _ => continue,
+        };
+        match action {
+            SettingsAction::Redraw => {
+                settings::draw(&setup.settings, setup.selected, &mut frame, font);
+                screen.present(texture, &frame, &setup.settings.present_options(scale))?;
+            }
+            SettingsAction::Start => return Ok(Some(setup.settings)),
+            SettingsAction::Exit => return Ok(None),
+        }
+    }
+}
+
+/// The settings key an SDL keycode asks for; a key the screen does not use is
+/// [`SettingsKey::Other`].
+fn settings_key(keycode: Option<Keycode>) -> SettingsKey {
+    match keycode {
+        Some(Keycode::Up) => SettingsKey::Up,
+        Some(Keycode::Down) => SettingsKey::Down,
+        Some(Keycode::Left) => SettingsKey::Left,
+        Some(Keycode::Right) => SettingsKey::Right,
+        Some(Keycode::Return | Keycode::KpEnter) => SettingsKey::Enter,
+        Some(Keycode::Escape) => SettingsKey::Escape,
+        _ => SettingsKey::Other,
+    }
 }
 
 /// How a presented run ends.
@@ -862,6 +1001,77 @@ mod tests {
             "Down wrapped from the last row to the first"
         );
         assert_eq!(menu.key(menu_key(Some(Keycode::Escape))), MenuAction::Close);
+    }
+
+    #[test]
+    fn the_settings_keys_map_to_the_settings_actions() {
+        assert_eq!(settings_key(Some(Keycode::Up)), SettingsKey::Up);
+        assert_eq!(settings_key(Some(Keycode::Down)), SettingsKey::Down);
+        assert_eq!(settings_key(Some(Keycode::Left)), SettingsKey::Left);
+        assert_eq!(settings_key(Some(Keycode::Right)), SettingsKey::Right);
+        assert_eq!(settings_key(Some(Keycode::Return)), SettingsKey::Enter);
+        assert_eq!(settings_key(Some(Keycode::KpEnter)), SettingsKey::Enter);
+        assert_eq!(settings_key(Some(Keycode::Escape)), SettingsKey::Escape);
+        for other in [Keycode::Space, Keycode::LCtrl, Keycode::A, Keycode::Tab] {
+            assert_eq!(settings_key(Some(other)), SettingsKey::Other, "{other:?}");
+        }
+        assert_eq!(settings_key(None), SettingsKey::Other);
+        // Through the reducer: Down, Right on Sound quality, then Enter starts with it.
+        let mut setup = Setup::new(Settings::from_cli(&Cli::default()));
+        for key in [Keycode::Down, Keycode::Right] {
+            assert_eq!(setup.key(settings_key(Some(key))), SettingsAction::Redraw);
+        }
+        assert_eq!(setup.settings.quality, sr_audio::Quality::Enhanced);
+        assert_eq!(setup.key(settings_key(Some(Keycode::Return))), SettingsAction::Start);
+        assert_eq!(setup.key(settings_key(Some(Keycode::Escape))), SettingsAction::Exit);
+    }
+
+    /// The font strip as unit tests find it: they run in the binary's directory.
+    fn settings_font() -> Font {
+        let image = load_path(Path::new("../../assets/ALKU/FONA.UH")).expect("the font strip");
+        Font::from_image(image, MENU_CELL, 'A').expect("the strip read as ALKU reads it")
+    }
+
+    #[test]
+    fn changing_the_aspect_resizes_the_window() {
+        // The raster the window is sized to is `output_size` of the screen's frame under the
+        // options the settings give; Aspect is one of the options' fields, so changing it
+        // changes the size, and `Screen::present` resizes on exactly that comparison.
+        let font = settings_font();
+        let mut frame = IndexedFrame::new(settings::FRAME_WIDTH, settings::FRAME_HEIGHT);
+        let mut setup = Setup::new(Settings::from_cli(&Cli::default()));
+        settings::draw(&setup.settings, setup.selected, &mut frame, &font);
+        let size = |setup: &Setup| output_size(&frame, &setup.settings.present_options(1));
+        let four_three = size(&setup);
+
+        setup.selected = 3; // Aspect
+        assert_eq!(setup.key(SettingsKey::Right), SettingsAction::Redraw);
+        let square = size(&setup);
+        assert_ne!(four_three, square, "square pixels is another raster, so the window resizes");
+        // 4:3 stretches 520x325 by 6/5 into a 4:3 box (624x468); square keeps 520x325. The
+        // border pads both by the same amount.
+        let pad = (four_three.0 - 624) / 2;
+        assert!(pad > 0, "the default run has its border");
+        assert_eq!(four_three, (624 + 2 * pad, 468 + 2 * pad));
+        assert_eq!(square, (520 + 2 * pad, 325 + 2 * pad));
+        assert_eq!(setup.key(SettingsKey::Left), SettingsAction::Redraw);
+        assert_eq!(size(&setup), four_three, "and back");
+    }
+
+    #[test]
+    fn changing_the_border_resizes_the_window() {
+        // The settings frame carries an overscan colour, so the Border row pads the raster.
+        let font = settings_font();
+        let mut frame = IndexedFrame::new(settings::FRAME_WIDTH, settings::FRAME_HEIGHT);
+        let mut setup = Setup::new(Settings::from_cli(&Cli::default()));
+        settings::draw(&setup.settings, setup.selected, &mut frame, &font);
+        let with = output_size(&frame, &setup.settings.present_options(1));
+        setup.selected = 4; // Border
+        setup.key(SettingsKey::Right);
+        assert!(!setup.settings.border);
+        let without = output_size(&frame, &setup.settings.present_options(1));
+        assert_eq!(without, (624, 468));
+        assert!(with.0 > without.0 && with.1 > without.1, "{with:?} vs {without:?}");
     }
 
     #[test]

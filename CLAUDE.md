@@ -131,6 +131,12 @@ status line: the part whose picture is up, that frame's index in the **reference
 block it came from. A run that has stopped says why, and a run whose index is *not* the
 reference's — `--part tunneli` numbers its own frames from zero — says that instead.
 
+A windowed demo run opens on **the settings screen** first (D44): Sound, Sound quality, Demo looping,
+Aspect and Border, drawn in `ALKU/FONA.UH` — Up/Down choose, Left/Right change, Enter starts and ESC
+leaves (printing the end box). It is the port's stand-in for `START.EXE`'s `menu()`; nothing is saved,
+the flags are the initial values, and `--no-setup` or `/gravis` skip it. `--part`, `--vault` and
+`--headless` never show it, so the only run that waits on a key is a demo run's setup.
+
 `--headless` runs the same sequence on a machine with no display, and is what the comparisons below
 use.
 

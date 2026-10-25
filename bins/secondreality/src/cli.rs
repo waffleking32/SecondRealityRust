@@ -200,6 +200,11 @@ impl Cli {
                 }
                 "--vault" => cli.vault = true,
                 "--loop" => cli.looping = shell::Looping::On,
+                // The setup screen is on by default for a windowed demo run
+                // ([`Cli::shows_setup`]); this is the way to start without it, as
+                // `/gravis` does in the original (`START.C:89-95`) — the flags are then
+                // the run's settings.
+                "--no-setup" => cli.setup = false,
                 // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
                 // characters, any case — is `m_looping=2` and no setup menu.
                 switch if is_gravis(switch) => {
@@ -219,6 +224,15 @@ impl Cli {
         }
         cli.validate()?;
         Ok(cli)
+    }
+
+    /// Whether the run opens on the settings screen ([`crate::settings`]): a **windowed
+    /// demo run** — one built from a block, which is also the run with no argument — that
+    /// has not skipped it (`--no-setup`, `/gravis`). Never `--part` or `--vault`, whose
+    /// runs are not the demo's, and never `--headless`, which opens no window and waits on
+    /// no key.
+    pub fn shows_setup(&self) -> bool {
+        self.setup && !self.headless && !self.vault && self.block.is_some()
     }
 
     /// The part a one-part run names, whether `--part` gave it or not.
@@ -901,5 +915,31 @@ mod tests {
         assert_eq!(cli.aspect, Aspect::SquarePixels);
         assert!(!cli.border);
         assert!(cli.no_audio);
+    }
+
+    #[test]
+    fn the_screen_shows_only_for_a_windowed_demo_run() {
+        // The demo's own run, in a window: no argument, a named block, a looping run.
+        for args in [&[][..], &["--block", "3"], &["--block", "U"], &["--loop"],
+                     &["--no-audio", "--aspect", "square"], &["--audio-dump", "a.wav"]] {
+            assert!(parse(args).unwrap().shows_setup(), "{args:?} opens the settings screen");
+        }
+        // Everything else starts as it always did.
+        assert!(!parse(&["--part", "glenz"]).unwrap().shows_setup(), "--part");
+        assert!(!parse(&["--vault"]).unwrap().shows_setup(), "--vault");
+        assert!(!parse(&["--no-setup"]).unwrap().shows_setup(), "--no-setup");
+        assert!(!parse(&["--no-setup", "--block", "2"]).unwrap().shows_setup());
+        assert!(!parse(&["/gravis"]).unwrap().shows_setup(), "/gravis skips it (START.C:89)");
+        assert!(!parse(&["/GRAVIS", "--block", "2"]).unwrap().shows_setup());
+        assert!(
+            !parse(&["--headless", "--frames", "1", "--dump-dir", "d"]).unwrap().shows_setup(),
+            "a headless run opens no window"
+        );
+        // `--no-setup` is a flag and changes nothing else.
+        let plain = parse(&[]).unwrap();
+        let skipped = parse(&["--no-setup"]).unwrap();
+        assert!(plain.setup && !skipped.setup);
+        assert_eq!(skipped.block, plain.block);
+        assert_eq!(skipped.looping, plain.looping);
     }
 }

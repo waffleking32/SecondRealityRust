@@ -5,49 +5,29 @@
 //! selection is a new surface and **not** a fidelity one: there is no original
 //! menu frame to match, so this module invents the picture — but it draws its
 //! text with the demo's own font, `ALKU/FONA.UH`, read by the same
-//! [`Font`] the parts use, at 1:1.
+//! [`Font`] the parts use, at 1:1 ([`crate::menu_text`], shared with the settings
+//! screen).
 //!
 //! **The state is a reducer**, not a loop: [`Menu::key`] is a function of the
 //! key and the current selection alone, so the menu's behaviour is testable
 //! without a window. The window owns the loop and the clock; this module owns
 //! nothing but the selection and the pixels.
-//!
-//! The strip's cells are proportional runs of ink, 3..25 columns wide
-//! (`sr_assets::font`'s module docs): a glyph advances by its own width here,
-//! a space by ten columns, and the 2-bit strip values 1..3 are the ink levels
-//! of whichever palette group the text is drawn in (0 is the black
-//! background). Each group is three consecutive palette entries, faint to
-//! full, so the strip's own antialiasing survives.
 
 use sr_assets::font::Font;
-use sr_engine::{IndexedFrame, Palette};
+use sr_engine::IndexedFrame;
 
+#[cfg(test)]
+use crate::menu_text::text_width;
+use crate::menu_text::{
+    draw_centered, draw_marker, draw_text, menu_palette, ENTRY_INK, FOOTER_INK, SELECT_INK,
+    TITLE_INK,
+};
 use crate::parts::vault::VAULT;
 
 /// The menu's frame is the demo's own mode-13h geometry, but it is a plain
 /// indexed frame — no surface, no view, no border.
 pub const FRAME_WIDTH: u16 = 320;
 pub const FRAME_HEIGHT: u16 = 200;
-
-/// `fonaw[32]=16` in the source's routines; the menu's own layout uses ten
-/// columns for a space.
-const SPACE_ADVANCE: i32 = 10;
-
-/// The gap between two glyphs. The strip's scanned runs exclude the blank
-/// columns between them, so a little tracking keeps the words legible when
-/// they are set side by side.
-const GLYPH_GAP: i32 = 2;
-
-/// The strip's own character order as far as the menu needs it: `A`..`X`, then
-/// `a`..`z`, the digits and the ASCII punctuation `ALKU/MAIN.C:40` lists.
-///
-/// The order is **not** ASCII-contiguous past `X`: [`Font::glyph`] indexes the
-/// scanned cells by `ch - 'A'`, so this table is what turns a character into
-/// the placeholder character whose index is the cell's place in the order.
-/// The two 215-column pictures at the end of the source's order and the two
-/// bytes before the brackets are skipped: the menu never draws them, and they
-/// are not printable ASCII.
-const FONA_ORDER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:";
 
 /// The row at which the first title line's ink starts.
 const TITLE_TOP: i32 = 22;
@@ -61,18 +41,6 @@ const MARKER_X: i32 = 96;
 const LABEL_X: i32 = 120;
 /// The footer's ink.
 const FOOTER_TOP: i32 = 172;
-
-/// How far the strip's lowercase `y` sits below an uppercase glyph's top. The
-/// order has no uppercase `Y` (it stops at `X`), so the title's `Y` is the
-/// strip's own `y` cell raised onto the cap line.
-const Y_DROP: i32 = 4;
-
-// The palette groups: entry `base + value - 1` is ink level `value` (1..=3) of
-// that role, so each role owns three consecutive entries.
-const TITLE_INK: u8 = 1;
-const ENTRY_INK: u8 = 4;
-const SELECT_INK: u8 = 7;
-const FOOTER_INK: u8 = 10;
 
 /// A key the menu acts on. Everything SDL reports that the menu does not use is
 /// [`MenuKey::Other`], so the mapping is total and the reducer has no
@@ -144,28 +112,6 @@ impl Default for Menu {
     }
 }
 
-/// The menu's colours, all six-bit DAC values: black, white, grey, amber and a
-/// dim blue, each ink group three entries wide (faint, medium, full).
-pub fn menu_palette() -> Palette {
-    let mut palette = Palette::new();
-    let groups: [(u8, [[u8; 3]; 3]); 4] = [
-        // Title: white.
-        (TITLE_INK, [[16, 16, 16], [40, 40, 40], [63, 63, 63]]),
-        // Entries: grey.
-        (ENTRY_INK, [[8, 8, 8], [22, 22, 22], [36, 36, 36]]),
-        // Selection: amber.
-        (SELECT_INK, [[24, 10, 0], [44, 22, 0], [63, 40, 0]]),
-        // Footer: dim blue.
-        (FOOTER_INK, [[4, 6, 16], [8, 12, 28], [14, 20, 44]]),
-    ];
-    for (base, shades) in groups {
-        for (step, rgb) in shades.into_iter().enumerate() {
-            palette.set_entry(base + step as u8, rgb);
-        }
-    }
-    palette
-}
-
 /// Draw the menu into `frame`.
 ///
 /// The frame is cleared to the background first; its palette timeline is reset
@@ -195,90 +141,6 @@ pub fn draw(menu: &Menu, font: &Font, frame: &mut IndexedFrame) {
     }
 
     draw_centered(frame, font, FOOTER_TOP, "UP DOWN  ENTER  ESC", FOOTER_INK);
-}
-
-/// The cell character whose index in the strip is `ch`'s place in
-/// [`FONA_ORDER`] — the placeholder [`Font::glyph`] expects.
-///
-/// The strip has no uppercase `Y` (the order runs `A`..`X`), so a `Y` falls
-/// back to the lowercase `y` cell, the font's only Y-shaped glyph; the caller
-/// raises it onto the cap line.
-fn cell_of(ch: char) -> Option<char> {
-    let position = |wanted: char| FONA_ORDER.chars().position(|c| c == wanted);
-    let at = position(ch).or_else(|| position(ch.to_ascii_lowercase()))?;
-    char::from_u32('A' as u32 + at as u32)
-}
-
-/// The glyph for `ch`, or `None` for one the strip has no cell for.
-fn glyph_of(font: &Font, ch: char) -> Option<&[u8]> {
-    font.glyph(cell_of(ch)?)
-}
-
-/// How many columns `text` occupies when drawn.
-fn text_width(font: &Font, text: &str) -> i32 {
-    let mut width = 0;
-    let mut glyphs: i32 = 0;
-    for ch in text.chars() {
-        if let Some(glyph) = glyph_of(font, ch) {
-            width += (glyph.len() / font.cell().1 as usize) as i32;
-            glyphs += 1;
-        } else {
-            // A space — the strip's blank is not a cell the scan finds — and
-            // anything else the menu does not draw.
-            width += SPACE_ADVANCE;
-        }
-    }
-    // The gap follows a glyph, never the last one.
-    width + (glyphs.saturating_sub(1) * GLYPH_GAP)
-}
-
-/// Draw `text` with its first glyph's cell at `(x, y)`, in `base`'s ink group.
-fn draw_text(frame: &mut IndexedFrame, font: &Font, x: i32, y: i32, text: &str, base: u8) {
-    let rows = font.cell().1 as usize;
-    let mut pen = x;
-    for ch in text.chars() {
-        let Some(glyph) = glyph_of(font, ch) else {
-            pen += SPACE_ADVANCE;
-            continue;
-        };
-        let width = glyph.len() / rows;
-        let shift = if ch == 'Y' { -Y_DROP } else { 0 };
-        for (row, line) in glyph.chunks_exact(width).enumerate() {
-            for (column, &value) in line.iter().enumerate() {
-                if value == 0 {
-                    continue;
-                }
-                let pixel = base + value - 1;
-                set(frame, pen + column as i32, y + row as i32 + shift, pixel);
-            }
-        }
-        pen += width as i32 + GLYPH_GAP;
-    }
-}
-
-/// Draw `text` centred horizontally, its ink starting at `y`.
-fn draw_centered(frame: &mut IndexedFrame, font: &Font, y: i32, text: &str, base: u8) {
-    let x = (frame.width as i32 - text_width(font, text)) / 2;
-    draw_text(frame, font, x, y, text, base);
-}
-
-/// The selected row's `>`: a two-pixel-wide chevron, eight rows tall.
-fn draw_marker(frame: &mut IndexedFrame, x: i32, y: i32) {
-    for row in 0..8 {
-        let arm = if row <= 3 { row } else { 7 - row };
-        for thickness in 0..2 {
-            set(frame, x + arm + thickness, y + row, SELECT_INK + 2);
-        }
-    }
-}
-
-/// One pixel, clipped to the frame.
-fn set(frame: &mut IndexedFrame, x: i32, y: i32, value: u8) {
-    if x < 0 || y < 0 || x >= frame.width as i32 || y >= frame.height as i32 {
-        return;
-    }
-    let at = y as usize * frame.width as usize + x as usize;
-    frame.pixels[at] = value;
 }
 
 #[cfg(test)]
