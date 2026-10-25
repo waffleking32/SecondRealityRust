@@ -1130,6 +1130,47 @@ fn initialiser_stores() -> BTreeMap<u8, u8> {
         }
         assert_eq!(at, to, "the stores decode to their end");
     };
+    // The routines are reached, not merely present: a `call rel16` lands at its own end plus the
+    // displacement. `_zplaysong` calls `+0x56bc` (`+0x258e`); `+0x56bc` calls the initialiser
+    // (`+0x5716`) and then the silence pass (`+0x5719`); the initialiser ends by calling
+    // `+0x4aa0` (`+0x5693`) and `+0x5781` (`+0x5696`).
+    let calls = |at: usize| -> usize {
+        assert_eq!(image[at], 0xE8, "0x{at:04X} is a near call");
+        let displacement = i16::from_le_bytes([image[at + 1], image[at + 2]]);
+        (at as i32 + 3 + i32::from(displacement)) as usize
+    };
+    for (at, target) in [
+        (0x258E, 0x56BC),
+        (0x5716, 0x5614),
+        (0x5719, 0x569A),
+        (0x5693, 0x4AA0),
+        (0x5696, 0x5781),
+    ] {
+        assert_eq!(calls(at), target, "0x{at:04X} calls 0x{target:04X}");
+    }
+    // And none of their other callees stores to `_zchn` on the measured card (output mode 5, SB
+    // Pro, at `+0x882`): `+0x4aa0` fills the AdLib register shadow at `+0x200c` and writes the
+    // AdLib ports (`+0x4a25`), globals only; `+0x5781`'s per-channel `+0x2be7` and its
+    // `+0x2bf8` return at once while `[0x89e]` is 0, which `+0x2a94` sets to 1 only for modes 7
+    // and 2; `+0x569a`'s `+0x2c7a` calls the driver's function `0xf`, and the SB driver
+    // `+0x5a60` returns for any function at or past `0xb`; and `+0x5781`'s `+0x4d88` runs only
+    // when `[0x8a3]` is set, which `+0x4aa0` clears (`+0x4ade`) just before.
+    assert_eq!(&image[0x2BE7..0x2BEF], &[0x2E, 0x80, 0x3E, 0x9E, 0x08, 0x00, 0x74, 0x08]);
+    assert_eq!(&image[0x2BF8..0x2C00], &[0x2E, 0x80, 0x3E, 0x9E, 0x08, 0x00, 0x74, 0x0A]);
+    assert_eq!(&image[0x2A94..0x2A9A], &[0x2E, 0xC6, 0x06, 0x9E, 0x08, 0x00], "[0x89e] = 0 …");
+    assert_eq!(&image[0x2AA4..0x2AAA], &[0x2E, 0xC6, 0x06, 0x9E, 0x08, 0x01], "… 1 for 7 or 2");
+    assert_eq!(&image[0x0882..0x0884], &[0x05, 0x00], "the object's output mode, SB Pro");
+    let driver = |mode: usize| u16::from_le_bytes([image[0x2A6F + 2 * mode], image[0x2A70 + 2 * mode]]);
+    assert_eq!(driver(5), 0x5A60, "mode 5's driver");
+    assert_eq!(
+        &image[0x5A60..0x5A6D],
+        &[0xD1, 0xE3, 0x83, 0xFB, 0x16, 0x73, 0x05, 0x2E, 0xFF, 0x97, 0xB6, 0x5A, 0xCB],
+        "shl %bx; cmp $0x16,%bx; jae lret — function 0xf (0x1e) is past the table"
+    );
+    assert_eq!(&image[0x2C7D..0x2C80], &[0xBB, 0x0F, 0x00], "+0x2c7a asks for function 0xf");
+    assert_eq!(&image[0x4ADE..0x4AE4], &[0x2E, 0xC6, 0x06, 0xA3, 0x08, 0x00], "[0x8a3] = 0");
+    assert_eq!(&image[0x57A4..0x57AA], &[0x2E, 0x80, 0x3E, 0xA3, 0x08, 0x00], "+0x4d88's gate");
+
     decode(0x5625, 0x5685);
     assert_eq!(&image[0x56A2..0x56A6], &[0xBE, 0xA0, 0x0D, 0xFA], "the silence pass walks `_zchn`");
     decode(0x56A6, 0x56B2);
@@ -1182,7 +1223,7 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
         last_info: 0x25,
         waveform: 0x26,
         clear_count: 0x27,
-        sample_offset: 0x2828_0000,
+        sample_offset: 0x2828,
         position: 0x2929_2929,
         position_low: 0x3030,
     };
@@ -1194,7 +1235,9 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
     let fields: [(&str, u8, u8, Read); 28] = [
         ("used (achannelused)", 0x01, 1, |c| u64::from(c.used)),
         ("aequ", 0x02, 1, |c| u64::from(c.aequ)),
-        ("sample_offset (aadr's high word)", 0x06, 2, |c| u64::from(c.sample_offset >> 16)),
+        // `sample_offset` *is* the word at `+0x06` (`Oxy` writes `info << 8` there), not its
+        // high half: the projection is the field itself.
+        ("sample_offset (aadr's high word)", 0x06, 2, |c| u64::from(c.sample_offset)),
         ("period (aspd)", 0x12, 2, |c| u64::from(c.period)),
         ("volume (avol)", 0x1a, 1, |c| u64::from(c.volume)),
         ("target_period (asldspd)", 0x20, 2, |c| u64::from(c.target_period)),
@@ -1272,8 +1315,7 @@ fn a_restart_keeps_the_previous_songs_volume_and_clears_lastins() {
     assert_ne!(handed.last_instrument, 0, "and has loaded an instrument");
 
     let mut music1 = player("MUSIC1");
-    music1.continue_from(&music0);
-    music1.play_song(0);
+    music1.restart_from(&music0, 0);
     let restarted = *music1.channel(2).unwrap();
     assert_eq!(restarted.volume, 63, "`avol` is kept");
     assert_eq!(restarted.zero_volume_count, handed.zero_volume_count, "and `a0volcut`");

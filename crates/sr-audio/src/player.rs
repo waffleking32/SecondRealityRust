@@ -350,7 +350,7 @@ impl Player {
     /// position, `lastins` and the cell fields go back to zero — **and the volume `avol`, its
     /// "volume 0" countdown `a0volcut` and the effect counters do not**, because no store in
     /// the routine names them. On a fresh player those are zero (a boot, D45); after
-    /// [`Player::continue_from`] they are the previous song's.
+    /// [`Player::restart_from`] they are the previous song's.
     ///
     /// **And it clears `[0x2000]`, the tick-in-row counter** (`+0x56ec`, `movw $0x0,0x2000` —
     /// the routine's own first instruction). The port mirrors it, because the shell's restarts
@@ -390,10 +390,10 @@ impl Player {
         self.running = true;
     }
 
-    /// Take over the state `restartmus` leaves in the object when it replaces `previous`'s
-    /// module with this one (`MAIN/U2.ASM:348-397`; D45). Call it on the freshly loaded player
-    /// and **before** [`Player::play_song`], which then writes what the song initialiser writes
-    /// over it.
+    /// `restartmus` (`MAIN/U2.ASM:348-397`; D45): take over the state the object keeps when it
+    /// replaces `previous`'s module with this one, then `_zplaysong(order)` —
+    /// [`Player::play_song`], which writes what the song initialiser writes over it. One call,
+    /// so the seek cannot come before the take-over; a boot is `play_song` on a fresh player.
     ///
     /// The object is one player, not one per module. `restartmus` runs `_zstopsong`
     /// (`+0x25c5`: `[0x939] = 0`, nothing else), `_zshutup` (`+0x25e3`: the song initialiser
@@ -427,20 +427,24 @@ impl Player {
     ///   (the trace tool's own refusal at a reload, `_np_ord reads -1`, `music-clock.md` §7),
     ///   until the new song's first row advance has come through. How far a reload gets is the
     ///   session's (D42's race: pass 2's ALKU reads the stale position in one session of seven).
-    ///   Carrying the old ring would put the port in that minority session at every restart —
-    ///   measured: it moves pass 2's ALKU hold (`bins/secondreality/tests/loop.rs`'s 10419) off
-    ///   the original's capture (A55) — and the −1 itself does not fit the published `u8`
-    ///   order (U2E's `order > 18` gate would read 255). The fresh ring's `0:0` gives GLENZ's wait (`musplus` −32: the new song's order
-    ///   0 has `zplus` 0) and U2E's gate (closed) the decision the −1 gives them; for pass 2's
+    ///   Carrying the old ring would put the port in that minority session at every restart:
+    ///   pass 2's ALKU would read the old song's `43:34`, `dis_sync` 10, and pass its four gates
+    ///   at once (`bins/secondreality/tests/loop.rs`'s
+    ///   `a_carried_ring_would_hand_pass_two_the_old_songs_position`, made exact by this file's
+    ///   `a_carried_ring_publishes_what_the_stopped_previous_player_would`; A55). And the −1
+    ///   itself does not fit the published `u8` order (U2E's `order > 18` gate would read
+    ///   255). The fresh ring's `0:0` gives GLENZ's wait (`musplus` −32: the new song's order 0
+    ///   has `zplus` 0) and U2E's gate (closed) the decision the −1 gives them; for pass 2's
     ///   ALKU the −1's `dis_sync` key is above the table (A15), and `0:0` is what the loop
     ///   test holds the original's frames to.
     /// - **the tick countdown** `[0xbe0]`, which the reload's polls keep running
     ///   (`+0x5157`). The restarted clock's phase is D34's measured four-frame wait from the
     ///   boundary (`MusicStart::restart`), not the previous song's.
-    pub fn continue_from(&mut self, previous: &Player) {
+    pub fn restart_from(&mut self, previous: &Player, order: u8) {
         self.channels = previous.channels;
         self.loops = previous.loops;
         self.zframe = previous.zframe;
+        self.play_song(order);
     }
 
     /// `_zgotosong(order, row)` (`MAIN/STMIK.H:46`): seek to `order`, `row`.
@@ -462,9 +466,13 @@ impl Player {
 
     /// `_zstopsong()` (`MAIN/STMIK.H:49`): stop playing, keeping the mixing engine on.
     ///
-    /// The original (`+0x25e3`) silences every channel and clears `[0x938]`; its ticks then
-    /// take the not-playing path (`+0x4404`), which counts but never advances a row and never
-    /// touches `_np_zframe` — which is why the tick counter is still 0 at the music's start.
+    /// The original (`+0x25c5`) writes `[0x939] = 0` and nothing else. The mixing loop then
+    /// takes the not-playing tick (`+0x513a` → `+0x515f` → `+0x4404`), which still counts the
+    /// tick and dispatches the row's effects but never advances a row, feeds order `0xffff`
+    /// (`+0x4408`) and never touches `_np_zframe` — which is why the tick counter is still 0 at
+    /// the music's start. The port's stop clears `running` as well and so does not tick at all;
+    /// nothing in the port calls this but its own tests (the shell's restarts are
+    /// [`Player::restart_from`], D45).
     pub fn stop(&mut self) {
         self.running = false;
         self.state = STATE_STOPPED;
@@ -472,6 +480,10 @@ impl Player {
 
     /// `_zshutup()` (`MAIN/STMIK.H:39`): "shuts up all the sounds playing without
     /// deinitializing the player" — the voices are Task 5's, so this records the request.
+    ///
+    /// The original (`+0x25e3`) runs the song initialiser (`+0x5614`, [`Channel::initialise`]),
+    /// clears the DMA buffer (`+0x2922`) and writes `[0x938] = 0`. The port records the request
+    /// and leaves the channels alone; nothing in the port calls this but its own tests.
     pub fn shut_up(&mut self) {
         self.silenced = true;
     }
@@ -1188,5 +1200,73 @@ mod tests {
         assert_eq!(samples_per_tick(MixRate::Hz40000, 120), 833);
         assert_eq!(samples_per_tick(MixRate::Hz40000, 130), 769);
         assert_eq!(samples_per_tick(MixRate::Hz20000, 120), 416);
+    }
+
+    /// **A55's counterfactual is exact**: a restart that also carried the position ring, its
+    /// pointers and the fed words would publish, poll for poll, what the previous player
+    /// publishes when it is stopped and polled on — until the new song's first row advance has
+    /// come through the ring. A stopped player's poll pushes its frozen fed words and pops the
+    /// ring exactly as the carried ring would. `bins/secondreality/tests/loop.rs`'s
+    /// `a_carried_ring_would_hand_pass_two_the_old_songs_position` uses this to read what pass
+    /// 2's ALKU would see, without the port carrying anything it does not.
+    ///
+    /// The scenario is that test's: block 5's MUSIC0 from order 25, 8,491 polls (frames 408 to
+    /// the loop's restart tick 8898), then the loop's MUSIC0 restart at order 0.
+    #[test]
+    fn a_carried_ring_publishes_what_the_stopped_previous_player_would() {
+        let module = || {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/MAIN/MUSIC0.S3M");
+            let mut module = Module::load(&std::fs::read(path).unwrap()).unwrap();
+            module.apply_tempo_patch(0x78);
+            module
+        };
+        let pass_one = || {
+            let mut player = Player::new(module(), PlayerOptions::default());
+            player.play_song(25);
+            for _ in 408..=8898 {
+                player.poll();
+            }
+            player
+        };
+        let old = pass_one();
+        let mut stopped = pass_one();
+        stopped.stop();
+        let mut carried = Player::new(module(), PlayerOptions::default());
+        carried.restart_from(&old, 0);
+        // What `restart_from` deliberately leaves behind (A55), carried here only.
+        carried.ring = old.ring;
+        carried.write = old.write;
+        carried.read = old.read;
+        carried.pushed = old.pushed;
+
+        let words = |player: &Player| {
+            let entry = player.published;
+            (entry.order, entry.pattern, entry.row, entry.zplus)
+        };
+        let mut first_feed = None;
+        let mut agreeing = 0;
+        for poll in 1..=40 {
+            carried.poll();
+            stopped.poll();
+            if first_feed.is_none() && carried.pushed != old.pushed {
+                first_feed = Some(poll);
+            }
+            if words(&carried) != words(&stopped) {
+                break;
+            }
+            agreeing = poll;
+        }
+        let first_feed = first_feed.expect("the new song advances a row");
+        assert_eq!(
+            agreeing,
+            first_feed + FIFO_DEPTH - 1,
+            "equal until the first fed row comes through the ring"
+        );
+        assert_eq!((first_feed, agreeing), (9, 18));
+        assert_eq!(
+            (words(&stopped).0, words(&stopped).2),
+            (43, 34),
+            "the old song's last fed row, which pass 2's ALKU would read"
+        );
     }
 }

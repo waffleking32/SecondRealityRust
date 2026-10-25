@@ -361,11 +361,20 @@ fn the_full_run_plays_every_part_in_the_originals_order() {
     // The shell's two restarts and its cue wait are in the run: MUSIC1 at order 0 at
     // GLENZ (`MAIN/U2.ASM:813-818`) and MUSIC0 at order 18 at U2E (`:880-885`) — each
     // boundary publishes `0:0` — the new player's ring, which a restart does not carry
-    // (`Player::continue_from`, D45) — and PANICEND's picture is up
+    // (`Player::restart_from`, D45) — and PANICEND's picture is up
     // until the cue's exit (`:833-853`), MNTSCRL starting on the next tick.
-    for part in [Part::Glenz, Part::U2e] {
+    // The new player publishes `0:0` until its first row comes through the ring (A55): its
+    // first other position, and so the length of that stretch, is pinned per restart.
+    for (part, first, at) in [(Part::Glenz, (0, 1), 8_075), (Part::U2e, (18, 1), 34_065)] {
         let seam = FULLRUN_SEAMS[part as usize];
         assert_eq!(run.timeline[&seam.start].position, Some((0, 0)), "{}: the restart", seam.part);
+        let (frame, tick) = run
+            .timeline
+            .range(seam.start..)
+            .find(|(_, tick)| tick.position != Some((0, 0)))
+            .expect("the new song publishes a row");
+        assert_eq!((*frame, tick.position), (at, Some(first)), "{}: the first new row", seam.part);
+        println!("{}: 0:0 from {} for {} frames, then {first:?}", seam.part, seam.start, at - seam.start);
     }
     assert_eq!(run.timeline[&CUE_EXIT.1].part, "panicend");
     // It exits on the row the original's does (`second1e`: 42:0 at 16629, 42:1 at 16630):

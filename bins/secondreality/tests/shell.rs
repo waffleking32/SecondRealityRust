@@ -510,7 +510,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // publishes `1:0` at 8,087, 30 ticks after the boundary (D34's four of
     // waiting, then 26 polls: four rows of speed 3 and the ring's ten). A fresh
     // player plays order 0's 64 rows and publishes `0:4` there instead (measured
-    // with the shell's `continue_from` call removed).
+    // with the shell's `restart_from` call removed).
     assert_eq!(frame_position(dumped, 8_086), "0:3", "order 0's last row");
     assert_eq!(frame_position(dumped, 8_087), "1:0", "order 0 is 4 rows long");
     //
@@ -519,10 +519,12 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // own wait exits on (8,521 is `2:45` in `second1d`). The port's published
     // position reaches it at **8,527**, whose frame is the first that differs
     // from the held picture: the zoomer's first body. That is 470 ticks after
-    // the boundary, and **6 frames after the reference's measured 8,521** —
-    // the restarted clock's lag (`second1d`'s +5 at its first row change, D34's
-    // four-tick wait from a boundary one frame after the trace's restart,
-    // 8,056) and the frame the published row takes to reach the part. Task 6
+    // the boundary, and **6 frames after the reference's measured 8,521**. Of
+    // those, 5 are the restarted clock's lag (`second1d`'s +5 at its first row
+    // change: D34's four-tick wait from a boundary one frame after the trace's
+    // restart, 8,056), and 1 is D17's: 8,521 is the trace's `2:45` sample and
+    // the reference's picture first differs at 8,522 (A38), so against the
+    // picture the port is +5 — `FULLRUN_SEAMS`' GLENZ row, 8,522 → 8,527. Task 6
     // measured 8,770 and 249 here, before the carry-over.
     let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
     let hold = rgb(8_057);

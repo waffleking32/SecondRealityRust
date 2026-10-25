@@ -242,3 +242,104 @@ fn looping_leaves_pass_one_alone() {
         assert_eq!(differing_pixels(&a, &b), 0, "{index}: the picture");
     }
 }
+
+/// **A55's counterfactual, measured: a restart that carried the old player's position ring
+/// would hand pass 2's ALKU the old song's position.** The port's restart does not carry the
+/// ring (`Player::restart_from`, D45, A55). Had it carried it, the new player would publish, until
+/// its own first row came through, exactly what the old player publishes if it is stopped and
+/// polled on (`crates/sr-audio/src/player.rs`'s
+/// `a_carried_ring_publishes_what_the_stopped_previous_player_would` proves the equality). So this
+/// test plays block 5's pass-1 MUSIC0 itself, checks it frame for frame against the run's own
+/// `--positions`, stops it at the loop's restart and reads what ALKU's first frames would see.
+///
+/// The run publishes `0:0` there, whose `dis_sync` is the word before the table (negative), so
+/// ALKU's first gate, `dis_sync() < 1` (`ALKU/MAIN.C:59`), waits for the new song — the filed
+/// capture's behaviour (D42's majority). The carried ring would publish the old song's `43:34`
+/// over every one of ALKU's frames before the new song's first row, whose `dis_sync` is 10: past
+/// all four of ALKU's gates at once, which is D42's minority session (there the stale `(43,43)`,
+/// sync 10, which leaves at once).
+#[test]
+fn a_carried_ring_would_hand_pass_two_the_old_songs_position() {
+    use sr_audio::{Module, Player, PlayerOptions};
+    use sr_engine::music::sync_from;
+
+    // The run: `--block 5 --loop`, its timeline to just past the new song's first published row.
+    let dir = std::env::temp_dir().join(format!("sr-loop-{}-ring", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let positions = dir.join("positions.csv");
+    std::fs::create_dir_all(&dir).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
+        .current_dir(repository_root())
+        .args(["--block", "5", "--loop", "--headless", "--dump-frames", "8925", "--dump-dir"])
+        .arg(dir.join("frames"))
+        .arg("--positions")
+        .arg(&positions)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let timeline: std::collections::BTreeMap<u32, (String, u8, u8)> = std::fs::read_to_string(&positions)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let fields: Vec<&str> = line.split(',').collect();
+            (fields[0].parse().unwrap(), (fields[2].to_string(), fields[3].parse().unwrap(), fields[4].parse().unwrap()))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    let position = |frame: u32| (timeline[&frame].1, timeline[&frame].2);
+
+    // The restart: the fade's end is 8898 (`the_loop_seam_is_the_originals`), whose tick installs
+    // the new player — its row already reads the new player's `0:0` — and ALKU starts at 8910.
+    const RESTART: u32 = 8898;
+    const ALKU: u32 = 8910;
+    assert_eq!(position(RESTART - 1), (43, 33), "pass 1's last published row");
+    assert_eq!(position(RESTART), (0, 0), "the new player, installed on this tick");
+    assert_eq!(timeline[&ALKU].0, "alku");
+    assert_eq!(timeline[&(ALKU - 1)].0, "cred");
+
+    // Pass 1's music, played here: block 5's MUSIC0 at order 25 with the shell's tempo patch,
+    // its clock waiting the restart recipes' four frames from the run's 404 (polled from 408),
+    // one poll a frame through the restart's own tick. It must be the run's, frame for frame.
+    let mut module = Module::load(&std::fs::read(repository_root().join("assets/MAIN/MUSIC0.S3M")).unwrap()).unwrap();
+    module.apply_tempo_patch(0x78);
+    let mut old = Player::new(module, PlayerOptions::default());
+    old.play_song(25);
+    for frame in 404..RESTART {
+        if frame >= 408 {
+            old.poll();
+        }
+        let state = old.state();
+        assert_eq!((state.order, state.row), position(frame), "pass 1's music at {frame}");
+    }
+    old.poll(); // the restart tick's own poll, before the install
+
+    // The counterfactual: the old player stopped and polled on wherever the new one is polled —
+    // from the end of `MusicStart::restart`'s four frames of waiting — up to the new song's
+    // first published row, 8921 (`the_loop_seam_is_the_originals`).
+    assert_eq!(position(8921), (0, 1), "the new song's first published row");
+    old.stop();
+    let mut carried = std::collections::BTreeMap::new();
+    for frame in RESTART + 5..8921 {
+        old.poll();
+        let state = old.state();
+        carried.insert(frame, (state.order, state.row));
+    }
+    for frame in ALKU..8921 {
+        let fresh = position(frame);
+        let stale = carried[&frame];
+        assert_eq!(fresh, (0, 0), "{frame}: the run publishes the new player's 0:0");
+        assert!(sync_from(fresh.0, fresh.1) < 1, "{frame}: ALKU's first gate waits");
+        assert_eq!(stale.0, 43, "{frame}: a carried ring publishes the old song's order");
+        assert_eq!(sync_from(stale.0, stale.1), 10, "{frame}: past all four of ALKU's gates");
+    }
+    println!(
+        "a carried ring at ALKU's first frame, {ALKU}: {:?} (sync {}); at 8920: {:?}; the run: 0:0 (sync {})",
+        carried[&ALKU],
+        sync_from(carried[&ALKU].0, carried[&ALKU].1),
+        carried[&8920],
+        sync_from(0, 0)
+    );
+    // The ring has drained to the old song's last fed row by ALKU's first frame.
+    assert_eq!((carried[&ALKU], carried[&8920]), ((43, 34), (43, 34)));
+}

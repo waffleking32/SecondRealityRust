@@ -2107,9 +2107,9 @@ entry's §3 describes; the measured seams are `APPROXIMATIONS.md` **A53**. The s
 post-GLENZ timeline 247–248 frames late, which is A38's lag and whose probable cause — `_zplaysong`
 keeps the channel volumes, so MUSIC1's order 0 breaks at row 3 — is recorded there; the port's fix is
 Task 6b.)* *(Phase 9 Task 6b: the fix is D45. On the corrected run the decision is re-checked under the
-same one-constant rule and stands: the changes still take both signs — +47 at ALKU→U2A, +18 at
-MNTSCRL→LNS&ZOOM, +10 at RAYSCRL→3DSINFLD — and the two music-pinned seams still need 6 and 59–68
-frames; the figures are A53's and §26.8's.)*
+same one-constant rule and stands: the changes still take both signs — every one of the eighteen
+seams, positive at eight (ALKU→U2A +47, BEGLOGO→GLENZ +42, TUNNELI→TECHNO +9, PANICEND→MNTSCRL +8, MNTSCRL→LNS&ZOOM +18, MINVBALL→RAYSCRL +9, RAYSCRL→3DSINFLD +10, U2E→ENDLOGO +34) and negative at ten (U2A→PAM −50, PAM→BEGLOGO −34, GLENZ→TUNNELI −12, TECHNO→PANICEND −14, LNS&ZOOM→PLZPART −13, PLZPART→MINVBALL −4, 3DSINFLD→JPLOGO −24, JPLOGO→U2E −37, ENDLOGO→CRED −8, CRED→ENDSCRL −69) — and the two music-pinned seams still
+need 6 and 59–68 frames; the figures are A53's and §26.8's.)*
 
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
@@ -2797,10 +2797,10 @@ in `EscapeKey::apply`.
 Decided: a mid-run restart is **the same player object taking a new module**, not a fresh player.
 The shell's three restarts — block 1's `MUSIC1@0` at GLENZ (`MAIN/U2.ASM:813-818`), `MUSIC0@18`
 at U2E (`:880-885`) and the loop's `MUSIC0@0` (`:929-932`) — all go through `install_music`, which
-now builds the new module's player, calls `Player::continue_from(&old)` and only then
+now builds the new module's player, calls `Player::restart_from(&old)` and only then
 `play_song(order)`. `play_song`'s channel clear is `Channel::initialise`: it writes exactly the
 song initialiser's stores and keeps every other field. An entry install has no old player and is
-a boot. The interface change is two `pub` methods in `sr-audio`, `Player::continue_from(&mut
+a boot. The interface change is two `pub` methods in `sr-audio`, `Player::restart_from(&mut
 self, &Player)` and `Channel::initialise(&mut self)` (which replaces the crate-private
 `Channel::reset`), plus the one call in `install_music`. `MusicSource` is unchanged.
 
@@ -2853,14 +2853,17 @@ unchanged at the moved pairings.
 **What it does not carry, and why** (A55). The position ring, its pointers and the fed words, and
 the tick countdown `[0xbe0]`, are kept by the object too, but what it puts in them happens during
 the reload: the stopped tick feeds order `0xffff` (`+0x4408`), and how many polls a reload spends
-is the session's (D42's race). The port has no reload (A53). Carrying the old ring published the
-old song's order at every restart, and in an experiment that failed `tests/loop.rs` at pass 2's
-ALKU hold. The countdown's phase is D34's measured wait.
+is the session's (D42's race). The port has no reload (A53). Carrying the old ring would publish the
+old song's position at every restart, and that is measured, not argued:
+`a_carried_ring_publishes_what_the_stopped_previous_player_would` (sr-audio) and
+`tests/loop.rs`'s `a_carried_ring_would_hand_pass_two_the_old_songs_position` show pass 2's ALKU
+would read `43:34`, `dis_sync` 10, and pass its four gates at once — D42's minority session, never
+the filed one. The countdown's phase is D34's measured wait.
 
 **D31's `LOADER_TICKS`, re-checked on the corrected run: still not adopted.** The seam changes
-still take both signs. The port is later at ALKU→U2A (+47), MNTSCRL→LNS&ZOOM (+18) and
-RAYSCRL→3DSINFLD (+10), and at TUNNELI→TECHNO and MINVBALL→RAYSCRL (+9 each). It is earlier at
-others: −50, −34, −12, −14, −13, −24, −37. The two music-pinned seams still need 6 frames and 59–68.
+still take both signs. Listing all eighteen seams, the change is positive at eight (ALKU→U2A +47, BEGLOGO→GLENZ +42, TUNNELI→TECHNO +9, PANICEND→MNTSCRL +8, MNTSCRL→LNS&ZOOM +18, MINVBALL→RAYSCRL +9, RAYSCRL→3DSINFLD +10, U2E→ENDLOGO +34) and
+negative at ten (U2A→PAM −50, PAM→BEGLOGO −34, GLENZ→TUNNELI −12, TECHNO→PANICEND −14, LNS&ZOOM→PLZPART −13, PLZPART→MINVBALL −4, 3DSINFLD→JPLOGO −24, JPLOGO→U2E −37, ENDLOGO→CRED −8, CRED→ENDSCRL −69). A delay inserted at a handover can only push a seam later, so it cannot
+produce the positive ones. The two music-pinned seams still need 6 frames and 59–68.
 One constant explains neither, so D24's rule is unmet as before (A53, `reference-indices.md`
 §26.8).
 

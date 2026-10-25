@@ -6142,7 +6142,7 @@ restart does not carry, D45), and PANICEND's picture is up through the cue wait'
 16632, MNTSCRL starting on the next.
 
 **Task 6b re-measured this subsection.** Task 6 found the run from GLENZ on ≈245 frames late; Task
-6b made a restart keep what `_zplaysong`'s initialiser does not write (D45: `Player::continue_from`),
+6b made a restart keep what `_zplaysong`'s initialiser does not write (D45: `Player::restart_from`),
 so block 1's `MUSIC1@0` plays order 0 for 4 rows, not 64, and every figure below from GLENZ on moved
 by that. Task 6's values, for the record: starts 11374, 12435, 16423, 16875, 18912, 22096, 26811,
 29392, 31466, 33498, 34286, 38199, 38807, 46430; first frames GLENZ 8770 … ENDSCRL 46432 (differences
@@ -6205,9 +6205,9 @@ the measurement.
 **The loader (D31's question).** The port hands each part over in one tick and the original spends
 the loader's frames. Modelling that as one `LOADER_TICKS` would need one constant to explain every
 seam the music does not decide, and the table refuses it: the changes across the seams take **both
-signs** (+47 at ALKU→U2A, +18 at MNTSCRL→LNS&ZOOM, +10 at RAYSCRL→3DSINFLD, +9 at TUNNELI→TECHNO and
-at MINVBALL→RAYSCRL — seams where the port is already *later*, which a delay inserted at the handover
-can only make later still — against −50, −34, −12, −14, −13, −24 and −37 elsewhere), and the two
+signs** — all eighteen seams: positive at eight (ALKU→U2A +47, BEGLOGO→GLENZ +42, TUNNELI→TECHNO +9, PANICEND→MNTSCRL +8, MNTSCRL→LNS&ZOOM +18, MINVBALL→RAYSCRL +9, RAYSCRL→3DSINFLD +10, U2E→ENDLOGO +34), seams where the port is already *later*,
+which a delay inserted at the handover can only make later still; negative at the other ten
+(U2A→PAM −50, PAM→BEGLOGO −34, GLENZ→TUNNELI −12, TECHNO→PANICEND −14, LNS&ZOOM→PLZPART −13, PLZPART→MINVBALL −4, 3DSINFLD→JPLOGO −24, JPLOGO→U2E −37, ENDLOGO→CRED −8, CRED→ENDSCRL −69) — and the two
 seams whose both sides are pinned by the music show two different loaders: the cue wait exits at
 16630 and MNTSCRL's mode set is up at 16637 (**7** frames; the port's are 16632 and 16633, **1**),
 while U2E's reload holds JPLOGO's screen, whitened, from ≤ 34100 to 34114 over a restart whose clock
@@ -6245,7 +6245,7 @@ silence passes write `achannelused`, `lastins`, the periods, the cell and the re
 parameters, and never `avol`, `a0volcut` or the effect counters), MUSIC1's order 0 (pattern 73) has
 a `C00` on channel 2 at row 3 that a fresh player's "volume 0" countdown drops (block 2's boot plays
 order 0's 64 rows, `second2b`), and MUSIC0's channel 2 is at 63 when it hands over. The port's
-restart now continues from the old player (`Player::continue_from`), takes the break, and publishes
+restart now continues from the old player (`Player::restart_from`), takes the break, and publishes
 `1:0` at 8,087; back from `second1d`'s first `1:5` (8,102) the restarted player's 46th poll puts the
 trace's restart at **8,056** — `crates/sr-audio/tests/trace.rs`'s `RESTART_TRACES` row — where the
 64-row reading put it at 7,814, while `second1b` still publishes MUSIC0 at 7,959. The tests are

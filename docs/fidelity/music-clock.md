@@ -681,7 +681,7 @@ effect counters), MUSIC1's order 0 (pattern 73) has a `C00` on channel 2 at row 
 player's "volume 0" countdown frees that channel on row 3 before its command runs — which is why
 block 2's boot (`second2b`) plays order 0's 64 rows. Block 1's MUSIC0 has channel 2 at 63 when it
 hands over, so the original takes the break and plays order 0 for 4 rows; the port's restart now
-continues from the old player (`Player::continue_from`) and does the same, publishing `1:0` at
+continues from the old player (`Player::restart_from`) and does the same, publishing `1:0` at
 8,087. Back from `second1d`'s first `1:5` (8,102) the restarted player's 46th poll puts the trace's
 restart at **8,056** (`RESTART_TRACES`), where the 64-row reading put it at 7,814 — inside BEGLOGO,
 while `second1b` still publishes MUSIC0 at 7,959:

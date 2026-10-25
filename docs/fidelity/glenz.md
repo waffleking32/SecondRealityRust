@@ -437,9 +437,11 @@ must — and does — keep the player and its clock.
   restart keep MUSIC0's channel volumes, as `_zplaysong` does (D45): MUSIC1's
   order 0 then takes its row-3 `C00` and lasts 4 rows, not 64, and the restart
   publishes `1:0` at 8,087. Before it the wait ended at 8,770, 713 ticks after
-  the boundary and 249 frames late. The 6 frames left are the restarted
-  clock's (D34's four-tick wait from the boundary; `music-clock.md`); **A38**
-  carries the measured values and the commands, not a fitted start.
+  the boundary and 249 frames late. Of the 6 frames left, 5 are the
+  restarted clock's (D34's four-tick wait from the boundary; `music-clock.md`)
+  and 1 is the trace's: 8,521 is its `2:45` sample and the reference picture
+  first differs at 8,522 (D17), so against the picture the port is +5;
+  **A38** carries the measured values and the commands, not a fitted start.
 - **The block-2 wait against `second2b`.** The reference exits at **1,111**
   (`2:45`); the port's position is `2:44` through 1,116 and `2:45` at
   **1,117**, six ticks later — a session-phase difference of A12's class,

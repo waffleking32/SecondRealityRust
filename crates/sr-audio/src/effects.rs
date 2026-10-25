@@ -155,9 +155,13 @@ impl Channel {
     /// `_zshutup` call the same routine), and **only** that: every field it does not store
     /// keeps the value it had (Phase 9 Task 6b, D45).
     ///
-    /// The stores are `+0x5625`…`+0x5681`'s loop body, then the silence pass at `+0x569a`
-    /// and `+0x5781`, which both routines end with. `ax` is zero throughout (`+0x561b`).
-    /// In the port's fields:
+    /// The stores are `+0x5625`…`+0x5681`'s loop body, then `+0x5781` (called at `+0x5696`)
+    /// and the silence pass at `+0x569a` (called after the initialiser at `+0x5719`). `ax` is
+    /// zero throughout (`+0x561b`). Their other callees store nothing into `_zchn` on the
+    /// measured card, SB Pro: `+0x4aa0` writes the AdLib register shadow and ports, `+0x2be7`
+    /// and `+0x2bf8` are gated off by `[0x89e]` = 0, the driver's function `0xf` that `+0x2c7a`
+    /// asks for is past the SB driver's table (`+0x5a60`), and `+0x4d88` is gated off by the
+    /// `[0x8a3]` = 0 that `+0x4ade` has just written. In the port's fields:
     ///
     /// | field | offset | store |
     /// |---|---|---|
@@ -201,7 +205,7 @@ impl Channel {
     /// (`tests/player.rs`'s `a_boot_starts_on_the_objects_zeroed_channels`), so the kept fields
     /// are [`Channel::default`]'s zeroes. **On a mid-song restart it is not**: `restartmus`
     /// (`MAIN/U2.ASM:348-397`) reaches it with the previous module's channels, and their volumes
-    /// and countdowns are what the new song's first rows see ([`crate::Player::continue_from`]).
+    /// and countdowns are what the new song's first rows see ([`crate::Player::restart_from`]).
     pub fn initialise(&mut self) {
         self.used = false;
         self.period = 0;

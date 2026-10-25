@@ -1284,7 +1284,7 @@ impl Sequence {
     /// `start` is the entry path's [`MusicStart::for_part`] or the restart's
     /// [`MusicStart::restart`]; the two differ in when the player's clock begins. A
     /// restart is a **new player** (`restartmus` loads the module again) that takes the old
-    /// one's state over first (`Player::continue_from`, D45): the original has one player
+    /// one's state over first (`Player::restart_from`, D45): the original has one player
     /// object, and its `_zplaysong` keeps whatever the song initialiser does not write. The
     /// run's [`AudioDump`](crate::audio::AudioDump) and sample scratch are carried across too:
     /// they belong to the run and its one output stream, not to whichever player mixes it.
@@ -1307,12 +1307,14 @@ impl Sequence {
                 // not 64). Every restart comes through here: both `MUSIC_RESTART_AT` sites and
                 // the loop seam's `LOOP_RESTART`. An entry install has no old player, and is a
                 // boot: the object's untouched state is zero, which a fresh player is.
-                crate::audio::lock(&player).continue_from(&crate::audio::lock(&old.player));
+                crate::audio::lock(&player).restart_from(&crate::audio::lock(&old.player), order);
                 (old.dump, old.scratch)
             }
-            None => (None, vec![0; 1024]),
+            None => {
+                crate::audio::lock(&player).play_song(order);
+                (None, vec![0; 1024])
+            }
         };
-        crate::audio::lock(&player).play_song(order);
         // **The frames the music missed before this run began.** A run whose first drawn
         // frame is *after* the music's own start pre-polls the frames in between, because
         // the music's advance is deterministic and does not depend on a frame being drawn:
@@ -2799,6 +2801,26 @@ mod tests {
         assert_eq!(LOOP_RESTART, (ModuleId::Music0, 0));
         assert_eq!(run.music_volume(), Some(0x40), "a reloaded module is at its own 0x40");
         assert_eq!(run.music_start_frame(), Some(run.index()), "installed at this boundary");
+        // D45: the loop's restart is `restartmus` too, so the player installed at
+        // `LOOP_RESTART` continues from pass 1's — every channel the old one's with the song
+        // initialiser's stores applied, and `_np_zframe` kept. Pass 1's player is not polled
+        // after the install, so its state is the handover's.
+        let restarted = run.audio_player().unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&restarted, &pass_one), "a new player");
+        {
+            let old = crate::audio::lock(&pass_one);
+            let new = crate::audio::lock(&restarted);
+            assert!(
+                (0..sr_audio::CHANNELS).any(|index| old.channel(index).unwrap().volume != 0),
+                "pass 1's MUSIC0 hands over a sounding channel"
+            );
+            for index in 0..sr_audio::CHANNELS {
+                let mut expected = *old.channel(index).unwrap();
+                expected.initialise();
+                assert_eq!(new.channel(index), Some(&expected), "channel {index} carried across");
+            }
+            assert_eq!(new.zframe(), old.zframe(), "the tick counter carried across");
+        }
         for tick in 1..=LOOP_RELOAD_TICKS {
             run.tick();
             assert_eq!(run.part(), "cred", "reload tick {tick}: still CRED's screen");

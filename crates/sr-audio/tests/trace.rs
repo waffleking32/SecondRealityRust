@@ -131,7 +131,7 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 /// measured boot frame; the comparison's phase alignment absorbs its sub-frame error.
 ///
 /// **Each row names the session its restart continues from** ([`Before`]): the port plays that
-/// session first and hands its state over (`Player::continue_from`), as the shell does. Under
+/// session first and hands its state over (`Player::restart_from`), as the shell does. Under
 /// that chain `second3e` and `second1f` align at +1 and +0 frames from the rows below, and
 /// their every figure is the one a fresh restart gave: MUSIC0's order 18 has no row whose
 /// length depends on a carried volume.
@@ -150,7 +150,7 @@ const RESTART_TRACES: &[(&str, &str, i64, u8, Before)] = &[
 ];
 
 /// The session a [`RESTART_TRACES`] row's restart replaces. A mid-song restart keeps the
-/// previous module's channel state (D45, `Player::continue_from`), so the port must play the
+/// previous module's channel state (D45, `Player::restart_from`), so the port must play the
 /// session before it to reach the restart with the state the reference had.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Before {
@@ -788,35 +788,33 @@ fn run(trace: &Trace) -> BTreeMap<i64, Published> {
 ///
 /// A [`RESTART_TRACES`] row is played through its chain: each earlier session from its own
 /// `_zplaysong`, one poll a frame, and at the next session's frame a new player for that module
-/// takes the old one's state over (`Player::continue_from`, D45) before it seeks — the trace's
+/// takes the old one's state over (`Player::restart_from`, D45) before it seeks — the trace's
 /// own session last, at `from`. Only the trace's own session is collected.
 fn simulate(trace: &Trace, from: i64) -> BTreeMap<i64, Published> {
+    // A session's `_zplaysong`: a boot onto a fresh player, or a restart from the one before.
+    let start = |module: &str, previous: Option<&Player>, order: u8| {
+        let mut player = Player::new(load(module), PlayerOptions::default());
+        match previous {
+            Some(old) => player.restart_from(old, order),
+            None => player.play_song(order),
+        }
+        player
+    };
     let mut previous: Option<Player> = None;
     for (index, &(module, frame, order)) in trace.before.iter().enumerate() {
         let until = trace.before.get(index + 1).map_or(from, |next| next.1);
-        let mut player = Player::new(load(module), PlayerOptions::default());
-        if let Some(old) = &previous {
-            player.continue_from(old);
-        }
-        player.play_song(order);
+        let mut player = start(module, previous.as_ref(), order);
         for _ in frame..until {
             player.poll();
         }
         previous = Some(player);
     }
-    let module = load(trace.module);
-    let mut player = Player::new(module, PlayerOptions::default());
-    if let Some(old) = &previous {
-        player.continue_from(old);
-    }
+    let mut player = start(trace.module, previous.as_ref(), trace.start_order);
 
     let mut out = BTreeMap::new();
     let last = trace.states.last().expect("a last frame").frame;
     let mut frame = from;
     loop {
-        if frame == from {
-            player.play_song(trace.start_order);
-        }
         player.poll();
         out.insert(
             frame,
@@ -1141,7 +1139,7 @@ fn the_port_reproduces_every_filed_trace() {
 /// - **A mid-song restart** keeps the channel volumes (`_zplaysong`'s initialiser never writes
 ///   `avol`: `tests/player.rs`'s `the_song_initialiser_writes_exactly_what_initialise_writes`),
 ///   and block 1's MUSIC0 hands channel 2 over at 63 (asserted below), so the break is taken.
-///   The port's restart is `Player::continue_from` and then `play_song`, and it takes it too:
+///   The port's restart is `Player::restart_from` and then `play_song`, and it takes it too:
 ///   order 0 is 4 rows, 12 ticks.
 ///
 /// **The derivation of `second1d`'s and `second1e`'s [`RESTART_TRACES`] anchor.** `second1d`'s
@@ -1187,10 +1185,9 @@ fn block_ones_music1_restart_takes_order_0s_break() {
     println!("MUSIC0's channel 2 at 8052..=8056: volume {volumes:?}");
     assert_eq!(volumes, [63; 5]);
 
-    // Order 0, played from the restart: how many rows, ticks and polls it lasts, and the poll
-    // each position is first published on.
+    // Order 0, played from a player its `_zplaysong(0)` has just sought: how many rows, ticks
+    // and polls it lasts, and the poll each position is first published on.
     let order_zero = |player: &mut Player| {
-        player.play_song(0);
         let mut polls = 0usize;
         let mut first: BTreeMap<(u8, u8), usize> = BTreeMap::new();
         let mut rows = 0;
@@ -1219,12 +1216,13 @@ fn block_ones_music1_restart_takes_order_0s_break() {
 
     // A boot: 64 rows of speed 3, channel 2 freed on row 3.
     let mut boot = Player::new(load("MUSIC1"), PlayerOptions::default());
+    boot.play_song(0);
     let (rows, ticks, fresh) = order_zero(&mut boot);
     assert_eq!((rows, ticks), (64, 64 * 3), "a boot plays order 0's 64 rows");
 
     // The port's restart: the same module, continuing from MUSIC0's state.
     let mut restart = Player::new(load("MUSIC1"), PlayerOptions::default());
-    restart.continue_from(&music0);
+    restart.restart_from(&music0, 0);
     let zframe = restart.zframe();
     let (rows, ticks, carried) = order_zero(&mut restart);
     assert_eq!(
