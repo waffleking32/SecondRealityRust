@@ -407,7 +407,12 @@ impl MusicStart {
 /// The seam is [`PartSource`]'s: the modules are read from the working directory, which a
 /// unit test does not share with a run, and a test that wants the real player without the
 /// real parts (or no player at all) must not have to reach the assets' path to get one.
-pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, String>;
+///
+/// The options are the run's own ([`RunSettings::player`]), passed at **every** call — the
+/// entry install and each restart — so a mid-run restart's player is built with them too and
+/// only then takes the old player's state over (`Player::restart_from`, D45).
+pub(crate) type MusicSource =
+    fn(ModuleId, sr_audio::PlayerOptions) -> Result<crate::audio::Shared, String>;
 
 /// One roll of the demo's own restart table: which module a block's run begins on, at which
 /// order, and where `MAIN/U2.ASM` says so.
@@ -836,6 +841,10 @@ pub struct RunSettings {
     /// The original's `looping` ([`Looping`]). It changes a run built from a block only:
     /// its plan ([`run_plan`]) and what happens when the plan runs out.
     pub looping: Looping,
+    /// How the run's music is mixed: the options every player the run installs is built with,
+    /// the restarts' included. Authentic by default; the enhanced renderer (D43) changes the
+    /// samples and their rate and nothing about the clock or the pictures.
+    pub player: sr_audio::PlayerOptions,
 }
 
 /// The loop's music: `mov ax,0; mov bx,0; mov cx,45000; call restartmus`
@@ -956,6 +965,8 @@ pub struct Sequence {
     /// player, so the shell needs the loader again at the boundary, not only at the start.
     /// `None` for a run with no music at all.
     music_source: Option<MusicSource>,
+    /// The options every player the run installs is built with ([`RunSettings::player`]).
+    player_options: sr_audio::PlayerOptions,
     /// Whether the part that just retired was the demo's `panicend`, so the next
     /// [`take_next`](Sequence::take_next) installs the shell's cue wait
     /// (`MAIN/U2.ASM:826-853`). Set only when `panicend` retires by reporting
@@ -1250,6 +1261,7 @@ impl Sequence {
             finished: false,
             music: None,
             music_source: music,
+            player_options: settings.player,
             cue_pending: false,
             live_cue: false,
             ending: settings.ending,
@@ -1295,7 +1307,10 @@ impl Sequence {
         source: MusicSource,
         start: MusicStart,
     ) -> Result<(), ShellError> {
-        let player = source(module).map_err(|message| ShellError::Music { message })?;
+        // The run's own options, at every install: a restart's player is built with them and
+        // then takes the old one's state over below.
+        let player =
+            source(module, self.player_options).map_err(|message| ShellError::Music { message })?;
         // Only now that the new player exists is the old one's state taken: a load that
         // fails must not cost the run the dump it has already written.
         let (dump, scratch) = match self.music.take() {
@@ -2095,6 +2110,7 @@ pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sr_audio::{PlayerOptions, Quality};
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::Music;
     use sr_engine::palette::PaletteTimeline;
@@ -2532,7 +2548,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["pam"],
             stub_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -2591,7 +2607,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["pam", "a"],
             stub_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings { ending: Ending::Exit, ..RunSettings::default() },
         )
         .unwrap();
@@ -2691,8 +2707,8 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             run_plan(block, looping).unwrap(),
             loop_source,
-            Some(crate::audio::test_player),
-            RunSettings { ending: Ending::Exit, looping },
+            Some(crate::audio::test_music),
+            RunSettings { ending: Ending::Exit, looping, ..RunSettings::default() },
         )
         .unwrap()
     }
@@ -3092,7 +3108,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             plan,
             stub_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -3326,7 +3342,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             plan,
             stub_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -4087,7 +4103,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["mntscrl", "u2e"],
             restart_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -4144,6 +4160,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn a_restart_keeps_the_runs_sound_quality() {
+        // The run's `PlayerOptions` reach every install, the U2E restart's included: the new
+        // player is built with the run's options and then takes the old one's state over
+        // (`Player::restart_from`, D45), so a run asked for the enhanced renderer (D43) keeps
+        // it past `MAIN/U2.ASM:880-885`'s `restartmus(0, 18)`.
+        let enhanced = PlayerOptions { quality: Quality::Enhanced, ..PlayerOptions::default() };
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["mntscrl", "u2e"],
+            restart_source,
+            Some(crate::audio::test_music),
+            RunSettings { player: enhanced, ..RunSettings::default() },
+        )
+        .unwrap();
+        let options = |run: &Sequence| {
+            crate::audio::lock(&run.music.as_ref().expect("a player").player).options()
+        };
+        assert_eq!(run.music_module(), Some((ModuleId::Music1, 42)));
+        assert_eq!(options(&run).quality, Quality::Enhanced, "the entry install");
+        let entry_player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+        run.tick();
+        run.tick();
+        assert_eq!(run.music_module(), Some((ModuleId::Music0, 18)), "the U2E restart");
+        assert_ne!(
+            std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player),
+            entry_player,
+            "a new player"
+        );
+        assert_eq!(options(&run).quality, Quality::Enhanced, "the restart's player");
+        assert_eq!(run.audio_format(), Some((48_000, 2)), "and the stream it describes");
+
+        // The authentic default is untouched by the plumbing.
+        let mut run = Sequence::with_run(
+            TEST_SURFACE,
+            TEST_SURFACE,
+            View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
+            vec!["mntscrl", "u2e"],
+            restart_source,
+            Some(crate::audio::test_music),
+            RunSettings::default(),
+        )
+        .unwrap();
+        run.tick();
+        run.tick();
+        assert_eq!(run.music_module(), Some((ModuleId::Music0, 18)));
+        assert_eq!(options(&run), PlayerOptions::default());
+        assert_eq!(run.audio_format(), Some((20_000, 2)));
+    }
+
     /// The number of `init` contexts the probe has seen, and how many of those
     /// `music_fresh` reported `true` to. The total is what proves the second
     /// U2E's init actually ran.
@@ -4196,7 +4264,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["u2e", "u2e"],
             same_order_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -4247,7 +4315,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["alku", "glenz"],
             block_one_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();
@@ -4321,7 +4389,7 @@ mod tests {
             View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
             vec!["beglogo", "glenz"],
             block_two_source,
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             RunSettings::default(),
         )
         .unwrap();

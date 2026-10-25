@@ -162,8 +162,12 @@ impl Music for PlayerMusic {
 /// where the shell applies it: `module[50] = 0x78` sets **MUSIC0's** initial tempo byte
 /// from 125 to 120 before it plays, and MUSIC1 keeps its file's own 130
 /// ([`ModuleId::tempo_patch`]).
-pub(crate) fn load_player(id: ModuleId) -> Result<Shared, String> {
-    player_at(id, Path::new(""))
+///
+/// The player is built with the run's `options`
+/// ([`RunSettings::player`](crate::shell::RunSettings::player)): authentic by default, the
+/// enhanced renderer when the run asks for it (D43).
+pub(crate) fn load_player(id: ModuleId, options: PlayerOptions) -> Result<Shared, String> {
+    player_at(id, Path::new(""), options)
 }
 
 /// [`load_player`] with the module path rooted somewhere else.
@@ -172,7 +176,11 @@ pub(crate) fn load_player(id: ModuleId) -> Result<Shared, String> {
 /// repository's commands); a unit test runs in the crate's own directory and reads the same
 /// files through `../..`. One loader with the root as a parameter is what keeps those from
 /// being two transcriptions of the same three steps.
-pub(crate) fn player_at(id: ModuleId, root: &Path) -> Result<Shared, String> {
+pub(crate) fn player_at(
+    id: ModuleId,
+    root: &Path,
+    options: PlayerOptions,
+) -> Result<Shared, String> {
     let path = root.join(id.path());
     let display = path.display().to_string();
     let bytes = std::fs::read(&path).map_err(|error| format!("{display}: {error}"))?;
@@ -180,35 +188,37 @@ pub(crate) fn player_at(id: ModuleId, root: &Path) -> Result<Shared, String> {
     if let Some(tempo) = id.tempo_patch() {
         module.apply_tempo_patch(tempo);
     }
-    Ok(Arc::new(Mutex::new(Player::new(
-        module,
-        PlayerOptions::default(),
-    ))))
+    Ok(Arc::new(Mutex::new(Player::new(module, options))))
 }
 
 /// The [`MusicSource`](crate::shell::MusicSource) the *tests* play with: the real modules,
 /// read at the path a unit test reads them by (the crate's own directory, not the repository
-/// root a run starts in — the same `../../` the parts' tests read their media by).
+/// root a run starts in — the same `../../` the parts' tests read their media by), built with
+/// the run's options.
 #[cfg(test)]
-pub(crate) fn test_player(id: ModuleId) -> Result<Shared, String> {
-    player_at(id, Path::new("../.."))
+pub(crate) fn test_music(id: ModuleId, options: PlayerOptions) -> Result<Shared, String> {
+    player_at(id, Path::new("../.."), options)
 }
 
-/// The mixer's stream as a WAV header describes it: **frames a second** and channels.
+/// [`test_music`] with the default (authentic) options: the player a part's own test reads.
+#[cfg(test)]
+pub(crate) fn test_player(id: ModuleId) -> Result<Shared, String> {
+    test_music(id, PlayerOptions::default())
+}
+
+/// The mixer's stream as a WAV header (and the sound card) describes it: **frames a second**
+/// and channels — [`PlayerOptions::output_rate`].
 ///
-/// The mixer produces `MixRate::samples_per_second()` **i16 samples** a second, interleaved as
-/// the output mode says (`Player::take_samples`), so in stereo the *frame* rate is half of it —
-/// `MixRate::Hz40000` gives 20000 frames a second, which is the rate the port's own playback
-/// runs at: "the frame rate is 20000 a second in stereo (40000 bytes of two)"
+/// The authentic mixer produces `MixRate::samples_per_second()` **i16 samples** a second,
+/// interleaved as the output mode says (`Player::take_samples`), so in stereo the *frame* rate
+/// is half of it — `MixRate::Hz40000` gives 20000 frames a second, which is the rate the port's
+/// own playback runs at: "the frame rate is 20000 a second in stereo (40000 bytes of two)"
 /// (`docs/fidelity/music.md` §10.2, where the same 20000 is what the reference's 5.26 %-flat
 /// stereo divides against). Writing 40000 into a stereo WAV header would play the music twice
-/// as fast and an octave up.
+/// as fast and an octave up. The enhanced renderer (D43) is 48,000 frames a second.
 pub(crate) fn wav_format(options: &PlayerOptions) -> (u32, u16) {
     let channels = if options.stereo { 2 } else { 1 };
-    (
-        options.mix_rate.samples_per_second() / u32::from(channels),
-        channels,
-    )
+    (options.output_rate(), channels)
 }
 
 // -------------------------------------------------------------------------------------------
@@ -481,6 +491,7 @@ impl AudioCallback for Drain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sr_audio::Quality;
     use std::path::PathBuf;
 
     /// The module this binary plays, at the path a *unit test* reads it by: the crate's
@@ -614,6 +625,29 @@ mod tests {
         assert_eq!(&bytes[44..48], &[0, 0, 1, 0]);
         assert_eq!(&bytes[52..56], &[0xff, 0xff, 0xfe, 0xff], "-1 then -2");
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_audio_dump_header_is_the_output_rate() {
+        // The header describes the stream the player's own options produce
+        // (`PlayerOptions::output_rate`): 20,000 frames a second for the authentic stereo
+        // `Hz40000`, and 48,000 for the enhanced renderer (D43), stereo both.
+        let enhanced = PlayerOptions { quality: Quality::Enhanced, ..PlayerOptions::default() };
+        let player = test_music(ModuleId::Music0, enhanced).expect("MUSIC0 loads");
+        assert_eq!(lock(&player).options(), enhanced, "the loader builds what it was asked for");
+        assert_eq!(wav_format(&lock(&player).options()), (48_000, 2));
+        assert_eq!(wav_format(&PlayerOptions::default()), (20_000, 2));
+
+        let path = scratch("enhanced");
+        let (rate, channels) = wav_format(&lock(&player).options());
+        let mut dump = AudioDump::create(&path, rate, channels).unwrap();
+        dump.write(&[1, 2]);
+        drop(dump);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(half(&bytes, 22), 2, "stereo");
+        assert_eq!(word(&bytes, 24), 48_000, "the enhanced frame rate");
+        assert_eq!(word(&bytes, 28), 48_000 * 4, "the byte rate");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

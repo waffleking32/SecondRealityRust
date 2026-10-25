@@ -141,6 +141,30 @@ impl MixRate {
     }
 }
 
+/// How the mixer renders the voices: the object's own arithmetic, or the port's enhanced
+/// renderer.
+///
+/// **`Enhanced` is the port's own and off by default** (D43, `docs/fidelity/music.md` §13). It
+/// keeps the authentic clock exactly — the tick schedule, every voice's step and every published
+/// word are the authentic path's — and changes only how a voice's samples become output: 48,000
+/// frames a second, linearly interpolated, through the curve's small-signal gain rather than its
+/// table. The authentic path is the reference; nothing compared against the original is mixed
+/// by the enhanced one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Quality {
+    /// The object's mixer, bit for bit: one sample byte a frame, at 20,000 frames a second for
+    /// the reference's stereo `Hz40000`, through the curve the machine holds.
+    #[default]
+    Authentic,
+    /// The port's renderer: the same voices at 48,000 frames a second, interpolated.
+    Enhanced,
+}
+
+/// The enhanced renderer's output rate, in frames a second — [`PlayerOptions::output_rate`]
+/// for [`Quality::Enhanced`]. For the reference's stereo `Hz40000` it is 12/5 of the authentic
+/// 20,000.
+pub const ENHANCED_RATE: u32 = 48_000;
+
 /// The player's settings, fixed for the life of the instance — the original's are set before
 /// `_zinit` (`MAIN/STMIK.H:63-96`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -149,8 +173,40 @@ pub struct PlayerOptions {
     pub mix_rate: MixRate,
     /// Stereo output: output mode 5 with the song's stereo bit (`MAIN/STMIK.H:73`).
     pub stereo: bool,
-    /// Interpolate when mixing. Task 5's setting; nothing here reads it.
-    pub interpolation: bool,
+    /// How the voices are rendered ([`Quality`]); authentic by default. This replaced an
+    /// `interpolation` flag nothing read, which stood for the object's `[0x919]` — the byte
+    /// `S1x` writes and only the interpolating dispatch entries read. Neither module carries an
+    /// `S1x` (`music.md` §9.12), so that byte is 0 on every run and is not modelled.
+    pub quality: Quality,
+}
+
+impl PlayerOptions {
+    /// The frames a second the stream these options produce plays at — what the sound card and
+    /// the WAV dump are opened at.
+    ///
+    /// Authentic: the mixing rate in the object's bytes, over the channel count — 20,000 for
+    /// the reference's stereo `Hz40000` (`music.md` §10.2: "40000 bytes of two"). Enhanced:
+    /// [`ENHANCED_RATE`], 48,000, whatever the authentic rate is.
+    pub fn output_rate(&self) -> u32 {
+        match self.quality {
+            Quality::Authentic => self.authentic_rate(),
+            Quality::Enhanced => ENHANCED_RATE,
+        }
+    }
+
+    /// The authentic stream's frames a second: `mix_rate` bytes over the channel count.
+    pub(crate) fn authentic_rate(&self) -> u32 {
+        self.mix_rate.samples_per_second() / self.channels()
+    }
+
+    /// One i16 a frame in mono, two in stereo.
+    pub(crate) fn channels(&self) -> u32 {
+        if self.stereo {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 impl Default for PlayerOptions {
@@ -158,7 +214,7 @@ impl Default for PlayerOptions {
         PlayerOptions {
             mix_rate: MixRate::default(),
             stereo: true,
-            interpolation: false,
+            quality: Quality::Authentic,
         }
     }
 }
@@ -324,7 +380,7 @@ impl Player {
             published: Entry::default(),
             global_volume,
             silenced: false,
-            mixer: Mixer::new(),
+            mixer: Mixer::for_options(&options),
         }
     }
 
@@ -569,7 +625,9 @@ impl Player {
         );
     }
 
-    /// The whole samples this poll contributed — what Task 5's mixer mixes. Fractional
+    /// The whole samples this poll contributed — what Task 5's mixer mixes. These are the
+    /// **authentic** stream's whatever the [`Quality`]: the clock's count, which the enhanced
+    /// renderer turns into 12/5 as many output frames. Fractional
     /// samples are carried into the next poll rather than rounded away, so the rate does not
     /// drift by construction: at 40000 Hz the mean is exactly `40000/70.086` = 570.727 a
     /// poll, and the first five read `[570, 571, 571, 570, 571]` — the pattern follows the
@@ -586,9 +644,9 @@ impl Player {
     ///
     /// The samples are interleaved as the output mode says: one a frame in mono, a left and a
     /// right in stereo, so `MixRate::Hz40000` in stereo is 20000 frames a second of two i16
-    /// each. This moves no engine state — the position the parts read is [`Player::state`]'s,
-    /// and the device is behind it by whatever this has not drained
-    /// (`MAIN/STMIK.H:100-103`).
+    /// each — or, under [`Quality::Enhanced`], 48,000 ([`PlayerOptions::output_rate`]). This
+    /// moves no engine state — the position the parts read is [`Player::state`]'s, and the
+    /// device is behind it by whatever this has not drained (`MAIN/STMIK.H:100-103`).
     ///
     /// A device that does not keep up loses samples, not time: the ring is bounded and drops
     /// the *oldest* ones when it is full ([`Mixer::dropped`] counts them), because a poll is

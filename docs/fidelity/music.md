@@ -2010,3 +2010,88 @@ port's hold being what marks the end of the run rather than a claim about the or
 | a run with no music refuses to dump, and a dump that cannot be written fails the run | `tests/audio.rs`'s `a_run_with_no_music_refuses_to_dump_audio`, `a_dump_that_cannot_be_written_fails_the_run` |
 | the status line shows `order:row`, and nothing for a run with no player | `src/window.rs`'s `the_status_line_shows_where_the_music_is` |
 | the seek clears the tick-in-row counter (§8's decision) | `crates/sr-audio/tests/player.rs`'s `a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read` |
+
+## 13. Enhanced quality — the port's own renderer, off by default (Phase 9 Task 7)
+
+**This section describes a surface that is not the original's.** `--sound-quality enhanced`
+(`Quality::Enhanced`, `crates/sr-audio/src/player.rs`) mixes the music with a renderer the port
+adds. **Authentic is the default**, and every run that compares anything against the original
+mixes authentically: the reference is §10's path, bit for bit, and nothing in it reads the new
+option (D43).
+
+### What it is
+
+The authentic path is the object's mixer: one sample byte a frame, held for the whole frame, at
+20,000 frames a second for the reference's stereo `Hz40000` (§10.2), through the curve the
+machine holds (§10.3). That stepping is audible. The enhanced path renders the same voices at
+**48,000 frames a second** (`PlayerOptions::output_rate`), the rate the sound card and the WAV
+dump are then opened at (`audio::wav_format`):
+
+- **The clock is untouched.** `Player::poll`, `samples_per_tick` and the voices' `advance` are
+  the authentic ones. The mixer is handed the same authentic budget and walks the voices exactly
+  as `Mixer::frame` does: the same volume and step refresh, the same gate, one advance a frame.
+  So every tick lands on the same sample and every published word is the same at every poll.
+  `enhanced_keeps_the_authentic_tick_schedule` compares `state()`, `engine_position()`,
+  `zplus()` and `zframe()` at each of 30,000 polls of both modules. The pictures, which read
+  only those words, cannot move.
+- **Each authentic frame becomes 2 or 3 output frames**, by an exact integer accumulator
+  (`Mixer`'s `owed`: add 48,000 a frame, emit one per 20,000). After `k` authentic frames,
+  exactly `floor(k × 12/5)` have gone out, so the stream never drifts against the picture
+  (`enhanced_emits_twelve_frames_for_every_five`).
+- **Output frame `j` of `n` evaluates each voice at its position plus `j/n` of its step**,
+  interpolating linearly between the two sample bytes. The second byte is the loop's start for a
+  looped voice at its end, and the last byte for a one-shot. A position within the step that has
+  crossed the end is placed where `advance` will put it.
+- **The value is `(s − 128) × scale(m_vol)` in `i32`, without the authentic `>> 8`**, and with
+  eight bits of the interpolated sample's fraction kept. Each side's sum is converted with the
+  authentic curve's **small-signal gain around its centre**, `Curve::sample` at `0x400 ± 1`
+  (256 per two units at the reference's `mul` 64), and clamped to `i16`.
+- The ring grows in proportion: `Mixer::for_options` gives it 19,660 samples, 12/5 of
+  `RING_SAMPLES`, so it holds the same 0.2 s.
+
+The option reaches every player a run installs. `RunSettings::player` is passed to each
+`MusicSource` call: the entry install, and each restart, whose new player is built with the run's
+options before `restart_from` takes over the old one's state (D45). The binary's
+`a_restart_keeps_the_runs_sound_quality` follows the U2E restart.
+
+### What it measures against the authentic path
+
+`cargo test -p sr-audio --test enhanced -- --nocapture --test-threads=1` prints these. The paste
+drops the harness's lines and the progress dots it puts at the start of a test's first line:
+
+```
+MUSIC0: 3,000 polls, 856091 authentic frames, 2054618 enhanced frames
+MUSIC1: 3,000 polls, 856091 authentic frames, 2054618 enhanced frames
+MUSIC0: 30000 polls, the same words at every one; both end at 6:52, zframe 20554
+MUSIC1: 30000 polls, the same words at every one; both end at 6:21, zframe 22265
+MUSIC0: ten seconds from order 0, RMS authentic 3933.8, enhanced 3854.2, -0.177 dB
+MUSIC1: ten seconds from order 0, RMS authentic 2159.2, enhanced 2023.3, -0.565 dB
+MUSIC0 order 6 row 0 channel 5: without the band limit, 173 and 172 upward crossings
+MUSIC0 order 6 row 0 channel 5: authentic 163.015 Hz (161 crossings), enhanced 163.014 Hz (161 crossings), -0.0003 %
+MUSIC1 order 90 row 32 channel 3: without the band limit, 389 and 373 upward crossings
+MUSIC1 order 90 row 32 channel 3: authentic 297.226 Hz (264 crossings), enhanced 297.219 Hz (264 crossings), -0.0022 %
+```
+
+The **pitch** is the same by construction, because the step is shared, and that includes the
+reference's 5.26 % flat stereo (§10.2). The enhanced path does not correct the flatness; it is
+the same music. The test measures it on two sustained notes, each on its own channel of a bare
+`Mixer`: MUSIC0's order 6, row 0, channel 5 (instrument 9, C-3) and MUSIC1's order 90, row 32,
+channel 3 (instrument 19). The measure is the zero-crossing frequency over one second, after the
+same 1 kHz band limit for both paths. Without that limit the counts differ by waveform and not by
+pitch: the authentic staircase and the enhanced line differ above the fundamental by design (the
+raw counts above). The tolerance is 0.5 %. The **level** is the RMS over ten seconds from order
+0, and the tolerance is 1 dB.
+
+### What it does not reproduce
+
+- **The curve's table and its clamp.** The authentic sum indexes the table the machine holds
+  (§10.3). Past the ramp it reads the `0xFF` tail or the zero fill, and past the table the port
+  clamps where the object's 16-bit index would read its own segment (A13). The enhanced sum uses
+  only the ramp's slope and clamps at `i16`. A signal inside the ramp has the same gain on both
+  paths; one beyond it saturates at a slightly different level (`0xFF` is 32,512, `i16::MAX` is
+  32,767).
+- **A14's ends.** The curve's `0xFF`/`0x00` regions, the builder's bug and the open marker
+  question, belong to the table. The enhanced path never reads the table, so it has none of them.
+- **The stepping itself**, which is the point: the authentic path's held byte, its 20 kHz images,
+  and its quantisation to one output level per two entries (a frame value of −1 is −256 and 0 or
+  1 is 0).

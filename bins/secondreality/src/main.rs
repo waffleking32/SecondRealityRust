@@ -29,6 +29,7 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
                      [--vault] [--loop] [/gravis]
+                     [--sound-quality authentic|enhanced]
 run:   with no --part and no --block, the demo plays from its beginning: no
        argument is SECOND 1, as it is in the original.
 loop:  --loop plays a block's run for ever, as the setup screen's looping row
@@ -49,7 +50,10 @@ vault: --vault opens the window's menu for the three unreleased effects — GRID
        window-only: a headless run names a part with --part instead.
 music: a window plays the demo's music on the default sound card; --no-audio runs
        silent, and --audio-dump <FILE> writes it to a WAV instead (the ring has one
-       consumer, so a dump is silent to watch). The music runs either way.";
+       consumer, so a dump is silent to watch). The music runs either way.
+       --sound-quality enhanced mixes it at 48 kHz, interpolated: the port's own
+       renderer, with the same clock and pictures; authentic, the default, is the
+       original's mixer at its own 20 kHz.";
 
 fn main() -> ExitCode {
     let cli = match cli::Cli::parse(std::env::args().skip(1)) {
@@ -100,7 +104,7 @@ fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
             shell::run_plan(block, cli.run_settings().looping)?,
             cli.run_settings(),
         )?),
-        None => new_sequence_for_part(shell::resolve(cli.part_name())?),
+        None => new_sequence_for_part(shell::resolve(cli.part_name())?, cli.run_settings()),
     }
 }
 
@@ -111,13 +115,19 @@ fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
 /// `None`, `shell::boot_anchor` says `None`), so the menu's runs play no music
 /// and number their frames from zero; the window presents them through the
 /// same loop a normal window run uses.
-pub fn new_sequence_for_part(name: &'static str) -> Result<Sequence, Box<dyn Error>> {
+///
+/// `settings` is the command line's ([`cli::Cli::run_settings`]): a part's run holds where it
+/// ends and mixes its music the way `--sound-quality` asks.
+pub fn new_sequence_for_part(
+    name: &'static str,
+    settings: shell::RunSettings,
+) -> Result<Sequence, Box<dyn Error>> {
     Ok(Sequence::new(
         SURFACE_WIDTH,
         SURFACE_HEIGHT,
         shell::start_view(),
         vec![name],
-        shell::RunSettings::default(),
+        settings,
     )?)
 }
 

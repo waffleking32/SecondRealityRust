@@ -1333,7 +1333,7 @@ mod tests {
                 (name == NAME)
                     .then(|| Box::new(Endlogo::at("../../assets/END/PIC.UH")) as Box<dyn Part>)
             },
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             crate::shell::RunSettings::default(),
         )
         .unwrap();

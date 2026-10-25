@@ -430,7 +430,10 @@ fn vault_loop(
             }
             MenuAction::Close => return Ok(()),
             MenuAction::Choose(name) => {
-                let mut run = crate::new_sequence_for_part(name)?;
+                // The vault's runs hold where they end and have no player, so the default
+                // settings are theirs whatever `--sound-quality` said.
+                let mut run =
+                    crate::new_sequence_for_part(name, crate::shell::RunSettings::default())?;
                 // The vault's parts are silent: `shell::music_for_part` has no
                 // row for them, so the run has no player and no device is
                 // opened. The slot is the same one the normal loop drains.
@@ -953,7 +956,7 @@ mod tests {
             plan,
             stub_source,
             None,
-            RunSettings { ending: Ending::Exit, looping: Looping::On },
+            RunSettings { ending: Ending::Exit, looping: Looping::On, ..RunSettings::default() },
         )
         .unwrap()
     }
@@ -1194,7 +1197,7 @@ mod tests {
     }
 
     /// A run of `plan` with the *real* player — the modules read at the path a unit test
-    /// reads them by ([`crate::audio::test_player`]) — and parts that draw nothing.
+    /// reads them by ([`crate::audio::test_music`]) — and parts that draw nothing.
     ///
     /// The window's own stubs retire early (the key tests watch the handover); a run whose
     /// music is under test has to keep ticking, so `endlogo` and the two parts after it
@@ -1209,7 +1212,7 @@ mod tests {
                 "endlogo" | "cred" | "endscrl" => Some(Box::new(Stub { retires: None })),
                 other => stub_source(other),
             },
-            Some(crate::audio::test_player),
+            Some(crate::audio::test_music),
             crate::shell::RunSettings::default(),
         )
         .unwrap()

@@ -69,10 +69,17 @@
 //! `_zbufsize` ring for the hardware to walk, and no EMS page frame. What replaces it is
 //! [`Mixer`]'s bounded queue of the same samples with the same meaning, drained by
 //! [`Player::take_samples`](crate::Player::take_samples).
+//!
+//! **The enhanced renderer is the port's own** ([`Quality::Enhanced`], D43, `music.md` §13), and
+//! off by default. It walks the voices exactly as points 2–5 do — the same budget, the same
+//! refresh, the same gate, the same advance — so the clock is untouched, and renders each
+//! authentic frame as 2 or 3 output frames at 48 kHz: interpolated sample bytes, weighted
+//! without the `>> 8`, through the curve's small-signal gain instead of its table. Nothing in
+//! the authentic path reads it.
 
 use crate::effects::Channel;
 use crate::module::Module;
-use crate::player::{MixRate, PlayerOptions};
+use crate::player::{MixRate, PlayerOptions, Quality, ENHANCED_RATE};
 use crate::CHANNELS;
 
 /// The volume scale table the object carries at `+0x9c4`, byte for byte: 64 entries, the
@@ -381,6 +388,12 @@ pub struct Mixer {
     held_right: Option<i16>,
     /// The last frame mixed, for a reader and for the tests.
     last_frame: (i16, i16),
+    /// The enhanced path's 12/5 accumulator ([`Quality::Enhanced`]): output frames owed, in
+    /// units of `1/authentic rate` of a frame. Each authentic frame adds [`ENHANCED_RATE`] and
+    /// emits one output frame per whole authentic rate it holds — 2 or 3 at the reference's
+    /// 20,000 — so after `k` authentic frames exactly `floor(k × 12/5)` have gone out. Integer
+    /// arithmetic, so the stream never drifts against the clock. Always 0 on the authentic path.
+    owed: u32,
 }
 
 impl Default for Mixer {
@@ -407,7 +420,22 @@ impl Mixer {
             dropped: 0,
             held_right: None,
             last_frame: (0, 0),
+            owed: 0,
         }
+    }
+
+    /// A mixer whose ring is sized for `options`' stream: [`RING_SAMPLES`] for the authentic
+    /// path, and as many more as the enhanced one produces in the same time — 12/5 of it at the
+    /// reference's rate, 19,660 samples — so the ring holds the same 0.2 s either way.
+    pub fn for_options(options: &PlayerOptions) -> Mixer {
+        let capacity = match options.quality {
+            Quality::Authentic => RING_SAMPLES,
+            // Rounded down to whole stereo frames, so an eviction never splits one.
+            Quality::Enhanced => {
+                (RING_SAMPLES * ENHANCED_RATE as usize / options.authentic_rate() as usize) & !1
+            }
+        };
+        Mixer::new_with_capacity(capacity)
     }
 
     /// The whole samples the overflow policy has dropped. Zero on any run whose device keeps
@@ -435,6 +463,7 @@ impl Mixer {
         self.dropped = 0;
         self.held_right = None;
         self.last_frame = (0, 0);
+        self.owed = 0;
         // The curve and the plane marker are the *card's*, not the song's: `_zplaysong` clears
         // the channels (`+0x5614`) and touches neither the table nor the accumulator planes.
     }
@@ -527,32 +556,49 @@ impl Mixer {
         let width = if options.stereo { 2 } else { 1 };
         let mut budget = samples;
 
+        // `samples` is the *authentic* budget whatever the quality: the frames mixed, and with
+        // them every voice's advance, are the object's. The enhanced path renders each of those
+        // frames as 2 or 3 of its own, so a split frame's right half has already gone out with
+        // the rest of it and the byte owed is consumed without a push.
+        let enhanced = options.quality == Quality::Enhanced;
+
         if let Some(right) = self.held_right.take() {
             if budget == 0 {
                 self.held_right = Some(right);
                 return;
             }
-            let overflow = self.ring.push(right);
-            self.dropped += u64::from(overflow);
+            if !enhanced {
+                let overflow = self.ring.push(right);
+                self.dropped += u64::from(overflow);
+            }
             budget -= 1;
         }
 
         while budget >= width {
-            let (left, right) = self.frame(module, channels, options, master, silenced);
-            let overflow = self.ring.push(left);
-            self.dropped += u64::from(overflow);
-            if options.stereo {
-                let overflow = self.ring.push(right);
+            if enhanced {
+                self.enhanced_frame(module, channels, options, master, silenced);
+            } else {
+                let (left, right) = self.frame(module, channels, options, master, silenced);
+                let overflow = self.ring.push(left);
                 self.dropped += u64::from(overflow);
+                if options.stereo {
+                    let overflow = self.ring.push(right);
+                    self.dropped += u64::from(overflow);
+                }
             }
             budget -= width;
         }
 
         if budget == 1 {
-            let (left, right) = self.frame(module, channels, options, master, silenced);
-            let overflow = self.ring.push(left);
-            self.dropped += u64::from(overflow);
-            self.held_right = Some(right);
+            if enhanced {
+                let right = self.enhanced_frame(module, channels, options, master, silenced).1;
+                self.held_right = Some(right);
+            } else {
+                let (left, right) = self.frame(module, channels, options, master, silenced);
+                let overflow = self.ring.push(left);
+                self.dropped += u64::from(overflow);
+                self.held_right = Some(right);
+            }
         }
     }
 
@@ -625,6 +671,107 @@ impl Mixer {
         (left, right)
     }
 
+    /// One authentic frame rendered by the enhanced path ([`Quality::Enhanced`], D43): the
+    /// port's own, not the object's.
+    ///
+    /// The voices are walked exactly as [`Mixer::frame`] walks them — the same volume and step
+    /// refresh, the same gate, the same single [`advance`] — so the clock and every voice's
+    /// position are the authentic ones. What differs is the output: the `owed` accumulator gives
+    /// this frame `n` output frames (2 or 3 at the reference's rate), and output frame `j`
+    /// evaluates each voice at its position plus `j/n` of its step, interpolated between two
+    /// sample bytes ([`enhanced_value`]). Each side's sum is converted with the authentic curve's
+    /// small-signal gain ([`Mixer::enhanced_gain`]) and clamped to `i16`; the curve's own table,
+    /// with its clamp and its `0xFF`/`0x00` ends (A13, A14), is not reproduced.
+    ///
+    /// Returns the last output frame, which is what [`Mixer::last_frame`] then holds.
+    fn enhanced_frame(
+        &mut self,
+        module: &Module,
+        channels: &mut [Channel; CHANNELS],
+        options: &PlayerOptions,
+        master: u16,
+        silenced: bool,
+    ) -> (i16, i16) {
+        self.owed += ENHANCED_RATE;
+        let rate = options.authentic_rate();
+        let count = self.owed / rate;
+        self.owed %= rate;
+
+        // Each voice that sounds this frame: its sample, its 16.16 position before the advance,
+        // its step, its bounds, its scale and its side — read, then advanced once.
+        let pan = module.channel_pan();
+        let mut voices: [Option<EnhancedVoice>; CHANNELS] = [None; CHANNELS];
+        for index in 0..CHANNELS {
+            let channel = &mut channels[index];
+            let voice = &mut self.voices[index];
+            voice.refresh_volume(if silenced { 0 } else { channel.volume }, master);
+            voice.refresh_speed(channel.period, options);
+            if voice_contribution(module, voice, channel).is_none() {
+                continue;
+            }
+            // `voice_contribution` has just read this voice's sample, so it has bytes.
+            let Some(bytes) = voice
+                .instrument
+                .and_then(|instrument| module.sample_bytes(usize::from(instrument.wrapping_sub(1))))
+            else {
+                continue;
+            };
+            let side = if options.stereo {
+                side_of(pan[index])
+            } else {
+                Side::Centre
+            };
+            voices[index] = Some(EnhancedVoice {
+                bytes,
+                position: (u64::from(channel.position) << 16) | u64::from(channel.position_low),
+                speed: u64::from(voice.speed),
+                end: voice.end,
+                loop_start: voice.loop_start,
+                scale: i32::from(scale(voice.volume)),
+                side,
+            });
+            advance(voice, channel);
+        }
+
+        let gain = self.enhanced_gain();
+        let mut last = (0, 0);
+        for j in 0..count {
+            let mut left: i32 = 0;
+            let mut right: i32 = 0;
+            for voice in voices.iter().flatten() {
+                let at = voice.position + voice.speed * u64::from(j) / u64::from(count);
+                let value = enhanced_value(voice, at);
+                match voice.side {
+                    Side::Left => left += value,
+                    Side::Right => right += value,
+                    Side::Centre => {
+                        left += value;
+                        right += value;
+                    }
+                }
+            }
+            last = (enhanced_sample(left, gain), enhanced_sample(right, gain));
+            let overflow = self.ring.push(last.0);
+            self.dropped += u64::from(overflow);
+            if options.stereo {
+                let overflow = self.ring.push(last.1);
+                self.dropped += u64::from(overflow);
+            }
+        }
+        self.last_frame = last;
+        last
+    }
+
+    /// The authentic curve's small-signal gain around its centre, in `i16` per two units of a
+    /// frame's value: `Curve::sample` one entry either side of the base. At the reference's
+    /// `mul` 64 the ramp is one output level per two entries, so this is 256 — 128 of the
+    /// `i16` a unit, the slope the authentic path has between its two clamps.
+    fn enhanced_gain(&self) -> i64 {
+        let above = i64::from(self.curve.sample(self.base() + 1));
+        let below = i64::from(self.curve.sample(self.base() - 1));
+        above - below
+    }
+
     /// The base the frame's value lands on: `0x400`, the flush's own `0x400 − centre_sum`
     /// (`+0x30b4`, `+0x2cbe`) with the accumulator's own DC. The code's `0x0101` re-mark is
     /// *not* applied — see the body.
@@ -687,6 +834,74 @@ fn voice_contribution(module: &Module, voice: &Voice, channel: &Channel) -> Opti
     let at = usize::try_from(channel.position).ok()?;
     let sample = bytes.get(at).or_else(|| bytes.last()).copied()?;
     Some(i32::from(voice_value(sample, voice.volume)) - i32::from(centre(voice.volume)))
+}
+
+/// What [`Mixer::enhanced_frame`] reads of a sounding voice before it is advanced.
+#[derive(Clone, Copy, Debug)]
+struct EnhancedVoice<'a> {
+    /// The sample bytes the voice plays.
+    bytes: &'a [u8],
+    /// The 16.16 position before this frame's advance: `m_pos` and `m_poslow`.
+    position: u64,
+    /// `m_speed`, 16.16.
+    speed: u64,
+    /// `m_end` and `m_loop`, as [`Voice`] holds them.
+    end: u32,
+    loop_start: u32,
+    /// The volume scale for `m_vol` (`+0x9c4`).
+    scale: i32,
+    side: Side,
+}
+
+/// The fractional bits the enhanced path keeps of an interpolated sample byte.
+const ENHANCED_FRACTION: u32 = 8;
+
+/// One voice's enhanced value at the 16.16 position `at`: the sample interpolated linearly
+/// between the byte at `at` and the next, less the centre, times the volume scale — the
+/// authentic `(s × scale) >> 8 − centre` **without the `>> 8`**, and with
+/// [`ENHANCED_FRACTION`] bits of the sample's fraction kept, in `i32`.
+///
+/// The second byte is the loop's start for a looped voice at its end, and the last byte for a
+/// one-shot. A position inside this frame's step that has crossed the end is placed the way
+/// [`advance`] will place it: rewrapped by `m_loop − m_end` with the overshoot kept, or held on
+/// the last byte of a one-shot. A position already at or past the end before the step (only an
+/// `O` longer than the sample reaches it) reads what the authentic path reads, the last byte.
+fn enhanced_value(voice: &EnhancedVoice, at: u64) -> i32 {
+    let bytes = voice.bytes;
+    let end = u64::from(voice.end) << 16;
+    let looped = voice.loop_start != NO_LOOP;
+    let at = if at >= end && voice.position < end {
+        if looped {
+            at - end + (u64::from(voice.loop_start) << 16)
+        } else {
+            end.saturating_sub(1 << 16)
+        }
+    } else {
+        at
+    };
+    let whole = (at >> 16) as usize;
+    let fraction = (at & 0xffff) as i32;
+    let last = bytes.last().copied().unwrap_or(0x80);
+    let first = bytes.get(whole).copied().unwrap_or(last);
+    let second = if whole + 1 < voice.end as usize {
+        bytes.get(whole + 1).copied().unwrap_or(last)
+    } else if looped {
+        bytes.get(voice.loop_start as usize).copied().unwrap_or(last)
+    } else {
+        last
+    };
+    let (first, second) = (i32::from(first), i32::from(second));
+    let sample = (first << ENHANCED_FRACTION)
+        + (((second - first) * fraction) >> (16 - ENHANCED_FRACTION));
+    (sample - (0x80 << ENHANCED_FRACTION)) * voice.scale
+}
+
+/// A side's enhanced sum as an `i16`: the authentic curve's small-signal `gain` (two units'
+/// worth, [`Mixer::enhanced_gain`]) applied to a sum that is `2^(8 + ENHANCED_FRACTION)` times
+/// the authentic frame value, clamped.
+fn enhanced_sample(sum: i32, gain: i64) -> i16 {
+    let scaled = i64::from(sum) * gain / (2 << (8 + ENHANCED_FRACTION));
+    scaled.clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16
 }
 
 /// Advance one voice's position by `m_speed` and honour its end.
@@ -1109,12 +1324,18 @@ mod tests {
     }
 
     #[test]
-    fn the_interpolation_setting_is_the_objects_own_and_off() {
-        // `PlayerOptions::interpolation` is the object's `[0x919]`, the byte `S1x` writes and
-        // only the interpolating dispatch entries read. Neither module carries an `S1x`
-        // (`music.md` §9.12), so the flag is 0 and this mixer has no path that reads it.
+    fn the_default_quality_is_authentic() {
+        // The enhanced path is the port's own and opt-in (D43): a player nobody configured
+        // mixes the object's arithmetic at the object's rate, stereo.
+        //
+        // The object's own interpolation switch is a different thing and is not modelled:
+        // `[0x919]`, the byte `S1x` writes and only the interpolating dispatch entries read.
+        // Neither module carries an `S1x` (`music.md` §9.12), so the byte is 0 on every run
+        // and the authentic path has no interpolation (this file's point 4).
         let options = PlayerOptions::default();
-        assert!(!options.interpolation);
-        assert!(PlayerOptions::default().stereo);
+        assert_eq!(options.quality, Quality::Authentic);
+        assert_eq!(Quality::default(), Quality::Authentic);
+        assert!(options.stereo);
+        assert_eq!(options.output_rate(), 20_000);
     }
 }

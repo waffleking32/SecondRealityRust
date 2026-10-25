@@ -31,7 +31,7 @@ pub use module::{
     descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, Song, CHANNELS,
     ROWS, SONGS,
 };
-pub use player::{MixRate, Player, PlayerOptions, Position};
+pub use player::{MixRate, Player, PlayerOptions, Position, Quality, ENHANCED_RATE};
 
 #[cfg(test)]
 mod tests {

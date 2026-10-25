@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use sr_audio::{PlayerOptions, Quality};
 use sr_engine::present::Aspect;
 
 use crate::parts;
@@ -87,6 +88,10 @@ pub struct Cli {
     /// published position. Headless only; what a full-run comparison against the traces
     /// reads (`tests/fullrun.rs`).
     pub positions: Option<PathBuf>,
+    /// How the music is mixed (`--sound-quality authentic|enhanced`): the object's own mixer,
+    /// or the port's enhanced renderer at 48 kHz (D43). Authentic by default; the clock and
+    /// the pictures are the same either way.
+    pub quality: Quality,
 }
 
 impl Default for Cli {
@@ -110,6 +115,7 @@ impl Default for Cli {
             looping: shell::Looping::Off,
             setup: true,
             positions: None,
+            quality: Quality::Authentic,
         }
     }
 }
@@ -180,6 +186,18 @@ impl Cli {
                 "--positions" => {
                     cli.positions = Some(PathBuf::from(value(&mut args, "--positions")?))
                 }
+                "--sound-quality" => {
+                    let raw = value(&mut args, "--sound-quality")?;
+                    cli.quality = match raw.as_str() {
+                        "authentic" => Quality::Authentic,
+                        "enhanced" => Quality::Enhanced,
+                        other => {
+                            return Err(format!(
+                                "unknown sound quality {other:?}; expected authentic or enhanced"
+                            ))
+                        }
+                    };
+                }
                 "--vault" => cli.vault = true,
                 "--loop" => cli.looping = shell::Looping::On,
                 // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
@@ -227,6 +245,10 @@ impl Cli {
             // `validate` refuses looping for anything but a block, so this is the
             // command line's own word.
             looping: self.looping,
+            player: PlayerOptions {
+                quality: self.quality,
+                ..PlayerOptions::default()
+            },
         }
     }
 
@@ -494,6 +516,27 @@ mod tests {
         assert_eq!(parse(&[]).unwrap().run_settings().ending, Ending::Exit);
         // The vault's runs are one-part runs the menu starts: they hold.
         assert_eq!(parse(&["--vault"]).unwrap().run_settings().ending, Ending::Hold);
+    }
+
+    #[test]
+    fn the_sound_quality_flag_picks_the_renderer_and_authentic_is_the_default() {
+        // The enhanced renderer is the port's own, off by default (D43): a command line that
+        // does not ask for it gets the object's mixer, and the run's player is built with it.
+        assert_eq!(Cli::default().quality, Quality::Authentic);
+        let c = parse(&[]).unwrap();
+        assert_eq!(c.quality, Quality::Authentic);
+        assert_eq!(c.run_settings().player, PlayerOptions::default());
+        let c = parse(&["--sound-quality", "enhanced"]).unwrap();
+        assert_eq!(c.quality, Quality::Enhanced);
+        assert_eq!(c.run_settings().player.quality, Quality::Enhanced);
+        assert_eq!(c.run_settings().player.output_rate(), 48_000);
+        let c = parse(&["--sound-quality", "authentic", "--part", "glenz"]).unwrap();
+        assert_eq!(c.run_settings().player.quality, Quality::Authentic);
+        // A part's run takes it as well as a block's.
+        let c = parse(&["--part", "u2e", "--sound-quality", "enhanced"]).unwrap();
+        assert_eq!(c.run_settings().player.quality, Quality::Enhanced);
+        assert!(parse(&["--sound-quality", "high"]).is_err(), "only the two names");
+        assert!(parse(&["--sound-quality"]).is_err(), "and a name is needed");
     }
 
     #[test]
