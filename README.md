@@ -58,12 +58,12 @@ The original accepts `SECOND 1` to `SECOND 5`, and `SECOND U`. The port accepts 
 `--block`:
 
 ```bash
-cargo run --release --bin secondreality -- --block 1   # from the beginning (the same as no argument)
-cargo run --release --bin secondreality -- --block 2   # from the title screen
-cargo run --release --bin secondreality -- --block 3   # from the landscape scroller
-cargo run --release --bin secondreality -- --block 4   # from the vector part
-cargo run --release --bin secondreality -- --block 5   # from the end credits
-cargo run --release --bin secondreality -- --block U   # the hidden part
+cargo run --release --bin secondreality -- --block 1   # from ALKU: the whole demo (as no argument)
+cargo run --release --bin secondreality -- --block 2   # from BEGLOGO
+cargo run --release --bin secondreality -- --block 3   # from MNTSCRL, the landscape scroller
+cargo run --release --bin secondreality -- --block 4   # from U2E
+cargo run --release --bin secondreality -- --block 5   # ENDLOGO, CRED, then the end scroller
+cargo run --release --bin secondreality -- --block U   # DDSTARS, the hidden part
 ```
 
 `--block U` plays **DDSTARS**, a part that is in the demo's code but that `README.1ST` never

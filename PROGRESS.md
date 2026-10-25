@@ -23,11 +23,12 @@ Phase status board. **Read this first if you are resuming work.**
 ## Where to pick up
 
 **Phase 9 (Assembly & fidelity pass) is complete on `phase-9-assembly`, and untagged.** The branch
-starts at `main`'s `3fd3be3`. Its plan is `docs/plans/09-assembly.md`, and its eleven tasks (with the
-inserted 6b) are done; the evidence is "Phase 9's evidence" below. Its decisions are **D41–D47**, and
-its register entries are **A53–A63**. The per-task ledger is `.superpowers/sdd/09-assembly/progress.md`,
-git-ignored scratch, and it holds the deferred minors for the final review. **The planned work is
-complete.** Phase 9 is the last phase of the spec's plan (§10), and no phase after it is planned.
+starts at `main`'s `3fd3be3`. Its plan is `docs/plans/09-assembly.md`, and its eleven tasks (with
+the inserted 6b) are done; the evidence is "Phase 9's evidence" below. Its decisions are
+**D41–D47**, and its register entries are **A53–A63**. The per-task ledger is
+`.superpowers/sdd/09-assembly/progress.md`, git-ignored scratch, and it holds the deferred minors
+for the final review. **The planned work is complete.** Phase 9 is the last phase of the spec's plan
+(§10), and no phase after it is planned.
 
 **What is left, in order:**
 
@@ -35,12 +36,15 @@ complete.** Phase 9 is the last phase of the spec's plan (§10), and no phase af
    until that review is clean**, Phase 1's and Phase 2's practice. Its fix round and re-review come
    first, then the tag, then the merge to `main`.
 2. **The hand checks left for the user.** Task 8's machine checks could not drive keys in a real
-   window. These are not checked by hand, and need a person at the window:
+   window, and Task 4's loop seam was not run under real SDL (its report's item 6). These are not
+   checked by hand, and need a person at the window:
    - the settings screen's row cycling and its `>` marker;
    - a live Aspect or Border change resizing the window;
    - Enter with Sound Off, with Demo looping Enabled, and with Sound quality Enhanced;
    - ESC on the settings screen, which leaves and prints the end box;
-   - ESC from ENDSCRL ending a block run: the fade, the blank, the close and the end box.
+   - ESC from ENDSCRL ending a block run: the fade, the blank, the close and the end box;
+   - a windowed `--loop` run crossing the seam into pass 2 (CRED's fade, then ALKU again), and the
+     close button then printing the end box.
    Task 8 did check, on this host's display, that the screen opens, that `--no-setup` reaches ALKU,
    that a windowed `/gravis` run closes itself and prints the box, and that `--no-setup` block 1
    reaches ENDSCRL.
@@ -61,10 +65,10 @@ derivation, A14's (a), A5 for 430–438 and A7 for 436–443):
 - **The session's phase (D17)**: A29, A31 and A36.
 - **Unreachable paths**: A3, A15 and A51.
 - **Unattributed, or needing a constant D24 does not allow without its own measurement**: A6 (no
-  session reproduces 4500/4600), A38 (the mid-run restart's +5), A48 (where mode 4's overrun
-  falls), A50 (two bytes no compared frame exercises), A53 (the full run: U2A's opening 47 frames
-  late, PANICEND's first frame, and the loader's frames, D31), A55 (what a reload puts in the ring) and A61 (the loop
-  seam's tail, Δ, the +5's recipe part and ALKU's pass-2 lag).
+  session reproduces 4500/4600), A38 (the mid-run restart's +5), A48 (where mode 4's overrun falls),
+  A50 (two bytes no compared frame exercises), A53 (the full run: U2A's opening 47 frames late,
+  PANICEND's first frame, and the loader's frames, D31), A55 (what a reload puts in the ring) and
+  A61 (the loop seam's tail, Δ, the +5's recipe part and ALKU's pass-2 lag).
 
 **Phase 8 (Vault) is done, tagged `phase-8`, merged to `main` and pushed** (`main`
 fast-forwarded `14ac207 → 3fd3be3`; the suite re-run on the merged result, 1,368 passed /
@@ -3045,9 +3049,9 @@ test the_full_runs_music_is_where_the_trace_holds_it ... ok
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.36s
 ```
 
-The command of record runs the same four tests without `--nocapture`. Its tests are
+The command of record runs the same four tests without `--nocapture`. Three of the four are
 `#[cfg_attr(debug_assertions, ignore)]`, so in release they run by default, and `-- --ignored`
-would skip them:
+would skip them. The fourth, `the_jitter_window_is_the_shells`, runs in both profiles:
 
 ```text
 $ cargo test --release -p secondreality --test fullrun
@@ -3060,8 +3064,8 @@ test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 ```
 
 **The loop seam.** `the_loop_seam_is_the_originals` asserts the port's `C` at 8833 (CRED's drift
-81), 9029/9055/9081 and 9600/10419/11419 at 0 pixels at `n − 196`, the original's `L` 9104 is the port's
-CRED screen at 8908 and the port's `L` is 8910 (`L − C` 77 against 75), the restarted song's
+81), 9029/9055/9081 and 9600/10419/11419 at 0 pixels at `n − 196`, the original's `L` 9104 is the
+port's CRED screen at 8908 and the port's `L` is 8910 (`L − C` 77 against 75), the restarted song's
 `(0,1)` at 8921 (+5), and ALKU's pass-2 fade-in at 10045 and hold at 10106 (D42, A61). It prints
 only the carried-ring line (A55):
 
@@ -3076,9 +3080,10 @@ test looping_leaves_pass_one_alone ... ok
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s
 ```
 
-**The suite and both clippy gates.** `cargo test --workspace` is green with zero warnings:
-**1,459 passed, 0 failed, 11 ignored** over the 55 `test result:` lines (the binary suite is **659 passed, 7 ignored**). Both
-`cargo clippy --workspace --all-targets -- -D warnings` and its `--release` form exit 0.
+**The suite and both clippy gates.** `cargo test --workspace` is green with zero warnings: **1,459
+passed, 0 failed, 11 ignored** over the 55 `test result:` lines (the binary suite is **659 passed, 7
+ignored**). Both `cargo clippy --workspace --all-targets -- -D warnings` and its `--release` form
+exit 0.
 
 ```text
 $ cargo test --workspace

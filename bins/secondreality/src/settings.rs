@@ -467,9 +467,19 @@ mod tests {
     #[test]
     fn the_frame_is_sized_for_the_widest_row_and_the_footer() {
         let font = test_font();
-        let widest = text_width(&font, "Sound quality") + text_width(&font, "Authentic");
+        // Each row's label and its widest value, measured over every row the screen has.
+        let widest = ROWS
+            .iter()
+            .map(|(label, values)| {
+                let value = values.iter().map(|v| text_width(&font, v)).max().unwrap_or(0);
+                text_width(&font, label) + value
+            })
+            .max()
+            .expect("the screen has rows");
+        let pair = text_width(&font, "Sound quality") + text_width(&font, "Authentic");
+        assert_eq!((widest, pair), (307, 307), "the widest row is Sound quality / Authentic");
         let footer = text_width(&font, FOOTER);
-        assert_eq!((widest, footer), (307, 475), "the widest row's text and the footer");
+        assert_eq!(footer, 475, "the footer");
         assert!(footer > 320, "the footer does not fit the demo's 320 columns");
     }
 

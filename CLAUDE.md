@@ -278,10 +278,11 @@ A part is done when its frames match. Record the evidence in `PROGRESS.md`.
   a count — or a capture with no entry). The report goes to `out/rediff/`. Re-run it after any
   change that could move a picture, and re-register a count only with the measurement that moved
   it.
-- **The full run is release-only.** `bins/secondreality/tests/fullrun.rs` (block 1 end to end
-  against `reference/parts/fullrun`: the part order, the seam table and the music against the
-  traces) is `#[cfg_attr(debug_assertions, ignore)]`, so a debug `cargo test --workspace` skips it
-  and a release run runs it by default. Run it as
+- **The full run is release-only.** `bins/secondreality/tests/fullrun.rs` checks block 1 end to
+  end against `reference/parts/fullrun`: the part order, the seam table and the music against the
+  traces. Three of its four tests are `#[cfg_attr(debug_assertions, ignore)]`, so a debug
+  `cargo test --workspace` skips them and a release run runs them by default. The fourth,
+  `the_jitter_window_is_the_shells`, reads only the source and runs in both profiles. Run it as
   `cargo test --release -p secondreality --test fullrun` — **without** `-- --ignored`, which in
   release runs only the genuinely ignored tests and skips these. The loop seam,
   `tests/loop.rs` against `reference/parts/loop`, runs in both profiles; its figures print with

@@ -2985,11 +2985,11 @@ marker, the palette) moved to `menu_text.rs` with its output unchanged — the v
 pass as they were — and gained the seven marks `( ) + - * = '` the source's order holds at cells
 67..73 (`ALKU/MAIN.C:40`). The frame is 520x325: the font at its own size needs 307 columns for
 "Sound quality" and "Authentic" and 475 for the footer `UP DOWN  LEFT RIGHT  ENTER  ESC`, which
-the demo's 320 columns cannot hold (both pinned by `settings::tests::`
-`the_frame_is_sized_for_the_widest_row_and_the_footer`), and a 4:3 window of it is 624x468 plus
-the border (`window.rs`'s tests), which fits a 600-line desktop. The screen is a new surface and
-not a fidelity one: it changes no compared frame, and its reducer, its frame and its settings are
-pinned by `settings.rs`'s tests.
+the demo's 320 columns cannot hold (both pinned by
+`settings::tests::the_frame_is_sized_for_the_widest_row_and_the_footer`), and a 4:3 window of it
+is 624x468 plus the border (`window.rs`'s tests), which fits a 600-line desktop. The screen is a
+new surface and not a fidelity one: it changes no compared frame, and its reducer, its frame and
+its settings are pinned by `settings.rs`'s tests.
 `APPROXIMATIONS.md` **A59** registers it beside the end box, at a measured difference of 0 on
 every compared frame.
 

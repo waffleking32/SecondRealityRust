@@ -3200,8 +3200,8 @@ hold from (10296, 10298].
 ALKU's fade-in is lit at 10045 and holds from 10106.
 
 **Why:** each residual is a property of something the seam inherits or a constant D24 does not let
-the port fit: CRED's retirement tick is CRED's (and if its two-tick tail is the original's too,
-the 2 frames are the capture's `C` reading, D42's cost); the restart recipe's 3 frames would be a
+the port fit: CRED's retirement tick is CRED's (the fade's end, 9092, is trace-measured, §25.3,
+so the two-tick tail is the port's CRED: D42's cost); the restart recipe's 3 frames would be a
 second constant needing its own measurement; ALKU follows the music; and CRED's 81-frame chain
 drift is CRED's span (A10, A53).
 
@@ -3221,10 +3221,10 @@ pins each):
 - **Δ open**: `L − 404` is 8700 if 404 is ALKU's first frame and 8698 if it is the mode set, so
   `LOOP_RELOAD_TICKS` is 11 or 9 (D42).
 
-**Status (Phase 9):** Carried — the tail and Δ need a reading of the original's frames the
-oracle did not give (the fade's placement is derived ±1, and whether 404 is a mode set is not
-measured); the +5's recipe part would be a second constant without its own measurement; ALKU's
-lag follows the music; the 81 is CRED's span, unexplained (A53).
+**Status (Phase 9):** Carried — the tail is CRED's retirement tick (CRED's work); Δ needs a
+reading of whether 404 is a mode set, which the oracle did not give; the +5's recipe part would
+be a second constant without its own measurement; ALKU's lag follows the music; the 81 is
+CRED's span, unexplained (A53).
 
 ## A62 — Three parts' exits: ALKU's skipped closing calls, MNTSCRL's exit-aware wait, PLZPART's unpolled flag (substitution; measured difference 0)
 
