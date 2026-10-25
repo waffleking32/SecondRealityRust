@@ -1128,7 +1128,8 @@ These came up while classifying and are deliberately elsewhere:
 - **The BEGLOGO/ENDLOGO doubled picture** Task 6 fixed was a port defect (an inherited line
   offset), not the original's.
 - **A14(a)'s marker.** §28.4 describes only the builder's count bug. The flush writes 0 and the
-  index is `0x400 + value`; Task 10 corrects A14(a)'s text.
+  index is `0x400 + value`; A14(a) is restated and closed on it
+  (`the_flush_clears_the_accumulator_word_it_reads`).
 - **HARD's two extra displays at the mode-4/part-2 boundary** (`hard.md` §"The mode-5 boundary",
   A48): the original's missed retrace, reproduced by two static ticks — a registered timing
   approximation.
@@ -1140,7 +1141,7 @@ These came up while classifying and are deliberately elsewhere:
   calls (`alku.md` §6), MNTSCRL's wait honours `dis_exit` where `:153-159` does not
   (`mntscrl.md` §8), PLZPART's frame never polls the exit flag (`plzpart.md` §10). They are what
   the port does differently, not what the original does, so they belong in `APPROXIMATIONS.md`
-  (Task 10).
+  — A62.
 
 ## The classification: every audited behaviour, and the grep that finds none missing
 
@@ -1184,9 +1185,9 @@ groups (a line can be in more than one):
   `minvball.md` §4, `plzpart.md` §9, `jplogo.md` §8);
 - "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`, `ddstars.md`, `u2a.md`,
   `reference-indices.md`'s HARD rows), or a build, capture or trace artefact (`asset-inventory.md`,
-  `music.md:1633`, `music-clock.md`, most of `reference-indices.md`);
+  `music.md:1638`, `music-clock.md`, most of `reference-indices.md`);
 - port-side mentions: the port's own page-slot spill (A23: `plzpart.md`, `APPROXIMATIONS.md`), the
-  conversion "bug" at `APPROXIMATIONS.md:133`, and `music.md:760`'s "a fix of a Task 3 timeline bug",
+  conversion "bug" at `APPROXIMATIONS.md:216`, and `music.md:762`'s "a fix of a Task 3 timeline bug",
   which is the port's own earlier player (§28.2 is the original's behaviour that fixed it);
 - a behaviour classified above under another name: A14's "bug" (§28.4), GRID's "(-10,-8) fill-word
   artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two extra displays (the
@@ -1199,12 +1200,12 @@ or a registered approximation), with the reason.
 | Hit | The note's behaviour | Class | Where |
 |---|---|---|---|
 | `alku.md:139` | the code-5 gate (`tptr++`) | E | §3, §10.4 |
-| `alku.md:147` | §6: the palette alias; the refresh past the row; the `memset`; the `f>7` fade; the exit path; the 9-tick spin | E, E, E, I, N (a port deviation: Task 10), N (the cadence is not a bug) | §10.1, §10.2, §10.3; index |
+| `alku.md:147` | §6: the palette alias; the refresh past the row; the `memset`; the `f>7` fade; the exit path; the 9-tick spin | E, E, E, I, N (a port deviation: A62), N (the cadence is not a bug) | §10.1, §10.2, §10.3; index |
 | `3dsinfld.md:495` | §7: the unlinked background; the palette aliasing; the dead frame-4 `setpalarea`; the dead `4444` cap; `cameralevel`; `docol`'s `~1`; `docopy`'s bands; the wave tables | I, I, I, I, I, E, E, E | index; §20.1, §20.2 |
 | `beglogo.md:66` | `setpalarea`'s byte count | E | §4 |
 | `endlogo.md:43` | `setpalarea`'s byte count (510) | E | §4 |
 | `mntscrl.md:66` | the packed font array kept as one buffer | N (the source's own `move` shifts it; a representation) | — |
-| `mntscrl.md:204` | §8: the `fbuf` overrun; the `veke` bound; the forced-black bands; the exact cue; the wait honouring `dis_exit` | E, I, E, E, N (a port deviation: Task 10) | §15.1, §15.2, §15.4; index |
+| `mntscrl.md:204` | §8: the `fbuf` overrun; the `veke` bound; the forced-black bands; the exact cue; the wait honouring `dis_exit` | E, I, E, E, N (a port deviation: A62) | §15.1, §15.2, §15.4; index |
 | `mntscrl.md:216` | the forced-black bands and their ramp | E | §15.2, §15.3 |
 | `mntscrl.md:232` | the `hback` rebase is not performed; the rebased layout is kept | N (a substitution, `mntscrl.md` §9) | — |
 | `grid.md:139` | the eye shift stops 100 bytes short | E | §24.1 |
@@ -1229,8 +1230,8 @@ or a registered approximation), with the reason.
 | `music.md:169` | the order list kept as bytes (254, 255) | I | index |
 | `music.md:172` | `the_order_list_is_preserved_byte_for_byte` | I | index |
 | `music.md:370` | order list 254 and 255 kept as data | I | index |
-| `music.md:1726` | a part whose cue is *required* | N (a shell requirement, not a behaviour) | — |
-| `music.md:2046` | the enhanced renderer keeps eight fraction bits | N (the port's own renderer, D43) | — |
+| `music.md:1731` | a part whose cue is *required* | N (a shell requirement, not a behaviour) | — |
+| `music.md:2051` | the enhanced renderer keeps eight fraction bits | N (the port's own renderer, D43) | — |
 | `pam.md:286` | §7: the FLI header counts; `ruudulle`; the 4-tick spin; the 45-step loop | E, I, N (a cadence), I | §11; index |
 | `panicend.md:339` | §10: `getpal`; the fade tables; `copyline`; the collapse; nothing beyond row 0 cleared; no exit poll | E, E, E, E, I, I | §13.1-§13.4; index |
 | `part-sequence.md:54` | the spec's part descriptions kept | N (names) | — |
@@ -1253,11 +1254,13 @@ or a registered approximation), with the reason.
 | `reference-indices.md:3843` | the palimpsest "preserves different rows" | E | §21.4 |
 | `reference-indices.md:5073` | a read of 480 "optional rather than *required*" | N (capture method) | — |
 | `reference-indices.md:5635`, `reference-indices.md:5636`, `reference-indices.md:5639`, `reference-indices.md:5640` | frames "not kept" by the indexed capture | N (capture bookkeeping) | — |
-| `APPROXIMATIONS.md:272` | what was "kept from the substitution" (ENDLOGO's cue) | N (a register's own history) | — |
-| `APPROXIMATIONS.md:965` | an earlier version "kept the tree's wait" | N (a register's own history) | — |
-| `APPROXIMATIONS.md:1010` | "the exact cue is kept: only `-11`" (RAYSCRL) | E | §19.5 |
-| `APPROXIMATIONS.md:1751` | "what is preserved is the pixel set" (a representation) | N | — |
-| `APPROXIMATIONS.md:2508`, `APPROXIMATIONS.md:2590` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
+| `APPROXIMATIONS.md:387` | what was "kept from the substitution" (ENDLOGO's cue) | N (a register's own history) | — |
+| `APPROXIMATIONS.md:1192` | an earlier version "kept the tree's wait" | N (a register's own history) | — |
+| `APPROXIMATIONS.md:1240` | "the exact cue is kept: only `-11`" (RAYSCRL) | E | §19.5 |
+| `APPROXIMATIONS.md:2090` | "what is preserved is the pixel set" (a representation) | N | — |
+| `APPROXIMATIONS.md:2872`, `APPROXIMATIONS.md:2970` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
+| `APPROXIMATIONS.md:14` | earlier text "kept as dated history" | N (the register's own convention) | — |
+| `APPROXIMATIONS.md:3086`, `APPROXIMATIONS.md:3097` | an ESC between two parts "kept" by the port where `flushkbd` drops it | N (a port deviation, A58) | — |
 
 The behaviours the audit's grep cannot find because their note never says *preserved*, *kept* or
 *required* — LNS&ZOOM's aspect order (§16), HARD's dot engine (§25), the music

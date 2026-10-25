@@ -7,8 +7,9 @@
 //! reference→rendered rule, its plane — and that test's asserted count. Where no test
 //! asserts a pixel count (CRED's bands, PANICEND's standalone frames, ENDSCRL, TUNNELI,
 //! PLZPART's percentages and its fit corpus, the lead-in windows), the count is the one
-//! this command measured, and `register` names the A-entry whose figure it reproduces —
-//! or, where it does not, that A-entry plus `(Task 10: restate)`.
+//! this command measured, and `register` names the A-entry whose figure it reproduces (A5, A7
+//! and A23 were restated at these counts, and PANICEND's handoff registered as A63, in Phase 9's
+//! register pass).
 //!
 //! This file is self-contained (no imports) because `xtask/tests/rediff.rs` includes it by
 //! path to check it against the tree: `xtask` is a binary crate.
@@ -270,12 +271,12 @@ pub const TABLE: &[Entry] = &[
     // §25.6: the field (index 15) at the port's own blit index, 436 (A5: the port blits at
     // tick 32), filed unbatched for its index plane. The RGB is white on both sides; the
     // port's plane already holds the picture (all but 2 of its 128,000 indices are not
-    // 15), which A5 predicted and its "zero" does not cover.
+    // 15), which A5 predicted and now registers as its restated index-plane figure.
     Entry {
         capture: "beglogo-leadin/plane-436",
         args: &["--part", "beglogo"],
         frames: &[
-            idx(436, 436, 127998, "A5 (Task 10: restate)"),
+            idx(436, 436, 127998, "A5"),
             rgb(436, 436, 0, "A5"),
         ],
     },
@@ -354,12 +355,12 @@ pub const TABLE: &[Entry] = &[
     },
     // §25.6: the field (index 0) at the port's blit index, 440 (A7: tick 36). The RGB is
     // white on both sides; the port's plane holds the picture, 55,499 of whose indices are
-    // not 0 — A7's prediction, outside its "zero".
+    // not 0 — A7's prediction, and its restated index-plane figure.
     Entry {
         capture: "endlogo-leadin/plane-440",
         args: &["--part", "endlogo"],
         frames: &[
-            idx(440, 440, 55499, "A7 (Task 10: restate)"),
+            idx(440, 440, 55499, "A7"),
             rgb(440, 440, 0, "A7"),
         ],
     },
@@ -613,12 +614,12 @@ pub const TABLE: &[Entry] = &[
     // (:33, :37, :51), every seam frame at 0 (:171-183). The original's `L` = 9104 lands
     // on the port's 8908, still CRED's 320×200 screen (:177) — a geometry mismatch, never a
     // registered outcome — so it is paired with the port's own `L`, 8910, which the test
-    // asserts is 9104 byte for byte (:189-195): D42's 2-tick CRED tail.
+    // asserts is 9104 byte for byte (:189-195): A61's 2-tick CRED tail (D42).
     Entry {
         capture: "loop/alku",
         args: &["--block", "5", "--loop"],
         frames: &[
-            rgb(9104, 8910, 0, "D42"),
+            rgb(9104, 8910, 0, "A61"),
             rgb0(9600, 9404),
             rgb0(10419, 10223),
             rgb0(11419, 11223),
@@ -670,32 +671,32 @@ pub const TABLE: &[Entry] = &[
     // tests/panicend.rs: boot = 8782 + tick (module docs), 9000 at tick 218 in both planes
     // (:138-152). 8792/8800 are the handoff's frames, which a standalone run cannot
     // reproduce; the test pins them at ticks 10/18 as 4,914 and 702 *bytes* (:178), and
-    // the counts here are this command's.
+    // the counts here are this command's — A63, the standalone run's limitation.
     Entry {
         capture: "panicend",
         args: &["--part", "panicend"],
         frames: &[
-            rgb(8792, 10, 1638, "PANICEND handoff (Task 10: register)"),
-            rgb(8800, 18, 234, "PANICEND handoff (Task 10: register)"),
+            rgb(8792, 10, 1638, "A63"),
+            rgb(8800, 18, 234, "A63"),
             rgb0(9000, 218),
             idx0(9000, 218),
         ],
     },
     // The fit corpus (reference-indices.md §1.13) at the part's mapping, tick = index −
     // 5723 (tests/plzpart.rs:93). It is not a keyframe set and no test compares the port's
-    // frames with it; the counts are this command's, and A23 states the corpus only as
-    // band-mask fit percentages, not as pixel counts. 8500's count is the cube capture's
-    // 8500 count, 16,743.
+    // frames with it; the counts are this command's, and A23 registers them as whole-frame
+    // counts beside its band-mask fit percentages. 8500's count is the cube capture's 8500
+    // count, 16,743.
     Entry {
         capture: "plzpart/band",
         args: &["--part", "plzpart"],
         frames: &[
-            rgb(8400, 2677, 20315, "A23 (Task 10: restate)"),
-            rgb(8450, 2727, 21832, "A23 (Task 10: restate)"),
-            rgb(8500, 2777, 16743, "A23 (Task 10: restate)"),
-            rgb(8600, 2877, 32287, "A23 (Task 10: restate)"),
-            rgb(8700, 2977, 14979, "A23 (Task 10: restate)"),
-            rgb(8800, 3077, 37374, "A23 (Task 10: restate)"),
+            rgb(8400, 2677, 20315, "A23"),
+            rgb(8450, 2727, 21832, "A23"),
+            rgb(8500, 2777, 16743, "A23"),
+            rgb(8600, 2877, 32287, "A23"),
+            rgb(8700, 2977, 14979, "A23"),
+            rgb(8800, 3077, 37374, "A23"),
         ],
     },
     // tests/plzpart.rs:333-438: 8500 at 26.161 % — its decomposition 6,333 + 105 + 10,305

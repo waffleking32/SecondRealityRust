@@ -4,6 +4,36 @@ Every place the port knowingly differs from the original. An entry requires a
 justification and a measured visual difference; it is not a parking place for "close
 enough".
 
+## How an entry reads (Phase 9 Task 10)
+
+Every entry carries five labels — **Part**, **Original**, **Port**, **Why** and **Measured
+difference** — and an entry that names an open item carries a **Status (Phase 9)** line: *Closed*,
+with the measurement and the command or test that produces it, or *Carried*, with the reason it
+cannot be closed (the packed EXE, D12; what the oracle cannot see; an unreachable path). Where an
+entry's earlier claim is no longer right it is restated at the measured figure and the old text is
+kept as dated history, struck through or headed as such (D29). `cargo test -p xtask --test
+approximations` checks every `## A` heading for the five labels, every entry that names an open
+item for its status line, and every `register` string of `cargo xtask rediff`'s table for an entry
+that exists.
+
+**The packed EXEs (D24's lead).** Where an entry's lead is the shipped part, it is two things: the
+part's EXE as `MAIN/DATA/` stages it, PKLITE-packed, and its line in `MAIN/PACKFINA.INC`, the list
+the release's packer read. A line's fifth and sixth words are a length, low word then high
+(`dw 01FBFh,0BA4Ah,00012h,012DFh,0A1BCh,00002h ;PAM.EXE` is 0x2A1BC = 172,476), and it is the
+staged file's size for 18 of the list's 22 EXEs. The four it is not are `LNS&ZOOM.EXE` (staged
+67,222, listed 67,226), `U2A.EXE` (111,894 against 54,432), `U2E.EXE` (89,102 against 46,278) and
+`START.EXE` (11,458 against 11,329), and the staged `U2A.EXE` and `U2E.EXE` are the only two with
+no PKLITE header: those two copies are not the images the release packs, and LNS&ZOOM's is four
+bytes from it. Measured by
+
+```bash
+cd upstream/SecondReality && tr -d '\r' < MAIN/PACKFINA.INC | grep -n -i '\.EXE' |
+while IFS= read -r l; do n=${l%%:*}; name=${l##*;}; w=$(echo "$l" | sed 's/.*dw //; s/ ;.*//')
+  len=$(( 16#$(echo $w | cut -d, -f6 | tr -d h) * 65536 + 16#$(echo $w | cut -d, -f5 | tr -d h) ))
+  echo "$n $name listed=$len staged=$(stat -c %s "MAIN/DATA/$name") pklite=$(grep -a -c -i pklite "MAIN/DATA/$name")"
+done
+```
+
 ## A1 — Overscan border is padded, not scanned out
 
 **Part:** all; used deliberately by PANIC and the 320×400 parts.
@@ -14,9 +44,59 @@ per side, scaled with the picture.
 **Why:** the engine composes the active display only (spec §4.2, plan decision 8). The
 border must still appear, but its exact thickness depends on CRTC timings the port does
 not model.
-**Measured difference:** 8 source pixels per side at every geometry. The filed reference captures
-are the displayed area, with no overscan border in them to measure, so the padding's exact
-thickness stays unmeasured; the Phase 9 fidelity pass owns closing it against the original.
+**Measured difference:** **not measurable against the reference, and derived instead (Phase 9
+Task 10).** The oracle renders no overscan region: its blank line on a VGA is the black index, and
+only a CGA's is the overscan colour (`dosbox-automation/src/hardware/video/vga_draw.cpp:1160-1215`,
+the CGA case at `:1182-1186`), so the filed captures are the display-enable area and hold no border.
+What the border *is* follows from the CRTC timing the parts' modes program, and that is the same
+everywhere: no part on the shipped path writes a timing register. Their CRTC writes are 0x09 (the
+rows: `inittwk`'s `0x0009`, `BEG/ASM.ASM:21-24`, `END/ASM.ASM:21-24`, LENS's `or al,3`,
+`LENS/ASM.ASM:223-231`), 0x0C/0x0D (start address), 0x13, 0x14, 0x17, 0x18 (line compare) and 0x07,
+which PLZPART's `set_plzstart` writes as `0x0F | LC8`, keeping mode 13h's timing bits
+(`PLZPART/ASMYT.ASM:103-112`); GLENZ's 240- and 350-line tables (`GLENZ/VIDINIT.ASM:10-25`,
+`sethseq`) belong to `init320x240`/`init320x350unr`, and the shipped `init320x200` has its tweak
+commented out (`GLENZ/VID.ASM:213`). `MAIN/VMODE.ASM` programs nothing: its save/load of modes
+0Dh/13h/0Eh is assembled out (`IF 0`, `:131-152`) and its dispatch commented (`:22-31`). So the
+timing is the BIOS's, which in the oracle is its own table: mode 13h and mode 0Eh (ENDSCRL,
+`ENDSCRL/MAIN.C:22-26`) are both `htotal 100, hdispend 80, vtotal 449, vdispend 400`
+(`src/ints/int10_modes.cpp:40`, `:45`), programmed at `:1352-1460` as CR00 95, CR01 79, CR02 80,
+CR03 0x82 with CR05 bit 7 (blank end 98 & 0x3F = 34), CR06 0xBF, CR12 0x8F and CR15 0x96 with their
+overflow bits (447, 399, 406), and CR16 = 441 & 0xFF = 0xB9. The oracle reads those back
+(`vga_draw.cpp:2001-2095`) as a line of 100 characters, 80 displayed, blanked from 80 to
+80 + ((34 − 80) & 0x3F) = 98, and a frame of 449 lines, 400 displayed, blanked from 406 + 1 = 407 to
+407 + ((0x39 − 407) & 0x7F) + 1 = 442. The border is what is displayed outside the active area and
+not blanked:
+
+| side | characters / lines | 320×200 (2 lines a row) | 320×400 | 640×400 (8 pixels a character) |
+|---|---|---|---|---|
+| left | 98–99: 2 characters | **8** | **8** | **16** |
+| right | none (blank starts at display end) | **0** | **0** | **0** |
+| top | 442–448: 7 lines | **3.5** | **7** | **7** |
+| bottom | 400–406: 7 lines | **3.5** | **7** | **7** |
+
+in source pixels (a character is four pixels in the 256-colour modes, eight in ENDSCRL's
+sixteen-colour one). **They are not whole at every geometry** — 320×200, most of the demo, has
+3.5 rows top and bottom — so `present.rs`'s `BORDER_PX` stays **8** on every side: the phase adopts a derived border only if
+it is whole source pixels at every geometry (`docs/plans/09-assembly.md`, Task 10 Step 3). Two further facts say a derived pad would not be a measurement either: the
+registers read as the IBM convention documents them (blank from 406, ending at 441) give 3 and 4
+rows at 320×200 where the oracle's reading gives 3.5 and 3.5, and nothing in the tree or the oracle
+arbitrates the one line; and the horizontal border the registers give is one-sided, which a monitor
+and the 256-colour pipeline's own delay shift and nothing here models. The pad's thickness is
+therefore the port's presentation choice, recorded as such; no compared frame contains it (`xtask
+compare` reads the composed frame, `present.rs`'s module docs), so its difference from the
+original is **0 on every compared frame**. The derivation's arithmetic is the test
+`a1_the_derived_border_is_not_whole_at_every_geometry` (`cargo test -p xtask --test
+approximations`); its inputs are the source lines cited here.
+
+**Status (Phase 9):** Closed — by derivation, not adopted: the border the modes' CRTC timing gives
+is 8/0/3.5/3.5 source pixels (left, right, top, bottom) at 320×200, not whole, so the pad stays 8
+(`cargo test -p xtask --test approximations a1_the_derived_border_is_not_whole_at_every_geometry`).
+What cannot be measured is the oracle's: it renders no border.
+
+*History (Phase 0–8).* The entry read: "8 source pixels per side at every geometry. The filed
+reference captures are the displayed area, with no overscan border in them to measure, so the
+padding's exact thickness stays unmeasured; the Phase 9 fidelity pass owns closing it against the
+original."
 
 ## A2 — An RLE row that decodes wider than its header's width is clipped
 
@@ -102,6 +182,9 @@ rather than the format's line pairing. No file in either tree carries either chu
 type (`PRAX4.FLI`'s histogram is `0x0B:1 0x0C:41 0x0F:1`), so those two paths are
 cited from the authority and unmeasured, which `sr_assets::anim`'s module docs say.
 
+**Status (Phase 9):** Carried — unreachable paths: no file the demo ships fires the three
+malformed-input constructs or carries a `0x0004`/`0x0007` chunk (the histogram above).
+
 ## A4 — Two FLI decoding choices where the port follows the format rather than VFLI.C's own reading
 
 **Part:** PAM (`PAM/PRAX4.FLI`), Phase 4. Both are choices about what a decode *is*, not about
@@ -176,7 +259,27 @@ frames "land where the original's must have" would be a fit of exactly the kind 
 forbids for the fade's constant, and it would put the picture's indices into 436-444 against no
 evidence at all.
 
-**Measured difference:** **zero on every frame the reference holds.** 430 is the white field in both
+**Measured difference (restated, Phase 9 Task 10).** Phase 9 Task 1 captured the window
+(`reference-indices.md` §25.6), and the "zero" below no longer covers it: it holds for the RGB and
+not for the index plane. **RGB: 0.** `beglogo-leadin/even` and `/odd` (430–450) are white through
+446 on both sides, and the ramp's first displayed step is 447, every frame at 0 differing pixels.
+**Index plane: the field, where the port already has the picture.** The original's plane is the
+white field — every byte index 15 — at every index the oracle could read, **430–438**, while the
+port's holds the picture from its blit at 436: `beglogo-leadin/plane-436` differs in **127,998 of
+128,000** indices (the port's other 2 are picture pixels of index 15). Both counts are
+`cargo xtask rediff --only beglogo-leadin`'s. From **439** the oracle cannot read the plane (§25.6:
+the chain-4 probe answers mid-`lineblit`, or the DAC pass reaches the ramp), so where the
+original's code blits is bounded below by 439 and not measured. The ramp's 447 is one frame after
+this entry's 446, which is D17's session alignment (446 was measured from `c` at 470 and 560), not
+a change in the port.
+
+**Status (Phase 9):** Closed for 430–438 — the plane is the white field (index 15) and the port's
+is the picture from 436, 127,998 of 128,000 (`cargo xtask rediff --only beglogo-leadin`);
+Carried for 439–446 — the oracle cannot read the index plane there (§25.6), so the nine
+unaccounted frames keep no cause.
+
+**Measured difference as Phase 2 registered it (history).** **Zero on every frame the reference
+holds.** 430 is the white field in both
 (128,000 bytes of index 15), the four keyframes compare at exit 0, and 436-444 fall between two
 keyframes the reference does not hold at all. **What a later phase should watch:** Phase 9 compares
 every frame, and these nine are the frames a difference would show in — with the port's map the
@@ -192,7 +295,7 @@ picture indexes white until `c` moves). A capture of 436-444, or a count of the 
 story: a palette ramp the tree's source and the shipped build disagree about, and the small residual
 that is left once the shipped one is ported.
 
-**The original — the ramp.** `TUN10.PAS:122` writes `(64-x) *3 div 4` into DAC entries 128..192
+**Original — the ramp.** `TUN10.PAS:122` writes `(64-x) *3 div 4` into DAC entries 128..192
 (a second grey ramp, three quarters of the first one's). The tree's own build of it, `TUN10.EXE`,
 compiles exactly that: `3*(64-x)` then `idiv 4`, three times over for r, g and b, with the entry
 pushed as `128+x` (image offsets `0x1d0`-`0x1e3`). **The build that shipped — the one every reference
@@ -258,6 +361,18 @@ pictures *and* a longer run to see where the two trajectories diverge — the re
 (`reference-indices.md` §1.8) is what would say whether the picture the port draws is a picture no
 session drew.
 
+**Measured difference (restated at the full run's and `rediff`'s numbers, Phase 9 Task 10).** The
+part's own run is unchanged: **179 / 373 / 321 / 433** differing pixels of 64,000 at 3800 / 4200 /
+4500 / 4600, at the same ticks (`cargo xtask rediff --only tunneli`, every frame at its count).
+In the full `SECOND 1` run, where TUNNELI starts 7 frames early (A53), the two filed TUNNELI frames
+differ by **192** (11159, its first) and **4,336** (11900) pixels (`cargo xtask rediff --only
+fullrun/04-glenz-techno`); the second is this residual seen through the run's own phase, not a
+new difference, and nothing in it is colour the ramp could change.
+
+**Status (Phase 9):** Carried — the residual is unattributed: no session reproduces the 4500 and
+4600 pictures (`reference-indices.md` §1.8), so the oracle cannot say whose it is, and the shipped
+`MAIN/DATA/TUNNELI.EXE` is packed (D12).
+
 ## A7 — ENDLOGO: ~~the music gate is its measured length~~ **retired, Task 8 — the cue is the source's own loop**, and ten lead-in frames are not modelled
 
 **Part:** ENDLOGO (`END/END.C`), Phase 2. Two entries in one, following A5's shape: the one gate in
@@ -277,7 +392,7 @@ entry's second half, are untouched. The one **new** approximation Task 8 leaves 
 alignment: one frame, because the port's own words and the reference's frames are one frame apart
 (`docs/fidelity/endlogo.md` §5.2), and the frames are the record (D12).
 
-**The original — the gate.** `END.C:107-111` is
+**Original — the gate.** `END.C:107-111` is
 
 ```c
 for(a=0;a<5000 && !dis_exit();a++) { dis_waitb(); if(dis_musplus()>-16) break; }
@@ -325,6 +440,15 @@ should take the alignment with it**: a run whose music starts elsewhere (a `SECO
 entry point) has no reference frame to align to, and `GATE_ALIGNMENT_TICKS` is a fact about the
 reference's boot and `second5`'s session, not about ENDLOGO.
 
+**Port.** Since Task 8 the gate is the source's own loop, run against the run's player (the
+retirement above, `docs/fidelity/endlogo.md` §5), with the one-frame `GATE_ALIGNMENT_TICKS`; the
+lead-in draws the white field and blits at tick 36 (index 440), with no model of the ten ticks
+below.
+
+**Why.** The gate needs no substitute once the music plays; the lead-in's ten ticks are
+not modelled for A5's reason — the port decodes the picture once, in `init`, and moving the blit
+to where the original's "must have" been would be a fit against no evidence.
+
 **The second half — the lead-in's ten unmodelled ticks.** The port's ticks follow the source's
 vertical blanks one for one: tick 0 is `:61`, tick 1 is `:62-63`'s white and `:67-88`'s CRTC and AC,
 tick 2 is `:89`, tick 3 is `:90-91`, ticks 4-35 are `:92`'s 32 blanks, and tick 36 is `:94-99`'s
@@ -341,7 +465,23 @@ so that white can only be `END.C:62-63`'s — and its picture is in video memory
 **version check, not a synchronisation cue** (`DIS/DISC.ASM:51-64`: `_dis_version`, a message and
 exit 3 if the server is absent, and otherwise a return). It costs no frame.
 
-**Measured difference: zero on every frame the reference holds.** 430 (tick 26) is inside the 32
+**Measured difference (restated, Phase 9 Task 10).** As A5's: Phase 9 Task 1 captured the window
+(`reference-indices.md` §25.6). **RGB: 0** — `endlogo-leadin/even` and `/odd` (436–455) are white
+through 451 on both sides and the ramp's first step is 452, every frame at 0. **Index plane: the
+field where the port has the picture.** The original's plane is index **0** — `END.C` never fills
+video memory, it whitens DAC entries 0–254 (`:62-63`, `:90-91`) — at every index the oracle could
+read, **436–443**, while the port's holds the picture from its blit at 440:
+`endlogo-leadin/plane-440` differs in **55,499 of 128,000** indices (the picture's index-0 pixels
+are the rest). Both counts are `cargo xtask rediff --only endlogo-leadin`'s. From **444** the
+plane cannot be read (§25.6).
+
+**Status (Phase 9):** Closed for 436–443 — the plane is index 0 and the port's is the picture from
+440, 55,499 of 128,000 (`cargo xtask rediff --only endlogo-leadin`); Carried for 444–450 — the
+oracle cannot read the index plane there (§25.6). The ten frames keep no cause, and the common
+candidate below (the decode-and-blit) is neither confirmed nor ruled out.
+
+**Measured difference as Phase 2 registered it (history): zero on every frame the reference
+holds.** 430 (tick 26) is inside the 32
 blanks and is index 0 in the reference and in the port; 500 and 1180 are the two fade frames and 900
 is the hold, all three far outside the window. Ticks 441-450 are frames the reference does not hold at
 all, and the port draws white through them, which is what the DAC makes of that window either way.
@@ -372,7 +512,7 @@ first entry of the part's own, and it is a *data* divergence rather than a
 substitution: what the routine states and what the file holds do not agree, and
 neither can be changed.
 
-**The original.** `#define FONAY 32` (`CREDITS/MAIN.C:29`) with
+**Original.** `#define FONAY 32` (`CREDITS/MAIN.C:29`) with
 `extern char far font[FONAY][1500]` (`:31`): the routine reads **32 rows** of a
 raster that has **40** (60,000 `db` values, the 1,500×40 raster the inventory's
 §E.8 and §E.20 measure). It also states a **32-column cell** —
@@ -420,7 +560,7 @@ register here because this is where a font strip is next touched: Phase 1's task
 A7 found it (`docs/plans/01-assets.md`, A7's Interfaces block) and its ledger
 says the entry belongs to the phase that ports the part.
 
-**The original.** `ALKU/MAIN.C:169` with `:218` and `:225` scan **32** rows, and
+**Original.** `ALKU/MAIN.C:169` with `:218` and `:225` scan **32** rows, and
 `y2w=y+32` (`:274`, `:429`) draws 32 — of a strip that is **1,500×30**: the
 header and the 45,000-byte payload of `ALKU/FONA.UH`. The array ALKU's routine
 indexes is however longer than the strip: `ALKU/INCLUDE.ASM:17` includes the
@@ -454,6 +594,10 @@ holds and not the two past it (`docs/fidelity/alku.md` §7, §11), and its two h
 keyframes (1719, 2719) are byte-identical with that strip (`docs/fidelity/alku.md` §8). The padding
 bits a black palette hides remain unmeasured; the lead is the packed `MAIN/DATA/ALKU.EXE`.
 
+**Status (Phase 9):** Carried — the padding bits a black palette hides are in the packed
+`MAIN/DATA/ALKU.EXE` (D12; its pack line is `MAIN/PACKFINA.INC:47`), and no screen shows them; the
+visible half is measured (the held cards 1719 and 2719 at 0, `cargo xtask rediff --only alku`).
+
 ## A10 — CRED: three of the five keyframes are the shipped build's credits, not the tree's
 
 **Part:** CRED (`CREDITS/MAIN.C` over `CREDITS/PICS/*.LBM`), Phase 2. A **data** divergence of the
@@ -461,12 +605,15 @@ same kind A6 records for TUNNELI, and the one that decides this part's acceptanc
 port below the register *is* this tree's source, and the reference is the **released demo**, whose
 CRED was not built from the source this tree holds.
 
-**The original.** What the shipped `CRED.EXE` draws — `MAIN/DATA/CRED.EXE`, 148,711 bytes,
+**Original.** What the shipped `CRED.EXE` draws — `MAIN/DATA/CRED.EXE`, 148,711 bytes,
 PKLITE-packed, its pack entry at `MAIN/PACKFINA.INC:70` — is recorded screen by screen, read off
 its own sheet, in `reference-indices.md` §20.1.
 
 **The tree.** `CREDITS/MAIN.C:41-156` calls `screenin(pic, text)` 21 times with the captions this
 port draws, and `CREDITS/INCLUDE.ASM`/`INCLUD2.ASM` link the 21 `PIC*.LBM` files into it.
+
+**Port.** The tree's: those 21 `screenin` calls, their captions and the 21 linked pictures, through
+the part's own tick map and palette repair (the *Why* below).
 
 **Where they differ, measured.** The brief's acceptance command exits 1, and each difference is
 localised (`bins/secondreality/tests/cred.rs` asserts both regions' byte counts per frame):
@@ -539,6 +686,15 @@ objects, which is what the credits were built from — and the internal layout (
 read out of the packed EXE. Nothing here has been unpacked; what the markers inside `CRED.EXE` are
 is unmeasured. Phase 9 compares every frame; these three are where that phase will first look.
 
+**Measured difference (restated at `rediff`'s and the full run's numbers, Phase 9 Task 10).** As
+pixels of 64,000 the three are **7,204 / 6,088 / 3,741** at 3240 / 5440 / 8740 — the percentages
+above, 0 at 1440 and 7640 (`cargo xtask rediff --only cred`). The full `SECOND 1` run's one filed
+CRED hold, 40600, differs by **7,204** as well (`cargo xtask rediff --only fullrun/12-cred`, A53):
+the same release-versus-tree screen, reached through block 1's chain.
+
+**Status (Phase 9):** Carried — the shipped captions and pictures are inside the packed
+`MAIN/DATA/CRED.EXE` (D12; `MAIN/PACKFINA.INC:70`), which nothing here unpacks.
+
 ## A11 — ENDSCRL: the shipped build's control lines, pitch, order and carriage returns are not the tree's
 
 **Part:** ENDSCRL (`ENDSCRL/MAIN.C` over `ENDSCRL/ASMYT.ASM` and `ENDSCRL/FONA.UH`), Phase 2. A6's
@@ -547,7 +703,7 @@ acceptance comparison. The port below the register *is* this tree's source read 
 asset; the reference is the **released demo**, whose ENDSCRL was built from other constants, other
 text handling and other art.
 
-**The original.** The shipped part is `MAIN/DATA/ENDSCRL.EXE`, **9,965 bytes**, which is the file
+**Original.** The shipped part is `MAIN/DATA/ENDSCRL.EXE`, **9,965 bytes**, which is the file
 `MAIN/PACKFINA.INC:50` packs (`0x26ED` unpacked, `0x140C` packed) and which PKLITE packed — the tree
 holds two builds of this part and the reference ran the other one.
 
@@ -589,6 +745,9 @@ frames by `bins/secondreality/src/parts/endscrl.rs`'s reference tests, in the or
    (`MAIN/PACKFINA.INC:51`); what that service did to the CRs is **not established** — the tree
    holds no source for it, so a text-mode read and a CR-stripped pack entry are both open.
 
+**Port.** This tree's `ENDSCRL/MAIN.C` over this tree's assets: `FONAY` 30, no control-line rule, the
+74-character `fonaorder`, `ENDSCRL/FONA.UH`'s raster and `ENDSCROL.TXT` with its carriage returns.
+
 **Why the port does not follow the reference.** These are the *part's build* and the *demo's file
 service*; the port's authority for the former is this tree's source (`MAIN.C:6` says 30, and its
 renderer has no control-line rule) and for the latter the tree's asset (which holds the CRs).
@@ -624,6 +783,18 @@ touch any of it.
 shipped one's control-line rule, its `FONAY`, its 80-character order and its raster are all inside
 that packed image. **The mechanism of the control-line rule is unknown, as the CR's is: what is
 measured is the behaviour** — a `[NN` line advances the ring NN rows and draws nothing.
+
+**Measured difference (restated at `rediff`'s and the full run's numbers, Phase 9 Task 10).** As
+pixels of 256,000 the four keyframes differ by **7,289 / 28,333 / 25,502 / 17,108** at 9100 / 10000
+/ 12000 / 14000 — the percentages above (`cargo xtask rediff --only endscrl`). In the full run
+ENDSCRL starts **88** frames early, not block 5's 82 (A53: CRED's span is 69 frames shorter), and
+its three filed opening frames 46280 / 46283 / 46286 differ by **42 / 67 / 149** pixels at that
+offset (`cargo xtask rediff --only fullrun/13-endscrl`): the first lines of the text, which both
+builds draw alike, before the pitch and the control lines part them.
+
+**Status (Phase 9):** Carried — the control-line rule, `FONAY`, the 80-character order and the
+raster are inside the packed `MAIN/DATA/ENDSCRL.EXE` (D12; `MAIN/PACKFINA.INC:50`), and what the
+demo's file service did to the CRs has no source in the tree.
 
 ## A12 — The music clock: the port's tick clock is exact, the reference's frame counter is not
 
@@ -713,6 +884,10 @@ and nothing else.
 **If it is ever closed:** it would take a trace of the reference's own frame clock beside a trace
 of the guest's, which is a measurement `music probe`-style and not a code change.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: its frame counter's host-timing term
+(D17) is reachable by neither the API nor `--set`, and two sessions of one recipe disagree with
+each other. Phase 9's longer traces are A54.
+
 ## A13 — ~~The mixer's output curve is the object's linear case, not the reference's gated one~~ **Withdrawn — the curve is implemented**
 
 **Withdrawn 2026-10-14, on review.** The entry above recorded the port converting the object's
@@ -727,6 +902,15 @@ and widens the byte the card would play.
 `docs/fidelity/music.md` §10.3 is the reading; §A13 leaves only one thing approximated in its
 place:
 
+**Part:** the music, under every part that plays it (`Curve::sample`, `crates/sr-audio/src/mix.rs`).
+
+**Original:** the curve's index is a 16-bit `bx` read out of the object's own code segment, so an
+index past either end of the table reads the segment's neighbouring bytes (the paragraph below).
+
+**Port:** `Curve::sample` clamps the index to the table's 2048 entries.
+
+**Why:** the port has no such neighbours to read, and clamping invents no value (below).
+
 **A13 (as it stands) — the curve's index is clamped at the table's ends.** The object's index is a
 16-bit `bx` added to the base and read out of its own code segment (`+0x2cf4`'s `mov %cs:(%bx),%ah`,
 `+0x2d08`'s `mov %cs:0x0(%bp),%al`), so a signal further from silence than the table is wide reads
@@ -736,17 +920,24 @@ and clamps to the table's 2048 entries instead of inventing a value: `Curve::sam
 the port indexes with (`0x400 + value`) the index reaches past the table's end only for a value
 at or above **+1024** — past the ±1000 these modules' signal reaches — and below the table's
 start only for a value at or below **−1025**, which a sixteen-voice mono mix can reach.
-(The marker's `0x501 + value`, which the port does not apply, would move both thresholds 257
-lower; A14(a) is that question.) **Measured difference:** none that any capture can show (the
-emulator runs silent, D17); the object's value there is not a defined output but its own
-segment's bytes, which is the finding rather than a number.
+~~(The marker's `0x501 + value`, which the port does not apply, would move both thresholds 257
+lower; A14(a) is that question.)~~ *(Phase 9 Task 10: there is no marker — the flush writes zero,
+A14(a) — so the two thresholds are the object's own.)*
 
-## A14 — The curve the machine's memory holds is not the curve the builder's formula describes: the `rep stosw` clobbers its own count, and the index's base is open
+**Measured difference:** none that any capture can show (the emulator runs silent, D17); the
+object's value there is not a defined output but its own segment's bytes, which is the finding
+rather than a number.
+
+**Status (Phase 9):** Carried — what the oracle cannot see: the emulator runs silent (D17), so no
+capture holds the sample a clamped index would change, and the object's value there is its
+segment's bytes, not an output.
+
+## A14 — The curve the machine's memory holds is not the curve the builder's formula describes: the `rep stosw` clobbers its own count ~~, and the index's base is open~~ (the base is `0x400 + value`: settled, Phase 9 Task 10)
 
 **Part:** the music, under every part that plays it (the re-review's probe, `cargo xtask music
 probe --dump`).
 
-**Measured** at `--cycles 30000 --arg 5 --frames 400..1300` (`music probe --at 0x525C --dump
+**Original, measured** at `--cycles 30000 --arg 5 --frames 400..1300` (`music probe --at 0x525C --dump
 0x6C:2 --dump 0x6E:16 … --dump 0x86C:2`, the whole window, one line per change — the dump printed
 **one** line per region, so nothing in these spans moved between frame 401 and frame 1299):
 
@@ -775,8 +966,10 @@ contradicts it: through the table the machine holds, `0x501` and everything abov
 `0xFF` tail the bug's short fill leaves, so silence would read the byte 0xFF. The *unmarked* base
 through that same table does not: index `0x400 + 0` = 1024 is the ramp's `(1024 − 768)/2` =
 **0x80**, the buffer's own centre, and a value of ±80 moves the byte by ±40 — the measured swing.
+*(Phase 9 Task 10: the "marker" here is a misreading — (a) below. The code's own index is
+`0x400 + value`, so the buffer and the code agree.)*
 
-**What the port does about it.** `Curve::build` reproduces the builder **with its bug**: the zero
+**Port.** `Curve::build` reproduces the builder **with its bug**: the zero
 region is `2·⌊(0x800 − K)/4⌋` entries, the ramp follows it, and `+0x55bd`'s shortfall fills the
 remainder of the span with `0xFF` for `2·⌊rem/2⌋` bytes. For `mul` 64 that is 768 zeros, the ramp
 at 768…1279 and `0xFF` from 1280 — the boundaries the probe read — and `tests/mix.rs`'s
@@ -784,9 +977,23 @@ at 768…1279 and `0xFF` from 1280 — the boundaries the probe read — and `te
 table (1536 zeros, the ramp at 1536…2047) or the linear map fails. The mixer indexes it at
 **`0x400 + value`** (the audible base — see (a)).
 
-**One clause is still open, with the measurement behind it.**
+**Why.** The table is behaviour on the reference's own path, built from a parameter the port
+already loads (A13's ruling): the port plays what the machine's memory holds, bug and all, because
+that is what the release of record plays in both modules' runs ((b) below).
 
-**(a) The marker.** The flush writes `0x0101` into every accumulator word it reads (`+0x2ce5`,
+**(a) The marker — settled (Phase 9 Task 10): there is none, and the code's index is the
+measured one.** The flush loads a zero into a 32-bit register and stores it back over every
+accumulator word it reads: the mono flush's `mov $0x0,%esp` (`+0x2ce5`) and `mov %esp,(%si)`
+(`+0x2cf1`), the stereo flush's `mov $0x0,%ecx` (`+0x30d0`) and `mov %ecx,(%si)` (`+0x30e8`). The
+immediates' four zero bytes are `LIDATA` runs, and the segment builder in `tests/player.rs` decoded
+every such run as `0x01` until Phase 9 Task 6b fixed it — which is where the `0x0101` "marker" below
+came from. So the plane a flush leaves is zero, the object's index is `0x400 + value` in every
+chunk, and the code, the DMA buffer's centre and the port's `Mixer::base` are one base. The test is
+`cargo test -p sr-audio --test player the_flush_clears_the_accumulator_word_it_reads`, which reads
+the ten instructions out of the rebuilt segment. The builder's count bug (point 3 above;
+`bugs.md` §28.4) stands.
+
+**(a) as it stood until Task 6b's parser fix (history).** The flush writes `0x0101` into every accumulator word it reads (`+0x2ce5`,
 `+0x30d0`), so the *code's* index should be `0x501 + value` — 257 entries above the base the port
 uses. The measurement says otherwise: with the buggy table the marker would put silence at index
 1281, inside the `0xFF` tail, while the DMA buffer the probe read (`[0xbe6]:0xC9B0`) is a
@@ -817,12 +1024,19 @@ the one D12 wants.**
 
 **Measured difference:** the port's byte is the machine's table applied to the object's
 accumulator — the same map **both modules' runs** are consistent with, byte for byte — and what
-remains open is whether the audible index carries the marker (a). No capture can quantify the
+~~remains open is whether the audible index carries the marker (a)~~ *(settled: it carries none,
+(a))*. No capture can quantify the
 audible result (the emulator runs silent, D17). `cargo xtask music
 probe --dump` reproduces the **segment's** bytes above — the base word and the whole table span,
 in either module's run — and does **not** reach the DMA buffer's contents (the waveform and its
-0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; a dump of
-that buffer beside the accumulator plane it came from is what would close (a).
+0x7C/0xA2 per-channel DCs), which live at `[0xbe6]:0xC9B0` outside the located segment; ~~a dump of
+that buffer beside the accumulator plane it came from is what would close (a)~~ — the code closed
+it instead (a).
+
+**Status (Phase 9):** Closed — (a): the flush writes zero, so the index is `0x400 + value`, the
+port's base (`cargo test -p sr-audio --test player the_flush_clears_the_accumulator_word_it_reads`);
+the table, bug included, is the probe's (`cargo xtask music probe --dump`). What stays unmeasured is
+the audible result, which the silent emulator cannot hold (D17).
 
 ## A15 — `dis_sync()` above `0x8E2E` is refused, not returned
 
@@ -897,6 +1111,10 @@ frames.
 (a panic naming the position) where the release returns a linker-set word. No caller in the tree is
 shown to do so — the two Phase-4 callers stay in orders ≤ 13 — and the case remains hypothetical.
 
+**Status (Phase 9):** Carried — an unreachable path: no caller in the tree syncs above `0x8E2E`
+(`sync_refuses_the_first_key_past_the_sixteenth_compare` pins the refusal), and the answer there is
+a linker-set word that differs between the tree's builds.
+
 ## A16 — The boot's twelve-frame music transient: a run installs its own module at its start, not the boot's
 
 **Part:** the music of a run whose entry restart replaces the boot's module — today `--block 5`
@@ -962,11 +1180,23 @@ own wait, by contrast, would have left three of the four keyframes ~62 % of pixe
 part's other difference from the tree, the `scp` bound, is adopted too (§7 of the note: the
 release's 640 over the tree's 639, measured at 401 bytes / 146 pixels on boot 2300).
 
+**Why (D24).** The release's wait is one measured duration that no `musplus` condition can
+produce (above), and every other difference in the part is accounted for, so the port carries the
+duration; the mechanism behind it is unknown, and the constant says so by its name.
+
+**Measured difference:** **0** differing pixels at all four keyframes through the real binary
+(`cargo test -p secondreality --test mntscrl the_four_keyframes_match_the_reference`; `cargo
+xtask rediff --only mntscrl`); the tree's own wait would differ by 118,843 / 118,924 / 119,056
+bytes at 1100 / 1700 / 2300 (the counterfactual above).
+
 **Replaces:** the earlier version of this entry, which kept the tree's wait and registered the
 divergence. **Leads for whoever takes it:** the tree's shipped copy is
 `upstream/SecondReality/MAIN/DATA/MNTSCRL.EXE` (77,047 bytes, PKLITE-packed), and
 `MAIN/PACKFINA.INC:56` names `MNTSCRL.EXE` in the demo's pack list. What is measured here is the
 wait's duration; the packed image's own condition, if it has one, would need an unpacker.
+
+**Status (Phase 9):** Carried — the condition behind the 71 ticks, if it is one, is inside the
+packed `MAIN/DATA/MNTSCRL.EXE` (D12).
 
 ## A18 — RAYSCRL: the release's gates act seven ticks after the tree's condition
 
@@ -1010,9 +1240,21 @@ release's embedded `MIEKKA.SCI` differing from the tree's at the handful of stri
 frames expose (`docs/fidelity/rayscrl.md` §6). The exact cue is kept: only `-11` triggers the
 fade, and it runs 65 uploads to black (`the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks`).
 
+**Why (D24).** One rule, measured independently at three gates, reproduces the release's leave
+frames, and the tree's immediate condition draws the keyframes early (the counterfactual above);
+the port carries the rule as one named constant and keeps the exact cue.
+
+**Measured difference:** **0** at 13000 and 13500, **3 / 42** pixels at 14000 / 14500 — the
+release's embedded `MIEKKA.SCI`, not timing (`cargo test -p secondreality --test rayscrl`; `cargo
+xtask rediff --only rayscrl`); the tree's gate would differ by 8,375 / 11,958.
+
 **Leads for whoever takes it:** the shipped part is `upstream/SecondReality/MAIN/DATA/RAYSCRL.EXE`
-(90,351 bytes, PKLITE-packed, like MNTSCRL's). What is measured here is each wait's leave frame;
-the packed image's own conditions would need an unpacker.
+(90,351 bytes, PKLITE-packed, like MNTSCRL's; `MAIN/PACKFINA.INC:62`). What is measured here is each
+wait's leave frame; the packed image's own conditions would need an unpacker.
+
+**Status (Phase 9):** Carried — the conditions behind the seven-tick confirmation are inside the
+packed `MAIN/DATA/RAYSCRL.EXE` (D12), and the strip bytes the 3/42 pixels expose are its embedded
+art.
 
 ---
 
@@ -1021,7 +1263,7 @@ the packed image's own conditions would need an unpacker.
 **Part:** MINVBALL (`DOTS/MAIN.C` + `DOTS/ASM.ASM`), Phase 4. Under D24: the source is the
 evidence, the reference's frames are the authority, and the shipped release is the tiebreaker.
 
-**The RNG, identified from the compile.** The brief names Turbo C; the source says Microsoft C
+**Original — the RNG, identified from the compile.** The brief names Turbo C; the source says Microsoft C
 6.0. `DOTS/MAKEFILE:10-16` uses `cl /qc /AL` — Microsoft's large-model compiler — and the linked
 `DOTS.EXE` carries the **“MS Run-Time Library - Copyright (c) 1990, Microsoft Corp”** string. Its
 `rand()` is the 32-bit LCG with modulus 2³², multiplier **214,013**, increment **2,531,011**,
@@ -1030,7 +1272,7 @@ seed 1, returning `(seed >> 16) & 0x7FFF`; the first ten values are 41, 18,467, 
 (`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`). The port implements that
 generator, not Borland's.
 
-**`j` is never initialised, and its value is fitted.** `dottaul[j]` picks which dot draws a
+**Original — `j` is never initialised, and the port fits its value.** `dottaul[j]` picks which dot draws a
 coincident position, and the permutation's cursor `j` is never assigned (`MAIN.C:87`, `:200`): the
 value is whatever the stack held. The port fits the one value the source leaves free to the
 reference, **88** (`INITIAL_J`). The fit is committed as the ignored measurement test
@@ -1046,8 +1288,15 @@ cargo test --release -p secondreality --bin secondreality \
 unique, not a minimum among near-ties. `the_setup_is_deterministic_and_its_permutation_is_fixed`
 pins the setup around it. The shipped part is
 `upstream/SecondReality/MAIN/DATA/MINVBALL.EXE`, a 7,395-byte PKLITE-packed self-extractor (the same
-shape as A17/A18's leads), but nothing needs unpacking: the tree's source, with this one fitted
-cursor, reproduces every filed frame.
+shape as A17/A18's leads; its pack line is `dw 03BC1h,06634h,00008h,01456h,01CE3h,00000h
+;MINVBALL.EXE`, `MAIN/PACKFINA.INC:57`, whose length 0x1CE3 is the staged file's), but nothing
+needs unpacking: the tree's source, with this one fitted cursor, reproduces every filed frame.
+
+**Port.** Microsoft C's generator (`MsRand`) and `INITIAL_J = 88`; everything else is the tree's
+`DOTS/MAIN.C` and `DOTS/ASM.ASM`.
+
+**Why.** The generator is the compiler's own, so it is not a choice; `j` is the one value the
+source leaves to whatever the stack held, and the reference fixes it uniquely (above).
 
 **Measured difference, through the real binary: none.** The four keyframes are byte-identical,
 0 / 0 / 0 / 0 differing pixels of 64,000 at 10,900 / 11,200 / 11,800 / 12,400, and the shadow layer
@@ -1081,7 +1330,7 @@ leaves open.
 one, because both are about one asset family and one frame: a D24 adoption of
 three palette bytes and a residual the port's fixed tick cannot carry.
 
-**The original — the palette.** `hzpic` is not `HOI.U`: `ALKU/INCLUDE.ASM:7-12`
+**Original — the palette.** `hzpic` is not `HOI.U`: `ALKU/INCLUDE.ASM:7-12`
 assembles `HOI.IN0` + `HOI.IN1` as the symbol, and the linked payload differs
 from `assets/ALKU/HOI.U` in exactly nine bytes — palette entries 1, 2 and 3
 (`docs/fidelity/asset-inventory.md` §E.18):
@@ -1130,7 +1379,7 @@ boot 2719: 4171 of 128000 pixels differ with the curated entries
 boot 5859: 2706 of 128000 pixels differ with the curated entries
 ```
 
-**The original — the text batches' phase.** The fifth text batch is the empty
+**Original — the text batches' phase.** The fifth text batch is the empty
 `case 4` (`MAIN.C:129-131`): it zeroes `tbuf`, calls `ffonapois` (which clears
 the old text's top two bits) and then waits. Its `fmaketext` — which would
 rebuild the XOR list from the zeroed buffer and keep the text erased — runs
@@ -1180,9 +1429,22 @@ entry `dw 0BE72h,06D53h,00002h,0132Eh,0797Fh,00000h ;ALKU.EXE`
 `ALKU/ALKU.EXE`, so the comparison is against the shipped frames only.
 `docs/fidelity/alku.md` §8 carries the frame-by-frame reading.
 
+**Why.** The palette is D24's adopt-the-release case (the *Port* paragraph above); the phase is
+the port's fixed tick giving `fmaketext`/`faddtext` no CPU cost and the session's own music
+clock, neither of which the port can reproduce without a fit (the phase paragraph above).
+
+**Measured difference:** 1719 and 2719 byte-identical with the shipped entries; 5859 differs by
+**2,353 of 128,000** pixels, all in the old text's glyph region (`cargo test -p secondreality
+--test alku -- --nocapture`; `cargo xtask rediff --only alku` registers the same 2,353).
+
+**Status (Phase 9):** Carried — the batches' phase is the session's (D17) and the release's CPU
+cost, which no filed frame records; the released bytes are the packed `MAIN/DATA/ALKU.EXE` (D12).
+
 ## A21 — PAM: the reference's 7900 index plane is the next part's white field, not PAM's screen (registered, not adopted)
 
-**Part:** PAM (`PAM/OUTTAA.C`), Phase 4. **Original:** the reference's 7900
+**Part:** PAM (`PAM/OUTTAA.C`), Phase 4.
+
+**Original:** the reference's 7900
 frame carries both `.rgb` and `.idx`. The RGB is the flat `(251,251,251)`
 wash; the index plane is 64,000 bytes of **15**, and the frame's manifest
 palette entry 15 is `[62,62,62]`, which widens to 251.
@@ -1220,7 +1482,9 @@ The lead is `BEG/BEG.C:18-21` and the reference's own
 
 ## A22 — PLZPART: the plasma exits at the release's fourth palette table, not the tree's fifth (adopted)
 
-**Part:** PLZPART (`PLZPART/PLZ.C`), Phase 5. **Original:** `plz()` advances
+**Part:** PLZPART (`PLZPART/PLZ.C`), Phase 5.
+
+**Original:** `plz()` advances
 `curpal` through `pals[6][768]` and exits when `curpal == 5 && cop_drop > 64`
 (`PLZ.C:94`; `PLZ.OBJ` disassembles to `cmpw $5`).
 
@@ -1359,7 +1623,20 @@ from the committed `RATA.INC` by
 `the_close_up_segments_carry_no_frame_dependent_translation`. The plasma
 keyframes are unaffected (11.209/5.848/4.052 %).
 
-**Decision (D24's procedure).** The extent, the projection and the entry
+**Port.** The release's extent (`CUBE_DRAWN_ROWS = 200`, `CLEAR_LINES = 201`), its projection
+(`yyy = yy*213/zz + 100`) and its 8-poll entry pre-roll, over the tree's `VECT.C`/`PLZA.ASM`
+pipeline and the tree's `RATA`/`SPLINE`/`sinit` data, which carry no close-up camera path.
+
+**Measured difference (restated at `rediff`'s numbers, Phase 9 Task 10).** The keyframes are
+**16,743** (8500, 26.161 %) and **63,669** (9500, 99.483 %) differing pixels of 64,000 (`cargo
+xtask rediff --only plzpart/cube`). The band corpus had only band-mask fit percentages here; as
+whole frames at the release extent and the part's mapping (tick = index − 5723) it differs by
+**20,315 / 21,832 / 16,743 / 32,287 / 14,979 / 37,374** pixels at 8400 / 8450 / 8500 / 8600 /
+8700 / 8800 — 143,530 of 384,000, 37.378 % (`cargo xtask rediff --only plzpart/band`). Those
+counts carry the page-slot spill and the shade/pose residual above as well as the silhouette the
+fit measures; the 8500 frame is the cube capture's own 8500, the same 16,743.
+
+**Why — D24's procedure.** The extent, the projection and the entry
 phase are single-value release divergences and are adopted; the close-up
 camera path is a multi-value data difference the tree cannot supply and is
 registered. The page-slot spill is **not** a measured release divergence: the
@@ -1374,6 +1651,13 @@ means a faithful port with A24's plasma tear, the 9.90-point port-side spill
 not a matching cube. The projection fit's reference is the committed
 `reference/parts/plzpart/band/`; the remaining diagnostic captures are under
 `out/`.
+
+**D24's lead.** The shipped part is `MAIN/DATA/PLZPART.EXE`, 58,094 bytes, PKLITE-packed, its pack
+line `dw 02BDCh,0E129h,00006h,0142Eh,0E2EEh,00000h ;PLZPART.EXE` (`MAIN/PACKFINA.INC:55`).
+
+**Status (Phase 9):** Carried — the close-up's camera data and the release's page timing, clear and
+draw path are inside the packed `PLZPART.EXE` (D12), and no capture of the release's flip frames
+was taken, so the 9.90-point spill stays unattributed.
 
 ## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
 
@@ -1403,13 +1687,24 @@ three: split 3 gives 8.42/8.59/8.28 and the boundary 11.21/5.85/4.05. The
 reference's own sessions agree within 0.09–3.08 % because a session's timing
 repeats; the port cannot choose the split without the original's cycle costs.
 
-**Decision.** The port keeps the steady state (the boundary); the residual is
+**Why — the decision.** The port keeps the steady state (the boundary); the residual is
 registered with the split measurements. `docs/fidelity/plzpart.md` §4 carries
 the mechanism and the table. The diagnostic renders are under `out/`.
 
 ## A25 — LNS&ZOOM: the release's face picture differs from the tree's `LENS.EXB` (registered), and the part 3 hand-over costs one frame more than the source's waits (adopted)
 
 **Part:** LNS&ZOOM (`LENS/MAIN.C` over `LENS/ASM.ASM`), Phase 5.
+
+**Original.** The release's `LNS&ZOOM.EXE` shows a later revision of the face picture than the
+tree's `LENS.EXB`, and its hand-over from the lens to the rotazoomer costs eight frames where the
+source's waits are seven (both below).
+
+**Port.** The tree's `LENS.EXB`, read in its original
+format; the hand-over's setup charged two frames, `ROT_SETUP_FRAMES` (below).
+
+**Why.** D24: the picture is a many-pixel asset difference the tree cannot carry, so it is
+registered; the hand-over is one measured constant with everything else accounted for, so it is
+adopted.
 
 **The picture (registered).** The port reads the tree's `LENS.EXB` in its
 original format — palette at +16, 64,000 pixels at +784 — and the wipe
@@ -1448,14 +1743,28 @@ not the displayed (row-doubled) picture, so it is a different geometry from
 the port's plane and is not compared. Its palette is 63 in every entry, so it
 could not validate a stride in any case. `docs/fidelity/lnszoom.md` §7.2.
 
+**Measured difference:** **2,058 / 1,935 / 0 / 1,396 / 0** pixels at 2700 / 3400 / 4200 / 4900 /
+5650 (`cargo test -p secondreality --test lnszoom`; `cargo xtask rediff --only lnszoom`), and the
+full run's 19000 at the same 2,058 (`cargo xtask rediff --only fullrun/06-panicend-lnszoom`, A53).
+
+**D24's lead.** The shipped part is `MAIN/DATA/LNS&ZOOM.EXE`, 67,222 bytes, PKLITE-packed; its pack
+line `dw 045CCh,085D4h,00004h,01439h,0069Ah,00001h ;LNS&ZOOM.EXE` (`MAIN/PACKFINA.INC:53`) lists
+0x1069A = 67,226, four bytes more than the staged file (this register's head), so the staged copy
+is not quite the packed image either.
+
+**Status (Phase 9):** Carried — the release's picture is inside the packed EXE (D12), and the
+staged copy is not the one the pack line lists.
+
 ## A26 — 3DSINFLD: the render's vblank count is a fixed two, the reference's occasionally returns one (registered)
 
 **Part:** 3DSINFLD (`COMAN/MAIN.C` over `COMAN/ASM.ASM` and the generated
 `COMAN/THELOOP.INC`, Phase 5).
 
-The source's `frame += (frepeat = dis_waitb())` (`MAIN.C:105`, `:111`) takes
+**Original.** The source's `frame += (frepeat = dis_waitb())` (`MAIN.C:105`, `:111`) takes
 whatever the DIS's INDEMO wait returns — the number of copper frames since
-the previous call (`DIS/DISINT.ASM:161-183`). The port's model is a fixed
+the previous call (`DIS/DISINT.ASM:161-183`).
+
+**Port.** The port's model is a fixed
 **two** (`VBLANKS_PER_ITERATION`), plus the frame-4 body's two waits
 (`MAIN.C:69-73`). It reproduces every keyframe byte for byte at measured
 ticks, but it drifts against the reference's own clock: the four keyframes
@@ -1466,7 +1775,7 @@ are the port's ticks **464, 966, 1470 and 1772** and the reference's frames
 = **1.992** frames an iteration across the first span, where the port's two
 is about 0.4 % slow.
 
-The pictures do not depend on the count: the camera and wave cursors advance
+**Measured difference.** The pictures do not depend on the count: the camera and wave cursors advance
 once an iteration, the palette is static, and `startrise` moves once a
 vblank, which the model reproduces at one a tick. The comparison is
 byte-identical at all four keyframes
@@ -1474,28 +1783,35 @@ byte-identical at all four keyframes
 pixels each), and `docs/fidelity/3dsinfld.md` §6 states the origin per
 keyframe rather than as an anchor.
 
-**Not adopted, and why the other side is not readable.** A variable model
+**Why — not adopted, and why the other side is not readable.** A variable model
 would need the release's render time, and neither the tree nor the reference
 records it: the block-3 music traces carry `ord`/`row`/`zframe`, not the
 part's waits, and `waitb_1`'s non-INDEMO arm is a literal 1 marked `TEMP!`
 (`:178-179`) while the INDEMO arm returns the count. The port keeps the
 model the pictures pin.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: the release's render time per
+iteration is in no trace and no capture. In the full run its two filed frames differ by 4 (31272,
+its first) and 33,554 (31901: the part draws every second frame, and the run's phase is A53's)
+pixels (`cargo xtask rediff --only fullrun/08-cube-3dsinfld`).
+
 ## A27 — JPLOGO: the `doit` counter's fixed one-vblank step, and the 17700 filing (registered)
 
 **Part:** JPLOGO (`JPLOGO/JP.C` over `ASM.ASM`, the generated `ZOOM.INC` and
 `READP.C`), Phase 5.
 
-The source's `frame += c` (`JP.C:77`) adds the number of copper frames the
+**Original.** The source's `frame += c` (`JP.C:77`) adds the number of copper frames the
 iteration took: `dis_waitb` returns the frames since the previous call
 (`DIS/DISINT.ASM:161-183`). A `doit` iteration redraws up to 400 rows with
 the unrolled `ZOOM.INC` routines and can take several; how many depends on
 the host's speed, and a jump past 511 freezes `y1`/`y2` at whatever the
-previous iteration used (`JP.C:78-83`). The port models **one vblank an
+previous iteration used (`JP.C:78-83`).
+
+**Port.** The port models **one vblank an
 iteration** (`frame += 1`), which is the reference's own cadence at the filed
 keyframes: 17300 is tick 235 and 17500 tick 435, 0 differing pixels each.
 
-The row *images* depend only on the counter's current `y1`/`y2`; the
+**Measured difference.** The row *images* depend only on the counter's current `y1`/`y2`; the
 *screen* depends on the path, through the palimpsest guard
 (`lasty`/`lasts`, `JP.C:96-99`): how far the counter jumps decides which
 pre-settle rows an earlier state leaves behind. The fixed step reproduces
@@ -1539,7 +1855,7 @@ state the reference itself took twelve captures to spread over ten
 pictures. The port keeps the fast-session model and records the residual
 rather than fitting a jump to the filing.
 
-**Not adopted, and why the other side is not readable.** The reference
+**Why — not adopted, and why the other side is not readable.** The reference
 records the picture, not the iteration durations; the copper frame counter
 is not in any trace, and the part's `waitb` returns a value no filed
 capture carries. A cost model built from the `ZOOM.INC` instruction counts
@@ -1582,6 +1898,14 @@ against another Gouraud frame.
 flat object and the silhouette are exact. Reproduce with
 `cargo test -p secondreality the_reference_7300_is_the_measured_stream_state`.
 
+**D24's lead.** The shipped part's pack line is `dw 058A4h,0AD8Ah,00008h,012A9h,0D4A0h,00000h
+;U2A.EXE` (`MAIN/PACKFINA.INC:58`), a 54,432-byte file, and the tree's staged
+`MAIN/DATA/U2A.EXE` is not it: 111,894 bytes, with no PKLITE header (this register's head). So the
+release's U2A image is in `SECOND.EXE` only, packed.
+
+**Status (Phase 9):** Carried — the release's Gouraud constants are in the packed image (D12),
+which the tree's staged copy is not.
+
 ## A29 — U2A: the 7300 boot-index picture is a session-phase offset (registered)
 
 **Part:** U2A (`VISU/C/U2A.C`), Phase 6.
@@ -1612,6 +1936,10 @@ and `cargo test -p secondreality
 the_reference_7300_is_the_measured_stream_state` (1098 belongs to state 297
 and to no other of the 522), plus the dump command in
 `docs/fidelity/u2a.md` §7.
+
+**D24's lead:** A28's (`MAIN/PACKFINA.INC:58`). **Status (Phase 9):** Carried — the session's phase
+(D17), which the oracle's API does not reach; the port's clock is `second1`'s and moving it would
+move ALKU's verified frames.
 
 ## A30 — U2E: the release's Gouraud shading differs at the four keyframes (registered, not adopted)
 
@@ -1644,7 +1972,14 @@ silhouettes and flat objects exact. Reproduce with
 `cargo test --release -p secondreality --bin secondreality
 search_reference_states -- --ignored --nocapture` and
 `cargo test -p secondreality --test u2e
-the_keyframes_record_the_measured_session_phase_and_gouraud_residual`.
+the_keyframes_record_the_measured_session_phase_and_gouraud_residual`; `cargo xtask rediff --only
+u2e` holds the four at the same counts.
+
+**D24's lead.** The pack line is `dw 02D44h,0AD0Ah,00009h,012ADh,0B4C6h,00000h ;U2E.EXE`
+(`MAIN/PACKFINA.INC:59`), a 46,278-byte file; the tree's staged `MAIN/DATA/U2E.EXE` is 89,102 bytes
+with no PKLITE header, so, as for U2A, the release's image is in `SECOND.EXE` only.
+
+**Status (Phase 9):** Carried — the release's Gouraud constants are in the packed image (D12).
 
 ## A31 — U2E: the block-4 keyframe boot indices are a session-phase intercept (registered)
 
@@ -1672,6 +2007,10 @@ the aligned-state residual A30's. Reproduce with
 `cargo test -p secondreality --test u2e
 the_keyframes_record_the_measured_session_phase_and_gouraud_residual` and the
 `search_reference_states` diagnostic above.
+
+**D24's lead:** A30's (`MAIN/PACKFINA.INC:59`). **Status (Phase 9):** Carried — the session's phase
+(D17); the port's intro is exact against the sessions that agree with it, and moving the anchor
+would move it.
 
 ## A32 — U2A: the pre-gate pad palette is the release's measured bright transform (adopted)
 
@@ -1793,6 +2132,10 @@ Gouraud colour deltas with exact silhouettes. Reproduce with
 (the fadeset's plane expansion and page bound), `cargo test -p secondreality --test u2a` and
 `cargo test -p secondreality --test u2e`.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: U2E's keyframes are RGB-only, so its
+page origins are not established, and the gap the original's slots carry is memory no compared
+frame shows.
+
 ## A36 — GLENZ: the block-2 keyframes are five ticks late, and the reference capture's DAC leads its surface (registered)
 
 **Part:** GLENZ (`GLENZ/MAIN.C`), Phase 7.
@@ -1892,6 +2235,14 @@ frees the visible slot and the next colour reuses it).
 the_moving_keyframes_record_the_registered_alignments_and_residuals` and
 `cargo test -p secondreality --bin secondreality
 glz_hidden_face_frees_the_visible_slot`.
+
+**D24's lead.** The shipped part is `MAIN/DATA/GLENZ.EXE`, 57,206 bytes, PKLITE-packed, its pack line
+`dw 04C66h,0D940h,00005h,01381h,0DF76h,00000h ;GLENZ.EXE` (`MAIN/PACKFINA.INC:54`), whose length is
+the staged file's. The adopted key is the reading the picture identifies; the packed code that
+would confirm it is not disassembled.
+
+**Status (Phase 9):** Carried — the 711 / 839 unexplained pixels have only a hypothesis (sub-pixel
+edge or phase), and the code that would settle it is the packed EXE (D12).
 
 ## A38 — GLENZ: block 1's zoomer starts 6 frames after the reference's, the restarted clock's residual (registered; restated by Phase 9 Task 6b — it was 249)
 
@@ -2019,6 +2370,12 @@ becomes 6, `RESTART_TRACES`' 7,815 becomes 8,056, and the U2E (`second3e`, `seco
 restarts move by nothing, MUSIC0's orders 18 and 0 having no row whose length depends on a carried
 volume.)*
 
+**Status (Phase 9):** Carried — the +5 is D34's boot-derived four-tick wait applied at a mid-run
+reload, whose real duration happens during a reload the port does not have (A53, A55); a
+mid-run restart timing would be a second constant D24 does not allow without its own measurement.
+Re-measured: `second1d` at +5 at its first and last rows (`cargo test --release -p secondreality
+--test fullrun -- --nocapture`).
+
 ## A39 — GLENZ: the span compositor repaints every span instead of walking the previous frame's list (substitution; measured difference 0)
 
 **Part:** GLENZ (`GLENZ/NEW.ASM:66-172`, `ng_pass3`), Phase 7.
@@ -2133,6 +2490,9 @@ all six keyframes is the measurement that the flash is absent.
 twist_matches_the_reference_at_its_measured_start`; see also the capture in
 `docs/fidelity/twist.md`.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: the standalone DIS the capture runs
+behind has no copper service, so no capture can show the flash or its duration.
+
 ## A43 — TWIST: any-key exit and the Scroll-Lock border become ESC/Ctrl (substitution; measured difference 0)
 
 **Part:** TWIST (`TWIST/MAIN.C:21-28,49,102`), Phase 8 Task 4.
@@ -2193,7 +2553,7 @@ twist_matches_the_reference_at_its_measured_start`; the cap with
 
 **Part:** TWIST reference and port, Phase 8 Task 4.
 
-**Capture.** The filed reference (`reference/parts/twist`, six frames 103..603) is RGB-only.
+**Original — the capture.** The filed reference (`reference/parts/twist`, six frames 103..603) is RGB-only.
 The moving screen fails the indexed read's coherence check (D15/D19), and TWIST has no
 `.idx` even in principle: an odd part frame draws and displays page 2 at pixel 131,072, and
 the oracle's indexed read always starts at plane offset 0, so it would read page 1. All six
@@ -2340,6 +2700,10 @@ PY
 ```
 
 (every line prints 0). The keyframes themselves are exact (A46).
+
+**Status (Phase 9):** Carried — the overrun's position inside mode 4 is not measured (the candidate
+is `B.C:208`'s palette upload); the capture measures its total, two displays, and no keyframe
+depends on where it falls.
 
 ## A49 — HARD: the optional argument, its debug strip and the border are not ported (substitution; measured difference 0)
 
@@ -2546,6 +2910,19 @@ registers are 5961 (63,788: U2A's opening, 47 frames late), 7930 (81,273, at BEG
 (48,786, PAM's picture under its white), 24540 (48,384, the cube screen under black) and 37970
 (46,997, U2E's leftover video memory under ENDLOGO's white).
 
+**Status (Phase 9):** Carried, three items, each re-measured at this commit (`cargo xtask rediff
+--only fullrun`, every frame at its count; `cargo test --release -p secondreality --test fullrun --
+--nocapture` prints the table above unchanged):
+
+- **U2A's opening, 63,788 px at 5961** — the frame is U2A's first, 47 frames late; that ALKU's
+  end is at least as late is measured, its cause is not established (the leads are above), and no
+  `alku` keyframe sees ALKU's end.
+- **PANICEND's first frame, 108,923 px at 16193** — not attributed: a moving frame at the part's
+  −12 that depends on the screen and DAC TECHNO hands over (A63 is the same dependency at block 2's
+  8792/8800), and no capture brackets the original's frames around it.
+- **The loader's frames** — not modelled (D31): one constant cannot explain seams that move in both
+  directions, and the per-seam loader cost is the session's disk and memory time.
+
 ## A54 — Block 1's two long traces: `second1e`'s placement drift and `second1f`'s speed-1 row (registered)
 
 **Part:** the music, block 1 after GLENZ (`reference/music/second1e`, 8,800…33,949, MUSIC1) and
@@ -2579,6 +2956,9 @@ offsets (`cargo test --release -p secondreality --test fullrun -- --nocapture`):
 25,143 frames within 3 (75.281 %) at +5, worst 8; `second1f` 6,352 of 14,168 (44.833 %) at −8, worst
 12, and the one frame past the search (Task 6, at +248 and +235: 17,439 of 25,143 and 6,187 of
 13,934).
+
+**Status (Phase 9):** Carried — what the oracle cannot see: the drift is A12's inter-session clock,
+and the speed-1 row is shorter than the trace's one sample a frame.
 
 ## A55 — A mid-run restart does not carry the position ring or the tick countdown (registered; measured difference 0 in every compared frame)
 
@@ -2646,3 +3026,247 @@ loop test's measurement, not an argument. The countdown's phase is D34's measure
     the_full_run_plays_every_part_in_the_originals_order -- --nocapture`;
   - 23 at the loop (block-5 numbering: the restart tick 8,898, `0:1` at 8,921), pinned by
     `tests/loop.rs`.
+
+**Status (Phase 9):** Carried — what the original puts in the ring and the countdown happens
+during a reload, whose polls are the session's (D42's race), and the port has no reload (A53).
+
+## A56 — `dis_muscode()` returns 0: the `_np_zinfo` substitute (substitution; measured difference 0)
+
+**Part:** the engine's music seam (`sr_engine::music::muscode_from`, `sr_audio::Player::zinfo`),
+under every part that calls `dis_muscode()`. In the demo none does: the callers are the vault's
+`GRID/MAIN.C:72`, `:160`, `HARD/B.C:138`, `HARD/BP.C:263`, and `ENDPIC/BEG.C:48`, the build of part 4
+that did not ship (D8's amendment). Phase 9 Task 10 registers what Phase 3 decided.
+
+**Original:** `muscode_6` returns STMIK's `_np_zinfo` (`DIS/DISINT.ASM:242-282`, the load at
+`:249`), a word nothing in either module produces — every `S` command is a standard `SDx` (D8) —
+and whose other values no measured window shows.
+
+**Port:** `muscode_from` returns **0** whatever the caller waits for, which is what the
+reference's own word held in every sample of every filed trace. This is spec §7.4's escalation
+clause taken: route 1 was performed (D8, amended 2026-10-14), it found the word but not its
+mechanism, and "implement the affected parts against a substitute cue and record the difference"
+is what this entry records. The vault's parts run behind the standalone DIS, whose
+`dis_muscode` is key-driven, and model their one start key instead (A40, A46, A52).
+
+**Why:** the measured value is the only one the port can stand behind; inventing the word's other
+values would be a cue no frame supports. The substitute is one function body, so a later
+measurement replaces it without moving anything else (`muscode_from`'s docs).
+
+**Measured difference:** **0** in every compared frame, because no part the demo runs calls
+`dis_muscode`; and the substitute is the reference's own reading:
+`cargo test -p sr-audio --test trace zinfo_is_zero_in_every_filed_trace` asserts `zinfo` 0 at every
+sample of every trace under `reference/music/`.
+
+**Status (Phase 9):** Carried — what the oracle cannot see: `_np_zinfo`'s non-zero values occur
+in no window any trace measured, and the parts that would wait on them are unshipped or run behind
+the standalone DIS.
+
+## A57 — DDSTARS: the star clip is assembled out, and the port does not clip (D24; measured difference 0 bytes)
+
+**Part:** DDSTARS (`DDSTARS/STARS.ASM`), the hidden part (`--block U`).
+
+**Original:** the tree's source still computes the clip window — `risetext` sets `_nostar1` and
+`_nostar2` (`STARS.ASM:436-445`, `:525-526`) — but the `cmp di,_nostar1/_nostar2` guards that would
+skip a star row inside it are commented out at `:692-696`, `:711-716`, `:737-742` and `:756-762`.
+The shipped build is the packed `MAIN/DATA/DDSTARS.EXE` (10,573 bytes, `MAIN/PACKFINA.INC:61`),
+and its frames show the stars in the window (`docs/fidelity/ddstars.md` §6).
+
+**Port:** no clip — the tree's assembled-out state, and the release's.
+
+**Why (D24):** the source and the reference agree, and the register carries it because the
+source reads as though it clips: a port that followed the computed `_nostar1/_nostar2` rather than
+the commented-out guards would lose the band's star rows. It is a decision about which artifact
+to follow, recorded where the next reader looks (`bugs.md` §27 keeps the behaviour).
+
+**Measured difference:** **0 bytes** at all four keyframes 1900 / 3000 / 5000 / 8000, with the
+reference's **1,025** star pixels in the clip window's rows at 1900 present in both
+(`cargo test -p secondreality --bin secondreality the_star_clip_is_assembled_out_and_the_keyframes_hold_its_pixels`;
+`cargo xtask rediff --only ddstars`).
+
+## A58 — The shell's keys: Ctrl skips one part, and an ESC between two parts is kept where `flushkbd` drops it (substitution; measured difference 0)
+
+**Part:** the shell, in a window (`bins/secondreality/src/window.rs`'s `EscapeKey`, D21).
+
+**Original:** `partexecute` (`MAIN/U2.ASM:205-215`) tests `ctrldown` before each part, and
+`ctrldown` (`:185-203`) keeps its carry from the first time it sees the key: one Ctrl skips every
+later part. After each part it calls `flushkbd` (`:211`; the routine is `MAIN/U2A.ASM:537-546`),
+which reads and discards up to 256 waiting BIOS keystrokes — so a key pressed after a part has
+stopped reading the keyboard and before the next one starts is thrown away.
+
+**Port:** Ctrl drops the running part and the run goes on with the next (D21). An ESC press that
+lands where no part is running is kept by `EscapeKey` and asked of the next part, or closes the
+window when nothing is left to play. *(D21's sentence that "the original does not lose it either"
+is contradicted by `:211`; D21 carries a dated note.)*
+
+**Why:** the port's window is inside a part, not in front of one (D21's reason for Ctrl), and it
+drains its events once a tick, so a press between two parts would otherwise be lost to the
+port's own scheduling rather than to the original's flush; keeping it was D21's choice for the
+"get me out" press that ends a block's last part.
+
+**Measured difference:** **0** in every compared frame: no capture presses Ctrl or ESC (the
+recipes' keys are the setup menu's `KBD_left KBD_enter`). The port's behaviour is pinned by
+`cargo test -p secondreality --bin secondreality window::tests` —
+`escape_asks_the_running_part_to_exit_and_ctrl_skips_it`,
+`an_escape_between_two_parts_is_kept_and_then_closes_the_window` and
+`an_escape_between_two_parts_is_asked_of_the_next_one`.
+
+## A59 — A demo run's two text-mode screens: the settings screen for `START.EXE`'s menu, and the end box printed to the terminal (substitution; measured difference 0)
+
+**Part:** a windowed demo run's start and end (`settings.rs`, `endscreen.rs`, D41, D44).
+
+**Original:** `START.EXE` runs `menu()` in text mode on every start but `/gravis`
+(`MAIN/START.C:89-95`, `MAIN/MENU.C`); at the end `fatalexit` sets text mode, waits twenty
+retraces and calls `printend`, which copies `U2END.BIN`'s 80×25 cells into text-mode memory with
+the cursor on row 14 (`MAIN/U2.ASM:506-535`, `:965-974`). The exit stage reads no key
+(`fademusic` and the `copperwaitborder` loop, `:333-346`, `:969-973`).
+
+**Port:** the settings screen is drawn in `ALKU/FONA.UH` on the port's own 520×325 frame, rows in
+the original's order and then the port's own, nothing saved (D44); the exit stage's 64 + 20 ticks
+are composed as the original's (D41), the end box's rows 0–14 are printed to the launching
+terminal after the window closes — with SGR colours when stdout is a terminal — and an ESC during
+the exit stage closes the window at once (D41's courtesy).
+
+**Why:** the port has no text mode, and spec §1 replaces `START.EXE`; both screens are the port's
+own surfaces, labelled so (D41, D44).
+
+**Measured difference:** **0** on every compared frame — headless runs never show the settings
+screen and the end box goes to stdout, so neither is a frame. The box's characters and colours
+are the shipped file's (`cargo test -p secondreality --bin secondreality endscreen`:
+`the_end_screen_is_the_shipped_box`, `the_end_screen_colours_are_its_attributes`), the stage's ticks
+are D41's tests (`a_demo_run_fades_then_blanks_then_ends`), and the screen's reducer and frame are
+`settings::tests`.
+
+## A60 — The enhanced sound option: the port's own renderer, off by default, the clock untouched (D43; measured difference 0 on every compared frame)
+
+**Part:** the music's output (`sr_audio::Quality::Enhanced`, `--sound-quality enhanced`, D43).
+
+**Original:** the object's mixer — one byte fetched a frame with no interpolation, through the
+8-bit output table, at 20,000 frames a second in the reference's stereo mode (A13, A14).
+
+**Port:** the authentic renderer is the default and is unchanged byte for byte; the enhanced one is
+opt-in: the same voices and tick schedule, each authentic frame rendered as 2 or 3 interpolated
+frames at 48,000 a second, converted with the curve's small-signal gain (`music.md` §13).
+
+**Why:** a labelled option of the port's own, which claims nothing about the original (D43); the
+register carries it because a run with it sounds different from the original, and says how far.
+
+**Measured difference:** no picture and no published position moves — every word at each of
+30,000 polls of both modules is the authentic schedule's
+(`cargo test -p sr-audio --test enhanced enhanced_keeps_the_authentic_tick_schedule`), and the
+authentic stream is pinned to its pre-option digests
+(`cargo test -p sr-audio --test mix the_authentic_stream_is_pinned_byte_for_byte`). The sound
+differs by at most **0.089 %** in pitch over nine sustained notes and by **−0.18 dB** (MUSIC0) and
+**−0.57 dB** (MUSIC1) in level over ten seconds (`cargo test --release -p sr-audio --test enhanced
+-- --nocapture`).
+
+## A61 — Loop mode: the seam's residuals between CRED and pass 2's ALKU (registered)
+
+**Part:** the shell's loop seam (`--loop`, D42; `MAIN/U2.ASM:919-933`), measured against
+`reference/parts/loop` (`reference-indices.md` §25.3).
+
+**Original:** in the loop capture's numbering (115 frames after the B1 recipe's, §25.1) CRED's
+closed iris `C` is 9029, the fade 9029–9092, ALKU's first pass-2 frame `L` 9104, the restarted
+song's `(0,1)` 9112, ALKU's first lit frame in (10236, 10238] and its "A Future Crew Production"
+hold from (10296, 10298].
+
+**Port:** CRED shows its closed iris on two ticks before it retires (8833, 8834), so the fade is
+8835–8898, then `LOOP_RELOAD_TICKS` = 11 and `L` at 8910; the restart publishes `(0,1)` at 8921;
+ALKU's fade-in is lit at 10045 and holds from 10106.
+
+**Why:** each residual is a property of something the seam inherits or a constant D24 does not let
+the port fit: CRED's retirement tick is CRED's (and if its two-tick tail is the original's too,
+the 2 frames are the capture's `C` reading, D42's cost); the restart recipe's 3 frames would be a
+second constant needing its own measurement; ALKU follows the music; and CRED's 81-frame chain
+drift is CRED's span (A10, A53).
+
+**Measured difference**, every figure re-measured by
+`cargo test --release -p secondreality --test loop -- --nocapture` (`the_loop_seam_is_the_originals`
+pins each):
+
+- **CRED's 2-tick closed-iris tail**: the fade and `L` 2 frames late against `C` (`L − C` 77
+  against 75), so the port's 8908 is CRED's 320×200 screen where the original's 9104 is ALKU's;
+  the iris frames 9029 / 9055 / 9081 and ALKU's 9600 / 10419 / 11419 are 0 differing pixels.
+- **Pass 2's music +5 frames** at `(0,1)`: 2 of them the tail's, 3 the restart recipe's
+  (`MusicStart::restart`'s timing against `restartmus` here).
+- **ALKU's pass-2 fade-in +3…5 and its hold +4…6** frames (10045 and 10106 against the original's
+  two-frame brackets).
+- **CRED's 81-frame chain drift**, which shifts every frame of pass 2 in absolute numbering
+  (9029 − 115 − 8833 = 81).
+- **Δ open**: `L − 404` is 8700 if 404 is ALKU's first frame and 8698 if it is the mode set, so
+  `LOOP_RELOAD_TICKS` is 11 or 9 (D42).
+
+**Status (Phase 9):** Carried — the tail and Δ need a reading of the original's frames the
+oracle did not give (the fade's placement is derived ±1, and whether 404 is a mode set is not
+measured); the +5's recipe part would be a second constant without its own measurement; ALKU's
+lag follows the music; the 81 is CRED's span, unexplained (A53).
+
+## A62 — Three parts' exits: ALKU's skipped closing calls, MNTSCRL's exit-aware wait, PLZPART's unpolled flag (substitution; measured difference 0)
+
+**Part:** ALKU (`ALKU/MAIN.C`), MNTSCRL (`FOREST/READ2.PAS`) and PLZPART (`PLZPART/PLZ.C`,
+`VECT.C`) — the three port deviations `bugs.md`'s "Not in this register" names.
+
+**Original:** ALKU's `:147-152` run after either ending of the `for` loop (`:87`), the `a=319`
+completion and `dis_exit` alike: `if(f>7) dofade(…)`, `fonapois()` and `close_copper()`.
+MNTSCRL's first wait, `READ2.PAS:153-159`, does not test `dis_exit`. PLZPART polls `dis_exit()`
+at every loop boundary — `PLZ.C:68` and `:76` for the plasma, `VECT.C:116-117` for the cube.
+
+**Port:** ALKU returns `Finished` at the top of the tick that sees `ctx.exit_requested` and runs
+none of the three (`parts/alku.rs`, `alku.md` §6). MNTSCRL's wait ends on the tick an exit is seen
+(`mntscrl.md` §8). PLZPART's `frame` never consults the flag; the shell retires it at the end of
+the tick the flag was set in (`Sequence::tick`, `plzpart.md` §10).
+
+**Why:** ALKU — the prompt-exit, no-spin rule ends the part on that tick rather than fading it,
+and nothing visible depends on the three calls (the engine clears the copper on the next start,
+`fonapois` only clears the text's top two bits); MNTSCRL — the port does not spin, and the
+source's own wait would hold an ESC until the tree's `musplus >= 0` gate (trace frame 2488);
+PLZPART — the engine's flag is sticky and the shell retires a part that does not poll on the same
+tick, so ESC ends it on that tick with or without the poll.
+
+**Measured difference:** **0** in every compared frame — no capture presses ESC. The port's
+behaviour is pinned by `an_exit_request_ends_every_wait_on_the_tick_it_is_seen` (ALKU),
+`exit_requested_ends_the_wait_on_that_tick` (MNTSCRL) and the shell's
+`the_exit_flag_asks_the_running_part_to_quit_and_the_run_goes_on`
+(`cargo test -p secondreality --bin secondreality`).
+
+## A63 — PANICEND: a standalone run cannot answer the handoff frames 8792 and 8800 (registered limitation; 0 through the handoff)
+
+**Part:** PANICEND (`PANIC/SHUTDOWN.C`), `--part panicend` against `reference/parts/panicend`.
+
+**Original:** block 2's PANICEND starts over the screen and DAC TECHNO leaves, and its first filed
+frames are states of that inherited picture: 8792 the collapse's seven rows 97–103 of 234 pixels,
+8800 the line, row 100 (`docs/fidelity/panicend.md` §1, §5).
+
+**Port:** reached through the chain, it inherits the same; a standalone `--part panicend` run
+starts on a blank surface and the machine's default DAC, so its ticks 10 and 18 — the mapping's
+own numbers for 8792 and 8800 — are a different picture.
+
+**Why:** a part run has no previous part to inherit from; the frames are the handoff's, and the
+handoff test drives them from TECHNO's state instead.
+
+**Measured difference:** through the handoff, **0** — `the_handoff_matches_the_collapse_8792_and_the_line_8800`
+(`cargo test -p secondreality --bin secondreality parts::panicend`) reproduces both byte for byte.
+Standalone, **1,638** and **234** pixels — exactly the reference's non-black pixels, 7 × 234 and
+234 (`cargo xtask rediff --only panicend`), the 4,914 and 702 bytes
+`the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so` pins
+(`cargo test -p secondreality --test panicend`).
+
+## Generated and self-modifying code (spec §5.2), Phase 9 Task 10
+
+Spec §5.2 named ten candidates — six generated unrolled loops and four self-modifying sites — "to
+be confirmed per part". The outcome of each, with its evidence:
+
+| candidate (spec §5.2) | outcome | evidence |
+|---|---|---|
+| `GLENZ/ZOOMLOOP.INC` | **not applicable**: linked (`ZOOM.ASM:26`, `GLENZ/MAKEFILE:3`) as the body of `_zoom`, which only the unshipped `zoomer1` calls; the shipped `zoomer2` uses none of it | `glenz.md` §5 |
+| `JPLOGO/ZOOM.INC` | **bit-identical**: the 160-entry dispatch and the routines' row images are `DOL.C`'s formula, per pixel | `the_zoom_window_is_the_source_bytes_at_each_scale`, `the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside` (`parts/jplogo.rs`); 17300/17500 at 0 (`tests/jplogo.rs`'s `the_three_keyframes_at_the_measured_ticks`); 17700's residual is A27's step, not the routines |
+| `TWIST/TWSTLOOP.INC` | **bit-identical**, consumed as data: the include's 16,000 texture bytes, read back out of its stores | `the_texture_table_is_the_shipped_twstloop` (`parts/vault/twist.rs`); six keyframes at 0 (A42–A45) |
+| `GRID/LINEBLIT.INC` | **bit-identical**: the generator's XOR Bresenham against all 357 committed routines | `the_line_blit_is_the_committed_generated_code` (`parts/vault/grid.rs`) |
+| `COMAN/THELOOP.INC` | **bit-identical**: the 5,230-line include parsed and executed against the port's `theloop`, whole 64 KB vbuf, five columns | `the_ray_march_matches_the_shipped_generated_program` (`parts/coman.rs`); four keyframes at 0 (A26) |
+| `HARD/LINEBLIT.INC` | **not applicable**: on no link line (`HARD/LINK.TMP:1-3`, `hard.md`'s head) | `hard.md` |
+| TUNNELI's "patched y-base" | **bit-identical in colour, and the spec's wording is wrong**: what `TUN10.PAS` patches is the plot's **colour immediate** (`:168` `mov byte ptr cs:[@c+3],al`, the plot at `:187`), not a y-base; the port passes `bbc` as a variable | `tunneli.md` §5; the colour field is exact (A6: the residual is presence, not colour) |
+| `GLENZ/VEC.ASM`'s matrix-in-immediates | **bit-identical**: state only, held in variables | `glenz.md` §5; 1499 at 0 in both planes (`the_held_opening_1499_is_the_reference_index_plane`), and every object pixel at 2305 (A37) |
+| `LENS/ASM.ASM`'s patched addressing | **bit-identical**: the displacement table patched into the unrolled draw is evaluated as a table, in the source's order | `the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps` (`parts/lnszoom.rs`); 3400/4200/4900 byte-identical once the forehead is the reference's (`the_forehead_asset_difference_is_the_whole_residual`, A25) |
+| PLZPART's "jump table" | **bit-identical in the line, and the spec's wording is wrong**: `setplzparas` (`ASMYT.ASM:74-95`) patches **four table bases** into `plzline`'s instructions (the placeholders `0xC100`…`0xC400`, `:46-61`), not a jump table; the port evaluates the patched index expression over the map's flat segment | `the_table_bases_are_the_maps_not_the_assembly_placeholders`, `the_plasma_line_is_the_assemblers_index_expression` (`parts/plzpart.rs`); the plasma frames' residual is A24's tear, registered there |
+
+None of the ten is a registered difference of its own: eight are bit-identical where the reference
+can see them and two are not on the shipped path.

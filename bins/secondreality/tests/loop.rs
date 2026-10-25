@@ -16,8 +16,8 @@
 //! original's `n`. The capture holds `.rgb` only (§25.4: neither screen's `.idx` survives the
 //! read), so the comparison is RGB, byte for byte.
 //!
-//! **What the seam does not match, pinned as measured (D24; Task 10 registers it).** The
-//! port's CRED shows its closed iris on two ticks before it retires (8833, 8834), so its
+//! **What the seam does not match, pinned as measured (D24; `APPROXIMATIONS.md` A61 registers
+//! it).** The port's CRED shows its closed iris on two ticks before it retires (8833, 8834), so its
 //! fade is 8835–8898 — the original's 9031–9094, **2 frames** after the original's
 //! 9029–9092 (§25.3). `LOOP_RELOAD_TICKS` is the original's own 11 frames from the fade's
 //! end to `L` (9093–9103), so the port's `L` is 2 frames late too: the original's 9104 is

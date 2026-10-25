@@ -177,7 +177,7 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   visible is misjudged by this — the engine clears the copper on the next
   start, `fonapois` only clears the text's top two bits (`:250-270`), and no
   reference frame is near an exit — but it is recorded as a deviation, not
-  claimed as equivalence.
+  claimed as equivalence. It is registered as `APPROXIMATIONS.md` A62.
 - **The `while(frame_count<9);` spin** is the 9-tick cadence (§4), never a
   loop.
 

@@ -222,7 +222,7 @@ port writes 640. The measurement is
   test it: the port does not spin, so an exit request ends the wait on the
   tick it is seen (`exit_requested_ends_the_wait_on_that_tick`, and the
   phase's Review Focus 1). The source's own wait would hold until the tree's
-  `musplus >= 0` gate (trace frame 2488), not until the `-11` fade cue.
+  `musplus >= 0` gate (trace frame 2488), not until the `-11` fade cue. Registered as `APPROXIMATIONS.md` A62.
 
 ## 9. What is substituted
 

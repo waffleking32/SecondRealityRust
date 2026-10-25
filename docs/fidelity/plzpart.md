@@ -488,7 +488,7 @@ registered, not a matching cube.
 this phase: the engine's exit flag is sticky and the shell retires any part at the end of the
 tick the flag was set in (`Sequence::tick`), so ESC ends the part on the same tick with or
 without the poll. It would matter only for a part that could abandon work inside a tick; this
-one's `frame` does a phase's bounded work and returns.
+one's `frame` does a phase's bounded work and returns. Registered as `APPROXIMATIONS.md` A62.
 
 ## 11. The tests and the run
 
