@@ -2914,7 +2914,7 @@ the seams take both signs. All eighteen are listed. The port is already *later* 
 and a delay inserted at a handover can only make those later still. It is earlier at the other ten
 (U2A→PAM −50, PAM→BEGLOGO −34, GLENZ→TUNNELI −12, TECHNO→PANICEND −14, LNS&ZOOM→PLZPART −13, PLZPART→MINVBALL −4, 3DSINFLD→JPLOGO −24, JPLOGO→U2E −37, ENDLOGO→CRED −8, CRED→ENDSCRL −69). And the two seams the music pins on both sides need
 different constants (6 frames after the cue wait; 59 to 68 under the U2E reload — its clock at
-34,054 ± 2, `reference-indices.md` §26.6, against U2E's first frame in (34114, 34120] — where the
+34,055, in [34,052, 34,055] (*2026-10-25 (Phase 9): was "34,054 ± 2"*), `reference-indices.md` §26.6, against U2E's first frame in (34114, 34120] — where the
 port's is 0). *(Task 6 decided this under the lag, at +47/+19/+11; Task 6b re-checked it on the
 corrected run under the same one-constant rule, and the decision and its reasons stand.)* Fitting a constant per seam is forbidden (D24), so the handover is
 left as D31 decided it, and this entry is its record. **A later task should watch** ALKU's ≥ 47
@@ -3148,7 +3148,9 @@ the cursor on row 14 (`MAIN/U2.ASM:506-535`, `:965-974`). The exit stage reads n
 
 **Port:** the settings screen is drawn in `ALKU/FONA.UH` on the port's own 520×325 frame, rows in
 the original's order and then the port's own, nothing saved (D44); the exit stage's 64 + 20 ticks
-are composed as the original's (D41), the end box's rows 0–14 are printed to the launching
+are composed as the original's (D41), the end box's rows 0–13 (`0..CURSOR_ROW`, 14 lines; *2026-10-25 (Phase
+9), the final review: was "rows 0–14"*. Rows 14–24, which `printend` also copies, are blank in
+the shipped file, and DOS's prompt starts at row 14) are printed to the launching
 terminal after the window closes — with SGR colours when stdout is a terminal — and an ESC during
 the exit stage closes the window at once (D41's courtesy).
 
@@ -3243,7 +3245,22 @@ the tick the flag was set in (`Sequence::tick`, `plzpart.md` §10).
 
 **Why:** ALKU — the prompt-exit, no-spin rule ends the part on that tick rather than fading it,
 and nothing visible depends on the three calls (the engine clears the copper on the next start,
-`fonapois` only clears the text's top two bits); MNTSCRL — the port does not spin, and the
+`fonapois` only clears the text's top two bits). *(2026-10-25 (Phase 9), the final review —
+**restated; the ALKU clause above is superseded.** The no-spin rule does not require dropping the
+calls, and "nothing visible" was not shown. Here is the source's account. **The fade is zero steps
+on an exit in the original too.** `dofade`'s loop is `for(a=0;a<64 && !dis_exit();a++)`
+(`ALKU/MAIN.C:306`), and DIS's exit flag is sticky within a part. ESC sets it
+(`DIS/DISINT.ASM:151-153`) and `exit_2` returns it (`:186-190`). Only `version_0` clears it
+(`:90`), and `dis_partstart` calls that at a part's start (`DIS/DISC.ASM:51-53`). So when the
+`for` loop at `:87` leaves on `dis_exit`, `:148`'s `dofade(palette2,palette)` fails its first test
+and writes no palette. The port's skip matches the original's ESC path step for step. (The
+original runs the 64 steps only on the `a=319` completion with `f>7`, and the port does too: `parts/alku.rs`,
+`MAIN.C:147-149`.) **`fonapois()` (`:150`, `:250-270`) is the one skipped call whose effect could
+be seen.** It is unconditional, and it clears bits 6–7 of every byte of rows 64–319 on the four
+planes, which erases whatever text the batch had up from ALKU's last screen. Whether a frame shows
+that before U2A's first picture replaces the screen depends on the handover, which is A53's, and it
+is **unmeasured**. This is a knowing deviation on the ESC path. `close_copper()` restores the
+interrupt, and the engine clears the copper on the next start.)* MNTSCRL — the port does not spin, and the
 source's own wait would hold an ESC until the tree's `musplus >= 0` gate (trace frame 2488);
 PLZPART — the engine's flag is sticky and the shell retires a part that does not poll on the same
 tick, so ESC ends it on that tick with or without the poll.
@@ -3253,6 +3270,11 @@ behaviour is pinned by `an_exit_request_ends_every_wait_on_the_tick_it_is_seen` 
 `exit_requested_ends_the_wait_on_that_tick` (MNTSCRL) and the shell's
 `the_exit_flag_asks_the_running_part_to_quit_and_the_run_goes_on`
 (`cargo test -p secondreality --bin secondreality`).
+
+**Status (Phase 9):** Carried — what no capture shows: whether a frame on ALKU's ESC path shows the
+skipped `fonapois()` text clear is unmeasured, because no capture presses ESC and the frames between
+ALKU's end and U2A's first picture are A53's handover. The skipped fade is not open: on that path the
+original runs none of its steps either (above).
 
 ## A63 — PANICEND: a standalone run cannot answer the handoff frames 8792 and 8800 (registered limitation; 0 through the handoff)
 

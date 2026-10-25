@@ -178,6 +178,12 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   start, `fonapois` only clears the text's top two bits (`:250-270`), and no
   reference frame is near an exit — but it is recorded as a deviation, not
   claimed as equivalence. It is registered as `APPROXIMATIONS.md` A62.
+  *(2026-10-25 (Phase 9), the final review — restated in A62. On the exit
+  path the source's `dofade` runs **zero** of its 64 steps, because its loop
+  tests `!dis_exit()` (`:306`) and the flag stays set until the next part's
+  `dis_partstart`, so skipping it changes nothing. `fonapois()` is the skipped
+  call whose text clear could be seen before U2A replaces the screen. That
+  is unmeasured.)*
 - **The `while(frame_count<9);` spin** is the 9-tick cadence (§4), never a
   loop.
 

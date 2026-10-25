@@ -1227,7 +1227,7 @@ or a registered approximation), with the reason.
 | `lnszoom.md:182` | the `a > 3` clamp | I | index |
 | `lnszoom.md:207` | `setpalarea` erased by `inittwk` | I | index |
 | `minvball.md:107` | §4: `mov ax,ax`; the clobbered offset; the skipped gravity; `j` | E, E, E, E | §18.1-§18.4 |
-| `music-clock.md:673` | the restart keeps the old module's channel state | E | §28.1 |
+| `music-clock.md:675` | the restart keeps the old module's channel state | E | §28.1 |
 | `music.md:169` | the order list kept as bytes (254, 255) | I | index |
 | `music.md:172` | `the_order_list_is_preserved_byte_for_byte` | I | index |
 | `music.md:370` | order list 254 and 255 kept as data | I | index |

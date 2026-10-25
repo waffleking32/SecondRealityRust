@@ -601,7 +601,9 @@ and `8800..33950` passes — so the reload is under way by the end-of-trace re-s
 34004, and the filed window ends 105 frames before the restart. It holds MUSIC1 orders 4…98 and, at
 33693–33872, speed 127.
 
-**The U2E restart's clock starts at 34,055 ± 2**, read as `second3e`'s was (§2.1): `second1f`'s rows
+**The U2E restart's clock starts at 34,055**, in [34,052, 34,055] (*2026-10-25 (Phase 9), the final
+review: was "34,055 ± 2"; the one figure, its source and the command are `reference-indices.md`
+§26.6*), read as `second3e`'s was (§2.1): `second1f`'s rows
 at order 18 sit 33,644–33,647 frames after `second4`'s, so 408.2 + 33,647 ≈ 34,055. The order
 boundaries then drift: orders 19…25 start 33,646, 33,644, 33,642, 33,641, 33,639, 33,636 and 33,635
 frames after `second4`'s, and the offset stays at 33,635 to the window's end —
@@ -616,7 +618,7 @@ awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second4/trac
 `out/p9-trace-second1f-a` (exit 0), agrees with the filed one at every row change within −2…+3.
 
 **PANICEND's cue wait (`MAIN/U2.ASM:833-853`) exits at 16630.** `musplus` from `second1e`'s columns
-is −32 from 16363 to 16618, 0 at 16622 (order 40 breaks to order 42 row 0) and **1 at 16630**
+is −32 from 16363 to 16621 (*2026-10-25 (Phase 9): was "16618", the frame order 40 row 31 starts*), 0 at 16622 (order 40 breaks to order 42 row 0) and **1 at 16630**
 (order 42 row 1), the first value above 0 after the negative stretch — the exit, whichever of the
 wait's two loops PANICEND's retirement entered.
 
@@ -1010,7 +1012,13 @@ GLENZ mode change, the counter went 1157 → 1159) and `second1d` 1 (8568, the c
 missing frames are where the frame captures of the same run cannot grab one either —
 `reference-indices.md` §26.2's refused indices 16192 and 24520 exactly, and 15603, 21926, 26570,
 33261, 34116 and 37967 at the same part loads — and 12207 is TECHNO's start (block 2's `second2`
-misses 4796, 7,410 earlier). **`second2b`'s 1158 is the hypothesis's clearest case after `second5`'s 1220**:
+misses 4796, 7,410 earlier). *(2026-10-25 (Phase 9), the final review — **qualified**: only 16192
+and 24520 are refusals the captures reproduced, with 33261 beside the reproduced 33260. 15603,
+21926, 26570, 34116 and 37967 sit where a capture was refused once and captured on a retry
+(unreproduced host stalls at 15603, 21925, 26570, 34114 and 37965). `second1f`'s other two,
+**38569 and 46264, are unexplained**: k4 captured 38569, and the one capture that asked for frames either side of 46264 was refused
+only later, at 46280, for its geometry. Details are in
+`reference-indices.md` §26.6.)* **`second2b`'s 1158 is the hypothesis's clearest case after `second5`'s 1220**:
 it sits exactly at GLENZ's `mov ax,13h` (`GLENZ/MAIN.C:295-299`), where the reference's own
 captures cannot grab 1155…1159 either, and both are a video-mode stop that publishes no frame.
 Apart from that, none of them is the boot's first graphics frame: `second1`'s are spread from

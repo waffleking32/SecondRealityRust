@@ -5880,7 +5880,7 @@ sessions that measured them (D17's ±1; three boundaries move by 2).
 | 13 | RAYSCRL | **29174** (`d37d5b68…`, h5 and `fullrun/08`; 29134–29173 black) | **31216** — last visible (31217–31271 black) | h5, h3 | 320×200 |
 | 14 | 3DSINFLD | **31272** (h5: 8 px, `d69d90c5…`); still black at 31272 in `fullrun/08`'s session | in **(33190, 33195]** — last visible 33190 (104 px), 33195 black | h5, h7 | 320×200 |
 | 15 | JPLOGO | first 320×400 frame in **(33261, 33263]** (h6: 33261 is 320×200 black, 33263 320×400 black `fec9afb5…`); **33260 never published** (h2, h3; h5 33259) | **34114** — its white `668f1e13…`, 320×400 (p34114); the white is up from ≤ 34100 (s18) | h6, h2, h3, h5, p34114 | 320×400 |
-| — | **the U2E `MUSIC0@18` restart** (`MAIN/U2.ASM:880-885`) | the restarted clock starts at **34,055 ± 2**; the reload runs under JPLOGO's white: `second1e` is valid through 33949, and windows ending at 34004 and 34069 are refused (§26.6) | | `second1e`, `second1f` | |
+| — | **the U2E `MUSIC0@18` restart** (`MAIN/U2.ASM:880-885`) | the restarted clock starts at **34,055**, in [34,052, 34,055] (§26.6; *2026-10-25 (Phase 9): was "34,055 ± 2"*); the reload runs under JPLOGO's white: `second1e` is valid through 33949, and windows ending at 34004 and 34069 are refused (§26.6) | | `second1e`, `second1f` | |
 | 16 | U2E | first 320×200 frame in **(34114, 34120]**; **34120** is U2E's band `6eb4e4cd…` (`u2e`'s first visible frame, §18.7's 467); 34113, 34114 and 34116 were refused in i2r, i2 and i3 and 34114 captured in p34114 | **37966** — U2E's fade to white is complete at 37962 (`20f3d62f…`) and 320×200 lasts to 37966 (j2r) | L1 i, i2, i2r, i3, p34114, `fullrun/10`, j2r | 320×200 |
 | 17 | ENDLOGO | **37967** — first 320×400 frame (j2r); in the first filing session 37967 was refused (`… reached frame 37968 before frame 37967 …`) and `second1f` skips it | **38569** — last visible (k4; 38570–38582 black, k2) | j2r, k4, k2 | 320×400 |
 | 18 | CRED | **38583** — first 320×200 frame (k4; k2's 38582 is 320×400); **38580 never published** (L1 k, k3) | **46275** — the closed black (46271 is the iris's last step `88532193…`, 46273 and 46275 black) | k4, k2, k3, l2r | 320×200 |
@@ -6040,6 +6040,16 @@ refusals**: 16192 and 24520 exactly, 15603, 21926 (≈ 21925), 26570, 33261 (≈
 at the same loads, and 12207 is TECHNO's mode change, inside the TUNNELI→TECHNO black gap
 (12185–12213).
 
+*(2026-10-25 (Phase 9), the final review — **qualified; the sentence above overstates it.** Only
+16192 and 24520 are refusals the captures **reproduced** (§26.2: refused again in every session),
+and 33261 sits beside the reproduced 33260. 15603, 21926 (≈ 21925), 26570, 34116 (≈ 34114) and
+37967 (≈ 37965) sit where a capture was refused **once** and then captured on a retry (§26.2's
+"not reproduced": p15603, p21925, L2 h4, p34114, p37965, and j2r for 37967), so they are
+unreproduced host stalls. The trace's gap is at the same load, but nothing shows it has the same
+cause. **38569 and 46264 are unexplained.** k4 captured 38569, and k2r's adjacent-grab slip is
+at 38566, not 38569. L1 l asked for 46260 and 46270, either side of 46264, and was refused only at 46280, for its
+geometry. 12207's reading stands. music-clock.md §7 carries the same qualifier.)*
+
 **The `second1e` window is narrowed**, as `second3d`'s was (music-clock.md §1's table). The brief's
 end is the restart − 50 = 34005; with the restart unknown, the first attempt was set from §26.3's
 frames, and two were refused:
@@ -6056,7 +6066,7 @@ ends at 33949. `second1f`'s first attempt (`--frames 34170..48280`, now `out/p9-
 exit 0) was set the same way; the filed one was re-taken at the restart + 50 once the restart was
 measured, and the two sessions agree on the row-change frames to within −2…+3.
 
-**The restart is 34,055 ± 2.** `restartmus` does not zero `_np_zframe` (music-clock §2.1), so the
+**The restart is 34,055** (*2026-10-25 (Phase 9): was "34,055 ± 2"; the note after this paragraph*). `restartmus` does not zero `_np_zframe` (music-clock §2.1), so the
 restart is read the way `second3e`'s was: `second1f`'s rows at order 18 sit 33,644–33,647 frames
 after `second4`'s (the block-4 boot's own restart, whose columns derive its start at 408.2), so the
 block-1 restart's clock starts at 408.2 + 33,647 ≈ **34,055**. U2E's band follows at 34120 (R + 65;
@@ -6064,9 +6074,30 @@ block 4: 467 = R + 59). **The two sessions drift**: the offset falls from 33,647
 33,635 at order 25 (orders 19…25 start 33,646, 33,644, 33,642, 33,641, 33,639, 33,636, 33,635 frames
 after `second4`'s), and stays there — 11 frames over the 3,421 frames of orders 19–25.
 
+*(2026-10-25 (Phase 9), the final review — **the restart is one figure: 34,055, in [34,052,
+34,055].** The "± 2" this paragraph carried, and the "34,054 ± 2" §26.8 and `APPROXIMATIONS.md` A53 cited from
+here, are replaced by this. The point value is `crates/sr-audio/tests/trace.rs`'s: its
+`RESTART_TRACES` row starts `second1f` at 34,055 (408.2 + 33,647), and
+`cargo test -p sr-audio --test trace -- --nocapture` prints `second1f: the session's phase is +0
+frame(s) from the boot's` from it. The bracket is 408.2 + the order-18 offsets 33,644–33,647, which
+gives 34,052.2…34,055.2. The 59–68 frames of A53, D31 and D45 rest on it: 34114 − 34,055 and 34120 −
+34,052. The offsets are printed by:*
+
+```bash
+python3 -c 'import csv
+def f(p): d={}; [d.setdefault((int(r["ord"]),int(r["row"])),int(r["frame"])) for r in csv.DictReader(open(p))]; return d
+a=f("reference/music/second1f/trace.csv"); b=f("reference/music/second4/trace.csv")
+[print(k, a[k]-b[k]) for k in sorted(a) if k in b and k[0]==18]'
+```
+
+*It prints 33,647 at 17 of order 18's 23 rows, 33,646 at 5, and 33,644 at one, `(18, 9)`. That
+row is `second4`'s first sample (frame 500, the window's edge), not a row change, so the row
+changes alone would narrow the bracket to [34,054, 34,055]. The records keep the wider one.)*
+
 **The PANICEND cue wait exits at 16630.** `musplus` from `second1e`'s `zplus` and `row` (the
-`DIS/DISINT.ASM:252-271` rule, `musplus_from`): −32 from 16363 to 16618 (order 39 row 32 … order 40
-row 31), 0 at 16622 (order 42 row 0 — order 40 breaks to 42), **1 at 16630** (order 42 row 1). The
+`DIS/DISINT.ASM:252-271` rule, `musplus_from`): −32 from 16363 to 16621 (order 39 row 32 … order 40
+row 31; *2026-10-25 (Phase 9): was "16618", the frame order 40 row 31 starts, not the stretch's last
+— the command below prints row 31 through 16621*), 0 at 16622 (order 42 row 0 — order 40 breaks to 42), **1 at 16630** (order 42 row 1). The
 wait (`MAIN/U2.ASM:833-853`) loops while `musplus` ≥ 0, then while ≤ 0, and leaves on the first
 value > 0 — 16630, whichever loop PANICEND's retirement entered. The dot is up to 16636 (§26.3).
 
@@ -6079,6 +6110,19 @@ python3 -c 'import csv; [print(r["frame"],r["ord"],r["row"],r["zplus"]) for r in
 order 18). The general rule fails on both, and these are the rows. They are **pinned exactly in
 the test's `KNOWN_DISAGREEMENTS`** (music-clock.md §2.3), so the suite passes, and it fails if
 either disagreement grows or shrinks:
+
+*(2026-10-25 (Phase 9), the final review — **superseded by Task 6b; left standing as Task 2's record.**
+This paragraph and the list below are Task 2's run, from the fresh-restart anchor 7,815 that Task
+6b replaced with **8,056**. Today's figures are in `APPROXIMATIONS.md` **A54** and §26.8 below, and
+in `crates/sr-audio/tests/trace.rs`'s `RESTART_TRACES` doc comment, which derives 8,056.
+`cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces` prints them: `second1e`
+at phase +0, `9893 of 25136 frames agree (39.358 %); worst displacement 8`, with the worst first
+reaching 1 at 8,813, 4 at 16,190 and 8 at 33,305; and `second1f` at phase +0, `2547 of 14161
+frames agree (17.986 %); worst displacement 12`, with the pinned `row` difference at index 502 and
+38376 unreachable. Below, the phase "−2", the `8087 of 25136 (32.173 %)` line and the drift
+trajectory "−1 by 10,827, −4 by 19,981, −8 … at 33,264" are Task 2's. **No committed command
+reproduces the trajectory.** It was printed by the temporary copy of the test named at the end of
+this section, and that copy was removed. It is **unreproduced history**, not a figure to cite.)*
 
 - **`second1e`: content identical, placement out by 8.** Every word's value sequence matches the
   trace (order 81 values, row 5,025, pattern 74, speed 7, tempo 1, zplus 39 — no difference), the
@@ -6107,7 +6151,7 @@ removed.
   indices given as two values are session-dependent.
 - **The never-published frames** 7921, 8568, 16192, 24520, 33260, 38580 and 46276: a port frame at
   those indices has no reference to pair with.
-- **The restart at 34,055 ± 2**, the reload under JPLOGO's white (≤ 34100 … 34114), U2E's band at
+- **The restart at 34,055**, in [34,052, 34,055] (*2026-10-25 (Phase 9): was "34,055 ± 2"; §26.6*), the reload under JPLOGO's white (≤ 34100 … 34114), U2E's band at
   34120; **the cue-wait exit at 16630**, the screen's change at 16637.
 - **The total length to ENDSCRL: 45,873 frames.**
 - **Block offsets**: block 2 + 7,410, block 3 + 16,200, block 4 + 33,647 (at order 18), block 5 +
@@ -6211,7 +6255,7 @@ which a delay inserted at the handover can only make later still; negative at th
 seams whose both sides are pinned by the music show two different loaders: the cue wait exits at
 16630 and MNTSCRL's mode set is up at 16637 (**7** frames; the port's are 16632 and 16633, **1**),
 while U2E's reload holds JPLOGO's screen, whitened, from ≤ 34100 to 34114 over a restart whose clock
-starts at 34,054 ± 2 (§26.6), where the port starts U2E at the restart's own boundary (34043). D24's
+starts at 34,055, in [34,052, 34,055] (§26.6; *2026-10-25 (Phase 9): was "34,054 ± 2"*), where the port starts U2E at the restart's own boundary (34043). D24's
 one-constant rule is not met — Task 6b re-checked it on the corrected run, and the signs and the two
 loaders are the same — so the handover is left as it is and the seams are registered:
 `APPROXIMATIONS.md` **A53**.

@@ -142,6 +142,9 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 /// `MUSIC0@18` restart between JPLOGO and U2E (`MAIN/U2.ASM:880-885`); its order boundaries sit
 /// 33,647 frames after `second4`'s at its first rows, so its clock starts at
 /// 408.2 + 33,647 ≈ **34,055** — `second3e`'s derivation, which the carry-over does not move.
+/// This row is the records' one figure for the restart (`reference-indices.md` §26.6, A53):
+/// `--nocapture` prints `second1f`'s phase as +0 from it, and the order-18 offsets
+/// 33,644–33,647 bracket it in [34,052, 34,055].
 const RESTART_TRACES: &[(&str, &str, i64, u8, Before)] = &[
     ("second3e", "MUSIC0", 17_850, 18, Before::Boot),
     ("second1d", "MUSIC1", 8_056, 0, Before::Boot),

@@ -146,6 +146,19 @@ mod tests {
         assert!(!text.contains('\x1b'), "plain text carries no escapes");
     }
 
+    /// `printend` copies all 25 rows (`MAIN/U2.ASM:522-529`), and printing only the box is
+    /// the same screen: rows 14–24 of the shipped file draw no ink (APPROXIMATIONS.md A59).
+    #[test]
+    fn the_rows_from_printends_cursor_down_are_blank() {
+        let screen = shipped();
+        for (row, cells) in screen.chunks(COLUMNS * CELL).enumerate().skip(CURSOR_ROW) {
+            assert!(
+                cells.chunks_exact(CELL).all(|cell| is_blank(cell[0])),
+                "row {row} of U2END.BIN draws ink below the cursor"
+            );
+        }
+    }
+
     #[test]
     fn the_end_screen_colours_are_its_attributes() {
         let screen = shipped();
