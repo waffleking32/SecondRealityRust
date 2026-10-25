@@ -661,9 +661,11 @@ residuals are registered (A23: 26.161 % at 8500, 99.483 % at 9500), so no cube f
 `0x08`, not the `0x0F` the periodic pattern would give. **Where.** `PLZPART/PLZA.ASM:350-363`.
 **Port must.** Read the same flat table, with the 16-bit displacement wrapping. **Frame.** None
 shows it, measured: replacing the underflowed byte by the `0x0F` the periodic pattern would give
-leaves 8500 and 9500 at exactly 26.161 % and 99.483 % (`cargo test --release -p secondreality --test
-plzpart -- --nocapture`), so the keyframes never take the `x = 0` case. It is pinned at the table
-level. **Test.**
+leaves 8500 and 9500 at exactly 26.161 % and 99.483 % (**an uncommitted mutation**: in
+`Plzpart::do_clear` replace the `end_mask` read by `if x == 0xFFFF { 0x0F } else { <the read> }`, run
+`cargo test --release -p secondreality --test plzpart -- --nocapture`, which prints the two
+percentages and passes, then `git checkout` the file), so the keyframes never take the `x = 0` case.
+It is pinned at the table level. **Test.**
 `do_clears_mask_underflow_reads_the_byte_before_end_mask`.
 
 ### 17.2 The last drop step resets the split and accumulates nothing
@@ -673,9 +675,12 @@ and returns before the accumulate loop, so **every** table's fade is cut short b
 accumulating steps, 66..96, of the 32 the 65..96 range holds). **Where.**
 `PLZPART/COPPER.ASM:189-268`. **Port must.** Return at step 65 without accumulating (steps 66-96
 and 128-255 do). **Frame.** 7000 and 7600, both after the first switch: letting step 65 accumulate
-moves 7000 from 5.848 % to 70.000 % differing pixels and 7600 from 4.052 % to 70.000 % (a temporary
-mutation of `do_drop`, `cargo test --release -p secondreality --test plzpart -- --nocapture`); 6000 is
-before the first switch and does not move. **Test.**
+moves 7000 from 5.848 % to 70.000 % differing pixels and 7600 from 4.052 % to 70.000 % (**an
+uncommitted mutation**: delete the `return;` after `self.initpparas();` in `CopperState::do_drop`, and
+raise the two expected percentages in `tests/plzpart.rs` so the run reaches 7600; `cargo test
+--release -p secondreality --test plzpart the_plasma_keyframes -- --nocapture` prints both; then `git
+checkout` the two files); 6000 is before the first switch and does not move. The unmutated figures
+are `cargo test --release -p secondreality --test plzpart -- --nocapture`. **Test.**
 `the_last_drop_step_resets_the_split_and_adds_nothing`.
 
 ### 17.3 The projection adds 160 twice
@@ -699,13 +704,16 @@ Tests are in `bins/secondreality/src/parts/minvball.rs`. Frames: `reference/part
 
 **Original.** Where the rotation's low word should have been saved (`mov bx,ax`) the source has a
 no-op (`mov ax,ax`). The subtraction is `sub ax,bx` / `sub dx,cx` (`:69-70`, object bytes
-`2b c3 2b d1`): `sub dx,cx` ignores the carry, and `ax` is overwritten at `:74`, so the stale `bx`
+`2b c3 2b d1` — `grep -obUaP '\x2b\xc3\x2b\xd1' upstream/SecondReality/DOTS/ASM.OBJ upstream/SecondReality/DOTS/DOTS.EXE` finds them once each, at offsets 782 and 3926 —): `sub dx,cx` ignores the carry, and `ax` is overwritten at `:74`, so the stale `bx`
 (the previous dot's screen offset) never reaches `bp`. `bp = hi(Z*cos) - hi(X*sin) + 9000`. **Where.**
 `DOTS/ASM.ASM:65`, `:69-70`, `:74`. **Port must.** Subtract the high words and nothing else:
 carrying a borrow in from a register, or carrying `bx` across the 512 dots, is not the original. (The
 port once did, and the four keyframes differed by 67 / 63 / 37 / 25 pixels for it; removed in Phase 9
-Task 9, A19.) **Frame.** The four keyframes, now 0 differing pixels each (a borrow moves `bp` by one,
-which at some Z moves a shadow row). **Test.** `the_stale_bx_never_reaches_bp` (a dot at `Z = -3228`
+Task 9, A19.) **Why it stays a full entry.** With no `sbb`, "fixing" `mov ax,ax` itself (saving
+the low word) changes nothing, but the natural reading of the routine — a 32-bit subtract that
+carries — moves `bp` by one where the low word borrows, and a borrow moves a shadow row at some Z: the
+port's own former variant of it moved all four keyframes (67 / 63 / 37 / 25 pixels). The entry guards
+that regression. **Frame.** The four keyframes, now 0 differing pixels each. **Test.** `the_stale_bx_never_reaches_bp` (a dot at `Z = -3228`
 has `bp` 8193 and shadow row 163 whatever the previous dot left, alone or after another dot).
 
 ### 18.2 The off-screen shadow stores a clobbered register as the next offset
@@ -1068,7 +1076,7 @@ a counterfactual test (a "fix" that *would* show), the row names it.
 | TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C:317` | The 400 decoded rows are identical either way (`the_troll_rle_is_the_origin_readers_rows`) | `techno.md` §6 |
 | PANICEND | The part never polls the exit flag: `SHUTDOWN.C` contains no `dis_exit()` call, so it runs all 121 waits whatever the key state | `PANIC/SHUTDOWN.C:1-157` (`grep -c dis_exit` prints 0) | The reference is captured with no key pressed, so no frame is at an exit | `panicend.md` §9-10 |
 | MNTSCRL | `frame = veke` can never fire: `inc(frame)` is commented out | `FOREST/READ2.PAS:3`, `:221-224` | Dead bound (`the_dead_veke_bound_never_ends_the_part`) | `mntscrl.md` §8 |
-| LNS&ZOOM | `memcpy(back+64000, back+64000-1536, 1536)` copies the picture's last 1,536 bytes into the pad past it | `LENS/MAIN.C:302` | The copied bytes are all 0 (checked over `LENS.EXB`'s last 1,536 picture bytes) and the port's buffer starts at 0, so the copy changes nothing: with it removed the three filed lens/rotazoomer residuals are unchanged (3.2156 / 3.0234 / 2.1812 %) and `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` still passes, so that test pins the buffer's layout, not the copy's contents | `lnszoom.md` §2 |
+| LNS&ZOOM | `memcpy(back+64000, back+64000-1536, 1536)` copies the picture's last 1,536 bytes into the pad past it | `LENS/MAIN.C:302` | The copied bytes are all 0 (`tail -c 1536 assets/LENS/LENS.EXB | od -An -v -tu1 | tr -s ' ' '\n' | sort -u | grep -v '^$'` prints only `0`; the picture ends at file offset 64,784) and the port's buffer starts at 0, so the copy changes nothing: with it removed (**an uncommitted mutation**: replace `self.back[VIDEO_BYTES..].copy_from_slice(&tail);` in `Lnszoom::init` by `let _ = tail;`) the three filed lens/rotazoomer residuals stay 3.2156 / 3.0234 / 2.1812 % (`cargo test --release -p secondreality --test lnszoom -- --nocapture` prints them) and `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` still passes, so that test pins the buffer's layout, not the copy's contents | `lnszoom.md` §2 |
 | LNS&ZOOM | `if(dis_musplus>-30)` tests the function pointer, so the wait always runs | `LENS/MAIN.C:104` | At the part's entry the player publishes -5 (`the_entry_pre_roll_lands_the_reference_position_at_tick_zero`), so the wait passes either way; the counterfactual at -32 is `the_missing_call_in_the_part1_guard_is_preserved` | `lnszoom.md` §3 |
 | LNS&ZOOM | The `a > 3` clamp on the frame advance | `LENS/MAIN.C:176` | The port runs one frame a tick, so `frame` never advances by more than one (the original's advanced by `min(waitb(),3)`) | `lnszoom.md` §4 |
 | LNS&ZOOM | `setpalarea` at `:200` is erased by `inittwk`'s DAC clear | `LENS/MAIN.C:200` | Uploaded and cleared inside one tick | `lnszoom.md` §5 |
@@ -1092,7 +1100,7 @@ a counterfactual test (a "fix" that *would* show), the row names it.
 | GLENZ | `NEW.ASM`'s 256-word row table is followed in memory by the edge arena | `GLENZ/NEW.ASM:11-16` (`nec`, `nep`, `ne`) | Not shown reachable: the worst shipped case is near y = 252 and the port's list is a `Vec`; an open item in `glenz.md` §8, registered only if a moving keyframe reaches it | `glenz.md` §8 |
 | GRID | `sin256` and the 64 KB `muldata` are built and read by nothing linked; `_asmloop2`, the unused slot words and `_line` | `GRID/MAIN.C:38-43`, `:130-139`, `ASM.ASM:113-134`, `:247-269` | Dead | `grid.md` §2 |
 | GRID | `d = sin1[k&1023]/4+256; d = 0;` is a dead store: the y waveform is static | `GRID/MAIN.C:162-163` | The overwritten value is never read | `grid.md` §6 |
-| HARD | `depthcol[bp]` with a negative low word reads a code byte (0x07), modelled as zero | `HARD/BA.ASM:233-235` | Over part 2's 501 states the low word is always positive (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`) | `hard.md` |
+| HARD | `depthcol[bp]` with a negative low word reads a code byte (0x07), modelled as zero | `HARD/BA.ASM:232-234` | Over part 2's 501 states the low word is always positive (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`) | `hard.md` |
 | HARD | `do3dots`'s shadow store to `[si+12]` is behind `jmp @@4`; the word clear that precedes it (`:229-231`) runs every iteration | `HARD/BA.ASM:229-235` | The store is unreachable, so `[si+12]` stays 0; the port's one-byte-per-row clear is a *model* of it, differing only in bytes 1/321 at offset 0, which no reached frame depends on (`hard.md` "The dot engine") | `hard.md` |
 | HARD | `_GRID1.TMP`'s last byte is `0x4F` in the linked copy and `0x00` in the file | `HARD/B.C:112-121` | The affected word is the y of the 100th pair; no filed keyframe depends on it (`the_grid_table_is_the_shipped_grid1`) | `hard.md` |
 | HARD | The `count>400` branch and the `0xff` cut; `setborder` | `HARD/B.C:243-246`, `:26`, `:196`, `:201` | Dead / inert (`the_0xff_cut_is_unreachable_with_one_start`) | `hard.md` |
@@ -1165,17 +1173,24 @@ grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b|\bbugs?\b|artefact|artifact' doc
   | grep -v '^docs/fidelity/bugs.md' | wc -l
 ```
 
-prints **172** at this commit, **103** of them lines the first grep does not print (`comm -13` of the
-two `file:line` lists). Those 103 add no behaviour the table lacks. Each is one of: a back-reference to
-§4's `setpalarea` ("bug", `beglogo.md`, `endlogo.md`, `techno.md`, `panicend.md`); a line inside a
-section the first grep already classifies (`alku.md` §6, `rayscrl.md` §5, `minvball.md` §4,
-`plzpart.md` §9, `jplogo.md` §8); "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`,
-`ddstars.md`, `u2a.md`, `reference-indices.md`'s HARD rows); a build, capture or trace artefact
-(`asset-inventory.md`, `music.md:1633`, `music-clock.md`, most of `reference-indices.md`); a port-side
-artifact registered in `APPROXIMATIONS.md` (A23's page-slot spill: `plzpart.md`,
-`APPROXIMATIONS.md`); or a behaviour classified above under another name — A14's "bug" (§28.4),
-GRID's "(-10,-8) fill-word artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two
-extra displays (the register's "Not in this register" list).
+prints **171** at this commit, **102** of them lines the first grep does not print (`comm -13` of the
+two `file:line` lists). Those 102 add no behaviour the table lacks, and each falls into one of these
+groups (a line can be in more than one):
+
+- the one-line `**Register.**` back-reference appended to each of 24 part notes by this task (the
+  line names `bugs.md`, which `\bbugs?\b` matches) and the §4 `setpalarea` back-references
+  (`beglogo.md`, `endlogo.md`, `techno.md`, `panicend.md`);
+- lines inside a section the first grep already classifies (`alku.md` §6, `rayscrl.md` §5,
+  `minvball.md` §4, `plzpart.md` §9, `jplogo.md` §8);
+- "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`, `ddstars.md`, `u2a.md`,
+  `reference-indices.md`'s HARD rows), or a build, capture or trace artefact (`asset-inventory.md`,
+  `music.md:1633`, `music-clock.md`, most of `reference-indices.md`);
+- port-side mentions: the port's own page-slot spill (A23: `plzpart.md`, `APPROXIMATIONS.md`), the
+  conversion "bug" at `APPROXIMATIONS.md:133`, and `music.md:760`'s "a fix of a Task 3 timeline bug",
+  which is the port's own earlier player (§28.2 is the original's behaviour that fixed it);
+- a behaviour classified above under another name: A14's "bug" (§28.4), GRID's "(-10,-8) fill-word
+  artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two extra displays (the
+  register's "Not in this register" list).
 
 **Classes.** **E** = a full entry in this file; **I** = a row of the index above; **N** = not a
 preserved behaviour of the original's (a port representation, a counterfactual, capture bookkeeping
@@ -1241,8 +1256,8 @@ or a registered approximation), with the reason.
 | `APPROXIMATIONS.md:272` | what was "kept from the substitution" (ENDLOGO's cue) | N (a register's own history) | — |
 | `APPROXIMATIONS.md:965` | an earlier version "kept the tree's wait" | N (a register's own history) | — |
 | `APPROXIMATIONS.md:1010` | "the exact cue is kept: only `-11`" (RAYSCRL) | E | §19.5 |
-| `APPROXIMATIONS.md:1748` | "what is preserved is the pixel set" (a representation) | N | — |
-| `APPROXIMATIONS.md:2505`, `APPROXIMATIONS.md:2587` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
+| `APPROXIMATIONS.md:1751` | "what is preserved is the pixel set" (a representation) | N | — |
+| `APPROXIMATIONS.md:2508`, `APPROXIMATIONS.md:2590` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
 
 The behaviours the audit's grep cannot find because their note never says *preserved*, *kept* or
 *required* — LNS&ZOOM's aspect order (§16), HARD's dot engine (§25), the music

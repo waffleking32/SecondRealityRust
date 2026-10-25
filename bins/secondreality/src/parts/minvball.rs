@@ -1704,6 +1704,13 @@ mod tests {
             scores[0].1, INITIAL_J,
             "the fitted cursor is the minimum over 0..512"
         );
+        // Unique, not a near-tie: 88 reproduces the frame exactly and the
+        // next best cursor leaves 283 pixels (`bugs.md` §18.4, A19).
+        assert_eq!(
+            (scores[0].0, scores[1].0),
+            (0, 283),
+            "88 is the only cursor with no residue; the runner-up's pixels"
+        );
     }
 
     // --- the reference's mapping --------------------------------------------

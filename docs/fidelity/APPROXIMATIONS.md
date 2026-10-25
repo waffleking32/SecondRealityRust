@@ -1051,7 +1051,10 @@ cursor, reproduces every filed frame.
 
 **Measured difference, through the real binary: none.** The four keyframes are byte-identical,
 0 / 0 / 0 / 0 differing pixels of 64,000 at 10,900 / 11,200 / 11,800 / 12,400, and the shadow layer
-agrees pixel for pixel (1,860, 2,159, 2,187 and 2,170 shared of as many). Commands:
+agrees pixel for pixel (1,860, 2,159, 2,187 and 2,170 shared of as many). **Not four independent
+confirmations:** 10,900 is the objective the `j` fit minimises, so its 0 is by construction; 11,200,
+11,800 and 12,400 are out of sample (the fit never saw them) and are the evidence that `j = 88` and the
+rest of the model generalise. Commands:
 
 ```bash
 cargo test --release -p secondreality --test minvball the_four_keyframes -- --nocapture
@@ -1066,7 +1069,7 @@ differed by **67 / 63 / 37 / 25** pixels (0.1047 / 0.0984 / 0.0578 / 0.0391 %), 
 attributed them to "the release's own stack-`j` difference", with a 99 % shadow agreement. The cause
 was a defect of the port's: `project_xz` subtracted a borrow from the previous dot's screen offset
 (`bx`) in the z rotation. The original does not: `DOTS/ASM.ASM:69-70` is `sub ax,bx` / `sub dx,cx`
-(object bytes `2b c3 2b d1`), the carry from the low word is ignored and `ax` is overwritten at
+(object bytes `2b c3 2b d1` — `grep -obUaP '\x2b\xc3\x2b\xd1' upstream/SecondReality/DOTS/ASM.OBJ upstream/SecondReality/DOTS/DOTS.EXE` finds them once each, at offsets 782 and 3926 —), the carry from the low word is ignored and `ax` is overwritten at
 `:74`, so the stale `bx` never reaches `bp` (`bugs.md` §18.1). Removing the borrow, a behaviour the
 original does not have, took all four residuals to 0 and made `j = 88`
 unique. Nothing in this entry is an approximation any more except the fitted `j`, which the source

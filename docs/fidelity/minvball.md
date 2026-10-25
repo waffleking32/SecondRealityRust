@@ -117,11 +117,11 @@ For each dot, in array order:
 - Before drawing, the dot's old shadow and old three ball rows are restored
   from `bgpic`.
 
-Three features of the assembly are translated literally:
+Two features of the assembly are translated literally, and one instruction is inert:
 
 - **`mov ax,ax`** (`ASM.ASM:65`) is a no-op where the rotation's low word
   should have been saved (`mov bx,ax`), and the z rotation is `sub ax,bx` /
-  `sub dx,cx` (`:69-70`, object bytes `2b c3 2b d1`). `sub dx,cx` ignores the
+  `sub dx,cx` (`:69-70`, object bytes `2b c3 2b d1` — `grep -obUaP '\x2b\xc3\x2b\xd1' upstream/SecondReality/DOTS/ASM.OBJ upstream/SecondReality/DOTS/DOTS.EXE` finds them once each, at offsets 782 and 3926 —). `sub dx,cx` ignores the
   carry and `ax` is overwritten at `:74`, so the stale `bx` never reaches
   `bp`: `bp = hi(Z*cos) - hi(X*sin) + 9000`. (The port once subtracted a
   borrow from the previous dot's offset, a defect of its own, and the four
@@ -266,7 +266,7 @@ development build of the source ported here. The tree's source reproduces all
 four filed frames exactly, so no D24 adoption is needed. The source leaves `j`
 uninitialized, so the port fits the one value the source permits to the
 reference (88, §4). Everything the source says — the projection, the depth
-tables, the two bugs, the y-integration skip, the Microsoft RNG, the cue and the
+tables, the clobbered-offset store, the y-integration skip, the Microsoft RNG, the cue and the
 frame cap — is implemented.
 
 ## 7. The real run
@@ -287,4 +287,4 @@ cue, the exit, the frame cap, the stage boundary, the gravity decrement, the
 depth tables, the palette, the fade uploads, the shadow bug, the ball rows,
 the pre-roll and the mapping.
 
-**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §2 (the painter's order) and §18 (the stale register, the clobbered offset, the skipped gravity, `j`).
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §2 (the painter's order) and §18 (the inert `mov ax,ax`, the clobbered offset, the skipped gravity, `j`).
