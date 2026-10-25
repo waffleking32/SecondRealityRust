@@ -2,3 +2,8 @@
 # them, and a CRLF-converting checkout must never rewrite them.
 reference/**/*.rgb binary
 reference/**/*.idx binary
+# The demo's media are read as raw bytes too, and several (PAM/OUT.ANI, the PLZPART .INC tables,
+# the U2A scene files) hold no NUL in their first 8 KB, so git would take them for text and a
+# CRLF-converting checkout — Windows' default — would corrupt them. `cargo xtask assets verify
+# --tree` checks them against assets/PROVENANCE.md.
+assets/** -text
