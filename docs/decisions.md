@@ -248,12 +248,12 @@ in `APPROXIMATIONS.md` — rather than the newer build being called the winner.
 
 **Closed 2026-10-25 (Phase 9 Task 10) — unresolved by design.** The open question — whether the part
 EXEs in `MAIN/DATA/` are byte-identical to those packed inside `SECOND.EXE` — is not answered and
-this project will not answer it: the staged EXEs are PKLITE-packed, `SECOND.EXE` packs them again,
+this project will not answer it: the staged EXEs but U2A's and U2E's are PKLITE-packed, `SECOND.EXE` packs them again,
 and nothing here unpacks either. The frames arbitrate instead, which is the ruling above and D24's
 procedure, and every divergence it found is registered against the frames with its packed EXE as
 the lead (A6, A9–A11, A17–A20, A22–A25, A28–A31, A37). The tree does say one thing, and it is
 measured: `MAIN/PACKFINA.INC`'s length words are the staged file's size for 18 of its 22 EXEs and
-not for `U2A.EXE` and `U2E.EXE` (whose staged copies carry no PKLITE header and are twice the listed
+not for `U2A.EXE` and `U2E.EXE` (whose staged copies carry no PKLITE header and are 2.06× and 1.93× the listed
 length), `LNS&ZOOM.EXE` (four bytes) or `START.EXE`, so for those four the staged file is certainly
 not the packed one (`APPROXIMATIONS.md`'s head has the command).
 
@@ -1593,7 +1593,7 @@ interrupted and the run goes on with the next one, one index later. It is a know
 silence: the original's fast-forward is the window's close button, and the port's Ctrl is "skip this
 part" — which is also what the phase's Task 10 asked for.
 
-*(Phase 9 Task 10 — a correction to the ESC paragraph above.)* "The original does not lose it
+**Corrected 2026-10-25 (Phase 9 Task 10) — the ESC paragraph above.** "The original does not lose it
 either" is not so between two parts: after each part `partexecute` calls `flushkbd`
 (`MAIN/U2.ASM:211`, the routine `MAIN/U2A.ASM:537-546`), which reads and discards up to 256 waiting
 keystrokes, so a key pressed after one part stopped reading and before the next began is dropped.

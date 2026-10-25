@@ -1691,6 +1691,10 @@ repeats; the port cannot choose the split without the original's cycle costs.
 registered with the split measurements. `docs/fidelity/plzpart.md` §4 carries
 the mechanism and the table. The diagnostic renders are under `out/`.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: the split the tear lands on depends on
+the original's per-frame cycle costs, which no capture or trace records; the residual stays 14,348 /
+7,486 / 5,186 px at 6000 / 7000 / 7600 (`cargo xtask rediff --only plzpart/plasma`).
+
 ## A25 — LNS&ZOOM: the release's face picture differs from the tree's `LENS.EXB` (registered), and the part 3 hand-over costs one frame more than the source's waits (adopted)
 
 **Part:** LNS&ZOOM (`LENS/MAIN.C` over `LENS/ASM.ASM`), Phase 5.
@@ -1861,6 +1865,10 @@ is not in any trace, and the part's `waitb` returns a value no filed
 capture carries. A cost model built from the `ZOOM.INC` instruction counts
 would need the emulator's cycles-per-instruction and VGA wait states, none
 of which the tree records.
+
+**Status (Phase 9):** Carried — what the oracle cannot see: the `doit` iterations' copper-frame
+counts are in no capture or trace, and the 17700 filing is outside its own census; the residual
+stays 51,445 px (`cargo xtask rediff --only jplogo`).
 
 ## A28 — U2A: the release's Gouraud shading differs at 7300 (registered, not adopted)
 
@@ -2183,6 +2191,10 @@ before the paint. No anchor, tick or palette order was fitted.
 the_moving_keyframes_record_the_registered_alignments_and_residuals`, and
 the dump/compare commands in `docs/fidelity/glenz.md` §11.
 
+**Status (Phase 9):** Carried — the session's phase (D17) and the capture's surface/DAC sampling
+instant, neither of which the port can draw or the oracle's API reaches; the residuals stay 5,208 /
+2,289 / 5,941 px at the surface minima (`cargo xtask rediff --only glenz`, A37).
+
 ## A37 — GLENZ: the reference identifies the low-byte colour key (adopted); the surface minima's residual is registered-unexplained
 
 **Part:** GLENZ (`GLENZ/VEC.ASM:403-506`), Phase 7.
@@ -2465,6 +2477,10 @@ grid_matches_the_reference_at_its_measured_start`, which prints the three counts
 minimum's offset, the max delta and the row histogram, and asserts that every differing row is
 14 or 15.
 
+**Status (Phase 9):** Carried — what the oracle cannot see: the filed RGB frames are published
+mid-draw, a sampling instant the port's completed frames cannot reproduce; the residual stays 6 / 2
+/ 36 / 33 / 14 px (`cargo xtask rediff --only grid`).
+
 ## A42 — TWIST: the copper test is not registered (substitution; measured difference 0)
 
 **Part:** TWIST (`TWIST/ASM.ASM:220-269`), Phase 8 Task 4.
@@ -2548,6 +2564,10 @@ mapping, not a measurement. Reproduce the frame sequence with
 `cargo test -p secondreality --test vault -- --nocapture
 twist_matches_the_reference_at_its_measured_start`; the cap with
 `twist_draws_exactly_4444_frames_and_holds`.
+
+**Status (Phase 9):** Carried — what the oracle cannot see: a missed retrace would slow the original
+below 70.086 Hz without changing its frame count, and neither the source nor the capture can observe
+it; every compared frame is 0.
 
 ## A45 — TWIST: the comparison is RGB-only (registered limitation; measured difference 0)
 
@@ -2752,6 +2772,9 @@ same pair. The capture's keyframes are exact with the file's values, which is th
 100th pair's y). Reproduce the data checks with
 `cargo test -p secondreality --bin secondreality vault::hard::dots`.
 
+**Status (Phase 9):** Carried — the two bytes stay recorded, not fitted: no compared frame exercises
+either (the terminator is never read as a record, and no keyframe reaches the 100th grid pair's y).
+
 ## A51 — HARD: `do3dots`' out-of-array guard is a model for an unreachable branch (registered model; measured difference 0)
 
 **Part:** HARD (`HARD/BA.ASM:221-222,262-270`), Phase 8 Task 6; part 2 is Task 7's.
@@ -2790,6 +2813,9 @@ frames); the unreachable byte is not reproduced. Reproduce the rule with
 the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`, and the domain with
 `cargo test -p secondreality --bin secondreality
 the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`.
+
+**Status (Phase 9):** Carried — an unreachable path: the guard never fires on part 2's measured
+domain, and the code byte the original would read is the link map's, which the tree does not give.
 
 ## A52 — The vault's silent run: no player, no music service, and one modelled start key (substitution; measured difference 0)
 

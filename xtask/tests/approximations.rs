@@ -1,5 +1,6 @@
-//! `docs/fidelity/APPROXIMATIONS.md` is complete in the two ways Phase 9 Task 10 made it so, and
-//! stays so after it.
+//! `docs/fidelity/APPROXIMATIONS.md` keeps the conventions Phase 9 Task 10 gave it. This checks
+//! the conventions, not completeness: whether every knowing difference is registered, and whether
+//! an entry names an open item in words [`OPEN_ITEM`] does not list, is for a reader.
 //!
 //! - **Every entry carries the five labels** — `**Part`, `**Original`, `**Port`, `**Why` and
 //!   `**Measured difference` at the start of a line, each followed by something other than a

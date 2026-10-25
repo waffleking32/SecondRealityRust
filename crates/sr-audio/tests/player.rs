@@ -2173,7 +2173,6 @@ fn the_timeline_effects_the_modules_carry() {
     let _ = CHANNELS;
 }
 
-
 /// **A14(a), settled: the flush clears the accumulator word it reads, so nothing marks the plane.**
 ///
 /// Both flushes load a zero into a 32-bit register before the loop and store that register

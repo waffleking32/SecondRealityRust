@@ -1152,7 +1152,7 @@ The audit is the set of lines in `docs/fidelity/*.md` (this file excluded) that 
 grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b' docs/fidelity/*.md | grep -v '^docs/fidelity/bugs.md'
 ```
 
-At this commit it prints **69** lines. The check that none is missing from the table below is that
+At this commit it prints **72** lines. The check that none is missing from the table below is that
 every `file:line` it prints appears as a code span **inside this closing section** (the section is
 cut out first, so a mention of the same `file:line` elsewhere in this file does not count):
 
@@ -1174,23 +1174,24 @@ grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b|\bbugs?\b|artefact|artifact' doc
   | grep -v '^docs/fidelity/bugs.md' | wc -l
 ```
 
-prints **171** at this commit, **102** of them lines the first grep does not print (`comm -13` of the
-two `file:line` lists). Those 102 add no behaviour the table lacks, and each falls into one of these
+prints **180** at this commit, **108** of them lines the first grep does not print (`comm -13` of the
+two `file:line` lists). Those 108 add no behaviour the table lacks, and each falls into one of these
 groups (a line can be in more than one):
 
 - the one-line `**Register.**` back-reference appended to each of 24 part notes by this task (the
   line names `bugs.md`, which `\bbugs?\b` matches) and the §4 `setpalarea` back-references
-  (`beglogo.md`, `endlogo.md`, `techno.md`, `panicend.md`);
+  (`beglogo.md`, `endlogo.md`, `techno.md`, `panicend.md`), and `APPROXIMATIONS.md`'s
+  back-references to this file (A14's §28.4, A57's §27, A62's "Not in this register");
 - lines inside a section the first grep already classifies (`alku.md` §6, `rayscrl.md` §5,
   `minvball.md` §4, `plzpart.md` §9, `jplogo.md` §8);
 - "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`, `ddstars.md`, `u2a.md`,
-  `reference-indices.md`'s HARD rows), or a build, capture or trace artefact (`asset-inventory.md`,
-  `music.md:1638`, `music-clock.md`, most of `reference-indices.md`);
+  `reference-indices.md`'s HARD rows, `APPROXIMATIONS.md` A57's "which artifact to follow"), or a
+  build, capture or trace artefact (`asset-inventory.md`, `music.md:1638`, `music-clock.md`, most of `reference-indices.md`);
 - port-side mentions: the port's own page-slot spill (A23: `plzpart.md`, `APPROXIMATIONS.md`), the
   conversion "bug" at `APPROXIMATIONS.md:216`, and `music.md:762`'s "a fix of a Task 3 timeline bug",
   which is the port's own earlier player (§28.2 is the original's behaviour that fixed it);
-- a behaviour classified above under another name: A14's "bug" (§28.4), GRID's "(-10,-8) fill-word
-  artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two extra displays (the
+- a behaviour classified above under another name: A14's "bug" (§28.4, in `APPROXIMATIONS.md`
+  A14 and `music.md` §13's list), GRID's "(-10,-8) fill-word artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two extra displays (the
   register's "Not in this register" list).
 
 **Classes.** **E** = a full entry in this file; **I** = a row of the index above; **N** = not a
@@ -1257,10 +1258,10 @@ or a registered approximation), with the reason.
 | `APPROXIMATIONS.md:387` | what was "kept from the substitution" (ENDLOGO's cue) | N (a register's own history) | — |
 | `APPROXIMATIONS.md:1192` | an earlier version "kept the tree's wait" | N (a register's own history) | — |
 | `APPROXIMATIONS.md:1240` | "the exact cue is kept: only `-11`" (RAYSCRL) | E | §19.5 |
-| `APPROXIMATIONS.md:2090` | "what is preserved is the pixel set" (a representation) | N | — |
-| `APPROXIMATIONS.md:2872`, `APPROXIMATIONS.md:2970` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
+| `APPROXIMATIONS.md:2098` | "what is preserved is the pixel set" (a representation) | N | — |
+| `APPROXIMATIONS.md:2898`, `APPROXIMATIONS.md:2996` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
 | `APPROXIMATIONS.md:14` | earlier text "kept as dated history" | N (the register's own convention) | — |
-| `APPROXIMATIONS.md:3086`, `APPROXIMATIONS.md:3097` | an ESC between two parts "kept" by the port where `flushkbd` drops it | N (a port deviation, A58) | — |
+| `APPROXIMATIONS.md:3112`, `APPROXIMATIONS.md:3123` | an ESC between two parts "kept" by the port where `flushkbd` drops it | N (a port deviation, A58) | — |
 
 The behaviours the audit's grep cannot find because their note never says *preserved*, *kept* or
 *required* — LNS&ZOOM's aspect order (§16), HARD's dot engine (§25), the music
