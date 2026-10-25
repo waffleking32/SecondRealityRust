@@ -19,7 +19,8 @@
 use std::path::Path;
 
 use sr_audio::{
-    note_period, scaled_period, Channel, Mixer, Module, Player, PlayerOptions, Quality, CHANNELS,
+    note_period, scaled_period, step, Channel, MixRate, Mixer, Module, Player, PlayerOptions,
+    Quality, CHANNELS,
 };
 
 const ASSETS: &str = "../../assets/MAIN";
@@ -202,74 +203,88 @@ fn one_second_of(
     out.iter().skip(side).step_by(2).copied().collect()
 }
 
-/// The buffer's zero-crossing frequency, in Hz: the upward crossings, each placed between
-/// its two samples by linear interpolation, and the frequency the first and last of them span.
+/// The buffer's fundamental frequency, in Hz, from its normalised autocorrelation.
 ///
-/// Two things are done to the signal first, the same for both paths, so that what is counted
-/// is the note's own period and not either renderer's high-frequency detail:
+/// For every lag between 1/2000 s and 1/30 s, `r(L) = Σ x[i]·x[i+L] / √(Σ x[i]² · Σ x[i+L]²)`
+/// over the same span of the buffer. The period is the **first** local maximum within 90 % of
+/// the highest local maximum, refined by a parabola through it and its two neighbours, and converted to
+/// seconds at the buffer's `rate`. The first such peak rather than the highest is what keeps
+/// both paths on the same multiple of the period.
 ///
-/// - **a band limit**: two one-pole low-passes at 1 kHz, matched in continuous time to the
-///   buffer's `rate`. The authentic path is a staircase at 20 kHz — one sample byte held a whole
-///   frame — and the enhanced path a line at 48 kHz, so above the note's fundamental the two
-///   waveforms differ by design and their raw crossing counts with them (on these two notes,
-///   without the band limit, 173 and 172 crossings, and 389 and 373);
-/// - **hysteresis**: a crossing counts only after the signal has been below an eighth of its
-///   peak, so a slow crossing is counted once.
-///
-/// When the two counts agree, the two frequencies differ only by where each path's crossings
-/// fall within a sample, a few thousandths of a percent.
-fn zero_crossing_frequency(samples: &[i16], rate: f64) -> (usize, f64) {
-    let alpha = 1.0 - (-2.0 * std::f64::consts::PI * 1000.0 / rate).exp();
-    let (mut first, mut second) = (0.0f64, 0.0f64);
-    let filtered: Vec<f64> = samples
-        .iter()
-        .map(|&sample| {
-            first += alpha * (f64::from(sample) - first);
-            second += alpha * (first - second);
-            second
+/// This replaced the zero-crossing count the brief named. Zero crossings count the waveform's
+/// shape, and the two renderers' shapes differ above the fundamental by design: the authentic
+/// path is a staircase at 20 kHz, one sample byte held a whole frame, and the enhanced path a
+/// line at 48 kHz. The test prints the raw counts beside the estimate (on MUSIC0's order 6,
+/// channel 0, 291 against 277, which is −4.8 %). A period estimate depends on the waveform
+/// repeating, not on its detail.
+fn fundamental(samples: &[i16], rate: f64) -> f64 {
+    let x: Vec<f64> = samples.iter().map(|&sample| f64::from(sample)).collect();
+    let (shortest, longest) = ((rate / 2000.0) as usize, (rate / 30.0) as usize);
+    let span = x.len() - longest - 1;
+    let r: Vec<f64> = (0..=longest + 1)
+        .map(|lag| {
+            if lag < shortest {
+                return 0.0;
+            }
+            let (mut cross, mut head, mut tail) = (0.0, 0.0, 0.0);
+            for i in 0..span {
+                cross += x[i] * x[i + lag];
+                head += x[i] * x[i];
+                tail += x[i + lag] * x[i + lag];
+            }
+            cross / (head * tail).sqrt()
         })
         .collect();
-    let peak = filtered
-        .iter()
-        .fold(0.0f64, |peak, sample| peak.max(sample.abs()));
-    let threshold = peak / 8.0;
-    let mut below = false;
-    let mut times = Vec::new();
-    for (at, pair) in filtered.windows(2).enumerate() {
-        if pair[1] < -threshold {
-            below = true;
-        } else if below && pair[0] <= 0.0 && pair[1] > 0.0 {
-            below = false;
-            times.push(at as f64 + -pair[0] / (pair[1] - pair[0]));
-        }
-    }
-    let count = times.len();
-    assert!(count > 2, "a periodic signal crosses zero");
-    let span = times[count - 1] - times[0];
-    (count, (count - 1) as f64 * rate / span)
+    // Peaks only: a smooth waveform's correlation is highest at the shortest lag, which is
+    // the window's edge and not a period.
+    let peaks: Vec<usize> = (shortest + 1..=longest)
+        .filter(|&lag| r[lag] > r[lag - 1] && r[lag] >= r[lag + 1])
+        .collect();
+    let highest = peaks.iter().map(|&lag| r[lag]).fold(f64::MIN, f64::max);
+    let lag = peaks
+        .into_iter()
+        .find(|&lag| r[lag] >= 0.9 * highest)
+        .expect("a periodic signal has a peak");
+    let (before, at, after) = (r[lag - 1], r[lag], r[lag + 1]);
+    let offset = 0.5 * (before - after) / (before - 2.0 * at + after);
+    rate / (lag as f64 + offset)
+}
+
+/// Upward zero crossings, unfiltered: printed beside the estimate, never asserted.
+fn crossings(samples: &[i16]) -> usize {
+    samples.windows(2).filter(|pair| pair[0] < 0 && pair[1] >= 0).count()
 }
 
 #[test]
 fn enhanced_pitch_is_the_authentic_pitch() {
-    // Two sustained notes, one per module, each sounding unchanged in the song for well over
-    // a second: no command on the row, and no cell on the channel for the rows after it.
+    // Every sustained note in the list, each sounding unchanged in the song for well over a
+    // second (no command on the row, no cell on the channel for the eight rows after it) and
+    // each a looping sample. A note is (module, order, row, channel).
     //
-    // - MUSIC0, order 6 (pattern 3), row 0, channel 5: note 0x30 (C-3), instrument 9 (looping
-    //   100..5945), no volume column; the channel's next cell is row 32 — 32 rows at speed 6,
-    //   tempo 120, which is 4 s.
-    // - MUSIC1, order 90 (pattern 37), row 32, channel 3: note 0x49, instrument 19 (looping
-    //   11666..20033), no volume column; the channel is empty to the pattern's end, 31 rows.
-    let notes: [(&'static str, u8, usize, usize); 2] = [("MUSIC0", 6, 0, 5), ("MUSIC1", 90, 32, 3)];
+    // **The selection** is the survey's sustained looped notes, all of them kept. One note the
+    // survey found is left out, and the reason is the sample, not the estimator: MUSIC1's order
+    // 43, row 12, channel 2 is instrument 53, whose 57,850 bytes loop only from 49,098. At its
+    // step the voice moves about 20,900 bytes a second, so it is still in its unlooped attack
+    // after this one second and has no period to measure. The block after the loop asserts
+    // that arithmetic.
+    let notes: [(&'static str, u8, usize, usize); 9] = [
+        ("MUSIC0", 6, 0, 0),   // note 0x40, instrument 2, the next cell at row 32 (4 s)
+        ("MUSIC0", 6, 0, 5),   // note 0x30, instrument 9, the next cell at row 32
+        ("MUSIC0", 6, 32, 3),  // note 0x42, instrument 1, volume column 20
+        ("MUSIC0", 8, 0, 5),   // note 0x28, instrument 9
+        ("MUSIC0", 19, 0, 1),  // note 0x33, instrument 17
+        ("MUSIC0", 22, 0, 0),  // note 0x40, instrument 12 (loop 10038..19030)
+        ("MUSIC0", 25, 48, 4), // note 0x40, instrument 1
+        ("MUSIC1", 90, 16, 4), // note 0x50, instrument 19
+        ("MUSIC1", 90, 32, 3), // note 0x49, instrument 19, empty to the pattern's end
+    ];
     for (name, order, row, channel) in notes {
         let module = module(name);
         let pattern = module
             .pattern(usize::from(module.orders()[usize::from(order)]))
             .expect("the order's pattern");
         let cell = pattern.rows[row][channel];
-        assert!(
-            cell.has_note() && !cell.has_command(),
-            "{name}: a plain note"
-        );
+        assert!(cell.has_note() && !cell.has_command(), "{name}: a plain note");
         for later in row + 1..row + 9 {
             assert!(
                 pattern.rows[later][channel].is_empty(),
@@ -285,39 +300,40 @@ fn enhanced_pitch_is_the_authentic_pitch() {
         }
         .min(0x3f);
 
-        let second = |quality| {
-            one_second_of(
-                &module,
-                channel,
-                cell.note,
-                cell.instrument,
-                volume,
-                quality,
-            )
-        };
+        let second =
+            |quality| one_second_of(&module, channel, cell.note, cell.instrument, volume, quality);
         let (authentic, enhanced) = (second(Quality::Authentic), second(Quality::Enhanced));
         assert_eq!(authentic.len(), 20_000, "one second at the authentic rate");
         assert_eq!(enhanced.len(), 48_000, "one second at the enhanced rate");
-        let (na, fa) = zero_crossing_frequency(&authentic, 20_000.0);
-        let (ne, fe) = zero_crossing_frequency(&enhanced, 48_000.0);
+        let (fa, fe) = (fundamental(&authentic, 20_000.0), fundamental(&enhanced, 48_000.0));
         let difference = (fe - fa) / fa;
-        let raw = |samples: &[i16]| samples.windows(2).filter(|p| p[0] < 0 && p[1] >= 0).count();
         println!(
-            "{name} order {order} row {row} channel {channel}: without the band limit, {} and \
-             {} upward crossings",
-            raw(&authentic),
-            raw(&enhanced)
-        );
-        println!(
-            "{name} order {order} row {row} channel {channel}: authentic {fa:.3} Hz ({na} \
-             crossings), enhanced {fe:.3} Hz ({ne} crossings), {:+.4} %",
-            difference * 100.0
+            "{name} order {order} row {row} channel {channel}: authentic {fa:.3} Hz, enhanced \
+             {fe:.3} Hz, {:+.4} % (zero crossings, unfiltered: {} and {})",
+            difference * 100.0,
+            crossings(&authentic),
+            crossings(&enhanced)
         );
         assert!(
             difference.abs() <= 0.005,
             "{name}: the pitch agrees within 0.5 % (authentic {fa:.3} Hz, enhanced {fe:.3} Hz)"
         );
     }
+
+    // The note left out: one second of its step does not reach its loop.
+    let module = module("MUSIC1");
+    let pattern = module.pattern(usize::from(module.orders()[43])).unwrap();
+    let cell = pattern.rows[12][2];
+    let header = module.instrument(usize::from(cell.instrument) - 1).unwrap();
+    let period = scaled_period(note_period(cell.note), header.c2spd.min(0xffff) as u16);
+    let bytes_a_second = (u64::from(step(period, MixRate::Hz40000, true)) * 20_000) >> 16;
+    println!(
+        "MUSIC1 order 43 row 12 channel 2: instrument {}, {bytes_a_second} bytes a second, \
+         loop {}..{}",
+        cell.instrument, header.loop_begin, header.loop_end
+    );
+    assert_eq!(cell.instrument, 53);
+    assert!(bytes_a_second < u64::from(header.loop_begin), "still before its loop at 1 s");
 }
 
 fn rms(samples: &[i16]) -> f64 {
@@ -356,4 +372,8 @@ fn the_output_rate_is_the_streams_frames_a_second() {
     // frames.
     assert_eq!(options(Quality::Authentic).output_rate(), 20_000);
     assert_eq!(options(Quality::Enhanced).output_rate(), 48_000);
+    // And the ring holds the same 0.2 s of either: 8,192 samples, and 12/5 of that rounded
+    // down to whole stereo frames.
+    assert_eq!(player("MUSIC0", Quality::Authentic, 0).ring_capacity(), 8_192);
+    assert_eq!(player("MUSIC0", Quality::Enhanced, 0).ring_capacity(), 19_660);
 }

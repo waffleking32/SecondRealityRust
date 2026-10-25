@@ -20,3 +20,11 @@ sr-engine = { path = "crates/sr-engine" }
 sdl2 = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# The mixer's tests run the player for minutes of music — `tests/enhanced.rs`'s 30,000-poll
+# clock pin (D43) above all — and the mixer is integer arithmetic whose result does not depend
+# on the optimiser. Optimising this one package in the dev and test profiles keeps those pins in
+# every profile without a minute-long debug run; overflow checks and debug assertions stay on,
+# because only `opt-level` is overridden.
+[profile.dev.package.sr-audio]
+opt-level = 3

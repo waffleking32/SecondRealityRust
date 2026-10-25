@@ -2066,21 +2066,49 @@ MUSIC0: 30000 polls, the same words at every one; both end at 6:52, zframe 20554
 MUSIC1: 30000 polls, the same words at every one; both end at 6:21, zframe 22265
 MUSIC0: ten seconds from order 0, RMS authentic 3933.8, enhanced 3854.2, -0.177 dB
 MUSIC1: ten seconds from order 0, RMS authentic 2159.2, enhanced 2023.3, -0.565 dB
-MUSIC0 order 6 row 0 channel 5: without the band limit, 173 and 172 upward crossings
-MUSIC0 order 6 row 0 channel 5: authentic 163.015 Hz (161 crossings), enhanced 163.014 Hz (161 crossings), -0.0003 %
-MUSIC1 order 90 row 32 channel 3: without the band limit, 389 and 373 upward crossings
-MUSIC1 order 90 row 32 channel 3: authentic 297.226 Hz (264 crossings), enhanced 297.219 Hz (264 crossings), -0.0022 %
+MUSIC0 order 6 row 0 channel 0: authentic 54.694 Hz, enhanced 54.707 Hz, +0.0235 % (zero crossings, unfiltered: 291 and 277)
+MUSIC0 order 6 row 0 channel 5: authentic 54.632 Hz, enhanced 54.620 Hz, -0.0233 % (zero crossings, unfiltered: 173 and 172)
+MUSIC0 order 6 row 32 channel 3: authentic 494.809 Hz, enhanced 494.369 Hz, -0.0890 % (zero crossings, unfiltered: 1178 and 1183)
+MUSIC0 order 8 row 0 channel 5: authentic 43.457 Hz, enhanced 43.421 Hz, -0.0826 % (zero crossings, unfiltered: 137 and 135)
+MUSIC0 order 19 row 0 channel 1: authentic 64.892 Hz, enhanced 64.852 Hz, -0.0617 % (zero crossings, unfiltered: 206 and 204)
+MUSIC0 order 22 row 0 channel 0: authentic 109.583 Hz, enhanced 109.590 Hz, +0.0064 % (zero crossings, unfiltered: 782 and 730)
+MUSIC0 order 25 row 48 channel 4: authentic 441.005 Hz, enhanced 440.761 Hz, -0.0554 % (zero crossings, unfiltered: 1098 and 1095)
+MUSIC1 order 90 row 16 channel 4: authentic 77.510 Hz, enhanced 77.526 Hz, +0.0200 % (zero crossings, unfiltered: 476 and 458)
+MUSIC1 order 90 row 32 channel 3: authentic 65.332 Hz, enhanced 65.317 Hz, -0.0235 % (zero crossings, unfiltered: 389 and 373)
+MUSIC1 order 43 row 12 channel 2: instrument 53, 20866 bytes a second, loop 49098..57850
 ```
 
 The **pitch** is the same by construction, because the step is shared, and that includes the
 reference's 5.26 % flat stereo (§10.2). The enhanced path does not correct the flatness; it is
-the same music. The test measures it on two sustained notes, each on its own channel of a bare
-`Mixer`: MUSIC0's order 6, row 0, channel 5 (instrument 9, C-3) and MUSIC1's order 90, row 32,
-channel 3 (instrument 19). The measure is the zero-crossing frequency over one second, after the
-same 1 kHz band limit for both paths. Without that limit the counts differ by waveform and not by
-pitch: the authentic staircase and the enhanced line differ above the fundamental by design (the
-raw counts above). The tolerance is 0.5 %. The **level** is the RMS over ten seconds from order
-0, and the tolerance is 1 dB.
+the same music. The test measures it on **every sustained, looped note the survey found**, nine
+of them. Each one has no command on its row and no cell on its channel for the eight rows after
+it, and each is rendered alone on its own channel of a bare `Mixer` for one second.
+
+- **The measure** is the fundamental from the normalised autocorrelation: the first peak within
+  90 % of the highest, refined by a parabola. The worst note agrees to 0.089 %, against a
+  tolerance of 0.5 %.
+- **Zero crossings are not used**, though the brief named them. They count the waveform's shape,
+  and the authentic staircase and the enhanced line differ above the fundamental by design. The
+  unfiltered counts, printed beside each estimate, differ by up to 4.8 % (291 against 277)
+  although the pitch does not.
+- **One note is left out**, MUSIC1's order 43, row 12, channel 2, and the test asserts why:
+  instrument 53 loops only from byte 49,098, and the voice moves 20,866 bytes a second, so the
+  measured second is all unlooped attack and has no period.
+
+The **level** is the RMS over ten seconds from order 0, and the tolerance is 1 dB.
+
+**The authentic stream is pinned whole.** `tests/mix.rs`'s
+`the_authentic_stream_is_pinned_byte_for_byte` hashes every sample (FNV-1a) of 12,000 polls of the
+default options from MUSIC0's orders 0 and 25 and MUSIC1's 0 and 42. Its four digests were
+computed by the same loop on a clean extract of commit 8004905, the tree before this renderer
+existed, so the authentic path is byte for byte what it was.
+
+**The device's margin.** At 48000 Hz stereo, SDL2 2.30.0 gives a 4096-frame callback on the
+`dummy`, `alsa`, `pulseaudio` and `pipewire` drivers (8192 i16, 0.085 s). The authentic path's
+20000 Hz gets 1024 frames. The enhanced ring's 19,660 samples (`Player::ring_capacity`) are a
+2.4× margin over that callback, against the authentic path's 4×. `window::run` prints the
+callback size and the ring on every windowed run, and `audio.rs`'s `Device::open` names the
+command.
 
 ### What it does not reproduce
 

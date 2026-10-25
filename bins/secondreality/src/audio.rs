@@ -392,10 +392,17 @@ impl Device {
     /// adjusts the buffer size to the driver: measured against the system SDL2 (2.30.0) on
     /// the `dummy`, `alsa`, `pulseaudio` and `pipewire` drivers, 20000 Hz stereo gives
     /// **1024 frames** a callback (2048 i16, 0.051 s) and a request of 4096 is honoured —
-    /// so the buffer is SDL's, and [`Device::spec`] reports what it gave. Today's 1024
-    /// frames are a 4× margin under [`RING_SAMPLES`](sr_audio::RING_SAMPLES) = 8192 i16; a
-    /// driver that returned 4096 stereo frames or more would take the whole ring in one
-    /// callback, which is why the size is printed with the rate rather than assumed.
+    /// so the buffer is SDL's, and [`Device::spec`] reports what it gave.
+    ///
+    /// The margin is the player's own ring ([`Player::ring_capacity`]) over a callback's
+    /// samples. Authentic: 1024 frames is a **4×** margin under
+    /// [`RING_SAMPLES`](sr_audio::RING_SAMPLES) = 8192 i16. Enhanced (D43): the same four
+    /// drivers give **4096 frames** a callback at 48000 Hz stereo (8192 i16, 0.085 s, measured
+    /// by `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=<driver> secondreality --part endlogo
+    /// --sound-quality enhanced`, which prints the line `window::run` writes), a **2.4×** margin
+    /// under its 19,660-sample ring. A driver that returned a callback as large as the ring
+    /// would take all of it at once, which is why the size is printed with the rate and the ring
+    /// rather than assumed.
     pub fn open(sdl: &sdl2::Sdl, player: Shared, rate: u32, channels: u8) -> Result<Device, String> {
         let audio = sdl.audio()?;
         let spec = AudioSpecDesired {

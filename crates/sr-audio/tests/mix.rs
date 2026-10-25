@@ -1027,3 +1027,57 @@ fn the_modules_loops_and_the_objects_zero_loop_end_rule() {
         assert_eq!(zero_ends, 0, "{name}: no zero-lend sample, so +0x489c is unreached");
     }
 }
+
+/// FNV-1a over the stream's little-endian bytes: the golden's digest. Written out here so the
+/// pin needs no crate (`sr-audio` has no dependencies, dev ones included).
+fn fnv1a(hash: u64, samples: &[i16]) -> u64 {
+    samples.iter().flat_map(|sample| sample.to_le_bytes()).fold(hash, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+#[test]
+fn the_authentic_stream_is_pinned_byte_for_byte() {
+    // **The authentic path's whole stream, not one frame of it.** The hand-computed tests above
+    // pin individual frames; this pins every sample of 12,000 polls (171 s) from four entry
+    // orders, so an edit to `Mixer::mix`'s shared branches that moves the authentic output
+    // fails here even when every frame test still passes.
+    //
+    // The four digests are the stream **before the enhanced renderer existed**: recomputed by
+    // this same loop on a clean extract of commit 8004905 (D43). The default options are the
+    // authentic ones, so this is also what every run that does not ask for `--sound-quality
+    // enhanced` plays. The four runs are independent, so they run on four threads.
+    const POLLS: usize = 12_000;
+    let runs = [
+        ("MUSIC0", 0u8, 0xc864_588f_c763_f410u64),
+        ("MUSIC0", 25, 0xcc33_2ccc_6fed_136a),
+        ("MUSIC1", 0, 0x4872_e144_c499_48cf),
+        ("MUSIC1", 42, 0x49ed_b4f0_c2f1_89e2),
+    ];
+    let digests: Vec<(u64, u64)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = runs
+            .iter()
+            .map(|&(name, order, _)| {
+                scope.spawn(move || {
+                    let mut player = Player::new(module(name), PlayerOptions::default());
+                    player.play_song(order);
+                    let (mut hash, mut samples) = (0xcbf2_9ce4_8422_2325u64, 0u64);
+                    let mut out = vec![0i16; 4096];
+                    for _ in 0..POLLS {
+                        player.poll();
+                        let taken = player.take_samples(&mut out);
+                        hash = fnv1a(hash, &out[..taken]);
+                        samples += taken as u64;
+                    }
+                    (samples, hash)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|handle| handle.join().expect("a run")).collect()
+    });
+    for (&(name, order, golden), &(samples, hash)) in runs.iter().zip(&digests) {
+        println!("{name}@{order}: {POLLS} polls, {samples} samples, FNV-1a {hash:016x}");
+        assert_eq!(samples, 6_848_728, "{name}@{order}: 12,000 polls of 40000/70.086 samples");
+        assert_eq!(hash, golden, "{name}@{order}: the authentic stream moved");
+    }
+}

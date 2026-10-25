@@ -655,6 +655,12 @@ impl Player {
         self.mixer.take(out)
     }
 
+    /// How many samples the drain's ring holds before it drops the oldest — the margin a
+    /// device's callback is measured against: 8,192 authentic, 19,660 enhanced.
+    pub fn ring_capacity(&self) -> usize {
+        self.mixer.capacity()
+    }
+
     /// The samples the mixer has produced and the drain has not taken.
     pub fn pending_samples(&self) -> usize {
         self.mixer.pending()

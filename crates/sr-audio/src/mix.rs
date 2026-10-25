@@ -444,6 +444,13 @@ impl Mixer {
         self.dropped
     }
 
+    /// How many samples the ring holds before its overflow policy drops the oldest:
+    /// [`RING_SAMPLES`] for the authentic path, 19,660 for the enhanced one
+    /// ([`Mixer::for_options`]).
+    pub fn capacity(&self) -> usize {
+        self.ring.buffer.len()
+    }
+
     /// The samples waiting for the device.
     pub fn pending(&self) -> usize {
         self.ring.len()

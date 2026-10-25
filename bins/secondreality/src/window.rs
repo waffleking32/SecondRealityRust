@@ -507,10 +507,12 @@ fn audio_of(
         Ok(device) => {
             let (opened_rate, opened_channels, opened_samples) = device.spec();
             // The callback size is SDL's, not the desired spec's: report it, because the
-            // ring's margin is `RING_SAMPLES` over `opened_samples × channels`.
+            // margin is the player's ring (`Player::ring_capacity`: 8192 authentic, 19,660
+            // enhanced) over `opened_samples × channels`.
+            let ring = crate::audio::lock(&device.player()).ring_capacity();
             println!(
                 "secondreality: audio at {opened_rate} Hz, {opened_channels} channel(s), \
-                 {opened_samples} frame(s) a callback"
+                 {opened_samples} frame(s) a callback, a ring of {ring} samples"
             );
             Ok(Some(device))
         }

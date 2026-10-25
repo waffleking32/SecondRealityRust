@@ -266,6 +266,12 @@ impl Cli {
                 return Err("the vault's parts do not loop; --loop and /gravis are a block's run"
                     .to_string());
             }
+            // GRID, HARD and TWIST are silent (`shell::music_for_part` has no row for them), so
+            // a mixer setting would be accepted and do nothing.
+            if self.quality != Quality::Authentic {
+                return Err("the vault's parts are silent; --sound-quality is for a run with music"
+                    .to_string());
+            }
             if self.headless
                 || self.part.is_some()
                 || self.block.is_some()
@@ -536,6 +542,11 @@ mod tests {
         let c = parse(&["--part", "u2e", "--sound-quality", "enhanced"]).unwrap();
         assert_eq!(c.run_settings().player.quality, Quality::Enhanced);
         assert!(parse(&["--sound-quality", "high"]).is_err(), "only the two names");
+        // The vault's parts have no music, so the setting is refused there rather than
+        // ignored; naming the default is harmless and accepted.
+        let error = parse(&["--vault", "--sound-quality", "enhanced"]).unwrap_err();
+        assert!(error.contains("silent"), "{error}");
+        assert!(parse(&["--vault", "--sound-quality", "authentic"]).is_ok());
         assert!(parse(&["--sound-quality"]).is_err(), "and a name is needed");
     }
 

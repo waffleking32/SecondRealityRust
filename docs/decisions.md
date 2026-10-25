@@ -2814,15 +2814,19 @@ with the authentic curve's small-signal gain (`Curve::sample` at `0x400 ± 1`), 
 **Why it is not a fidelity approximation.** An approximation (`APPROXIMATIONS.md`) is the port
 falling short of the original on a path it claims to reproduce. This path claims nothing. It is
 opt-in, it is labelled the port's own in the help text and in the note, and the authentic path
-stays the reference: it is the default, it is unchanged byte for byte, and everything compared
-against the original runs on it. The phase's rule that a setting may not move the clock is held
+stays the reference. It is the default and everything compared against the original runs on it.
+It is unchanged byte for byte: `tests/mix.rs`'s `the_authentic_stream_is_pinned_byte_for_byte`
+asserts the FNV-1a digests of 12,000 polls from four entry orders, and the digests were computed
+on a clean extract of 8004905, before the renderer existed. The phase's rule that a setting may not move the clock is held
 by tests, not by argument. `enhanced_keeps_the_authentic_tick_schedule` compares every published
 word at each of 30,000 polls of both modules, so a run's pictures are the same under either
-quality. Pitch and level are measured against the authentic path (0.0003 % and 0.0022 % on two
-sustained notes; −0.18 dB and −0.57 dB over ten seconds, `tests/enhanced.rs`).
+quality. Pitch and level are measured against the authentic path: within 0.089 % on nine sustained notes
+by autocorrelation, and −0.18 dB and −0.57 dB over ten seconds (`tests/enhanced.rs`).
 
 **Cost if wrong.** The authentic path is the default and is untouched, so a wrong enhanced
 renderer costs only the runs that ask for it: its sound, never a picture or a published position.
+If an edit to the shared `Mixer::mix` moved the authentic stream, the golden fails at the first
+of its four digests.
 If it did move the clock, the schedule test fails at the first poll that differs. If the
 accumulator drifted, `enhanced_emits_twelve_frames_for_every_five` fails, and so would the run's
 audio-to-picture sync over a long run. If the options stopped reaching a restart, the run would
