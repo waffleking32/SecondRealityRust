@@ -2706,7 +2706,7 @@ Decided: a run with no argument is the demo — `SECOND` with no argument is `SE
 card is reached only by `--part testcard`. A run built from a block (`--block`, or no argument)
 is `Ending::Exit` and ends the way `SECOND.EXE` does; `--part`, the vault's runs and the shell's
 own test constructors are `Ending::Hold` and hold for ever, as before (`RunSettings`, passed to
-`Sequence::with_run`; `Cli::run_settings`).
+`Sequence::new` and `Sequence::with_run`; `Cli::run_settings`).
 
 **The exit stage is the hold.** When an `Exit` run's plan runs out, `@@partsdone`
 (`MAIN/U2.ASM:935-939`) is `mov cx,1; call fademusic`: `fademusic` (`:333-346`) steps the
@@ -2728,7 +2728,8 @@ after `dis_resetint` (`:966`) and reads only the retrace bit (`MAIN/COPPER.ASM:7
 cannot be skipped.
 The port's stage is the hold, where ESC has always closed the window, and it keeps doing so:
 a deliberate ESC is not made to wait out up to 84 ticks. That is the port's courtesy and a
-recorded difference. Leaving ENDSCRL is therefore **one** ESC (the part's own `dis_exit`), then
+recorded difference (`APPROXIMATIONS.md` **A59**, with the end box).
+Leaving ENDSCRL is therefore **one** ESC (the part's own `dis_exit`), then
 the stage, then the close — where it used to be two.
 
 **The end box goes to the launching terminal.** `printend` (`MAIN/U2.ASM:506-535`) copies
@@ -2753,7 +2754,16 @@ count moved.
 `the_end_screen_is_the_shipped_box`, `the_end_screen_colours_are_its_attributes`,
 `an_ended_run_closes_the_window`, `escape_during_the_exit_stage_closes_at_once`,
 `an_index_past_a_demo_runs_exit_stage_is_its_blank_screen` and
-`the_end_screen_is_printed_after_a_windowed_demo_run_only`. Task 11 adds the evidence numbers.
+`the_end_screen_is_printed_after_a_windowed_demo_run_only`.
+
+**Evidence (Phase 9 Task 11, at the close-out).** Every test above is in
+`cargo test -p secondreality --bin secondreality`, which is 659 passed, 0 failed and 7 ignored
+inside `cargo test --workspace`'s 1,459 passed, 0 failed and 11 ignored. The stage begins only once
+a plan has run out, and no compared frame moved: `cargo xtask rediff` exits 0 with 231 of 231
+frames at their registered counts, its `--block` entries included. The windowed path was run by
+hand in Task 8: a windowed `/gravis` run (`NoEndScroller`, the same `Ending::Exit`) closed its own
+window and printed the box. The one path no machine check drove is ESC from ENDSCRL ending a
+block run. It is left for a hand check (`PROGRESS.md`).
 
 **Cost if wrong.** The stage is one counter on the hold and one predicate in the window; the
 parts' frames are untouched, because the stage only begins once the plan has run out. If the
@@ -2824,8 +2834,10 @@ the original's 9106: `L − C` is 77 against 75. Measured, with the constant at 
 
 and the port's own `L`, 8910, is the original's 9104 byte for byte; its 8909 is CRED's 320×200. In
 the port's numbering `C`, the fade, `L` and Δ are 8833, 8835–8898, 8910 and `L − 404` = 8506,
-against the original's 9029, 9029–9092, 9104 and 8700 (8698 if 404 is a mode set): 196 = 115 + 81
-of the Δ difference is the recipe and CRED's drift, and 2 is CRED's tail.
+against the original's 9029, 9029–9092, 9104 and 8700 (8698 if 404 is a mode set). The Δ
+difference is 8700 − 8506 = **194 = 196 − 2**: 196 = 115 + 81 is the offset at `C` (the recipe and
+CRED's drift), and the port's `L` sits 2 frames later than that offset puts it (CRED's tail), so
+`L`'s offset is 9104 − 8910 = 194.
 
 **The race.** ALKU's first pass-2 `dis_sync()` (`ALKU/MAIN.C:59`) races the restarted player in the
 original: in six sessions of seven it reads the new song and waits for order 2; in one it reads the
@@ -2844,7 +2856,7 @@ frame is in (10236, 10238] and its "A Future Crew Production" hold starts in (10
 **10106** — **3 to 5** and **4 to 6** frames late. The held frames sit inside their holds
 regardless.
 
-**Task 10 registers the seam's residuals, whatever this constant's status:** CRED's 2-tick
+**The seam's residuals, registered by Task 10 as `APPROXIMATIONS.md` A61:** CRED's 2-tick
 closed-iris tail at the seam (the fade and `L` 2 frames late, the port's 8908 a CRED frame where
 the original shows ALKU); the pass-2 music lag (5 frames at (0,1), 2 of them the tail's and 3 the
 restart recipe's); ALKU's pass-2 fade-in and hold lags (3 to 5, 4 to 6); and CRED's 81-frame chain
@@ -2874,13 +2886,21 @@ and the 81, the seven frames' results above, the port's `L` at 8910 and its byte
 `the_status_line_counts_the_pass_from_the_second_on`. The iris's seven-frame agreement is
 reproduced by §25.3's `out/p9-loop-c` capture command against
 `cargo run --release --bin secondreality -- --block 5 --headless --dump-frames "$(seq -s, 8755 8840)" --dump-dir out/t4/b5-iris`.
-Task 11 adds the evidence numbers.
+
+**Evidence (Phase 9 Task 11, at the close-out).**
+`cargo test --release -p secondreality --test loop -- --nocapture` is 3 passed and 0 failed.
+`the_loop_seam_is_the_originals` asserts every figure above: the port's `C` 8833 and the drift 81,
+the seven filed frames, `L` 8910 (`L − C` 77 against 75), the fade's end 8898, `(0,1)` at 8921,
+10045 and 10106. `cargo xtask rediff`'s `loop/cred` (9029, 9055, 9081 at 8833, 8859, 8885) and
+`loop/alku` (9104 at 8910, A61's pairing; 9600, 10419, 11419 at `n − 196`) are 0 differing pixels
+at all seven, and every count is the registered one (exit 0).
 
 **Cost if wrong.** If 404 is ALKU's mode set rather than its first frame, the constant is 9 — one
-number, and the test's pinned `L`. If CRED's two-tick tail is the original's too (§25.3's fade
-placement is derived, ±1, not measured), the fade is the original's and the 2 frames are the
-capture's `C` reading, not a residual. If a looping run should be left with ESC, it is one branch
-in `EscapeKey::apply`.
+number, and the test's pinned `L`. The 2-tick tail is not a reading of the capture: the fade's
+end, 9092, is trace-measured (the player's `zframe` stops there, §25.3), so the original's fade is
+9029–9092 and it is the port's CRED that holds its closed iris two ticks longer. Closing it is
+CRED's retirement tick, and this constant does not move. If a looping run should be left with
+ESC, it is one branch in `EscapeKey::apply`.
 
 ## D43 — An enhanced sound option: the port's own renderer at 48 kHz, off by default (2026-10-24)
 
@@ -2902,16 +2922,20 @@ step, weights it by `(s − 128) × scale(m_vol)` without the `>> 8`, and conver
 with the authentic curve's small-signal gain (`Curve::sample` at `0x400 ± 1`), clamped to `i16`.
 
 **Why it is not a fidelity approximation.** An approximation (`APPROXIMATIONS.md`) is the port
-falling short of the original on a path it claims to reproduce. This path claims nothing. It is
-opt-in, it is labelled the port's own in the help text and in the note, and the authentic path
-stays the reference. It is the default and everything compared against the original runs on it.
+falling short of the original on a path it claims to reproduce. This path claims nothing. The
+register still lists it, as **A60** (Task 10), because a run with it sounds different from the
+original, and the entry says by how much. It is opt-in, it is labelled the port's own in the
+help text and in the note, and the authentic path stays the reference. It is the default and
+everything compared against the original runs on it.
 It is unchanged byte for byte: `tests/mix.rs`'s `the_authentic_stream_is_pinned_byte_for_byte`
 asserts the FNV-1a digests of 12,000 polls from four entry orders, and the digests were computed
 on a clean extract of 8004905, before the renderer existed. The phase's rule that a setting may not move the clock is held
 by tests, not by argument. `enhanced_keeps_the_authentic_tick_schedule` compares every published
 word at each of 30,000 polls of both modules, so a run's pictures are the same under either
 quality. Pitch and level are measured against the authentic path: within 0.089 % on nine sustained notes
-by autocorrelation, and −0.18 dB and −0.57 dB over ten seconds (`tests/enhanced.rs`).
+by autocorrelation, and −0.18 dB and −0.57 dB over ten seconds (`tests/enhanced.rs`; printed by
+`cargo test --release -p sr-audio --test enhanced -- --nocapture`, re-run in Phase 9 Task 11:
+worst note −0.0890 %, MUSIC0 −0.177 dB, MUSIC1 −0.565 dB, 5 passed).
 
 **Cost if wrong.** The authentic path is the default and is untouched, so a wrong enhanced
 renderer costs only the runs that ask for it: its sound, never a picture or a published position.
@@ -2930,7 +2954,8 @@ Decided: a **windowed demo run** opens on a five-row settings screen before anyt
 replaces `START.EXE`, so the screen is the port's stand-in for it (`settings.rs`, the window
 loop `window::setup_run`). **What it shows**, in the original's row order and then the port's:
 **Sound** On/Off (the soundcard row, `MENU.C:190-209`; Off is `--no-audio`, and the player still
-runs, as the original's no-sound option still syncs to the music, `MENU.C:114-123`), **Sound
+runs, as the original's no-sound option still syncs to the music, `MENU.C:114-123`; D46 says why
+its clock is the reference's and not the original's no-sound mode's), **Sound
 quality** Authentic/Enhanced (`--sound-quality`, D43), **Demo looping** Disabled/Enabled
 (`--loop`, D42; `MENU.C:229-238`), **Aspect** 4:3/Square and **Border** On/Off
 (`PresentOptions`). Up and Down move and **clamp** at the first and last row (`MENU.C:158-159`);
@@ -2960,9 +2985,13 @@ marker, the palette) moved to `menu_text.rs` with its output unchanged — the v
 pass as they were — and gained the seven marks `( ) + - * = '` the source's order holds at cells
 67..73 (`ALKU/MAIN.C:40`). The frame is 520x325: the font at its own size needs 307 columns for
 "Sound quality" and "Authentic" and 475 for the footer `UP DOWN  LEFT RIGHT  ENTER  ESC`, which
-the demo's 320 columns cannot hold, and a 4:3 window of it is 624x468 plus the border, which fits
-a 600-line desktop. The screen is a new surface and not a fidelity one: it changes no compared
-frame, and its reducer, its frame and its settings are pinned by `settings.rs`'s tests.
+the demo's 320 columns cannot hold (both pinned by `settings::tests::`
+`the_frame_is_sized_for_the_widest_row_and_the_footer`), and a 4:3 window of it is 624x468 plus
+the border (`window.rs`'s tests), which fits a 600-line desktop. The screen is a new surface and
+not a fidelity one: it changes no compared frame, and its reducer, its frame and its settings are
+pinned by `settings.rs`'s tests.
+`APPROXIMATIONS.md` **A59** registers it beside the end box, at a measured difference of 0 on
+every compared frame.
 
 **Cost if wrong.** If a run should remember its choices, it is one file written in `apply` and
 read in `from_cli`; the original did not. If the screen should show for `--part` or the vault, it
@@ -2974,13 +3003,18 @@ vault menu's pixels, `vault_menu`'s six tests would fail.
 
 Decided: a mid-run restart is **the same player object taking a new module**, not a fresh player.
 The shell's three restarts — block 1's `MUSIC1@0` at GLENZ (`MAIN/U2.ASM:813-818`), `MUSIC0@18`
-at U2E (`:880-885`) and the loop's `MUSIC0@0` (`:929-932`) — all go through `install_music`, which
-now builds the new module's player, calls `Player::restart_from(&old)` and only then
-`play_song(order)`. `play_song`'s channel clear is `Channel::initialise`: it writes exactly the
-song initialiser's stores and keeps every other field. An entry install has no old player and is
-a boot. The interface change is two `pub` methods in `sr-audio`, `Player::restart_from(&mut
-self, &Player)` and `Channel::initialise(&mut self)` (which replaces the crate-private
-`Channel::reset`), plus the one call in `install_music`. `MusicSource` is unchanged.
+at U2E (`:880-885`) and the loop's `MUSIC0@0` (`:929-932`) — all go through `install_music`
+(`bins/secondreality/src/shell.rs`), which builds the new module's player and, for a restart,
+calls `Player::restart_from(&previous, order)`: that takes the previous player's channels, its
+loop counter and its `_np_zframe` over and then calls `play_song(order)` itself
+(`crates/sr-audio/src/player.rs`). `play_song`'s channel clear is `Channel::initialise`: it
+writes exactly the song initialiser's stores and keeps every other field. An entry install has no
+old player and is a boot: `install_music` calls `play_song(order)` on the fresh player. The
+interface change is two `pub` methods in `sr-audio`, `Player::restart_from(&mut self, previous:
+&Player, order: u8)` and `Channel::initialise(&mut self)` (which replaces the crate-private
+`Channel::reset`), plus the one call in `install_music`. `MusicSource` is not part of this
+change; its signature is D43's `fn(ModuleId, PlayerOptions)`, so a restart's player is built
+with the run's options before `restart_from` takes the old one's state over.
 
 **The bytes** (`upstream/SecondReality/MAIN/STMIK.300`'s segment image, rebuilt by
 `crates/sr-audio/tests/player.rs`):

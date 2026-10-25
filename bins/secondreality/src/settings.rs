@@ -462,6 +462,17 @@ mod tests {
         assert!(text_width(&font, FOOTER) < FRAME_WIDTH as i32);
     }
 
+    /// D44's widths, which are why the frame is not the demo's 320 columns: the widest label
+    /// and value together, and the footer, at the font's own size.
+    #[test]
+    fn the_frame_is_sized_for_the_widest_row_and_the_footer() {
+        let font = test_font();
+        let widest = text_width(&font, "Sound quality") + text_width(&font, "Authentic");
+        let footer = text_width(&font, FOOTER);
+        assert_eq!((widest, footer), (307, 475), "the widest row's text and the footer");
+        assert!(footer > 320, "the footer does not fit the demo's 320 columns");
+    }
+
     #[test]
     fn the_chosen_settings_are_the_runs_settings() {
         // The flags are the initial values...

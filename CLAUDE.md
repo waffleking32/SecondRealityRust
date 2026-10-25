@@ -71,6 +71,9 @@ cargo run --release --bin secondreality -- --block 5     # ENDLOGO -> CRED -> EN
 cargo run --release --bin secondreality -- --block U     # DDSTARS (the hidden part)
 cargo run --release --bin secondreality -- --part glenz
 cargo run --release --bin secondreality -- --part testcard   # the Phase 0 test card
+cargo run --release --bin secondreality -- --loop        # loop mode: no end scroller, for ever
+cargo run --release --bin secondreality -- /gravis       # once, no end scroller, no settings screen
+cargo run --release --bin secondreality -- --no-setup --sound-quality enhanced
 ```
 
 `--block 1` runs **ALKU → U2A → PAM → BEGLOGO → GLENZ → TUNNELI → TECHNO → PANIC → MNTSCRL →
@@ -107,8 +110,11 @@ on the first `> 0`. The wait is exit-aware — an ESC already set when it would 
 the original's shell returns to DOS (`MAIN/U2.ASM:935`); a block's run ends by itself instead
 (below). **Ctrl** skips the part that is playing
 (`MAIN/U2.ASM:205-207`) — dropped where it stands, the next one starting one index on; the original's
-`ctrldown` is sticky and skips every later part too. Nothing else does anything, and nothing waits on
-a key.
+`ctrldown` is sticky and skips every later part too. An ESC pressed **between** two parts, when no
+part is running, is kept and asked of the next one (or closes the window when nothing is left to
+play), where the original's `partexecute` calls `flushkbd` after each part (`MAIN/U2.ASM:211`) and
+drops it — a knowing difference, registered with the Ctrl skip as `APPROXIMATIONS.md` **A58**
+(D21's dated 2026-10-25 correction). Nothing else does anything, and no part waits on a key.
 
 `--block 1` through `--block 5` end in ENDSCRL, whose own loop is `while(!dis_exit())`
 (`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it does in the demo, so leaving it
@@ -136,6 +142,19 @@ Aspect and Border, drawn in `ALKU/FONA.UH` — Up/Down choose, Left/Right change
 leaves (printing the end box). It is the port's stand-in for `START.EXE`'s `menu()`; nothing is saved,
 the flags are the initial values, and `--no-setup` or `/gravis` skip it. `--part`, `--vault` and
 `--headless` never show it, so the only run that waits on a key is a demo run's setup.
+
+**Loop mode** (D42) is the original's `looping` byte (`MAIN/U2.ASM:746`): `--loop` is the setup's
+"Demo looping: Enabled" and `/gravis` (`START.C:89-93`, any argument position) plays once without
+the end scroller and skips the settings screen; any other `/` switch is ignored, and both are a
+block's run. A looping plan has no ENDSCRL; after CRED the shell fades the music for 64 ticks,
+restarts MUSIC0 at order 0, holds 11 more ticks (`LOOP_RELOAD_TICKS`, the release's measured
+interval) and starts pass 2 at ALKU, whatever block pass 1 began at. ESC still ends only the
+running part; a looping run is left with the window's close button, and the end box is printed.
+The seam's residuals against `reference/parts/loop` are A61.
+
+**`--sound-quality enhanced`** (D43) is the port's own 48 kHz interpolating renderer, off by
+default and refused by `--vault`; the authentic mixer is the default and the reference, and no
+setting moves the music's published `(order, row)` (A60).
 
 `--headless` runs the same sequence on a machine with no display, and is what the comparisons below
 use.
@@ -248,6 +267,25 @@ differing-pixel percentage, max channel delta, and a diff image per frame.
   inside a reference tree is refused. Do not write into a capture directory.
 
 A part is done when its frames match. Record the evidence in `PROGRESS.md`.
+
+### Re-diffing everything, and the full run
+
+- **`cargo xtask rediff`** re-renders every filed reference frame under `reference/parts` with the
+  release binary and compares it exactly where `xtask/src/rediff/table.rs` says, against the
+  differing-pixel count the table registers for it (`exact`, or the A- or D-entry that explains
+  it). Exit **0** means every frame is at its registered count; **1** means a count moved, in
+  either direction; **2** means it could not compare (a missing frame, a geometry mismatch — never
+  a count — or a capture with no entry). The report goes to `out/rediff/`. Re-run it after any
+  change that could move a picture, and re-register a count only with the measurement that moved
+  it.
+- **The full run is release-only.** `bins/secondreality/tests/fullrun.rs` (block 1 end to end
+  against `reference/parts/fullrun`: the part order, the seam table and the music against the
+  traces) is `#[cfg_attr(debug_assertions, ignore)]`, so a debug `cargo test --workspace` skips it
+  and a release run runs it by default. Run it as
+  `cargo test --release -p secondreality --test fullrun` — **without** `-- --ignored`, which in
+  release runs only the genuinely ignored tests and skips these. The loop seam,
+  `tests/loop.rs` against `reference/parts/loop`, runs in both profiles; its figures print with
+  `cargo test --release -p secondreality --test loop -- --nocapture`.
 
 ### Caveats worth knowing before they bite
 
