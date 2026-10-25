@@ -119,26 +119,50 @@ const BOOTLESS_RECIPES: &[(&str, i64, u8)] = &[
 /// seeks mid-song, so it could not reach the window at all.
 ///
 /// `SECOND 1` reaches GLENZ between BEGLOGO and GLENZ (`MAIN/U2.ASM:813-818`) and the shell
-/// restarts MUSIC1 at order 0 there. `second1d`'s window opens at 8,100, and its first
-/// published position — order 1 row 4, `music-clock.md` §2.2 — is 68 rows (204 ticks) into
-/// the new song; at the module's own 1.3474 frames a tick and the ten-poll ring's ten-frame
-/// delay, that puts the restart's `_zplaysong(0)` at 8,100 − 10 − 204/0.7419 ≈ **7,815**.
-/// The reload hides the restart frame itself from the trace (the wide window refuses, §7), so
-/// this is a back-extrapolation from the window's first sample rather than a measured boot
-/// frame; the comparison's phase alignment absorbs its few-frame error.
+/// restarts MUSIC1 at order 0 there. A restart keeps the previous module's channel volumes
+/// (D45), so MUSIC1's order 0 is **4** rows long here, not a boot's 64
+/// ([`block_ones_music1_restart_takes_order_0s_break`]). `second1d`'s window opens at 8,100
+/// and its first `1:5` is at 8,102; the restarted player, continuing from block 1's MUSIC0,
+/// first publishes `1:5` on its 46th poll, so the restart's `_zplaysong(0)` is at
+/// 8,102 − 46 = **8,056** — which that test derives and holds this row to. (Before Task 6b the
+/// derivation went through a 64-row order 0 and gave 7,815, while `second1b` still publishes
+/// MUSIC0 at 7,959.) The reload hides the restart frame itself from the trace (the wide window
+/// refuses, §7), so this is a back-extrapolation from the window's first rows rather than a
+/// measured boot frame; the comparison's phase alignment absorbs its sub-frame error.
+///
+/// **Each row names the session its restart continues from** ([`Before`]): the port plays that
+/// session first and hands its state over (`Player::continue_from`), as the shell does. Under
+/// that chain `second3e` and `second1f` align at +1 and +0 frames from the rows below, and
+/// their every figure is the one a fresh restart gave: MUSIC0's order 18 has no row whose
+/// length depends on a carried volume.
 ///
 /// `second1e` and `second1f` are block 1's full run (Phase 9 Task 2,
 /// `docs/fidelity/reference-indices.md` §26). `second1e` (8,800…) is the same `MUSIC1@0`
 /// session `second1d` is in, so it shares that restart. `second1f` opens after the shell's
 /// `MUSIC0@18` restart between JPLOGO and U2E (`MAIN/U2.ASM:880-885`); its order boundaries sit
 /// 33,647 frames after `second4`'s at its first rows, so its clock starts at
-/// 408.2 + 33,647 ≈ **34,055** — `second3e`'s derivation.
-const RESTART_TRACES: &[(&str, &str, i64, u8)] = &[
-    ("second3e", "MUSIC0", 17_850, 18),
-    ("second1d", "MUSIC1", 7_815, 0),
-    ("second1e", "MUSIC1", 7_815, 0),
-    ("second1f", "MUSIC0", 34_055, 18),
+/// 408.2 + 33,647 ≈ **34,055** — `second3e`'s derivation, which the carry-over does not move.
+const RESTART_TRACES: &[(&str, &str, i64, u8, Before)] = &[
+    ("second3e", "MUSIC0", 17_850, 18, Before::Boot),
+    ("second1d", "MUSIC1", 8_056, 0, Before::Boot),
+    ("second1e", "MUSIC1", 8_056, 0, Before::Boot),
+    ("second1f", "MUSIC0", 34_055, 18, Before::Restart("second1d")),
 ];
+
+/// The session a [`RESTART_TRACES`] row's restart replaces. A mid-song restart keeps the
+/// previous module's channel state (D45, `Player::continue_from`), so the port must play the
+/// session before it to reach the restart with the state the reference had.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Before {
+    /// The trace's own recipe's boot session: its module, anchor and start order as the
+    /// recipe's boot trace measures them (`second1` for `SECOND 1`, `second3` for `SECOND 3`).
+    Boot,
+    /// The session of the named [`RESTART_TRACES`] row, itself played from its own chain.
+    Restart(&'static str),
+}
+
+/// One session of a chain: the module, the frame its `_zplaysong` is at and the order it seeks.
+type Session = (&'static str, i64, u8);
 
 /// One content difference the comparison measured: the word, the index in its sequence of
 /// distinct values, the two values there (`None` past a sequence's end), and whether the
@@ -174,11 +198,12 @@ struct KnownDisagreement {
 const KNOWN_DISAGREEMENTS: &[KnownDisagreement] = &[
     // **Registered: `docs/fidelity/APPROXIMATIONS.md` A54** (Phase 9 Task 6, which found no
     // seam that explains it). `second1e` (8,800…33,949, MUSIC1 orders 4…98) matches the port in
-    // every word's value sequence; its placement drifts with the port early, to 8 frames from
-    // order 96 row 58 (frame 33,264) on — one past `JITTER_FRAMES`, over a window four times
-    // `second1`'s 5,538 frames. The port's own block-1 run shows the same drift against it:
-    // its lag is 248 frames at the window's first row change and 240 at its last
-    // (`bins/secondreality/tests/fullrun.rs`'s `last_offset`).
+    // every word's value sequence; its placement drifts with the port early, reaching 8
+    // frames at order 96 row 63 (frame 33,305; the comparison prints where each worst is first
+    // reached) — one past `JITTER_FRAMES`, over a window four times `second1`'s 5,538 frames.
+    // The port's own block-1 run shows the same drift against it: its offset is +5 frames at
+    // the window's first row change and −3 at its last (`bins/secondreality/tests/fullrun.rs`'s
+    // `last_offset`; Task 6, before the restart carry-over D45, measured 248 and 240).
     KnownDisagreement {
         trace: "second1e",
         content: &[],
@@ -287,6 +312,9 @@ struct Trace {
     /// window does not hold the seek, so its first order change is a natural one at row 0
     /// rather than the seek's first published row 1.
     boot: bool,
+    /// The sessions the port plays before this trace's own, oldest first — empty but for a
+    /// [`RESTART_TRACES`] row, whose restart continues from the last of them (D45).
+    before: Vec<Session>,
 }
 
 /// One trace row: `frame,ord,row,pat,loop,speed,tempo,zinfo,zplus,zframe`.
@@ -489,7 +517,7 @@ fn traces() -> Vec<Trace> {
     // Each recipe's anchor and start order, from the traces that hold the start. A recipe
     // with two boot sessions (second5 and second5b) must derive the same anchor twice; that
     // is what makes it a property of the boot rather than of a session.
-    let mut recipes: BTreeMap<String, (i64, u8)> = BTreeMap::new();
+    let mut recipes: BTreeMap<String, (i64, u8, &'static str)> = BTreeMap::new();
     for trace in filed.iter().filter(|trace| trace.window[0] <= MUSIC_START_FRAME) {
         let anchor = start_frame(&trace.states);
         let start_order = trace
@@ -500,7 +528,7 @@ fn traces() -> Vec<Trace> {
             .expect("the first published position");
         let key = trace.arguments.join(",");
         match recipes.get(&key) {
-            Some(&(seen, order)) => {
+            Some(&(seen, order, _)) => {
                 assert_eq!(
                     anchor, seen,
                     "{}: a second boot session of the same recipe derives anchor {anchor}, not \
@@ -514,21 +542,59 @@ fn traces() -> Vec<Trace> {
                 );
             }
             None => {
-                recipes.insert(key, (anchor, start_order));
+                recipes.insert(key, (anchor, start_order, trace.module));
             }
         }
     }
     assert!(!recipes.is_empty(), "no filed trace holds the music's start");
 
+    // A restart row's chain: the sessions before it, oldest first, ending with the one its
+    // restart replaces.
+    let arguments_of: BTreeMap<String, String> = filed
+        .iter()
+        .map(|trace| (trace.name.clone(), trace.arguments.join(",")))
+        .collect();
+    fn chain(
+        name: &str,
+        arguments_of: &BTreeMap<String, String>,
+        recipes: &BTreeMap<String, (i64, u8, &'static str)>,
+    ) -> Vec<Session> {
+        let &(_, _, _, _, before) = RESTART_TRACES
+            .iter()
+            .find(|row| row.0 == name)
+            .unwrap_or_else(|| panic!("{name} is not a restart row"));
+        match before {
+            Before::Boot => {
+                let key = &arguments_of[name];
+                let &(anchor, order, module) = recipes
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{name}: no boot trace of its recipe ({key})"));
+                vec![(module, anchor, order)]
+            }
+            Before::Restart(previous) => {
+                let &(_, module, anchor, order, _) =
+                    RESTART_TRACES.iter().find(|row| row.0 == previous).unwrap();
+                let mut sessions = chain(previous, arguments_of, recipes);
+                sessions.push((module, anchor, order));
+                sessions
+            }
+        }
+    }
+
     filed
         .into_iter()
         .map(|trace| {
             let key = trace.arguments.join(",");
+            let before = if RESTART_TRACES.iter().any(|row| row.0 == trace.name) {
+                chain(&trace.name, &arguments_of, &recipes)
+            } else {
+                Vec::new()
+            };
             let (module, anchor, start_order) = match RESTART_TRACES
                 .iter()
                 .find(|(name, ..)| *name == trace.name)
             {
-                Some(&(_, module, anchor, start_order)) => (module, anchor, start_order),
+                Some(&(_, module, anchor, start_order, _)) => (module, anchor, start_order),
                 None => {
                     // A recipe the tree has no boot trace of: its window traces carry no
                     // seek, so the start order and the simulation's anchor come from the
@@ -536,7 +602,7 @@ fn traces() -> Vec<Trace> {
                     // recipe with neither is refused rather than compared from a guessed
                     // start.
                     let (anchor, start_order) = match recipes.get(&key) {
-                        Some(found) => *found,
+                        Some(&(anchor, order, _)) => (anchor, order),
                         None => {
                             let &(_, anchor, start_order) = BOOTLESS_RECIPES
                                 .iter()
@@ -584,6 +650,7 @@ fn traces() -> Vec<Trace> {
                 run_from: anchor,
                 start_order,
                 boot,
+                before,
             };
             result.check_coverage();
             result
@@ -718,9 +785,30 @@ fn run(trace: &Trace) -> BTreeMap<i64, Published> {
 /// The port's published state at every frame from `from` to the trace's last, one poll a
 /// frame. Frames before the comparison's start are kept: the phase alignment below looks for
 /// a row change there.
+///
+/// A [`RESTART_TRACES`] row is played through its chain: each earlier session from its own
+/// `_zplaysong`, one poll a frame, and at the next session's frame a new player for that module
+/// takes the old one's state over (`Player::continue_from`, D45) before it seeks — the trace's
+/// own session last, at `from`. Only the trace's own session is collected.
 fn simulate(trace: &Trace, from: i64) -> BTreeMap<i64, Published> {
+    let mut previous: Option<Player> = None;
+    for (index, &(module, frame, order)) in trace.before.iter().enumerate() {
+        let until = trace.before.get(index + 1).map_or(from, |next| next.1);
+        let mut player = Player::new(load(module), PlayerOptions::default());
+        if let Some(old) = &previous {
+            player.continue_from(old);
+        }
+        player.play_song(order);
+        for _ in frame..until {
+            player.poll();
+        }
+        previous = Some(player);
+    }
     let module = load(trace.module);
     let mut player = Player::new(module, PlayerOptions::default());
+    if let Some(old) = &previous {
+        player.continue_from(old);
+    }
 
     let mut out = BTreeMap::new();
     let last = trace.states.last().expect("a last frame").frame;
@@ -930,6 +1018,8 @@ fn the_port_reproduces_every_filed_trace() {
 
         let mut agreeing = 0usize;
         let mut worst = 0i64;
+        // Where the worst displacement grows, frame by frame: the drift A54 quotes.
+        let mut growth: Vec<(i64, i64)> = Vec::new();
         let mut unreachable = Vec::new();
         let mut unreachable_frames: Vec<i64> = Vec::new();
         for row in interior.iter() {
@@ -982,6 +1072,9 @@ fn the_port_reproduces_every_filed_trace() {
                         trace.name, row.frame
                     ));
                 } else {
+                    if displacement > worst {
+                        growth.push((displacement, row.frame));
+                    }
                     worst = worst.max(displacement);
                 }
             }
@@ -1001,7 +1094,7 @@ fn the_port_reproduces_every_filed_trace() {
             unreachable_frames.dedup();
             println!(
                 "  {}: pinned disagreement — content {:?}, unreachable at {:?}, worst \
-                 displacement {worst}",
+                 displacement {worst}, first reached (displacement, frame) {growth:?}",
                 trace.name, content_found, unreachable_frames
             );
             if content_found.as_slice() != known.content {
@@ -1038,22 +1131,29 @@ fn the_port_reproduces_every_filed_trace() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
-/// **A38's lead (Phase 9 Task 6): block 1's `MUSIC1@0` restart plays order 0 for four rows,
-/// not 64.** MUSIC1's order 0 is pattern 73, whose row 0 is a note-off on every channel and
-/// whose row 3 holds a `C00` on channel 2 and nothing else. A fresh player — a boot, and the
-/// port's every restart — has channel 2 at volume 0, so the "volume 0" countdown frees the
-/// channel on row 3 before its command is dispatched, and order 0 plays its 64 rows; that is
-/// what block 2's boot trace `second2b` publishes (`0:4` at 428 and on), and the port with it.
-/// `restartmus`'s `_zplaysong` mid-song keeps MUSIC0's volumes (`tests/player.rs`'s
-/// `the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown`) — and block 1's
-/// MUSIC0 has channel 2 at 63 around the handover (asserted below) — so channel 2 is not freed
-/// and the break is taken.
+/// **Block 1's `MUSIC1@0` restart plays order 0 for four rows, not 64** — A38's cause, found
+/// by Phase 9 Task 6 and fixed by Task 6b (D45). MUSIC1's order 0 is pattern 73, whose row 0
+/// is a note-off on every channel and whose row 3 holds a `C00` on channel 2 and nothing else.
 ///
-/// `second1d` tells the two apart with filed traces alone: back from its first `1:5` (8,102),
-/// a 64-row order 0 puts the restart's first poll at **7,814** — before `second1b`'s last
-/// frame, 7,959, which still publishes MUSIC0 — and a 4-row one at **8,056.6**, inside
-/// `(7,959, 8,100)` and at the port's own BEGLOGO→GLENZ boundary, 8,057, to the frame. The 60
-/// rows between them, 242.6 frames, are A38's 249-frame lag but for its last 6.
+/// - **A boot** — a fresh player, as `second2b`'s block-2 start is — has channel 2 at volume 0,
+///   so the "volume 0" countdown frees the channel on row 3 before its command is dispatched,
+///   and order 0 plays its 64 rows (`second2b` publishes `0:4` at 428 and on).
+/// - **A mid-song restart** keeps the channel volumes (`_zplaysong`'s initialiser never writes
+///   `avol`: `tests/player.rs`'s `the_song_initialiser_writes_exactly_what_initialise_writes`),
+///   and block 1's MUSIC0 hands channel 2 over at 63 (asserted below), so the break is taken.
+///   The port's restart is `Player::continue_from` and then `play_song`, and it takes it too:
+///   order 0 is 4 rows, 12 ticks.
+///
+/// **The derivation of `second1d`'s and `second1e`'s [`RESTART_TRACES`] anchor.** `second1d`'s
+/// window opens at 8,100 and its first `1:5` is at **8,102**. The port's restarted player
+/// first publishes `1:5` on its *k*th poll from the restart (counting the restart's own poll as
+/// 0), so the restart's first poll is 8,102 − *k*. With the carried 4-row order 0, *k* is 46
+/// and the restart is at **8,056** — inside `(7,959, 8,100)`, between `second1b`'s last MUSIC0
+/// frame and `second1d`'s first, and one frame before the port's own BEGLOGO→GLENZ boundary
+/// (8,057), whose restarted clock begins four frames after it (D34, `MusicStart::restart`).
+/// The 64-row reading this replaces had *k* = 288 and put the restart at 7,814, while
+/// `second1b` still publishes MUSIC0. The comparison's phase alignment absorbs the anchor's
+/// sub-frame error, as it did before.
 #[test]
 fn block_ones_music1_restart_takes_order_0s_break() {
     let module = load("MUSIC1");
@@ -1072,30 +1172,72 @@ fn block_ones_music1_restart_takes_order_0s_break() {
         .collect();
     assert_eq!(row3, [(2, 3, 0)], "row 3 is `C00` on channel 2 and nothing else");
 
-    // A fresh player: channel 2 is freed on row 3, and order 1 begins 64 rows after order 0.
-    let mut player = Player::new(module, PlayerOptions::default());
-    player.play_song(0);
-    let mut polls = 0usize;
-    let mut first_published: BTreeMap<(u8, u8), usize> = BTreeMap::new();
-    while player.engine_position().order == 0 {
-        player.poll();
-        let state = player.state();
-        first_published.entry((state.order, state.row)).or_insert(polls);
-        if player.engine_position().row == 4 {
-            assert!(!player.channel(2).unwrap().used, "channel 2 was freed on row 3");
+    // What MUSIC0 hands over: block 1's MUSIC0 from order 0 at frame 400 (`second1`'s anchor,
+    // the port's `BLOCK_ONE_MUSIC_START_FRAME`), one poll a frame, up to the port's boundary at
+    // 8,057. Channel 2 is sounding there, at full volume.
+    let mut music0 = Player::new(load("MUSIC0"), PlayerOptions::default());
+    music0.play_song(0);
+    let mut volumes = Vec::new();
+    for frame in 400..8_057 {
+        music0.poll();
+        if frame >= 8_052 {
+            volumes.push(music0.channel(2).unwrap().volume);
         }
-        polls += 1;
-        assert!(polls < 1_000, "order 0 never ended");
     }
-    assert_eq!(player.engine_position().row, 0, "order 1 begins at row 0");
-    assert_eq!(player.zframe(), 64 * 3, "64 rows of speed 3");
-    while !first_published.contains_key(&(1, 5)) {
-        player.poll();
-        let state = player.state();
-        first_published.entry((state.order, state.row)).or_insert(polls);
-        polls += 1;
-    }
-    let fresh = first_published[&(1, 5)] as i64;
+    println!("MUSIC0's channel 2 at 8052..=8056: volume {volumes:?}");
+    assert_eq!(volumes, [63; 5]);
+
+    // Order 0, played from the restart: how many rows, ticks and polls it lasts, and the poll
+    // each position is first published on.
+    let order_zero = |player: &mut Player| {
+        player.play_song(0);
+        let mut polls = 0usize;
+        let mut first: BTreeMap<(u8, u8), usize> = BTreeMap::new();
+        let mut rows = 0;
+        let mut last_row = None;
+        while player.engine_position().order == 0 {
+            player.poll();
+            let state = player.state();
+            first.entry((state.order, state.row)).or_insert(polls);
+            if player.engine_position().order == 0 && last_row != Some(player.engine_position().row) {
+                last_row = Some(player.engine_position().row);
+                rows += 1;
+            }
+            polls += 1;
+            assert!(polls < 1_000, "order 0 never ended");
+        }
+        assert_eq!(player.engine_position().row, 0, "order 1 begins at row 0");
+        let ticks = player.zframe();
+        while !first.contains_key(&(1, 5)) {
+            player.poll();
+            let state = player.state();
+            first.entry((state.order, state.row)).or_insert(polls);
+            polls += 1;
+        }
+        (rows, ticks, first)
+    };
+
+    // A boot: 64 rows of speed 3, channel 2 freed on row 3.
+    let mut boot = Player::new(load("MUSIC1"), PlayerOptions::default());
+    let (rows, ticks, fresh) = order_zero(&mut boot);
+    assert_eq!((rows, ticks), (64, 64 * 3), "a boot plays order 0's 64 rows");
+
+    // The port's restart: the same module, continuing from MUSIC0's state.
+    let mut restart = Player::new(load("MUSIC1"), PlayerOptions::default());
+    restart.continue_from(&music0);
+    let zframe = restart.zframe();
+    let (rows, ticks, carried) = order_zero(&mut restart);
+    assert_eq!(
+        (rows, ticks - zframe),
+        (4, 4 * 3),
+        "the restart takes row 3's `C00`: order 0 is 4 rows"
+    );
+    println!(
+        "the restart publishes 1:0 on poll {} and 1:5 on poll {}; a boot 1:5 on poll {}",
+        carried[&(1, 0)],
+        carried[&(1, 5)],
+        fresh[&(1, 5)]
+    );
 
     // `second1d`'s first `1:5`, and the last MUSIC0 frame `second1b` holds.
     let rows = |name: &str| -> Vec<Row> {
@@ -1115,37 +1257,21 @@ fn block_ones_music1_restart_takes_order_0s_break() {
     assert_eq!((at, music0_until), (8_102, 7_959));
     assert_eq!(identify("second1b", &rows("second1b"), 7_600), "MUSIC0");
 
-    // 60 rows of speed 3 at MUSIC1's tempo 130, in frames.
-    let skipped = (60 * 3 * TICK_NUMERATOR) as f64 / (130.0 * 1000.0);
-    let start_64 = at - fresh;
-    let start_4 = at as f64 - fresh as f64 + skipped;
-    println!(
-        "second1d's 1:5 at {at}: a 64-row order 0 starts at {start_64}, a 4-row one at \
-         {start_4:.1} ({skipped:.1} frames later)"
-    );
-    assert_eq!(start_64, 7_814);
-    assert_eq!(start_4.round() as i64, 8_057);
-    assert!(start_64 < music0_until, "a 64-row order 0 starts while MUSIC0 still plays");
+    let start_4 = at - carried[&(1, 5)] as i64;
+    let start_64 = at - fresh[&(1, 5)] as i64;
+    println!("second1d's 1:5 at {at}: the restart's first poll is {start_4} (a 64-row order 0: {start_64})");
+    assert_eq!(start_64, 7_814, "the reading this replaces");
+    assert!(start_64 < music0_until, "a 64-row order 0 would start while MUSIC0 still plays");
+    assert_eq!(carried[&(1, 5)], 46, "the restart publishes 1:5 on its 46th poll");
+    assert_eq!(start_4, 8_056, "the restart, one frame before the port's boundary 8,057");
     assert!(
-        (music0_until as f64) < start_4 && start_4 < 8_100.0,
-        "a 4-row one starts between MUSIC0's last trace frame and second1d's first"
+        music0_until < start_4 && start_4 < 8_100,
+        "between MUSIC0's last trace frame and second1d's first"
     );
-
-    // And what MUSIC0 hands over: block 1's MUSIC0 from order 0 at frame 400 (`second1`'s
-    // anchor, the port's `BLOCK_ONE_MUSIC_START_FRAME`), one poll a frame, to the frames
-    // around the port's boundary at 8,057. Channel 2 is sounding there, at full volume — the
-    // `avol` `_zplaysong` leaves for MUSIC1's row 3.
-    let mut music0 = Player::new(load("MUSIC0"), PlayerOptions::default());
-    music0.play_song(0);
-    let mut volumes = Vec::new();
-    for frame in 400..=8_059 {
-        music0.poll();
-        if frame >= 8_055 {
-            volumes.push(music0.channel(2).unwrap().volume);
-        }
+    for name in ["second1d", "second1e"] {
+        let row = RESTART_TRACES.iter().find(|row| row.0 == name).unwrap();
+        assert_eq!((row.1, row.2, row.3), ("MUSIC1", start_4, 0), "{name}'s restart row");
     }
-    println!("MUSIC0's channel 2 at 8055..=8059: volume {volumes:?}");
-    assert_eq!(volumes, [63; 5]);
 }
 
 /// A pinned disagreement is a claim about a filed trace, so a row whose trace the walk does

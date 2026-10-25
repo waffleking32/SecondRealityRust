@@ -420,11 +420,12 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // drawn frame 7,710 — and a part boundary that moves is recorded as
     // measured, not absorbed into an offset.
     // The first twelve frames are the PAM stretch Task 6 inherits; the last
-    // eleven cross PAM's end into BEGLOGO, BEGLOGO's 172 ticks into GLENZ and
-    // GLENZ's music wait to the first zoomer body. 8,766..8,771 is the
-    // measured hold→zoom transition (the last four are the held picture).
+    // thirteen cross PAM's end into BEGLOGO, BEGLOGO's 172 ticks into GLENZ, the
+    // restarted MUSIC1's first order change and GLENZ's music wait to the first
+    // zoomer body. 8,523..8,528 is the measured hold→zoom transition (the first
+    // four are the held picture).
     let frames = "900,6007,6008,6500,6988,7300,7507,7508,7618,7709,7710,7712,\
-                  7884,7885,8055,8056,8057,8766,8767,8768,8769,8770,8771";
+                  7884,7885,8055,8056,8057,8086,8087,8523,8524,8525,8526,8527,8528";
     let (dir, manifest) = block_dump("block1", "1", frames);
     assert_eq!(manifest["part"], "alku");
     assert_eq!(manifest["index_origin"], "boot");
@@ -458,17 +459,20 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
         (7884, "pam", 320, 200),
         (7885, "beglogo", 320, 400),
         // BEGLOGO's 172 ticks from 7,885: last frame 8,056, and GLENZ's first
-        // tick on 8,057 under the `:813-818` restart's fresh player.
+        // tick on 8,057 under the `:813-818` restart's player.
         (8055, "beglogo", 320, 400),
         (8056, "beglogo", 320, 400),
         (8057, "glenz", 320, 400),
-        // The wait's hold, and the first zoomer body at 8,770 (below).
-        (8766, "glenz", 320, 400),
-        (8767, "glenz", 320, 400),
-        (8768, "glenz", 320, 400),
-        (8769, "glenz", 320, 400),
-        (8770, "glenz", 320, 400),
-        (8771, "glenz", 320, 400),
+        // MUSIC1's order 0 ends after four rows (below).
+        (8086, "glenz", 320, 400),
+        (8087, "glenz", 320, 400),
+        // The wait's hold, and the first zoomer body at 8,527 (below).
+        (8523, "glenz", 320, 400),
+        (8524, "glenz", 320, 400),
+        (8525, "glenz", 320, 400),
+        (8526, "glenz", 320, 400),
+        (8527, "glenz", 320, 400),
+        (8528, "glenz", 320, 400),
     ];
     let dumped = manifest["frames"].as_array().unwrap();
     assert_eq!(dumped.len(), expected.len(), "every asked-for frame was dumped");
@@ -497,48 +501,57 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     assert_eq!(block1_trace_position(6_988), (11, 47), "U2A's first gate");
     assert_eq!(block1_trace_position(7_618), (12, 55), "U2A's second gate");
 
-    // **The GLENZ boundary's music, measured** (Task 6 Step 5; D38).
+    // **The GLENZ boundary's music, measured** (Task 6 Step 5; D38; re-measured by
+    // Task 6b after the restart carry-over, D45).
     //
-    // The source-faithful restart seeks MUSIC1 to order 0 row 0 at 8,057. The
-    // part's wait is `while (dis_musplus() < -19)` (`GLENZ/MAIN.C:290`), and
+    // The restart seeks MUSIC1 to order 0 row 0 at 8,057, and the new player
+    // continues from MUSIC0's channel state: channel 2 is still at 63, so order
+    // 0's row-3 `C00` is taken and order 0 lasts **4 rows** — the restart
+    // publishes `1:0` at 8,087, 30 ticks after the boundary (D34's four of
+    // waiting, then 26 polls: four rows of speed 3 and the ring's ten). A fresh
+    // player plays order 0's 64 rows and publishes `0:4` there instead (measured
+    // with the shell's `continue_from` call removed).
+    assert_eq!(frame_position(dumped, 8_086), "0:3", "order 0's last row");
+    assert_eq!(frame_position(dumped, 8_087), "1:0", "order 0 is 4 rows long");
+    //
+    // The part's wait is `while (dis_musplus() < -19)` (`GLENZ/MAIN.C:290`), and
     // `musplus` is −19 at order 2 row 45 — the very position the reference's
     // own wait exits on (8,521 is `2:45` in `second1d`). The port's published
-    // position reaches it at **8,770**, whose frame is the first that differs
-    // from the held picture: the zoomer's first body. That is 713 ticks after
-    // the boundary, and **249 frames after the reference's measured 8,521**.
-    //
-    // The difference is the source-faithful seek's and is recorded, not fitted:
-    // the reference's player had already played a stretch of MUSIC1 when its
-    // part chain reached GLENZ, while the port's starts at 0:0 at the boundary.
-    // `docs/fidelity/glenz.md` §10 and D38 name it for Task 7/8.
+    // position reaches it at **8,527**, whose frame is the first that differs
+    // from the held picture: the zoomer's first body. That is 470 ticks after
+    // the boundary, and **6 frames after the reference's measured 8,521** —
+    // the restarted clock's lag (`second1d`'s +5 at its first row change, D34's
+    // four-tick wait from a boundary one frame after the trace's restart,
+    // 8,056) and the frame the published row takes to reach the part. Task 6
+    // measured 8,770 and 249 here, before the carry-over.
     let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
     let hold = rgb(8_057);
-    for index in [8_766u32, 8_767, 8_768, 8_769] {
+    for index in [8_523u32, 8_524, 8_525, 8_526] {
         assert_eq!(
             rgb(index),
             hold,
             "frame {index} still holds BEGLOGO's last picture"
         );
     }
-    assert_ne!(rgb(8_770), hold, "the zoomer's first body draws over it");
-    assert_eq!(frame_position(dumped, 8_769), "2:44", "the wait's last holding tick");
-    assert_eq!(frame_position(dumped, 8_770), "2:45", "musplus −19: the wait's exit");
+    assert_ne!(rgb(8_527), hold, "the zoomer's first body draws over it");
+    assert_eq!(frame_position(dumped, 8_526), "2:44", "the wait's last holding tick");
+    assert_eq!(frame_position(dumped, 8_527), "2:45", "musplus −19: the wait's exit");
     // The reference's own exit, read from the filed trace, publishes the same
-    // position the port's 8,770 answers: the wait's condition is the source's.
+    // position the port's 8,527 answers: the wait's condition is the source's.
     assert_eq!(
         trace_position("second1d", 8_521),
         (2, 45),
         "the reference's measured block-1 wait exit"
     );
-    let zoomer_start = 8_770u32;
+    let zoomer_start = 8_527u32;
     assert_eq!(
         zoomer_start - 8_057,
-        713,
+        470,
         "the port's WaitMusic: the boundary to its first zoomer body"
     );
     assert_eq!(
         zoomer_start - 8_521,
-        249,
+        6,
         "the measured difference from the reference's exit (D38's assigned consequence)"
     );
 

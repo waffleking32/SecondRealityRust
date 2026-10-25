@@ -101,7 +101,7 @@ const RULES: [(&str, First); 19] = [
 /// The post-PANICEND cue wait's exit (`MAIN/U2.ASM:833-853`): the original's first frame
 /// with `musplus` > 0 is 16630 (§26.6); the port's is the wait's last tick, the frame
 /// before MNTSCRL starts.
-const CUE_EXIT: (u32, u32) = (16_630, 16_874);
+const CUE_EXIT: (u32, u32) = (16_630, 16_632);
 
 /// How far a published position may be from the frame the trace publishes it at — the
 /// shell's own window, `src/shell.rs`'s `JITTER_FRAMES` (A12), which lives in the binary's
@@ -130,32 +130,31 @@ struct Agreement {
     last_offset: i64,
 }
 
-/// Measured by this file's run (Phase 9 Task 6) and recorded in `reference-indices.md`
-/// §26.8 and `music-clock.md`:
+/// Measured by this file's run (Phase 9 Task 6; the post-GLENZ rows re-measured by Task 6b,
+/// after the restart carry-over D45) and recorded in `reference-indices.md` §26.8 and
+/// `music-clock.md`:
 ///
 /// - `second1`, `second1c`, `second1b` — block 1 up to BEGLOGO, under the boot's MUSIC0:
 ///   the run's own clock, 97.4 / 100 / 99.7 % within the window at offset 0 / −1 / −1, as
 ///   `crates/sr-audio/tests/trace.rs` and the shell's own block-1 test hold them (`second1`'s
 ///   worst 7 is A12's; `second1b`'s one frame past the search is its last, where the port is
-///   a row ahead of the window's edge).
-/// - `second1d`, `second1e` — the `MUSIC1@0` session from GLENZ to JPLOGO: **247 and 248
-///   frames late** (A38's lag, which every part of the session inherits), and within the
-///   window at that offset 100 % and 69.4 % — `second1e`'s worst 8 is the drift the trace
-///   test pins (A54): its lag falls from 248 at the window's first row change to 240 at its
-///   last.
-/// - `second1f` — the `MUSIC0@18` session from U2E to ENDSCRL: **235 frames late** at its
-///   first row change and 243 at the last the run reaches, 44.4 % within the window, worst 12,
-///   and the one frame (38,376) whose position the trace never publishes: the speed-1 row
-///   (A54).
-///
-/// With no offset at all, no frame of the three post-GLENZ traces agrees.
+///   a row ahead of the window's edge). Task 6b moves none of them.
+/// - `second1d`, `second1e` — the `MUSIC1@0` session from GLENZ to JPLOGO: **5 frames late**
+///   at the first row change of each (Task 6 measured 247 and 248 before the restart kept
+///   MUSIC0's channel volumes, A38), 100 % and 75.3 % within the window at that offset.
+///   `second1e`'s lag falls from +5 to −3 at its last row change — the drift its worst 8 is
+///   (A54) — so with no offset at all 91.8 % of it agrees.
+/// - `second1f` — the `MUSIC0@18` session from U2E to ENDSCRL: **8 frames early** at its first
+///   row change and 0 at the last the run reaches (Task 6: 235 and 243 late), 44.8 % within
+///   the window at −8 and 95.7 % with no offset; worst 12, and the one frame (38,376) whose
+///   position the trace never publishes: the speed-1 row (A54).
 const AGREEMENTS: [Agreement; 6] = [
     Agreement { trace: "second1", offset: 0, frames: 5541, within: 5399, worst: 7, beyond: 0, unshifted: 5399, last_offset: 3 },
     Agreement { trace: "second1c", offset: -1, frames: 1699, within: 1699, worst: 1, beyond: 0, unshifted: 1698, last_offset: -2 },
     Agreement { trace: "second1b", offset: -1, frames: 359, within: 358, worst: 1, beyond: 1, unshifted: 357, last_offset: -2 },
-    Agreement { trace: "second1d", offset: 247, frames: 699, within: 699, worst: 2, beyond: 0, unshifted: 0, last_offset: 248 },
-    Agreement { trace: "second1e", offset: 248, frames: 25_143, within: 17_439, worst: 8, beyond: 0, unshifted: 0, last_offset: 240 },
-    Agreement { trace: "second1f", offset: 235, frames: 13_934, within: 6187, worst: 12, beyond: 1, unshifted: 0, last_offset: 243 },
+    Agreement { trace: "second1d", offset: 5, frames: 699, within: 699, worst: 2, beyond: 0, unshifted: 227, last_offset: 5 },
+    Agreement { trace: "second1e", offset: 5, frames: 25_143, within: 18_928, worst: 8, beyond: 0, unshifted: 23_083, last_offset: -3 },
+    Agreement { trace: "second1f", offset: -8, frames: 14_168, within: 6352, worst: 12, beyond: 1, unshifted: 13_554, last_offset: 0 },
 ];
 
 fn repository_root() -> PathBuf {
@@ -361,7 +360,8 @@ fn the_full_run_plays_every_part_in_the_originals_order() {
     }
     // The shell's two restarts and its cue wait are in the run: MUSIC1 at order 0 at
     // GLENZ (`MAIN/U2.ASM:813-818`) and MUSIC0 at order 18 at U2E (`:880-885`) — each
-    // boundary publishes `0:0`, the fresh player's ring — and PANICEND's picture is up
+    // boundary publishes `0:0` — the new player's ring, which a restart does not carry
+    // (`Player::continue_from`, D45) — and PANICEND's picture is up
     // until the cue's exit (`:833-853`), MNTSCRL starting on the next tick.
     for part in [Part::Glenz, Part::U2e] {
         let seam = FULLRUN_SEAMS[part as usize];

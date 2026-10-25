@@ -575,9 +575,11 @@ chain's frames therefore do not agree on when the restarted player began to play
 cannot separate a seek that left the row from a play that began during the module load. The
 wait's **exit** (8521) is what Task 6 consumes and it is measured twice; the restart frame is
 recorded as the interval **(8049, 8100)**. `docs/decisions.md` D38 carries the consequence.
-*(Phase 9 Task 6: on the probable cause recorded below — MUSIC1's order 0 four rows long, not 64 —
-the two readings agree, the restart falling at 8,056.6, inside the interval; see "The block-1 full run
-against the port". Task 6b's player fix will re-measure it.)*
+*(Phase 9 Task 6 found, and Task 6b fixed, why the two readings disagreed: a mid-song restart keeps
+the previous module's channel volumes (D45), so MUSIC1's order 0 is four rows long here, not 64, and
+the sample at 8100 is 8 rows into the restarted module, not 68. With the port's restarted player the
+two agree: the restart is at **8,056**, inside the interval; see "The block-1 full run against the
+port".)*
 
 ### The block-1 full run: `second1e` and `second1f` (Phase 9)
 
@@ -620,13 +622,17 @@ wait's two loops PANICEND's retirement entered.
 
 **What the port's player does with them** (`cargo test -p sr-audio --test trace`, both in
 `RESTART_TRACES`): **`second1e`'s content is identical** — every word's value sequence over 25,136
-frames — **and its placement drifts to 8 frames**, the port early by −1 at 10,827, −4 at 19,981 and
-−8 from 33,264, one past `JITTER_FRAMES`; **`second1f` has one row the trace never publishes**:
+frames — **and its placement drifts to 8 frames**, one past `JITTER_FRAMES`: the worst displacement
+first reaches 1 at 8,813, 4 at 16,190 and 8 at 33,305 (the comparison prints each; Task 2 measured
+1, 4 and 8 at 10,827, 19,981 and 33,264 from the 64-row restart anchor Task 6b replaced);
+**`second1f` has one row the trace never publishes**:
 order 26 runs at **speed 1** (frames 38328–38370, 1.46 frames a row, the first speed-1 stretch in
 any filed trace), the trace publishes row 25 at 38364 and row 27 at 38366, and the port, ten frames
 later in phase, publishes row 26 at 38376 (`second1f: the row sequence differs at index Some(502):
 trace 27, port 26`), and its placement drifts with the port late by up to 12 frames. The player was
-not changed.
+not changed then; Task 6b's restart carry-over (D45), under which both traces are simulated through
+the session their restart replaces, leaves every `second1f` figure as it was and `second1e`'s worst
+at 8.
 
 **Both are pinned, exactly, in `KNOWN_DISAGREEMENTS`** (`crates/sr-audio/tests/trace.rs`), and
 **Task 6 registered both rows as `APPROXIMATIONS.md` A54** — neither is a seam (below). `the_port_reproduces_every_filed_trace` holds a
@@ -644,7 +650,7 @@ displacement is 8 frames, not the recorded 7` and `second1f: the port publishes 
 never does at [38376], not the recorded []`. Every row must name a trace the walk found
 (`every_known_disagreement_names_a_trace_the_walk_found`).
 
-### The block-1 full run against the port (Phase 9 Task 6)
+### The block-1 full run against the port (Phase 9 Task 6; re-measured by Task 6b)
 
 The port's own `--block 1`, played headless to 48,277 with `--positions`, against block 1's six
 traces (`cargo test --release -p secondreality --test fullrun -- --nocapture`; the table
@@ -653,41 +659,42 @@ port's change to the trace's first row change minus the trace's — then every f
 shell's `JITTER_FRAMES` = 3:
 
 ```text
-second1: offset +0 at 420 (0, 1); 5399 of 5541 frames within 3 (97.437 %), worst 7, 0 past 60; with no offset 5399 (97.437 %)
-second1c: offset -1 at 5901 (9, 51); 1699 of 1699 frames within 3 (100.000 %), worst 1, 0 past 60; with no offset 1698 (99.941 %)
-second1b: offset -1 at 7609 (12, 54); 358 of 359 frames within 3 (99.721 %), worst 1, 1 past 60; with no offset 357 (99.443 %)
-second1d: offset +247 at 8102 (1, 5); 699 of 699 frames within 3 (100.000 %), worst 2, 0 past 60; with no offset 0 (0.000 %)
-second1e: offset +248 at 8801 (4, 50); 17439 of 25143 frames within 3 (69.359 %), worst 8, 0 past 60; with no offset 0 (0.000 %)
-second1f: offset +235 at 34108 (18, 5); 6187 of 13934 frames within 3 (44.402 %), worst 12, 1 past 60; with no offset 0 (0.000 %)
+second1: offset +0 at 420 (0, 1); 5399 of 5541 frames within 3 (97.437 %), worst 7, 0 past 60; with no offset 5399 (97.437 %); offset +3 at its last row change (5994)
+second1c: offset -1 at 5901 (9, 51); 1699 of 1699 frames within 3 (100.000 %), worst 1, 0 past 60; with no offset 1698 (99.941 %); offset -2 at its last row change (7592)
+second1b: offset -1 at 7609 (12, 54); 358 of 359 frames within 3 (99.721 %), worst 1, 1 past 60; with no offset 357 (99.443 %); offset -2 at its last row change (7951)
+second1d: offset +5 at 8102 (1, 5); 699 of 699 frames within 3 (100.000 %), worst 2, 0 past 60; with no offset 227 (32.475 %); offset +5 at its last row change (8797)
+second1e: offset +5 at 8801 (4, 50); 18928 of 25143 frames within 3 (75.281 %), worst 8, 0 past 60; with no offset 23083 (91.807 %); offset -3 at its last row change (33872)
+second1f: offset -8 at 34108 (18, 5); 6352 of 14168 frames within 3 (44.833 %), worst 12, 1 past 60; with no offset 13554 (95.666 %); offset +0 at its last row change (47969)
 ```
 
-The boot's MUSIC0 is the original's to the frame through BEGLOGO; the `MUSIC1@0` session from
-GLENZ to JPLOGO is **247–248 frames late** at its first rows (240 at `second1e`'s last) and the `MUSIC0@18` session after U2E **235** — the run's
-parts follow the music, so the whole of block 1 after GLENZ is that much late (A53's seam table),
-and that lag is A38's. The cue wait exits on the original's row (`42:1`, the port's 16874 against
-`second1e`'s 16630).
+The boot's MUSIC0 is the original's to the frame through BEGLOGO; the `MUSIC1@0` session from GLENZ
+to JPLOGO is **5 frames late** at its first rows (−3 at `second1e`'s last) and the `MUSIC0@18`
+session after U2E **8 early** (0 at the last row change the run reaches). Task 6 measured +247, +248
+and +235 here, before the restart kept the old module's channel state. The cue wait exits on the
+original's row (`42:1`, the port's 16632 against `second1e`'s 16630).
 
-**Why the `MUSIC1@0` session is late — the reading §2's GLENZ boundary left open.** The probable
-cause, confirmed by the two tests below, is neither a seek that left the row nor a play during the
-load: `restartmus`'s `_zplaysong` keeps the channel
-volumes the previous module left (the initialiser at `+0x5614` writes `achannelused` and `lastins`
-and never `avol` or `a0volcut`), MUSIC1's order 0 (pattern 73) has a `C00` on channel 2 at row 3,
-and a fresh player's "volume 0" countdown frees that channel on row 3 before its command runs —
-which is why block 2's boot (`second2b`) plays order 0's 64 rows and why the port, which installs a
-fresh player at every restart, does. Block 1's MUSIC0 has channel 2 at 63 when it hands over, so the
-original, on this reading, takes the break and plays order 0 for 4 rows. Back from `second1d`'s first `1:5` (8,102),
-a 64-row order 0 starts the restart at 7,814 (inside BEGLOGO, while `second1b` still publishes
-MUSIC0 at 7,959: impossible) and a 4-row one at **8,056.6 — the port's own boundary, 8,057**:
+**Why the `MUSIC1@0` session was late, and the fix (A38, D45).** It was neither a seek that left the
+row nor a play during the load: `restartmus`'s `_zplaysong` keeps the channel volumes the previous
+module left (the song initialiser at `+0x5614` and its silence passes write `achannelused`,
+`lastins`, the periods, the cell and the remembered parameters, and never `avol`, `a0volcut` or the
+effect counters), MUSIC1's order 0 (pattern 73) has a `C00` on channel 2 at row 3, and a fresh
+player's "volume 0" countdown frees that channel on row 3 before its command runs — which is why
+block 2's boot (`second2b`) plays order 0's 64 rows. Block 1's MUSIC0 has channel 2 at 63 when it
+hands over, so the original takes the break and plays order 0 for 4 rows; the port's restart now
+continues from the old player (`Player::continue_from`) and does the same, publishing `1:0` at
+8,087. Back from `second1d`'s first `1:5` (8,102) the restarted player's 46th poll puts the trace's
+restart at **8,056** (`RESTART_TRACES`), where the 64-row reading put it at 7,814 — inside BEGLOGO,
+while `second1b` still publishes MUSIC0 at 7,959:
 
 ```bash
-cargo test -p sr-audio --test player the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown
+cargo test -p sr-audio --test player the_song_initialiser_writes_exactly_what_initialise_writes
 cargo test -p sr-audio --test trace block_ones_music1_restart_takes_order_0s_break -- --nocapture
 ```
 
-`RESTART_TRACES`'s 7,815 for `second1d`/`second1e` is the 64-row back-extrapolation: it puts the
-trace test's fresh player on the original's rows, which is why that test passes, and it is not the
-restart's frame. Modelling the kept volumes is a player change — Task 6b's, which will re-measure
-this paragraph (A38).
+**The residual +5** is the restarted clock's: the port installs the restart at its boundary,
+8,057, and D34's four-tick wait starts its clock at 8,061, five frames after the trace's 8,056 —
+D34's relation is the restart recipes' boot one (404 → 408), and a mid-run restart's reload is not
+modelled (A53). It is A38's measured residual, not fitted away.
 
 ## 3. The tick rate, and the rule behind it
 

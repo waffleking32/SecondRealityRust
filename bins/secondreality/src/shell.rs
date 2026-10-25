@@ -436,7 +436,8 @@ pub(crate) type MusicSource = fn(ModuleId) -> Result<crate::audio::Shared, Strin
 /// block 1 between BEGLOGO and GLENZ (MUSIC1@0; block 2's mask has bit 0 clear and skips
 /// it). `MUSIC_RESTART_AT`'s `("u2e", ModuleId::Music0, 18)` and
 /// `("glenz", ModuleId::Music1, 0)` rows are that mid-run expression:
-/// [`Sequence::restart_music`] installs a fresh player at the named part's boundary, and
+/// [`Sequence::restart_music`] installs a new player at the named part's boundary, carrying
+/// the old one's state the song initialiser does not write (D45), and
 /// its equality check keeps block 2's already-playing MUSIC1@0 and its clock. Block 5's
 /// mask has bit 3 clear, so it takes only `:898-905`'s entry restart.
 ///
@@ -1282,9 +1283,11 @@ impl Sequence {
     ///
     /// `start` is the entry path's [`MusicStart::for_part`] or the restart's
     /// [`MusicStart::restart`]; the two differ in when the player's clock begins. A
-    /// restart is a **new player** (`restartmus` loads the module again), so the run's
-    /// [`AudioDump`](crate::audio::AudioDump) and sample scratch are carried across: they
-    /// belong to the run and its one output stream, not to whichever player mixes it.
+    /// restart is a **new player** (`restartmus` loads the module again) that takes the old
+    /// one's state over first (`Player::continue_from`, D45): the original has one player
+    /// object, and its `_zplaysong` keeps whatever the song initialiser does not write. The
+    /// run's [`AudioDump`](crate::audio::AudioDump) and sample scratch are carried across too:
+    /// they belong to the run and its one output stream, not to whichever player mixes it.
     fn install_music(
         &mut self,
         module: ModuleId,
@@ -1296,7 +1299,17 @@ impl Sequence {
         // Only now that the new player exists is the old one's state taken: a load that
         // fails must not cost the run the dump it has already written.
         let (dump, scratch) = match self.music.take() {
-            Some(old) => (old.dump, old.scratch),
+            Some(old) => {
+                // **A restart is the same object playing a new module** (D45): `restartmus`'s
+                // `_zplaysong` writes what the song initialiser writes and keeps the rest of the
+                // previous module's state — its channel volumes above all, which decide whether
+                // a new song's first rows take their breaks (block 1's MUSIC1 order 0 is 4 rows,
+                // not 64). Every restart comes through here: both `MUSIC_RESTART_AT` sites and
+                // the loop seam's `LOOP_RESTART`. An entry install has no old player, and is a
+                // boot: the object's untouched state is zero, which a fresh player is.
+                crate::audio::lock(&player).continue_from(&crate::audio::lock(&old.player));
+                (old.dump, old.scratch)
+            }
             None => (None, vec![0; 1024]),
         };
         crate::audio::lock(&player).play_song(order);
@@ -1558,8 +1571,9 @@ impl Sequence {
     /// is one ([`MUSIC_RESTART_AT`], `MAIN/U2.ASM:880-885` and `:813-818`).
     ///
     /// The original's `restartmus` stops and unloads the player, loads the new module and
-    /// seeks it, every time the site runs. The port installs a fresh player too — the
-    /// modules are different files and `Player` owns its module — but only when the row's
+    /// seeks it, every time the site runs. The port installs a new player too — the
+    /// modules are different files and `Player` owns its module — which takes the old one's
+    /// state over before it seeks (`install_music`, D45), but only when the row's
     /// module/order **differs** from the player the run already has: a plan that reaches a
     /// restart site under the very same module and order would otherwise throw away a
     /// player's position for nothing. That is what keeps block 2 from reloading at GLENZ:
@@ -4064,7 +4078,7 @@ mod tests {
             MusicStart { frame: 0, waiting: 0, pre: 0 }
         );
         // The shell's dump and scratch belong to the run, not to one player: a
-        // restart installs a fresh player and carries both across. The marker
+        // restart installs a new player and carries both across. The marker
         // is past one poll's samples (~570) so the dump's drain before the
         // boundary cannot overwrite it — what is under test is the vector's
         // identity, not its contents.
@@ -4225,7 +4239,8 @@ mod tests {
             MusicStart { frame: 404, waiting: 0, pre: 4 },
             "the block-1 clock starts at 400 and the run's 404 pre-polls the four frames"
         );
-        let entry_player = std::sync::Arc::as_ptr(&run.music.as_ref().unwrap().player);
+        let entry = std::sync::Arc::clone(&run.music.as_ref().unwrap().player);
+        let entry_player = std::sync::Arc::as_ptr(&entry);
 
         // Tick 0: ALKU draws and retires. Tick 1: the boundary — the restart
         // installs MUSIC1@0 before GLENZ's `init`, and the part starts.
@@ -4248,8 +4263,19 @@ mod tests {
         assert_ne!(
             std::sync::Arc::as_ptr(&music.player),
             entry_player,
-            "a fresh player, as `restartmus` loads the module again"
+            "a new player, as `restartmus` loads the module again"
         );
+        // D45: the new player continues from the old one's state — every channel is the old
+        // one's with the song initialiser's stores applied, and `_np_zframe` is kept. The old
+        // player is not polled after the boundary, so its state is the handover's.
+        let old = crate::audio::lock(&entry);
+        let new = crate::audio::lock(&music.player);
+        for index in 0..sr_audio::CHANNELS {
+            let mut expected = *old.channel(index).unwrap();
+            expected.initialise();
+            assert_eq!(new.channel(index), Some(&expected), "channel {index} carried across");
+        }
+        assert_eq!(new.zframe(), old.zframe(), "the tick counter carried across");
     }
 
     /// Block 2's first part and GLENZ: the block already plays MUSIC1@0.

@@ -1895,7 +1895,7 @@ the_moving_keyframes_record_the_registered_alignments_and_residuals` and
 `cargo test -p secondreality --bin secondreality
 glz_hidden_face_frees_the_visible_slot`.
 
-## A38 — GLENZ: block 1's zoomer starts 249 frames after the reference's, because the restart seeks MUSIC1 from order 0 (registered)
+## A38 — GLENZ: block 1's zoomer starts 6 frames after the reference's, the restarted clock's residual (registered; restated by Phase 9 Task 6b — it was 249)
 
 **Part:** GLENZ (`GLENZ/MAIN.C:290`) through the shell's block-1 restart
 (`MAIN/U2.ASM:813-818`), Phase 7.
@@ -1912,7 +1912,46 @@ row 45 (`musplus` −19, `zplus` 1, `zframe` 5,588 → 0), and
 `out/p7-b1-collapse-dense` (frames 8,516…8,528) holds through 8,521 and first differs
 on **8,522** (the sample/publish instant, D17).
 
-**Port.** The restart installs MUSIC1@0 at the port's BEGLOGO→GLENZ boundary, **8,057**
+**Port (Phase 9 Task 6b).** The restart installs MUSIC1@0 at the port's BEGLOGO→GLENZ boundary,
+**8,057**, with D34's four-tick `waiting`, and the new player **continues from MUSIC0's state**
+(`Player::continue_from`, D45): `_zplaysong`'s song initialiser never writes a channel's volume, so
+channel 2 is still at 63, MUSIC1's order 0 takes its row-3 `C00` and lasts **4 rows**, and the
+restart publishes `1:0` at **8,087**. The wait (`MAIN.C:290`, `musplus < -19`) ends on the first
+published order 2 row 45: the port's first zoomer body is at boot **8,527** — **470 ticks after the
+boundary** and **6 frames after the reference's 8,521**. 8,527 is the first frame that differs from
+the held picture and publishes `2:45`; 8,526 still holds at `2:44`.
+
+**Why the residual is registered, not fitted.** It is the restarted clock's. `second1d`'s rows put
+the reference's restart at **8,056** (`crates/sr-audio/tests/trace.rs`'s `RESTART_TRACES`, derived by
+`block_ones_music1_restart_takes_order_0s_break` from the restarted player's own polls), and the
+port's clock begins at 8,061 — its boundary, 8,057, plus D34's four ticks, which are the restart
+recipes' boot relation (404 → 408) and not a measurement of a mid-run reload (A53: the port has no
+loader stretch). The block-1 run is **+5** against `second1d` at its first and last row changes and
++5…−3 across `second1e` (`cargo test --release -p secondreality --test fullrun -- --nocapture`);
+this row's +6 is that offset and a frame of tick phase. The 6 frames are within A12's 7-frame
+inter-session spread and outside the shell's 3-frame `JITTER_FRAMES`, so the entry stays registered.
+No row, order, frame or tick was adjusted to reduce it.
+
+**Measured difference:** **8,527 − 8,521 = 6 frames** (the wait's exit). Reproduce with
+
+```text
+cargo test -p secondreality --test shell \
+    a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering
+cargo test -p secondreality --bin secondreality \
+    the_block_one_run_restarts_music1_at_glenz
+cargo test -p sr-audio --test trace block_ones_music1_restart_takes_order_0s_break -- --nocapture
+awk -F, '$1 == 8521' reference/music/second1d/trace.csv
+```
+
+The chain test pins 8,057, `1:0` at 8,087, 8,527, 470 and 6 and reads `second1d`'s 8,521 = `2:45`
+(with the shell's `continue_from` removed it publishes `0:4` at 8,087 and fails); the restart test
+pins the install, `waiting == 4` and that every channel of the new player is the old one's,
+initialised; the trace test derives the 8,056.
+
+**History.** What follows is the entry as Phase 7 registered it and Phase 9 Task 6 extended it;
+its figures are the lag before Task 6b's fix.
+
+**Port (Phase 7).** The restart installs MUSIC1@0 at the port's BEGLOGO→GLENZ boundary, **8,057**
 (inside the reference's interval), with D34's four-tick `waiting`. The wait
 (`MAIN.C:290`, `musplus < -19`) ends on the first published order 2 row 45; from order 0
 row 0 that is 173 rows × 3 ticks = 519 music ticks ≈ 699 frames, and the port's first
@@ -1969,11 +2008,14 @@ trace block_ones_music1_restart_takes_order_0s_break -- --nocapture`). The 60 ro
 frames, are this entry's 249 but for 6. This is the probable cause, confirmed as far as the
 committed evidence goes by those two tests; the paragraph above's reading ("the reference's player
 had already played a stretch of MUSIC1") stands as the entry's record until the port's fix — Task 6b —
-lands and re-measures it. **Not changed here**: modelling it — `Channel::reset` keeping what the initialiser keeps, and the shell's
+lands and re-measures it. **Not changed here**: modelling it — the channel clear keeping what the initialiser keeps, and the shell's
 restart handing the new player the old one's channels — is a player change that moves this entry's
 pinned 8,770/249, the trace test's `RESTART_TRACES` rows for `second1d`/`second1e` (7,815, the
 back-extrapolation through a 64-row order 0) and possibly the U2E and loop restarts, so it is Task
-6b's.
+6b's. *(Task 6b made that change — the entry's head above — and measured what it moved: the 249
+becomes 6, `RESTART_TRACES`' 7,815 becomes 8,056, and the U2E (`second3e`, `second1f`) and loop
+restarts move by nothing, MUSIC0's orders 18 and 0 having no row whose length depends on a carried
+volume.)*
 
 ## A39 — GLENZ: the span compositor repaints every span instead of walking the previous frame's list (substitution; measured difference 0)
 
@@ -2415,7 +2457,8 @@ with `cargo test -p secondreality --test vault -- --nocapture`; the manifest che
 ## A53 — The full run's seams: every part is handed over in one tick, and the loader's frames are not modelled (registered; D31's question decided)
 
 **Part:** the shell, between every two parts of a run (`--block 1` measured in full), Phase 9
-Task 6.
+Task 6; re-measured by Task 6b after the restart carry-over (D45), which moved every first frame
+from GLENZ on and no `fullrun` count.
 
 **Original.** Each part is its own EXE. Between two of them the shell's `partexecute` loads the
 next (`MAIN/U2.ASM:789-912`), and at two places it also reloads the music (`restartmus`,
@@ -2438,54 +2481,59 @@ alku            404    404          +0
 u2a            5961   6008         +47     +47
 pam            7707   7704          -3     -50
 beglogo        7922   7885         -37     -34
-glenz          8522   8770        +248    +285
-tunneli       11158  11394        +236     -12
-techno        12214  12458        +244      +8
-panicend      16193  16423        +230     -14
-mntscrl       16637  16875        +238      +8
-lnszoom       18656  18913        +257     +19
-plzpart       21927  22171        +244     -13
-minvball      26673  26912        +239      -5
-rayscrl       29174  29422        +248      +9
-3dsinfld      31272  31531        +259     +11
-jplogo        33263  33498        +235     -24
-u2e           34120  34318        +198     -37
-endlogo       37967  38199        +232     +34
-cred          38583  38807        +224      -8
-endscrl       46277  46432        +155     -69
-cue exit      16630  16874        +244
+glenz          8522   8527          +5     +42
+tunneli       11158  11151          -7     -12
+techno        12214  12216          +2      +9
+panicend      16193  16181         -12     -14
+mntscrl       16637  16633          -4      +8
+lnszoom       18656  18670         +14     +18
+plzpart       21927  21928          +1     -13
+minvball      26673  26670          -3      -4
+rayscrl       29174  29180          +6      +9
+3dsinfld      31272  31288         +16     +10
+jplogo        33263  33255          -8     -24
+u2e           34120  34075         -45     -37
+endlogo       37967  37956         -11     +34
+cred          38583  38564         -19      -8
+endscrl       46277  46189         -88     -69
+cue exit      16630  16632          +2
 ```
 
 (JPLOGO and U2E are aligned on bytes — JPLOGO's opening black and U2E's band — because §26.3 can
-only bracket their first frames.) From GLENZ to ENDSCRL every difference carries A38's lag (the
-`MUSIC1@0` session is 247–248 frames late, the `MUSIC0@18` one 235); the parts sit within −18…+11
-of it until JPLOGO; ENDSCRL's −69 change is CRED's span (first frame to ENDSCRL's) being 69 frames
+only bracket their first frames.) From GLENZ to JPLOGO the parts follow the restarted `MUSIC1@0`
+session, which is 5 frames late at its first rows and 3 early at its last (A38's residual), and sit
+within −12…+16 of the original; the `MUSIC0@18` session after U2E is 8 frames early at its first row
+and level at its last. *(Task 6 measured +230…+259 here, A38's lag before the restart kept the
+channel volumes.)* ENDSCRL's −69 change is CRED's span (first frame to ENDSCRL's) being 69 frames
 shorter in the port, 7,625 against 7,694 — why is not measured; A10's record of CRED running early is
 a lead. The parts' own residuals at the seams are: **U2A's first frame is 47 frames late, so ALKU's
 end is at least 47 frames late** (the original's last ALKU frame may be its loader holding the
 screen; no keyframe of `alku` sees it; the cause is not established, and the leads are the batches' `dis_sync()<4+tptr`
 waits and the scroll's `frame_count<SCRLF`, `ALKU/MAIN.C:138`, `:400`); **BEGLOGO's −37 is A5's
 lead-in** (the port's white field is up from its first tick; the ramp is frame-locked, the port's
-7930 being the original's byte for byte); **U2E's band comes 37 frames earlier than its restart's
-lag** (+198 against +235): the port starts U2E at the restart's boundary, where the original's
-reload holds JPLOGO's whitened screen; and the cue wait's exit is followed by MNTSCRL's first frame
-after **7** frames in the original (16630 → 16637) and **1** in the port (16874 → 16875).
+7930 being the original's byte for byte); **U2E's band is 45 frames early** (37 earlier than
+JPLOGO's −8): the port starts U2E at the restart's boundary, where the original's reload holds
+JPLOGO's whitened screen; and the cue wait's exit is followed by MNTSCRL's first frame after **7**
+frames in the original (16630 → 16637) and **1** in the port (16632 → 16633).
 
 **Why the loader is not modelled (D31's question, D24's rule).** One `LOADER_TICKS` held between
 parts would have to explain every seam the music does not decide. It does not: the changes across
-the seams take both signs — the port is already *later* at ALKU→U2A (+47), MNTSCRL→LNS&ZOOM (+19)
-and RAYSCRL→3DSINFLD (+11), and a delay inserted at a handover can only make it later still — and
-the two seams the music pins on both sides need different constants (6 frames after the cue wait;
-59 to 68 under the U2E reload — its clock at 34,054 ± 2, `reference-indices.md` §26.6, against
-U2E's first frame in (34114, 34120] — where the port's is 0). Fitting a constant per seam is forbidden (D24), so the handover is
+the seams take both signs — the port is already *later* at ALKU→U2A (+47), MNTSCRL→LNS&ZOOM (+18),
+RAYSCRL→3DSINFLD (+10), TUNNELI→TECHNO and MINVBALL→RAYSCRL (+9 each), and a delay inserted at a
+handover can only make it later still — and the two seams the music pins on both sides need
+different constants (6 frames after the cue wait; 59 to 68 under the U2E reload — its clock at
+34,054 ± 2, `reference-indices.md` §26.6, against U2E's first frame in (34114, 34120] — where the
+port's is 0). *(Task 6 decided this under the lag, at +47/+19/+11; Task 6b re-checked it on the
+corrected run under the same one-constant rule, and the decision and its reasons stand.)* Fitting a constant per seam is forbidden (D24), so the handover is
 left as D31 decided it, and this entry is its record. **A later task should watch** ALKU's ≥ 47
 frames, which are a part's, not a seam's.
 
 **The filed frames at those differences.** Each `reference/parts/fullrun` frame is rendered at its
 reference index plus its part's difference above — never chosen for the frame's own count — and
 the three frames the original shows during a loader stretch the port does not have (7920, 16636,
-34110) at the port's last frame of that screen (7884, 16874, 34285). `cargo xtask rediff --only
-fullrun` compares all 60 (44 frames, 16 index planes) at their registered counts
+34110) at the port's last frame of that screen (7884, 16632, 34042). `cargo xtask rediff --only
+fullrun` compares all 60 (44 frames, 16 index planes) at their registered counts — the same 60
+counts at Task 6's pairings and at Task 6b's, every one re-measured
 (`xtask/src/rediff/table.rs`'s `fullrun/*` entries; the full list is `reference-indices.md` §26.8).
 Every held frame is 0 in RGB but A25's 19000 (2,058), A10's 40600 (7,204) and 34110 (72,363: the
 reload's white, which the port never shows; its index plane is 0). The moving frames this entry
@@ -2510,18 +2558,68 @@ sample a frame publishes row 25 at 38,364 and row 27 at 38,366 and never row 26.
 publishes row 26 at 38,376 — a frame on which that row *is* current, and which the trace's sampling
 never caught.
 
-**Why this is registered rather than fixed.** Neither is a seam: Task 6's seam work explains A38's
-lag (the offset these windows are compared at), not the drift inside them. The drift is A12's
+**Why this is registered rather than fixed.** Neither is a seam, nor the restart: Task 6's seam
+work explained A38's lag (the offset these windows are compared at) and Task 6b removed it (D45),
+and neither the drift inside them nor the speed-1 row moved. The drift is A12's
 inter-session fact over a longer window — the port sits on one clock, the sessions on their own —
 and the unsampled row is a sampling fact: a row shorter than one sample cannot be published by a
 trace that samples once a frame. A player that skipped row 26 would be wrong.
 
 **Measured difference.** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
-holds both traces to `KNOWN_DISAGREEMENTS`, exactly: `second1e` — content identical in every word,
-**worst displacement 8** (`JITTER_FRAMES` 7; the port early by −1 at 10,827, −4 at 19,981 and −8
-from 33,264); `second1f` — one content difference (`row`, index 502, trace 27, port 26, every other
-value identical), **one frame, 38,376**, whose value the trace never publishes, **worst
-displacement 12**. The port's whole block-1 run shows the same against them at their offsets
-(`cargo test --release -p secondreality --test fullrun -- --nocapture`): `second1e`
-17,439 of 25,143 frames within 3 (69.359 %), worst 8; `second1f` 6,187 of 13,934 (44.402 %), worst
-12, and the one frame past the search.
+holds both traces to `KNOWN_DISAGREEMENTS`, exactly, each simulated through the session its
+restart replaces (D45): `second1e` — content identical in every word, **worst displacement 8**
+(`JITTER_FRAMES` 7; the worst first reaches 1 at 8,813, 4 at 16,190 and 8 at 33,305 — the test
+prints each; Task 2's fresh-restart simulation reached them at 10,827, 19,981 and 33,264);
+`second1f` — one content difference (`row`, index 502, trace 27, port 26, every other value
+identical), **one frame, 38,376**, whose value the trace never publishes, **worst displacement 12**,
+every figure as before Task 6b. The port's whole block-1 run shows the same against them at their
+offsets (`cargo test --release -p secondreality --test fullrun -- --nocapture`): `second1e` 18,928 of
+25,143 frames within 3 (75.281 %) at +5, worst 8; `second1f` 6,352 of 14,168 (44.833 %) at −8, worst
+12, and the one frame past the search (Task 6, at +248 and +235: 17,439 of 25,143 and 6,187 of
+13,934).
+
+## A55 — A mid-run restart does not carry the position ring or the tick countdown (registered; measured difference 0 in every compared frame)
+
+**Part:** the player under the shell's three restarts — block 1's `MUSIC1@0` at GLENZ
+(`MAIN/U2.ASM:813-818`), `MUSIC0@18` at U2E (`:880-885`) and the loop's `MUSIC0@0` (`:929-932`) —
+Phase 9 Task 6b.
+
+**Original.** `restartmus` (`:348-397`) stops the song, reloads the module and calls `_zplaysong`
+on the one player object. D45 lists what that keeps; two of the kept words are the subject here.
+The **position ring** (`+0x2150`, its pointers `+0x214c`/`+0x214e` and the words a row advance
+feeds it, `[0x905]`…`[0x90e]`) is primed only by `_zinit` (`+0x2a8f`, called once at `+0x2390`), and
+every poll pushes and pops it, running or not (`+0x52c9`). Every tick of a stopped song
+(`+0x515f` → `+0x4404`) writes `0xffff` into the fed order word (`+0x4408`). So once the song stops
+the ring goes on publishing the old song's last positions for as many polls as remain of its ten,
+then **order −1** with the old row (the trace tool refuses such a frame, `_np_ord reads -1`,
+`music-clock.md` §7), until the new song's first row advance has come through. How far a reload
+gets is the session's: at the loop, pass 2's ALKU reads the stale `(43,43)` at its first
+`dis_sync` in one session of seven and the new song in six (D42's race, `reference-indices.md`
+§25.3). The **tick countdown** `[0xbe0]` runs on through the reload's polls (`+0x5157`).
+
+**Port.** `Player::continue_from` carries the channels, the loop counter and `_np_zframe`, and
+not these: the new player's ring is the fresh one, so it publishes `0:0` from the restart until
+its first row comes through (`0:1` at 8,075 after GLENZ's restart at 8,057), and its clock starts
+D34's four frames after the boundary.
+
+**Why it is registered rather than carried.** What the original puts in both words happens during
+the reload, and the port has none (A53). Carrying the old ring would publish the old song's last
+order at every restart: that is D42's minority session, never the filed one. An uncommitted
+experiment that carried the ring, the pointers, the fed words and the published words showed the
+cost: `cargo test --release -p secondreality --test loop` failed, with pass 2's ALKU hold (10419)
+no longer matching the original's capture, ALKU having left its first wait at once on the stale
+position. Every other start and first frame of the block-1 run stayed the same. The −1
+itself cannot be published: the port's published order is a `u8`, and U2E's `order > 18` gate
+would read 255 as open. With the fresh ring, GLENZ's wait sees `musplus` −32 (the order 0 the
+restart enters has `zplus` 0) and U2E's gate stays closed, which are the decisions the −1 gives
+them. For pass 2's ALKU the −1's `dis_sync` key is above the table (A15), so the comparison is the
+loop test's measurement, not an argument. The countdown's phase is D34's measured wait.
+
+**Measured difference: 0 in every compared frame.** No filed trace holds these frames: every
+post-restart window opens after the new song's first rows (`second1d` at 8,100, `second1f` at
+34,105, the loop's seam trace's `(0,1)` at 9,112). `cargo test --release -p secondreality --test
+fullrun` and `--test loop`, and `cargo xtask rediff`, hold every compared frame at its count with
+the fresh ring. The published position differs from the original's for the frames between a
+restart and the new song's first published row: 18 at GLENZ (8,057…8,074) and 22 at U2E
+(34,043…34,064) in the block-1 run (`--positions`, as `tests/fullrun.rs` writes it), and 23 at the
+loop (`loop.rs`'s block-5 numbering: the restart at 8,898, `0:1` at 8,921).

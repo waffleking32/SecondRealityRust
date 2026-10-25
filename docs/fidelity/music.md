@@ -1138,9 +1138,11 @@ note quotes:
    port had the assignment inside the not-fresh branch, which would have left the first note of
    an `O` row at position 0; `o_starts_the_next_note_at_the_offset_in_bytes` asserts the position
    and the offset both, on MUSIC0's own `O05` cell.
-3. **A seek clears every channel** (`+0x5614`, which `_zplaysong` reaches at `+0x258e`), so the
-   effects start from zero after a `play_song` — the period, the volume, the remembered
-   parameters and the vibrato position. Task 3's port did not, which no trace could show (every
+3. **A seek runs the song initialiser on every channel** (`+0x5614`, which `_zplaysong` reaches
+   at `+0x258e`), so the effects start from zero after a `play_song` — the period, the remembered
+   parameters and the vibrato position. *(Phase 9 Task 6b, D45: not the volume. The initialiser
+   never stores to `avol`, `a0volcut` or the effect counters, so a mid-song restart keeps them —
+   `Channel::initialise`.)* Task 3's port did not, which no trace could show (every
    filed trace seeks on a fresh player) but which a test that seeks mid-song can: the `K` test
    above finds `alasteff1` at zero because the seek cleared it.
 
@@ -1794,7 +1796,8 @@ numbers' order — and pins it (nothing else in the suite looks at this site).
 
 **The port reaches both mid-run sites today** (Phase 7 added `:813-818`). `--block 3`
 runs MNTSCRL → LNS&ZOOM → PLZPART → MINVBALL → RAYSCRL → 3DSINFLD → JPLOGO → U2E and, before
-U2E, fires `:880-885`'s mid-run restart: the shell installs a fresh MUSIC0 seeked to order 18,
+U2E, fires `:880-885`'s mid-run restart: the shell installs a new MUSIC0 seeked to order 18
+(continuing from the old player's channel state, D45),
 which waits four engine ticks (D34; `MUSIC_RESTART_AT`, `MusicStart::restart`), and the block-3
 chain test in `tests/shell.rs` asserts the boundary, the first published row and the positions
 against `second3e`. `--block 4` takes the same call as its entry-point install. The

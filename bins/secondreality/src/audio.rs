@@ -56,7 +56,8 @@ pub(crate) fn lock(player: &Shared) -> MutexGuard<'_, Player> {
 ///
 /// A run's player can be replaced mid-run: `MAIN/U2.ASM:880-885`'s restart at the U2E
 /// boundary stops the module, loads the next and seeks it (`restartmus`, `:348-397`), and
-/// the port installs that as a fresh [`Shared`] (`Sequence::restart_music`). The sound
+/// the port installs that as a new [`Shared`] (`Sequence::restart_music`), which takes the
+/// old player's state over first (D45). The sound
 /// card is opened once, on the run's entry player, and outlives it; this cell is what lets
 /// the window hand it the run's current one ([`Device::follow`]).
 pub(crate) type Swappable = Arc<Mutex<Shared>>;

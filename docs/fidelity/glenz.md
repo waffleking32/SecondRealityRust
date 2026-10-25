@@ -409,8 +409,9 @@ and GLENZ (`exe4`): `test whattorun,1 / jz @@skip2b` inside the `whattorun & 2`
 region — both bits, so the site fires for `SECOND 1`'s run alone — and
 `restartmus(ax=1, bx=0, cx=48700)`. The port's row is
 `MUSIC_RESTART_AT = [("u2e", Music0, 18), ("glenz", Music1, 0)]`; a plan that
-reaches GLENZ under any other module installs a fresh player seeked to MUSIC1
-order 0 at the boundary, with `MusicStart::restart`'s four-tick wait. Block 2
+reaches GLENZ under any other module installs a new player seeked to MUSIC1
+order 0 at the boundary, with `MusicStart::restart`'s four-tick wait — one that
+continues from the old player's channel state (D45). Block 2
 skips the site (`whattorun & 1` clear) and its initial start already sought
 MUSIC1 order 0 (`:772-775`), so `Sequence::restart_music`'s equality check
 must — and does — keep the player and its clock.
@@ -431,11 +432,14 @@ must — and does — keep the player and its clock.
 - **The block-1 wait is measured, not fitted.** The seek starts at 0:0; the
   wait (`MAIN.C:290`, `musplus < -19`) ends on the first published order 2
   row 45 (`musplus` −19) — the same position the reference's own exit answers
-  (8,521 is `2:45` in `second1d`) — at **8,770**, 713 ticks after the boundary
-  and **249 frames after the reference's 8,521**. The difference is the
-  source-faithful seek's: the reference's player had already played a stretch
-  of MUSIC1 when its chain reached GLENZ. It is registered as **A38** (with the
-  measured values and the commands), not closed by a fitted start.
+  (8,521 is `2:45` in `second1d`) — at **8,527**, 470 ticks after the boundary
+  and **6 frames after the reference's 8,521**. Phase 9 Task 6b made the
+  restart keep MUSIC0's channel volumes, as `_zplaysong` does (D45): MUSIC1's
+  order 0 then takes its row-3 `C00` and lasts 4 rows, not 64, and the restart
+  publishes `1:0` at 8,087. Before it the wait ended at 8,770, 713 ticks after
+  the boundary and 249 frames late. The 6 frames left are the restarted
+  clock's (D34's four-tick wait from the boundary; `music-clock.md`); **A38**
+  carries the measured values and the commands, not a fitted start.
 - **The block-2 wait against `second2b`.** The reference exits at **1,111**
   (`2:45`); the port's position is `2:44` through 1,116 and `2:45` at
   **1,117**, six ticks later — a session-phase difference of A12's class,

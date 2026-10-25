@@ -52,10 +52,19 @@ fn player(name: &'static str) -> Player {
 /// The original's segment image, rebuilt from the object's own records.
 ///
 /// `0xA0` is `LEDATA` (a segment offset and its bytes), `0xA2` is `LIDATA` (the same, with the
-/// data written as repeated blocks — an iterated block being a two-byte count and that many
-/// bytes, or a count of zero and a nested repeat). The object carries 105 `LEDATA` and 118
-/// `LIDATA` records and they tile one 29,607-byte segment with no gaps, which is what
-/// `sr-assets`'s symbol map records as `text_stmik300_text`'s length.
+/// data written as iterated blocks). An iterated block is a two-byte **repeat count**, a
+/// two-byte **block count** and then either, for a block count of zero, a one-byte length and
+/// that many bytes, or that many nested blocks — the whole repeated `repeat` times. The object
+/// carries 105 `LEDATA` and 118 `LIDATA` records and they tile one 29,607-byte segment with no
+/// gaps, which is what `sr-assets`'s symbol map records as `text_stmik300_text`'s length.
+///
+/// **This builder read the block wrongly until Phase 9 Task 6b**: it took the block count for a
+/// byte count and so copied the nested block's repeat count's low byte — `0x01` in every one of
+/// the object's 118 records — in place of the data. The image still tiled, because the lengths
+/// were right, and the claims below passed, because every one of them is in `LEDATA`, except
+/// two: `+0x5628`'s and `+0x5630`'s four-byte immediates are `LIDATA` runs of `0x00` and were
+/// read as `0x01010101`. `a_boot_starts_on_the_objects_zeroed_channels` is the test that found
+/// it (`_zchn` read `0x01` in every byte).
 fn segment_image() -> Vec<u8> {
     let object = std::fs::read("../../upstream/SecondReality/MAIN/STMIK.300")
         .expect("the vendored original's player object");
@@ -79,16 +88,16 @@ fn segment_image() -> Vec<u8> {
                 let offset = word(body, 1) as usize;
                 place(offset, &body[3..body.len() - 1]);
             }
-            0xA2 if body.len() >= 5 && body[0] == 1 => {
+            0xA2 if body.len() >= 7 && body[0] == 1 => {
                 let offset = word(body, 1) as usize;
-                let repeat = word(body, 3) as usize;
+                // The blocks run to the checksum byte that ends the record.
                 let mut data = Vec::new();
-                iterated(body, 5, &mut data, 0);
-                let mut all = Vec::with_capacity(data.len() * repeat);
-                for _ in 0..repeat {
-                    all.extend_from_slice(&data);
+                let mut at = 3;
+                while at < body.len() - 1 {
+                    at = iterated(body, at, &mut data, 0);
                 }
-                place(offset, &all);
+                assert_eq!(at, body.len() - 1, "LIDATA at 0x{offset:04X}: the blocks overrun");
+                place(offset, &data);
             }
             _ => {}
         }
@@ -102,20 +111,27 @@ fn segment_image() -> Vec<u8> {
     image
 }
 
-/// One iterated block of a `LIDATA` record, appended to `out`.
-fn iterated(body: &[u8], at: usize, out: &mut Vec<u8>, depth: usize) {
+/// One iterated block of a `LIDATA` record at `at`, appended to `out`; returns the offset just
+/// past it. The layout is the OMF one `segment_image`'s comment gives.
+fn iterated(body: &[u8], at: usize, out: &mut Vec<u8>, depth: usize) -> usize {
     assert!(depth < 8, "LIDATA nesting deeper than the format allows");
-    let count = u16::from_le_bytes([body[at], body[at + 1]]) as usize;
-    if count != 0 {
-        out.extend_from_slice(&body[at + 2..at + 2 + count]);
-        return;
-    }
-    let repeat = u16::from_le_bytes([body[at + 2], body[at + 3]]) as usize;
+    let word = |at: usize| u16::from_le_bytes([body[at], body[at + 1]]) as usize;
+    let (repeat, blocks) = (word(at), word(at + 2));
     let mut block = Vec::new();
-    iterated(body, at + 4, &mut block, depth + 1);
+    let mut next = at + 4;
+    if blocks == 0 {
+        let length = usize::from(body[next]);
+        block.extend_from_slice(&body[next + 1..next + 1 + length]);
+        next += 1 + length;
+    } else {
+        for _ in 0..blocks {
+            next = iterated(body, next, &mut block, depth + 1);
+        }
+    }
     for _ in 0..repeat {
         out.extend_from_slice(&block);
     }
+    next
 }
 
 /// Where the seven published words live in the object (`cargo xtask music symbols` prints the
@@ -368,13 +384,13 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         ),
         (
             0x095C,
-            &[0x00, 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x01, 0x01],
-            "the Q volume addends at `+0x95c`",
+            &[0x00, 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00],
+            "the Q volume addends at `+0x95c` (the last two are a `LIDATA` run of zeroes)",
         ),
         (
             0x096C,
-            &[0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x0A, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x18, 0x20],
-            "the Q volume multipliers at `+0x96c` — `0x0101` filler but for 6, 7, 14 and 15",
+            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x20],
+            "the Q volume multipliers at `+0x96c` — zero (`LIDATA` runs) but for 6, 7, 14 and 15",
         ),
         (
             0x1FA0,
@@ -663,8 +679,8 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         ),
         (
             0x4922,
-            &[0x66, 0xC7, 0x44, 0x5C, 0x01, 0x01, 0x01, 0x01, 0x89, 0x44, 0x44, 0x33],
-            "movl $0x1010101,0x5c(%si); mov %ax,0x44(%si) — m_pos takes the O offset",
+            &[0x66, 0xC7, 0x44, 0x5C, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x44, 0x44, 0x33],
+            "movl $0xffffffff,0x5c(%si); mov %ax,0x44(%si) — the shadow is invalidated, m_pos takes the O offset",
         ),
         (
             0x4938,
@@ -788,7 +804,7 @@ fn the_objects_own_bytes_say_what_the_player_says() {
             "movb $0x1,0x93a; cmp $0xff,%al (B, and BFF)",
         ),
         // The channel initialiser and the mixer's shadow of the position: the offsets
-        // `effects.rs`'s `Channel::reset` doc names, asserted rather than described. Two
+        // `effects.rs`'s `Channel::initialise` doc names, asserted rather than described. Two
         // labels in that doc were wrong for a round (`+0x5625` called a zero, `+0x5630` called
         // `m_base`) and nothing here would have caught them; these twelve entries are that gap.
         (
@@ -798,13 +814,13 @@ fn the_objects_own_bytes_say_what_the_player_says() {
         ),
         (
             0x5628,
-            &[0x66, 0xC7, 0x44, 0x44, 0x01, 0x01, 0x01, 0x01],
-            "movl $0x1010101,0x44(%si) — the marker goes into `m_pos`",
+            &[0x66, 0xC7, 0x44, 0x44, 0x00, 0x00, 0x00, 0x00],
+            "movl $0x0,0x44(%si) — `m_pos` is zeroed (the immediate is a `LIDATA` run of zeroes)",
         ),
         (
             0x5630,
-            &[0x66, 0xC7, 0x44, 0x5C, 0x01, 0x01, 0x01, 0x01],
-            "and into +0x5c — the mixer's shadow, not `m_base`",
+            &[0x66, 0xC7, 0x44, 0x5C, 0x00, 0x00, 0x00, 0x00],
+            "and +0x5c — the mixer's shadow, not `m_base` — zeroed too",
         ),
         (
             0x5641,
@@ -1043,13 +1059,13 @@ fn the_objects_own_bytes_say_what_the_player_says() {
 /// body is decoded instruction by instruction and the displacements collected (the first,
 /// `88 5c 03`, stores `bl` — the channel's own index — into `channelnum`).
 ///
-/// It writes `achannelused` (`+0x01`) as **`0x80`** — the channel is walked — and `lastins`
-/// (`+0x37`) as 0; it never writes `avol` (`+0x1a`) or `a0volcut` (`+0x31`). A seek made
-/// mid-song (`restartmus`'s `_zplaysong`, `MAIN/U2.ASM:394`) therefore keeps the previous
-/// module's channel volumes, and with `lastins` 0 a note-off returns at `+0x48ce` before it
-/// can zero one. That is what decides MUSIC1's order 0 in block 1
-/// (`docs/fidelity/APPROXIMATIONS.md` A38's Phase 9 lead): the port's `Channel::reset`
-/// zeroes all three, as a fresh boot's memory is.
+/// It writes `achannelused` (`+0x01`) as **`0x80`** — which the `+0x5781` the initialiser ends
+/// with clears again — and `lastins` (`+0x37`) as 0; it never writes `avol` (`+0x1a`) or
+/// `a0volcut` (`+0x31`). A seek made mid-song (`restartmus`'s `_zplaysong`, `MAIN/U2.ASM:394`)
+/// therefore keeps the previous module's channel volumes, and with `lastins` 0 a note-off
+/// returns at `+0x48ce` before it can zero one. That is what decides MUSIC1's order 0 in block
+/// 1 (`docs/fidelity/APPROXIMATIONS.md` A38): the port's `Channel::initialise` keeps both, as
+/// `the_song_initialiser_writes_exactly_what_initialise_writes` checks for every field.
 #[test]
 fn the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown() {
     let image = segment_image();
@@ -1084,6 +1100,220 @@ fn the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown() {
     assert!(!written.contains_key(&0x1A), "avol is never written");
     assert!(!written.contains_key(&0x31), "a0volcut is never written");
     println!("the initialiser writes {:x?}", written.keys().collect::<Vec<_>>());
+}
+
+/// The song initialiser's stores, decoded from the object: the loop body `+0x5625`…`+0x5684`,
+/// the silence pass `+0x56a6`…`+0x56b1` that `+0x56bc` calls after it, and `+0x5781`'s
+/// `andb $0x7f,0x1(%si)` (`+0x5791`), which the initialiser itself ends with. Each byte of the
+/// 0x60-byte channel struct that a store reaches maps to the value it leaves there.
+fn initialiser_stores() -> BTreeMap<u8, u8> {
+    let image = segment_image();
+    let mut stored: BTreeMap<u8, u8> = BTreeMap::new();
+    let mut decode = |from: usize, to: usize| {
+        let mut at = from;
+        while at < to {
+            // `ax` is zero through the loop (`xor %ax,%ax` at `+0x561b`), so a register store is
+            // a zero; `bl`, `channelnum`'s source, is the channel's own index — set apart here.
+            let si = |modrm: u8| modrm & 0xC7 == 0x44;
+            let (displacement, length, values) = match image[at..at + 3] {
+                [0x88, 0x5C, d] => (d, 3, vec![0xEE]),
+                [0x88, modrm, d] if si(modrm) => (d, 3, vec![0]),
+                [0x89, modrm, d] if si(modrm) => (d, 3, vec![0, 0]),
+                [0xC6, 0x44, d] => (d, 4, vec![image[at + 3]]),
+                [0x66, 0xC7, 0x44] => (image[at + 3], 8, image[at + 4..at + 8].to_vec()),
+                _ => panic!("0x{at:04X}: not one of the initialiser's store encodings"),
+            };
+            for (byte, value) in values.into_iter().enumerate() {
+                stored.insert(displacement + byte as u8, value);
+            }
+            at += length;
+        }
+        assert_eq!(at, to, "the stores decode to their end");
+    };
+    decode(0x5625, 0x5685);
+    assert_eq!(&image[0x56A2..0x56A6], &[0xBE, 0xA0, 0x0D, 0xFA], "the silence pass walks `_zchn`");
+    decode(0x56A6, 0x56B2);
+    assert_eq!(
+        &image[0x578B..0x5795],
+        &[0xF6, 0x44, 0x01, 0x80, 0x74, 0x0B, 0x80, 0x64, 0x01, 0x7F],
+        "`+0x5781`: testb $0x80,0x1(%si); je; andb $0x7f,0x1(%si)"
+    );
+    let used = stored.get_mut(&0x01).expect("achannelused is stored");
+    *used &= 0x7F;
+    stored
+}
+
+/// **A restart writes exactly what the song initialiser writes, and keeps the rest** (Phase 9
+/// Task 6b, D45): `Channel::initialise` against the stores the object's own bytes make.
+///
+/// Every field of the port's channel is given a value no store leaves, the initialiser is run,
+/// and each field must then hold the store's value if any of its bytes is stored to, and its own
+/// value if none is. A field the port keeps that the object writes — or the other way round —
+/// fails here by name.
+#[test]
+fn the_song_initialiser_writes_exactly_what_initialise_writes() {
+    use sr_audio::Channel;
+    let stored = initialiser_stores();
+    println!("the initialiser stores to {:x?}", stored.keys().collect::<Vec<_>>());
+
+    let before = Channel {
+        used: true,
+        aequ: 0x11,
+        volume: 0x2a,
+        org_volume: 0x13,
+        period: 0x1414,
+        target_period: 0x1515,
+        c2spd: 0x1616,
+        org_period: 0x1717,
+        vibrato_position: 0x1818,
+        last_effect1: 0x19,
+        last_effect2: 0x1a,
+        tremor_on: true,
+        retrigger_count: 0x1b,
+        tremor_count: 0x1c,
+        zero_volume_count: 0x1d,
+        note: 0x1e,
+        instrument: 0x1f,
+        cell_volume: 0x20,
+        command: 0x21,
+        info: 0x22,
+        last_instrument: 0x23,
+        last_note: 0x24,
+        last_info: 0x25,
+        waveform: 0x26,
+        clear_count: 0x27,
+        sample_offset: 0x2828_0000,
+        position: 0x2929_2929,
+        position_low: 0x3030,
+    };
+    let mut after = before;
+    after.initialise();
+
+    // (field, offset, width in the object's struct, the port's value as a number)
+    type Read = fn(&Channel) -> u64;
+    let fields: [(&str, u8, u8, Read); 28] = [
+        ("used (achannelused)", 0x01, 1, |c| u64::from(c.used)),
+        ("aequ", 0x02, 1, |c| u64::from(c.aequ)),
+        ("sample_offset (aadr's high word)", 0x06, 2, |c| u64::from(c.sample_offset >> 16)),
+        ("period (aspd)", 0x12, 2, |c| u64::from(c.period)),
+        ("volume (avol)", 0x1a, 1, |c| u64::from(c.volume)),
+        ("target_period (asldspd)", 0x20, 2, |c| u64::from(c.target_period)),
+        ("c2spd (ac2spd)", 0x22, 2, |c| u64::from(c.c2spd)),
+        ("org_period (aorgspd)", 0x24, 2, |c| u64::from(c.org_period)),
+        ("vibrato_position (avibcnt)", 0x26, 2, |c| u64::from(c.vibrato_position)),
+        ("org_volume (aorgvol)", 0x2a, 1, |c| u64::from(c.org_volume)),
+        ("last_effect1 (alasteff1)", 0x2b, 1, |c| u64::from(c.last_effect1)),
+        ("last_effect2 (alasteff2)", 0x2c, 1, |c| u64::from(c.last_effect2)),
+        ("tremor_on (atreon)", 0x2d, 1, |c| u64::from(c.tremor_on)),
+        ("retrigger_count (atrigcnt)", 0x2e, 1, |c| u64::from(c.retrigger_count)),
+        ("tremor_count (atremor)", 0x2f, 1, |c| u64::from(c.tremor_count)),
+        ("zero_volume_count (a0volcut)", 0x31, 1, |c| u64::from(c.zero_volume_count)),
+        ("note", 0x32, 1, |c| u64::from(c.note)),
+        ("instrument (ins)", 0x33, 1, |c| u64::from(c.instrument)),
+        ("cell_volume (vol)", 0x34, 1, |c| u64::from(c.cell_volume)),
+        ("command (cmd)", 0x35, 1, |c| u64::from(c.command)),
+        ("info", 0x36, 1, |c| u64::from(c.info)),
+        ("last_instrument (lastins)", 0x37, 1, |c| u64::from(c.last_instrument)),
+        ("last_note (lastnote)", 0x38, 1, |c| u64::from(c.last_note)),
+        ("last_info (alastnfo)", 0x39, 1, |c| u64::from(c.last_info)),
+        ("waveform (vibtretype)", 0x3d, 1, |c| u64::from(c.waveform)),
+        ("clear_count (a0clearcnt)", 0x3e, 1, |c| u64::from(c.clear_count)),
+        ("position_low (m_poslow)", 0x42, 2, |c| u64::from(c.position_low)),
+        ("position (m_pos)", 0x44, 4, |c| u64::from(c.position)),
+    ];
+    let mut kept = Vec::new();
+    for (name, offset, width, read) in fields {
+        let bytes: Vec<Option<u8>> = (offset..offset + width).map(|b| stored.get(&b).copied()).collect();
+        if bytes.iter().all(Option::is_none) {
+            assert_eq!(read(&after), read(&before), "{name} (+0x{offset:02x}): no store, so it is kept");
+            kept.push(name);
+        } else {
+            let value = bytes
+                .iter()
+                .rev()
+                .fold(0u64, |acc, byte| (acc << 8) | u64::from(byte.expect("a whole field is stored")));
+            assert_eq!(read(&after), value, "{name} (+0x{offset:02x}): the store's value");
+        }
+    }
+    println!("kept across a restart: {kept:?}");
+    assert_eq!(
+        kept,
+        [
+            "aequ",
+            "sample_offset (aadr's high word)",
+            "volume (avol)",
+            "c2spd (ac2spd)",
+            "tremor_on (atreon)",
+            "retrigger_count (atrigcnt)",
+            "tremor_count (atremor)",
+            "zero_volume_count (a0volcut)",
+            "waveform (vibtretype)",
+            "clear_count (a0clearcnt)",
+            "position_low (m_poslow)",
+        ]
+    );
+}
+
+/// **A restart keeps the previous module's channel volumes and clears `lastins`** (D45): block
+/// 1's GLENZ restart, `restartmus(1, 0)` at the port's boundary 8,057 (`MAIN/U2.ASM:813-818`),
+/// on block 1's MUSIC0 from its anchor 400 (`second1`'s, the port's
+/// `BLOCK_ONE_MUSIC_START_FRAME`). Channel 2 is at 63 when MUSIC0 hands over, and the restarted
+/// MUSIC1 still has it — where a fresh player, a boot, has 0.
+#[test]
+fn a_restart_keeps_the_previous_songs_volume_and_clears_lastins() {
+    let mut music0 = player("MUSIC0");
+    music0.play_song(0);
+    for _ in 400..8_057 {
+        music0.poll();
+    }
+    let handed = *music0.channel(2).unwrap();
+    println!("MUSIC0's channel 2 at 8,057: {handed:?}, zframe {}", music0.zframe());
+    assert_eq!(handed.volume, 63, "MUSIC0's channel 2 is sounding");
+    assert_ne!(handed.last_instrument, 0, "and has loaded an instrument");
+
+    let mut music1 = player("MUSIC1");
+    music1.continue_from(&music0);
+    music1.play_song(0);
+    let restarted = *music1.channel(2).unwrap();
+    assert_eq!(restarted.volume, 63, "`avol` is kept");
+    assert_eq!(restarted.zero_volume_count, handed.zero_volume_count, "and `a0volcut`");
+    assert_eq!(restarted.last_instrument, 0, "`lastins` is cleared");
+    assert!(!restarted.used, "`achannelused` is 0 after `+0x5781`");
+    assert_eq!(music1.zframe(), music0.zframe(), "`_np_zframe` is kept");
+    for index in 0..CHANNELS {
+        let (old, new) = (music0.channel(index).unwrap(), music1.channel(index).unwrap());
+        let mut expected = *old;
+        expected.initialise();
+        assert_eq!(new, &expected, "channel {index}: the old channel, initialised");
+    }
+
+    let mut boot = player("MUSIC1");
+    boot.play_song(0);
+    assert_eq!(boot.channel(2).unwrap().volume, 0, "a boot's channel 2 is silent");
+}
+
+/// **A boot is the first `_zplaysong`, onto the object's initial state** — and that state is
+/// zero wherever the song initialiser does not write (Phase 9 Task 6b, D45).
+///
+/// Every boot path reaches its first `_zplaysong` with no tick in between: `_zinit`
+/// (`MAIN/U2.ASM:747`), the boot's `restartmus` and its `_zinitmodule`, then `_zsoundon` and
+/// `_zplaysong(0)` (`:776-786`) — `zpollmix` is not set until `:783`, so nothing has mixed or
+/// ticked. What a boot's channels hold, then, is the object's own image wherever
+/// `+0x5614` does not store. The image's `_zchn` (`+0x0da0`, 48 × 0x60 bytes), the loop
+/// counter `[0x90b]`, `_np_zframe` (`+0x8fb`), the ring (`+0x2150`, 256 bytes), its two
+/// pointers (`+0x214c`, `+0x214e`) and the fed words (`+0x905`…`+0x90e`) are all zero — which
+/// is `Player::new`'s state, so a boot is a fresh player and the port's boots (`second2b`,
+/// `second1`) do not move.
+#[test]
+fn a_boot_starts_on_the_objects_zeroed_channels() {
+    let image = segment_image();
+    let zeroed = |from: usize, length: usize| image[from..from + length].iter().all(|&b| b == 0);
+    assert!(zeroed(0x0da0, 48 * 0x60), "`_zchn`, every byte of the 48 channels");
+    assert!(zeroed(0x090b, 2), "the loop counter [0x90b]");
+    assert!(zeroed(0x08fb, 2), "`_np_zframe`");
+    assert!(zeroed(0x2150, 0x100), "the ring");
+    assert!(zeroed(0x214c, 4), "its read and write pointers, before `_zinit` primes them");
+    assert!(zeroed(0x0905, 10), "the words a row advance feeds it");
 }
 
 // -------------------------------------------------------------------------------------------

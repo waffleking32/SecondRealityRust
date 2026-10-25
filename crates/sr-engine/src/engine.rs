@@ -132,7 +132,7 @@ impl Engine {
     ///
     /// Installing a player also arms the mid-chain seam: the **next**
     /// [`start`](Engine::start) is the part the install was for — a run's
-    /// entry part, or the mid-chain part a restart site installs a fresh
+    /// entry part, or the mid-chain part a restart site installs a new
     /// player for (`MAIN/U2.ASM:880-885`'s call before `partexecute`) — so
     /// that init context reports [`PartCtx::music_fresh`] as `true`; every
     /// later part in the chain reports `false`. Calling this again re-arms it.

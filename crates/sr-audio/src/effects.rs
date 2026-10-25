@@ -36,11 +36,11 @@
 //!    effect is measured in that unit, and [`period_step`] is what the mixer will turn it
 //!    back into (`8363 × 1712/period`, the object's `+0x582b`).
 //!
-//! 5. **The waveform tables' zero slots are the object image's filler.** The `Q` multiplier
-//!    table at `+0x96c` carries real bytes only where it is not zero; everywhere else the
-//!    image holds `0x0101`, the filler these objects use for slots the program clears before
-//!    it runs (`docs/fidelity/music.md` §8, `_np_zframe` and `_zspeedadjust` read the same
-//!    way). At runtime those slots are zero, which is what sends the codes that are not
+//! 5. **The `Q` tables' zero slots are zero in the object.** The multiplier table at `+0x96c`
+//!    is non-zero only for codes 6, 7, 14 and 15; its other slots, and the addend table's last
+//!    two, are `LIDATA` runs of `0x00`. (Until Phase 9 Task 6b `tests/player.rs` decoded every
+//!    `LIDATA` run as `0x01`, and this note called them `0x0101` filler cleared at runtime; the
+//!    value the port uses was zero either way.) The zero is what sends the codes that are not
 //!    multipliers down the addend path — see [`Channel::retrigger`].
 
 /// One channel's tracker state: the fields of `struct st_zchn` (`MAIN/STMIK.H:203-258`) that
@@ -150,39 +150,76 @@ pub struct Channel {
 }
 
 impl Channel {
-    /// A channel, left the way the port starts one: every field zero and [`Channel::used`]
-    /// false — the part of the module initialiser (`+0x5614`, which `_zplaysong` calls at
-    /// `+0x258e`) that any Task 4 assertion can observe.
+    /// What `_zplaysong`'s song initialiser writes into a channel (`+0x5614`, called at
+    /// `+0x5716` from the routine `_zplaysong` calls at `+0x258e`; `_zinitmodule` and
+    /// `_zshutup` call the same routine), and **only** that: every field it does not store
+    /// keeps the value it had (Phase 9 Task 6b, D45).
     ///
-    /// **The object's own writes are wider than that, and Task 5's mixer will meet them**, so
-    /// they are named against the fields it actually writes:
+    /// The stores are `+0x5625`…`+0x5681`'s loop body, then the silence pass at `+0x569a`
+    /// and `+0x5781`, which both routines end with. `ax` is zero throughout (`+0x561b`).
+    /// In the port's fields:
     ///
-    /// - `+0x5625`, `mov %bl,0x3(%si)` — `channelnum` takes **the channel's own index** (`bl` is
-    ///   the loop counter the initialiser increments per channel), not zero.
-    /// - `+0x5628` writes the marker **`0x01010101`** into `m_pos` (`+0x44`), and `+0x5630`
-    ///   writes it into **`+0x5c`** — which is not `m_base`: it is the word the mixer keeps as
-    ///   its *shadow of the position* (`+0x6fb8` reads `+0x5c` and compares it with `+0x44`;
-    ///   `+0x6fc7` rewrites it). `m_base` is `+0x58`, the same initialiser **zeroes** it —
-    ///   both words, `+0x5641` and `+0x5644` — and it is the sample base (`0x708c`:
-    ///   `mov 0x58(%si),%cx; shl $0xe,%ecx`).
-    /// - `lastadlins` (`+0x3a`) is set to `0x65` (`+0x5681`); the cell fields and the
-    ///   remembered parameters *are* zeroed (the words at `+0x2b`, `avibcnt` at `+0x26`,
-    ///   `aorgvol` at `+0x2a`, `alastnfo` at `+0x39`), but the effect counters — `atreon`
-    ///   (`+0x2d`), `atrigcnt` (`+0x2e`), `atremor` (`+0x2f`), `avslide` (`+0x30`) and
-    ///   `a0volcut` (`+0x31`) — are left as they were: the initialiser writes none of them,
-    ///   and neither does the silence pass that follows it (`+0x569a`), which writes `0xff`
-    ///   into `+0x04` and `+0x3f` and 0 into `+0x41`.
+    /// | field | offset | store |
+    /// |---|---|---|
+    /// | [`used`](Channel::used) | `+0x01` | `movb $0x80` (`+0x564d`), then `+0x5781`'s `andb $0x7f` (`+0x5791`), so 0 |
+    /// | [`period`](Channel::period) | `+0x12` | `+0x5678` |
+    /// | [`target_period`](Channel::target_period) | `+0x20` | `+0x5675` |
+    /// | [`org_period`](Channel::org_period) | `+0x24` | `+0x5666` |
+    /// | [`vibrato_position`](Channel::vibrato_position) | `+0x26` | `+0x566c` |
+    /// | [`org_volume`](Channel::org_volume) | `+0x2a` | `+0x5669` |
+    /// | [`last_effect1`](Channel::last_effect1), [`last_effect2`](Channel::last_effect2) | `+0x2b`, `+0x2c` | one word, `+0x5672` |
+    /// | [`note`](Channel::note) | `+0x32` | `+0x5654` — 0, not the row reset's `0xff` |
+    /// | [`instrument`](Channel::instrument) | `+0x33` | `+0x5651` |
+    /// | [`cell_volume`](Channel::cell_volume) | `+0x34` | `+0x5657` — 0, not `0xff` |
+    /// | [`command`](Channel::command), [`info`](Channel::info) | `+0x35`, `+0x36` | `+0x565a`, `+0x565d` |
+    /// | [`last_instrument`](Channel::last_instrument) | `+0x37` | `+0x567e` |
+    /// | [`last_note`](Channel::last_note) | `+0x38` | `+0x5660`, `+0x567b` |
+    /// | [`last_info`](Channel::last_info) | `+0x39` | `+0x566f` |
+    /// | [`position`](Channel::position) | `+0x44` | `movl $0x0` (`+0x5628`) |
     ///
-    /// Every store named above is an entry in `tests/player.rs`'s claims table (`+0x5625`,
-    /// `+0x5628`, `+0x5630`, `+0x5641`, `+0x5644`, `+0x5681`, the silence pass's three at
-    /// `+0x56a6`, and the mixer's `+0x6fb8`, `+0x6fc7` and `0x708c`), so a wrong label here
-    /// fails a test rather than surviving a review round.
+    /// **Kept**, because no store names them: [`aequ`](Channel::aequ) (`+0x02`),
+    /// [`sample_offset`](Channel::sample_offset) (`aadr`'s high word, `+0x06`),
+    /// [`volume`](Channel::volume) (`avol`, `+0x1a`), [`c2spd`](Channel::c2spd) (`+0x22`),
+    /// [`tremor_on`](Channel::tremor_on) (`+0x2d`), [`retrigger_count`](Channel::retrigger_count)
+    /// (`+0x2e`), [`tremor_count`](Channel::tremor_count) (`+0x2f`),
+    /// [`zero_volume_count`](Channel::zero_volume_count) (`a0volcut`, `+0x31`),
+    /// [`waveform`](Channel::waveform) (`+0x3d`), [`clear_count`](Channel::clear_count)
+    /// (`+0x3e`) and [`position_low`](Channel::position_low) (`m_poslow`, `+0x42`).
     ///
-    /// None of it is reachable by a Task 4 assertion — the position a note start writes
-    /// replaces the marker — so the port carries none of it, and the mixer decides for itself
-    /// what to make of a channel that has never played a note.
-    pub(crate) fn reset(&mut self) {
-        *self = Channel::default();
+    /// The object's other stores go to words the port does not keep in this struct:
+    /// `channelnum` (`+0x03`, the loop's own index, `+0x5625`), `+0x1b`, `lastadlins` (`+0x3a`,
+    /// `0x65`), the silence pass's `+0x04` and `+0x3f` (`0xff`), and the mixer's half — `m_vol`
+    /// (`+0x41`), `m_end` (`+0x48`/`+0x4a`), `m_speed` (`+0x50`/`+0x52`), `m_base`
+    /// (`+0x58`/`+0x5a`; the sample base, `0x708c`: `mov 0x58(%si),%cx; shl $0xe,%ecx`) and
+    /// the mixer's shadow of the position, `+0x5c` (`+0x6fb8` compares it with `m_pos`,
+    /// `+0x6fc7` rewrites it) — which `Mixer::reset` clears. Every store and mixer read named
+    /// here is an entry in `tests/player.rs`'s claims table, and that file's
+    /// `the_song_initialiser_writes_exactly_what_initialise_writes` decodes the stores from the
+    /// object and checks this table against them, field by field.
+    ///
+    /// **On a boot this is a fresh channel**: the object's own `_zchn` is zero in every byte
+    /// (`tests/player.rs`'s `a_boot_starts_on_the_objects_zeroed_channels`), so the kept fields
+    /// are [`Channel::default`]'s zeroes. **On a mid-song restart it is not**: `restartmus`
+    /// (`MAIN/U2.ASM:348-397`) reaches it with the previous module's channels, and their volumes
+    /// and countdowns are what the new song's first rows see ([`crate::Player::continue_from`]).
+    pub fn initialise(&mut self) {
+        self.used = false;
+        self.period = 0;
+        self.target_period = 0;
+        self.org_period = 0;
+        self.vibrato_position = 0;
+        self.org_volume = 0;
+        self.last_effect1 = 0;
+        self.last_effect2 = 0;
+        self.note = 0;
+        self.instrument = 0;
+        self.cell_volume = 0;
+        self.command = 0;
+        self.info = 0;
+        self.last_instrument = 0;
+        self.last_note = 0;
+        self.last_info = 0;
+        self.position = 0;
     }
 
     /// The row reset (`+0x46a4`): note `0xff`, volume `0xff`, instrument, command and info 0,
@@ -632,9 +669,8 @@ impl Channel {
     /// variation of the pair of tables at `+0x95c`/`+0x96c`: `x`'s *multiplier* if it has one
     /// (only 6, 7, 14 and 15 do: ×10/16, ×8/16, ×24/16 and ×32/16), otherwise `x`'s signed
     /// addend — 0, -1, -2, -4, -8, -16 for 0…5 and +1, +2, +4, +8, +16 for 9…13. The
-    /// multiplier table's zero slots are the object image's `0x0101` filler (see this module's
-    /// header, point 5), which at runtime is 0 — and that zero is what sends those codes down
-    /// the addend path. A zero info repeats the channel's `last_info` (`+0x41f0`).
+    /// multiplier table's zero slots (this module's header, point 5) are what send those codes
+    /// down the addend path. A zero info repeats the channel's `last_info` (`+0x41f0`).
     pub(crate) fn retrigger(&mut self, info: u8) {
         let info = if info != 0 {
             info
@@ -787,13 +823,12 @@ const NOTE_SHIFTS: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 5, 11, 17, 27, 32, 42,
 /// The `Q` volume-variation addends at `+0x95c`, signed — with the same reading of the image
 /// applied as the multipliers below: 6, 7, 14 and 15 are the codes that take the *multiply*
 /// path (the only ones whose multiplier is not zero), and code 8's addend is a real zero byte of
-/// its own. Every slot a code that *does* take this path can reach — 0…5, 8 and 9…13 — is a
-/// real byte of the image; the image's `0x0101` filler sits in the last two slots, 14 and 15,
-/// which are the multiply codes' and are never read here.
+/// its own. The last two slots, 14 and 15, are zero too and belong to multiply codes, so they
+/// are never read here.
 const RETRIGGER_ADD: [i8; 16] = [0, -1, -2, -4, -8, -16, 0, 0, 0, 1, 2, 4, 8, 16, 0, 0];
 
-/// The `Q` volume-variation multipliers at `+0x96c`, in sixteenths — with the object image's
-/// `0x0101` filler slots read as the runtime zeroes they are.
+/// The `Q` volume-variation multipliers at `+0x96c`, in sixteenths; the zero slots are zero
+/// bytes of the object.
 const RETRIGGER_MULTIPLY: [u8; 16] = [0, 0, 0, 0, 0, 0, 10, 8, 0, 0, 0, 0, 0, 0, 24, 32];
 
 #[cfg(test)]

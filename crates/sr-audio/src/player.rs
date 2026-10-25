@@ -345,9 +345,12 @@ impl Player {
     /// `+0x259a`, so the player ends up *ticking with no new order entered* — the old pattern
     /// still playing, the position where it was. That is what the port does too.
     ///
-    /// That routine also **clears every channel** (`+0x5614`, called at `+0x5716`): the period,
-    /// the volume, the remembered parameters, the vibrato position and the cell fields all go
-    /// back to zero, so a seek is a fresh start for the effects too.
+    /// That routine also **runs the song initialiser on every channel** (`+0x5614`, called at
+    /// `+0x5716`; [`Channel::initialise`]): the period, the remembered parameters, the vibrato
+    /// position, `lastins` and the cell fields go back to zero — **and the volume `avol`, its
+    /// "volume 0" countdown `a0volcut` and the effect counters do not**, because no store in
+    /// the routine names them. On a fresh player those are zero (a boot, D45); after
+    /// [`Player::continue_from`] they are the previous song's.
     ///
     /// **And it clears `[0x2000]`, the tick-in-row counter** (`+0x56ec`, `movw $0x0,0x2000` —
     /// the routine's own first instruction). The port mirrors it, because the shell's restarts
@@ -360,7 +363,7 @@ impl Player {
         // `+0x56ec`: the counter is zeroed first, before anything else the routine does.
         self.tick_in_row = 0;
         for channel in &mut self.channels {
-            channel.reset();
+            channel.initialise();
         }
         // `+0x5614` clears each channel's mixer half too — `m_base` at `+0x5641`/`+0x5644` —
         // so a seek is a fresh start for the voices as well as for the effects.
@@ -368,7 +371,9 @@ impl Player {
         self.loop_order = 0;
         self.next_order = u16::from(order);
         self.pending_row = 0;
-        self.loops = 0;
+        // `+0x5705` zeroes the published `_np_loop` (`[0x903]`); the counter it is republished
+        // from at every poll, `[0x90b]` (`+0x52c2`), is written by nothing but the `255` path's
+        // `incw` (`+0x4481`), so `loops` is left as it is (0 on every filed run).
         self.pub_loop = 0;
         self.published.row = 0;
         // The row and the pattern are zeroed by that same routine (`+0x5702`, `+0x5708`) and
@@ -383,6 +388,59 @@ impl Player {
         self.at_end = false;
         self.enter_order();
         self.running = true;
+    }
+
+    /// Take over the state `restartmus` leaves in the object when it replaces `previous`'s
+    /// module with this one (`MAIN/U2.ASM:348-397`; D45). Call it on the freshly loaded player
+    /// and **before** [`Player::play_song`], which then writes what the song initialiser writes
+    /// over it.
+    ///
+    /// The object is one player, not one per module. `restartmus` runs `_zstopsong`
+    /// (`+0x25c5`: `[0x939] = 0`, nothing else), `_zshutup` (`+0x25e3`: the song initialiser
+    /// `+0x5614`, a DMA-buffer clear `+0x2922`, `[0x938] = 0`), then the loader's
+    /// `_zinitmodule` (`+0x2400`: `+0x56bc`, which ends in the initialiser, and the instrument
+    /// loads) and `_zplaysong(order)` (`+0x2555`: the header watch `+0x5424`, `+0x56bc` again,
+    /// the order advance). Every one of those writes what [`Channel::initialise`] writes and
+    /// nothing more into a channel, so a restart keeps, per channel, `avol`, `a0volcut`, the
+    /// effect counters and the other fields that table lists as kept. Globally it keeps:
+    ///
+    /// - the loop counter `[0x90b]`, which only the `255` path writes (`+0x4481`);
+    /// - `_np_zframe` (`+0x8fb`), which only the *playing* tick increments (`+0x4357`) — the
+    ///   reload's ticks take the stopped path (`+0x515f` → `+0x4404`) — and which every part
+    ///   that reads it sets first (`GLENZ/MAIN.C:291`, `PLZPART/PLZ.C:69`, `TECHNO/KOE.C:214`).
+    ///
+    /// Everything else is the new module's, as [`Player::new`] reads it: the speed, tempo and
+    /// global volume (the header watch's cached bytes are reset at `+0x5424` so all three are
+    /// read again), the master flags and the vibrato shift (both modules' flags word is 8).
+    ///
+    /// **Two pieces of global state the object also keeps are not carried, because what the
+    /// original puts in them happens during the reload, which the port does not have** (A53:
+    /// the original spends 59–68 frames reloading at U2E, the port none; A55):
+    ///
+    /// - **the position ring, its pointers and the fed words** (`+0x2150`, `+0x214c`,
+    ///   `[0x905]`…`[0x90e]`). Only `_zinit` primes the ring (`+0x2a8f`, called once at
+    ///   `+0x2390`), and the poll pushes and pops it whether a song is running or not
+    ///   (`+0x52c9`; the `[0x938]` test at `+0x5228` gates only the mixing) — but every tick of
+    ///   a *stopped* song (`+0x515f` → `+0x4404`) writes `0xffff` into the fed order word
+    ///   (`+0x4408`). So once the song stops the ring goes on publishing the old song's last
+    ///   positions for as many polls as remain of its ten, then **order −1** with the old row
+    ///   (the trace tool's own refusal at a reload, `_np_ord reads -1`, `music-clock.md` §7),
+    ///   until the new song's first row advance has come through. How far a reload gets is the
+    ///   session's (D42's race: pass 2's ALKU reads the stale position in one session of seven).
+    ///   Carrying the old ring would put the port in that minority session at every restart —
+    ///   measured: it moves pass 2's ALKU hold (`bins/secondreality/tests/loop.rs`'s 10419) off
+    ///   the original's capture (A55) — and the −1 itself does not fit the published `u8`
+    ///   order (U2E's `order > 18` gate would read 255). The fresh ring's `0:0` gives GLENZ's wait (`musplus` −32: the new song's order
+    ///   0 has `zplus` 0) and U2E's gate (closed) the decision the −1 gives them; for pass 2's
+    ///   ALKU the −1's `dis_sync` key is above the table (A15), and `0:0` is what the loop
+    ///   test holds the original's frames to.
+    /// - **the tick countdown** `[0xbe0]`, which the reload's polls keep running
+    ///   (`+0x5157`). The restarted clock's phase is D34's measured four-frame wait from the
+    ///   boundary (`MusicStart::restart`), not the previous song's.
+    pub fn continue_from(&mut self, previous: &Player) {
+        self.channels = previous.channels;
+        self.loops = previous.loops;
+        self.zframe = previous.zframe;
     }
 
     /// `_zgotosong(order, row)` (`MAIN/STMIK.H:46`): seek to `order`, `row`.

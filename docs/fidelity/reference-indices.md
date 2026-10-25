@@ -6119,7 +6119,7 @@ removed.
 `cargo xtask reference verify --tree reference` passes over **67 captures (262 files)**: the
 thirteen `parts/fullrun/*` captures (44 frames, 60 files) and the two traces (one file each).
 
-### 26.8 The port's column (Phase 9 Task 6)
+### 26.8 The port's column (Phase 9 Task 6; re-measured by Task 6b)
 
 Task 6 runs the port's `--block 1` against everything above. One release run answers it: the
 binary plays block 1 headless from 404 to **48,277** (ENDSCRL's 46277 + 2,000), writing its
@@ -6135,10 +6135,19 @@ cargo xtask rediff --only fullrun
 `-- --ignored` runs them in debug, slowly). Its plan is block 1's own,
 once each in the demo's order — `alku u2a pam beglogo glenz tunneli techno panicend mntscrl lnszoom
 plzpart minvball rayscrl 3dsinfld jplogo u2e endlogo cred endscrl` — starting at 404, 6008, 7508,
-7885, 8057, 11374, 12435, 16423, 16875, 18912, 22096, 26811, 29392, 31466, 33498, 34286, 38199,
-38807 and 46430; both restarts publish the fresh player's `0:0` at their boundary (GLENZ's
-`MUSIC1@0`, U2E's `MUSIC0@18`), and PANICEND's picture is up through the cue wait's last tick,
-16874, MNTSCRL starting on the next.
+7885, 8057, 11131, 12192, 16181, 16633, 18669, 21853, 26569, 29150, 31224, 33255, 34043, 37956,
+38564 and 46187; both restarts publish the new player's `0:0` at their boundary (GLENZ's
+`MUSIC1@0`, U2E's `MUSIC0@18` — the position ring is the one piece of the old player's state a
+restart does not carry, D45), and PANICEND's picture is up through the cue wait's last tick,
+16632, MNTSCRL starting on the next.
+
+**Task 6b re-measured this subsection.** Task 6 found the run from GLENZ on ≈245 frames late; Task
+6b made a restart keep what `_zplaysong`'s initialiser does not write (D45: `Player::continue_from`),
+so block 1's `MUSIC1@0` plays order 0 for 4 rows, not 64, and every figure below from GLENZ on moved
+by that. Task 6's values, for the record: starts 11374, 12435, 16423, 16875, 18912, 22096, 26811,
+29392, 31466, 33498, 34286, 38199, 38807, 46430; first frames GLENZ 8770 … ENDSCRL 46432 (differences
++230…+259 to JPLOGO, U2E +198, ENDSCRL +155); music offsets +247/+248/+235. Every `fullrun` count is
+unchanged at the new pairings.
 
 **The seam table.** It has one source, `xtask/src/rediff/table.rs`'s `FULLRUN_SEAMS` (the original's
 first frame, the port's, and the port's start), which `tests/fullrun.rs` includes and asserts against
@@ -6150,8 +6159,8 @@ first visible frame after a black gap — and the test reads every frame from th
 earlier frame of the part meets the definition. The original's is §26.3's, in the session the part's `fullrun` capture was filed in
 where §26.3 gives two (BEGLOGO 7922, GLENZ 8522, TUNNELI 11158; 3DSINFLD is h5's 31272). The two
 bracketed boundaries are aligned on bytes, as the Task 2 review ruled: **JPLOGO** on its opening
-black (`fullrun/09`'s 33263; the port's 33498 is that frame, and the only one of its hash in the
-port's JPLOGO), **U2E** on its band (34120 = block 4's band, §18.7; the port's is 34318).
+black (`fullrun/09`'s 33263; the port's 33255 is that frame, and the only one of its hash in the
+port's JPLOGO), **U2E** on its band (34120 = block 4's band, §18.7; the port's is 34075).
 
 | part | rule | original | port | difference | change |
 |---|---|---|---|---|---|
@@ -6159,22 +6168,22 @@ port's JPLOGO), **U2E** on its band (34120 = block 4's band, §18.7; the port's 
 | U2A | first 320×200 | 5961 | 6008 | +47 | +47 |
 | PAM | first frame of PAM's white (`fullrun/02` 7707's bytes) | 7707 | 7704 | −3 | −50 |
 | BEGLOGO | first change | 7922 | 7885 | −37 | −34 |
-| GLENZ | first frame no longer BEGLOGO's hold (the collapse) | 8522 | 8770 | +248 | +285 |
-| TUNNELI | first visible | 11158 | 11394 | +236 | −12 |
-| TECHNO | first visible | 12214 | 12458 | +244 | +8 |
-| PANICEND | first change | 16193 | 16423 | +230 | −14 |
-| *the cue wait's exit* | `musplus` > 0 / the wait's last tick | 16630 | 16874 | +244 | |
-| MNTSCRL | first change (the mode set's black) | 16637 | 16875 | +238 | +8 |
-| LNS&ZOOM | first visible | 18656 | 18913 | +257 | +19 |
-| PLZPART | first 320×400 | 21927 | 22171 | +244 | −13 |
-| MINVBALL | first visible | 26673 | 26912 | +239 | −5 |
-| RAYSCRL | first visible | 29174 | 29422 | +248 | +9 |
-| 3DSINFLD | first visible | 31272 | 31531 | +259 | +11 |
-| JPLOGO | `fullrun/09` 33263's bytes | 33263 | 33498 | +235 | −24 |
-| U2E | the band, `fullrun/10` 34120's bytes | 34120 | 34318 | +198 | −37 |
-| ENDLOGO | first 320×400 | 37967 | 38199 | +232 | +34 |
-| CRED | first 320×200 | 38583 | 38807 | +224 | −8 |
-| ENDSCRL | first 640×400 | 46277 | 46432 | +155 | −69 |
+| GLENZ | first frame no longer BEGLOGO's hold (the collapse) | 8522 | 8527 | +5 | +42 |
+| TUNNELI | first visible | 11158 | 11151 | −7 | −12 |
+| TECHNO | first visible | 12214 | 12216 | +2 | +9 |
+| PANICEND | first change | 16193 | 16181 | −12 | −14 |
+| *the cue wait's exit* | `musplus` > 0 / the wait's last tick | 16630 | 16632 | +2 | |
+| MNTSCRL | first change (the mode set's black) | 16637 | 16633 | −4 | +8 |
+| LNS&ZOOM | first visible | 18656 | 18670 | +14 | +18 |
+| PLZPART | first 320×400 | 21927 | 21928 | +1 | −13 |
+| MINVBALL | first visible | 26673 | 26670 | −3 | −4 |
+| RAYSCRL | first visible | 29174 | 29180 | +6 | +9 |
+| 3DSINFLD | first visible | 31272 | 31288 | +16 | +10 |
+| JPLOGO | `fullrun/09` 33263's bytes | 33263 | 33255 | −8 | −24 |
+| U2E | the band, `fullrun/10` 34120's bytes | 34120 | 34075 | −45 | −37 |
+| ENDLOGO | first 320×400 | 37967 | 37956 | −11 | +34 |
+| CRED | first 320×200 | 38583 | 38564 | −19 | −8 |
+| ENDSCRL | first 640×400 | 46277 | 46189 | −88 | −69 |
 
 **Read with the music, the table has two halves.** Up to BEGLOGO the port's clock is the
 original's (the traces below agree at offset 0/−1), and the start differences are the parts' own:
@@ -6182,25 +6191,30 @@ U2A's first frame is 47 frames late — so ALKU's end is at least 47 frames late
 last ALKU frame (5960) being possibly the loader holding it — PAM begins 3 early, and BEGLOGO's −37 is its lead-in (A5) — the port
 shows its 320×400 white field from its first tick, where the original still shows PAM's screen to
 7920–7922; the ramp itself is frame-locked, the port's 7930 being `fullrun/03`'s 7930 byte for byte.
-From GLENZ on, every part inherits **A38's lag**: the `MUSIC1@0` session is 247–248 frames late at
-`second1d`'s and `second1e`'s first rows, and the parts' start differences sit within −18…+11 of it
-(PANICEND +230 and 3DSINFLD +259 against +248) — the parts follow the music, which is late. After
-U2E's `MUSIC0@18` restart the session is 235 frames late at `second1f`'s first row; ENDLOGO and CRED
-sit at +232 and +224. ENDSCRL's −69 change is CRED's span, first frame to ENDSCRL's first, being
-69 frames shorter in the port (7,625 against 7,694); why is not measured here — A10's record of
-CRED running 6–105 frames early is a lead, not the measurement.
+From GLENZ on the parts follow the restarted music, which is now within a few frames of the
+original's: the `MUSIC1@0` session is **5** frames late at `second1d`'s and `second1e`'s first rows
+(A38's residual) and 3 early at `second1e`'s last, and the parts' start differences from GLENZ to
+JPLOGO sit within −12…+16 (PANICEND −12, 3DSINFLD +16). After U2E's `MUSIC0@18` restart the session
+is 8 frames early at `second1f`'s first row and level at the last the run reaches. **U2E's band is
+45 frames early**: the port starts U2E at the restart's own boundary, where the original's reload
+holds JPLOGO's whitened screen (A53); ENDLOGO and CRED follow at −11 and −19. ENDSCRL's −69 change
+is CRED's span, first frame to ENDSCRL's first, being 69 frames shorter in the port (7,625 against
+7,694); why is not measured here — A10's record of CRED running 6–105 frames early is a lead, not
+the measurement.
 
 **The loader (D31's question).** The port hands each part over in one tick and the original spends
 the loader's frames. Modelling that as one `LOADER_TICKS` would need one constant to explain every
 seam the music does not decide, and the table refuses it: the changes across the seams take **both
-signs** (+47 at ALKU→U2A, +19 at MNTSCRL→LNS&ZOOM, +11 at RAYSCRL→3DSINFLD — seams where the port is
-already *later*, which a delay inserted at the handover can only make later still — against −50, −34,
-−14, −24 and −37 elsewhere), and the two seams whose both sides are pinned by the music show two
-different loaders: the cue wait exits at 16630 and MNTSCRL's mode set is up at 16637 (**7** frames;
-the port's are 16874 and 16875, **1**), while U2E's reload holds JPLOGO's screen, whitened, from
-≤ 34100 to 34114 over a restart whose clock starts at 34,054 ± 2 (§26.6), where the port starts U2E at
-the restart's own boundary (34286). D24's one-constant rule is not met, so the handover is left as it
-is and the seams are registered: `APPROXIMATIONS.md` **A53**.
+signs** (+47 at ALKU→U2A, +18 at MNTSCRL→LNS&ZOOM, +10 at RAYSCRL→3DSINFLD, +9 at TUNNELI→TECHNO and
+at MINVBALL→RAYSCRL — seams where the port is already *later*, which a delay inserted at the handover
+can only make later still — against −50, −34, −12, −14, −13, −24 and −37 elsewhere), and the two
+seams whose both sides are pinned by the music show two different loaders: the cue wait exits at
+16630 and MNTSCRL's mode set is up at 16637 (**7** frames; the port's are 16632 and 16633, **1**),
+while U2E's reload holds JPLOGO's screen, whitened, from ≤ 34100 to 34114 over a restart whose clock
+starts at 34,054 ± 2 (§26.6), where the port starts U2E at the restart's own boundary (34043). D24's
+one-constant rule is not met — Task 6b re-checked it on the corrected run, and the signs and the two
+loaders are the same — so the handover is left as it is and the seams are registered:
+`APPROXIMATIONS.md` **A53**.
 
 **The music, row by row.** At every frame of block 1's six traces the port's published `(order,
 row)` is compared with the trace within the shell's window (`JITTER_FRAMES` = 3), after one offset
@@ -6212,29 +6226,31 @@ first row change minus the trace's own:
 | `second1` | the boot's MUSIC0 | 0 | 5,541 | 5,399 (97.437 %) | 7 | 5,399 |
 | `second1c` | MUSIC0 | −1 | 1,699 | 1,699 (100 %) | 1 | 1,698 |
 | `second1b` | MUSIC0 | −1 | 359 | 358 (99.721 %) | 1 (one frame past the search: the window's last) | 357 |
-| `second1d` | `MUSIC1@0` | **+247** | 699 | 699 (100 %) | 2 | 0 |
-| `second1e` | `MUSIC1@0` | **+248** | 25,143 | 17,439 (69.359 %) | 8 | 0 |
-| `second1f` | `MUSIC0@18` | **+235** | 13,934 | 6,187 (44.402 %) | 12 (and 38376, never published) | 0 |
+| `second1d` | `MUSIC1@0` | **+5** | 699 | 699 (100 %) | 2 | 227 |
+| `second1e` | `MUSIC1@0` | **+5** (−3 at its last row change) | 25,143 | 18,928 (75.281 %) | 8 | 23,083 |
+| `second1f` | `MUSIC0@18` | **−8** (0 at the last the run reaches) | 14,168 | 6,352 (44.833 %) | 12 (and 38376, never published) | 13,554 |
 
 So the restarts and the cue wait are where the source puts them, in context — each session lines
 up with its trace at one offset, its content is the trace's (`crates/sr-audio/tests/trace.rs`'s
 check, but for `second1f`'s speed-1 row), and the cue wait exits on the original's published row,
-`42:1` (the port's 16873/16874 publish `42:0`/`42:1` as `second1e`'s 16629/16630 do) — and the
-post-GLENZ timeline is A38's lag. `second1e`'s worst 8 and `second1f`'s 12 and unsampled speed-1
-row are the trace test's pinned disagreements, registered as **A54**.
+`42:1` (the port's 16631/16632 publish `42:0`/`42:1` as `second1e`'s 16629/16630 do) — and the
+post-GLENZ timeline is within A38's residual. `second1e`'s worst 8 and `second1f`'s 12 and
+unsampled speed-1 row are the trace test's pinned disagreements, registered as **A54**. (`second1f`
+counts 14,168 frames, not Task 6's 13,934: the run now reaches 234 more of its window before
+48,277.)
 
-**A38's lead — the probable cause, confirmed by the two tests below; the port's fix is Task 6b.**
-On this reading the lag is not the seek's: `restartmus`'s `_zplaysong` keeps the channel volumes
-the previous module left (the object's initialiser at `+0x5614` writes `achannelused` `0x80` and
-`lastins` 0 and never `avol` or `a0volcut`), MUSIC1's order 0 (pattern 73) has a `C00` on channel 2
-at row 3 that a fresh player's "volume 0" countdown drops (block 2's boot plays order 0's 64 rows,
-`second2b`), and back from `second1d`'s first `1:5` (8,102) a 64-row order 0 starts the restart at
-7,814 — while `second1b` still publishes MUSIC0 at 7,959 — and a 4-row one at **8,056.6, the port's
-own boundary (8,057)**. MUSIC0's channel 2 is at 63 when it hands over. The tests are
-`cargo test -p sr-audio --test player the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown`
-and `cargo test -p sr-audio --test trace block_ones_music1_restart_takes_order_0s_break -- --nocapture`;
-A38 carries the consequence, and the change is Task 6b's (it moves A38's pinned numbers and the trace
-test's `RESTART_TRACES`).
+**A38's cause, and its fix (Task 6b, D45).** The lag was not the seek's: `restartmus`'s `_zplaysong`
+keeps the channel volumes the previous module left (the song initialiser at `+0x5614` and its
+silence passes write `achannelused`, `lastins`, the periods, the cell and the remembered
+parameters, and never `avol`, `a0volcut` or the effect counters), MUSIC1's order 0 (pattern 73) has
+a `C00` on channel 2 at row 3 that a fresh player's "volume 0" countdown drops (block 2's boot plays
+order 0's 64 rows, `second2b`), and MUSIC0's channel 2 is at 63 when it hands over. The port's
+restart now continues from the old player (`Player::continue_from`), takes the break, and publishes
+`1:0` at 8,087; back from `second1d`'s first `1:5` (8,102) the restarted player's 46th poll puts the
+trace's restart at **8,056** — `crates/sr-audio/tests/trace.rs`'s `RESTART_TRACES` row — where the
+64-row reading put it at 7,814, while `second1b` still publishes MUSIC0 at 7,959. The tests are
+`cargo test -p sr-audio --test player the_song_initialiser_writes_exactly_what_initialise_writes`
+and `cargo test -p sr-audio --test trace block_ones_music1_restart_takes_order_0s_break -- --nocapture`.
 
 **The two parts that inherited a line offset.** BEGLOGO and ENDLOGO write CRTC 0x13 nowhere; every
 part before them in the demo leaves the 320-pixel tweak's 80 bytes a row, which is the stride their
@@ -6250,7 +6266,7 @@ was already `None`, so no per-part count moved.
 difference above, never chosen for its own count; the three frames the original shows during a
 loader stretch the port does not have — 7920 (PAM's white under BEGLOGO's load), 16636 (the dot after
 the cue's exit) and 34110 (JPLOGO's white under the U2E reload) — are paired with the port's last
-frame of that screen (7884, 16874, 34285). One frame lies across a handover: BEGLOGO's held picture,
+frame of that screen (7884, 16632, 34042). One frame lies across a handover: BEGLOGO's held picture,
 8300 — §26.3's BEGLOGO row, whose last frame is 8520 — paired at BEGLOGO's −37 on the port's 8263,
 which is GLENZ's wait showing the same hold (`FULLRUN_ACROSS_HANDOVER`). `xtask/tests/rediff.rs`'s
 `every_fullrun_row_is_at_its_parts_start_difference` holds every row to that rule, the three loader
@@ -6262,17 +6278,17 @@ comparisons, every one at its registered count**:
 |---|---|
 | `01-alku` | 1719 → 1719: 0 |
 | `02-u2a-pam` | 5961 → 6008: 63,788 · 6500 → 6547: 0 · 7707 → 7704: 0 (and idx 0) · 7880 → 7877: 0 (idx 48,786) · 7920 → 7884: 0 |
-| `03-beglogo` | 7930 → 7893: 81,273 · 8300 → 8263: 0 (and idx 0) · 8522 → 8770: 0 |
-| `04-glenz-techno` | 8572 → 8820: 0 (and idx 0) · 8900 → 9148: 0 (and idx 0) · 11159 → 11395: 192 · 11900 → 12136: 4,336 · 12214 → 12458: 0 · 12400 → 12644: 0 |
-| `05-troll-panicend` | 16000 → 16244: 0 · 16193 → 16423: 108,923 |
-| `06-panicend-lnszoom` | 16500 → 16730: 0 (and idx 0) · 16636 → 16874: 0 · 16637 → 16875: 0 · 16690 → 16928: 0 · 18656 → 18913: 129 · 19000 → 19257: 2,058 (and idx 2,058; A25's) |
-| `07-plasma` | 21927 → 22171: 0 · 24500 → 24744: 45,808 |
-| `08-cube-3dsinfld` | 24540 → 24784: 0 (idx 48,384) · 26673 → 26912: 0 · 26700 → 26939: 0 · 29174 → 29422: 875 · 29800 → 30048: 0 (and idx 0) · 31272 → 31531: 4 · 31901 → 32160: 33,554 (idx 34,036) |
-| `09-jplogo` | 33263 → 33498: 0 (and idx 0) · 33900 → 34135: 0 (and idx 0) · 34110 → 34285: 72,363 (idx 0) |
-| `10-u2e` | 34120 → 34318: 0 · 34250 → 34448: 0 (and idx 0) |
-| `11-endlogo` | 37970 → 38202: 0 (idx 46,997) · 38300 → 38532: 0 (and idx 0) |
-| `12-cred` | 38583 → 38807: 0 · 40600 → 40824: 7,204 (A10's) |
-| `13-endscrl` | 46280 → 46435: 42 · 46283 → 46438: 67 · 46286 → 46441: 149 |
+| `03-beglogo` | 7930 → 7893: 81,273 · 8300 → 8263: 0 (and idx 0) · 8522 → 8527: 0 |
+| `04-glenz-techno` | 8572 → 8577: 0 (and idx 0) · 8900 → 8905: 0 (and idx 0) · 11159 → 11152: 192 · 11900 → 11893: 4,336 · 12214 → 12216: 0 · 12400 → 12402: 0 |
+| `05-troll-panicend` | 16000 → 16002: 0 · 16193 → 16181: 108,923 |
+| `06-panicend-lnszoom` | 16500 → 16488: 0 (and idx 0) · 16636 → 16632: 0 · 16637 → 16633: 0 · 16690 → 16686: 0 · 18656 → 18670: 129 · 19000 → 19014: 2,058 (and idx 2,058; A25's) |
+| `07-plasma` | 21927 → 21928: 0 · 24500 → 24501: 45,808 |
+| `08-cube-3dsinfld` | 24540 → 24541: 0 (idx 48,384) · 26673 → 26670: 0 · 26700 → 26697: 0 · 29174 → 29180: 875 · 29800 → 29806: 0 (and idx 0) · 31272 → 31288: 4 · 31901 → 31917: 33,554 (idx 34,036) |
+| `09-jplogo` | 33263 → 33255: 0 (and idx 0) · 33900 → 33892: 0 (and idx 0) · 34110 → 34042: 72,363 (idx 0) |
+| `10-u2e` | 34120 → 34075: 0 · 34250 → 34205: 0 (and idx 0) |
+| `11-endlogo` | 37970 → 37959: 0 (idx 46,997) · 38300 → 38289: 0 (and idx 0) |
+| `12-cred` | 38583 → 38564: 0 · 40600 → 40581: 7,204 (A10's) |
+| `13-endscrl` | 46280 → 46192: 42 · 46283 → 46195: 67 · 46286 → 46198: 149 |
 
 **Every held frame compares at 0 in RGB** — 1719, 6500, 7880, 8300, 8900, 12400, 16000, 16500,
 16636, 16690, 29800, 33900, 34250 and 38300 — except the two that carry their part's own

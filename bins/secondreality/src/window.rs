@@ -285,7 +285,7 @@ fn present_run<'a>(
         run.advance(now - sampled);
         sampled = now;
 
-        // A mid-run restart installs a fresh player (`MAIN/U2.ASM:880-885`, at U2E's
+        // A mid-run restart installs a new player (`MAIN/U2.ASM:880-885`, at U2E's
         // boundary in block 3), and the card was opened on the entry one. Hand the drain
         // the run's current player; the old ring's tail is dropped, as the module reload
         // interrupts it in the original too. `advance` above is what may have taken the
