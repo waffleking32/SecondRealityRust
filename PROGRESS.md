@@ -18,14 +18,53 @@ Phase status board. **Read this first if you are resuming work.**
 | 6 | Vector engine | **done** — spec §10's U2A and U2E verified against their references with every residual registered and measured: U2A's 6500 and 7640 keyframes compare at 0 and 7300 is A28 (426 px at the reference's own state 294, the release-vs-tree Gouraud difference) + A29 (1098 px at the port's boot index, session phase); U2E's intro is byte-exact at nine indices and its four keyframes are A30 (189/7,118/231/1,177 at the reference's own state) + A31 (11,006/11,805/17,278/16,234 at K, the four-tick session phase). The mid-run MUSIC0@18 restart is measured at chain 17,418 against D34's derived 17,427 (the gapless-handover seam) and waits 4; the ESC drain (`Part::drains_after_exit`) and the sound card's follow seam are in. Three new traces (`second1c`, `second4`, `second3e`). Evidence below. The final whole-branch review ran (fable, `8b1b99a..5cc532c`): **no Criticals**; its two Important and four Minor findings are fixed in `5cc532c` and the scoped re-review is clean; **the tag is applied at this commit** | [06-vector-engine.md](docs/plans/06-vector-engine.md) | `phase-6` |
 | 7 | GLENZ | **done** — spec §10's "GLENZ verified": the held opening at 1499 compares at **0 differing indices of 64,000**, and the moving keyframes are measured at the capture's surface-aligned phase — **2305/2300** 5,208 px (every difference a palette 0..15 fade entry, **0** at an index ≥ 16; the object is the reference's 9,989-px box exactly), **3004/3000** 2,289 px (711 registered-unexplained) and **3404/3400** 5,941 px (839), with **`L_p = 1567`** against `L_r = 1562` (**K + 5**) — A36/A37. D24 (b) is settled by the reference's picture: the in-bounds **low-byte** colour key is adopted (one shared slot map; the tree's full-word key exhausts the pool and is rejected). The two shell seams are in: the block-1 `MUSIC1@0` restart (boundary **8,057**, inside the reference's (8,049, 8,100)), whose source-faithful seek puts the first zoomer body at **8,770** — **249 frames after 8,521** (registered **A38**) — and the post-PANICEND cue wait (**8,903 / 8,953 / 9,219**). Blocks 1 and 2 run to ENDSCRL with no stop, and `--part glenz` runs. The span compositor's full-repaint substitution is **A39** (measured difference 0). Evidence below. The final whole-branch review ran (fable, `4223266..f6bd2fb`): **NEEDS FIXES** — 1 Important (the main loop's double exit check could drop the frame the source draws) and 3 Minor record defects; fixed in `40d83e6` (draw-then-finish; the plan's K+5/hold/`double_scan` lines; the 14th carried item; the CLI note), and the scoped re-review is clean. **The tag is applied at this commit** | [07-glens.md](docs/plans/07-glens.md) | `phase-7` |
 | 8 | Vault | **done** — GRID, HARD and TWIST play standalone and are verified: GRID's five filed keyframes differ by the measured A41 sampling residual **6/2/36/33/14** px at offset 0 (max channel delta 41, rows 14–15 only); TWIST's six keyframes are **0** px; HARD's nine are **0** px (840's `.idx` byte-identical), and its mode-5 boundary (references 950–960 vs ports 594–604) and part-3 end (2245–2257 vs 1889–1901) compare at **0** over the full 1,903-frame run, which retires at 1902. The references are `reference/parts/{grid,hard,twist}` (`K0` 353/3/356) captured from `GRID/P.EXE`, `HARD/B.EXE` and `TWIST/T.EXE` behind the standalone `DIS/DIS.EXE`; the runs are silent and a window-only `--vault` menu selects the three (D39/D40). The final whole-branch review ran (fable, `14ac207..aa42e2b`): no Critical and no code-defect Important; one D25 record Important (A51's z′ range) and record/hygiene/UX Minors, all fixed in `2ba4632` (the A51 part-2 range test and the record/menu/`.gitattributes` fixes) with a scoped re-review **GO**. At the tag tip `cargo test --workspace` is **1,368 passed, 0 failed, 8 ignored** (binary 606/7). **The tag is applied at this commit.** Evidence below | [08-vault.md](docs/plans/08-vault.md) | `phase-8` |
-| 9 | Assembly & fidelity pass | **in progress** — on `phase-9-assembly`; see the plan | [09-assembly.md](docs/plans/09-assembly.md) | — |
+| 9 | Assembly & fidelity pass | **complete — untagged** — spec §10's criterion met. **The full sequence**: block 1 plays ALKU → … → ENDSCRL in the original's order, its 19 part starts held to `reference/parts/fullrun` (−88…+47 frames, every seam measured in A53) with the music restarts (MUSIC1@0 at GLENZ and MUSIC0@18 at U2E, taken over by the same player, D45) against the `second1*` traces, and the post-PANICEND cue wait exits at 16,632 against the original's 16,630. **Loop mode**: the seam against `reference/parts/loop`, seven filed frames at 0, its residuals registered (A61). **The settings screen** (D44), the demo's own ending (D41) and the enhanced option (D43). **Both registers complete**: `APPROXIMATIONS.md` A1–A63, each open item with a status line, and `bugs.md` §1–§28 with its index and classification. **Every part re-diffed**: `cargo xtask rediff` is 47 entries and 231 frames, every one at its registered count (161 at 0, 70 registered), exit 0. Suite **1,459 passed, 0 failed, 11 ignored**. Evidence below. **The tag is withheld until the final whole-branch review is clean** | [09-assembly.md](docs/plans/09-assembly.md) | — |
 
 ## Where to pick up
 
-**Phase 9 (Assembly & fidelity pass) is in progress** on `phase-9-assembly`, branched from
-`main` at `3fd3be3`. Its plan is `docs/plans/09-assembly.md`; execution is subagent-driven, and
-the per-task ledger is `.superpowers/sdd/09-assembly/progress.md` (git-ignored scratch — trust it
-and `git log` to find the first task without a `complete` line).
+**Phase 9 (Assembly & fidelity pass) is complete on `phase-9-assembly`, and untagged.** The branch
+starts at `main`'s `3fd3be3`. Its plan is `docs/plans/09-assembly.md`, and its eleven tasks (with the
+inserted 6b) are done; the evidence is "Phase 9's evidence" below. Its decisions are **D41–D47**, and
+its register entries are **A53–A63**. The per-task ledger is `.superpowers/sdd/09-assembly/progress.md`,
+git-ignored scratch, and it holds the deferred minors for the final review. **The planned work is
+complete.** Phase 9 is the last phase of the spec's plan (§10), and no phase after it is planned.
+
+**What is left, in order:**
+
+1. **The final whole-branch review** of `3fd3be3..` the close-out. **The `phase-9` tag is withheld
+   until that review is clean**, Phase 1's and Phase 2's practice. Its fix round and re-review come
+   first, then the tag, then the merge to `main`.
+2. **The hand checks left for the user.** Task 8's machine checks could not drive keys in a real
+   window. These are not checked by hand, and need a person at the window:
+   - the settings screen's row cycling and its `>` marker;
+   - a live Aspect or Border change resizing the window;
+   - Enter with Sound Off, with Demo looping Enabled, and with Sound quality Enhanced;
+   - ESC on the settings screen, which leaves and prints the end box;
+   - ESC from ENDSCRL ending a block run: the fade, the blank, the close and the end box.
+   Task 8 did check, on this host's display, that the screen opens, that `--no-setup` reaches ALKU,
+   that a windowed `/gravis` run closes itself and prints the box, and that `--no-setup` block 1
+   reaches ENDSCRL.
+3. **The next queued work, outside Phase 9.** On 2026-10-25 the user asked for a GitHub Actions
+   workflow, on its own branch after Phase 9 closes, that builds a Windows `secondreality.exe`:
+   SDL2 from the official SDL2 Windows development package, with `SDL2.dll` shipped beside the
+   executable; the build zipped with `assets/`; published as an Actions run artifact only, with no
+   Release. Its purpose is for the user to test the audio on bare-metal Windows. It is not created
+   yet, and a push needs the user's word.
+
+**What the registers carry** (`APPROXIMATIONS.md`'s *Carried* status lines; *Closed*: A1 by
+derivation, A14's (a), A5 for 430–438 and A7 for 436–443):
+
+- **The packed release EXEs (D12)**: A9, A10, A11, A17, A18, A20, A23, A25, A28, A30 and A37. Each
+  is a release behaviour or datum inside a packed `MAIN/DATA/*.EXE`, which nothing here unpacks.
+- **What the oracle cannot see**: A5 for 439–446 and A7 for 444–450 (the index plane is
+  unreadable there), A12, A13, A24, A26, A27, A35, A41, A42, A44, A54 and A56.
+- **The session's phase (D17)**: A29, A31 and A36.
+- **Unreachable paths**: A3, A15 and A51.
+- **Unattributed, or needing a constant D24 does not allow without its own measurement**: A6 (no
+  session reproduces 4500/4600), A38 (the mid-run restart's +5), A48 (where mode 4's overrun
+  falls), A50 (two bytes no compared frame exercises), A53 (the full run: U2A's opening 47 frames
+  late, PANICEND's first frame, and the loader's frames, D31), A55 (what a reload puts in the ring) and A61 (the loop
+  seam's tail, Δ, the +5's recipe part and ALKU's pass-2 lag).
 
 **Phase 8 (Vault) is done, tagged `phase-8`, merged to `main` and pushed** (`main`
 fast-forwarded `14ac207 → 3fd3be3`; the suite re-run on the merged result, 1,368 passed /
@@ -2864,6 +2903,230 @@ session would settle it). The mode-5 overrun's *position* remains unmeasured: th
 measures its total cost, two displays (A48). The `do3dots` shadow clear is a documented model
 of the unreachable branch. The `assets/PROVENANCE.md`/`asset-inventory.md` FCRZ.U rows were
 already in place from Task 6. **The final whole-branch review ran** (fable, `14ac207..aa42e2b`): no Critical and no code-defect Important; one D25 record Important (A51's z′ range) and record/hygiene/UX Minors, fixed in `2ba4632`, and the scoped re-review is **GO**. The paste above is the close-out at `aa42e2b` (1,365/603); the tag tip `2ba4632` is **1,368 passed, 0 failed, 8 ignored** (binary 606/7). **The tag is applied at this commit.**
+
+### Phase 9's evidence (close-out, Task 11, 2026-10-25)
+
+**Exit criterion (spec §10): the full sequence with music restarts, cue waits and loop mode; the
+settings screen; `APPROXIMATIONS.md` and `docs/fidelity/bugs.md` complete; every part re-diffed.**
+Every number below was re-run at the close-out's tree, which is `3d9bf0f` plus this task's records
+and one new test (`settings::tests::the_frame_is_sized_for_the_widest_row_and_the_footer`, D44's
+widths). The blocks are pastes, `(…)` marks an elision, and a number in the prose that is not in a
+command block is asserted by the named test (D25).
+
+| criterion | how it is evidenced | the number |
+|---|---|---|
+| the full sequence | `tests/fullrun.rs`: block 1 against `reference/parts/fullrun` (Tasks 2, 6) | 19 parts in the original's order; start differences **−88…+47** frames (the seam table below, A53) |
+| music restarts in context | `the_full_runs_music_is_where_the_trace_holds_it` against `second1`, `second1b`–`second1f`; the restart carry-over (D45) | `second1d` **+5**, `second1e` +5 → −3, `second1f` −8 → 0 |
+| the cue wait in context | the seam table's `cue exit` row (`MAIN/U2.ASM:833-853`) | the original's **16,630**, the port's **16,632** (+2) |
+| loop mode | `tests/loop.rs` against `reference/parts/loop` (Tasks 1, 4; D42) | 7 filed frames at **0** at their pairings; the port's `L` 8910, 2 late (A61) |
+| the settings screen | `settings::tests` (6), `window.rs`'s resize tests (D44); keyed checks left for the user (above) | — |
+| `APPROXIMATIONS.md` complete | `cargo test -p xtask --test approximations`: five labels, a status per open item, no gap, every rediff register an entry | **A1–A63** |
+| `bugs.md` complete | §1–§28, the index, "Not in this register", and the classification grep (Tasks 9, 10) | **28** numbered sections (`grep -c '^## [0-9]' docs/fidelity/bugs.md`) |
+| every part re-diffed | `cargo xtask rediff` (Task 5's walker, Task 6's `fullrun` entries) | **47 entries, 231 frames, 231 at their registered count**, exit 0 |
+
+**The re-diff of record.** One command re-renders every filed reference frame from the release
+binary and checks each against its registered count:
+
+```text
+$ cargo xtask rediff
+building: cargo build --release -p secondreality
+capture                      reference  rendered  plane    differing  registered  register  verdict
+3dsinfld                         15500       464  rgb              0           0  exact     ok
+(… 229 rows, every verdict `ok` …)
+u2e                               3600      3596  rgb           1177        1177  A30       ok
+entries: 47; frames: 231 (231 at their registered count, 0 off it, 0 not compared); pending captures: 0; problems: 0
+verdict: every frame at its registered count
+report: out/rediff/report.json
+exit 0
+```
+
+Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count. By capture
+(frames, frames at 0, the non-zero counts in table order, and the entries that register them):
+
+| capture | frames | at 0 | non-zero counts | register of the non-zero frames |
+|---|---|---|---|---|
+| `3dsinfld` | 4 | 4 | — | — |
+| `alku` | 4 | 3 | 2353 | A20 |
+| `beglogo-leadin/even` | 11 | 11 | — | — |
+| `beglogo-leadin/odd` | 10 | 10 | — | — |
+| `beglogo-leadin/plane-436` | 2 | 1 | 127998 | A5 |
+| `beglogo` | 5 | 5 | — | — |
+| `cred` | 5 | 2 | 7204 / 6088 / 3741 | A10 |
+| `ddstars` | 4 | 4 | — | — |
+| `endlogo-leadin/even` | 10 | 10 | — | — |
+| `endlogo-leadin/odd` | 10 | 10 | — | — |
+| `endlogo-leadin/plane-440` | 2 | 1 | 55499 | A7 |
+| `endlogo` | 4 | 4 | — | — |
+| `endscrl` | 4 | 0 | 7289 / 28333 / 25502 / 17108 | A11 |
+| `fullrun/01-alku` | 1 | 1 | — | — |
+| `fullrun/02-u2a-pam` | 7 | 5 | 63788 / 48786 | A53 |
+| `fullrun/03-beglogo` | 4 | 3 | 81273 | A53 |
+| `fullrun/04-glenz-techno` | 8 | 6 | 192 / 4336 | A53 |
+| `fullrun/05-troll-panicend` | 2 | 1 | 108923 | A53 |
+| `fullrun/06-panicend-lnszoom` | 8 | 5 | 129 / 2058 / 2058 | A53, A25 |
+| `fullrun/07-plasma` | 2 | 1 | 45808 | A53 |
+| `fullrun/08-cube-3dsinfld` | 10 | 5 | 48384 / 875 / 4 / 33554 / 34036 | A53 |
+| `fullrun/09-jplogo` | 6 | 5 | 72363 | A53 |
+| `fullrun/10-u2e` | 3 | 3 | — | — |
+| `fullrun/11-endlogo` | 4 | 3 | 46997 | A53 |
+| `fullrun/12-cred` | 2 | 1 | 7204 | A10 |
+| `fullrun/13-endscrl` | 3 | 0 | 42 / 67 / 149 | A53 |
+| `glenz` | 5 | 2 | 5208 / 2289 / 5941 | A37 |
+| `grid` | 5 | 0 | 6 / 2 / 36 / 33 / 14 | A41 |
+| `hard` | 10 | 10 | — | — |
+| `jplogo` | 3 | 2 | 51445 | A27 |
+| `lnszoom` | 6 | 2 | 2058 / 2058 / 1935 / 1396 | A25 |
+| `loop/alku` | 4 | 4 | — | — |
+| `loop/cred` | 3 | 3 | — | — |
+| `minvball` | 4 | 4 | — | — |
+| `mntscrl` | 5 | 5 | — | — |
+| `pam` | 5 | 4 | 60375 | A21 |
+| `panicend` | 4 | 2 | 1638 / 234 | A63 |
+| `plzpart/band` | 6 | 0 | 20315 / 21832 / 16743 / 32287 / 14979 / 37374 | A23 |
+| `plzpart/cube` | 2 | 0 | 16743 / 63669 | A23 |
+| `plzpart/plasma` | 3 | 0 | 14348 / 7486 / 5186 | A24 |
+| `rayscrl` | 5 | 3 | 3 / 42 | A18 |
+| `techno/interference` | 4 | 4 | — | — |
+| `techno/troll` | 3 | 3 | — | — |
+| `tunneli` | 4 | 0 | 179 / 373 / 321 / 433 | A6 |
+| `twist` | 6 | 6 | — | — |
+| `u2a` | 5 | 3 | 1098 / 1098 | A29 |
+| `u2e` | 4 | 0 | 189 / 7118 / 231 / 1177 | A30 |
+
+**The full run's seam table** (block 1, the original's first frame of each part against the
+port's, from `xtask/src/rediff/table.rs`'s `FULLRUN_SEAMS` as the test re-finds them in the dump).
+The run's four tests print in parallel, so the other tests' lines are elided:
+
+```text
+$ cargo test --release -p secondreality --test fullrun -- --nocapture
+(…)
+part        original  port   difference  change
+alku            404    404          +0        
+u2a            5961   6008         +47     +47
+(…)
+pam            7707   7704          -3     -50
+beglogo        7922   7885         -37     -34
+(…)
+glenz          8522   8527          +5     +42
+tunneli       11158  11151          -7     -12
+techno        12214  12216          +2      +9
+panicend      16193  16181         -12     -14
+mntscrl       16637  16633          -4      +8
+lnszoom       18656  18670         +14     +18
+plzpart       21927  21928          +1     -13
+minvball      26673  26670          -3      -4
+rayscrl       29174  29180          +6      +9
+3dsinfld      31272  31288         +16     +10
+jplogo        33263  33255          -8     -24
+u2e           34120  34075         -45     -37
+endlogo       37967  37956         -11     +34
+cred          38583  38564         -19      -8
+endscrl       46277  46189         -88     -69
+cue exit      16630  16632          +2
+test the_seam_table_is_the_ports_own_frames ... ok
+(…)
+```
+
+and the music against the traces, from the same run:
+
+```text
+glenz: 0:0 from 8057 for 18 frames, then (0, 1)
+u2e: 0:0 from 34043 for 22 frames, then (18, 1)
+(…)
+second1: offset +0 at 420 (0, 1); 5399 of 5541 frames within 3 (97.437 %), worst 7, 0 past 60; with no offset 5399 (97.437 %); offset +3 at its last row change (5994)
+second1c: offset -1 at 5901 (9, 51); 1699 of 1699 frames within 3 (100.000 %), worst 1, 0 past 60; with no offset 1698 (99.941 %); offset -2 at its last row change (7592)
+second1b: offset -1 at 7609 (12, 54); 358 of 359 frames within 3 (99.721 %), worst 1, 1 past 60; with no offset 357 (99.443 %); offset -2 at its last row change (7951)
+second1d: offset +5 at 8102 (1, 5); 699 of 699 frames within 3 (100.000 %), worst 2, 0 past 60; with no offset 227 (32.475 %); offset +5 at its last row change (8797)
+(…)
+second1e: offset +5 at 8801 (4, 50); 18928 of 25143 frames within 3 (75.281 %), worst 8, 0 past 60; with no offset 23083 (91.807 %); offset -3 at its last row change (33872)
+second1f: offset -8 at 34108 (18, 5); 6352 of 14168 frames within 3 (44.833 %), worst 12, 1 past 60; with no offset 13554 (95.666 %); offset +0 at its last row change (47969)
+test the_full_runs_music_is_where_the_trace_holds_it ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.36s
+```
+
+The command of record runs the same four tests without `--nocapture`. Its tests are
+`#[cfg_attr(debug_assertions, ignore)]`, so in release they run by default, and `-- --ignored`
+would skip them:
+
+```text
+$ cargo test --release -p secondreality --test fullrun
+running 4 tests
+test the_jitter_window_is_the_shells ... ok
+test the_full_run_plays_every_part_in_the_originals_order ... ok
+test the_seam_table_is_the_ports_own_frames ... ok
+test the_full_runs_music_is_where_the_trace_holds_it ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.54s
+```
+
+**The loop seam.** `the_loop_seam_is_the_originals` asserts the port's `C` at 8833 (CRED's drift
+81), 9029/9055/9081 and 9600/10419/11419 at 0 pixels at `n − 196`, the original's `L` 9104 is the port's
+CRED screen at 8908 and the port's `L` is 8910 (`L − C` 77 against 75), the restarted song's
+`(0,1)` at 8921 (+5), and ALKU's pass-2 fade-in at 10045 and hold at 10106 (D42, A61). It prints
+only the carried-ring line (A55):
+
+```text
+$ cargo test --release -p secondreality --test loop -- --nocapture
+running 3 tests
+a carried ring at ALKU's first frame, 8910: (43, 34) (sync 10); at 8920: (43, 34); the run: 0:0 (sync -15609)
+test a_carried_ring_would_hand_pass_two_the_old_songs_position ... ok
+test the_loop_seam_is_the_originals ... ok
+test looping_leaves_pass_one_alone ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s
+```
+
+**The suite and both clippy gates.** `cargo test --workspace` is green with zero warnings:
+**1,459 passed, 0 failed, 11 ignored** over the 55 `test result:` lines (the binary suite is **659 passed, 7 ignored**). Both
+`cargo clippy --workspace --all-targets -- -D warnings` and its `--release` form exit 0.
+
+```text
+$ cargo test --workspace
+(…)
+test result: ok. 659 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 109.28s
+(… all 55 `test result:` lines are `ok`; …)
+exit 0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+(…)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.88s exit 0
+
+$ cargo clippy --workspace --all-targets --release -- -D warnings
+(…)
+Finished `release` profile [optimized] target(s) in 4.27s exit 0
+```
+
+**The reference and asset trees.** `cargo xtask reference verify --tree reference` passes over
+**67 captures / 262 files** (66,654,129 bytes; Phase 8 closed at 44 / 148, and Phase 9 added the
+loop, lead-in and full-run captures). `cargo xtask assets verify --tree --decode` decodes **159
+assets** with 0 findings. (The plan's `--tree assets` form is refused, because `--tree` takes no
+value: `error: unexpected argument 'assets' found`, exit 2.)
+
+```text
+$ cargo xtask reference verify --tree reference
+(…)
+verdict: ok — 67 capture(s), 262 file(s), 66654129 bytes        exit 0
+
+$ cargo xtask assets verify --tree --decode
+(…)
+decode: 159 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene file(s), 45 headerless with no decoder, 1 refused on record, 0 finding(s)
+verdict: ok                                                      exit 0
+```
+
+**The decisions.** **D41** (the demo's own run and its ending: no argument is `SECOND 1`, the
+64 + 20-tick exit stage, ESC closing it at once, the end box printed to the terminal), **D42** (loop
+mode: `--loop`, `/gravis`, the seam and `LOOP_RELOAD_TICKS` = 11), **D43** (the enhanced renderer,
+off by default), **D44** (the settings screen, nothing kept) and **D45** (a restart keeps what
+`_zplaysong`'s initialiser does not write) are finalized: evidence numbers, cross-references to
+A58–A61 and D46, D45's interface as built (`Player::restart_from(&previous, order)`, `MusicSource`
+as D43's `fn(ModuleId, PlayerOptions)`), D42's Δ arithmetic (194 = 196 − 2) and its cost line (the
+fade's end, 9092, is trace-measured). **D46** (`zspeedadjust`) and **D47** (the event stream
+retired) are Task 10's. The register's Phase 9 entries are **A53–A63**, and `bugs.md`'s Phase 9
+work is §10–§28 with the MINVBALL borrow fixed as a port defect (§18.1, A19: its four keyframes
+now 0).
+
+**Not run here.** No oracle session was needed: every figure above comes from the filed captures
+and traces. The keyed window checks are the user's (above).
 
 ## Phase log
 
