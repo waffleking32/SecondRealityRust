@@ -211,7 +211,7 @@ const FINAL_FADE_THRESHOLD: i32 = 7;
 const MAKETEXT_LIMIT: u16 = 320 - 12;
 const MAKETEXT_LEAD: u16 = 16;
 
-/// `MAIN.C:99` `memset(tbuf,0,186*320)` on the 186×352 array.
+/// `MAIN.C:101` `memset(tbuf,0,186*320)` on the 186×352 array.
 const TBUF_ROWS: usize = 186;
 const TBUF_STRIDE: usize = 352;
 const TBUF_LEN: usize = TBUF_ROWS * TBUF_STRIDE;
@@ -1776,12 +1776,44 @@ mod tests {
 
     #[test]
     fn the_tbuf_clear_keeps_the_arrays_last_sixteen_rows() {
-        let (_, mut part) = started();
-        part.tbuf.fill(7);
-        part.tbuf[..TBUF_CLEAR].fill(0);
-        assert_eq!(part.tbuf[TBUF_CLEAR - 1], 0);
-        assert_eq!(part.tbuf[TBUF_CLEAR], 7, "row 169's 32 bytes survive");
-        assert_eq!(part.tbuf[TBUF_LEN - 1], 7, "and the last row");
+        // `MAIN.C:101` clears 186*320 bytes of a 186*352 array.
+        assert_eq!(TBUF_CLEAR, 186 * 320);
+        assert_eq!(TBUF_LEN, 186 * 352);
+        // Drive the part's own batch branch (`MAIN.C:99-101`): fill the buffer
+        // with a marker just before the tick that clears it, and read what the
+        // production clear left.
+        let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
+        for _ in 0..1600 {
+            // The picture fade's last tick falls through into the branch in the
+            // same call, so the marker goes in on every tick before it.
+            if matches!(part.stage, Stage::PictureFade | Stage::Main(MainPhase::Branch)) {
+                part.tbuf.fill(7);
+            }
+            rig.step(&mut part);
+            if matches!(part.stage, Stage::Main(MainPhase::Inner { .. })) {
+                break;
+            }
+        }
+        assert!(
+            matches!(part.stage, Stage::Main(MainPhase::Inner { .. })),
+            "the first batch ran"
+        );
+        assert!(
+            part.tbuf[..TBUF_CLEAR].iter().all(|byte| *byte != 7),
+            "the first {TBUF_CLEAR} bytes were cleared (and the batch's text is not the marker)"
+        );
+        // The batch's own text is drawn after the clear and may land in the
+        // last rows' first 320 columns, so read the columns it never writes
+        // (320 and up) of the rows the clear never reaches (170..185).
+        for row in 170..TBUF_ROWS {
+            assert!(
+                part.tbuf[row * TBUF_STRIDE + 320..(row + 1) * TBUF_STRIDE]
+                    .iter()
+                    .all(|byte| *byte == 7),
+                "row {row}'s columns 320.. survive the clear"
+            );
+        }
+        assert_eq!(part.tbuf[TBUF_LEN - 1], 7, "and the array's last byte");
     }
 
     #[test]

@@ -320,4 +320,4 @@ this part its tick 0 at **8835** with CRED's screen at 8834 and the geometry cha
 
 Every number in this note is produced by a test in this commit or by a command named here.
 
-**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` the index (the unreachable end-of-buffer read).
+**Register.** ENDSCRL's one behaviour that the original has and the port keeps, the unreachable end-of-buffer read, is a row of `bugs.md`'s index; the part has no entry of its own.

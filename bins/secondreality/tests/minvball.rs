@@ -21,12 +21,10 @@
 //! and 1903), and the survey's 12,900 flat-grey frame is that palette curve's
 //! frame counter 2403.
 //!
-//! The per-keyframe residues are **measured, not tolerated**: the projected
-//! positions match the reference (the shadow layer agrees at 99.45-99.91 % in
-//! every keyframe, asserted below), and the differing pixels are all at
-//! coincident dots, where the vendored tree's `dottaul` assignment resolves an
-//! overlap differently from the shipped release's build. The counts are
-//! asserted exactly; a change that moves them fails this test.
+//! The per-keyframe residues are **measured, not tolerated**: all four
+//! keyframes are byte-identical to the reference and the shadow layer agrees
+//! pixel for pixel (asserted below). The counts are asserted exactly; a change
+//! that moves them fails this test.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -191,15 +189,16 @@ fn the_run_is_numbered_in_its_own_frames_and_draws_320x200() {
 }
 
 /// The four keyframes' residues, in pixels, measured from the shipped
-/// reference and asserted exactly. Their cause is in the module docs and the
-/// note: the same dot positions, resolved in a different overlap order by the
-/// release's build.
+/// reference and asserted exactly: all four are byte-identical. (They were 67 /
+/// 63 / 37 / 25 pixels while the port's z rotation subtracted a borrow from
+/// the previous dot's offset, which the original's `sub dx,cx` does not do:
+/// `bugs.md` §18.1, A19.)
 const KEYFRAMES: [(u32, usize, usize, usize); 4] = [
     // (reference index, differing pixels, reference shadow pixels, shared shadow pixels)
-    (10_900, 67, 1860, 1856),
-    (11_200, 63, 2159, 2152),
-    (11_800, 37, 2187, 2175),
-    (12_400, 25, 2170, 2168),
+    (10_900, 0, 1860, 1860),
+    (11_200, 0, 2159, 2159),
+    (11_800, 0, 2187, 2187),
+    (12_400, 0, 2170, 2170),
 ];
 
 #[test]
@@ -223,11 +222,9 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
         let tick = tick_of(index);
         let key = frame_file(&dir, tick, "rgb");
         let theirs = reference_frame(index, "rgb");
-        assert_eq!(
-            differing_pixels(&key, &theirs),
-            expected,
-            "boot {index} (tick {tick})"
-        );
+        let differing = differing_pixels(&key, &theirs);
+        println!("boot {index} (tick {tick}): {differing} px differ");
+        assert_eq!(differing, expected, "boot {index} (tick {tick})");
         // Every keyframe is a moving screen (`reference-indices.md` §14.3):
         // the two neighbours are different pictures, which is what makes the
         // mapping exact.
@@ -238,10 +235,9 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
                 "boot {index}: tick {neighbour} is not distinguishable"
             );
         }
-        // The geometry is exact even where the residue is not: the shadow is
-        // colour 87, whose grey ramp value is 11, widened by the DAC to 45.
-        // Every reference shadow pixel is at the same place in the port's
-        // frame but for the coincident-dot overdraw.
+        // The shadow is colour 87, whose grey ramp value is 11, widened by the
+        // DAC to 45: every reference shadow pixel is at the same place in the
+        // port's frame.
         let shadow = [45u8, 45, 45];
         let count = |frame: &[u8]| {
             (0..64_000)
@@ -249,6 +245,7 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
                 .count()
         };
         assert_eq!(count(&theirs), reference_shadow, "boot {index}");
+        println!("boot {index}: reference shadow pixels {}", count(&theirs));
         let rendered = frame_file(&dir, tick, "rgb");
         let shared = (0..64_000)
             .filter(|at| {
@@ -256,6 +253,7 @@ fn the_four_keyframes_match_the_reference_at_the_mapping() {
                     && rendered[at * 3..at * 3 + 3] == shadow
             })
             .count();
+        println!("boot {index}: shared shadow pixels {shared}");
         assert_eq!(
             shared, shared_expected,
             "boot {index}: shadow pixels shared with the reference"

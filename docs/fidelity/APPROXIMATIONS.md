@@ -1016,7 +1016,7 @@ the packed image's own conditions would need an unpacker.
 
 ---
 
-## A19 — MINVBALL: the release's coincident-dot overlay is not the tree's, and the RNG is Microsoft's
+## A19 — MINVBALL: the RNG is Microsoft's, and the uninitialised `j` is fitted (the former 67/63/37/25-pixel residual was a port defect, fixed in Phase 9 Task 9)
 
 **Part:** MINVBALL (`DOTS/MAIN.C` + `DOTS/ASM.ASM`), Phase 4. Under D24: the source is the
 evidence, the reference's frames are the authority, and the shipped release is the tiebreaker.
@@ -1028,54 +1028,49 @@ evidence, the reference's frames are the authority, and the shipped release is t
 seed 1, returning `(seed >> 16) & 0x7FFF`; the first ten values are 41, 18,467, 6,334, 26,500,
 19,169, 15,724, 11,478, 29,358, 26,962, 24,464
 (`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`). The port implements that
-generator, not Borland's; the reference's dense 12,400 scatter frame is reproduced to **25
-pixels** (`the_four_keyframes_match_the_reference_at_the_mapping`), which is the evidence the
-stream is the release's.
+generator, not Borland's.
 
-**The residual the port does not reproduce.** The four reference keyframes differ from the port
-by **67 / 63 / 37 / 25 pixels** of 64,000 (10,900 / 11,200 / 11,800 / 12,400; 0.1047 / 0.0984 /
-0.0578 / 0.0391 %), asserted exactly by `the_four_keyframes_match_the_reference_at_the_mapping`.
-The geometry is exact — at least **99 %** of each reference frame's shadow pixels are at the same
-pixel in the port's frame (same test) — so the difference is confined to *coincident* dots: two
-balls, or a ball and a shadow, land on one pixel and the draw order decides the colour. The
-source fixes the draw order (the `dot` array), but which dot draws a given position is the
-`dottaul` permutation, and the permutation's cursor `j` is **never initialized** (`MAIN.C:87`,
-`:200`): the value is whatever the stack held. The port fits the one value the source leaves free
-to the reference, **88** (the value the residues in this entry are measured with;
-`the_setup_is_deterministic_and_its_permutation_is_fixed` pins the setup around it). The fit is
-committed as the ignored measurement test `the_initial_j_is_fitted_to_the_reference`, which
-replays all 512 values against the 10,900 frame:
+**`j` is never initialised, and its value is fitted.** `dottaul[j]` picks which dot draws a
+coincident position, and the permutation's cursor `j` is never assigned (`MAIN.C:87`, `:200`): the
+value is whatever the stack held. The port fits the one value the source leaves free to the
+reference, **88** (`INITIAL_J`). The fit is committed as the ignored measurement test
+`the_initial_j_is_fitted_to_the_reference`, which replays all 512 values against the 10,900 frame:
 
 ```bash
 cargo test --release -p secondreality --bin secondreality \
     parts::minvball::tests::the_initial_j_is_fitted -- --ignored --nocapture
-# best five (pixels, j): [(67, 88), (341, 171), (353, 168), (354, 14), (356, 386)]
+# best five (pixels, j): [(0, 88), (283, 171), (296, 168), (297, 386), (300, 14)]
 ```
 
-88 is the minimum; the residual is the release's own stack-`j` difference (the permutation itself
-is the RNG's and is reproduced). The compiled
-caller's `bx` — the other register the source does not fix — is measured as unobservable:
-`the_entry_bx_is_unobservable_at_the_keyframe` renders 10,900 under `0, 0xFFFF, 0x8000, 0x1234,
-0x4000, 0x5757` and asserts identical bytes.
+88 is the only value that reproduces the frame (0 pixels; the next best leaves 283), so the fit is
+unique, not a minimum among near-ties. `the_setup_is_deterministic_and_its_permutation_is_fixed`
+pins the setup around it. The shipped part is
+`upstream/SecondReality/MAIN/DATA/MINVBALL.EXE`, a 7,395-byte PKLITE-packed self-extractor (the same
+shape as A17/A18's leads), but nothing needs unpacking: the tree's source, with this one fitted
+cursor, reproduces every filed frame.
 
-**Why it cannot be followed further.** The shipped part is
-`upstream/SecondReality/MAIN/DATA/MINVBALL.EXE`, a 7,395-byte PKLITE-packed self-extractor (the
-same shape as A17/A18's leads); the tree's `DOTS/DOTS.EXE` is the 10,372-byte development build
-of the ported source. The `dottaul` permutation is the RNG's and the port reproduces it — the
-25-pixel scatter is the evidence — so the only unreadable input is the release's **initial stack
-`j`**, inside the packed image. Everything the source states is implemented literally — the
-`mov ax,ax` stale-`bx` rotation, the corrupted-offset store (`mov ds:[si+6],ax` stores the low
-word of the dword the three ball restores left in `eax`, `ASM.ASM:186-195`, not the shadow row),
-the gravity integration skipped when the shadow is off screen (`ja @@2` jumps past it), the
-shadow colour 87 inside the background ramp, the exact cue window and the frame cap. The
-corrupted-offset store was corrected in fix round 1 and the four keyframes re-measured; the
-numbers in this entry are the post-fix measurement.
+**Measured difference, through the real binary: none.** The four keyframes are byte-identical,
+0 / 0 / 0 / 0 differing pixels of 64,000 at 10,900 / 11,200 / 11,800 / 12,400, and the shadow layer
+agrees pixel for pixel (1,860, 2,159, 2,187 and 2,170 shared of as many). Commands:
 
-**Measured difference, through the real binary.** 67/63/37/25 pixels at the four keyframes, with
-the shadow layer at 1856/1860, 2152/2159, 2175/2187 and 2168/2170 pixels shared (99.78 / 99.68 /
-99.45 / 99.91 %), and every keyframe reproduced at exactly one frame counter
-(403/703/1303/1903; the `K±1` neighbours are different pictures, asserted by the test, so the
-mapping is not a loose fit).
+```bash
+cargo test --release -p secondreality --test minvball the_four_keyframes -- --nocapture
+cargo xtask rediff        # the four minvball rows, registered at 0, verdict ok
+```
+
+Every keyframe is reproduced at exactly one frame counter (403/703/1303/1903; the `K±1` neighbours
+are different pictures, asserted by the test, so the mapping is not a loose fit).
+
+**What this entry used to say, and why it was wrong.** Until Phase 9 Task 9 the four keyframes
+differed by **67 / 63 / 37 / 25** pixels (0.1047 / 0.0984 / 0.0578 / 0.0391 %), and this entry
+attributed them to "the release's own stack-`j` difference", with a 99 % shadow agreement. The cause
+was a defect of the port's: `project_xz` subtracted a borrow from the previous dot's screen offset
+(`bx`) in the z rotation. The original does not: `DOTS/ASM.ASM:69-70` is `sub ax,bx` / `sub dx,cx`
+(object bytes `2b c3 2b d1`), the carry from the low word is ignored and `ax` is overwritten at
+`:74`, so the stale `bx` never reaches `bp` (`bugs.md` §18.1). Removing the borrow, a behaviour the
+original does not have, took all four residuals to 0 and made `j = 88`
+unique. Nothing in this entry is an approximation any more except the fitted `j`, which the source
+leaves open.
 
 ## A20 — ALKU: the linked hzpic's three palette entries (adopted), and the text batches' phase (registered)
 

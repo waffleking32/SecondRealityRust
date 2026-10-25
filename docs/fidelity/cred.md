@@ -456,4 +456,4 @@ regions' byte counts per frame; **the wipes moving the display between the holds
 open steps, two that differ, the open loop's last step identical to the hold's first frame, and two
 close steps that differ, all through the binary; and the truncated-frame guard.
 
-**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` the index (the inert line compare).
+**Register.** CRED's one behaviour that the original has and the port keeps, the inert `tw_setsplit(400)`, is a row of `bugs.md`'s index; the part has no entry of its own.

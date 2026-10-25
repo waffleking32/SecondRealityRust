@@ -2360,10 +2360,51 @@ mod tests {
         assert_eq!(state.cop_drop, 128);
         assert_eq!(state.fadepal[0], 0x0110, "the leftover fraction carried into the colour");
         assert_eq!(state.fadepal[0] >> 8, 1);
-        assert_eq!(
-            state.fadepal[2], 0x0000,
-            "an accumulator with no leftover fraction starts from the step alone"
-        );
+        // An accumulator with no leftover fraction starts from the step alone.
+        state.pals[0][2] = 0x0020;
+        state.do_drop();
+        assert_eq!(state.cop_drop, 129);
+        assert_eq!(state.fadepal[2], 0x0020);
+    }
+
+    /// `bugs.md` §1, through the part itself: at the plasma's second table
+    /// switch (`ttptr` 1 → 2) the accumulators the first fade left behind
+    /// lose their colour byte and keep their fraction. Removing the clear from
+    /// `plasma_tick`, or clearing the whole word, fails it.
+    #[test]
+    fn the_plasma_tick_clears_only_the_colour_half_at_a_table_switch() {
+        use crate::audio::{lock, test_player, PlayerMusic};
+        use crate::shell::ModuleId;
+        use sr_engine::{Engine, IndexedFrame, View, MAX_HEIGHT, MAX_WIDTH};
+
+        let player = test_player(ModuleId::Music1).expect("MUSIC1 loads");
+        lock(&player).play_song(62);
+        let mut engine = Engine::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200));
+        engine.set_music(Box::new(PlayerMusic::new(player, 0)));
+        let mut part = Plzpart::new();
+        part.table_directory = "../../assets/PLZPART";
+        engine.start(&mut part).expect("the part starts");
+        let mut frame = IndexedFrame::new(engine.view().width, engine.view().height);
+        let mut switched = false;
+        for _ in 0..2600 {
+            let before = part.copper.borrow().fadepal;
+            let ttptr = part.copper.borrow().ttptr;
+            engine.tick(&mut part, &mut frame);
+            if ttptr == 1 && part.copper.borrow().ttptr == 2 {
+                let after = part.copper.borrow().fadepal;
+                assert!(
+                    before.iter().any(|acc| acc & 0xFF00 != 0)
+                        && before.iter().any(|acc| acc & 0x00FF != 0),
+                    "the first fade left colour and fraction bytes to tell apart"
+                );
+                for (index, (old, new)) in before.iter().zip(after.iter()).enumerate() {
+                    assert_eq!(*new, old & 0x00FF, "accumulator {index}: colour zeroed, fraction kept");
+                }
+                switched = true;
+                break;
+            }
+        }
+        assert!(switched, "the second table switch happened (tick ~2010)");
     }
 
     /// `bugs.md` §17.2: the drop's 65th step resets the line compare and

@@ -120,10 +120,13 @@ For each dot, in array order:
 Three features of the assembly are translated literally:
 
 - **`mov ax,ax`** (`ASM.ASM:65`) is a no-op where the rotation's low word
-  should have been saved (`mov bx,ax`). The z rotation therefore subtracts
-  the *previous dot's screen offset* from `Z*cos`; only its high word reaches
-  `bp`, so the carried register changes `bp` by at most the borrow. The port
-  carries `bx` across the 512 dots.
+  should have been saved (`mov bx,ax`), and the z rotation is `sub ax,bx` /
+  `sub dx,cx` (`:69-70`, object bytes `2b c3 2b d1`). `sub dx,cx` ignores the
+  carry and `ax` is overwritten at `:74`, so the stale `bx` never reaches
+  `bp`: `bp = hi(Z*cos) - hi(X*sin) + 9000`. (The port once subtracted a
+  borrow from the previous dot's offset, a defect of its own, and the four
+  keyframes differed by 67/63/37/25 pixels for it; fixed in Phase 9 Task 9,
+  `bugs.md` §18.1, A19.)
 - **`mov ds:[si+6],ax`** (`:194-196`) stores a clobbered register as the next
   frame's shadow offset when the shadow is off screen. The three 32-bit
   restores before it (`:186`, `:189`, `:192`) each load `eax` from
@@ -160,11 +163,13 @@ committed and reproducible:
 ```bash
 cargo test --release -p secondreality --bin secondreality \
     parts::minvball::tests::the_initial_j_is_fitted -- --ignored --nocapture
-# best five (pixels, j): [(67, 88), (341, 171), (353, 168), (354, 14), (356, 386)]
+# best five (pixels, j): [(0, 88), (283, 171), (296, 168), (297, 386), (300, 14)]
 ```
 
-88 is the minimum of all 512 (`the_initial_j_is_fitted_to_the_reference`). The
-residue §6 measures is what remains under that fit.
+88 is the minimum of all 512 (`the_initial_j_is_fitted_to_the_reference`), and
+it is the only one that reproduces the frame: 0 differing pixels, where the next
+best leaves 283. (With the z rotation's former borrow the same fit gave 67 against
+341; the borrow was the port's, not the original's, `bugs.md` §18.1.)
 
 ## 5. The cue, `dis_indemo`, and the music
 
@@ -228,22 +233,24 @@ search's nearest fit.
 
 | reference | port tick | frame counter | differing pixels of 64,000 | percentage |
 |---|---|---|---|---|
-| 10,900 | 532 | 403 | **67** | 0.1047 % |
-| 11,200 | 832 | 703 | **63** | 0.0984 % |
-| 11,800 | 1,432 | 1,303 | **37** | 0.0578 % |
-| 12,400 | 2,032 | 1,903 | **25** | 0.0391 % |
+| 10,900 | 532 | 403 | **0** | 0 % |
+| 11,200 | 832 | 703 | **0** | 0 % |
+| 11,800 | 1,432 | 1,303 | **0** | 0 % |
+| 12,400 | 2,032 | 1,903 | **0** | 0 % |
 
 The counts are asserted exactly by
-`the_four_keyframes_match_the_reference_at_the_mapping`, so a change that
-moves them fails the test.
+`the_four_keyframes_match_the_reference_at_the_mapping` (`cargo test --release
+-p secondreality --test minvball the_four_keyframes -- --nocapture` prints each),
+and `cargo xtask rediff` registers all four at 0. They were 67 / 63 / 37 / 25
+pixels until Phase 9 Task 9 removed the borrow the port's z rotation took from
+the previous dot's `bx`; the original's `sub dx,cx` has none (§4, `bugs.md`
+§18.1), and the residue A19 attributed to the release's unreadable stack `j` was
+that defect.
 
 **The geometry is exact.** The shadow — colour 87, a grey whose value is 11 in
 the six-bit palette and 45 in the widened RGB — is at the same pixels in the
-port's and the reference's frames for at least **99 %** of the reference's
-shadow pixels at every keyframe (the same test). The projection, the rotation
-and the scatter's random positions are therefore right; the residue is at
-coincident dots, where two balls or a ball and a shadow land on one pixel and
-the last writer wins.
+port's and the reference's frames for **every** shadow pixel at every keyframe
+(the same test: 1,860, 2,159, 2,187 and 2,170 shared of as many).
 
 **The D24 record.** The vendor tree and the shipped release are different
 artifacts:
@@ -255,22 +262,17 @@ ls -l upstream/SecondReality/MAIN/DATA/MINVBALL.EXE upstream/SecondReality/DOTS/
 ```
 
 The release's part is the packed one, while the tree's `DOTS/DOTS.EXE` is the
-development build of the source ported here (A19's lead applies). The
-`dottaul` permutation is the RNG's and the port reproduces it — the 25-pixel
-scatter at 12,400 is the evidence — so the only unreadable input is the
-release's **initial stack `j`**, which is inside the packed image. The source
-leaves `j` uninitialized, so the port fits the one value the source permits to
-the reference (88, §4). The residual above is that unobservable overlap resolution, and it
-is recorded in `docs/fidelity/APPROXIMATIONS.md` A19. Everything the source
-*does* say — the projection, the depth tables, the two bugs, the y-integration
-skip, the Microsoft RNG, the cue and the frame cap — is implemented, and the
-scatter's 25-pixel residue at 12,400 is the evidence that the random stream is
-the reference's.
+development build of the source ported here. The tree's source reproduces all
+four filed frames exactly, so no D24 adoption is needed. The source leaves `j`
+uninitialized, so the port fits the one value the source permits to the
+reference (88, §4). Everything the source says — the projection, the depth
+tables, the two bugs, the y-integration skip, the Microsoft RNG, the cue and the
+frame cap — is implemented.
 
 ## 7. The real run
 
 ```bash
-cargo test -p secondreality --bin secondreality parts::minvball               # 17 unit tests (+1 ignored measurement)
+cargo test -p secondreality --bin secondreality parts::minvball               # 20 unit tests (+1 ignored measurement)
 cargo test -p secondreality --test minvball                                    # 4 integration tests
 ```
 
@@ -278,7 +280,7 @@ The integration test drives `CARGO_BIN_EXE_secondreality --part minvball
 --headless` from the repository root and asserts the manifest
 (`index_origin: "part"`, `anchor: null`, `MUSIC1` at order 75), the 320×200
 geometry, the black DAC and the floor ramp at tick 0, the four keyframes at
-the mapping with their exact residues, the 99 % shadow agreement, the frame
+the mapping, all byte-identical, the exact shadow agreement, the frame
 cap at tick 2,579 (boot 12,947) and that the retired part holds its last
 frame. The unit tests pin the RNG, the setup, the cue window and the skipped
 cue, the exit, the frame cap, the stage boundary, the gravity decrement, the

@@ -77,7 +77,7 @@
 //! interval**: the keyframes 10,900 / 11,200 / 11,800 / 12,400 are reproduced
 //! at frame counters 403 / 703 / 1303 / 1903, whose differences (300 / 600 /
 //! 600) are exactly the boot-index differences, and the four keyframes
-//! reproduce at those counters (67/63/37/25 pixels; `tests/minvball.rs`). A
+//! reproduce at those counters (0 differing pixels in all four; `tests/minvball.rs`). A
 //! `repeat` above one between two keyframes would advance the frame counter
 //! without a draw and move the ball rows; the matches would fail. The run's
 //! end at 12,947 is the mapping's prediction from the source's 2,450-frame
@@ -117,16 +117,18 @@
 //! - **The shadow colour 87 sits inside the background's grey ramp** (64-163).
 //!   It is written as it stands, over the floor.
 //! - **The C's `mov ax,ax`** (`ASM.ASM:65`) is a no-op where the rotation's
-//!   low word should have been saved (`mov bx,ax`): the z rotation subtracts
-//!   the *previous dot's screen offset* from `Z*cos`, and only its high word
-//!   reaches `bp`. The port carries that `bx` across the 512 dots in
-//!   [`drawdots`].
+//!   low word should have been saved (`mov bx,ax`). The z rotation is `sub
+//!   ax,bx` / `sub dx,cx` (`:69-70`): `sub dx,cx` ignores the carry and `ax`
+//!   is overwritten at `:74`, so the stale `bx` never reaches `bp`, which is
+//!   `hi(Z*cos) - hi(X*sin) + 9000` (`bugs.md` §18.1). The port once
+//!   subtracted a borrow from the previous dot's offset; that was its own
+//!   defect and is gone.
 //! - **`j` is never initialized** (`MAIN.C:87`): the first event reads
 //!   `dottaul[j]` at whatever the stack held. The reference's overlaps pin it
 //!   to **88**; the port starts there ([`INITIAL_J`]), and the ignored
 //!   measurement test `the_initial_j_is_fitted_to_the_reference` replays all
-//!   512 values against the 10,900 frame and asserts 88 is the minimum (67
-//!   pixels; the next is 341).
+//!   512 values against the 10,900 frame and asserts 88 is the minimum (0
+//!   pixels; the next is 283).
 //!
 //! # The cue, and `dis_indemo`
 //!
@@ -677,12 +679,6 @@ impl Minvball {
 
     /// `ASM.ASM:52-218`'s `drawdots` into the 64 KB video buffer.
     fn draw_video(&mut self) {
-        self.draw_video_with_entry(0);
-    }
-
-    /// [`draw_video`](Minvball::draw_video) with the caller's `bx` chosen, for
-    /// the unit test that measures the register's unobservability.
-    fn draw_video_with_entry(&mut self, entry_bx: u16) {
         drawdots(
             &mut self.dots,
             &self.bgpic,
@@ -695,7 +691,6 @@ impl Minvball {
             &self.depth1,
             &self.depth2,
             &self.depth3,
-            entry_bx,
         );
     }
 
@@ -835,16 +830,15 @@ impl Part for Minvball {
 /// `ASM.ASM:61-92`: the shared x/z projection. Returns `(x, shadow row, bp)`;
 /// `bp` also gives the depth entry (`bp >> 8`) and is reused for the ball row
 /// after the gravity integration.
-fn project_xz(dot: &Dot, bx_stale: u16, rotcos: i32, rotsin: i32) -> (i16, i16, i16) {
-    // The z rotation, with the source's `mov ax,ax` bug: the low word of
-    // `X*rot` is never saved, so the subtrahend's high word is `X*sin`'s and
-    // its low word is the previous dot's screen offset.
+fn project_xz(dot: &Dot, rotcos: i32, rotsin: i32) -> (i16, i16, i16) {
+    // The z rotation (`:61-72`): `X*sin`'s high word goes to `cx` (`mov
+    // cx,dx`), then `Z*cos`'s product is reduced by `sub ax,bx` / `sub dx,cx`.
+    // `sub dx,cx` ignores the carry and `ax` is overwritten at `:74`, so the
+    // low word, the stale `bx` and the `mov ax,ax` (`:65`) never reach `bp`:
+    // it is the difference of the high words, plus 9000.
     let xsin = i32::from(dot.x) * rotsin;
     let zcos = i32::from(dot.z) * rotcos;
-    let borrow = u16::from((zcos as u16) < bx_stale);
-    let high = ((zcos >> 16) as u16)
-        .wrapping_sub((xsin >> 16) as u16)
-        .wrapping_sub(borrow);
+    let high = ((zcos >> 16) as u16).wrapping_sub((xsin >> 16) as u16);
     let bp = (high as i16).wrapping_add(9000);
 
     // `:74-93`: x' = X*cos + Z*sin; the screen x is (x'>>8 + x'>>11)/bp+160.
@@ -897,12 +891,8 @@ fn write_table(video: &mut [u8], at: u16, value: u32, bytes: usize) {
 
 /// `ASM.ASM:52-218`'s `_drawdots`, unit for unit, into a 64 KB segment.
 ///
-/// The dot order is the array order; `bx` is the register the source carries
-/// from one dot's projection to the next, and its entry value is the caller's
-/// (the compiled `main`'s) — the source cannot say what it was. The port uses
-/// 0; `the_entry_bx_is_unobservable_at_the_keyframe` renders 10,900 under
-/// `{0, 0xFFFF, 0x8000, 0x1234, 0x4000, 0x5757}` and asserts identical bytes,
-/// so the choice is unobservable in the reference.
+/// The dot order is the array order. `bx` is not carried between dots: the
+/// z rotation's `sub dx,cx` ignores the carry (`bugs.md` §18.1).
 ///
 /// The arity is the machine's: each parameter is one of the registers or
 /// memory pointers the assembly reads, and bundling them would have to hold
@@ -920,11 +910,9 @@ fn drawdots(
     depth1: &[u32; DEPTH_ENTRIES],
     depth2: &[u32; DEPTH_ENTRIES],
     depth3: &[u32; DEPTH_ENTRIES],
-    entry_bx: u16,
 ) {
-    let mut bx: u16 = entry_bx;
     for dot in dots.iter_mut() {
-        let (x, shadow, bp) = project_xz(dot, bx, rotcos, rotsin);
+        let (x, shadow, bp) = project_xz(dot, rotcos, rotsin);
         let on_shadow = (x as u16) <= 319 && (shadow as u16) <= 199;
         if on_shadow {
             // `:106-118`: restore the old shadow and write the two-pixel one.
@@ -951,14 +939,12 @@ fn drawdots(
                 write_table(video, at.wrapping_add(320), depth2[depth], 4);
                 write_table(video, at.wrapping_add(641), depth3[depth], 2);
                 dot.old2 = at;
-                bx = at;
             } else {
                 // `@@3` (`:203-216`): the ball is off screen; restore it and
                 // leave `old2` alone.
                 restore(video, bgpic, dot.old2, 4);
                 restore(video, bgpic, dot.old2.wrapping_add(320), 4);
                 restore(video, bgpic, dot.old2.wrapping_add(640), 4);
-                bx = x as u16;
             }
         } else {
             // `@@2` (`:185-202`): the shadow is off screen. Three 32-bit
@@ -976,7 +962,6 @@ fn drawdots(
             restore(video, bgpic, dot.old2.wrapping_add(640), 4);
             restore(video, bgpic, dot.old1, 2);
             dot.old1 = stored;
-            bx = x as u16;
         }
     }
 }
@@ -1394,7 +1379,7 @@ mod tests {
             z: 16384,
             ..Dot::default()
         };
-        let (x, shadow, bp) = project_xz(&dot, 0, 11584, 11584);
+        let (x, shadow, bp) = project_xz(&dot, 11584, 11584);
         assert_eq!((x, shadow, bp), (345, 158, 9000));
         let mut dots = [dot];
         let mut bgpic = vec![0u8; FRAME_MEMORY];
@@ -1413,7 +1398,7 @@ mod tests {
         let d2 = [0u32; DEPTH_ENTRIES];
         let d3 = [0u32; DEPTH_ENTRIES];
         drawdots(
-            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
         assert_eq!(
             dots[0].old1, 0x1234,
@@ -1427,7 +1412,7 @@ mod tests {
         dots[0].x = 0;
         dots[0].z = 0;
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
         assert_eq!(
             &video[0x1234..0x1236],
@@ -1454,7 +1439,7 @@ mod tests {
             z: -4000,
             ..Dot::default()
         };
-        // The far dot: Z = 0, bp 9000 (8999 once the stale-`bx` borrow lands);
+        // The far dot: Z = 0, bp 9000;
         // its two-pixel shadow lands on row 158, columns 160 and 161.
         let far = Dot {
             x: 0,
@@ -1462,10 +1447,10 @@ mod tests {
             z: 0,
             ..Dot::default()
         };
-        let (near_x, near_shadow, near_bp) = project_xz(&near, 0, cos, sin);
+        let (near_x, near_shadow, near_bp) = project_xz(&near, cos, sin);
         assert_eq!((near_x, near_shadow, near_bp), (160, 165, 8000));
         assert_eq!(project_y(near.y, near_bp), 157, "the near ball starts on row 157");
-        let (far_x, far_shadow, far_bp) = project_xz(&far, 0xFFFF, cos, sin);
+        let (far_x, far_shadow, far_bp) = project_xz(&far, cos, sin);
         assert_eq!((far_x, far_shadow), (160, 158));
         assert!(far_bp > near_bp, "the far dot is farther than the near one");
 
@@ -1475,7 +1460,7 @@ mod tests {
             let mut dots = order;
             let mut video = vec![0u8; FRAME_MEMORY];
             drawdots(
-                &mut dots, &bgpic, &mut video, cos, sin, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+                &mut dots, &bgpic, &mut video, cos, sin, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
             );
             video
         };
@@ -1504,50 +1489,45 @@ mod tests {
         );
     }
 
-    /// `bugs.md` §18.1: `mov ax,ax` (`DOTS/ASM.ASM:65`) is a no-op where the
-    /// rotation's low word should have been saved, so the z rotation subtracts
-    /// the previous dot's screen offset from `Z*cos`. Only the borrow reaches
-    /// `bp`, but a one-unit `bp` is a different shadow row at the scale where
-    /// `(8<<16)/bp` crosses an integer.
+    /// `bugs.md` §18.1: the z rotation is `sub ax,bx` / `sub dx,cx`
+    /// (`DOTS/ASM.ASM:69-70`), and `sub dx,cx` ignores the carry, so the low
+    /// word's borrow never reaches `bp`; `ax` is overwritten at `:74`, which
+    /// makes the stale `bx` (and the `mov ax,ax` at `:65`) inert:
+    /// `bp = hi(Z*cos) - hi(X*sin) + 9000`, whatever the previous dot left.
     #[test]
-    fn the_z_rotation_borrows_from_the_previous_dots_screen_offset() {
-        // Z = -3228 at rotation 0: Z*cos is -807 * 65536, whose low word is 0.
+    fn the_stale_bx_never_reaches_bp() {
+        // Z = -3228 at rotation 0: Z*cos is -807 * 65536, whose low word is 0,
+        // the case where a borrow from a larger `bx` would move bp by one and
+        // the shadow row from 163 to 164.
         let dot = Dot {
             x: 0,
             y: 0,
             z: -3228,
             ..Dot::default()
         };
-        // No carried offset: no borrow, bp = 9000 - 807 = 8193, row 63 + 100.
-        assert_eq!(project_xz(&dot, 0, 16384, 0), (160, 163, 8193));
-        // A carried offset above the low word (0) borrows one: bp 8192, row 64.
-        assert_eq!(project_xz(&dot, 1, 16384, 0), (160, 164, 8192));
+        assert_eq!(
+            project_xz(&dot, 16384, 0),
+            (160, 163, 8193),
+            "bp = -807 + 9000: the low word's borrow never reaches it"
+        );
 
-        // Through `drawdots`: the register is the previous dot's ball offset.
+        // Through `drawdots`: a dot drawn after another one (whose ball offset
+        // is the register the source leaves in `bx`) casts the same shadow as
+        // the same dot drawn alone.
         let (d1, d2, d3) = Minvball::build_depth_tables();
         let bgpic = vec![0u8; FRAME_MEMORY];
-        let centre = Dot::default();
-        let at_ball_of_centre = 100 * 320 + 160;
-        assert_ne!(at_ball_of_centre, 0);
-        let mut video = vec![0u8; FRAME_MEMORY];
-        let mut dots = [dot];
+        let mut alone = vec![0u8; FRAME_MEMORY];
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut [dot], &bgpic, &mut alone, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
-        assert_eq!(video[163 * 320 + 160], SHADOW, "alone: no borrow, shadow row 163");
-        assert_eq!(video[164 * 320 + 160], 0);
-        let mut video = vec![0u8; FRAME_MEMORY];
-        let mut dots = [centre, dot];
+        let mut after = vec![0u8; FRAME_MEMORY];
+        let mut dots = [Dot::default(), dot];
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut after, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
-        assert_eq!(dots[0].old2, at_ball_of_centre, "the first dot's ball offset is the carry");
-        assert_eq!(
-            video[164 * 320 + 160],
-            SHADOW,
-            "after another dot: the borrow moves the shadow to row 164"
-        );
-        assert_eq!(video[163 * 320 + 160], 0);
+        assert_eq!(after[163 * 320 + 160], SHADOW, "the shadow is on row 163 either way");
+        assert_eq!(alone[163 * 320 + 160], SHADOW);
+        assert_eq!(after[164 * 320 + 160], 0);
     }
 
     /// `bugs.md` §18.3: the gravity integration is inside the ball block and
@@ -1565,12 +1545,12 @@ mod tests {
             yadd: 7,
             ..Dot::default()
         };
-        let (x, _, _) = project_xz(&off, 0, 11584, 11584);
+        let (x, _, _) = project_xz(&off, 11584, 11584);
         assert!(x as u16 > 319, "the shadow is off screen");
         let mut dots = [off];
         let mut video = vec![0u8; FRAME_MEMORY];
         drawdots(
-            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
         assert_eq!((dots[0].y, dots[0].yadd), (100, 7), "gravity is skipped");
         // The same dot on screen integrates: yadd += gravity, then y += yadd.
@@ -1583,7 +1563,7 @@ mod tests {
         };
         let mut dots = [on];
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
         assert_eq!((dots[0].yadd, dots[0].y), (10, 110), "gravity runs on screen");
     }
@@ -1600,11 +1580,11 @@ mod tests {
         let mut video = vec![0u8; FRAME_MEMORY];
         let (d1, d2, d3) = Minvball::build_depth_tables();
         drawdots(
-            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3,
         );
         let dot = dots[0];
         // bp = 9000; x = 160, shadow row = 58+100 = 158, ball row = 0+100.
-        let (x, shadow, bp) = project_xz(&dot, 0, 16384, 0);
+        let (x, shadow, bp) = project_xz(&dot, 16384, 0);
         assert_eq!((x, shadow), (160, 158));
         let row = project_y(dot.y, bp);
         let at = (row as u16) * 320 + x as u16;
@@ -1684,15 +1664,15 @@ mod tests {
     }
 
     /// Replay the main loop from frame 1 to `frame`, drawing every tick, with
-    /// the cursor at `j` and the caller's `bx`. The fade is not replayed: it
+    /// the cursor at `j`. The fade is not replayed: it
     /// draws nothing, and the reference frames are main-loop frames.
-    fn replay(j: usize, frame: i32, entry_bx: u16) -> Vec<u8> {
+    fn replay(j: usize, frame: i32) -> Vec<u8> {
         let mut part = Minvball::new();
         part.setup_state(&Palette::new());
         part.next = j;
         for _ in 1..=frame {
             part.physics();
-            part.draw_video_with_entry(entry_bx);
+            part.draw_video();
         }
         rendered_rgb(&part)
     }
@@ -1709,7 +1689,7 @@ mod tests {
         assert_eq!(reference.len(), VIDEO_BYTES * 3);
         let mut scores: Vec<(usize, usize)> = (0..DOTNUM)
             .map(|j| {
-                let rgb = replay(j, 403, 0);
+                let rgb = replay(j, 403);
                 let diff = rgb
                     .chunks_exact(3)
                     .zip(reference.chunks_exact(3))
@@ -1724,22 +1704,6 @@ mod tests {
             scores[0].1, INITIAL_J,
             "the fitted cursor is the minimum over 0..512"
         );
-    }
-
-    #[test]
-    fn the_entry_bx_is_unobservable_at_the_keyframe() {
-        // The compiled main's `bx` at the `drawdots` call is not in the
-        // source. The buggy rotation carries it into `bp` by the low-word
-        // borrow; the reference frame is identical under every plausible
-        // entry value.
-        let base = replay(INITIAL_J, 403, 0);
-        for entry in [0xFFFFu16, 0x8000, 0x1234, 0x4000, 0x5757] {
-            assert_eq!(
-                replay(INITIAL_J, 403, entry),
-                base,
-                "entry bx {entry:#06x}"
-            );
-        }
     }
 
     // --- the reference's mapping --------------------------------------------

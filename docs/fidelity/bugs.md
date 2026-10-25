@@ -128,10 +128,9 @@ artefact and changes the picture.
 
 **Evidence.** `reference/parts/minvball/` — 10900, 11200, 11800, 12400 (`reference-indices.md` §14).
 All four are moving keyframes at 3/3 (100 %) support, so a diff there is a real difference. The
-port's residuals are 67 / 63 / 37 / 25 pixels of 64,000, and at least 99 % of each frame's shadow
-pixels are at the same pixel in both (`the_four_keyframes_match_the_reference_at_the_mapping`);
-what differs is which of two *coincident* dots draws last, and that is the initial `j` of §18.4
-(A19), not the painter's order.
+port is byte-identical at all four (0 differing pixels each, and every shadow pixel shared:
+`the_four_keyframes_match_the_reference_at_the_mapping`; `cargo xtask rediff` registers them at 0), and
+where two dots coincide the winner is the draw order, with the initial `j` fitted (§18.4, A19).
 
 **Test.** `shadows_are_drawn_over_balls_without_a_depth_test`
 (`bins/secondreality/src/parts/minvball.rs`): a near dot (bp 8000) and a far dot (bp 9000) are
@@ -445,7 +444,10 @@ clears the first 320 columns' worth of bytes, so the array's last 16 rows surviv
 exactly 186×320 bytes of the 186×352 array. **Frame.** None isolates it: the surviving rows are the
 text buffer's own, redrawn by the next `fmaketext`, and the filed frames are cards (1719, 2719) and
 one mid-batch scroll (5859) whose residual is the phase. **Test.**
-`the_tbuf_clear_keeps_the_arrays_last_sixteen_rows`.
+`the_tbuf_clear_keeps_the_arrays_last_sixteen_rows` (asserts `TBUF_CLEAR == 186*320`, then runs the
+part to its first batch with a marker in the buffer and reads what the production clear left: the
+first 59,520 bytes cleared, columns 320.. of rows 170..185 and the last byte still the marker; a
+full clear or a short one fails it).
 
 ### 10.4 The batch gate waits for code 5 (the post-incremented `tptr`)
 
@@ -588,7 +590,7 @@ captures confirm all eight rotations (`techno.md` §7, §4.1); none is filed. **
 ### 14.3 `clipanypoly`'s first edge is the pre-clipped closing edge
 
 **Original.** `cap3` ends with `jmp cap35`, which skips the first loop iteration's clipping.
-**Where.** `TECHNO/POLYCLIP.ASM` (`clipanypoly`). **Port must.** Not model it as a pseudo-point: that
+**Where.** `TECHNO/POLYCLIP.ASM:63` (`cap3:`), `:78` (`jmp cap35`), `:94` (`cap35:`). **Port must.** Not model it as a pseudo-point: that
 produces a sparse picture and fails 6300 at once. **Frame.** 6300 (the bars). **Test.**
 `the_box_renderer_fills_the_clipped_polygon`.
 
@@ -633,21 +635,13 @@ tick 1,979 (`mntscrl.md` §6) and the keyframes stop at 2300's scroll; the posit
 `reference/music/second3`. **Tests.** `the_cue_is_exactly_minus_eleven`,
 `the_fade_out_is_sixty_five_ticks_and_ends_the_part`.
 
-## 16. LNS&ZOOM — the 1,536-byte overrun and the aspect block's place (slot 10)
+## 16. LNS&ZOOM — the aspect block's place (slot 10)
 
 Tests are in `bins/secondreality/src/parts/lnszoom.rs`. Frames: `reference/parts/lnszoom/` — 2700,
-3400, 4200, 4900, 5650 (`reference-indices.md` §12).
+3400, 4200, 4900, 5650 (`reference-indices.md` §12). The 1,536-byte overrun at `LENS/MAIN.C:302` is
+an index row: its source bytes are all zero.
 
-### 16.1 `memcpy(back+64000, back+64000-1536, 1536)` writes past the picture
-
-**Original.** The destination is the `FILLER` pad after the 64,000-byte picture; the source is the
-picture's last 1,536 bytes. The lens's 16-bit source addresses reach it. **Where.**
-`LENS/MAIN.C:302`. **Port must.** Keep a 65,536-byte `back` whose `[64000, 65536)` is that copy.
-**Frame.** None isolates it: the pad's contents are the picture's own tail, and the filed lens
-frame (3400) differs from the port only by A25's forehead asset. **Test.**
-`the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy`.
-
-### 16.2 `rotate`'s aspect-ratio block runs after the displacement table is patched
+### 16.1 `rotate`'s aspect-ratio block runs after the displacement table is patched
 
 **Original.** The 307/256 scaling of `xadd`/`yadd` comes after the table is built and before the row
 loop, so the in-row sample steps keep the uncorrected vector and only the row-to-row advance is
@@ -666,16 +660,22 @@ residuals are registered (A23: 26.161 % at 8500, 99.483 % at 9500), so no cube f
 **Original.** `end_mask[x-1]` at `x = 0` reads the byte before the table, `start_mask`'s last
 `0x08`, not the `0x0F` the periodic pattern would give. **Where.** `PLZPART/PLZA.ASM:350-363`.
 **Port must.** Read the same flat table, with the 16-bit displacement wrapping. **Frame.** None
-isolates it: it is one edge byte where a span's edge sits at `x = 0`, inside the cube's clear, and
-the cube keyframes carry the registered residual. **Test.**
+shows it, measured: replacing the underflowed byte by the `0x0F` the periodic pattern would give
+leaves 8500 and 9500 at exactly 26.161 % and 99.483 % (`cargo test --release -p secondreality --test
+plzpart -- --nocapture`), so the keyframes never take the `x = 0` case. It is pinned at the table
+level. **Test.**
 `do_clears_mask_underflow_reads_the_byte_before_end_mask`.
 
 ### 17.2 The last drop step resets the split and accumulates nothing
 
 **Original.** `do_drop`'s 65th step sets the line compare to 400 and re-initialises the parameters
-and returns before the accumulate loop, so the last table's fade is cut short. **Where.**
+and returns before the accumulate loop, so **every** table's fade is cut short by one step (31
+accumulating steps, 66..96, of the 32 the 65..96 range holds). **Where.**
 `PLZPART/COPPER.ASM:189-268`. **Port must.** Return at step 65 without accumulating (steps 66-96
-and 128-255 do). **Frame.** 7600 is the plasma frame nearest the exit. **Test.**
+and 128-255 do). **Frame.** 7000 and 7600, both after the first switch: letting step 65 accumulate
+moves 7000 from 5.848 % to 70.000 % differing pixels and 7600 from 4.052 % to 70.000 % (a temporary
+mutation of `do_drop`, `cargo test --release -p secondreality --test plzpart -- --nocapture`); 6000 is
+before the first switch and does not move. **Test.**
 `the_last_drop_step_resets_the_split_and_adds_nothing`.
 
 ### 17.3 The projection adds 160 twice
@@ -690,28 +690,30 @@ and 128-255 do). **Frame.** 7600 is the plasma frame nearest the exit. **Test.**
 **Where.** `PLZPART/VECT.C:166-199`. **Port must.** Shift by 22 and subtract inside. **Frame.** Cube
 8500/9500 (residual registered). **Test.** `count_const_keeps_the_c_precedence_shifts`.
 
-## 18. MINVBALL — beyond §2: the stale register, the clobbered offset, the skipped gravity and the uninitialised `j` (slot 12)
+## 18. MINVBALL — beyond §2: the inert `mov ax,ax`, the clobbered offset, the skipped gravity and the uninitialised `j` (slot 12)
 
 Tests are in `bins/secondreality/src/parts/minvball.rs`. Frames: `reference/parts/minvball/` — 10900,
-11200, 11800, 12400 (`reference-indices.md` §14); residuals 67 / 63 / 37 / 25 pixels (A19).
+11200, 11800, 12400 (`reference-indices.md` §14); all four are byte-identical (A19).
 
-### 18.1 `mov ax,ax` leaves the previous dot's offset in the z rotation
+### 18.1 The z rotation drops the low word's borrow, so `mov ax,ax` and the stale `bx` are inert
 
 **Original.** Where the rotation's low word should have been saved (`mov bx,ax`) the source has a
-no-op, so the z rotation subtracts the previous dot's screen offset; only the borrow reaches `bp`.
-**Where.** `DOTS/ASM.ASM:65`. **Port must.** Carry `bx` across the 512 dots. **Frame.** The four
-keyframes; the entry value is unobservable (`the_entry_bx_is_unobservable_at_the_keyframe`).
-**Test.** `the_z_rotation_borrows_from_the_previous_dots_screen_offset` (a dot at `Z = -3228` has bp 8193
-and shadow row 163 alone, bp 8192 and row 164 after another dot, whose ball offset is the carried
-register); `the_entry_bx_is_unobservable_at_the_keyframe` pins the register's entry value.
+no-op (`mov ax,ax`). The subtraction is `sub ax,bx` / `sub dx,cx` (`:69-70`, object bytes
+`2b c3 2b d1`): `sub dx,cx` ignores the carry, and `ax` is overwritten at `:74`, so the stale `bx`
+(the previous dot's screen offset) never reaches `bp`. `bp = hi(Z*cos) - hi(X*sin) + 9000`. **Where.**
+`DOTS/ASM.ASM:65`, `:69-70`, `:74`. **Port must.** Subtract the high words and nothing else:
+carrying a borrow in from a register, or carrying `bx` across the 512 dots, is not the original. (The
+port once did, and the four keyframes differed by 67 / 63 / 37 / 25 pixels for it; removed in Phase 9
+Task 9, A19.) **Frame.** The four keyframes, now 0 differing pixels each (a borrow moves `bp` by one,
+which at some Z moves a shadow row). **Test.** `the_stale_bx_never_reaches_bp` (a dot at `Z = -3228`
+has `bp` 8193 and shadow row 163 whatever the previous dot left, alone or after another dot).
 
 ### 18.2 The off-screen shadow stores a clobbered register as the next offset
 
 **Original.** The three 32-bit restores leave `eax` holding the old ball's third row; `mov
 ds:[si+6],ax` stores its low word, not the shadow row, and the next frame restores from it as a pixel
 offset. **Where.** `DOTS/ASM.ASM:186-195`. **Port must.** Store that word; keep the 64 KB segment so
-the restore reads defined bytes. **Frame.** The four keyframes (corrected in fix round 1 and
-re-measured). **Test.** `the_shadow_restore_bug_stores_the_old_balls_third_row_word`.
+the restore reads defined bytes. **Frame.** The four keyframes (byte-identical). **Test.** `the_shadow_restore_bug_stores_the_old_balls_third_row_word`.
 
 ### 18.3 The gravity integration is skipped while the shadow is off screen
 
@@ -727,7 +729,8 @@ same dot on screen integrates to 110 / 10).
 reads it, so which dot draws a coincident position depends on the stack. **Where.**
 `DOTS/MAIN.C:87`, `:200`. **Port must.** Start at **88**, the value the reference's overlaps fit
 (`INITIAL_J`); the drawing is identical at every dot's position, only the coincident-pixel winner
-moves. **Frame.** All four keyframes: 67 pixels at 10,900 under 88, the next best candidate is 341.
+moves. **Frame.** All four keyframes: 0 pixels differ at 10,900 under 88, and the next best
+candidate leaves 283, so the fit is unique.
 **Tests.** `the_initial_j_is_fitted_to_the_reference` (ignored; the fit command is in `minvball.md`
 §4), `the_setup_is_deterministic_and_its_permutation_is_fixed`.
 
@@ -758,7 +761,7 @@ Reproduce the double step. **Frame.** 13000, byte for byte (35 colours, mean 23.
 ### 19.3 The last upload is one step short on the seven entries whose blue target is 63
 
 **Original.** The 63rd upload (y = 125) displays those blues at 62 and then steps the stored array
-to 63. **Port must.** Upload before stepping. **Frame.** 13500: its palette is MIEKKA's with exactly
+to 63. **Where.** `WATER/DEMO.PAS:122-126`. **Port must.** Upload before stepping. **Frame.** 13500: its palette is MIEKKA's with exactly
 seven blue channels at 62 and no other channel short. **Test.** the same,
 `the_fade_in_is_one_hundred_twenty_seven_iterations_and_pins_tick_zero`.
 
@@ -773,11 +776,15 @@ upload).
 
 ### 19.5 The fade is cued at `dis_musplus() == -11`, confirmed seven ticks
 
-The cue is `-11` exactly (A18's confirmation applies to it): `minus_ten_and_minus_twelve_never_trigger_the_cue`,
-`the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks`. A timing, no filed frame (the cue is
-at boot 14,942, after 14500).
+**Original.** The fade-out fires on `cmp dx,-11 / jnz`, not `<=`; a relaxed test moves the tick the
+fade begins (A18's seven-tick confirmation applies to it). **Where.** `WATER/DEMO.PAS:162`. **Port
+must.** Fire on -11 only. **Frame.** None: the cue is at boot 14,942, after the last keyframe (14500).
+**Tests.** `minus_ten_and_minus_twelve_never_trigger_the_cue`,
+`the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks`.
 
 ## 20. 3DSINFLD — the 18-row clear that moves the copy, and the masked coordinates (slot 14)
+
+(`cameralevel`, written and never read, is an index row.)
 
 Tests are in `bins/secondreality/src/parts/coman.rs` and `bins/secondreality/tests/coman.rs`.
 Frames: `reference/parts/3dsinfld/` — 15500, 16000, 16500, 16800 (`reference-indices.md` §16);
@@ -799,11 +806,6 @@ vbuf are cleared. **Where.** `COMAN/ASM.ASM:178-183` (and `ASM.ASM:216-229` for 
 are 16-bit byte offsets into the 64 KB wave tables, and `mov bx,fs:[si]` masks the low bit.
 **Where.** `COMAN/ASM.ASM:115-124`. **Port must.** Mask, and index the tables as bytes. **Frame.**
 All four. **Test.** `the_ray_march_matches_the_shipped_generated_program` (byte for byte).
-
-### 20.3 `cameralevel` is written and never read
-
-`MAIN.C:54` writes -270, `docol` loads it, `THELOOP.INC` stores it in `theloop_heigth`, and nothing
-reads it: indexed in the closing table.
 
 ## 21. JPLOGO — the crop and its border, the zero remap, its own sine table and the palimpsest guard (slot 15)
 
@@ -828,7 +830,9 @@ must.** Both. **Frame.** 17300 and 17500. **Test.** the same.
 ### 21.3 JPLOGO's sine table differs from the common copy
 
 **Original.** `SIN1024.INC` here holds ±255 at indices 256 and 768 where the common copy has ±256.
-**Port must.** Use this file's table. **Frame.** 17300/17500 (the wobble). **Test.**
+**Where.** `JPLOGO/SIN1024.INC:10` (index 256 is 255) and `:26` (index 768 is -255), counting the `dw`
+words from the label. **Port must.** Use this file's table.
+**Frame.** 17300/17500 (the wobble). **Test.**
 `the_sine_table_is_the_sources_own_1024_words` (all 1,024 words from the shipped file).
 
 ### 21.4 `doit` redraws only rows whose `(b, a)` changed — the palimpsest
@@ -904,35 +908,62 @@ must.** The same default. **Frame.** 400-800 (the (-10,-8) artefacts match every
 
 ## 25. HARD (vault) — beyond §7-§9: the dot engine's unsigned clips and colour decrement, the 16-bit z load, and the record that is never read
 
-Tests are in `bins/secondreality/src/parts/vault/hard/`. Frames: `reference/parts/hard/` — all
-nine keyframes are exact.
+Tests are in `bins/secondreality/src/parts/vault/hard/`. Frames: `reference/parts/hard/` — all nine
+keyframes are exact (480, 560, 630, 700, 770, 840, 910, 1050, 1600); the dot frames are 560-770.
 
-- **`sar 6` then unsigned clips.** `dot3d` draws when `y <= 127` and `x <= 319` as *unsigned*
-  compares after the shift, so negative coordinates are clipped, and the x advance is skipped when y
-  is out. `HARD/BA.ASM:75-122`. Frame 480-770. `the_dot_engine_leaves_the_66_frame_trail`.
-- **`dot3d2`'s `dec dl`.** The colour decrements every frame, so a mode-4 dot spawned at 254 ends at
-  189 after 65 frames and the 66th call kills it undrawn; the 930-955 hold's 100 white pixels are
-  those last positions. `HARD/BA.ASM:144`. Frame 910. `the_dot_engine_leaves_the_66_frame_trail`.
-- **`do3dots` loads z's low word and signed-skips above 3000.** `HARD/BA.ASM:233-235`. Frame 1050.
-  `the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`,
-  `the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`.
-- **Record 0 is never read.** The spawner's `dotsp += 4` precedes the first read, and a terminator
-  resets `dotsp` to 0, so the next read is record 1 again: a stream of R records yields `N - N/R`
-  dots. `HARD/BP.C:60-69`, `B.C:251-261`. Frame 480-770. `the_dot_streams_are_the_bdo_extraction`.
+### 25.1 `sar 6`, then unsigned clips
+
+**Original.** `dot3d` draws when `y <= 127` and `x <= 319` as *unsigned* compares after the shift, so
+a negative coordinate is clipped, and the x advance is skipped when y is out. **Where.**
+`HARD/BA.ASM:75-122`. **Port must.** Clip as unsigned words after the arithmetic shift. **Frame.**
+560-770 are drawn through it (exact); no test or frame isolates a negative coordinate. **Test.**
+`the_dot_engine_leaves_the_66_frame_trail` (pins the record, the restore, the life, the clips and the
+decrement).
+
+### 25.2 `dot3d2`'s `dec dl`
+
+**Original.** The colour decrements every frame, so a mode-4 dot spawned at 254 ends at 189 after 65
+frames and the 66th call kills it undrawn; the 930-955 hold's 100 white pixels are those last
+positions. **Where.** `HARD/BA.ASM:144`. **Port must.** Decrement and draw in that order. **Frame.**
+910 (the mode-4 band). **Test.** `the_dot_engine_leaves_the_66_frame_trail`.
+
+### 25.3 `do3dots` loads z's low word and signed-skips above 3000
+
+**Original.** `mov bp,ds:[si+8] / cmp bp,3000 / jg @@2` reads the 16-bit low word of the dword z and
+compares it signed; a negative low word passes and indexes past `depthcol`. **Where.**
+`HARD/BA.ASM:232-234`. **Port must.** Load the low word. (The word a negative z would read is
+modelled as zero; the index records that this branch is unreachable.) **Frame.** 1050 (part 2's grid).
+**Tests.** `the_shadow_grid_dot_skips_positive_z_and_models_the_negative_word`,
+`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`.
+
+### 25.4 Record 0 of a dot stream is never read
+
+**Original.** The spawner's `dotsp += 4` precedes the first read and a terminator resets `dotsp` to
+0, so the next read is record 1 again: a stream of R records yields `N - N/R` dot calls. **Where.**
+`HARD/BP.C:62`, `HARD/B.C:251-261`. **Port must.** Add before reading. **Frame.** 560-770 (the
+streams' dots). **Test.** `the_dot_streams_are_the_bdo_extraction` (and
+`the_first_spawn_is_the_sources_rand_sequence`).
 
 ## 26. TWIST (vault) — the 16-bit row arithmetic and the texture the generator shipped
 
-Tests are in `bins/secondreality/src/parts/vault/twist.rs`. Frames: `reference/parts/twist/` —
-103-603, exact.
+Tests are in `bins/secondreality/src/parts/vault/twist.rs`. Frames: `reference/parts/twist/` — 103,
+203, 303, 403, 503, 603 (all exact).
 
-- **`rows(frame)`'s two traps.** `ra = frame + 1` as a `u16`, `r = (y as u16).wrapping_mul(ra)`,
-  C's truncating `/`, `w % 200`: the sine peak selects row 0, not 199, and frame 327's final add
-  wraps (200·328 = 65,600). `TWIST/MAIN.C` (`twist.md` §2). Frame 103-603.
-  `the_selected_rows_are_the_sources_16_bit_phase`.
-- **The shipped include's left edge.** `TWSTLOOP.INC` holds 121 rows whose first byte is `0x3F`
-  (the generator's order-dependent quirk: a visible four-pixel blue left edge); the port consumes
-  the include as shipped and does not re-derive a clean texture. `TWIST/TWSTLOOP.INC`, `DOL.C`.
-  Frame 103-603. `the_texture_table_is_the_shipped_twstloop`.
+### 26.1 `rows(frame)`'s two traps
+
+**Original.** `ra` is a 16-bit `int` incremented per frame and `r += ra` wraps; `w` is then reduced
+by `twister()`'s modulo-200 clamp, so the sine peak selects row 0, not 199, and frame 327's final add
+wraps (200·328 = 65,600). **Where.** `TWIST/MAIN.C:52-58`, `TWIST/TWIST.ASM:26-34`. **Port must.**
+`ra = frame + 1` as a `u16`, `(y as u16).wrapping_mul(ra)`, C's truncating `/`, `w % 200`. **Frame.**
+103-603. **Test.** `the_selected_rows_are_the_sources_16_bit_phase`.
+
+### 26.2 The shipped include's left edge
+
+**Original.** `TWSTLOOP.INC`, generated from `TMP.UH`, holds 121 rows whose first byte is `0x3F`
+(the generator's order-dependent quirk: a visible four-pixel blue left edge). **Where.**
+`TWIST/DOL.C:108` (`v[0]=63`), the include `TWIST/TWSTLOOP.INC`. **Port must.** Consume the include
+as shipped and not re-derive a clean texture. **Frame.** 103-603. **Test.**
+`the_texture_table_is_the_shipped_twstloop`.
 
 ## 27. DDSTARS — the star clip is assembled out
 
@@ -1005,7 +1036,7 @@ plays. **Frame.** None: the emulator runs silent (D17). **Tests.**
 divide by the segment's initial **21111** where the frame rate is 20000: 94 cents flat. **Where.**
 `MAIN/STMIK.300` `+0x539b`…`+0x53a9`. **Port must.** Keep the object's word. **Sound it decides.**
 Every stereo voice's pitch. **Frame.** None (silent emulator). **Test.**
-`a_step_is_the_objects_two_divisions` (`tests/mix.rs`).
+`a_step_is_the_objects_two_divisions` (`crates/sr-audio/src/mix.rs`).
 
 ---
 
@@ -1027,16 +1058,17 @@ a counterfactual test (a "fix" that *would* show), the row names it.
 | U2A | The city hacks force sort distances for `co[2]`, `co[7]`, `co[13]`, `co[14]` | `VISU/C/U2A.C:301-310` | `U2A.00M`'s byte 15 is 0, so neither branch runs; implemented and guarded (`the_city_hacks_are_u2a_s_and_guard_out_of_range_instances`) | `u2a.md` §6 |
 | U2A | The teardown clears all four pages and names page 3 the draw page | `VISU/C/U2A.C:432-441`, `AVID.ASM:341-358` | The display never moves during teardown and every page holds the same cleared background | `u2a.md` §6 |
 | U2E | `fov` is uninitialised when first read | `VISU/C/U2E.C:378` | The first draw is skipped (§12.3), so the read is invisible | `u2e.md` §6 |
-| U2E | The city hacks are dead | `VISU/C/U2E.C` | `U2E.00M` byte 15 is 0 and U2E never reads `city` | `u2e.md` §6 |
+| U2E | The city hacks are dead: `city` is assigned and never read | `VISU/C/U2E.C:18`, `:212-213` | `U2E.00M` byte 15 is 0 and nothing in U2E reads `city` | `u2e.md` §6 |
 | TECHNO | `setborder` returns before its assembly | `TECHNO/KOE.C:68-80` | The Scroll Lock border is not a frame; no call has an effect | `techno.md` §7 |
 | TECHNO | `flash(-2)` returns `pal1` without capturing or uploading; `mode16` writes `flash_pal` and uploads nothing | `TECHNO/KOE.C:82-103` | No DAC write | `techno.md` §7; `flash_minus_two_uploads_nothing` |
 | TECHNO | `mov cx,400` in `init_interference` is reloaded before it is read | `TECHNO/KOEB.ASM:356`, reloaded at `:360` | The register's first value is never used | `techno.md` §7 |
 | TECHNO | The KOEB plane-8 loop is behind `jmp @@OVER3`; `sizefade` stays 0 and its `add ax,256` is commented out | `TECHNO/KOEB.ASM:454` (`jmp @@OVER3`), `:524` (`;add ax,256`) | The first pass's display start is the constant 8020 either way; the port keeps `first_pass_move` with `p1_sizefade` 0 | `techno.md` §3 |
 | TECHNO | `power1` is computed and never read | `TECHNO/KOE.C:173-211` | A dead table | `techno.md` §3 |
 | TECHNO | `dis_partstart()` is called a second time | `TECHNO/KOE.C:327` | The version check draws nothing and waits on nothing | `techno.md` §5 |
-| TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C` troll init | The 400 decoded rows are identical either way (`the_troll_rle_is_the_origin_readers_rows`) | `techno.md` §6 |
-| PANICEND | `SHUTDOWN.C` has no `dis_exit()`; nothing beyond memory row 0 is cleared | `PANIC/SHUTDOWN.C` | The part never reads ESC; the shell retires it at the end of that tick (`the_part_ignores_the_exit_flag_and_completes_its_finite_acts`) | `panicend.md` §9-10 |
+| TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C:317` | The 400 decoded rows are identical either way (`the_troll_rle_is_the_origin_readers_rows`) | `techno.md` §6 |
+| PANICEND | The part never polls the exit flag: `SHUTDOWN.C` contains no `dis_exit()` call, so it runs all 121 waits whatever the key state | `PANIC/SHUTDOWN.C:1-157` (`grep -c dis_exit` prints 0) | The reference is captured with no key pressed, so no frame is at an exit | `panicend.md` §9-10 |
 | MNTSCRL | `frame = veke` can never fire: `inc(frame)` is commented out | `FOREST/READ2.PAS:3`, `:221-224` | Dead bound (`the_dead_veke_bound_never_ends_the_part`) | `mntscrl.md` §8 |
+| LNS&ZOOM | `memcpy(back+64000, back+64000-1536, 1536)` copies the picture's last 1,536 bytes into the pad past it | `LENS/MAIN.C:302` | The copied bytes are all 0 (checked over `LENS.EXB`'s last 1,536 picture bytes) and the port's buffer starts at 0, so the copy changes nothing: with it removed the three filed lens/rotazoomer residuals are unchanged (3.2156 / 3.0234 / 2.1812 %) and `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` still passes, so that test pins the buffer's layout, not the copy's contents | `lnszoom.md` §2 |
 | LNS&ZOOM | `if(dis_musplus>-30)` tests the function pointer, so the wait always runs | `LENS/MAIN.C:104` | At the part's entry the player publishes -5 (`the_entry_pre_roll_lands_the_reference_position_at_tick_zero`), so the wait passes either way; the counterfactual at -32 is `the_missing_call_in_the_part1_guard_is_preserved` | `lnszoom.md` §3 |
 | LNS&ZOOM | The `a > 3` clamp on the frame advance | `LENS/MAIN.C:176` | The port runs one frame a tick, so `frame` never advances by more than one (the original's advanced by `min(waitb(),3)`) | `lnszoom.md` §4 |
 | LNS&ZOOM | `setpalarea` at `:200` is erased by `inittwk`'s DAC clear | `LENS/MAIN.C:200` | Uploaded and cleared inside one tick | `lnszoom.md` §5 |
@@ -1055,29 +1087,33 @@ a counterfactual test (a "fix" that *would* show), the row names it.
 | JPLOGO | `if(frame>511) c=400;` is a skipped assignment: `c` is never read again | `JPLOGO/JP.C:78` | The freeze is `y1`/`y2` keeping their values, which the port writes as `frame <= FREEZE_AFTER` | `jplogo.md` §4 |
 | JPLOGO | `scrolly` writes CRTC `0x0D` then `0x0C` | `JPLOGO/JP.C:30-45` | The order matters only to hardware; the port's origin is the 16-bit pair | `jplogo.md` §1 |
 | JPLOGO | `doit`'s `halt`, `storea`, `ysb`; `calc` (`:53-65`) never called; `lineblit` (`ASM.ASM:76-100`) never called; the `storea = a` and its `printf` | `JPLOGO/JP.C:69`, `:109`, `:220-225` | Dead | `jplogo.md` §8 |
-| JPLOGO | The run opcode `0x80` writes 256 copies (an 8-bit count that wraps) | `JPLOGO/READP.C` | The shipped writers never emit it; `sr-assets` refuses it (`a_0x80_run_opcode_wraps_to_256_copies`) | `jplogo.md` §2.2 |
+| JPLOGO | The run opcode `0x80` writes 256 copies (an 8-bit count that wraps: `dec ah / jnz l4`) | `JPLOGO/READP.C:44-51` | The shipped writers never emit it; `sr-assets` refuses it (`a_0x80_run_opcode_wraps_to_256_copies`) | `jplogo.md` §2.2 |
 | GLENZ | The `frame>1400+789` bscale-shrink arm is unreachable: `frame>1220+789` catches every value first | `GLENZ/MAIN.C:483`, `:490` | Kept in source order | `glenz.md` §5 |
-| GLENZ | `NEW.ASM`'s 256-word row table is followed in memory by the edge arena | `GLENZ/NEW.ASM` | Not shown reachable: the worst shipped case is near y = 252 and the port's list is a `Vec`; an open item in `glenz.md` §8, registered only if a moving keyframe reaches it | `glenz.md` §8 |
+| GLENZ | `NEW.ASM`'s 256-word row table is followed in memory by the edge arena | `GLENZ/NEW.ASM:11-16` (`nec`, `nep`, `ne`) | Not shown reachable: the worst shipped case is near y = 252 and the port's list is a `Vec`; an open item in `glenz.md` §8, registered only if a moving keyframe reaches it | `glenz.md` §8 |
 | GRID | `sin256` and the 64 KB `muldata` are built and read by nothing linked; `_asmloop2`, the unused slot words and `_line` | `GRID/MAIN.C:38-43`, `:130-139`, `ASM.ASM:113-134`, `:247-269` | Dead | `grid.md` §2 |
 | GRID | `d = sin1[k&1023]/4+256; d = 0;` is a dead store: the y waveform is static | `GRID/MAIN.C:162-163` | The overwritten value is never read | `grid.md` §6 |
 | HARD | `depthcol[bp]` with a negative low word reads a code byte (0x07), modelled as zero | `HARD/BA.ASM:233-235` | Over part 2's 501 states the low word is always positive (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`) | `hard.md` |
-| HARD | The word clear at `[si+12]` is behind `jmp @@4` | `HARD/BA.ASM:229-235` | Unreachable; the port's one-byte-per-row clear differs only in bytes 1/321 at offset 0 that no reached frame depends on | `hard.md` |
+| HARD | `do3dots`'s shadow store to `[si+12]` is behind `jmp @@4`; the word clear that precedes it (`:229-231`) runs every iteration | `HARD/BA.ASM:229-235` | The store is unreachable, so `[si+12]` stays 0; the port's one-byte-per-row clear is a *model* of it, differing only in bytes 1/321 at offset 0, which no reached frame depends on (`hard.md` "The dot engine") | `hard.md` |
 | HARD | `_GRID1.TMP`'s last byte is `0x4F` in the linked copy and `0x00` in the file | `HARD/B.C:112-121` | The affected word is the y of the 100th pair; no filed keyframe depends on it (`the_grid_table_is_the_shipped_grid1`) | `hard.md` |
 | HARD | The `count>400` branch and the `0xff` cut; `setborder` | `HARD/B.C:243-246`, `:26`, `:196`, `:201` | Dead / inert (`the_0xff_cut_is_unreachable_with_one_start`) | `hard.md` |
 | TWIST | `line()`/`leftline`/`rightline` are linked but never called; the `memset` and `vram[a]=a` are overwritten before the first display; the 8-byte record's last six bytes are never read | `TWIST/MAIN.C:30-42`, `ASM.ASM:97-218` | None is observable | `twist.md` §2 |
 | CRED | `tw_setsplit(400)` | `CREDITS/MAIN.C:165` | A line compare of 400 below a 200-row display is inert | `cred.md` §1 |
 | ENDSCRL | The scan's end-of-buffer case reads past `text[64000]` | `ENDSCRL/MAIN.C:103-122` | Unreachable in the shipped text: the part ends 184 lines before it | `endscrl.md` §4 |
-| ENDLOGO | The surface is not cleared and DAC entry 255 is never written | `END/END.C` | The first is index 0 anyway (`the_opening_screen_is_the_shells_surface_through_the_shells_dac`); the second is displayed by no path (`the_white_leaves_entry_255_unwritten`) | `endlogo.md` §4 |
+| ENDLOGO | The surface is not cleared and DAC entry 255 is never written | `END/END.C:66` (`//inittwk();`), `:90-91` (the white loop stops at byte 764, entry 254) | The first is index 0 anyway (`the_opening_screen_is_the_shells_surface_through_the_shells_dac`); the second is displayed by no path (`the_white_leaves_entry_255_unwritten`) | `endlogo.md` §4 |
 | Music | The order list's `254` and `255` are kept as bytes; `254` is stepped over and `255` ends or loops the list | `MUSIC0.S3M`/`MUSIC1.S3M` | No order the demo plays reaches a `255`; the `254`'s effect (RAYSCRL's `zplus`) is §28's trace | `music.md` §4, §7; `the_order_list_is_preserved_byte_for_byte` |
 | Music | The period clamp `[64, 32767]` | `MAIN/STMIK.300` `+0x5876`…`+0x5896` | Inaudible: the 2,408 / 2,635 probe hits above `0x7FFF` are all on volume-0 channels | `music.md` §10 |
 | Music | The flags word's bit 4 would write the clamped period back; both modules carry flags 8 | `MAIN/STMIK.300` `+0x583d`, `+0x586e`, `+0x589a` | The write-back never runs | `music.md` §10 |
 | Shell | `error2` says "a number between 2 and 5" where `SECOND 1` is accepted | `MAIN/U2.ASM:557-559` | Text-mode wording; the port's refusal text is its own | `part-sequence.md` §4 |
-| ALKU (pass 2) | The first `dis_sync()` of the loop's second pass races the restarted player: in 1 session of 7 it starts early | `ALKU/MAIN.C:59`, `DIS/DISINT.ASM:449-463` | **Not preserved**: it is the host-timing term (D17), session-dependent, not a deterministic behaviour. The port reproduces the filed majority and registers the carried-ring counterfactual (A55, D42, `reference-indices.md` §25.3) | `reference-indices.md` §25 |
 
 ## Not in this register, and why
 
 These came up while classifying and are deliberately elsewhere:
 
+- **ALKU's pass-2 `dis_sync` race (D42).** The first `dis_sync()` of the loop's second pass races the
+  restarted player (`ALKU/MAIN.C:59`, `DIS/DISINT.ASM:449-463`): in 1 session of 7 it starts early
+  (`reference-indices.md` §25.3). It is the host-timing term (D17), session-dependent, not a
+  deterministic behaviour a test can pin. The port reproduces the filed majority and does not carry
+  the minority; the carried-ring counterfactual is A55 / D42.
 - **A55** — the original's stopped tick feeds order `0xffff` into the position ring at a reload.
   The port does not carry the ring; it is a registered approximation (`APPROXIMATIONS.md`), not a
   behaviour the port preserves.
@@ -1107,20 +1143,39 @@ The audit is the set of lines in `docs/fidelity/*.md` (this file excluded) that 
 grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b' docs/fidelity/*.md | grep -v '^docs/fidelity/bugs.md'
 ```
 
-At this commit it prints **69** lines. The check that none is missing from the table below is
-that every `file:line` it prints appears in this file as a code span:
+At this commit it prints **69** lines. The check that none is missing from the table below is that
+every `file:line` it prints appears as a code span **inside this closing section** (the section is
+cut out first, so a mention of the same `file:line` elsewhere in this file does not count):
 
 ```bash
+sect() { awk '/^## The classification/{f=1} /^## Adding an entry/{f=0} f' docs/fidelity/bugs.md; }
 grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b' docs/fidelity/*.md | grep -v '^docs/fidelity/bugs.md' \
   | cut -d: -f1,2 | sed 's#^docs/fidelity/##' \
-  | while read -r hit; do grep -qF "$hit\`" docs/fidelity/bugs.md || echo "UNCLASSIFIED $hit"; done
+  | while read -r hit; do sect | grep -qF -- "$hit\`" || echo "UNCLASSIFIED $hit"; done
 ```
 
 It prints nothing. (Line numbers are this commit's: a later edit to a note moves them and the check
-reports the hits it moved, which is its job. A second, wider grep — `\bbugs?\b|artefact|artifact`,
-144 lines — adds no behaviour the table lacks: its extra lines are the `setpalarea` back-references
-(§4), the vault captures' "artifact" meaning the shipped binary (D24), the build artefacts
-(`asset-inventory.md`, `music.md:1633`) and the measurement artefacts of the traces.)
+reports the hits it moved, which is its job.)
+
+**The wider grep.** Notes also call behaviours "bugs" or "artefacts" without the four words, so the
+same pipeline was run with that alternation:
+
+```bash
+grep -nEi 'preserv|\bkept\b|\brequired\b|\bD7\b|\bbugs?\b|artefact|artifact' docs/fidelity/*.md \
+  | grep -v '^docs/fidelity/bugs.md' | wc -l
+```
+
+prints **172** at this commit, **103** of them lines the first grep does not print (`comm -13` of the
+two `file:line` lists). Those 103 add no behaviour the table lacks. Each is one of: a back-reference to
+§4's `setpalarea` ("bug", `beglogo.md`, `endlogo.md`, `techno.md`, `panicend.md`); a line inside a
+section the first grep already classifies (`alku.md` §6, `rayscrl.md` §5, `minvball.md` §4,
+`plzpart.md` §9, `jplogo.md` §8); "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`,
+`ddstars.md`, `u2a.md`, `reference-indices.md`'s HARD rows); a build, capture or trace artefact
+(`asset-inventory.md`, `music.md:1633`, `music-clock.md`, most of `reference-indices.md`); a port-side
+artifact registered in `APPROXIMATIONS.md` (A23's page-slot spill: `plzpart.md`,
+`APPROXIMATIONS.md`); or a behaviour classified above under another name — A14's "bug" (§28.4),
+GRID's "(-10,-8) fill-word artefacts" (§24.2), HARD's "the fade is the source's bug" (§9) and A48's two
+extra displays (the register's "Not in this register" list).
 
 **Classes.** **E** = a full entry in this file; **I** = a row of the index above; **N** = not a
 preserved behaviour of the original's (a port representation, a counterfactual, capture bookkeeping
@@ -1186,11 +1241,11 @@ or a registered approximation), with the reason.
 | `APPROXIMATIONS.md:272` | what was "kept from the substitution" (ENDLOGO's cue) | N (a register's own history) | — |
 | `APPROXIMATIONS.md:965` | an earlier version "kept the tree's wait" | N (a register's own history) | — |
 | `APPROXIMATIONS.md:1010` | "the exact cue is kept: only `-11`" (RAYSCRL) | E | §19.5 |
-| `APPROXIMATIONS.md:1753` | "what is preserved is the pixel set" (a representation) | N | — |
-| `APPROXIMATIONS.md:2510`, `APPROXIMATIONS.md:2592` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
+| `APPROXIMATIONS.md:1748` | "what is preserved is the pixel set" (a representation) | N | — |
+| `APPROXIMATIONS.md:2505`, `APPROXIMATIONS.md:2587` | the restart keeps the old module's channel state / the kept words | E | §28.1 |
 
 The behaviours the audit's grep cannot find because their note never says *preserved*, *kept* or
-*required* — LNS&ZOOM's overrun and aspect order (§16), HARD's dot engine (§25), the music
+*required* — LNS&ZOOM's aspect order (§16), HARD's dot engine (§25), the music
 player's volume-0 optimisation, `A7F`, curve builder and stereo word (§28.2-§28.5), U2E's
 `firstframe`, GRID and HARD's vault entries (§6-§9) and TWIST's texture (§26) — were found by
 reading each note's section on the part's own arithmetic, and are entries above so the register

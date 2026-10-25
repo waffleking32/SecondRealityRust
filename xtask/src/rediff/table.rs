@@ -629,15 +629,16 @@ pub const TABLE: &[Entry] = &[
         args: &["--block", "5", "--loop"],
         frames: &[rgb0(9029, 8833), rgb0(9055, 8859), rgb0(9081, 8885)],
     },
-    // tests/minvball.rs:117 boot = 10,368 + tick, :197 KEYFRAMES' differing pixels (A19).
+    // tests/minvball.rs boot = 10,368 + tick; KEYFRAMES' differing pixels, all four 0 since the
+    // z rotation stopped borrowing from the previous dot's `bx` (bugs.md §18.1, A19).
     Entry {
         capture: "minvball",
         args: &["--part", "minvball"],
         frames: &[
-            rgb(10900, 532, 67, "A19"),
-            rgb(11200, 832, 63, "A19"),
-            rgb(11800, 1432, 37, "A19"),
-            rgb(12400, 2032, 25, "A19"),
+            rgb0(10900, 532),
+            rgb0(11200, 832),
+            rgb0(11800, 1432),
+            rgb0(12400, 2032),
         ],
     },
     // tests/mntscrl.rs:96 tick = index − 419: 500 at 0 in both planes (:200-209), the three
