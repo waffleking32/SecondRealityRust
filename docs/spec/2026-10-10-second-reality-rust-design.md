@@ -250,6 +250,19 @@ part be compiled and tested without the whole demo. `sr-part` modules are large 
 in aggregate that a single crate with one module per part is the right granularity —
 crate-per-part would be ceremony without benefit.
 
+**As built (amended 2026-10-25, Phase 9 Task 10): three library crates, and the parts, the shell
+and the vault in the binary.** The workspace is `crates/sr-engine`, `crates/sr-assets`,
+`crates/sr-audio`, `bins/secondreality` and `xtask`. There is no `sr-parts`, `sr-shell` or
+`sr-vault`: the parts are modules of the binary (`bins/secondreality/src/parts/`, one a part, with
+`parts/visu/` and `parts/glenz/` for the two renderers two parts or one large part need), the vault
+is `parts/vault/` with `vault_menu.rs`, and the shell is `shell.rs` with `settings.rs` and
+`window.rs`. The decision is Phase 2's — "No new crate: the shell is a module in the binary, the
+parts are modules beside it" (`docs/plans/02-shell.md:20`) — recorded as **D32** for the vector
+renderer, D36 for GLENZ's and Phase 8's plan for the vault (`docs/plans/08-vault.md:21`); the
+rationale above is unchanged, one module per part, with the binary as the single crate. The
+dependency rule is the one that held throughout: `sr-engine` and `sr-audio` have no runtime
+dependencies, and `sr-assets` depends on `sr-engine` only. The tree above is the spec's record.
+
 ### 4.2 `sr-engine` — the software VGA model
 
 The core insight: **the visible output of the original is always an indexed 8-bit
@@ -400,16 +413,30 @@ See §7.
 The `U2.ASM` equivalent: part sequence, music restart points, the inter-block
 music-cue wait, transitions, exit handling, loop mode, and the modern settings screen.
 
+*(Amended 2026-10-25: built as `bins/secondreality/src/shell.rs`, `settings.rs` and `window.rs`,
+not a crate — §4.1's note. Loop mode is D42, the settings screen D44, the run's end D41.)*
+
 ### 4.7 `sr-vault`
 
 GRID, HARD and TWIST, playable standalone. These are development effects that never
 shipped; they are real ports, held to the same standard, but are not part of the main
 sequence.
 
+*(Amended 2026-10-25: built as `bins/secondreality/src/parts/vault/` and `vault_menu.rs`, not a
+crate — §4.1's note; D39, D40.)*
+
 ### 4.8 Tooling
 
 `xtask` subcommands: `assets verify`, `reference capture`, `compare`, `audio render`,
 `event log`. See §8.
+
+**As built (amended 2026-10-25, Phase 9 Task 10, D47).** `cargo xtask` has `reference capture`,
+`reference verify` (and `backfill`), `compare`, `rediff` (every filed frame at its registered
+count), `frames sheet`, `assets verify`, and `music symbols`, `trace`, `analyse` and `probe` (the
+original's player state, D26). `audio render` and `event log` were not built: D47 retires them,
+with §8.3's event stream, in favour of `rediff`'s frame comparison, `music trace`, and the binary's
+`--audio-dump` (the port's PCM) and `--positions` (a headless run's part and published position a
+frame).
 
 ---
 
@@ -450,6 +477,14 @@ Known candidates, to be confirmed per part:
   `GLENZ/VEC.ASM`'s matrix-in-immediates, `LENS/ASM.ASM`'s patched addressing,
   `PLZPART`'s jump table. The original compiles a value into an instruction; the port
   reads a variable. Expected to be identical.
+
+**The candidates' outcomes (amended 2026-10-25, Phase 9 Task 10).** `APPROXIMATIONS.md`'s section
+"Generated and self-modifying code" has one row each, with its test: eight are bit-identical where
+the reference can see them, and `GLENZ/ZOOMLOOP.INC` and `HARD/LINEBLIT.INC` are not on the shipped
+path. Two of the list's words are wrong, and the register's rows say so: what `TUNNELI` patches is
+the plot's **colour immediate** (`TUN10.PAS:168`), not a y-base, and `PLZPART` has no jump table —
+`setplzparas` patches **four table bases** into `plzline`'s instructions (`ASMYT.ASM:46-61`,
+`:74-95`).
 
 ### 5.3 Timing fidelity
 
@@ -613,6 +648,14 @@ Resolution ladder, cheapest first:
 the affected parts against a substitute cue and record the difference in
 `APPROXIMATIONS.md`; do not let it block the phase.
 
+**Outcome (amended 2026-10-25, Phase 9 Task 10).** Route 1 was performed in Phase 3 and found the
+word — `_np_zinfo` at segment offset `0x08F7` — and its value, **0 in every sample of every filed
+trace**, but no mechanism for any other value (D8, amended 2026-10-14). The trigger was therefore
+met and the substitute taken: `dis_muscode()` returns 0 (`sr_engine::music::muscode_from`),
+registered as `APPROXIMATIONS.md` **A56**. Routes 2 and 3 were not taken. No part the demo runs
+calls `dis_muscode`; GRID and HARD run behind the standalone DIS and model their one start key
+(A40, A46, A52), so the substitute's measured difference is 0 in every compared frame.
+
 ---
 
 ## 8. Verification
@@ -657,6 +700,12 @@ takes effect, and sound-clock advances. The same events can be logged from the
 original. This turns "the picture is slightly off" into "the line-compare write at
 frame 812 was 0x3C, you produced 0x13C", and is the technique `demoscene-recomp` uses
 to claim event-level correctness.
+
+**Retired (amended 2026-10-25, Phase 9 Task 10, D47).** The event stream was not built. The oracle
+exposes the original's registers only as polls between frames, so the events cannot be logged from
+the original without changing the emulator, and the frame comparison (§8.2, `cargo xtask rediff`)
+and the trace of the original's player state (`cargo xtask music trace`) answered what it was for.
+D47 has the decision and its cost.
 
 ### 8.4 Limitations, stated honestly
 
@@ -747,6 +796,11 @@ The project is designed to be stopped and resumed at any phase boundary.
 
 1. **`zspeedadjust` / `zspeedadjust2`.** Whether they affect audible timing or are
    GUS-specific calibration. Resolve in Phase 3.
+
+**Closed (amended 2026-10-25, Phase 9 Task 10): D46.** Both read 0 in the reference's run and in the
+object's image, the row timer's adder therefore adds nothing, and the shell writes
+`_zspeedadjust2` only for output modes 7 (no sound) and 2 (Gravis) — `MAIN/U2.ASM:384-389` — where
+the reference's card is mode 5. No question in this section is open.
 
 ---
 
