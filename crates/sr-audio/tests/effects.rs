@@ -1303,8 +1303,9 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
     // `QF4` — the interval 4 with the volume code 15, whose multiplier is ×32/16.
     //
     // The multiplier table at `+0x96c` holds real bytes only at 6, 7, 14 and 15 (10, 8, 24
-    // and 32); everywhere else the object image carries the `0x0101` filler, which at runtime
-    // is zero and sends those codes down the *addend* path. So this cell doubles the volume on
+    // and 32); everywhere else the object image's bytes are zero (`LIDATA` runs, read as
+    // `0x0101` filler before Phase 9 Task 6b fixed the segment builder), which sends those
+    // codes down the *addend* path. So this cell doubles the volume on
     // every retrigger, and the multiply clamps at 63 the way the addend does.
     let m0 = module("MUSIC0");
     let mut player = Player::new(m0, PlayerOptions::default());

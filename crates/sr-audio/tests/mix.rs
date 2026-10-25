@@ -82,20 +82,24 @@ fn value(sample: u8, level: u8) -> i32 {
 /// The base the port indexes the curve with: the flush's own `0x400 − centre_sum`
 /// (`+0x30b4`, `+0x2cbe`), so a frame's value lands on entry `0x400 + value` and silence is the
 /// curve's 1024th entry — the byte 0x80 the audible DMA buffer is centred on. **Every** sample
-/// is read at this base, the first chunk's included: the flush's `0x0101` re-mark
-/// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`) would move the index up by [`MARKED_OFFSET`] for
-/// every later chunk, and the port does not apply it — A14(a) is that question.
+/// is read at this base, the first chunk's included, because the flush stores zero over every
+/// accumulator word it reads (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`;
+/// `tests/player.rs`'s `the_flush_clears_the_accumulator_word_it_reads`), so no chunk's index
+/// moves — A14(a), settled.
 const BASE: i32 = 0x400;
 
 /// The number of the object's first mixed chunk: the DMA loop's countdown starts at 1
 /// (`+0x50ab`) and is rounded up to 64 (`+0x50e6`).
 const FIRST_CHUNK: usize = 64;
 
-/// The entries the flush's `0x0101` re-mark would move a later chunk's index up by
-/// (`+0x2ce5`/`+0x2cf1`, `+0x30d0`/`+0x30e8`). The port does not apply it, so nothing the mixer
-/// produces reads at `0x501 + value`; this constant exists only for the assertions below that
-/// pin what the marker's arithmetic *would* read, which A14(a) records as unsettled.
-const MARKED_OFFSET: i32 = 0x101;
+/// The offset a **misreading** of the flush put on a later chunk's index: a segment builder that
+/// decoded the `LIDATA` zeros of `+0x2ce5`'s and `+0x30d0`'s immediates as `0x01` saw the flush
+/// write `0x0101` into each accumulator word, which would have read at `0x501 + value`. The
+/// flush writes zero (A14(a)), so neither the object nor the port ever reads there; the
+/// constant exists only for the counterfactual assertions below, which keep the numbers the
+/// misreading predicted (`music.md` §10.4 quotes two of them) so that the difference stays
+/// checkable.
+const MISREAD_MARKER_OFFSET: i32 = 0x101;
 
 /// The object's output curve, worked out by hand: the machine's own counts of `+0x5565`…
 /// `+0x55c1` — `2 × ⌊(0x800 − K)/4⌋` zero entries (the two `shr $1,%cx` halve the count twice),
@@ -198,7 +202,7 @@ fn expected_values(
 
 /// [`expected_values`] through a curve, as a **stereo** window: a frame's left sample is the
 /// output sample `2 × frame`, and every frame — the first 32 frames' 64 samples included — is
-/// read at [`BASE`], because the port does not apply the flush's marker.
+/// read at [`BASE`], because the flush leaves no marker (A14(a)).
 #[allow(clippy::too_many_arguments)]
 fn expected_voice(
     mul: u32,
@@ -289,7 +293,7 @@ fn one_voice_is_the_modules_own_sample_bytes() {
         frames,
     );
     // One base for the whole mono window: the port's index does not move at the first chunk's
-    // end (the marker is not applied; A14(a)), so this is the *same* curve for all 256 frames.
+    // end (the flush leaves no marker; A14(a)), so this is the *same* curve for all 256 frames.
     let expected: Vec<i16> = values.iter().map(|value| curve_with(16, *value)).collect();
     let positions: Vec<usize> = {
         let mut position = 0u32;
@@ -332,12 +336,12 @@ fn one_voice_is_the_modules_own_sample_bytes() {
     assert_eq!(value(176, 63), 48);
     assert_eq!(curve_with(16, 48), 1536, "index 0x400 + 48 = 1072, the byte 134");
     assert_eq!(curve_with(16, -13), -512, "index 1011, the byte 126");
-    // The marker's arithmetic, which the port does **not** apply (A14(a)): `0x501 = 1281`, so
-    // the same two values would read 1268 and 1329 — the linear curve's bytes 158 and 166, i.e.
-    // 7680 and 9728. It is pinned here because `music.md` §10.4 quotes the two numbers; nothing
-    // the mixer produces is read at that index.
-    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, 48), 9728);
-    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, -13), 7680);
+    // The misread marker's arithmetic, which neither the object nor the port has (A14(a)):
+    // `0x501 = 1281`, so the same two values would read 1268 and 1329 — the linear curve's
+    // bytes 158 and 166, i.e. 7680 and 9728. It is pinned here because `music.md` §10.4
+    // quotes the two numbers; nothing the mixer produces is read at that index.
+    assert_eq!(curve_at(16, BASE + MISREAD_MARKER_OFFSET, 48), 9728);
+    assert_eq!(curve_at(16, BASE + MISREAD_MARKER_OFFSET, -13), 7680);
     // The sample's 115 is the value −13 → index 1011 → the byte 126 → −512; its 176 is +48 →
     // index 1072 → the byte 134 → 1536. The positions are 0 five times and then 1, so the first
     // five samples are the first and the next three the second.
@@ -805,7 +809,7 @@ fn the_window_is_not_silent() {
     assert_eq!(
         samples[..64],
         [curve_with(64, 0); 64],
-        "the first chunk is the ramp's centre too: the marker never moves the base"
+        "the first chunk is the ramp's centre too: no marker moves the base"
     );
 
     // The window is extended past the intro because MUSIC0 starts quietly; what the
@@ -927,8 +931,8 @@ fn a_note_off_leaves_the_voice_silent() {
     // `0xfe` parks the position at 1 and the volume at 0 (`effects.rs`'s note start), and the
     // mixer then plays the sample at the centre — silence at level 0 whatever the byte is. The
     // master-volume byte is the one that asks for the linear curve, so a level of 0 reads the
-    // curve's own entry for 0 — the byte 128, i.e. 0 — and not the marker's byte 160 (8192),
-    // which the port does not apply (A14(a)); the counterfactual four lines below pins that.
+    // curve's own entry for 0 — the byte 128, i.e. 0 — and not the misread marker's byte 160
+    // (8192), which the flush never writes (A14(a)); the counterfactual below pins that.
     let module = module_with_master_volume(0x82);
     let options = PlayerOptions::default();
     let mut channels = [Channel::default(); CHANNELS];
@@ -939,10 +943,14 @@ fn a_note_off_leaves_the_voice_silent() {
     mixer.mix(&module, &mut channels, &options, 64, false, out.len());
     assert_eq!(mixer.take(&mut out), 128);
     // A level of 0 makes every sample's value 0, so the samples are the table's own silence
-    // entry — the byte 128, i.e. 0 — and never the note. (The marker's `0x501` would read the
-    // byte 160, i.e. 8192, and the port does not apply it: A14(a).)
+    // entry — the byte 128, i.e. 0 — and never the note. (A misread marker's `0x501` would
+    // read the byte 160, i.e. 8192; the flush writes zero: A14(a).)
     assert_eq!(curve_with(16, 0), 0, "the curve's centre, the byte 128");
-    assert_eq!(curve_at(16, BASE + MARKED_OFFSET, 0), 8192, "the marker's byte 160");
+    assert_eq!(
+        curve_at(16, BASE + MISREAD_MARKER_OFFSET, 0),
+        8192,
+        "the misread marker's byte 160"
+    );
     assert!(out.iter().all(|sample| *sample == 0), "a level of 0 is the byte 128");
 }
 

@@ -604,11 +604,13 @@ row 61's `C00` is the trace's ord 26 → ord 28. `C`'s parameter is decimal and 
     43AB: 48                    dec    %ax             ; one tick off the row
   ```
 
-  The addend lives in a word the object's image carries as `0x0101` — the filler these objects
-  use for slots the program clears before it runs: the segment's other BSS-like words read the
-  same way, `_np_zframe` among them, and every trace that holds the music's start reads
-  `_np_zframe` as 0 before the music's first tick, so those slots do not survive into the
-  running program. And the traces
+  The addend is `_zspeedadjust` (`0x8cd`), and the object's image holds it as zero: a `LIDATA`
+  run of `0x00`, like `_np_zframe`'s and the segment's other BSS-like words. *(Corrected in Phase
+  9 Task 10: this note called it a `0x0101` filler the program clears before it runs — the
+  segment builder in `tests/player.rs` decoded every `LIDATA` run as `0x01` until Task 6b fixed
+  it.)* The live word reads 0 too (`music-clock.md` §5's table, D46); `tests/player.rs`'s
+  `the_speed_adjusters_are_zero_in_the_image` reads the image's eight bytes; and every trace that holds
+  the music's start reads `_np_zframe` as 0 before the music's first tick. And the traces
   agree the adjuster contributes nothing here: the published row changes of `second5`'s speed-6
   run are **exactly** six ticks apart (`cargo xtask music analyse --trace reference/music/second5`
   prints 61 gaps in 534 frames where the rule says 534.4, residual −0.4).
@@ -1019,7 +1021,7 @@ so the form the port implements for completeness is one no shipped cell reaches,
 persistence it exists for (an `O` that leaves the offset for a later note) is not measured on
 these files either.
 
-### 9.9 Q — the retrigger, and what the object's `0x0101` filler means in a table
+### 9.9 Q — the retrigger, and what the object's zero slots mean in a table
 
 `+0x41ec`, in both tables. The interval is the **low** nibble and the volume code the **high** one
 (`+0x41f6`), and the object's own test is `interval <= atrigcnt` (`+0x4205`): `y = 0` never
@@ -1032,14 +1034,13 @@ plus the volume variation.
 
 The variation is the pair of tables at `+0x95c` (signed addends) and `+0x96c` (multipliers in
 sixteenths): `x`'s multiplier when it has one and its addend otherwise. **The multiplier table's
-zeros are the object image's `0x0101` filler** — the same filler `_np_zframe` and `_zspeedadjust`
-read as, §8 — and that is what the rule looks like applied to a *table* rather than a variable: the
-image holds real bytes at 6, 7, 14 and 15 (10, 8, 24 and 32) and `0x0101` everywhere else, and at
-runtime those slots are 0. Read the image literally and every code but those four would take a
-multiplier of 257 — a sixteenth of which is the ×16 the code's shift makes of it — instead of the
-addend they are meant to take; read it as the running program does and the two paths are the ST3
-tables they look like. Which of the codes the files reach is measured by the scope test with the
-letters (`cargo test -p sr-audio --test effects -- --nocapture the_cells_the_tests_drive`): MUSIC0's
+other slots are zero in the object image** — `LIDATA` runs of `0x00`, as `_np_zframe` and
+`_zspeedadjust` are, §8: the image holds real bytes at 6, 7, 14 and 15 (10, 8, 24 and 32) and 0
+everywhere else, so every code but those four takes its addend, and the two paths are the ST3
+tables they look like. *(Corrected in Phase 9 Task 10: this paragraph read the zeros as a `0x0101`
+filler that "at runtime" became 0 — the segment builder's `LIDATA` misreading, fixed in Task 6b;
+the value the port uses was zero either way.)* Which of the codes the files reach is measured by
+the scope test with the letters (`cargo test -p sr-audio --test effects -- --nocapture the_cells_the_tests_drive`): MUSIC0's
 84 `Q` cells carry codes `{0, 4, 7, 12, 14, 15}` on intervals `{0, 3, 4, 6}` and MUSIC1's 38 carry
 code 0 on interval 3 — so three of the four multiplier codes (7, 14, 15) are on shipped cells and
 **6 on neither file**, and the addends reached are 0 (both files), −8 (code 4, two cells) and +8
@@ -1324,8 +1325,12 @@ the interpolating dispatch entries are `S1x`-gated with `[0x919]` = 0 in both fi
 `+0x3473` looks it up in the volume table at `(m_vol << 8) | sample`, and `+0x3482`'s 32-bit `add
 %eax,(%di)` puts two frames' values into the two 16-bit accumulator words at once. **The channel's
 accumulator is 16 bits and is biased**: the sound init fills the buffer with `0x8080` (`+0x293b`)
-and the flush replaces each pair with `0x01010101` (`+0x2ce5`, `+0x30d0`) — the same filler
-`+0x5628` writes into `m_pos`, and a marker rather than a sample value in both places.
+and the flush stores **zero** over each pair it reads (`+0x2ce5`'s `mov $0x0,%esp` and `+0x2cf1`,
+`+0x30d0`'s `mov $0x0,%ecx` and `+0x30e8`; `cargo test -p sr-audio --test player
+the_flush_clears_the_accumulator_word_it_reads`), so a later chunk adds into a clean plane.
+*(Corrected in Phase 9 Task 10: this note said the flush wrote `0x01010101`, "a marker rather than a
+sample value", as `+0x5628` was said to write into `m_pos`. Both immediates are `LIDATA` runs of
+zero, which the segment builder misread as `0x01` until Task 6b; A14(a).)*
 
 **The two clamps of the position's window** are `m_safe`/`m_lsafe`, computed at `+0x58e3`…`+0x5916`
 as `((m_end - m_pos) << 16 - m_poslow) / m_speed`, forced odd (`or $1`), incremented, and
@@ -1396,15 +1401,13 @@ would write 683, which the unit test builds both ways and asserts differ.
 quantity the object forms by subtracting the summed centres at `+0x30b4`), indexes the curve with
 it, and widens the byte the card would play: `(byte − 128) × 256`.
 
-**The index's base is `0x400 + value`, and the marker is not applied.** The flush does re-mark
-what it reads — `+0x2cf1` and `+0x30e8` write `0x0101` *after* the read, and `+0x3482` adds into
-the plane — so the code's own index would be `0x501 + value`, 257 entries higher. The
-measurement says the audible path does not land there: the DMA buffer (`[0xbe6]:0xC9B0`) is
-centred on the byte 0x80, which is the ramp's `(1024 − 768)/2` at index 1024, while `0x501`
-would put silence inside the `0xFF` tail the bug leaves. The port follows the machine
-(`Mixer::base`) and keeps the marker's bookkeeping in the code unapplied; **why** the audible
-index behaves otherwise is open and named in A14 — a re-dump of the DMA buffer beside the plane
-it came from is what would settle it.
+**The index's base is `0x400 + value`, in the code and in the measurement.** The flush clears
+what it reads — `+0x2cf1` and `+0x30e8` store zero *after* the read, and `+0x3482` adds into the
+plane — so the code's own index is `0x400 + value`; and the DMA buffer (`[0xbe6]:0xC9B0`) is
+centred on the byte 0x80, the ramp's `(1024 − 768)/2` at index 1024. The port's `Mixer::base` is
+that base. *(Corrected in Phase 9 Task 10: this paragraph said the flush wrote `0x0101` after the
+read, so that the code's index "would be `0x501 + value`" and why the audible index behaved
+otherwise was open. That was the segment builder's `LIDATA` misreading; A14(a) is settled.)*
 
 **The table the machine's memory holds is not the table the builder writes**, and the
 difference is measured: `cargo xtask music probe --dump` reads `cs:0x6E+0x000`…`+0x7FF` across a
@@ -1414,8 +1417,9 @@ stosb` therefore writes nothing, which makes `+0x55bd`'s tail fill the shortfall
 `APPROXIMATIONS.md` A14 is the measurement. The port **plays the table the machine holds**: the
 halved zero fill, the ramp where the bug leaves it, the `0xFF` tail, indexed at `0x400 + value`
 — the base the audible buffer supports, since `[0xbe6]:0xC9B0` holds a waveform centred on 0x80,
-which is the ramp's byte 128 at index 1024. One clause of A14 is open and named there: the
-flush's `0x0101` marker, which would put silence 257 entries higher, inside the tail. The table
+which is the ramp's byte 128 at index 1024 — and the base the flush's own code indexes with,
+since it writes zero back (A14(a), settled in Phase 9 Task 10; the "`0x0101` marker" an earlier
+reading saw would have put silence 257 entries higher, inside the tail). The table
 is not one run's: the re-review's dump of the **MUSIC1** window (`--cycles 30000 --arg 3
 --frames 600..900`) reads all 2048 bytes of the span *identical* to MUSIC0's, one change line,
 `cs:0x6C` = `6E 00` in both — so the port's table is the release of record's own behaviour, in
@@ -1463,8 +1467,9 @@ the positions of the first eight frames are 0 five times and then 1; the level's
 its centre (128 × 255) >> 8 = **127**, so the sample's 115 is **−13** and its 176 is **+48**.
 Every sample is read at the audible base — the index is `0x400 + value`, the same base for the
 whole window, first chunk included — so −13 gives 1011 → the byte 126 → **−512**, and +48 gives
-1072 → the byte 134 → **1536**. (The marker's `0x501 + value` would make those two reads 1268 and
-1329, the bytes 158 and 166 — 7680 and 9728 — which is why the port does not apply it: A14(a).)
+1072 → the byte 134 → **1536**. (The misread marker's `0x501 + value` would have made those two
+reads 1268 and 1329, the bytes 158 and 166 — 7680 and 9728; the flush writes zero, A14(a), and
+`tests/mix.rs` keeps the two numbers as its counterfactual.)
 The curve is the *linear* one because the run is mono and this test's module asks for it by its
 master-volume byte, so the voice's own arithmetic is visible through it. The modules' own byte
 gives `mul` 64, which the next test pins on the table the machine holds: a solo voice's value is
@@ -2118,8 +2123,9 @@ command.
   only the ramp's slope and clamps at `i16`. A signal inside the ramp has the same gain on both
   paths; one beyond it saturates at a slightly different level (`0xFF` is 32,512, `i16::MAX` is
   32,767).
-- **A14's ends.** The curve's `0xFF`/`0x00` regions, the builder's bug and the open marker
-  question, belong to the table. The enhanced path never reads the table, so it has none of them.
+- **A14's ends.** The curve's `0xFF`/`0x00` regions and the builder's bug belong to the table
+  (A14's marker question is settled: there is none). The enhanced path never reads the table, so
+  it has none of them.
 - **The stepping itself**, which is the point: the authentic path's held byte, its 20 kHz images,
   and its quantisation to one output level per two entries (a frame value of −1 is −256 and 0 or
   1 is 0).

@@ -57,8 +57,10 @@
 //! `Mixer::frame` and the rewrap. Point 6 is the table [`Curve`] builds — a per-run gain curve
 //! from `_np_mastermul` (the module header's master-volume byte, offset 0x33, which the
 //! reference runs at 0xB0 → 2240, `music.md` §10) **as the machine's memory holds it, bug and
-//! all** — indexed at the base the audible DMA buffer supports (`0x400 + value`, the flush's
-//! own correction with the code's `0x0101` marker *not* applied; A14(a) is that open clause).
+//! all** — indexed at the flush's own base, `0x400 + value`: the base the audible DMA buffer
+//! was measured at, and the one the code itself leaves, because the flush clears every
+//! accumulator word it reads (A14(a), settled; `tests/player.rs`'s
+//! `the_flush_clears_the_accumulator_word_it_reads`).
 //! Each voice's contribution is its table value less its own centre, which is exactly the
 //! quantity the object forms at `+0x2cbe`/`+0x30b4`, and the byte becomes the port's `i16` the
 //! way the card widens it: `(byte − 128) × 256`. What is approximated in the table's place is
@@ -125,8 +127,11 @@ const NO_LOOP: u32 = 0xffff_ffff;
 
 /// The flush's own base: `+0x30b4`'s `0x400 − centre_sum` plus the accumulator, so a frame's
 /// value lands on the curve's 1024th entry — the byte 0x80 the audible buffer is centred on.
-/// The flush's `0x0101` re-mark (`+0x2ce5`, `+0x30d0`) would put silence 257 entries higher and
-/// the port does not apply it, because the measurement says the audible path does not: A14(a).
+/// Nothing moves it: the flush stores zero over each accumulator word it reads (`+0x2ce5`'s
+/// `mov $0x0,%esp` and `+0x2cf1`'s store, `+0x30d0`'s `mov $0x0,%ecx` and `+0x30e8`'s), so the
+/// plane a later chunk adds into is clean. The name records what an earlier reading got wrong:
+/// a builder that decoded the immediates' `LIDATA` zeros as `0x01` saw a `0x0101` "marker" that
+/// would have put silence 257 entries higher (A14(a), settled in Phase 9 Task 10).
 const UNMARKED_BASE: i32 = 0x400;
 
 /// The largest position the object can hold: `m_pos`'s whole bytes are a 16-bit word
@@ -471,8 +476,8 @@ impl Mixer {
         self.held_right = None;
         self.last_frame = (0, 0);
         self.owed = 0;
-        // The curve and the plane marker are the *card's*, not the song's: `_zplaysong` clears
-        // the channels (`+0x5614`) and touches neither the table nor the accumulator planes.
+        // The curve and the accumulator planes are the *card's*, not the song's: `_zplaysong`
+        // clears the channels (`+0x5614`) and touches neither the table nor the planes.
     }
 
     /// Give a channel a fresh sample: the note start's half of the mixer's state.
@@ -665,10 +670,10 @@ impl Mixer {
         }
 
         // `+0x30b4`/`+0x2cb4`: the accumulator less the centre sums, indexed into the curve at
-        // `0x400 + value` — the flush's own base, without the marker (`Mixer::base`).
+        // `0x400 + value` — the flush's own base (`Mixer::base`).
         let left = self.emit(left);
         // A mono mix writes one byte a frame, so only the left accumulator is an output sample;
-        // the right's value is still converted for `last_frame` but consumes no marker unit.
+        // the right's value is still converted for `last_frame` but is not emitted.
         let right = if options.stereo {
             self.emit(right)
         } else {
@@ -780,26 +785,24 @@ impl Mixer {
     }
 
     /// The base the frame's value lands on: `0x400`, the flush's own `0x400 − centre_sum`
-    /// (`+0x30b4`, `+0x2cbe`) with the accumulator's own DC. The code's `0x0101` re-mark is
-    /// *not* applied — see the body.
+    /// (`+0x30b4`, `+0x2cbe`) with the accumulator's own DC — see the body.
     fn base(&self) -> i32 {
-        // **The audible path carries no `0x101` marker**, measured: the buffer the DMA plays
-        // (`[0xbe6]:0xC9B0`) is centred on the byte 0x80, which is the ramp's centre at index
-        // 1024 — `0x400 + 0` — while the marker's `0x101` would put silence 257 entries higher,
-        // inside the `0xFF` tail the builder's bug leaves (A14(a) carries the argument and what
-        // is still open about it). The marker's own bookkeeping is not modelled: the object's
-        // code has it, but it changes no value here, so the port has nothing to keep.
+        // **The code and the measurement agree.** The flush stores zero over every accumulator
+        // word it reads (`+0x2cf1`, `+0x30e8`; `tests/player.rs`'s
+        // `the_flush_clears_the_accumulator_word_it_reads`), so a frame's value is indexed at
+        // `0x400 + value` in every chunk; and the buffer the DMA plays (`[0xbe6]:0xC9B0`) is
+        // centred on the byte 0x80, the ramp's centre at index 1024 — `0x400 + 0`. The
+        // `0x0101` "marker" an earlier reading saw would have put silence 257 entries higher,
+        // inside the `0xFF` tail; it was a misread of the immediates' `LIDATA` zeros (A14(a)).
         UNMARKED_BASE
     }
 
-    /// One output sample: the curve's entry for a frame's value. The object's marker
-    /// bookkeeping (`0x0101` re-marks of the first chunk's 64 bytes) would change no value on
-    /// the audible path, so the port does not carry it — see [`Mixer::base`].
+    /// One output sample: the curve's entry for a frame's value at [`Mixer::base`].
     fn emit(&mut self, value: i32) -> i16 {
         self.curve.sample(self.base() + value)
     }
 
-    /// The same conversion without consuming a marker unit.
+    /// The same conversion, for a value that is not emitted (a mono mix's right side).
     fn peek(&self, value: i32) -> i16 {
         self.curve.sample(self.base() + value)
     }
@@ -1287,9 +1290,9 @@ mod tests {
         assert_eq!(curve.sample(0), -32768);
         assert_eq!(curve.sample(2047), 127 * 256);
         // The reference's own curve, at the base the port indexes with: silence is the ramp's
-        // centre — the byte 0x80 the audible buffer is centred on. The marker's `0x501` would
-        // put silence 257 entries higher, inside the 0xFF tail, and the port does not apply it
-        // (A14(a)).
+        // centre — the byte 0x80 the audible buffer is centred on, and the base the flush's
+        // own code indexes with (A14(a)). A misread `0x0101` marker's `0x501` would have put
+        // silence 257 entries higher, inside the 0xFF tail.
         let curve = Curve::build(64);
         assert_eq!(curve.sample(0x400), 0, "index 1024, the byte 128");
         assert_eq!(curve.sample(0x400 + 80), 40 * 256, "±80 of value is ±40 of byte");

@@ -2173,3 +2173,55 @@ fn the_timeline_effects_the_modules_carry() {
     let _ = CHANNELS;
 }
 
+
+/// **A14(a), settled: the flush clears the accumulator word it reads, so nothing marks the plane.**
+///
+/// Both flushes load a zero into a 32-bit register before the loop and store that register
+/// back over every accumulator dword they have just read: the mono flush's `mov $0x0,%esp`
+/// (`+0x2ce5`, with `%esp` saved at `+0x2cde` and interrupts off at `+0x2ce4`) and its
+/// `mov %esp,(%si)` (`+0x2cf1`), and the stereo flush's `mov $0x0,%ecx` (`+0x30d0`) and
+/// `mov %ecx,(%si)` (`+0x30e8`). The four zero bytes of each immediate are a `LIDATA` run, and
+/// the builder's old misreading of every such run as `0x01` is where the "`0x0101` marker"
+/// came from (`segment_image`'s note; `APPROXIMATIONS.md` A14(a)). So the plane a flush leaves
+/// behind is zero, the frame's value lands on the flush's own `0x400 + value`, and that is the
+/// base the port's mixer indexes with (`mix.rs`'s `UNMARKED_BASE`) — the base the audible DMA
+/// buffer was measured at.
+#[test]
+fn the_flush_clears_the_accumulator_word_it_reads() {
+    let image = segment_image();
+    let claims: &[(usize, &[u8], &str)] = &[
+        (0x2CDE, &[0x66, 0x2E, 0x89, 0x26, 0x0C, 0x21], "mov %esp,%cs:0x210c (saved)"),
+        (0x2CE4, &[0xFA], "cli"),
+        (0x2CE5, &[0x66, 0xBC, 0x00, 0x00, 0x00, 0x00], "mov $0x0,%esp"),
+        (0x2CEB, &[0x66, 0x8B, 0x1C], "mov (%si),%ebx (read the accumulator)"),
+        (0x2CEE, &[0x66, 0x03, 0xD9], "add %ecx,%ebx"),
+        (0x2CF1, &[0x66, 0x89, 0x24], "mov %esp,(%si) (store the zero back)"),
+        (0x30D0, &[0x66, 0xB9, 0x00, 0x00, 0x00, 0x00], "mov $0x0,%ecx"),
+        (0x30E2, &[0x66, 0x8B, 0x1C], "mov (%si),%ebx (read the accumulator)"),
+        (0x30E5, &[0x66, 0x03, 0xDA], "add %edx,%ebx"),
+        (0x30E8, &[0x66, 0x89, 0x0C], "mov %ecx,(%si) (store the zero back)"),
+    ];
+    for (offset, bytes, meaning) in claims {
+        assert_eq!(
+            &image[*offset..*offset + bytes.len()],
+            *bytes,
+            "+0x{offset:04x}: {meaning}"
+        );
+    }
+}
+
+/// `_zspeedadjust` (`0x8cd`) and `_zspeedadjust2` (`0x8d1`, `crates/sr-assets/tests/omf_symbols.rs`)
+/// start at zero in the object's image: both are `LIDATA` runs of `0x00`. The live words read 0 in
+/// the reference's run too (`music-clock.md` §5), and the shell writes `_zspeedadjust2` only for
+/// output modes 7 and 2 (`MAIN/U2.ASM:384-389`), which the reference's Sound Blaster (5) is not —
+/// D46. The row timer's fractional adder (`+0x439f`) adds `_zspeedadjust`, so it adds nothing.
+#[test]
+fn the_speed_adjusters_are_zero_in_the_image() {
+    let image = segment_image();
+    assert_eq!(&image[0x08CD..0x08D5], &[0u8; 8], "_zspeedadjust and _zspeedadjust2");
+    assert_eq!(
+        &image[0x439F..0x43A9],
+        &[0x2E, 0x8B, 0x16, 0xCD, 0x08, 0x2E, 0x01, 0x16, 0xCF, 0x08],
+        "mov %cs:0x8cd,%dx; add %dx,%cs:0x8cf — the row timer adds _zspeedadjust"
+    );
+}
