@@ -2833,6 +2833,53 @@ audio-to-picture sync over a long run. If the options stopped reaching a restart
 switch back to authentic at U2E, and `a_restart_keeps_the_runs_sound_quality` names it. Removing
 the option is one enum variant, one `match` in `Mixer::mix`, and the flag.
 
+## D44 — The settings screen: the original's setup, asked every time, nothing kept (2026-10-24)
+
+Decided: a **windowed demo run** opens on a five-row settings screen before anything plays.
+`START.EXE` ran `menu()` on every start except `/gravis` (`MAIN/START.C:89-95`), and spec §1
+replaces `START.EXE`, so the screen is the port's stand-in for it (`settings.rs`, the window
+loop `window::setup_run`). **What it shows**, in the original's row order and then the port's:
+**Sound** On/Off (the soundcard row, `MENU.C:190-209`; Off is `--no-audio`, and the player still
+runs, as the original's no-sound option still syncs to the music, `MENU.C:114-123`), **Sound
+quality** Authentic/Enhanced (`--sound-quality`, D43), **Demo looping** Disabled/Enabled
+(`--loop`, D42; `MENU.C:229-238`), **Aspect** 4:3/Square and **Border** On/Off
+(`PresentOptions`). Up and Down move and **clamp** at the first and last row (`MENU.C:158-159`);
+Left and Right change the value and **wrap** (`:161-168`); Enter starts the run, and ESC leaves
+without one — and, like `fatalexit` (D41), `main` then prints the end box. The close button
+does the same.
+
+**Nothing persists.** The original asked every time and the port does too: no file is written
+and none is read. The command-line flags are the initial values (`Settings::from_cli`), and the
+choices become the command line the run is built from (`Settings::apply` writes `no_audio`,
+`quality`, `looping`, `aspect` and `border`; it leaves `/gravis`'s `NoEndScroller` alone, because
+that run never shows the screen). The run is therefore built, and the sound card opened, only
+after Enter: a chosen Enhanced reaches the device's 48,000 Hz open rate through
+`RunSettings::player` and `PlayerOptions::output_rate`, and a chosen Sound Off decides there is no
+card. Aspect and Border re-present the screen under the new `PresentOptions`, which resizes the
+window; the screen's frame carries an overscan colour so the Border row has a border to show.
+
+**When it shows.** `Cli::shows_setup`: the run is built from a block (so no argument, `--block`
+and `--loop` show it), it has not skipped it, and it is not headless. It does **not** show for
+`--part`, `--vault` (its parts are not the demo's), `--headless` (no window, no key), `--no-setup`
+(new: the way to start without it, the flags then being the settings) or `/gravis`
+(`START.C:89`, which also clears `Cli::setup`). Every other run starts exactly as before, and
+the screen waits in bounded `wait_event_timeout`s, never spinning.
+
+**Its look.** The text layer the vault menu had (the FONA table, proportional layout, the `>`
+marker, the palette) moved to `menu_text.rs` with its output unchanged — the vault menu's tests
+pass as they were — and gained the seven marks `( ) + - * = '` the source's order holds at cells
+67..73 (`ALKU/MAIN.C:40`). The frame is 520x325: the font at its own size needs 307 columns for
+"Sound quality" and "Authentic" and 475 for the footer `UP DOWN  LEFT RIGHT  ENTER  ESC`, which
+the demo's 320 columns cannot hold, and a 4:3 window of it is 624x468 plus the border, which fits
+a 600-line desktop. The screen is a new surface and not a fidelity one: it changes no compared
+frame, and its reducer, its frame and its settings are pinned by `settings.rs`'s tests.
+
+**Cost if wrong.** If a run should remember its choices, it is one file written in `apply` and
+read in `from_cli`; the original did not. If the screen should show for `--part` or the vault, it
+is one clause of `shows_setup`. If the frame is too big for a small desktop, it is its two
+constants and the layout's six; nothing else reads them. If `menu_text.rs`'s move had changed the
+vault menu's pixels, `vault_menu`'s six tests would fail.
+
 ## D45 — A restart keeps what `_zplaysong`'s initialiser does not write (2026-10-24)
 
 Decided: a mid-run restart is **the same player object taking a new module**, not a fresh player.
