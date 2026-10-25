@@ -2106,7 +2106,10 @@ no delay at the handover can produce — and the two seams the music pins on bot
 entry's §3 describes; the measured seams are `APPROXIMATIONS.md` **A53**. The same run found the
 post-GLENZ timeline 247–248 frames late, which is A38's lag and whose probable cause — `_zplaysong`
 keeps the channel volumes, so MUSIC1's order 0 breaks at row 3 — is recorded there; the port's fix is
-Task 6b.)*
+Task 6b.)* *(Phase 9 Task 6b: the fix is D45. On the corrected run the decision is re-checked under the
+same one-constant rule and stands: the changes still take both signs — +47 at ALKU→U2A, +18 at
+MNTSCRL→LNS&ZOOM, +10 at RAYSCRL→3DSINFLD — and the two music-pinned seams still need 6 and 59–68
+frames; the figures are A53's and §26.8's.)*
 
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
@@ -2282,7 +2285,9 @@ within one MUSIC0 row (18:17 against 18:16 at 17,581; 18:19 against 18:18 at 17,
 against 19:0 at 17,721). The seam is recorded in `docs/fidelity/u2e.md` §5 and asserted by
 `bins/secondreality/tests/shell.rs`'s chain test; nothing was shifted. The manifest records
 the last installed player (`MUSIC0@18`, `start_frame` 17,418), which is the value the chain
-test pins, and the restart's `_np_zframe` difference stays as recorded and unread.
+test pins, and the restart's `_np_zframe` difference stays as recorded and unread. *(Phase 9
+Task 6b, D45: the port's restart now carries `_np_zframe` across, as this paragraph measured the
+original does.)*
 
 ## D35 — The shell's restart seams: an exit drain the part opts into, and a sound card that follows a new player (2026-10-19)
 
@@ -2529,6 +2534,12 @@ PANICEND's last tick skips the wait, the `@@skip5` first-poll path
 `every_blocks_plan_stops_at_the_first_part_the_registry_lacks`). The block-1 wait's
 8,770/713/249 is **A38**; the reference's restart interval (8,049, 8,100) stays recorded as
 the trace's limit. Nothing was fitted.
+
+*(Phase 9 Task 6b: the "one limit" above is resolved and the 8,770/713/249 restated. A restart keeps
+the previous module's channel volumes (D45), so MUSIC1's order 0 is 4 rows long and `second1d`'s
+first sample is 8 rows into the restarted module, not 68 — the trace's restart is at 8,056, inside
+(8,049, 8,100), and the port's wait now ends at **8,527**, 470 ticks after the boundary and **6**
+frames after the reference's 8,521, which A38 registers as the restarted clock's residual.)*
 
 ## D39 — The vault boots the vendored effects behind the standalone DIS (2026-10-21)
 
@@ -2780,3 +2791,82 @@ number, and the test's pinned `L`. If CRED's two-tick tail is the original's too
 placement is derived, ±1, not measured), the fade is the original's and the 2 frames are the
 capture's `C` reading, not a residual. If a looping run should be left with ESC, it is one branch
 in `EscapeKey::apply`.
+
+## D45 — A restart keeps what `_zplaysong`'s initialiser does not write (2026-10-24)
+
+Decided: a mid-run restart is **the same player object taking a new module**, not a fresh player.
+The shell's three restarts — block 1's `MUSIC1@0` at GLENZ (`MAIN/U2.ASM:813-818`), `MUSIC0@18`
+at U2E (`:880-885`) and the loop's `MUSIC0@0` (`:929-932`) — all go through `install_music`, which
+now builds the new module's player, calls `Player::continue_from(&old)` and only then
+`play_song(order)`. `play_song`'s channel clear is `Channel::initialise`: it writes exactly the
+song initialiser's stores and keeps every other field. An entry install has no old player and is
+a boot. The interface change is two `pub` methods in `sr-audio`, `Player::continue_from(&mut
+self, &Player)` and `Channel::initialise(&mut self)` (which replaces the crate-private
+`Channel::reset`), plus the one call in `install_music`. `MusicSource` is unchanged.
+
+**The bytes** (`upstream/SecondReality/MAIN/STMIK.300`'s segment image, rebuilt by
+`crates/sr-audio/tests/player.rs`):
+
+- `restartmus` (`:348-397`) runs `_zstopsong` (`+0x25c5`: `[0x939] = 0`), `_zshutup` (`+0x25e3`: the
+  initialiser `+0x5614`, a DMA clear, `[0x938] = 0`), the loader's `_zinitmodule` (`+0x2400`:
+  `+0x56bc`, which ends in the initialiser) and `_zplaysong` (`+0x2555`: the header watch
+  `+0x5424`, `+0x56bc`, the order advance).
+- The initialiser's loop (`+0x5625`…`+0x5684`), its silence pass (`+0x56a6`…`+0x56b1`) and
+  `+0x5781`'s bit clear store to `achannelused` (ending 0), the periods, `avibcnt`, `aorgvol`,
+  `alasteff1/2`, the cell, `lastins`, `lastnote`, `alastnfo` and `m_pos`. They never store to
+  `avol`, `a0volcut`, `aequ`, `aadr`'s high word, `ac2spd`, `atreon`, `atrigcnt`, `atremor`,
+  `vibtretype`, `a0clearcnt` or `m_poslow`.
+- Globally they write neither the loop counter `[0x90b]` nor `_np_zframe`, which the stopped
+  tick does not advance. D34 measured the second in the original: `second3e` reads 9,099 at
+  18000, carried across the U2E restart from PLZPART's reset. The port now carries it too. No
+  test compares `_np_zframe` against a trace, and every part that reads it sets it first, so the
+  value is not asserted.
+- `the_song_initialiser_writes_exactly_what_initialise_writes` decodes the stores and checks
+  `initialise` field by field.
+- `a_boot_starts_on_the_objects_zeroed_channels` shows the object's own `_zchn`, `[0x90b]`,
+  `_np_zframe` and ring are zero, so a boot is `Player::new` and `second2b` and `second1` do not
+  move.
+
+**What it fixes.** Block 1's MUSIC0 hands channel 2 over at volume 63; MUSIC1's order 0 (pattern 73)
+has a `C00` on that channel at row 3, which a fresh player's "volume 0" countdown drops. With the
+volume kept the break is taken, order 0 is 4 rows long and not 64, and the port publishes `1:0` at
+8,087 (`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering`; `0:4` there without the
+carry-over). Task 6's ≈245-frame lag from GLENZ on is gone:
+
+| measure | before | after |
+|---|---|---|
+| `second1d` | +247 | +5 |
+| `second1e` | +248 → +240 | +5 → −3 |
+| `second1f` | +235 → +243 | −8 → 0 |
+| start differences, GLENZ to JPLOGO | +230…+259 | −12…+16 |
+| GLENZ's wait exit (A38) | 249 frames late | 6 |
+| `RESTART_TRACES`' `second1d`/`second1e` anchor | 7,815 | 8,056 |
+
+The block-1 music offsets are from `cargo test --release -p secondreality --test fullrun --
+--nocapture`, and the anchor is derived by `block_ones_music1_restart_takes_order_0s_break`.
+
+The U2E restart and the loop restart move by nothing: under the carry-over `second3e`, `second1f`,
+`loop.rs`'s (0,1) at 8,921 and ALKU's pass-2 frames are exactly as before, because MUSIC0's orders
+18 and 0 have no row whose length depends on a carried volume. Every `fullrun` rediff count is
+unchanged at the moved pairings.
+
+**What it does not carry, and why** (A55). The position ring, its pointers and the fed words, and
+the tick countdown `[0xbe0]`, are kept by the object too, but what it puts in them happens during
+the reload: the stopped tick feeds order `0xffff` (`+0x4408`), and how many polls a reload spends
+is the session's (D42's race). The port has no reload (A53). Carrying the old ring published the
+old song's order at every restart, and in an experiment that failed `tests/loop.rs` at pass 2's
+ALKU hold. The countdown's phase is D34's measured wait.
+
+**D31's `LOADER_TICKS`, re-checked on the corrected run: still not adopted.** The seam changes
+still take both signs. The port is later at ALKU→U2A (+47), MNTSCRL→LNS&ZOOM (+18) and
+RAYSCRL→3DSINFLD (+10), and at TUNNELI→TECHNO and MINVBALL→RAYSCRL (+9 each). It is earlier at
+others: −50, −34, −12, −14, −13, −24, −37. The two music-pinned seams still need 6 frames and 59–68.
+One constant explains neither, so D24's rule is unmet as before (A53, `reference-indices.md`
+§26.8).
+
+**Cost if wrong.** If a restart should be fresh after all, the lag returns: about 245 frames from
+GLENZ on and a 64-row order 0. The change is one call in `install_music`, and `trace.rs`'s and
+`fullrun.rs`'s pins fail at once. If the initialiser stores to a field the table keeps, or the other
+way round, `the_song_initialiser_writes_exactly_what_initialise_writes` names it. If the ring
+should be carried, A55 says what that costs (pass 2's ALKU) and what a faithful model would need: a
+signed published order, and the reload's polls.
