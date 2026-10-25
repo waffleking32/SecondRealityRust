@@ -2783,6 +2783,14 @@ position**, where `START.C:89` reads only `argv[1]`: the port's flags are not po
 have ignored it. Any other `/` switch is ignored (`U2.ASM:605-606`: `checkcmdline` returns at a
 `/` with `whattorun` at its 7fh), so `/x` is the demo. Looping is a block's run: `--loop` or
 `/gravis` with `--part` or `--vault` is refused.
+*(2026-10-25 (Phase 9), the final review — **`/gravis` wins over `--loop`, in either order.**
+Until this fix the later flag won, so `--loop /gravis` was `NoEndScroller` and `/gravis --loop`
+was `On` with the setup skipped. In the original the two never meet: `/gravis` sets
+`m_looping=2` *instead of* calling `menu()` (`START.C:89-94`), and `menu()` is the only place
+`looping` 1 is chosen (`MENU.C:229-238`). `--loop` is that menu's choice, so `Cli::parse` now
+applies `/gravis` after reading every argument, as 2 and with the setup skipped.
+`cli::tests::gravis_wins_over_loop_in_either_order` pins both orders, with and without
+`--block`.)*
 
 **The plan.** `shell::run_plan(block, looping)` is `block_plan(block)` without ENDSCRL whenever
 `looping` is not 0 (`:914-917`: `cmp cs:looping,0; jne @@skipp6` jumps over `exe23`).
@@ -2946,6 +2954,15 @@ accumulator drifted, `enhanced_emits_twelve_frames_for_every_five` fails, and so
 audio-to-picture sync over a long run. If the options stopped reaching a restart, the run would
 switch back to authentic at U2E, and `a_restart_keeps_the_runs_sound_quality` names it. Removing
 the option is one enum variant, one `match` in `Mixer::mix`, and the flag.
+
+*(2026-10-25 (Phase 9), the final review — **the flag's scope.** `--sound-quality enhanced` is
+refused for a run with no player, in the same words `--audio-dump` uses: `--sound-quality
+enhanced needs a run with music, and a run of <part> has none`. That covers the test card and
+`--part grid|hard|twist`, whose `shell::music_for_part` is `None`. `--vault` already refused it,
+and still does with its own message. Before this fix, a silent `--part` run accepted the setting
+and did nothing with it. `authentic`, the default, is accepted everywhere.
+`cli::tests::enhanced_sound_is_refused_for_a_run_with_no_music` pins every registry part and
+every block.)*
 
 ## D44 — The settings screen: the original's setup, asked every time, nothing kept (2026-10-24)
 

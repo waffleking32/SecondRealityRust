@@ -145,19 +145,24 @@ the flags are the initial values, and `--no-setup` or `/gravis` skip it. `--part
 
 **Loop mode** (D42) is the original's `looping` byte (`MAIN/U2.ASM:746`): `--loop` is the setup's
 "Demo looping: Enabled" and `/gravis` (`START.C:89-93`, any argument position) plays once without
-the end scroller and skips the settings screen; any other `/` switch is ignored, and both are a
-block's run. A looping plan has no ENDSCRL; after CRED the shell fades the music for 64 ticks,
+the end scroller and skips the settings screen. With `--loop`, `/gravis` wins in either order, because
+the original's `/gravis` skips `menu()`, the only place looping is chosen. Any other `/` switch is
+ignored, and both are a block's run. A looping plan has no ENDSCRL; after CRED the shell fades the music for 64 ticks,
 restarts MUSIC0 at order 0, holds 11 more ticks (`LOOP_RELOAD_TICKS`, the release's measured
 interval) and starts pass 2 at ALKU, whatever block pass 1 began at. ESC still ends only the
 running part; a looping run is left with the window's close button, and the end box is printed.
 The seam's residuals against `reference/parts/loop` are A61.
 
 **`--sound-quality enhanced`** (D43) is the port's own 48 kHz interpolating renderer, off by
-default and refused by `--vault`; the authentic mixer is the default and the reference, and no
+default and refused by `--vault` and by any run with no music (`--part testcard|grid|hard|twist`,
+as `--audio-dump` refuses them); the authentic mixer is the default and the reference, and no
 setting moves the music's published `(order, row)` (A60).
 
 `--headless` runs the same sequence on a machine with no display, and is what the comparisons below
-use.
+use. **`--positions <FILE>`** is headless only. It writes the run's timeline as CSV: the header
+`index,pass,part,order,row`, then one line a tick, giving the frame's index, the loop pass, the part
+whose picture is up, and the music's published `(order, row)` (empty for a run with no music). It
+needs `--frames` or `--dump-frames`, not `--run-seconds`, and it is what `tests/fullrun.rs` reads.
 
 ### The vault
 

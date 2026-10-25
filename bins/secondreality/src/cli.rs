@@ -131,6 +131,7 @@ impl Cli {
         I: IntoIterator<Item = String>,
     {
         let mut cli = Cli::default();
+        let mut gravis = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -206,16 +207,21 @@ impl Cli {
                 // the run's settings.
                 "--no-setup" => cli.setup = false,
                 // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
-                // characters, any case — is `m_looping=2` and no setup menu.
-                switch if is_gravis(switch) => {
-                    cli.looping = shell::Looping::NoEndScroller;
-                    cli.setup = false;
-                }
+                // characters, any case — is `m_looping=2` and no setup menu. Applied after
+                // the loop, so that it wins over `--loop` in either order.
+                switch if is_gravis(switch) => gravis = true,
                 // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at a `/`, so any other
                 // switch is no block and no error. It is ignored here too.
                 switch if switch.starts_with('/') => {}
                 other => return Err(format!("unknown argument {other:?}")),
             }
+        }
+        // `START.C:89-94`: `/gravis` sets `m_looping=2` and skips `menu()`, the only
+        // place `looping` 1 is chosen (`MENU.C:229-238`). `--loop` is that menu's choice,
+        // so `/gravis` wins over it wherever the two are written (D42).
+        if gravis {
+            cli.looping = shell::Looping::NoEndScroller;
+            cli.setup = false;
         }
         // No part and no block is the demo's own run, `SECOND 1`. The vault names
         // neither and starts its own runs, so it is left alone.
@@ -308,6 +314,16 @@ impl Cli {
         // parts.
         if self.looping != shell::Looping::Off && self.block.is_none() {
             return Err("--loop and /gravis are a block's run; give --block, not --part".to_string());
+        }
+        // A mixer setting for a run with no player would be accepted and do nothing: the
+        // test card and the vault's effects are silent (`music_for_part` has no row for
+        // them). The default names the authentic mixer and is harmless, so it is accepted.
+        if self.quality != Quality::Authentic && shell::music_for_part(self.first_part()?).is_none()
+        {
+            return Err(format!(
+                "--sound-quality enhanced needs a run with music, and a run of {} has none",
+                self.first_part()?
+            ));
         }
         // A dump of a run with no music would be a file with a header and nothing in it,
         // which reads as a recording that captured silence. Which runs have music is the
@@ -565,6 +581,44 @@ mod tests {
     }
 
     #[test]
+    fn enhanced_sound_is_refused_for_a_run_with_no_music() {
+        // The test card and the vault's three effects have no player
+        // (`shell::music_for_part` is `None`), so a mixer setting would be accepted and do
+        // nothing. It is refused, as `--audio-dump` and `--vault` refuse it.
+        for part in ["testcard", "grid", "hard", "twist"] {
+            assert!(shell::music_for_part(part).is_none(), "{part} is silent");
+            let error = parse(&["--part", part, "--sound-quality", "enhanced"]).unwrap_err();
+            assert_eq!(
+                error,
+                format!("--sound-quality enhanced needs a run with music, and a run of {part} has none")
+            );
+            let error = parse(&["--sound-quality", "enhanced", "--headless", "--dump-dir", "d",
+                                "--frames", "1", "--part", part]).unwrap_err();
+            assert!(error.starts_with("--sound-quality enhanced needs"), "{part}: {error}");
+        }
+        // The default is accepted everywhere: every part, every block, and the vault.
+        for (name, _) in parts::registry() {
+            assert!(parse(&["--part", name, "--sound-quality", "authentic"]).is_ok(), "{name}");
+            let music = shell::music_for_part(name).is_some();
+            assert_eq!(
+                parse(&["--part", name, "--sound-quality", "enhanced"]).is_ok(),
+                music,
+                "{name}: enhanced is accepted exactly when the part has music"
+            );
+        }
+        for (block, _) in shell::BLOCKS {
+            let block = block.to_string();
+            for quality in ["authentic", "enhanced"] {
+                assert!(
+                    parse(&["--block", &block, "--sound-quality", quality]).is_ok(),
+                    "--block {block} --sound-quality {quality}"
+                );
+            }
+        }
+        assert!(parse(&["--vault", "--sound-quality", "authentic"]).is_ok());
+    }
+
+    #[test]
     fn the_loop_flag_is_looping_on() {
         // The setup menu's looping row (`MENU.C:229-238`) is `looping` 1, which
         // `MAIN/U2.ASM:920-933` turns into a run that plays for ever.
@@ -599,6 +653,27 @@ mod tests {
         assert!(parse(&[]).unwrap().setup, "a plain run asks its settings");
         assert!(Cli::default().setup);
         assert!(parse(&["--part", "glenz", "/gravis"]).is_err());
+    }
+
+    #[test]
+    fn gravis_wins_over_loop_in_either_order() {
+        // `START.C:89-94`: `/gravis` sets `m_looping=2` and skips `menu()`, and the menu
+        // is the only place `looping` 1 is chosen (`MENU.C:229-238`), so the setup's
+        // looping choice never meets `/gravis`. `--loop` is that choice, and the order the
+        // two are written in does not matter.
+        for args in [["--loop", "/gravis"], ["/gravis", "--loop"]] {
+            let c = parse(&args).unwrap();
+            assert_eq!(c.looping, Looping::NoEndScroller, "{args:?}");
+            assert!(!c.setup, "{args:?}: /gravis skips the setup screen");
+            assert_eq!(c.run_settings().looping, Looping::NoEndScroller, "{args:?}");
+        }
+        for args in [["--block", "5", "--loop", "/gravis"], ["/gravis", "--block", "5", "--loop"]]
+            .iter()
+            .map(|a| a.as_slice())
+        {
+            let c = parse(args).unwrap();
+            assert_eq!((c.block, c.looping), (Some('5'), Looping::NoEndScroller), "{args:?}");
+        }
     }
 
     #[test]

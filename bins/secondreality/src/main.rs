@@ -31,7 +31,7 @@ usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--aspect 4:3|square] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
                      [--vault] [--loop] [--no-setup] [/gravis]
-                     [--sound-quality authentic|enhanced]
+                     [--sound-quality authentic|enhanced] [--positions <FILE>]
 run:   with no --part and no --block, the demo plays from its beginning: no
        argument is SECOND 1, as it is in the original.
 setup: a windowed demo run opens on a settings screen first, as the original asked its
@@ -61,7 +61,15 @@ music: a window plays the demo's music on the default sound card; --no-audio run
        consumer, so a dump is silent to watch). The music runs either way.
        --sound-quality enhanced mixes it at 48 kHz, interpolated: the port's own
        renderer, with the same clock and pictures; authentic, the default, is the
-       original's mixer at its own 20 kHz.";
+       original's mixer at its own 20 kHz. A run with no music (the test card, GRID,
+       HARD, TWIST) refuses enhanced, as it refuses --audio-dump.
+dump:  --headless runs with no window and no sound card and needs --dump-dir and one of
+       --frames, --dump-frames or --run-seconds. --positions <FILE> is headless only and
+       writes the run's timeline as CSV: a header, then one line a tick,
+       index,pass,part,order,row (the frame's index, the loop pass, the part whose
+       picture is up, and the music's published order and row, empty for a run with no
+       music). It needs --frames or --dump-frames, because a --run-seconds run ticks in
+       batches.";
 
 fn main() -> ExitCode {
     let cli = match cli::Cli::parse(std::env::args().skip(1)) {

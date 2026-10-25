@@ -84,7 +84,9 @@ credits the music fades and the demo starts again from the beginning. It loops u
 the window. ESC still ends only the part that is playing.
 
 `/gravis` is the original's own switch. It plays the demo once without the end scroller and
-skips the settings screen. Any other `/` switch is ignored, as `SECOND.EXE` ignores it.
+skips the settings screen. Given with `--loop`, in either order, `/gravis` wins: in the original
+it skips the setup menu, which is the only place looping is chosen. Any other `/` switch is
+ignored, as `SECOND.EXE` ignores it.
 
 ## Sound
 
@@ -94,7 +96,8 @@ pictures. `--audio-dump <FILE>` writes the music to a 16-bit WAV file instead of
 `--sound-quality authentic` is the default. It is the original's own mixer at its 20 kHz.
 `--sound-quality enhanced` is the port's own interpolating renderer at 48 kHz. It is off by
 default and is not part of the original. The music's timing, and therefore every picture, is the
-same either way.
+same either way. A run with no music, such as the test card or one of the vault's effects, refuses
+`enhanced`, as it refuses `--audio-dump`.
 
 ## The vault
 
@@ -108,7 +111,8 @@ cargo run --release --bin secondreality -- --part grid   # or hard, or twist
 
 In the menu, Up and Down choose, Enter plays and ESC closes the window. In a running effect, the
 first ESC ends it, and the second ESC returns to the menu. An effect that has ended by itself
-needs only one ESC. The effects are silent, so `--vault` refuses `--sound-quality enhanced`.
+needs only one ESC. The effects are silent, so `--vault` and `--part grid|hard|twist` refuse
+`--sound-quality enhanced`.
 
 ## Display
 
