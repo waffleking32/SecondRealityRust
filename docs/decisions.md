@@ -2792,6 +2792,43 @@ placement is derived, ±1, not measured), the fade is the original's and the 2 f
 capture's `C` reading, not a residual. If a looping run should be left with ESC, it is one branch
 in `EscapeKey::apply`.
 
+## D43 — An enhanced sound option: the port's own renderer at 48 kHz, off by default (2026-10-24)
+
+Decided: the player gains a second renderer, `Quality::Enhanced`, chosen by
+`--sound-quality enhanced` (`Cli::quality`, carried in `RunSettings::player`) and **off by
+default**. `PlayerOptions` is now `{ mix_rate, stereo, quality }`, and `quality` replaces the
+`interpolation` flag nothing read. That flag stood for the object's `[0x919]`, the byte `S1x`
+writes, which neither module sets (`music.md` §9.12). `PlayerOptions::output_rate()` is what the
+sound card and the WAV dump are opened at: 20,000 for the authentic stereo `Hz40000`, 48,000 for
+the enhanced renderer. `MusicSource` becomes `fn(ModuleId, PlayerOptions)`. The `Sequence` keeps
+the run's options and passes them at every install, so a restart's new player is built with them
+before `Player::restart_from` takes the old one's state over (D45).
+
+**What it is** (`music.md` §13). The tick schedule and every voice's step and advance are the
+authentic path's: the mixer gets the same authentic budget and walks the voices exactly as
+`Mixer::frame` does. Each authentic frame becomes 2 or 3 output frames by an exact 12/5 integer
+accumulator. Output frame `j` of `n` interpolates each voice at its position plus `j/n` of its
+step, weights it by `(s − 128) × scale(m_vol)` without the `>> 8`, and converts the side's sum
+with the authentic curve's small-signal gain (`Curve::sample` at `0x400 ± 1`), clamped to `i16`.
+
+**Why it is not a fidelity approximation.** An approximation (`APPROXIMATIONS.md`) is the port
+falling short of the original on a path it claims to reproduce. This path claims nothing. It is
+opt-in, it is labelled the port's own in the help text and in the note, and the authentic path
+stays the reference: it is the default, it is unchanged byte for byte, and everything compared
+against the original runs on it. The phase's rule that a setting may not move the clock is held
+by tests, not by argument. `enhanced_keeps_the_authentic_tick_schedule` compares every published
+word at each of 30,000 polls of both modules, so a run's pictures are the same under either
+quality. Pitch and level are measured against the authentic path (0.0003 % and 0.0022 % on two
+sustained notes; −0.18 dB and −0.57 dB over ten seconds, `tests/enhanced.rs`).
+
+**Cost if wrong.** The authentic path is the default and is untouched, so a wrong enhanced
+renderer costs only the runs that ask for it: its sound, never a picture or a published position.
+If it did move the clock, the schedule test fails at the first poll that differs. If the
+accumulator drifted, `enhanced_emits_twelve_frames_for_every_five` fails, and so would the run's
+audio-to-picture sync over a long run. If the options stopped reaching a restart, the run would
+switch back to authentic at U2E, and `a_restart_keeps_the_runs_sound_quality` names it. Removing
+the option is one enum variant, one `match` in `Mixer::mix`, and the flag.
+
 ## D45 — A restart keeps what `_zplaysong`'s initialiser does not write (2026-10-24)
 
 Decided: a mid-run restart is **the same player object taking a new module**, not a fresh player.
