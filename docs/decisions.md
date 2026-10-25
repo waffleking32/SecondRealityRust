@@ -137,6 +137,15 @@ one it inferred. Route 2 (`st3play`'s "plus flags") and route 3 (disassembly) ar
 taken: route 1 did not fail, it answered — the answer is that the word stays 0 in every
 window the phase has, and a mechanism for its other values is not measured by any of them.
 
+**Closed 2026-10-25 (Phase 9 Task 10) — the substitute is adopted and registered.** `dis_muscode()`
+returns 0 (`sr_engine::music::muscode_from`), the reference's own reading at every sample of every
+trace filed under `reference/music/` (`cargo test -p sr-audio --test trace
+zinfo_is_zero_in_every_filed_trace`). That is spec §7.4's escalation clause taken, and its
+difference is `APPROXIMATIONS.md` **A56**: 0 in every compared frame, because no part the demo runs
+calls `dis_muscode`, and the vault's callers run behind the standalone DIS and model their one start
+key (A40, A46, A52). What stays open, and is carried there, is the word's other values, which no
+measured window shows.
+
 ## D11 — The reference oracle is verified end-to-end (2026-10-10)
 
 Supersedes the "still unverified" caveat in D10. The emulator's REST API was exercised
@@ -236,6 +245,17 @@ release is the reference of record for every frame diff") decides which of them 
 follows: the frames. A part whose source and shipped build disagree is therefore not a
 contradiction to resolve but a measurement to take, and the difference is recorded — here and
 in `APPROXIMATIONS.md` — rather than the newer build being called the winner.
+
+**Closed 2026-10-25 (Phase 9 Task 10) — unresolved by design.** The open question — whether the part
+EXEs in `MAIN/DATA/` are byte-identical to those packed inside `SECOND.EXE` — is not answered and
+this project will not answer it: the staged EXEs are PKLITE-packed, `SECOND.EXE` packs them again,
+and nothing here unpacks either. The frames arbitrate instead, which is the ruling above and D24's
+procedure, and every divergence it found is registered against the frames with its packed EXE as
+the lead (A6, A9–A11, A17–A20, A22–A25, A28–A31, A37). The tree does say one thing, and it is
+measured: `MAIN/PACKFINA.INC`'s length words are the staged file's size for 18 of its 22 EXEs and
+not for `U2A.EXE` and `U2E.EXE` (whose staged copies carry no PKLITE header and are twice the listed
+length), `LNS&ZOOM.EXE` (four bytes) or `START.EXE`, so for those four the staged file is certainly
+not the packed one (`APPROXIMATIONS.md`'s head has the command).
 
 ## D9 — Licence: MIT (2026-10-10)
 
@@ -378,6 +398,14 @@ semantics remain open — the same unknown D8 already tracks under `_np_zinfo`. 
 resolves it from live memory. The wait's *shape* is certain (wait for `dx` to go
 negative, then positive, aborting on any key, skipped if Ctrl is held); only what
 musical event `dx` encodes is not.
+
+**Closed 2026-10-25 (Phase 9 Task 10).** The "Not resolved" paragraph is answered: `dx` is
+`dis_musplus()`'s reading of `_np_row` and `_np_zplus` — `row` in one phase, `row − 64` in the
+other, −32 for no cue — whose `_np_zplus` rule D26's traces measured (`music-clock.md` §6) and D8's
+2026-10-14 amendment adopted. The wait is implemented on it (D38) and its exit is measured in the
+full run at +2 frames against the original (`APPROXIMATIONS.md` A53's cue exit, 16632 against
+16630). The restart table this entry prescribes is `shell::MUSIC_RESTARTS` and `MUSIC_RESTART_AT`
+(D27, D34, D38).
 
 ## D14 — The reference oracle's API shape (2026-10-10)
 
@@ -717,6 +745,26 @@ recorded bytes of the screen Phase 0 actually captures.
   `/memory/search`, `/memory/freeze`, `/dos/internals`, `/drive/swap`, `/mount/lock`.
   Nothing in Phase 0 needs them.
 
+**Closed 2026-10-25 (Phase 9 Task 10) — the left-open probes, one by one.**
+
+- *The `-conf`-anchor mount route*: still untested, and moot — `xtask` writes a scratch primary
+  config with `mount_allowed_bases` (`CLAUDE.md`'s capture list, item 2), and no capture needed
+  another route.
+- *Whether `No sound` lets the reference run*: not tested, and not wanted: the captures run the
+  SB16 under the emulator's own silent mode (D17), which keeps the demo's music clock, while the
+  shell's no-sound output mode writes `_zspeedadjust2` (`MAIN/U2.ASM:384-389`, D46) and would not
+  be the reference's clock.
+- *Whether `AUTOTYPE` can drive the setup menu*: yes — `--boot autoexec`'s `AUTOTYPE left enter`
+  (D17), the recipe every capture since Phase 1 uses.
+- *Capture determinism at fixed indices*: answered by D15 and D17 (a held screen repeats byte for
+  byte; a moving one lands in alignment groups, which `compare`'s ±1 search handles, D18).
+- *A paletted raw frame's palette payload*: never observed and not needed — the palette is read
+  through the DAC ports (item 3 above, `xtask/src/oracle/dosbox.rs`'s `read_palette`).
+- *The unexercised endpoints*: `/memory/` (the indexed reads and every music trace), `/io/port`,
+  `/script/*`, `/input/*` and `/video/text` are now used; `/api/v1/mixer`, `/capture/*`,
+  `/memory/search`, `/memory/freeze`, `/dos/internals`, `/drive/swap` and `/mount/lock` are still
+  not, and nothing through Phase 9 needed them (`grep -rhoE '"/api/v1/[a-z/_-]+' xtask/src`).
+
 ## D15 — Capture is deterministic, and what that costs (2026-10-10)
 
 Task 12's step-5 check is answered: **two captures of the same boot-relative frame indices
@@ -908,6 +956,15 @@ that a later phase is most likely to trip over:
   sawtooth.** It passes against both. The property is currently guaranteed by the constant
   (`8 + band * 7`) rather than by a test; a strict-increase walk over all eight band boundaries
   would pin it.
+
+**Closed 2026-10-25 (Phase 9 Task 10).** **Item 6 is decided by derivation:** the border the
+parts' CRTC timing gives is 8 / 0 / 3.5 / 3.5 source pixels (left, right, top, bottom) at 320×200,
+not whole at every geometry, so the presenter's pad stays 8 per side and is the port's presentation
+choice (`APPROXIMATIONS.md` A1, `cargo test -p xtask --test approximations
+a1_the_derived_border_is_not_whole_at_every_geometry`); the oracle renders no border to measure.
+**The deferred minors:** the `..` guard is fixed (above, Task 5's tests). The staircase test is
+**carried**: it is the Phase 0 test card's, which no block plays and no reference compares, and the
+constant still guarantees the property.
 
 ## D17 — A boot that repeats, and what still does not (2026-10-11)
 
@@ -1396,6 +1453,21 @@ the final whole-branch review comes after B6 and may require fixes, and a tag th
 worse than a tag applied a few commits later. The phase's exit criteria are met and its evidence is
 recorded; the tag goes on when that review is clean.
 
+**Closed 2026-10-25 (Phase 9 Task 10) — the three unresolved items, as Phase 9 leaves them.**
+
+- *The oracle's rare excursion*: carried. Phase 9 met it nowhere — `cargo xtask rediff` holds every
+  filed TECHNO frame at 0 and the full run's TECHNO seam at +2 (A53) — and it stays unexplained and
+  unreproduced.
+- *ENDSCRL's deviation*: carried. Its census is still an offset-0 count: Phase 9's full-run
+  captures took its opening at three-frame spacing (46280 / 46283 / 46286, `reference-indices.md`
+  §26), not a ±1 window, so a one-frame-out diff there is still a difference, not an alignment
+  (A11).
+- *The CRTC read race*: carried, and met again. `chain4_enabled()` and `crtc_offset_register()`
+  still read the index/data pair in two requests (`xtask/src/oracle/dosbox.rs`), and the lead-in
+  captures' refusals from 439/444 on are one of the two readings `reference-indices.md` §25.6
+  gives for them. The fix — read the pair coherently, or twice — still belongs to whoever next
+  changes the oracle.
+
 ## D21 — The shell: the run's numbering, the DAC it starts from, and where it ends (2026-10-13)
 
 Phase 2's first task. Two things it settles that a reader of the plan would otherwise have to
@@ -1520,6 +1592,13 @@ port's window is inside a part rather than in front of one, so Ctrl there drops 
 interrupted and the run goes on with the next one, one index later. It is a knowing difference, not a
 silence: the original's fast-forward is the window's close button, and the port's Ctrl is "skip this
 part" — which is also what the phase's Task 10 asked for.
+
+*(Phase 9 Task 10 — a correction to the ESC paragraph above.)* "The original does not lose it
+either" is not so between two parts: after each part `partexecute` calls `flushkbd`
+(`MAIN/U2.ASM:211`, the routine `MAIN/U2A.ASM:537-546`), which reads and discards up to 256 waiting
+keystrokes, so a key pressed after one part stopped reading and before the next began is dropped.
+The port keeps it; that is a knowing difference, registered with the Ctrl skip as
+`APPROXIMATIONS.md` **A58** (0 in every compared frame — no capture presses either key).
 
 ## D22 — `dis_waitb` counts the overrun, and spec §6.2 said it discarded it (2026-10-13)
 
@@ -2111,6 +2190,12 @@ same one-constant rule and stands: the changes still take both signs — every o
 seams, positive at eight (ALKU→U2A +47, BEGLOGO→GLENZ +42, TUNNELI→TECHNO +9, PANICEND→MNTSCRL +8, MNTSCRL→LNS&ZOOM +18, MINVBALL→RAYSCRL +9, RAYSCRL→3DSINFLD +10, U2E→ENDLOGO +34) and negative at ten (U2A→PAM −50, PAM→BEGLOGO −34, GLENZ→TUNNELI −12, TECHNO→PANICEND −14, LNS&ZOOM→PLZPART −13, PLZPART→MINVBALL −4, 3DSINFLD→JPLOGO −24, JPLOGO→U2E −37, ENDLOGO→CRED −8, CRED→ENDSCRL −69) — and the two music-pinned seams still
 need 6 and 59–68 frames; the figures are A53's and §26.8's.)*
 
+**Closed 2026-10-25 (Phase 9 Task 10).** The loader question is decided — **not modelled** — and its
+record is `APPROXIMATIONS.md` A53, whose seam table, filed-frame counts and three carried items
+(U2A's opening, PANICEND's first frame, the loader's frames) are re-measured at Task 10's commit by
+`cargo test --release -p secondreality --test fullrun -- --nocapture` and `cargo xtask rediff
+--only fullrun`. §3's one-tick handover stands as decided.
+
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 
 Decided: the VISU engine lives in the module directory `bins/secondreality/src/parts/visu/` —
@@ -2608,6 +2693,11 @@ asserted directly), `the_vault_flag_is_parsed`, the three refusal tests,
 untouched. A wrong ESC rule would return from a live part instead of ending it (or close the
 window instead of returning); the reducer and window tests pin both.
 
+**Closed 2026-10-25 (Phase 9 Task 10).** The deferral is spent: the settings screen and loop mode
+are now D41–D44 (the demo's own run and its end, D41; loop mode, D42; the enhanced sound option the
+settings offer, D43; the settings screen, D44), and the restart carry-over the loop's restart rides
+on is D45. None of them touched the vault: its parts stay silent and its menu window-only, as above.
+
 ## D41 — The demo's own run, and how it ends (2026-10-24)
 
 Decided: a run with no argument is the demo — `SECOND` with no argument is `SECOND 1`
@@ -2961,3 +3051,79 @@ GLENZ on and a 64-row order 0. The change is one call in `install_music`, and `t
 way round, `the_song_initialiser_writes_exactly_what_initialise_writes` names it. If the ring
 should be carried, A55 says what that costs (pass 2's ALKU) and what a faithful model would need: a
 signed published order, and the reload's polls.
+
+## D46 — `zspeedadjust`: both words read 0, and the shell writes the second only for Gravis and no sound (2026-10-25)
+
+Decided: spec §13's one open question is closed. Neither `_zspeedadjust` nor `_zspeedadjust2`
+moves the reference's timing, and the port models neither.
+
+**The evidence**, four pieces, each with its command:
+
+1. **Both read 0 in the reference's run**, at the segment's locate and while the music plays
+   (`docs/fidelity/music-clock.md` §5's table, from `cargo xtask music analyse --trace
+   reference/music/second5b`'s section 4).
+2. **The object's image holds both as zero** — `LIDATA` runs of `0x00` at `0x8cd` and `0x8d1`
+   (`cargo test -p sr-audio --test player the_speed_adjusters_are_zero_in_the_image`).
+3. **The row timer adds `_zspeedadjust` and nothing else**: `+0x439f`'s `mov %cs:0x8cd,%dx; add
+   %dx,%cs:0x8cf; jae; dec %ax` takes a tick off a row only on the adder's carry, so at 0 it never
+   does — and the traces agree: `second5`'s speed-6 row changes are exactly six ticks apart (61 gaps
+   in 534 frames where the rule says 534.4, `cargo xtask music analyse --trace
+   reference/music/second5`; `music.md` §8). The same test asserts those instruction bytes.
+4. **The shell writes `_zspeedadjust2` only for output modes 7 and 2**: `restartmus` passes its
+   `cx` (48700, 45000: `part-sequence.md`'s restart table) through `cmp es:_zoutputmode,7; je
+   @@isnosound; cmp es:_zoutputmode,2; jne @@nogus2; @@isnosound: mov es:_zspeedadjust2,cx`
+   (`MAIN/U2.ASM:384-389`). The shell's own labels make mode 7 no sound and mode 2 the Gravis
+   (`:725`, `:734`); the reference's card is mode 5, the Sound Blaster Pro (`:731`,
+   `music-clock.md` §5).
+
+So the answer to §13's question — "whether they affect audible timing or are GUS-specific
+calibration" — is the second, with the no-sound mode beside the Gravis: the second word is
+written on those two paths only, and on the reference's path both are 0. What the player does with
+`_zspeedadjust2` on those two paths is not measured, because no reference runs them (the default
+Gravis fails on this emulator, `CLAUDE.md`, and the captures are SB16 under the emulator's own
+silent mode, D17).
+
+**Consequence for the port.** Nothing to model: its tick arithmetic has no adjuster term, which is
+the reference's arithmetic at 0 (`music.md` §8). The port's Sound Off (D44) keeps that clock — the
+reference's mode-5 clock, not the original's no-sound mode with its written `_zspeedadjust2` — as
+the phase's rule requires (no setting moves the published position).
+
+**Cost if wrong.** If the original's no-sound or Gravis run ticks at another rate, a port run with
+Sound Off differs from *that* run's timing and not from the reference's; no capture of either mode
+exists to say so. Modelling it would be one adder in the tick, with the restart's `cx` as its
+input, and would need a trace of a no-sound session first.
+
+## D47 — Spec §8.3's event stream and §4.8's `audio render` and `event log` are retired in favour of what was built (2026-10-25)
+
+Decided: the event stream spec §8.3 describes — palette writes, view changes and the scanline each
+takes effect on, sound-clock advances, logged from both the port and the original — and the two
+`xtask` subcommands §4.8 names for it, `audio render` and `event log`, are not built and will not
+be. What was built answers the questions they were for:
+
+- **Frame comparison**, `cargo xtask compare` and `cargo xtask rediff`: every filed reference frame
+  against the port's run at a registered count, the index plane wherever the oracle can read one
+  (§8.2; D18, D19; Phase 9 Task 5). A wrong split, pan, start address or palette write shows as
+  pixels on the frame it happens in, and the register attributes each difference with the source
+  and the trace (`APPROXIMATIONS.md`).
+- **The original's player state as a trace**, `cargo xtask music trace` (with `analyse`, `probe`
+  and `symbols`): the object's own position words, one row a frame (D26), against which the
+  port's published position is held word for word (`crates/sr-audio/tests/trace.rs`; A12, A54).
+  That is §8.3's "sound-clock advances", read from the unmodified original instead of logged.
+- **`--audio-dump`**: the port's PCM, for listening and for the mixer's tests. The original's audio
+  cannot be captured — the emulator runs silent (D17) — which is why `audio render` had nothing to
+  compare against.
+- **`--positions`**: a headless run's timeline, the part, frame and published position of every
+  frame (Phase 9 Task 6), which the full-run comparison against the traces reads
+  (`bins/secondreality/tests/fullrun.rs`).
+
+**Why.** §8.3 needs the same events logged from the original, and the oracle exposes none of them
+as events: its frame, port and memory reads are polls between frames with the guest running (D14,
+D19, D20's read race), so "the line-compare write at frame 812" cannot be taken from it without
+changing the emulator, which this project only reads. The frame comparison is stricter where it
+applies — pixel-exact, indexed — and every difference it found was attributed without events.
+
+**Cost if wrong.** A difference the original makes in a register that no filed frame displays — a
+palette entry overwritten before the next sample, a split no compared frame reaches — goes unseen;
+that is D18's and D19's recorded limit, not a new one. Building the stream later means
+instrumenting the oracle's VGA writes and adding a matching log to the engine; nothing built here
+would have to change for it.
