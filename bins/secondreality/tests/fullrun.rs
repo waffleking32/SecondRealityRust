@@ -4,28 +4,41 @@
 //!
 //! **One run answers every test here.** The release binary plays block 1 headless from
 //! ALKU's 404 to [`RUN_TO`] — the original's ENDSCRL start plus 2,000 frames, about 48,000
-//! ticks — writing its timeline with `--positions` and dumping only the frames the seam
-//! table needs. That is ten seconds in release and minutes in debug, so every test is
-//! ignored by default and run by
+//! ticks — writing its timeline with `--positions` and dumping, for every part, each frame
+//! from two before its start to its first frame. That is ten seconds in release and minutes
+//! in debug, so the tests are ignored in a debug build only and run by
 //!
 //! ```text
-//! cargo test --release -p secondreality --test fullrun -- --ignored --nocapture
+//! cargo test --release -p secondreality --test fullrun -- --nocapture
 //! ```
 //!
-//! **What is asserted is what was measured, both ways.** The port's first frame of every
-//! part is found from its own frames by §26.3's own definition (its own geometry, its own
-//! first change to the screen, or its first visible frame after a black gap), and pinned;
-//! the original's is §26.3's, for the session the `fullrun` capture of that part was filed
-//! in. The differences are the seam table of §26.8 and `APPROXIMATIONS.md` A53. The music is
-//! compared at every frame of every block-1 trace after removing **one** offset per trace —
-//! 0 for the boot trace, and for a window trace measured at its first row change (A38's lag
-//! in `second1d`/`second1e`, the U2E restart's in `second1f`) — and the agreement within
+//! (or in debug with `-- --ignored`, slowly). The dump is read into memory — a hash, the
+//! geometry and a black flag per frame — and removed before any test runs.
+//!
+//! **The seam table has one source**, `xtask/src/rediff/table.rs`'s `FULLRUN_SEAMS`, included
+//! here by path: the original's first frame of each part (§26.3), the port's, and the port's
+//! start. This file asserts the port's two columns against the run — the start is
+//! `Sequence::starts`, and the first frame is the first frame at or after the start that meets
+//! §26.3's own definition for that part (its own geometry, its first change to the screen, its
+//! first visible frame after a black gap), with **no frame between the start and it** meeting
+//! the definition. `cargo xtask rediff` derives every `fullrun` pairing from the same rows. The
+//! music is compared at every frame of every block-1 trace after removing **one** offset per
+//! trace — 0 for the boot trace, and for a window trace measured at its first row change (A38's
+//! lag in `second1d`/`second1e`, the U2E restart's in `second1f`) — and the agreement within
 //! [`JITTER_FRAMES`] is pinned with the offset.
 
-use std::collections::BTreeMap;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
+
+#[allow(dead_code)]
+#[path = "../../../xtask/src/rediff/table.rs"]
+mod table;
+
+use table::{at, Part, FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS, TABLE};
 
 /// The original's ENDSCRL begins at 46,277 (§26.3); the run goes 2,000 frames past it.
 const RUN_TO: u32 = 46_277 + 2_000;
@@ -37,79 +50,52 @@ const PLAN: [&str; 19] = [
     "cred", "endscrl",
 ];
 
-/// Where each part started in the port's run: `Sequence::starts`, as the manifest records
-/// it. Measured by this file's first run and pinned: a start that moves is a change to the
-/// run that every row of the seam table below inherits.
-const PORT_STARTS: [u32; 19] = [
-    404, 6008, 7508, 7885, 8057, 11374, 12435, 16423, 16875, 18912, 22096, 26811, 29392,
-    31466, 33498, 34286, 38199, 38807, 46430,
-];
-
-/// How the port's first frame of a part is found — §26.3's three definitions, and the two
-/// rulings for the boundaries §26.3 can only bracket.
+/// How a part's first frame is found — §26.3's definitions, and the two rulings for the
+/// boundaries §26.3 can only bracket.
 #[derive(Clone, Copy, Debug)]
 enum First {
     /// The run's first frame: ALKU at the boot's 404.
     Anchor,
     /// The first frame of this geometry: the frame before is another one.
     Geometry(u64, u64),
-    /// The first frame that differs from the one before it.
+    /// The first frame that differs from the one before it, after a frame that held.
     Change,
-    /// The first frame that is not black after a black gap.
+    /// The first frame that is no longer this filed held picture: GLENZ's collapse, whose
+    /// first ticks hold BEGLOGO's final screen (`fullrun/03`'s 8300) through the music wait.
+    Leaves(&'static str, u32),
+    /// The first frame that is not black after a black frame.
     Visible,
     /// The first frame byte-identical to this filed reference frame: U2E's band (34120, the
-    /// ruling that aligns U2E on it) and JPLOGO's opening black (33263, the ruling that
-    /// aligns JPLOGO on a frame's hash rather than on its bracket).
+    /// ruling that aligns U2E on it), JPLOGO's opening black (33263, the ruling that aligns
+    /// JPLOGO on a frame's bytes rather than its bracket) and PAM's white (7707).
     Bytes(&'static str, u32),
 }
 
-/// One row of the seam table: the part, the original's first frame (§26.3, in the session
-/// the part's `fullrun` capture was filed in where §26.3 gives two), the rule, and the
-/// port's first frame that rule finds.
-struct Seam {
-    part: &'static str,
-    original: u32,
-    rule: First,
-    port: u32,
-}
-
-const fn seam(part: &'static str, original: u32, rule: First, port: u32) -> Seam {
-    Seam { part, original, rule, port }
-}
-
-/// §26.3's first frames, and the port's.
-///
-/// - BEGLOGO 7922: `fullrun/02`'s session still shows PAM's white at 7920 and never
-///   publishes 7921 (b2r2's 7922; L1 b's session has 7920).
-/// - GLENZ 8522: `fullrun/03`'s own first frame of the collapse (c3r; c2's is 8521).
-/// - TUNNELI 11158: `fullrun/04` holds d2's 11160 bytes at 11159, one frame earlier.
-/// - 3DSINFLD 31272: h5's 8-pixel frame (`fullrun/08`'s session is still black there).
-/// - JPLOGO: §26.3 brackets the first 320×400 frame in (33261, 33263]; it is aligned on
-///   `fullrun/09`'s 33263, the black frame JPLOGO opens on — the port's only frame of
-///   that hash.
-/// - U2E: §26.3 brackets the first 320×200 frame in (34114, 34120]; it is aligned on the
-///   band, 34120, which is byte-identical to block 4's (§18.7).
-/// - ENDSCRL 46277: l2r's first 640×400 frame.
-const SEAMS: [Seam; 19] = [
-    seam("alku", 404, First::Anchor, 404),
-    seam("u2a", 5961, First::Geometry(320, 200), 6008),
-    seam("pam", 7707, First::Bytes("02-u2a-pam", 7707), 7704),
-    seam("beglogo", 7922, First::Change, 7885),
-    seam("glenz", 8522, First::Change, 8770),
-    seam("tunneli", 11158, First::Visible, 11394),
-    seam("techno", 12214, First::Visible, 12458),
-    seam("panicend", 16193, First::Change, 16423),
-    seam("mntscrl", 16637, First::Change, 16875),
-    seam("lnszoom", 18656, First::Visible, 18913),
-    seam("plzpart", 21927, First::Geometry(320, 400), 22171),
-    seam("minvball", 26673, First::Visible, 26912),
-    seam("rayscrl", 29174, First::Visible, 29422),
-    seam("3dsinfld", 31272, First::Visible, 31531),
-    seam("jplogo", 33263, First::Bytes("09-jplogo", 33263), 33498),
-    seam("u2e", 34120, First::Bytes("10-u2e", 34120), 34318),
-    seam("endlogo", 37967, First::Geometry(320, 400), 38199),
-    seam("cred", 38583, First::Geometry(320, 200), 38807),
-    seam("endscrl", 46277, First::Geometry(640, 400), 46432),
+/// §26.3's definition for each part, in `FULLRUN_SEAMS`' order. Where §26.3 gives two
+/// sessions, `FULLRUN_SEAMS`' original is the `fullrun` capture's: BEGLOGO 7922 (`fullrun/02`
+/// shows PAM's white at 7920 and never publishes 7921), GLENZ 8522 (`fullrun/03`'s collapse),
+/// TUNNELI 11158 (`fullrun/04` holds d2's 11160 bytes at 11159); 3DSINFLD is h5's 31272 and
+/// ENDSCRL l2r's 46277.
+const RULES: [(&str, First); 19] = [
+    ("alku", First::Anchor),
+    ("u2a", First::Geometry(320, 200)),
+    ("pam", First::Bytes("02-u2a-pam", 7707)),
+    ("beglogo", First::Change),
+    ("glenz", First::Leaves("03-beglogo", 8300)),
+    ("tunneli", First::Visible),
+    ("techno", First::Visible),
+    ("panicend", First::Change),
+    ("mntscrl", First::Change),
+    ("lnszoom", First::Visible),
+    ("plzpart", First::Geometry(320, 400)),
+    ("minvball", First::Visible),
+    ("rayscrl", First::Visible),
+    ("3dsinfld", First::Visible),
+    ("jplogo", First::Bytes("09-jplogo", 33263)),
+    ("u2e", First::Bytes("10-u2e", 34120)),
+    ("endlogo", First::Geometry(320, 400)),
+    ("cred", First::Geometry(320, 200)),
+    ("endscrl", First::Geometry(640, 400)),
 ];
 
 /// The post-PANICEND cue wait's exit (`MAIN/U2.ASM:833-853`): the original's first frame
@@ -118,7 +104,9 @@ const SEAMS: [Seam; 19] = [
 const CUE_EXIT: (u32, u32) = (16_630, 16_874);
 
 /// How far a published position may be from the frame the trace publishes it at — the
-/// shell's own window (`src/shell.rs`'s `JITTER_FRAMES`, A12).
+/// shell's own window, `src/shell.rs`'s `JITTER_FRAMES` (A12), which lives in the binary's
+/// test module where this file cannot reach it; `the_jitter_window_is_the_shells` holds the
+/// two equal.
 const JITTER_FRAMES: u32 = 3;
 
 /// How far the worst-displacement search looks either side of a frame: past it, a
@@ -128,8 +116,9 @@ const SEARCH_FRAMES: u32 = 60;
 /// Per block-1 trace: its name, the offset measured at its first row change (port frame
 /// minus trace frame), and — at that offset — how many of its frames the port publishes
 /// within [`JITTER_FRAMES`] of the trace, the worst displacement (searched to
-/// [`SEARCH_FRAMES`]) and how many it publishes nowhere that near; and how many agree within
-/// the window with no offset at all.
+/// [`SEARCH_FRAMES`]) and how many it publishes nowhere that near; how many agree within the
+/// window with no offset at all; and the offset measured the same way at the trace's **last**
+/// row change, which is how far the session's lag moves across the window.
 struct Agreement {
     trace: &'static str,
     offset: i64,
@@ -138,10 +127,11 @@ struct Agreement {
     worst: u32,
     beyond: usize,
     unshifted: usize,
+    last_offset: i64,
 }
 
 /// Measured by this file's run (Phase 9 Task 6) and recorded in `reference-indices.md`
-/// §26.8 and `music-clock.md` §2.4:
+/// §26.8 and `music-clock.md`:
 ///
 /// - `second1`, `second1c`, `second1b` — block 1 up to BEGLOGO, under the boot's MUSIC0:
 ///   the run's own clock, 97.4 / 100 / 99.7 % within the window at offset 0 / −1 / −1, as
@@ -151,19 +141,21 @@ struct Agreement {
 /// - `second1d`, `second1e` — the `MUSIC1@0` session from GLENZ to JPLOGO: **247 and 248
 ///   frames late** (A38's lag, which every part of the session inherits), and within the
 ///   window at that offset 100 % and 69.4 % — `second1e`'s worst 8 is the drift the trace
-///   test pins (A54).
-/// - `second1f` — the `MUSIC0@18` session from U2E to ENDSCRL: **235 frames late**, 44.4 %
-///   within the window, worst 12, and the one frame (38,376) whose position the trace never
-///   publishes: the speed-1 row (A54).
+///   test pins (A54): its lag falls from 248 at the window's first row change to 240 at its
+///   last.
+/// - `second1f` — the `MUSIC0@18` session from U2E to ENDSCRL: **235 frames late** at its
+///   first row change and 243 at the last the run reaches, 44.4 % within the window, worst 12,
+///   and the one frame (38,376) whose position the trace never publishes: the speed-1 row
+///   (A54).
 ///
 /// With no offset at all, no frame of the three post-GLENZ traces agrees.
 const AGREEMENTS: [Agreement; 6] = [
-    Agreement { trace: "second1", offset: 0, frames: 5541, within: 5399, worst: 7, beyond: 0, unshifted: 5399 },
-    Agreement { trace: "second1c", offset: -1, frames: 1699, within: 1699, worst: 1, beyond: 0, unshifted: 1698 },
-    Agreement { trace: "second1b", offset: -1, frames: 359, within: 358, worst: 1, beyond: 1, unshifted: 357 },
-    Agreement { trace: "second1d", offset: 247, frames: 699, within: 699, worst: 2, beyond: 0, unshifted: 0 },
-    Agreement { trace: "second1e", offset: 248, frames: 25_143, within: 17_439, worst: 8, beyond: 0, unshifted: 0 },
-    Agreement { trace: "second1f", offset: 235, frames: 13_934, within: 6187, worst: 12, beyond: 1, unshifted: 0 },
+    Agreement { trace: "second1", offset: 0, frames: 5541, within: 5399, worst: 7, beyond: 0, unshifted: 5399, last_offset: 3 },
+    Agreement { trace: "second1c", offset: -1, frames: 1699, within: 1699, worst: 1, beyond: 0, unshifted: 1698, last_offset: -2 },
+    Agreement { trace: "second1b", offset: -1, frames: 359, within: 358, worst: 1, beyond: 1, unshifted: 357, last_offset: -2 },
+    Agreement { trace: "second1d", offset: 247, frames: 699, within: 699, worst: 2, beyond: 0, unshifted: 0, last_offset: 248 },
+    Agreement { trace: "second1e", offset: 248, frames: 25_143, within: 17_439, worst: 8, beyond: 0, unshifted: 0, last_offset: 240 },
+    Agreement { trace: "second1f", offset: 235, frames: 13_934, within: 6187, worst: 12, beyond: 1, unshifted: 0, last_offset: 243 },
 ];
 
 fn repository_root() -> PathBuf {
@@ -177,55 +169,50 @@ struct Tick {
     position: Option<(u8, u8)>,
 }
 
-/// The run every test reads.
+/// What the tests need of a dumped frame: its geometry, whether every pixel is black, and a
+/// hash of its `.rgb` bytes — and the bytes themselves for the frames compared pixel by pixel.
+struct Shot {
+    geometry: (u64, u64),
+    black: bool,
+    hash: u64,
+}
+
+/// The run every test reads, held in memory: its dump directory is gone by the time a test
+/// runs.
 struct Run {
-    dir: PathBuf,
-    manifest: serde_json::Value,
+    starts: Vec<(u32, String)>,
+    shots: BTreeMap<u32, Shot>,
+    kept: BTreeMap<u32, Vec<u8>>,
     timeline: BTreeMap<u32, Tick>,
 }
 
 impl Run {
-    fn starts(&self) -> Vec<(u32, String)> {
-        self.manifest["starts"]
-            .as_array()
-            .expect("the manifest lists the run's starts")
-            .iter()
-            .map(|start| {
-                (
-                    start["index"].as_u64().unwrap() as u32,
-                    start["part"].as_str().unwrap().to_string(),
-                )
-            })
-            .collect()
-    }
-
-    fn entry(&self, index: u32) -> &serde_json::Value {
-        self.manifest["frames"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|frame| frame["index"] == index)
-            .unwrap_or_else(|| panic!("the run dumped no frame {index}"))
-    }
-
-    /// The dumped frame's `.rgb` and its geometry.
-    fn frame(&self, index: u32) -> (Vec<u8>, (u64, u64)) {
-        let entry = self.entry(index);
-        let bytes = std::fs::read(self.dir.join(entry["rgb"].as_str().unwrap())).unwrap();
-        (bytes, (entry["width"].as_u64().unwrap(), entry["height"].as_u64().unwrap()))
+    fn shot(&self, index: u32) -> &Shot {
+        self.shots.get(&index).unwrap_or_else(|| panic!("the run dumped no frame {index}"))
     }
 }
 
-/// The indices the seam checks read: each pinned first frame and the two before it.
-fn seam_frames() -> Vec<u32> {
-    let mut indices: Vec<u32> = SEAMS
+fn hash(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The `fullrun` frames compared pixel by pixel here: BEGLOGO's ramp and ENDLOGO's hold, the
+/// two frames the parts' line-offset fix is read at.
+fn kept() -> [(u32, &'static str, u32); 2] {
+    [(7930, "03-beglogo", 7930), (at(38_300, Part::Endlogo), "11-endlogo", 38_300)]
+}
+
+/// Every frame the seam checks read: from two before each part's start to its first frame.
+fn dumped() -> Vec<u32> {
+    let mut indices: Vec<u32> = FULLRUN_SEAMS
         .iter()
-        .filter(|seam| !matches!(seam.rule, First::Anchor))
-        .flat_map(|seam| [seam.port - 2, seam.port - 1, seam.port])
+        .skip(1)
+        .flat_map(|seam| seam.start - 2..=seam.port)
         .collect();
-    // The two frames the parts' line-offset fix is read at (BEGLOGO's ramp and ENDLOGO's
-    // hold), and the run's last.
-    indices.extend([7930, 38_532, RUN_TO]);
+    indices.extend(kept().iter().map(|(index, ..)| *index));
+    indices.push(RUN_TO);
     indices.sort_unstable();
     indices.dedup();
     indices
@@ -238,36 +225,73 @@ fn run() -> &'static Run {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let positions = dir.join("positions.csv");
-        let list = seam_frames().iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let frames = dir.join("frames");
+        let list = dumped().iter().map(u32::to_string).collect::<Vec<_>>().join(",");
         let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
             .current_dir(repository_root())
             .args(["--block", "1", "--headless", "--dump-frames", &list, "--dump-dir"])
-            .arg(dir.join("frames"))
+            .arg(&frames)
             .arg("--positions")
             .arg(&positions)
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        let manifest = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("frames/manifest.json")).unwrap(),
-        )
-        .unwrap();
-        let text = std::fs::read_to_string(&positions).unwrap();
-        let mut lines = text.lines();
-        assert_eq!(lines.next(), Some("index,pass,part,order,row"), "the CSV's header");
-        let timeline = lines
-            .map(|line| {
-                let fields: Vec<&str> = line.split(',').collect();
-                assert_eq!(fields.len(), 5, "{line}");
-                let position = (!fields[3].is_empty())
-                    .then(|| (fields[3].parse().unwrap(), fields[4].parse().unwrap()));
-                (
-                    fields[0].parse().unwrap(),
-                    Tick { pass: fields[1].parse().unwrap(), part: fields[2].to_string(), position },
-                )
-            })
-            .collect();
-        Run { dir: dir.join("frames"), manifest, timeline }
+        let read = || -> Run {
+            assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+            let manifest: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(frames.join("manifest.json")).unwrap(),
+            )
+            .unwrap();
+            let starts = manifest["starts"]
+                .as_array()
+                .expect("the manifest lists the run's starts")
+                .iter()
+                .map(|start| {
+                    (
+                        start["index"].as_u64().unwrap() as u32,
+                        start["part"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+            let keep: BTreeSet<u32> = kept().iter().map(|(index, ..)| *index).collect();
+            let mut shots = BTreeMap::new();
+            let mut kept_bytes = BTreeMap::new();
+            for entry in manifest["frames"].as_array().unwrap() {
+                let index = entry["index"].as_u64().unwrap() as u32;
+                let bytes = std::fs::read(frames.join(entry["rgb"].as_str().unwrap())).unwrap();
+                shots.insert(
+                    index,
+                    Shot {
+                        geometry: (entry["width"].as_u64().unwrap(), entry["height"].as_u64().unwrap()),
+                        black: bytes.iter().all(|byte| *byte == 0),
+                        hash: hash(&bytes),
+                    },
+                );
+                if keep.contains(&index) {
+                    kept_bytes.insert(index, bytes);
+                }
+            }
+            let text = std::fs::read_to_string(&positions).unwrap();
+            let mut lines = text.lines();
+            assert_eq!(lines.next(), Some("index,pass,part,order,row"), "the CSV's header");
+            let timeline = lines
+                .map(|line| {
+                    let fields: Vec<&str> = line.split(',').collect();
+                    assert_eq!(fields.len(), 5, "{line}");
+                    let position = (!fields[3].is_empty())
+                        .then(|| (fields[3].parse().unwrap(), fields[4].parse().unwrap()));
+                    (
+                        fields[0].parse().unwrap(),
+                        Tick { pass: fields[1].parse().unwrap(), part: fields[2].to_string(), position },
+                    )
+                })
+                .collect();
+            Run { starts, shots, kept: kept_bytes, timeline }
+        };
+        // Read, then remove the dump whatever the reading found: a failed run must not leave
+        // its hundreds of megabytes behind either.
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read));
+        let _ = std::fs::remove_dir_all(&dir);
+        run.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     })
 }
 
@@ -279,48 +303,51 @@ fn reference(capture: &str, index: u32) -> Vec<u8> {
     .unwrap()
 }
 
-fn black(rgb: &[u8]) -> bool {
-    rgb.iter().all(|byte| *byte == 0)
-}
-
 fn differing_pixels(a: &[u8], b: &[u8]) -> usize {
     assert_eq!(a.len(), b.len(), "a short read is not a comparison");
     a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|(x, y)| x != y).count()
 }
 
-/// Whether `index` is the first frame `rule` names: it holds and the frame before does not
-/// (and, for a change, the frame before that is the one before held).
-fn is_first(run: &Run, rule: First, index: u32) -> bool {
-    let (now, now_geometry) = run.frame(index);
-    let (before, before_geometry) = run.frame(index - 1);
+/// Whether `index` meets `rule`: it holds and the frame before does not (and, for a change,
+/// the frame before that is the one before held).
+fn meets(run: &Run, rule: First, index: u32) -> bool {
+    let now = run.shot(index);
+    let before = run.shot(index - 1);
+    let same = |a: &Shot, b: &Shot| a.geometry == b.geometry && a.hash == b.hash;
     match rule {
         First::Anchor => unreachable!("the anchor is the run's first start"),
         First::Geometry(width, height) => {
-            now_geometry == (width, height) && before_geometry != (width, height)
+            now.geometry == (width, height) && before.geometry != (width, height)
         }
-        First::Change => {
-            let (earlier, earlier_geometry) = run.frame(index - 2);
-            (now_geometry != before_geometry || now != before)
-                && earlier_geometry == before_geometry
-                && earlier == before
+        First::Change => !same(now, before) && same(before, run.shot(index - 2)),
+        First::Leaves(capture, at) => {
+            let held = hash(&reference(capture, at));
+            before.hash == held && now.hash != held
         }
-        First::Visible => !black(&now) && black(&before),
+        First::Visible => !now.black && before.black,
         First::Bytes(capture, at) => {
-            let wanted = reference(capture, at);
-            now == wanted && before != wanted
+            let wanted = hash(&reference(capture, at));
+            now.hash == wanted && before.hash != wanted
         }
     }
 }
 
+/// The part (an index into `FULLRUN_SEAMS`) a reference index lies in: the last whose
+/// original first frame is at or before it.
+fn part_of(reference: u32) -> usize {
+    FULLRUN_SEAMS.iter().rposition(|seam| seam.original <= reference).unwrap()
+}
+
 #[test]
-#[ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun -- --ignored"]
+#[cfg_attr(debug_assertions, ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun")]
 fn the_full_run_plays_every_part_in_the_originals_order() {
     let run = run();
-    let starts = run.starts();
-    let names: Vec<&str> = starts.iter().map(|(_, name)| name.as_str()).collect();
+    let names: Vec<&str> = run.starts.iter().map(|(_, name)| name.as_str()).collect();
     assert_eq!(names, PLAN, "block 1's parts, once each, in the demo's own order");
-    let indices: Vec<u32> = starts.iter().map(|(index, _)| *index).collect();
-    assert_eq!(indices, PORT_STARTS);
+    let seams: Vec<(&str, u32)> = FULLRUN_SEAMS.iter().map(|seam| (seam.part, seam.start)).collect();
+    let starts: Vec<(&str, u32)> =
+        run.starts.iter().map(|(index, name)| (name.as_str(), *index)).collect();
+    assert_eq!(starts, seams, "Sequence::starts is FULLRUN_SEAMS' start column");
 
     // The timeline is one line a tick, from the boot's 404 to the run's last frame, all on
     // the first pass, and each part's lines begin at its start.
@@ -329,42 +356,49 @@ fn the_full_run_plays_every_part_in_the_originals_order() {
     assert_eq!((first, last), (404, RUN_TO));
     assert_eq!(run.timeline.len() as u32, RUN_TO - 404 + 1, "no tick is missing");
     assert!(run.timeline.values().all(|tick| tick.pass == 1));
-    for (index, name) in &starts {
+    for (index, name) in &run.starts {
         assert_eq!(&run.timeline[index].part, name, "{name} draws its start's frame");
     }
     // The shell's two restarts and its cue wait are in the run: MUSIC1 at order 0 at
     // GLENZ (`MAIN/U2.ASM:813-818`) and MUSIC0 at order 18 at U2E (`:880-885`) — each
     // boundary publishes `0:0`, the fresh player's ring — and PANICEND's picture is up
     // until the cue's exit (`:833-853`), MNTSCRL starting on the next tick.
-    for part in ["glenz", "u2e"] {
-        let (at, _) = starts.iter().find(|(_, name)| name == part).unwrap();
-        assert_eq!(run.timeline[at].position, Some((0, 0)), "{part}: the restart");
+    for part in [Part::Glenz, Part::U2e] {
+        let seam = FULLRUN_SEAMS[part as usize];
+        assert_eq!(run.timeline[&seam.start].position, Some((0, 0)), "{}: the restart", seam.part);
     }
     assert_eq!(run.timeline[&CUE_EXIT.1].part, "panicend");
     // It exits on the row the original's does (`second1e`: 42:0 at 16629, 42:1 at 16630):
     // `musplus` comes back positive at order 42 row 1.
     assert_eq!(run.timeline[&(CUE_EXIT.1 - 1)].position, Some((42, 0)));
     assert_eq!(run.timeline[&CUE_EXIT.1].position, Some((42, 1)), "the cue's exit row");
-    assert_eq!(CUE_EXIT.1 + 1, PORT_STARTS[8], "MNTSCRL starts the tick after the cue");
-    assert_eq!(run.timeline[&(RUN_TO)].part, "endscrl", "the run is in ENDSCRL at its end");
+    assert_eq!(CUE_EXIT.1 + 1, FULLRUN_SEAMS[Part::Mntscrl as usize].start, "MNTSCRL next");
+    assert_eq!(run.timeline[&RUN_TO].part, "endscrl", "the run is in ENDSCRL at its end");
 }
 
 #[test]
-#[ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun -- --ignored"]
+#[cfg_attr(debug_assertions, ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun")]
 fn the_seam_table_is_the_ports_own_frames() {
     let run = run();
+    let names: Vec<&str> = RULES.iter().map(|(name, _)| *name).collect();
+    let seams: Vec<&str> = FULLRUN_SEAMS.iter().map(|seam| seam.part).collect();
+    assert_eq!(names, seams, "one rule a part, in FULLRUN_SEAMS' order");
+
     println!("part        original  port   difference  change");
     let mut previous: Option<i64> = None;
-    for seam in &SEAMS {
-        if let First::Anchor = seam.rule {
-            assert_eq!(seam.port, PORT_STARTS[0]);
+    for (seam, (_, rule)) in FULLRUN_SEAMS.iter().zip(RULES) {
+        if let First::Anchor = rule {
+            assert_eq!((seam.port, seam.start), (404, 404));
         } else {
-            assert!(
-                is_first(run, seam.rule, seam.port),
-                "{}: {} is not the port's first frame by {:?}",
+            // The first frame that meets the rule at or after the part's start is the pinned
+            // one: none of the frames between them meets it.
+            let found = (seam.start..=seam.port).find(|index| meets(run, rule, *index));
+            assert_eq!(
+                found,
+                Some(seam.port),
+                "{}: the first frame from its start at {} that is its first by {rule:?}",
                 seam.part,
-                seam.port,
-                seam.rule
+                seam.start
             );
         }
         assert_eq!(run.timeline[&seam.port].part, seam.part, "{}'s frame", seam.part);
@@ -383,13 +417,40 @@ fn the_seam_table_is_the_ports_own_frames() {
         i64::from(CUE_EXIT.1) - i64::from(CUE_EXIT.0)
     );
 
+    // Every `fullrun` pairing `cargo xtask rediff` makes lands in its frame's part in the
+    // port's own timeline: a loader frame on the last frame of the part whose screen it is,
+    // and the one frame paired across a handover (BEGLOGO's held 8300) in the next part.
+    let loader: BTreeSet<u32> = FULLRUN_LOADER_FRAMES.iter().map(|(reference, _)| *reference).collect();
+    for entry in TABLE.iter().filter(|entry| entry.capture.starts_with("fullrun/")) {
+        for frame in entry.frames {
+            let part = part_of(frame.reference);
+            let expected = if FULLRUN_ACROSS_HANDOVER.contains(&frame.reference) {
+                FULLRUN_SEAMS[part + 1].part
+            } else {
+                FULLRUN_SEAMS[part].part
+            };
+            assert_eq!(
+                run.timeline[&frame.rendered].part,
+                expected,
+                "{} {} → {} (loader frame: {})",
+                entry.capture,
+                frame.reference,
+                frame.rendered,
+                loader.contains(&frame.reference)
+            );
+        }
+    }
+
     // The two parts that inherit their predecessor's line offset read their own rows:
     // BEGLOGO's ramp is the original's 7930 byte for byte at 7930, and ENDLOGO's hold —
     // `endlogo`'s 900 — is the original's 38300 at ENDLOGO's start difference.
-    let (ramp, _) = run.frame(7930);
-    assert_eq!(differing_pixels(&ramp, &reference("03-beglogo", 7930)), 0, "BEGLOGO's 7930");
-    let (hold, _) = run.frame(38_532);
-    assert_eq!(differing_pixels(&hold, &reference("11-endlogo", 38_300)), 0, "ENDLOGO's 38300");
+    for (index, capture, reference_index) in kept() {
+        assert_eq!(
+            differing_pixels(&run.kept[&index], &reference(capture, reference_index)),
+            0,
+            "{capture} {reference_index} at the port's {index}"
+        );
+    }
 }
 
 /// `reference/music/<name>/trace.csv` as `(frame, (order, row))`.
@@ -411,8 +472,21 @@ fn trace(name: &str) -> Vec<(u32, (u8, u8))> {
         .collect()
 }
 
+/// The port's change to the trace's row change at `(at, position)`: the nearest one from 20
+/// frames before to 300 after (the window holds one session of one module: a position recurs
+/// only orders later), as an offset from `at`.
+fn offset_at(port: &BTreeMap<u32, (u8, u8)>, trace: &str, at: u32, position: (u8, u8)) -> i64 {
+    let port_change = (at.saturating_sub(20)..=at + 300)
+        .filter(|index| {
+            port.get(index) == Some(&position) && port.get(&(index - 1)) != Some(&position)
+        })
+        .min_by_key(|index| index.abs_diff(at))
+        .unwrap_or_else(|| panic!("{trace}: the port never changes to {position:?} near {at}"));
+    i64::from(port_change) - i64::from(at)
+}
+
 #[test]
-#[ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun -- --ignored"]
+#[cfg_attr(debug_assertions, ignore = "release only: a 48,000-tick run; cargo test --release -p secondreality --test fullrun")]
 fn the_full_runs_music_is_where_the_trace_holds_it() {
     let run = run();
     let port: BTreeMap<u32, (u8, u8)> = run
@@ -424,31 +498,23 @@ fn the_full_runs_music_is_where_the_trace_holds_it() {
     for expected in &AGREEMENTS {
         let rows: Vec<(u32, (u8, u8))> =
             trace(expected.trace).into_iter().filter(|(frame, _)| *frame >= 404).collect();
+        let changes: Vec<(u32, (u8, u8))> = rows
+            .windows(2)
+            .filter(|pair| pair[0].1 != pair[1].1)
+            .map(|pair| pair[1])
+            .collect();
         // The offset. A boot trace (`second1`, whose window opens before the music's start)
         // is the run's own anchor, 0, as `crates/sr-audio/tests/trace.rs` holds it; a
-        // window trace's is measured at its first row change: the port's change to the
-        // same position, the nearest one from 20 frames before to 300 after (the window
-        // holds one session of one module: a position recurs only orders later).
+        // window trace's is measured at its first row change.
         let boot = rows.first().is_some_and(|(frame, _)| *frame <= 404);
-        let (at, position) = rows
-            .windows(2)
-            .find(|pair| pair[0].1 != pair[1].1)
-            .map(|pair| pair[1])
-            .expect("a row change in the trace");
-        let offset = if boot {
-            0
-        } else {
-            let port_change = (at.saturating_sub(20)..=at + 300)
-                .filter(|index| {
-                    port.get(index) == Some(&position)
-                        && port.get(&(index - 1)) != Some(&position)
-                })
-                .min_by_key(|index| index.abs_diff(at))
-                .unwrap_or_else(|| {
-                    panic!("{}: the port never changes to {position:?}", expected.trace)
-                });
-            i64::from(port_change) - i64::from(at)
-        };
+        let (at, position) = changes[0];
+        let offset = if boot { 0 } else { offset_at(&port, expected.trace, at, position) };
+        // And at its last row change the run can answer (one whose search window ends by
+        // [`RUN_TO`]: `second1f` runs on past the run's end): how far the lag has moved across
+        // the window. A boot trace's is measured too — its drift from the anchor.
+        let (last_at, last_position) =
+            *changes.iter().rev().find(|(frame, _)| frame + 300 <= RUN_TO).unwrap();
+        let last_offset = offset_at(&port, expected.trace, last_at, last_position);
 
         // Every frame of the trace: the port's position at that frame plus the offset must
         // be one the trace publishes within the window.
@@ -485,16 +551,27 @@ fn the_full_runs_music_is_where_the_trace_holds_it() {
         println!(
             "{}: offset {offset:+} at {at} {position:?}; {within} of {frames} frames within \
              {JITTER_FRAMES} ({:.3} %), worst {worst}, {beyond} past {SEARCH_FRAMES}; with no offset \
-             {unshifted} ({:.3} %)",
+             {unshifted} ({:.3} %); offset {last_offset:+} at its last row change ({last_at})",
             expected.trace,
             100.0 * within as f64 / frames as f64,
             100.0 * unshifted as f64 / frames as f64,
         );
-        measured.push((expected.trace, offset, frames, within, worst, beyond, unshifted));
+        measured.push((expected.trace, offset, frames, within, worst, beyond, unshifted, last_offset));
     }
     let wanted: Vec<_> = AGREEMENTS
         .iter()
-        .map(|a| (a.trace, a.offset, a.frames, a.within, a.worst, a.beyond, a.unshifted))
+        .map(|a| (a.trace, a.offset, a.frames, a.within, a.worst, a.beyond, a.unshifted, a.last_offset))
         .collect();
     assert_eq!(measured, wanted, "the music's agreement with block 1's traces");
+}
+
+/// This file's window is the shell's: `src/shell.rs` declares its `JITTER_FRAMES` in the
+/// binary's own test module, which an integration test cannot import, so the declaration is
+/// read from the source and held to this file's.
+#[test]
+fn the_jitter_window_is_the_shells() {
+    let shell = include_str!("../src/shell.rs");
+    let declaration = format!("const JITTER_FRAMES: u32 = {JITTER_FRAMES};");
+    assert_eq!(shell.matches("const JITTER_FRAMES: u32 =").count(), 1, "one declaration");
+    assert!(shell.contains(&declaration), "src/shell.rs declares {declaration}");
 }

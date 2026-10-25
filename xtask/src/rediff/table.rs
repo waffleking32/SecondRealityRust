@@ -86,6 +86,113 @@ const fn idx0(reference: u32, rendered: u32) -> Frame {
     idx(reference, rendered, 0, "exact")
 }
 
+/// One part of block 1's run, as the seam table of `reference-indices.md` §26.8 holds it: the
+/// original's first frame by §26.3's definition (in the session the part's `fullrun` capture was
+/// filed in), the port's first frame by the same definition, and the index the port starts the
+/// part at (`Sequence::starts`). **This is the one source of the full run's start differences**:
+/// the `fullrun/*` entries above derive every rendered index from it, and
+/// `bins/secondreality/tests/fullrun.rs` includes this file and asserts both port columns
+/// against the run's own frames and timeline.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // `part` is read by the tests that include this file
+pub struct Seam {
+    pub part: &'static str,
+    pub original: u32,
+    pub port: u32,
+    pub start: u32,
+}
+
+/// Block 1's nineteen parts, in the demo's order (`MAIN/U2.ASM:789-912`).
+pub const FULLRUN_SEAMS: [Seam; 19] = [
+    Seam { part: "alku", original: 404, port: 404, start: 404 },
+    Seam { part: "u2a", original: 5961, port: 6008, start: 6008 },
+    Seam { part: "pam", original: 7707, port: 7704, start: 7508 },
+    Seam { part: "beglogo", original: 7922, port: 7885, start: 7885 },
+    Seam { part: "glenz", original: 8522, port: 8770, start: 8057 },
+    Seam { part: "tunneli", original: 11158, port: 11394, start: 11374 },
+    Seam { part: "techno", original: 12214, port: 12458, start: 12435 },
+    Seam { part: "panicend", original: 16193, port: 16423, start: 16423 },
+    Seam { part: "mntscrl", original: 16637, port: 16875, start: 16875 },
+    Seam { part: "lnszoom", original: 18656, port: 18913, start: 18912 },
+    Seam { part: "plzpart", original: 21927, port: 22171, start: 22096 },
+    Seam { part: "minvball", original: 26673, port: 26912, start: 26811 },
+    Seam { part: "rayscrl", original: 29174, port: 29422, start: 29392 },
+    Seam { part: "3dsinfld", original: 31272, port: 31531, start: 31466 },
+    Seam { part: "jplogo", original: 33263, port: 33498, start: 33498 },
+    Seam { part: "u2e", original: 34120, port: 34318, start: 34286 },
+    Seam { part: "endlogo", original: 37967, port: 38199, start: 38199 },
+    Seam { part: "cred", original: 38583, port: 38807, start: 38807 },
+    Seam { part: "endscrl", original: 46277, port: 46432, start: 46430 },
+];
+
+/// An index into [`FULLRUN_SEAMS`], so a row names its part rather than a number.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub enum Part {
+    Alku,
+    U2a,
+    Pam,
+    Beglogo,
+    Glenz,
+    Tunneli,
+    Techno,
+    Panicend,
+    Mntscrl,
+    Lnszoom,
+    Plzpart,
+    Minvball,
+    Rayscrl,
+    /// 3DSINFLD (`coman.rs`).
+    Coman,
+    Jplogo,
+    U2e,
+    Endlogo,
+    Cred,
+    Endscrl,
+}
+
+/// The port's index answering the original's `reference` in `part`: plus the part's start
+/// difference.
+pub const fn at(reference: u32, part: Part) -> u32 {
+    let seam = FULLRUN_SEAMS[part as usize];
+    reference + seam.port - seam.original
+}
+
+/// The port's last frame before `next` starts: where a frame the original shows during the
+/// loader stretch before `next` is answered, the port having no such stretch.
+pub const fn before(next: Part) -> u32 {
+    FULLRUN_SEAMS[next as usize].start - 1
+}
+
+/// The frames the original shows during a loader stretch the port does not have, and the part
+/// that starts after it: PAM's white under BEGLOGO's load, the dot after the cue wait's exit,
+/// JPLOGO's white under the U2E reload (`reference-indices.md` §26.8).
+#[allow(dead_code)]
+pub const FULLRUN_LOADER_FRAMES: [(u32, Part); 3] =
+    [(7920, Part::Beglogo), (16636, Part::Mntscrl), (34110, Part::U2e)];
+
+/// Frames paired at their own part's difference whose rendered index the port has already
+/// handed to the next part: BEGLOGO's held picture (8300; §26.3 gives BEGLOGO's last frame as
+/// 8520), which the port holds under GLENZ's wait from 8057 on.
+#[allow(dead_code)]
+pub const FULLRUN_ACROSS_HANDOVER: [u32; 1] = [8300];
+
+const fn rgb_at(reference: u32, part: Part, registered: u32, register: &'static str) -> Frame {
+    rgb(reference, at(reference, part), registered, register)
+}
+
+const fn idx_at(reference: u32, part: Part, registered: u32, register: &'static str) -> Frame {
+    idx(reference, at(reference, part), registered, register)
+}
+
+const fn rgb_before(reference: u32, next: Part, registered: u32, register: &'static str) -> Frame {
+    rgb(reference, before(next), registered, register)
+}
+
+const fn idx_before(reference: u32, next: Part, registered: u32, register: &'static str) -> Frame {
+    idx(reference, before(next), registered, register)
+}
+
 pub const TABLE: &[Entry] = &[
     // tests/coman.rs:129 KEYFRAMES (reference, tick), RGB, 0 px and delta 0 (:184-185).
     Entry {
@@ -271,166 +378,165 @@ pub const TABLE: &[Entry] = &[
         ],
     },
     // The original's whole `SECOND 1` run (reference-indices.md §26) against the port's
-    // `--block 1`: each filed frame at its reference index plus **its part's start
-    // difference** — the port's first frame minus the original's, by §26.3's own
-    // definition, measured from the port's frames and pinned by tests/fullrun.rs's SEAMS
-    // (:93-113), never chosen for a keyframe's count (§26.8). The three frames the
-    // original shows during a loader stretch the port does not have (7920 after PAM,
-    // 16636 after the cue wait, 34110 under the U2E reload) are paired with the port's last
-    // frame of that screen — the frame before the next part's first. Held frames compare
-    // at 0 but for the two that carry their part's own registered count (19000 is A25's
-    // 2,058, 40600 is A10's 7,204); every other count is this command's and is A53's, which
-    // also names every pairing at a start difference other than 0 (A38's lag among them).
+    // `--block 1`. Every rendered index is derived, never written: `rgb_at`/`idx_at` put a
+    // frame at its reference index plus **its part's start difference** (FULLRUN_SEAMS,
+    // below the table — the one source tests/fullrun.rs asserts against the run's frames),
+    // and `rgb_before`/`idx_before` put the three frames the original shows during a loader
+    // stretch the port does not have (FULLRUN_LOADER_FRAMES) on the port's last frame
+    // before the next part starts. xtask/tests/rediff.rs checks every fullrun row against
+    // that rule. Held frames compare at 0 but for the two that carry their part's own
+    // registered count (19000 is A25's 2,058, 40600 is A10's 7,204); every other count is
+    // this command's and is A53's, which also names every pairing at a non-zero difference.
     Entry {
         capture: "fullrun/01-alku",
         args: &["--block", "1"],
-        frames: &[rgb0(1719, 1719)],
+        frames: &[
+            rgb_at(1719, Part::Alku, 0, "exact"),
+        ],
     },
-    // U2A +47 (6008 − 5961): ALKU ends 47 frames late, so U2A's opening is not the
-    // original's; PAM −3 (7704 − 7707). 7920 is PAM's white under BEGLOGO's load: the
-    // port's last PAM frame, 7884. 7880's index plane is PAM's picture under a white DAC.
+    // U2A's opening is not the original's (ALKU's end is at least 47 frames late); 7880's
+    // index plane is PAM's picture under a white DAC; 7920 is PAM's white under BEGLOGO's
+    // load.
     Entry {
         capture: "fullrun/02-u2a-pam",
         args: &["--block", "1"],
         frames: &[
-            rgb(5961, 6008, 63788, "A53"),
-            rgb(6500, 6547, 0, "A53"),
-            rgb(7707, 7704, 0, "A53"),
-            idx(7707, 7704, 0, "A53"),
-            rgb(7880, 7877, 0, "A53"),
-            idx(7880, 7877, 48786, "A53"),
-            rgb(7920, 7884, 0, "A53"),
+            rgb_at(5961, Part::U2a, 63788, "A53"),
+            rgb_at(6500, Part::U2a, 0, "A53"),
+            rgb_at(7707, Part::Pam, 0, "A53"),
+            idx_at(7707, Part::Pam, 0, "A53"),
+            rgb_at(7880, Part::Pam, 0, "A53"),
+            idx_at(7880, Part::Pam, 48786, "A53"),
+            rgb_before(7920, Part::Beglogo, 0, "A53"),
         ],
     },
-    // BEGLOGO −37 (7885 − 7922): the port's 320×400 white field from its first tick, where
-    // the original still shows PAM's screen (A5's lead-in). The ramp itself is frame-locked
-    // — the port's 7930 is the original's byte for byte (tests/fullrun.rs) — so at −37 it
-    // is 81,273 px off. 8300 is the hold under GLENZ's wait; 8522 is GLENZ's (+248, A38's lag).
+    // BEGLOGO's −37 is A5's lead-in; its ramp is frame-locked — the port's 7930 is the
+    // original's byte for byte (tests/fullrun.rs) — so at −37 it is 81,273 px off. 8300 is
+    // BEGLOGO's held picture by §26.3 (its last frame is 8520), paired at BEGLOGO's
+    // difference, and the port shows that hold under GLENZ's wait: FULLRUN_ACROSS_HANDOVER.
     Entry {
         capture: "fullrun/03-beglogo",
         args: &["--block", "1"],
         frames: &[
-            rgb(7930, 7893, 81273, "A53"),
-            rgb(8300, 8263, 0, "A53"),
-            idx(8300, 8263, 0, "A53"),
-            rgb(8522, 8770, 0, "A53"),
+            rgb_at(7930, Part::Beglogo, 81273, "A53"),
+            rgb_at(8300, Part::Beglogo, 0, "A53"),
+            idx_at(8300, Part::Beglogo, 0, "A53"),
+            rgb_at(8522, Part::Glenz, 0, "A53"),
         ],
     },
-    // GLENZ +248 (A38's lag), TUNNELI +236 (11394 − 11158), TECHNO +244 (12458 − 12214).
     Entry {
         capture: "fullrun/04-glenz-techno",
         args: &["--block", "1"],
         frames: &[
-            rgb(8572, 8820, 0, "A53"),
-            idx(8572, 8820, 0, "A53"),
-            rgb(8900, 9148, 0, "A53"),
-            idx(8900, 9148, 0, "A53"),
-            rgb(11159, 11395, 192, "A53"),
-            rgb(11900, 12136, 4336, "A53"),
-            rgb(12214, 12458, 0, "A53"),
-            rgb(12400, 12644, 0, "A53"),
+            rgb_at(8572, Part::Glenz, 0, "A53"),
+            idx_at(8572, Part::Glenz, 0, "A53"),
+            rgb_at(8900, Part::Glenz, 0, "A53"),
+            idx_at(8900, Part::Glenz, 0, "A53"),
+            rgb_at(11159, Part::Tunneli, 192, "A53"),
+            rgb_at(11900, Part::Tunneli, 4336, "A53"),
+            rgb_at(12214, Part::Techno, 0, "A53"),
+            rgb_at(12400, Part::Techno, 0, "A53"),
         ],
     },
-    // TECHNO +244, PANICEND +230 (16423 − 16193).
     Entry {
         capture: "fullrun/05-troll-panicend",
         args: &["--block", "1"],
-        frames: &[rgb(16000, 16244, 0, "A53"), rgb(16193, 16423, 108923, "A53")],
+        frames: &[
+            rgb_at(16000, Part::Techno, 0, "A53"),
+            rgb_at(16193, Part::Panicend, 108923, "A53"),
+        ],
     },
-    // PANICEND +230; 16636 is the dot after the cue's exit (16630), the port's last
-    // PANICEND frame 16874 (its cue exit); MNTSCRL +238 (16875 − 16637); LNS&ZOOM +257
-    // (18913 − 18656), whose hold carries A25's 2,058 in both planes.
+    // 16636 is the dot after the cue's exit; LNS&ZOOM's hold carries A25's 2,058 in both
+    // planes.
     Entry {
         capture: "fullrun/06-panicend-lnszoom",
         args: &["--block", "1"],
         frames: &[
-            rgb(16500, 16730, 0, "A53"),
-            idx(16500, 16730, 0, "A53"),
-            rgb(16636, 16874, 0, "A53"),
-            rgb(16637, 16875, 0, "A53"),
-            rgb(16690, 16928, 0, "A53"),
-            rgb(18656, 18913, 129, "A53"),
-            rgb(19000, 19257, 2058, "A25"),
-            idx(19000, 19257, 2058, "A25"),
+            rgb_at(16500, Part::Panicend, 0, "A53"),
+            idx_at(16500, Part::Panicend, 0, "A53"),
+            rgb_before(16636, Part::Mntscrl, 0, "A53"),
+            rgb_at(16637, Part::Mntscrl, 0, "A53"),
+            rgb_at(16690, Part::Mntscrl, 0, "A53"),
+            rgb_at(18656, Part::Lnszoom, 129, "A53"),
+            rgb_at(19000, Part::Lnszoom, 2058, "A25"),
+            idx_at(19000, Part::Lnszoom, 2058, "A25"),
         ],
     },
-    // PLZPART +244 (22171 − 21927).
     Entry {
         capture: "fullrun/07-plasma",
         args: &["--block", "1"],
-        frames: &[rgb(21927, 22171, 0, "A53"), rgb(24500, 24744, 45808, "A53")],
+        frames: &[
+            rgb_at(21927, Part::Plzpart, 0, "A53"),
+            rgb_at(24500, Part::Plzpart, 45808, "A53"),
+        ],
     },
-    // PLZPART +244, MINVBALL +239 (26912 − 26673), RAYSCRL +248 (29422 − 29174), 3DSINFLD
-    // +259 (31531 − 31272).
     Entry {
         capture: "fullrun/08-cube-3dsinfld",
         args: &["--block", "1"],
         frames: &[
-            rgb(24540, 24784, 0, "A53"),
-            idx(24540, 24784, 48384, "A53"),
-            rgb(26673, 26912, 0, "A53"),
-            rgb(26700, 26939, 0, "A53"),
-            rgb(29174, 29422, 875, "A53"),
-            rgb(29800, 30048, 0, "A53"),
-            idx(29800, 30048, 0, "A53"),
-            rgb(31272, 31531, 4, "A53"),
-            rgb(31901, 32160, 33554, "A53"),
-            idx(31901, 32160, 34036, "A53"),
+            rgb_at(24540, Part::Plzpart, 0, "A53"),
+            idx_at(24540, Part::Plzpart, 48384, "A53"),
+            rgb_at(26673, Part::Minvball, 0, "A53"),
+            rgb_at(26700, Part::Minvball, 0, "A53"),
+            rgb_at(29174, Part::Rayscrl, 875, "A53"),
+            rgb_at(29800, Part::Rayscrl, 0, "A53"),
+            idx_at(29800, Part::Rayscrl, 0, "A53"),
+            rgb_at(31272, Part::Coman, 4, "A53"),
+            rgb_at(31901, Part::Coman, 33554, "A53"),
+            idx_at(31901, Part::Coman, 34036, "A53"),
         ],
     },
-    // JPLOGO +235, aligned on its opening black (33498 is 33263's bytes, the port's only
-    // frame of that hash; §26.3 brackets the original's in (33261, 33263]). 34110 is the
-    // white under the U2E reload: the port's last JPLOGO frame, 34285 — the same indices
-    // (the white is the DAC's), not the same colours.
+    // 34110 is JPLOGO's white under the U2E reload: the same indices as the hold (the white is
+    // the DAC's), not the same colours.
     Entry {
         capture: "fullrun/09-jplogo",
         args: &["--block", "1"],
         frames: &[
-            rgb(33263, 33498, 0, "A53"),
-            idx(33263, 33498, 0, "A53"),
-            rgb(33900, 34135, 0, "A53"),
-            idx(33900, 34135, 0, "A53"),
-            rgb(34110, 34285, 72363, "A53"),
-            idx(34110, 34285, 0, "A53"),
+            rgb_at(33263, Part::Jplogo, 0, "A53"),
+            idx_at(33263, Part::Jplogo, 0, "A53"),
+            rgb_at(33900, Part::Jplogo, 0, "A53"),
+            idx_at(33900, Part::Jplogo, 0, "A53"),
+            rgb_before(34110, Part::U2e, 72363, "A53"),
+            idx_before(34110, Part::U2e, 0, "A53"),
         ],
     },
-    // U2E +198, aligned on the band (34318 is 34120's bytes; §26.3 brackets U2E's first
-    // 320×200 frame in (34114, 34120]).
     Entry {
         capture: "fullrun/10-u2e",
         args: &["--block", "1"],
         frames: &[
-            rgb(34120, 34318, 0, "A53"),
-            rgb(34250, 34448, 0, "A53"),
-            idx(34250, 34448, 0, "A53"),
+            rgb_at(34120, Part::U2e, 0, "A53"),
+            rgb_at(34250, Part::U2e, 0, "A53"),
+            idx_at(34250, Part::U2e, 0, "A53"),
         ],
     },
-    // ENDLOGO +232 (38199 − 37967). 37970's index plane is the video memory U2E left, under
-    // ENDLOGO's white DAC (`END.C` has no memset).
+    // 37970's index plane is the video memory U2E left, under ENDLOGO's white DAC (`END.C` has
+    // no memset).
     Entry {
         capture: "fullrun/11-endlogo",
         args: &["--block", "1"],
         frames: &[
-            rgb(37970, 38202, 0, "A53"),
-            idx(37970, 38202, 46997, "A53"),
-            rgb(38300, 38532, 0, "A53"),
-            idx(38300, 38532, 0, "A53"),
+            rgb_at(37970, Part::Endlogo, 0, "A53"),
+            idx_at(37970, Part::Endlogo, 46997, "A53"),
+            rgb_at(38300, Part::Endlogo, 0, "A53"),
+            idx_at(38300, Part::Endlogo, 0, "A53"),
         ],
     },
-    // CRED +224 (38807 − 38583); its 40600 hold is `cred`'s 3240, at A10's 7,204.
+    // Its 40600 hold is `cred`'s 3240, at A10's 7,204.
     Entry {
         capture: "fullrun/12-cred",
         args: &["--block", "1"],
-        frames: &[rgb(38583, 38807, 0, "A53"), rgb(40600, 40824, 7204, "A10")],
+        frames: &[
+            rgb_at(38583, Part::Cred, 0, "A53"),
+            rgb_at(40600, Part::Cred, 7204, "A10"),
+        ],
     },
-    // ENDSCRL +155 (46432 − 46277).
     Entry {
         capture: "fullrun/13-endscrl",
         args: &["--block", "1"],
         frames: &[
-            rgb(46280, 46435, 42, "A53"),
-            rgb(46283, 46438, 67, "A53"),
-            rgb(46286, 46441, 149, "A53"),
+            rgb_at(46280, Part::Endscrl, 42, "A53"),
+            rgb_at(46283, Part::Endscrl, 67, "A53"),
+            rgb_at(46286, Part::Endscrl, 149, "A53"),
         ],
     },
     // tests/glenz.rs, block 2 (:90): 1499 at 0 in both planes (:420-431); the moving

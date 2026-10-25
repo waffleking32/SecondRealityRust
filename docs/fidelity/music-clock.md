@@ -575,8 +575,9 @@ chain's frames therefore do not agree on when the restarted player began to play
 cannot separate a seek that left the row from a play that began during the module load. The
 wait's **exit** (8521) is what Task 6 consumes and it is measured twice; the restart frame is
 recorded as the interval **(8049, 8100)**. `docs/decisions.md` D38 carries the consequence.
-*(Phase 9 Task 6: the two readings agree once MUSIC1's order 0 is four rows long, not 64 — the
-restart is at 8,056.6, inside the interval; see "The block-1 full run against the port" below.)*
+*(Phase 9 Task 6: on the probable cause recorded below — MUSIC1's order 0 four rows long, not 64 —
+the two readings agree, the restart falling at 8,056.6, inside the interval; see "The block-1 full run
+against the port". Task 6b's player fix will re-measure it.)*
 
 ### The block-1 full run: `second1e` and `second1f` (Phase 9)
 
@@ -646,7 +647,7 @@ never does at [38376], not the recorded []`. Every row must name a trace the wal
 ### The block-1 full run against the port (Phase 9 Task 6)
 
 The port's own `--block 1`, played headless to 48,277 with `--positions`, against block 1's six
-traces (`cargo test --release -p secondreality --test fullrun -- --ignored --nocapture`; the table
+traces (`cargo test --release -p secondreality --test fullrun -- --nocapture`; the table
 is `reference-indices.md` §26.8's). One offset per trace — 0 for the boot trace, and for a window the
 port's change to the trace's first row change minus the trace's — then every frame within the
 shell's `JITTER_FRAMES` = 3:
@@ -661,19 +662,20 @@ second1f: offset +235 at 34108 (18, 5); 6187 of 13934 frames within 3 (44.402 %)
 ```
 
 The boot's MUSIC0 is the original's to the frame through BEGLOGO; the `MUSIC1@0` session from
-GLENZ to JPLOGO is **247–248 frames late** and the `MUSIC0@18` session after U2E **235** — the run's
+GLENZ to JPLOGO is **247–248 frames late** at its first rows (240 at `second1e`'s last) and the `MUSIC0@18` session after U2E **235** — the run's
 parts follow the music, so the whole of block 1 after GLENZ is that much late (A53's seam table),
 and that lag is A38's. The cue wait exits on the original's row (`42:1`, the port's 16874 against
 `second1e`'s 16630).
 
-**Why the `MUSIC1@0` session is late — the reading §2's GLENZ boundary left open.** It is neither
-a seek that left the row nor a play during the load: `restartmus`'s `_zplaysong` keeps the channel
+**Why the `MUSIC1@0` session is late — the reading §2's GLENZ boundary left open.** The probable
+cause, confirmed by the two tests below, is neither a seek that left the row nor a play during the
+load: `restartmus`'s `_zplaysong` keeps the channel
 volumes the previous module left (the initialiser at `+0x5614` writes `achannelused` and `lastins`
 and never `avol` or `a0volcut`), MUSIC1's order 0 (pattern 73) has a `C00` on channel 2 at row 3,
 and a fresh player's "volume 0" countdown frees that channel on row 3 before its command runs —
 which is why block 2's boot (`second2b`) plays order 0's 64 rows and why the port, which installs a
 fresh player at every restart, does. Block 1's MUSIC0 has channel 2 at 63 when it hands over, so the
-original takes the break and plays order 0 for 4 rows. Back from `second1d`'s first `1:5` (8,102),
+original, on this reading, takes the break and plays order 0 for 4 rows. Back from `second1d`'s first `1:5` (8,102),
 a 64-row order 0 starts the restart at 7,814 (inside BEGLOGO, while `second1b` still publishes
 MUSIC0 at 7,959: impossible) and a 4-row one at **8,056.6 — the port's own boundary, 8,057**:
 
@@ -684,7 +686,8 @@ cargo test -p sr-audio --test trace block_ones_music1_restart_takes_order_0s_bre
 
 `RESTART_TRACES`'s 7,815 for `second1d`/`second1e` is the 64-row back-extrapolation: it puts the
 trace test's fresh player on the original's rows, which is why that test passes, and it is not the
-restart's frame. Modelling the kept volumes is a player change left to a task of its own (A38).
+restart's frame. Modelling the kept volumes is a player change — Task 6b's, which will re-measure
+this paragraph (A38).
 
 ## 3. The tick rate, and the rule behind it
 

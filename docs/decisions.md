@@ -2097,16 +2097,16 @@ on to ENDSCRL, and every block's plan is fully ported. The paragraph above is D3
 *(Phase 9 Task 6 — the loader question, decided from measurement: **not modelled**.* The full
 `SECOND 1` run against the port's `--block 1` gives the seam table of `reference-indices.md` §26.8:
 each part's first frame in both, by §26.3's definitions, pinned by
-`cargo test --release -p secondreality --test fullrun -- --ignored`. A `LOADER_TICKS` held between
+`cargo test --release -p secondreality --test fullrun`. A `LOADER_TICKS` held between
 parts would be adopted only if **one** constant explained every seam the music does not decide and
 left every filed comparison unchanged (D24). The changes across the seams take both signs — the
 port is already later at ALKU→U2A (+47), MNTSCRL→LNS&ZOOM (+19) and RAYSCRL→3DSINFLD (+11), which
 no delay at the handover can produce — and the two seams the music pins on both sides need 6 frames
 (the cue wait's exit to MNTSCRL) and 59–68 (the U2E reload). The handover stays the one tick this
 entry's §3 describes; the measured seams are `APPROXIMATIONS.md` **A53**. The same run found the
-post-GLENZ timeline 247–248 frames late, which is A38's lag and whose lead — `_zplaysong` keeps the
-channel volumes, so MUSIC1's order 0 breaks at row 3 — is recorded there and left to a task of its
-own.)*
+post-GLENZ timeline 247–248 frames late, which is A38's lag and whose probable cause — `_zplaysong`
+keeps the channel volumes, so MUSIC1's order 0 breaks at row 3 — is recorded there; the port's fix is
+Task 6b.)*
 
 ## D32 — The vector renderer's home: a module in the binary, the packed formats as data in `sr-assets` (2026-10-18)
 

@@ -176,8 +176,9 @@ const KNOWN_DISAGREEMENTS: &[KnownDisagreement] = &[
     // seam that explains it). `second1e` (8,800…33,949, MUSIC1 orders 4…98) matches the port in
     // every word's value sequence; its placement drifts with the port early, to 8 frames from
     // order 96 row 58 (frame 33,264) on — one past `JITTER_FRAMES`, over a window four times
-    // `second1`'s 5,538 frames. The port's own block-1 run shows the same drift against it
-    // (its lag falls from 248 to 240 frames, `bins/secondreality/tests/fullrun.rs`).
+    // `second1`'s 5,538 frames. The port's own block-1 run shows the same drift against it:
+    // its lag is 248 frames at the window's first row change and 240 at its last
+    // (`bins/secondreality/tests/fullrun.rs`'s `last_offset`).
     KnownDisagreement {
         trace: "second1e",
         content: &[],

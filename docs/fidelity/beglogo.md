@@ -203,7 +203,7 @@ the 640-wide surface read every second scanline from the picture's right margin:
 and fade were the picture's top half, doubled, with black lines between, until the full run's
 comparison found it (`reference-indices.md` §26.8). `init` now writes `y_line_offset = None`, which
 is what a run that starts here already had, so no count of this note moved; block 1's 7930 is the
-original's 7930 byte for byte (`cargo test --release -p secondreality --test fullrun -- --ignored`),
+original's 7930 byte for byte (`cargo test --release -p secondreality --test fullrun`),
 and `the_picture_is_read_at_its_own_row_stride_whatever_the_part_before_left` pins the write.
 
 **The upload is byte-exact, not entry-exact.** §6.

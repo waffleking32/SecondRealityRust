@@ -579,3 +579,70 @@ fn an_out_through_dot_dot_into_the_reference_is_refused() {
     assert!(!parent.join("missing").exists());
     assert!(!reference.join("nested").exists());
 }
+
+/// Every `fullrun/*` row's rendered index is its reference plus its part's start difference —
+/// the part being the last one whose original first frame is at or before the reference
+/// (`reference-indices.md` §26.3's rows) — except the frames named in
+/// `FULLRUN_LOADER_FRAMES`, which sit on the port's last frame before the next part starts.
+/// A row whose rendered index falls past the next part's port start lies across a handover,
+/// and must be named in `FULLRUN_ACROSS_HANDOVER`. `bins/secondreality/tests/fullrun.rs`
+/// includes the same file and asserts `FULLRUN_SEAMS` against the run, so the two cannot
+/// disagree.
+#[test]
+fn every_fullrun_row_is_at_its_parts_start_difference() {
+    use table::{FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS};
+    let seams = FULLRUN_SEAMS;
+    assert!(
+        seams.windows(2).all(|pair| pair[0].original < pair[1].original
+            && pair[0].start < pair[1].start),
+        "the seam table is in the run's order"
+    );
+    assert!(seams.iter().all(|seam| seam.start <= seam.port), "a part's first frame is not before its start");
+    let part_of = |reference: u32| {
+        seams.iter().rposition(|seam| seam.original <= reference).expect("a frame after 404")
+    };
+    let loader: BTreeMap<u32, usize> =
+        FULLRUN_LOADER_FRAMES.iter().map(|(reference, next)| (*reference, *next as usize)).collect();
+    assert_eq!(loader.keys().copied().collect::<Vec<_>>(), [7920, 16636, 34110]);
+
+    let mut loader_seen = BTreeSet::new();
+    let mut across_seen = BTreeSet::new();
+    let mut rows = 0;
+    for entry in TABLE.iter().filter(|entry| entry.capture.starts_with("fullrun/")) {
+        assert_eq!(entry.args, ["--block", "1"], "{}", entry.capture);
+        for frame in entry.frames {
+            rows += 1;
+            let part = part_of(frame.reference);
+            let expected = match loader.get(&frame.reference) {
+                Some(&next) => {
+                    assert_eq!(next, part + 1, "{}: the loader stretch before the next part", frame.reference);
+                    loader_seen.insert(frame.reference);
+                    seams[next].start - 1
+                }
+                None => {
+                    let seam = seams[part];
+                    (i64::from(frame.reference) + i64::from(seam.port) - i64::from(seam.original)) as u32
+                }
+            };
+            assert_eq!(
+                frame.rendered, expected,
+                "{} {}: {} is not at {}'s start difference",
+                entry.capture, frame.reference, frame.rendered, seams[part].part
+            );
+            assert!(frame.rendered >= seams[part].start, "{}: before {}'s start", frame.reference, seams[part].part);
+            let across = seams.get(part + 1).is_some_and(|next| frame.rendered >= next.start);
+            if across {
+                across_seen.insert(frame.reference);
+            }
+            assert_eq!(
+                across,
+                FULLRUN_ACROSS_HANDOVER.contains(&frame.reference),
+                "{}: across a handover, and listed, must agree",
+                frame.reference
+            );
+        }
+    }
+    assert_eq!(rows, 60, "the fullrun captures' 44 frames and 16 index planes");
+    assert_eq!(loader_seen.len(), 3, "every loader frame is a row");
+    assert_eq!(across_seen.into_iter().collect::<Vec<_>>(), FULLRUN_ACROSS_HANDOVER);
+}
