@@ -1051,6 +1051,17 @@ struct CopperState {
 }
 
 impl CopperState {
+    /// `memset(fadepal,0,768)` (`PLZ.C:81`) zeroes the first 768 bytes of the
+    /// 1,536-byte `fadepal`: the colour half, the accumulators' high bytes. The
+    /// fractions (the low bytes, `COPPER.ASM:184`) stand, so the next table's
+    /// fade starts from the last one's fractional state: the palette leak
+    /// (`bugs.md` §1).
+    fn clear_colour_half(&mut self) {
+        for acc in self.fadepal.iter_mut() {
+            *acc &= 0x00FF;
+        }
+    }
+
     fn new() -> CopperState {
         CopperState {
             pals: [[0; 768]; 6],
@@ -1443,11 +1454,7 @@ impl Plzpart {
         // `tim+=frame_count; frame_count=0; count++;`
         state.frame_count = 0;
         if state.ttptr < TIMETABLE.len() && published > TIMETABLE[state.ttptr] {
-            // `memset(fadepal,0,768)` zeroes the colour half and leaves the
-            // fraction: the palette leak.
-            for acc in state.fadepal.iter_mut() {
-                *acc &= 0x00FF;
-            }
+            state.clear_colour_half();
             state.cop_drop = 1;
             state.fade_index = state.curpal as usize;
             state.curpal += 1;
@@ -2326,6 +2333,56 @@ mod tests {
         // The split is the register + 1; 404 walks it off the 400-row screen.
         assert_eq!(dtau[64] + 1, 405);
         assert!(dtau[64] + 1 > PLASMA_HEIGHT);
+    }
+
+    /// `bugs.md` §1: `memset(fadepal,0,768)` clears the colour half and leaves
+    /// the fractions, so the next fade's first sum carries the old fraction
+    /// into the colour. A clean (16-bit) clear would start every channel at
+    /// the step alone.
+    #[test]
+    fn a_table_switch_zeroes_the_colour_half_and_keeps_the_fraction() {
+        let mut state = CopperState::new();
+        state.fadepal[0] = 0x2AF0;
+        state.fadepal[1] = 0x3F01;
+        state.fadepal[767] = 0xFF80;
+        state.clear_colour_half();
+        assert_eq!(
+            [state.fadepal[0], state.fadepal[1], state.fadepal[767]],
+            [0x00F0, 0x0001, 0x0080],
+            "the high (colour) byte is zeroed and the low (fraction) byte stands"
+        );
+        // The next table's first fade step: 0xF0 + 0x20 carries into the
+        // colour byte, so the channel reads 1 where a cleared fraction reads 0.
+        state.pals[0][0] = 0x0020;
+        state.fade_index = 0;
+        state.cop_drop = 127;
+        state.do_drop();
+        assert_eq!(state.cop_drop, 128);
+        assert_eq!(state.fadepal[0], 0x0110, "the leftover fraction carried into the colour");
+        assert_eq!(state.fadepal[0] >> 8, 1);
+        assert_eq!(
+            state.fadepal[2], 0x0000,
+            "an accumulator with no leftover fraction starts from the step alone"
+        );
+    }
+
+    /// `bugs.md` §17.2: the drop's 65th step resets the line compare and
+    /// accumulates nothing, so the last table's fade is cut short.
+    #[test]
+    fn the_last_drop_step_resets_the_split_and_adds_nothing() {
+        let mut state = CopperState::new();
+        state.pals[0] = [0x0040; 768];
+        state.fade_index = 0;
+        state.fadepal[0] = 0x0010;
+        state.cop_drop = 64;
+        state.do_drop();
+        assert_eq!(state.cop_drop, 65);
+        assert_eq!(state.line_compare, 400, "the split is reset");
+        assert_eq!(state.fadepal[0], 0x0010, "nothing is accumulated on the 65th step");
+        // The next step does accumulate (66..=96 is the fade).
+        state.do_drop();
+        assert_eq!(state.cop_drop, 66);
+        assert_eq!(state.fadepal[0], 0x0050);
     }
 
     #[test]

@@ -370,3 +370,5 @@ cargo xtask reference capture --arg U --boot autoexec \
 # the reference tree's own digests
 cargo xtask reference verify --tree reference
 ```
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §27 (the star clip assembled out).

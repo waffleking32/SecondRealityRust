@@ -493,3 +493,5 @@ hold.
 - **CRTC timing registers.** `:110-115` is a BIOS mode set, and the port models its geometry, its
   addressing and its clear; the horizontal and vertical timing registers have no analogue in an
   engine that composes a rectangle rather than scanning one out.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §22 (the unchecked read past `rows`).

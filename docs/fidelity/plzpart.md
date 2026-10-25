@@ -512,3 +512,5 @@ five keyframe RGB files are `reference/parts/plzpart/{plasma,cube}/`; the six
 band frames are `reference/parts/plzpart/band/`;
 `cargo xtask reference verify --tree reference` checks the tree (36 captures,
 122 files, 28,115,022 bytes at this record).
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §1 (the palette-leak banding) and §17 (the mask underflow, the cut-short fade, the double `+160`, the shift precedence).

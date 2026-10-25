@@ -286,3 +286,5 @@ tools/vault_capture.sh twist --frames 102,103,104 --out out/task4/twist-support
 # the include's line count quoted above
 wc -l upstream/SecondReality/TWIST/TWSTLOOP.INC    # 11,752
 ```
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §26 (the row arithmetic, the shipped texture).

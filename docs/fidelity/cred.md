@@ -455,3 +455,5 @@ holds; the two frames that agree with the reference byte for byte; the three tha
 regions' byte counts per frame; **the wipes moving the display between the holds** — two blank early
 open steps, two that differ, the open loop's last step identical to the hold's first frame, and two
 close steps that differ, all through the binary; and the truncated-frame guard.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` the index (the inert line compare).

@@ -628,3 +628,5 @@ shipped constant is adopted (D36's 92-byte row stays a memory-layout fact).
   shows surface *N−1* with the DAC of *N*. No upload order was changed to
   chase it — that would break the source's own order (`MAIN.C:414-415`
   uploads, then the body computes the next palette).
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §5 (the span raster) and §23 (the 16-bit products, the upload order, the clear before the paint).

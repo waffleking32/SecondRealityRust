@@ -284,3 +284,5 @@ frame. The unit tests pin the RNG, the setup, the cue window and the skipped
 cue, the exit, the frame cap, the stage boundary, the gravity decrement, the
 depth tables, the palette, the fade uploads, the shadow bug, the ball rows,
 the pre-roll and the mapping.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §2 (the painter's order) and §18 (the stale register, the clobbered offset, the skipped gravity, `j`).

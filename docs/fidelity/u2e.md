@@ -364,3 +364,5 @@ main palette (every path reaches black/white at the hold). It is therefore a
 and the sessions that agree with it (and the filed keyframes' city scenes),
 and the anomaly is **not registered in `APPROXIMATIONS.md`** for that reason.
 The `+252` correction above is source-faithful and unrelated to it.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §12 (the cadence, the skipped first draw, the DAC rotation, the name hacks), with `fov` and the city hacks in the index.

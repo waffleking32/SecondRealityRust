@@ -500,3 +500,5 @@ cargo xtask compare --reference reference/parts/jplogo --rendered out/b4b-jp-ses
 awk -F, '$1 >= 17000 && $1 <= 17100' reference/music/second3d/trace.csv
 awk -F, '$1 == 17300 || $1 == 17500 || $1 == 17700' reference/music/second3d/trace.csv
 ```
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §4 (`setpalarea` and the DAC clear) and §21 (the crop, the remap, the sine table, the palimpsest guard).

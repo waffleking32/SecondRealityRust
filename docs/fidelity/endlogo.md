@@ -455,3 +455,5 @@ The first four are the traps Phase 2's task was written around; the last two are
 that "looks right" fails a keyframe on this part; and the gate's three are the ways a port that runs
 the source's loop but reads it at the wrong instant — or with no alignment — fails the same keyframe
 from the other side.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §4 (`setpalarea`'s byte count, 510 bytes).

@@ -281,3 +281,5 @@ The fifth test is a guard with a guard: `differing_bytes` asserts both frames ar
 before it counts anything, because `iter().zip()` stops at the shorter side and a *truncated* dump is
 the one failure a comparison test exists to catch. `a_truncated_frame_is_refused_rather_than_counted`
 proves that assertion fires, rather than describing it.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §4 (`setpalarea`'s byte count).

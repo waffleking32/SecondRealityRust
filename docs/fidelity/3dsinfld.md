@@ -532,3 +532,5 @@ The timing difference is registered as `APPROXIMATIONS.md` A26.
 | `index_origin`, `anchor`, the music row | `tests/coman.rs::the_run_is_numbered_in_its_own_frames_and_declares_the_derived_music_row` |
 
 The trace citations are the two `awk` commands above.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §20 (`docopy`'s clear, `docol`'s mask), with the dead and unreachable paths in the index.

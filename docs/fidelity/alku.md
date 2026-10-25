@@ -159,7 +159,7 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   neighbours are the next row's columns 20-23. The unit test
   `the_picture_blit_writes_the_band_and_the_refresh_reads_past_the_row` pins
   `a=316`'s column 165 to `picture[660..664] == picture[640+20..640+24]`.
-- **The `memset` clears 186×320 of a 186×352 `tbuf`** (`MAIN.C:99`):
+- **The `memset` clears 186×320 of a 186×352 `tbuf`** (`MAIN.C:101`):
   `the_tbuf_clear_keeps_the_arrays_last_sixteen_rows` pins that the last 16
   rows survive.
 - **The final fade only when `f>7`** (`:148`): `63/SCRLF` is 7. The port runs
@@ -353,3 +353,5 @@ cargo xtask music analyse --trace reference/music/second1
   (`reference-indices.md` §4.4), and a future re-capture may show that offset.
 - The two rows of the font the routine reads past the strip are not drawn:
   A9's resolution, cited rather than re-derived.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §10 (the palette alias, the row-spill refresh, the `tbuf` clear, the code-5 gate; `dis_sync` itself is §3).

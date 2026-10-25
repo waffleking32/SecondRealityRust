@@ -446,3 +446,5 @@ The unit tests in `src/parts/lnszoom.rs` pin, by name:
 
 The integration test `tests/lnszoom.rs` drives the real binary for the
 registry row, the manifest's numbering and music, and the five keyframes.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §16 (the 1,536-byte overrun, the aspect block), with the guard, the clamp and the dead paths in the index.

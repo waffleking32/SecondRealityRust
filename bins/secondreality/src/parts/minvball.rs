@@ -1436,6 +1436,158 @@ mod tests {
         );
     }
 
+    /// `bugs.md` §2: shadows and balls are painted in the dot array's own
+    /// order and there is no depth test, so a later (farther) dot's shadow is
+    /// drawn over an earlier (nearer) dot's ball, and swapping the order swaps
+    /// which one shows. Sorting the dots by depth, or drawing every shadow
+    /// first, would put the near ball on top in both orders.
+    #[test]
+    fn shadows_are_drawn_over_balls_without_a_depth_test() {
+        // Rotation 0: cos 16384, sin 0, so x' = X and bp = Z/4 + 9000.
+        let (cos, sin) = (16384, 0);
+        // The near dot: Z = -4000, bp 8000; y = 7125 puts its ball's rows at
+        // 157, 158 and 159 with the wide middle row (four pixels) at 158,
+        // columns 160..=163.
+        let near = Dot {
+            x: 0,
+            y: 7125,
+            z: -4000,
+            ..Dot::default()
+        };
+        // The far dot: Z = 0, bp 9000 (8999 once the stale-`bx` borrow lands);
+        // its two-pixel shadow lands on row 158, columns 160 and 161.
+        let far = Dot {
+            x: 0,
+            y: 0,
+            z: 0,
+            ..Dot::default()
+        };
+        let (near_x, near_shadow, near_bp) = project_xz(&near, 0, cos, sin);
+        assert_eq!((near_x, near_shadow, near_bp), (160, 165, 8000));
+        assert_eq!(project_y(near.y, near_bp), 157, "the near ball starts on row 157");
+        let (far_x, far_shadow, far_bp) = project_xz(&far, 0xFFFF, cos, sin);
+        assert_eq!((far_x, far_shadow), (160, 158));
+        assert!(far_bp > near_bp, "the far dot is farther than the near one");
+
+        let (d1, d2, d3) = Minvball::build_depth_tables();
+        let bgpic = vec![0u8; FRAME_MEMORY];
+        let paint = |order: [Dot; 2]| -> Vec<u8> {
+            let mut dots = order;
+            let mut video = vec![0u8; FRAME_MEMORY];
+            drawdots(
+                &mut dots, &bgpic, &mut video, cos, sin, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+            );
+            video
+        };
+        let middle = 158 * 320 + 160;
+        let near_depth = (((near_bp as u16) >> 6) & 0xFFFC) as usize / 4;
+        let ball = d2[near_depth].to_le_bytes();
+        assert!(
+            !ball.contains(&SHADOW),
+            "the ball's own bytes differ from the shadow colour, so the two can be told apart"
+        );
+
+        // Near first, far second: the far dot's shadow is drawn over the near
+        // dot's ball, although the ball is nearer.
+        let video = paint([near, far]);
+        assert_eq!(
+            &video[middle..middle + 4],
+            &[SHADOW, SHADOW, ball[2], ball[3]],
+            "the later, farther shadow covers the first two pixels of the nearer ball"
+        );
+        // Far first, near second: the near ball is drawn over the far shadow.
+        let video = paint([far, near]);
+        assert_eq!(
+            &video[middle..middle + 4],
+            &ball,
+            "the later, nearer ball covers the earlier shadow: the draw order alone decides"
+        );
+    }
+
+    /// `bugs.md` §18.1: `mov ax,ax` (`DOTS/ASM.ASM:65`) is a no-op where the
+    /// rotation's low word should have been saved, so the z rotation subtracts
+    /// the previous dot's screen offset from `Z*cos`. Only the borrow reaches
+    /// `bp`, but a one-unit `bp` is a different shadow row at the scale where
+    /// `(8<<16)/bp` crosses an integer.
+    #[test]
+    fn the_z_rotation_borrows_from_the_previous_dots_screen_offset() {
+        // Z = -3228 at rotation 0: Z*cos is -807 * 65536, whose low word is 0.
+        let dot = Dot {
+            x: 0,
+            y: 0,
+            z: -3228,
+            ..Dot::default()
+        };
+        // No carried offset: no borrow, bp = 9000 - 807 = 8193, row 63 + 100.
+        assert_eq!(project_xz(&dot, 0, 16384, 0), (160, 163, 8193));
+        // A carried offset above the low word (0) borrows one: bp 8192, row 64.
+        assert_eq!(project_xz(&dot, 1, 16384, 0), (160, 164, 8192));
+
+        // Through `drawdots`: the register is the previous dot's ball offset.
+        let (d1, d2, d3) = Minvball::build_depth_tables();
+        let bgpic = vec![0u8; FRAME_MEMORY];
+        let centre = Dot::default();
+        let at_ball_of_centre = 100 * 320 + 160;
+        assert_ne!(at_ball_of_centre, 0);
+        let mut video = vec![0u8; FRAME_MEMORY];
+        let mut dots = [dot];
+        drawdots(
+            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+        );
+        assert_eq!(video[163 * 320 + 160], SHADOW, "alone: no borrow, shadow row 163");
+        assert_eq!(video[164 * 320 + 160], 0);
+        let mut video = vec![0u8; FRAME_MEMORY];
+        let mut dots = [centre, dot];
+        drawdots(
+            &mut dots, &bgpic, &mut video, 16384, 0, 0, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+        );
+        assert_eq!(dots[0].old2, at_ball_of_centre, "the first dot's ball offset is the carry");
+        assert_eq!(
+            video[164 * 320 + 160],
+            SHADOW,
+            "after another dot: the borrow moves the shadow to row 164"
+        );
+        assert_eq!(video[163 * 320 + 160], 0);
+    }
+
+    /// `bugs.md` §18.3: the gravity integration is inside the ball block and
+    /// `ja @@2` (`DOTS/ASM.ASM:96`, `:105`) jumps past it when the shadow is
+    /// off screen, so such a dot's `y` and `yadd` hold still.
+    #[test]
+    fn an_off_screen_shadow_holds_the_dots_y_still() {
+        let (d1, d2, d3) = Minvball::build_depth_tables();
+        let bgpic = vec![0u8; FRAME_MEMORY];
+        // At rotation 45 degrees this dot's x projects to 345, off screen.
+        let off = Dot {
+            x: 16384,
+            y: 100,
+            z: 16384,
+            yadd: 7,
+            ..Dot::default()
+        };
+        let (x, _, _) = project_xz(&off, 0, 11584, 11584);
+        assert!(x as u16 > 319, "the shadow is off screen");
+        let mut dots = [off];
+        let mut video = vec![0u8; FRAME_MEMORY];
+        drawdots(
+            &mut dots, &bgpic, &mut video, 11584, 11584, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+        );
+        assert_eq!((dots[0].y, dots[0].yadd), (100, 7), "gravity is skipped");
+        // The same dot on screen integrates: yadd += gravity, then y += yadd.
+        let on = Dot {
+            x: 0,
+            y: 100,
+            z: 0,
+            yadd: 7,
+            ..Dot::default()
+        };
+        let mut dots = [on];
+        drawdots(
+            &mut dots, &bgpic, &mut video, 16384, 0, 3, 13, GRAVITY_BOTTOM, &d1, &d2, &d3, 0,
+        );
+        assert_eq!((dots[0].yadd, dots[0].y), (10, 110), "gravity runs on screen");
+    }
+
     #[test]
     fn the_ball_rows_are_the_three_depth_table_writes() {
         // A dot at the origin projects to x=160, shadow row ~158, ball row

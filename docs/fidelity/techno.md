@@ -692,3 +692,5 @@ The integration test `tests/techno.rs` drives the real binary from the
 repository root for the registry row, the manifest's numbering and music
 (`MUSIC1`, order 18), the two geometries, and the seven keyframes with D19's
 support.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §4 (`setpalarea`) and §14 (`patdir`, `rotate1`, `clipanypoly`), with the dead paths in the index.

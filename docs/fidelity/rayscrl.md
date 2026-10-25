@@ -273,3 +273,5 @@ differs from its keyframe except the 13000 upload/hold pair (tick 37 = tick 38,
 the reference's own 64-pixel capture artefact) and the held 13500's pair. The
 run's manifest says `index_origin: "part"`, `anchor: null`, `MUSIC1` at order
 86.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §19 (the refill, the fade loops, the fade-out's source, the exact cue).

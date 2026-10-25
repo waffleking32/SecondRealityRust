@@ -359,3 +359,5 @@ sha256sum reference/parts/u2a/frame_007640.rgb
 it reports `0.0000%` at 6500 and 7640, `1.7156%` (1098/64000, max delta 238)
 at 7300, `verdict: different`, and exits 1: the port's page at that index is
 a different stream state, so no ±1 phase match applies.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §12 (the page cadence, the two exits), with the dead second gate, city hacks and `fov` in the index.

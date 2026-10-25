@@ -319,3 +319,5 @@ this part its tick 0 at **8835** with CRED's screen at 8834 and the geometry cha
 8837.
 
 Every number in this note is produced by a test in this commit or by a command named here.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` the index (the unreachable end-of-buffer read).

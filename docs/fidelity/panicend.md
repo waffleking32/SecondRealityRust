@@ -389,3 +389,5 @@ In `tests/panicend.rs`:
 The shell's music table test (`a_blocks_first_part_is_the_entry_point_its_row_is_about`)
 also covers the new `music_for_part("panicend")` row: every registry name
 must have an expected row.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §13 (`getpal`, `copyline`, the fade tables, the collapse).

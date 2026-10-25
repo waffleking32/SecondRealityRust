@@ -293,3 +293,5 @@ route-B comparison (2/24 pixels at 800/1000; historical — the route-B capture 
 `RUNP.BAT` recipe of `reference-indices.md` §24.2 and the mapping is `K0` = 704, so the port
 frames are 96 and 296; it is not a filed claim). No constant, anchor or palette phase was
 fitted to reduce it (D17/D18/D24/D25).
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §6 (`sinus1`'s `d`) and §24 (the eye shift, the dispatch default).

@@ -335,3 +335,5 @@ cargo run --release --bin secondreality -- --part pam --headless \
 sha256sum out/pam-timeline/pam_007720.rgb out/pam-timeline/pam_007721.rgb \
           out/pam-timeline/pam_007870.rgb
 ```
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §11 (the 40-frame loop), with the dead `ruudulle` in the index.

@@ -251,3 +251,5 @@ cargo xtask reference verify --tree reference                     # exit 0
 The per-keyframe numbers above are produced by the named tests; the trace's
 positions are `reference/music/second3/trace.csv`'s, and the reference's
 palette and dimensions are `reference/parts/mntscrl/manifest.json`'s.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §15 (the `fbuf` byte, the bands, the shortfall, the exact cue), with the dead `veke` bound in the index.

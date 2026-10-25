@@ -438,3 +438,5 @@ A reference `R` is port frame `R - 356`; `docs/fidelity/reference-indices.md` §
 the capture. The substitutions — the start gate, the fixed tick, the dropped argument path
 and the mode-5 boundary's two inserted displays — are `docs/fidelity/APPROXIMATIONS.md`
 A46–A50, each with its measured difference.
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §7-§9 and §25 (the dot engine, the 16-bit z load, record 0).

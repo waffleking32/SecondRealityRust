@@ -2123,3 +2123,5 @@ command.
 - **The stepping itself**, which is the point: the authentic path's held byte, its 20 kHz images,
   and its quantisation to one output level per two entries (a frame value of −1 is −256 and 0 or
   1 is 0).
+
+**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §28 (the restart, the volume-0 optimisation, `A7F`, the curve builder, the stereo word).
