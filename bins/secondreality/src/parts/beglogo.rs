@@ -154,11 +154,22 @@ impl Part for Beglogo {
         // both halves of the port's origin are what those two writes set.
         //
         // The registers `BEG.C` does not write — AC 0x13's pan, CRTC 0x18's
-        // line compare, CRTC 0x13's line offset — are deliberately left as the
-        // run left them, which is what the original inherits from the mode set
-        // before it. In a run that starts here they are the shell's:
-        // `y_line_offset` unset (the port's beam reads the surface's own rows,
-        // Part B's first convention), no split, no pan.
+        // line compare, CRTC 0x13's line offset — are left as the run left them,
+        // which is what the original inherits from the mode set before it. In a
+        // run that starts here they are the shell's: no split, no pan.
+        //
+        // **The line offset is the one the original's picture is drawn at.**
+        // Every part the demo runs before this one (PAM, in block 1) leaves the
+        // 320-pixel tweak's CRTC 0x13 — 80 bytes a row — which is exactly the
+        // stride `:74-78`'s `lineblit(vram+(unsigned)y*80U,rowbuf)` writes, so
+        // the original reads its picture row by row whoever came before. The
+        // port draws through `Surface::set`, at the surface's own 640-pixel rows,
+        // and the stride that reads those is the unset offset (Part B's first
+        // convention); PAM's `Some(320)` kept here would read every second
+        // scanline from the picture's right margin — block 1's BEGLOGO was
+        // doubled that way until the full run's comparison found it
+        // (`reference-indices.md` §26.8).
+        ctx.view.y_line_offset = None;
         ctx.view.set_origin(0);
         // `:47-53` and `:62-71`: CRTC 9 with bit 7 and the low five bits
         // cleared — a 400-line screen, one scanline a row — and AC 0x11 = 255,
@@ -403,6 +414,22 @@ mod tests {
         let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
+    }
+
+    #[test]
+    fn the_picture_is_read_at_its_own_row_stride_whatever_the_part_before_left() {
+        // Mid-chain the view arrives with the predecessor's line offset: PAM (`pam.rs`, `Some(LINE_PIXELS)`) leaves it
+        // at 320 pixels a row. In the original that is the 320-pixel tweak's CRTC 0x13,
+        // the stride this part's own `lineblit(vram+y*80U, ...)` draws at, so the
+        // picture is read row by row. On the port's 640-wide surface a kept `Some(320)`
+        // would read every second scanline from the picture's right margin — the full
+        // run's measurement (`reference-indices.md` §26.8) — so the part reads its own
+        // rows, the unset offset.
+        let mut rig = Rig::new();
+        rig.view.y_line_offset = Some(320);
+        let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
+        part.init(&mut rig.ctx(0)).unwrap();
+        assert_eq!(rig.view.y_line_offset, None);
     }
 
     /// Runs the part for `ticks` ticks, numbered from zero.

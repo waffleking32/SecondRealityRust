@@ -51,8 +51,10 @@ pub struct Frame {
 }
 
 /// Filed captures whose mapping a later task measures. `rediff` names each capture under
-/// one of these in its report as not compared. Task 6 empties it.
-pub const PENDING: &[&str] = &["fullrun"];
+/// one of these in its report as not compared. Empty since Phase 9 Task 6 measured the
+/// last of them (`fullrun`); the mechanism stays, for the next capture filed before its
+/// mapping is.
+pub const PENDING: &[&str] = &[];
 
 const fn rgb(reference: u32, rendered: u32, registered: u32, register: &'static str) -> Frame {
     Frame {
@@ -266,6 +268,169 @@ pub const TABLE: &[Entry] = &[
             rgb(10000, 10000, 28333, "A11"),
             rgb(12000, 12000, 25502, "A11"),
             rgb(14000, 14000, 17108, "A11"),
+        ],
+    },
+    // The original's whole `SECOND 1` run (reference-indices.md §26) against the port's
+    // `--block 1`: each filed frame at its reference index plus **its part's start
+    // difference** — the port's first frame minus the original's, by §26.3's own
+    // definition, measured from the port's frames and pinned by tests/fullrun.rs's SEAMS
+    // (:93-113), never chosen for a keyframe's count (§26.8). The three frames the
+    // original shows during a loader stretch the port does not have (7920 after PAM,
+    // 16636 after the cue wait, 34110 under the U2E reload) are paired with the port's last
+    // frame of that screen — the frame before the next part's first. Held frames compare
+    // at 0 but for the two that carry their part's own registered count (19000 is A25's
+    // 2,058, 40600 is A10's 7,204); every other count is this command's and is A53's, which
+    // also names every pairing at a start difference other than 0 (A38's lag among them).
+    Entry {
+        capture: "fullrun/01-alku",
+        args: &["--block", "1"],
+        frames: &[rgb0(1719, 1719)],
+    },
+    // U2A +47 (6008 − 5961): ALKU ends 47 frames late, so U2A's opening is not the
+    // original's; PAM −3 (7704 − 7707). 7920 is PAM's white under BEGLOGO's load: the
+    // port's last PAM frame, 7884. 7880's index plane is PAM's picture under a white DAC.
+    Entry {
+        capture: "fullrun/02-u2a-pam",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(5961, 6008, 63788, "A53"),
+            rgb(6500, 6547, 0, "A53"),
+            rgb(7707, 7704, 0, "A53"),
+            idx(7707, 7704, 0, "A53"),
+            rgb(7880, 7877, 0, "A53"),
+            idx(7880, 7877, 48786, "A53"),
+            rgb(7920, 7884, 0, "A53"),
+        ],
+    },
+    // BEGLOGO −37 (7885 − 7922): the port's 320×400 white field from its first tick, where
+    // the original still shows PAM's screen (A5's lead-in). The ramp itself is frame-locked
+    // — the port's 7930 is the original's byte for byte (tests/fullrun.rs) — so at −37 it
+    // is 81,273 px off. 8300 is the hold under GLENZ's wait; 8522 is GLENZ's (+248, A38's lag).
+    Entry {
+        capture: "fullrun/03-beglogo",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(7930, 7893, 81273, "A53"),
+            rgb(8300, 8263, 0, "A53"),
+            idx(8300, 8263, 0, "A53"),
+            rgb(8522, 8770, 0, "A53"),
+        ],
+    },
+    // GLENZ +248 (A38's lag), TUNNELI +236 (11394 − 11158), TECHNO +244 (12458 − 12214).
+    Entry {
+        capture: "fullrun/04-glenz-techno",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(8572, 8820, 0, "A53"),
+            idx(8572, 8820, 0, "A53"),
+            rgb(8900, 9148, 0, "A53"),
+            idx(8900, 9148, 0, "A53"),
+            rgb(11159, 11395, 192, "A53"),
+            rgb(11900, 12136, 4336, "A53"),
+            rgb(12214, 12458, 0, "A53"),
+            rgb(12400, 12644, 0, "A53"),
+        ],
+    },
+    // TECHNO +244, PANICEND +230 (16423 − 16193).
+    Entry {
+        capture: "fullrun/05-troll-panicend",
+        args: &["--block", "1"],
+        frames: &[rgb(16000, 16244, 0, "A53"), rgb(16193, 16423, 108923, "A53")],
+    },
+    // PANICEND +230; 16636 is the dot after the cue's exit (16630), the port's last
+    // PANICEND frame 16874 (its cue exit); MNTSCRL +238 (16875 − 16637); LNS&ZOOM +257
+    // (18913 − 18656), whose hold carries A25's 2,058 in both planes.
+    Entry {
+        capture: "fullrun/06-panicend-lnszoom",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(16500, 16730, 0, "A53"),
+            idx(16500, 16730, 0, "A53"),
+            rgb(16636, 16874, 0, "A53"),
+            rgb(16637, 16875, 0, "A53"),
+            rgb(16690, 16928, 0, "A53"),
+            rgb(18656, 18913, 129, "A53"),
+            rgb(19000, 19257, 2058, "A25"),
+            idx(19000, 19257, 2058, "A25"),
+        ],
+    },
+    // PLZPART +244 (22171 − 21927).
+    Entry {
+        capture: "fullrun/07-plasma",
+        args: &["--block", "1"],
+        frames: &[rgb(21927, 22171, 0, "A53"), rgb(24500, 24744, 45808, "A53")],
+    },
+    // PLZPART +244, MINVBALL +239 (26912 − 26673), RAYSCRL +248 (29422 − 29174), 3DSINFLD
+    // +259 (31531 − 31272).
+    Entry {
+        capture: "fullrun/08-cube-3dsinfld",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(24540, 24784, 0, "A53"),
+            idx(24540, 24784, 48384, "A53"),
+            rgb(26673, 26912, 0, "A53"),
+            rgb(26700, 26939, 0, "A53"),
+            rgb(29174, 29422, 875, "A53"),
+            rgb(29800, 30048, 0, "A53"),
+            idx(29800, 30048, 0, "A53"),
+            rgb(31272, 31531, 4, "A53"),
+            rgb(31901, 32160, 33554, "A53"),
+            idx(31901, 32160, 34036, "A53"),
+        ],
+    },
+    // JPLOGO +235, aligned on its opening black (33498 is 33263's bytes, the port's only
+    // frame of that hash; §26.3 brackets the original's in (33261, 33263]). 34110 is the
+    // white under the U2E reload: the port's last JPLOGO frame, 34285 — the same indices
+    // (the white is the DAC's), not the same colours.
+    Entry {
+        capture: "fullrun/09-jplogo",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(33263, 33498, 0, "A53"),
+            idx(33263, 33498, 0, "A53"),
+            rgb(33900, 34135, 0, "A53"),
+            idx(33900, 34135, 0, "A53"),
+            rgb(34110, 34285, 72363, "A53"),
+            idx(34110, 34285, 0, "A53"),
+        ],
+    },
+    // U2E +198, aligned on the band (34318 is 34120's bytes; §26.3 brackets U2E's first
+    // 320×200 frame in (34114, 34120]).
+    Entry {
+        capture: "fullrun/10-u2e",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(34120, 34318, 0, "A53"),
+            rgb(34250, 34448, 0, "A53"),
+            idx(34250, 34448, 0, "A53"),
+        ],
+    },
+    // ENDLOGO +232 (38199 − 37967). 37970's index plane is the video memory U2E left, under
+    // ENDLOGO's white DAC (`END.C` has no memset).
+    Entry {
+        capture: "fullrun/11-endlogo",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(37970, 38202, 0, "A53"),
+            idx(37970, 38202, 46997, "A53"),
+            rgb(38300, 38532, 0, "A53"),
+            idx(38300, 38532, 0, "A53"),
+        ],
+    },
+    // CRED +224 (38807 − 38583); its 40600 hold is `cred`'s 3240, at A10's 7,204.
+    Entry {
+        capture: "fullrun/12-cred",
+        args: &["--block", "1"],
+        frames: &[rgb(38583, 38807, 0, "A53"), rgb(40600, 40824, 7204, "A10")],
+    },
+    // ENDSCRL +155 (46432 − 46277).
+    Entry {
+        capture: "fullrun/13-endscrl",
+        args: &["--block", "1"],
+        frames: &[
+            rgb(46280, 46435, 42, "A53"),
+            rgb(46283, 46438, 67, "A53"),
+            rgb(46286, 46441, 149, "A53"),
         ],
     },
     // tests/glenz.rs, block 2 (:90): 1499 at 0 in both planes (:420-431); the moving

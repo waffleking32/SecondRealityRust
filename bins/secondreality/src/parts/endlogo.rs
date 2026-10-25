@@ -319,8 +319,19 @@ impl Part for Endlogo {
         // display start, which is why `set_origin(0)` zeroes `start_addr` **and**
         // `x_offset` rather than leaving the offset alone. The registers
         // `END.C` does not write — AC 0x13's pan, CRTC 0x18's line compare,
-        // CRTC 0x13's line offset — are deliberately left as the run left
-        // them: `y_line_offset` unset (Part B's first convention) and no split.
+        // CRTC 0x13's line offset — are left as the run left them: no split.
+        //
+        // **The line offset is the one the original's picture is drawn at.**
+        // Every part the demo runs before this one (U2E, in blocks 1, 3 and 4)
+        // leaves the 320-pixel tweak's CRTC 0x13 — 80 bytes a row — which is the
+        // stride `:95-99`'s `lineblit(vram+(unsigned)y*80U,rowbuf)` writes, so
+        // the original reads its picture row by row. The port draws through
+        // `Surface::set`, at the surface's own 640-pixel rows, read by the unset
+        // offset (Part B's first convention); U2E's `Some(320)` kept here would
+        // read every second scanline from the picture's right margin, which is
+        // what block 1's ENDLOGO showed until the full run's comparison found it
+        // (`reference-indices.md` §26.8).
+        ctx.view.y_line_offset = None;
         ctx.view.set_origin(0);
         // `:75-80`: CRTC 9 with bit 7 (the double-scan bit) and the low five
         // bits (the maximum scan line) cleared — a 400-line screen, one
@@ -905,6 +916,22 @@ mod tests {
         let mut part = Endlogo::at("../../assets/END/PIC.UH");
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
+    }
+
+    #[test]
+    fn the_picture_is_read_at_its_own_row_stride_whatever_the_part_before_left() {
+        // Mid-chain the view arrives with the predecessor's line offset: U2E (`u2e.rs`, `Some(VIEW_WIDTH)`) leaves it
+        // at 320 pixels a row. In the original that is the 320-pixel tweak's CRTC 0x13,
+        // the stride this part's own `lineblit(vram+y*80U, ...)` draws at, so the
+        // picture is read row by row. On the port's 640-wide surface a kept `Some(320)`
+        // would read every second scanline from the picture's right margin — the full
+        // run's measurement (`reference-indices.md` §26.8) — so the part reads its own
+        // rows, the unset offset.
+        let mut rig = Rig::new();
+        rig.view.y_line_offset = Some(320);
+        let mut part = Endlogo::at("../../assets/END/PIC.UH");
+        part.init(&mut rig.ctx(0)).unwrap();
+        assert_eq!(rig.view.y_line_offset, None);
     }
 
     /// Runs the part for `ticks` ticks, numbered from zero.

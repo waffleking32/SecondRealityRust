@@ -168,19 +168,24 @@ struct KnownDisagreement {
 }
 
 /// The measured disagreements of block 1's full-run traces (Phase 9 Task 2,
-/// `docs/fidelity/reference-indices.md` §26.6, `docs/fidelity/music-clock.md` §2.3).
+/// `docs/fidelity/reference-indices.md` §26.6, `docs/fidelity/music-clock.md` §2.3), registered
+/// as `docs/fidelity/APPROXIMATIONS.md` A54 by Task 6. Every row must name a filed trace
+/// (`every_known_disagreement_names_a_trace_the_walk_found`).
 const KNOWN_DISAGREEMENTS: &[KnownDisagreement] = &[
-    // **Task 6 owns this row: resolve it or register it** (Phase 9 plan). `second1e`
-    // (8,800…33,949, MUSIC1 orders 4…98) matches the port in every word's value sequence; its
-    // placement drifts with the port early, to 8 frames from order 96 row 58 (frame 33,264)
-    // on — one past `JITTER_FRAMES`, over a window four times `second1`'s 5,538 frames.
+    // **Registered: `docs/fidelity/APPROXIMATIONS.md` A54** (Phase 9 Task 6, which found no
+    // seam that explains it). `second1e` (8,800…33,949, MUSIC1 orders 4…98) matches the port in
+    // every word's value sequence; its placement drifts with the port early, to 8 frames from
+    // order 96 row 58 (frame 33,264) on — one past `JITTER_FRAMES`, over a window four times
+    // `second1`'s 5,538 frames. The port's own block-1 run shows the same drift against it
+    // (its lag falls from 248 to 240 frames, `bins/secondreality/tests/fullrun.rs`).
     KnownDisagreement {
         trace: "second1e",
         content: &[],
         unreachable: &[],
         worst_displacement: 8,
     },
-    // **Task 6 owns this row: resolve it or register it** (Phase 9 plan). `second1f`
+    // **Registered: `docs/fidelity/APPROXIMATIONS.md` A54** (Phase 9 Task 6: a sampling
+    // fact and a session's row rate, not a seam). `second1f`
     // (34,105…48,276, MUSIC0 orders 18…45) holds the first speed-1 stretch of any filed trace —
     // order 26, pattern 71, frames 38,328…38,370, a row every 1.46 frames. The trace's one
     // sample a frame publishes row 25 at 38,364 and row 27 at 38,366, so row 26 is never
@@ -1030,6 +1035,136 @@ fn the_port_reproduces_every_filed_trace() {
     }
 
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// **A38's lead (Phase 9 Task 6): block 1's `MUSIC1@0` restart plays order 0 for four rows,
+/// not 64.** MUSIC1's order 0 is pattern 73, whose row 0 is a note-off on every channel and
+/// whose row 3 holds a `C00` on channel 2 and nothing else. A fresh player — a boot, and the
+/// port's every restart — has channel 2 at volume 0, so the "volume 0" countdown frees the
+/// channel on row 3 before its command is dispatched, and order 0 plays its 64 rows; that is
+/// what block 2's boot trace `second2b` publishes (`0:4` at 428 and on), and the port with it.
+/// `restartmus`'s `_zplaysong` mid-song keeps MUSIC0's volumes (`tests/player.rs`'s
+/// `the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown`) — and block 1's
+/// MUSIC0 has channel 2 at 63 around the handover (asserted below) — so channel 2 is not freed
+/// and the break is taken.
+///
+/// `second1d` tells the two apart with filed traces alone: back from its first `1:5` (8,102),
+/// a 64-row order 0 puts the restart's first poll at **7,814** — before `second1b`'s last
+/// frame, 7,959, which still publishes MUSIC0 — and a 4-row one at **8,056.6**, inside
+/// `(7,959, 8,100)` and at the port's own BEGLOGO→GLENZ boundary, 8,057, to the frame. The 60
+/// rows between them, 242.6 frames, are A38's 249-frame lag but for its last 6.
+#[test]
+fn block_ones_music1_restart_takes_order_0s_break() {
+    let module = load("MUSIC1");
+    assert_eq!(module.orders()[0], 73, "order 0 is pattern 73");
+    let pattern = module.pattern(73).expect("pattern 73");
+    assert!(
+        pattern.rows[0].iter().filter(|cell| !cell.is_empty()).all(|cell| cell.note == 0xfe
+            && cell.instrument == 0),
+        "row 0 is a note-off, with no instrument, on every channel it names"
+    );
+    let row3: Vec<(usize, u8, u8)> = pattern.rows[3]
+        .iter()
+        .enumerate()
+        .filter(|(_, cell)| !cell.is_empty())
+        .map(|(channel, cell)| (channel, cell.command, cell.info))
+        .collect();
+    assert_eq!(row3, [(2, 3, 0)], "row 3 is `C00` on channel 2 and nothing else");
+
+    // A fresh player: channel 2 is freed on row 3, and order 1 begins 64 rows after order 0.
+    let mut player = Player::new(module, PlayerOptions::default());
+    player.play_song(0);
+    let mut polls = 0usize;
+    let mut first_published: BTreeMap<(u8, u8), usize> = BTreeMap::new();
+    while player.engine_position().order == 0 {
+        player.poll();
+        let state = player.state();
+        first_published.entry((state.order, state.row)).or_insert(polls);
+        if player.engine_position().row == 4 {
+            assert!(!player.channel(2).unwrap().used, "channel 2 was freed on row 3");
+        }
+        polls += 1;
+        assert!(polls < 1_000, "order 0 never ended");
+    }
+    assert_eq!(player.engine_position().row, 0, "order 1 begins at row 0");
+    assert_eq!(player.zframe(), 64 * 3, "64 rows of speed 3");
+    while !first_published.contains_key(&(1, 5)) {
+        player.poll();
+        let state = player.state();
+        first_published.entry((state.order, state.row)).or_insert(polls);
+        polls += 1;
+    }
+    let fresh = first_published[&(1, 5)] as i64;
+
+    // `second1d`'s first `1:5`, and the last MUSIC0 frame `second1b` holds.
+    let rows = |name: &str| -> Vec<Row> {
+        std::fs::read_to_string(workspace().join(format!("reference/music/{name}/trace.csv")))
+            .unwrap()
+            .lines()
+            .skip(1)
+            .map(parse_row)
+            .collect()
+    };
+    let at = rows("second1d")
+        .iter()
+        .find(|row| (row.position.order, row.position.row) == (1, 5))
+        .expect("second1d publishes 1:5")
+        .frame;
+    let music0_until = rows("second1b").last().unwrap().frame;
+    assert_eq!((at, music0_until), (8_102, 7_959));
+    assert_eq!(identify("second1b", &rows("second1b"), 7_600), "MUSIC0");
+
+    // 60 rows of speed 3 at MUSIC1's tempo 130, in frames.
+    let skipped = (60 * 3 * TICK_NUMERATOR) as f64 / (130.0 * 1000.0);
+    let start_64 = at - fresh;
+    let start_4 = at as f64 - fresh as f64 + skipped;
+    println!(
+        "second1d's 1:5 at {at}: a 64-row order 0 starts at {start_64}, a 4-row one at \
+         {start_4:.1} ({skipped:.1} frames later)"
+    );
+    assert_eq!(start_64, 7_814);
+    assert_eq!(start_4.round() as i64, 8_057);
+    assert!(start_64 < music0_until, "a 64-row order 0 starts while MUSIC0 still plays");
+    assert!(
+        (music0_until as f64) < start_4 && start_4 < 8_100.0,
+        "a 4-row one starts between MUSIC0's last trace frame and second1d's first"
+    );
+
+    // And what MUSIC0 hands over: block 1's MUSIC0 from order 0 at frame 400 (`second1`'s
+    // anchor, the port's `BLOCK_ONE_MUSIC_START_FRAME`), one poll a frame, to the frames
+    // around the port's boundary at 8,057. Channel 2 is sounding there, at full volume — the
+    // `avol` `_zplaysong` leaves for MUSIC1's row 3.
+    let mut music0 = Player::new(load("MUSIC0"), PlayerOptions::default());
+    music0.play_song(0);
+    let mut volumes = Vec::new();
+    for frame in 400..=8_059 {
+        music0.poll();
+        if frame >= 8_055 {
+            volumes.push(music0.channel(2).unwrap().volume);
+        }
+    }
+    println!("MUSIC0's channel 2 at 8055..=8059: volume {volumes:?}");
+    assert_eq!(volumes, [63; 5]);
+}
+
+/// A pinned disagreement is a claim about a filed trace, so a row whose trace the walk does
+/// not find — renamed, removed, or misspelt — is a row that pins nothing: the comparison
+/// above looks each trace up in the table, never the other way round, and would pass with
+/// the row silently unused.
+#[test]
+fn every_known_disagreement_names_a_trace_the_walk_found() {
+    let walked: Vec<String> = traces().into_iter().map(|trace| trace.name).collect();
+    for known in KNOWN_DISAGREEMENTS {
+        assert!(
+            walked.iter().any(|name| name == known.trace),
+            "KNOWN_DISAGREEMENTS names {}, which is not a filed trace ({walked:?})",
+            known.trace
+        );
+    }
+    let mut names: Vec<&str> = KNOWN_DISAGREEMENTS.iter().map(|known| known.trace).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), KNOWN_DISAGREEMENTS.len(), "a trace is pinned twice");
 }
 
 /// The tick counter is the tick clock and nothing else: over each run that never goes

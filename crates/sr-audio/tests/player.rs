@@ -1036,6 +1036,56 @@ fn the_objects_own_bytes_say_what_the_player_says() {
     );
 }
 
+/// `_zplaysong`'s per-channel initialiser (`+0x5614`, the loop `+0x5625`…`+0x568a` over the
+/// 48 channel structs at `+0xda0`, `0x60` bytes apart): **which fields it writes, and which it
+/// leaves.** Every store in the loop body is `[si + d]` with an 8-bit displacement, in one of
+/// four encodings (`88 /r d` byte, `89 /r d` word, `c6 44 d imm8`, `66 c7 44 d imm32`), so the
+/// body is decoded instruction by instruction and the displacements collected (the first,
+/// `88 5c 03`, stores `bl` — the channel's own index — into `channelnum`).
+///
+/// It writes `achannelused` (`+0x01`) as **`0x80`** — the channel is walked — and `lastins`
+/// (`+0x37`) as 0; it never writes `avol` (`+0x1a`) or `a0volcut` (`+0x31`). A seek made
+/// mid-song (`restartmus`'s `_zplaysong`, `MAIN/U2.ASM:394`) therefore keeps the previous
+/// module's channel volumes, and with `lastins` 0 a note-off returns at `+0x48ce` before it
+/// can zero one. That is what decides MUSIC1's order 0 in block 1
+/// (`docs/fidelity/APPROXIMATIONS.md` A38's Phase 9 lead): the port's `Channel::reset`
+/// zeroes all three, as a fresh boot's memory is.
+#[test]
+fn the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown() {
+    let image = segment_image();
+    // `+0x5614`…`+0x5624`: ds = cs, cx = 0x30 channels, ax = 0, si = 0xda0, bl = 0, bh = 1, cli.
+    assert_eq!(
+        &image[0x5614..0x5625],
+        &[0x8C, 0xC8, 0x8E, 0xD8, 0xB9, 0x30, 0x00, 0x33, 0xC0, 0xBE, 0xA0, 0x0D, 0x32, 0xDB, 0xB7,
+          0x01, 0xFA]
+    );
+    // `+0x5685`…`+0x568b`: add si,0x60; inc bl; loop +0x5625.
+    assert_eq!(&image[0x5685..0x568C], &[0x83, 0xC6, 0x60, 0xFE, 0xC3, 0xE2, 0x99]);
+
+    let mut written: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
+    let mut at = 0x5625;
+    while at < 0x5685 {
+        // The ModRM byte's mod/rm bits are `01 100` — `[si + disp8]` — and its reg field is
+        // the source register (al, bl), which is why it is masked.
+        let si = |modrm: u8| modrm & 0xC7 == 0x44;
+        let (displacement, length, value) = match image[at..at + 3] {
+            [0x88, modrm, d] if si(modrm) => (d, 3, vec![]),
+            [0x89, modrm, d] if si(modrm) => (d, 3, vec![]),
+            [0xC6, 0x44, d] => (d, 4, vec![image[at + 3]]),
+            [0x66, 0xC7, 0x44] => (image[at + 3], 8, image[at + 4..at + 8].to_vec()),
+            _ => panic!("0x{at:04X}: not one of the loop's four store encodings"),
+        };
+        written.entry(displacement).or_default().extend(value);
+        at += length;
+    }
+    assert_eq!(at, 0x5685, "the body decodes to its end");
+    assert_eq!(written.get(&0x01), Some(&vec![0x80]), "achannelused = 0x80");
+    assert!(written.contains_key(&0x37), "lastins is written (from al = 0)");
+    assert!(!written.contains_key(&0x1A), "avol is never written");
+    assert!(!written.contains_key(&0x31), "a0volcut is never written");
+    println!("the initialiser writes {:x?}", written.keys().collect::<Vec<_>>());
+}
+
 // -------------------------------------------------------------------------------------------
 // A module built here, for the cells the shipped data does not carry
 // -------------------------------------------------------------------------------------------

@@ -69,7 +69,15 @@ Three things `END.C` relies on the shell for, and each is a trap for a port that
   so there is no plane interleave to address and no byte/word mode to select. The port draws through
   `Surface::set` with `y_line_offset` unset (Part B's first convention) and the beam reads back
   exactly the picture (`docs/fidelity/beglogo.md` §5 states the same convention for the same
-  `lineblit`).
+  `lineblit`). **`init` writes that unset offset rather than inheriting it** (Phase 9 Task 6):
+  `END.C` leaves CRTC 0x13 as the part before it set it, which in the demo is always the 320-pixel
+  tweak's 80 bytes a row — `lineblit(vram+(unsigned)y*80U)`'s own stride — but the port's U2E leaves
+  `Some(320)`, and on the 640-wide surface that read every second scanline from the picture's right
+  margin: blocks 1, 3 and 4 showed the logo's top half doubled with black lines between. With the
+  write, block 1's ENDLOGO hold is the original's 38300 at 0 in both planes (`cargo xtask rediff
+  --only fullrun/11-endlogo`; `reference-indices.md` §26.8), a run that starts here is unchanged (it
+  was already unset), and `the_picture_is_read_at_its_own_row_stride_whatever_the_part_before_left`
+  pins it.
 
 ## 3. The two fade constants, derived by matching the reference bit for bit
 

@@ -126,7 +126,7 @@ is measured from the frames and does not depend on the split.
 original needs two `memset`s and a chain-4 write, because the port's surface is chunky: the plane
 interleave is a hardware detail the chunky model folds away, and 64 KB of plane memory is the whole
 screen either way. The view becomes 320×400 (`:42-53`: display start 0, CRTC 9's double-scan bit and
-max-scan-line field cleared), with `y_line_offset` left unset — Part B's first convention: a part
+max-scan-line field cleared), with `y_line_offset` written unset (§5) — Part B's first convention: a part
 whose picture *is* the display writes through `Surface` at the surface's own stride. The border is
 AC 0x11 = 255 (`:66-68`), which is an entry number: `:32-34` is what makes entry 255 black, and it is
 what makes this part's overscan black. The picture is read with
@@ -194,6 +194,17 @@ white frames (`reference-indices.md` §3.3) and the port is white at all of them
 pixels of each row at the row's own place in the 640-wide surface, and the view — 320 wide, no line
 offset — reads back exactly that half. Setting `y_line_offset` to 320 here would shear the picture
 against itself, with no error anywhere (CLAUDE.md's caveat; Part B's first convention).
+
+**And so `init` sets it unset, rather than leaving it** (Phase 9 Task 6). `BEG.C` writes CRTC 0x13
+nowhere: it inherits the line offset the part before it left, and in the demo that is always the
+320-pixel tweak's 80 bytes a row — the stride `lineblit(vram+(unsigned)y*80U,rowbuf)` draws at — so
+the original reads its picture row by row. In the port, block 1's PAM leaves `Some(320)`, which on
+the 640-wide surface read every second scanline from the picture's right margin: block 1's lead-in
+and fade were the picture's top half, doubled, with black lines between, until the full run's
+comparison found it (`reference-indices.md` §26.8). `init` now writes `y_line_offset = None`, which
+is what a run that starts here already had, so no count of this note moved; block 1's 7930 is the
+original's 7930 byte for byte (`cargo test --release -p secondreality --test fullrun -- --ignored`),
+and `the_picture_is_read_at_its_own_row_stride_whatever_the_part_before_left` pins the write.
 
 **The upload is byte-exact, not entry-exact.** §6.
 
