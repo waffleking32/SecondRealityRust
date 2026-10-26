@@ -23,7 +23,7 @@ jobs:
       SDL2_SHA256: af347939395a58b365846aaea27391e69f9ec9d4dd650d6ac40802159b418a6e
     steps:
       # The build reads only assets/ and the crates; upstream/ (the submodule) is for tests.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -73,7 +73,7 @@ jobs:
             if (-not (Test-Path (Join-Path $dump $f))) { throw "the smoke run wrote no $f" }
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: secondreality-windows-x64
           path: dist/
