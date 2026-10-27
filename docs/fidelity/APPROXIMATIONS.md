@@ -1550,9 +1550,9 @@ should be black.
 python3 -I tools/crtc_probe.py 3 8500 30 <outdir>
 ```
 
-26 of the 30 sampled frames read CRTC 0x09 = 0x02; 19 read 0x09 = 2, 0x12 = 143 and 0x07 = 31
-(400 lines) together, 16 of them with 0x13 = 80 (a 160-byte row) and three that caught 0x13 = 0
-mid-write; the rest are the probe racing the demo's own CRTC writes (0x09 = 170 = 0xAA three
+26 of the 30 sampled frames read CRTC 0x09 = 0x02; 20 read 0x09 = 2, 0x12 = 143 and 0x07 = 31
+(400 lines) together, 16 of them with 0x13 = 80 (a 160-byte row), three that caught 0x13 = 0 and
+one 0x13 = 85 mid-write; the rest are the probe racing the demo's own CRTC writes (0x09 = 170 = 0xAA three
 times, among others). The display start cycles 0x0028 / 0x5528 / 0xAA28 (11 / 7 / 10 of the 30
 samples; two frames caught mid-write) — exactly the tree's six-page flip. So this was never a divergence between the
 release and the tree; it was the port's display model.
