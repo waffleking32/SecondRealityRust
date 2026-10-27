@@ -1772,6 +1772,24 @@ recovers an exact rational factor (3/2) is a hint that the capture, not the buil
 test-only `FitProbe` and the fit test are removed; `the_cube_is_a_134_row_screen` and
 `a_134_row_draw_stays_inside_its_slot` replace them.
 
+**Corrected 2026-10-26 (`fix-user-glitches`) — U2A's pre-gate palette is a race at the 30,000-cycle
+reference speed, and the port follows the four speeds that agree.** A32 adopted the release's
+"measured bright transform" `(3v + 5) & 63` for U2A's pre-gate hold from one capture, the reference
+`u2a/frame_006500.rgb` (`11a66eb0...`, 30,000 cycles). D24's procedure was applied to **one capture
+speed**. The same recipe at 15,000, 25,000, 35,000 and 60,000 cycles, at boot 6400 and 6600,
+gives `0a68ffb9...` in all eight frames (`reference/parts/u2a-speed`, `reference-indices.md` §27): the
+`U2ABG.UH` picture under the merged palette (`U2A.C:152`), the same bytes as the port's own post-gate
+7000. At 30,000 cycles 6100-6900 are the neon and 7000 is `0a68ffb9...`. The user saw the neon as a
+glitch (~13.5 s of yellow-green) and decided the port shows the normal landscape. The mechanism of the
+race is **not traced** (the release's U2A is PKLITE-packed; a guest-memory dump found the gate loop
+at linear 0x23a11 but not the source of the neon DAC); an 8.8 fixed-point copper fade running ~3x its
+count would give ~3v and wrap at 64, unproven. The port uploads the merged palette in `init`; the
+`pad_entry` palette is removed; A32 is rewritten as a registered divergence (the port is 64,000 px
+off the 30,000-cycle 6500, 0 off the other eight frames). The lesson for the procedure: a release
+behaviour measured at one emulated CPU speed is a hypothesis about timing until a second speed
+agrees. `cargo xtask rediff` re-registers `u2a` 6500 and `fullrun/02-u2a-pam` 5961/6500
+(60,160 / 64,000).
+
 ## D25 — Every number in a fidelity note is reproducible, and an unobservable claim is stated as one (2026-10-13)
 
 Four review rounds across Phase 2's Tasks 4 and 5 were spent not on code but on **records claiming

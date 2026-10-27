@@ -15,15 +15,15 @@
 //! 5. `:432-451` — the teardown: slot 2 removed, all four pages cleared with
 //!    the background.
 //!
-//! # The release's pre-gate pad
+//! # The pre-gate hold
 //!
 //! The vendored tree's `main` draws nothing before the gate, but the shipped
-//! release does: `reference/parts/u2a/frame_006500.rgb` is the `U2ABG.UH`
-//! picture under a bright palette, `(3 * background + 5) & 63` with entry 195
-//! black, from about boot 5966 to the gate (`docs/fidelity/u2a.md`; the
-//! measurement is Task 1's, `.superpowers/sdd/06-vector-engine/task-1-report.md`
-//! §4). The port paints that hold in `init` and leaves it until the gate, as
-//! the controller's rulings record.
+//! release shows the `U2ABG.UH` picture. Under the **merged** palette
+//! (`U2A.C:152`) that is what the original shows at 15,000, 25,000, 35,000 and
+//! 60,000 cycles (`reference/parts/u2a-speed`, boot 6400 and 6600); the
+//! 30,000-cycle reference's neon frame at 6500 is a timing race the port does
+//! not copy (`APPROXIMATIONS.md` A32, D24's 2026-10-26 U2A correction in `docs/decisions.md`). `init` paints
+//! that hold and leaves it until the gate.
 //!
 //! # The tick map
 //!
@@ -69,32 +69,16 @@ const SURFACE_PIXELS: usize = PAGES * PAGE_PIXELS;
 const GATE_ONE: (u8, u8) = (10, 46);
 /// The second gate (`U2A.C:276`): break when `order > 11 && row > 54`.
 const GATE_TWO: (u8, u8) = (11, 54);
-/// The pad palette's brightening: `(3 * background + 5) & 63`.
-const PAD_SCALE: u32 = 3;
-const PAD_BIAS: u32 = 5;
-/// The one measured pad entry off the formula: the white stars at index 195.
-const PAD_BLACK: u8 = 195;
 
 /// The merged palette's first background entry (`U2A.C:152`):
 /// `memcpy(scene0+16+192*3, bg+16, 64*3)`.
 const MERGE_FIRST: u8 = 192;
 
-/// The measured release pad: `(3 * background + 5) & 63` (Task 1's report
-/// §4; `docs/fidelity/u2a.md`). Every channel of every entry, entry 195
-/// excepted.
-fn pad_entry(background: [u8; 3]) -> [u8; 3] {
-    [
-        ((PAD_SCALE * u32::from(background[0]) + PAD_BIAS) & 63) as u8,
-        ((PAD_SCALE * u32::from(background[1]) + PAD_BIAS) & 63) as u8,
-        ((PAD_SCALE * u32::from(background[2]) + PAD_BIAS) & 63) as u8,
-    ]
-}
-
 /// Where the part is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
-    /// Before the first gate: the release's bright pad is up, the ring does
-    /// not exist and no copper is installed.
+    /// Before the first gate: the background is up under the merged palette,
+    /// the ring does not exist and no copper is installed.
     Pad,
     /// The draw loop (`U2A.C:259-431`).
     Loop,
@@ -106,14 +90,12 @@ enum Phase {
 pub struct U2a {
     /// The loaded `.00M`/`.00N`/`.0AB` scene.
     scene: Option<Scene>,
-    /// The `U2ABG.UH` pixels, linear 320x200: the clear image and the pad.
+    /// The `U2ABG.UH` pixels, linear 320x200: the clear image and the pre-gate hold.
     background: Vec<u8>,
-    /// The background's own 6-bit palette, the pad's and the merge's source.
+    /// The background's own 6-bit palette, the merge's source.
     background_palette: Palette,
     /// `U2A.00M` entries 0-191 with the background's 0-63 at 192-255.
     merged_palette: Palette,
-    /// `(3 * background + 5) & 63` over all 256 entries, 195 black.
-    pad_palette: Palette,
     /// The ring and projection, shared with copper slot 2.
     driver: Option<Rc<RefCell<Driver>>>,
     phase: Phase,
@@ -129,7 +111,6 @@ impl U2a {
             background: Vec::new(),
             background_palette: Palette::new(),
             merged_palette: Palette::new(),
-            pad_palette: Palette::new(),
             driver: None,
             phase: Phase::Pad,
             scene_dir: SCENE_DIR,
@@ -155,12 +136,11 @@ impl U2a {
     }
 
     /// Read the scene and the background, set the view and paint the
-    /// release's pre-gate pad.
+    /// pre-gate hold.
     ///
     /// The vendored `U2A.C` draws nothing before its gate, but the shipped
-    /// release holds the `U2ABG.UH` picture under the measured pad palette
-    /// from about boot 5966 to 6988 (`docs/fidelity/u2a.md`; Task 1's report
-    /// §4). The view, the page and the DAC are set here so the hold is up
+    /// release holds the `U2ABG.UH` picture under the merged palette
+    /// (`docs/fidelity/u2a.md` §1, A32). The view, the page and the DAC are set here so the hold is up
     /// from the part's first tick. The ring and its copper are *not* set up
     /// here: `U2A.C:249` installs `copper2` after the gate, so no retrace
     /// advances the ring during the hold.
@@ -208,13 +188,6 @@ impl U2a {
         for index in 0..64u8 {
             merged_palette.set_entry(MERGE_FIRST + index, background_palette.entry(index));
         }
-        // The measured release pad: `(3 * background + 5) & 63` over all 256
-        // entries, with the white stars' entry 195 black.
-        let mut pad_palette = Palette::new();
-        for index in 0..=255u8 {
-            pad_palette.set_entry(index, pad_entry(background_palette.entry(index)));
-        }
-        pad_palette.set_entry(PAD_BLACK, [0, 0, 0]);
 
         // `vid_init(3)` is state only (`U2A.C:242`): the part runs in the
         // shipped 320x200 mode; `vid_window(0,319,25,174,512,9999999)`
@@ -228,17 +201,18 @@ impl U2a {
         ctx.view.split = None;
         ctx.view.border = None;
 
-        // The release's hold is page 0 under the pad palette (`U2A.C:243-246`
-        // is the source's post-gate DAC upload; the release moved the picture
-        // and a measured palette in front of the gate).
+        // The release holds page 0 under the merged palette (`U2A.C:152`)
+        // before the gate. The original at 15,000, 25,000, 35,000 and 60,000
+        // cycles shows exactly that at boot 6400 and 6600
+        // (`reference/parts/u2a-speed`); only the 30,000-cycle reference shows
+        // a neon palette there, a timing race the port does not copy (A32).
         ctx.surface.pixels_mut()[..PAGE_PIXELS].copy_from_slice(&background_pixels);
-        ctx.set_palette(pad_palette);
+        ctx.set_palette(merged_palette);
 
         self.scene = Some(scene);
         self.background = background_pixels;
         self.background_palette = background_palette;
         self.merged_palette = merged_palette;
-        self.pad_palette = pad_palette;
         self.driver = None;
         self.phase = Phase::Pad;
         Ok(())
@@ -437,10 +411,17 @@ mod tests {
     const TEST_REFERENCE_6500: &str = "../../reference/parts/u2a/frame_006500.rgb";
     const TEST_REFERENCE_7300: &str = "../../reference/parts/u2a/frame_007300.rgb";
     const TEST_REFERENCE_7640: &str = "../../reference/parts/u2a/frame_007640.rgb";
-    /// The 7640 index plane: the `U2ABG.UH` image under the natural palette
-    /// (`docs/fidelity/u2a.md` §4). The 6500 frame is the same pixels under
-    /// the pad palette, so the pair measures the palette entry by entry.
-    const TEST_REFERENCE_7640_IDX: &str = "../../reference/parts/u2a/frame_007640.idx";
+    const NEON_DIFFERING: usize = 64_000;
+    const TEST_SPEED_FRAMES: [&str; 8] = [
+        "../../reference/parts/u2a-speed/c15000/frame_006400.rgb",
+        "../../reference/parts/u2a-speed/c15000/frame_006600.rgb",
+        "../../reference/parts/u2a-speed/c25000/frame_006400.rgb",
+        "../../reference/parts/u2a-speed/c25000/frame_006600.rgb",
+        "../../reference/parts/u2a-speed/c35000/frame_006400.rgb",
+        "../../reference/parts/u2a-speed/c35000/frame_006600.rgb",
+        "../../reference/parts/u2a-speed/c60000/frame_006400.rgb",
+        "../../reference/parts/u2a-speed/c60000/frame_006600.rgb",
+    ];
 
     /// The music a unit test hands the part: one scripted published position
     /// a tick, every other call the null reading.
@@ -662,7 +643,7 @@ mod tests {
     // --- the brief's tests --------------------------------------------------
 
     #[test]
-    fn init_sets_the_shipped_view_and_paints_the_pad() {
+    fn init_sets_the_shipped_view_and_paints_the_background() {
         let (rig, part) = started_with(Player::closed());
         assert_eq!(part.phase, Phase::Pad);
         assert_eq!((rig.view.width, rig.view.height), (VIEW_WIDTH, VIEW_HEIGHT));
@@ -670,7 +651,7 @@ mod tests {
         assert_eq!(rig.view.y_line_offset, Some(320), "CRTC 0x13: 320 pixels a line");
         assert!(!rig.view.double_scan);
         assert_eq!(rig.page(0), part.background, "page 0 holds U2ABG.UH");
-        assert_eq!(rig.palette, part.pad_palette, "the measured pad palette is up");
+        assert_eq!(rig.palette, part.merged_palette, "the merged palette is up before the gate");
         assert!(!rig.copper.is_set(0));
         assert!(!rig.copper.is_set(1));
         assert!(!rig.copper.is_set(2), "the ring's copper is installed at the gate");
@@ -678,58 +659,14 @@ mod tests {
     }
 
     #[test]
-    fn the_pad_palette_is_the_measured_formula_with_entry_195_black() {
-        let (rig, part) = started_with(Player::closed());
-        for index in 0..=255u8 {
-            let expected = if index == PAD_BLACK {
-                [0, 0, 0]
-            } else {
-                pad_entry(part.background_palette.entry(index))
-            };
-            assert_eq!(rig.palette.entry(index), expected, "pad entry {index}");
-        }
-        // The one measured entry off the formula: U2ABG entry 3 is 63 and
-        // would brighten to 2, but the reference's white stars are black.
-        assert_eq!(part.background_palette.entry(PAD_BLACK), [63, 63, 63]);
-        assert_eq!(pad_entry([63, 63, 63]), [2, 2, 2]);
-
-        // A32's counts, measured rather than quoted: the reference's own
-        // 7640 index plane says which pixels use which entry, and the 6500
-        // frame — the same picture under the pad palette — says what the
-        // release's DAC showed there. Of the 57,600 pixels whose index is
-        // >= 192, the formula reproduces 57,516; the other 84 are the
-        // index-195 stars, which the release renders black.
-        let indices = reference(TEST_REFERENCE_7640_IDX);
-        let measured = reference(TEST_REFERENCE_6500);
-        let pixels = usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT);
-        assert_eq!(indices.len(), pixels, "the 7640 index plane is one byte a pixel");
-        assert_eq!(measured.len(), pixels * 3, "the 6500 frame is one RGB triple a pixel");
-        let mut above_192 = 0usize;
-        let mut stars = 0usize;
-        let mut formula_matches = 0usize;
-        for (&index, rgb) in indices.iter().zip(measured.chunks_exact(3)) {
-            if index < 192 {
-                continue;
-            }
-            above_192 += 1;
-            if index == PAD_BLACK {
-                stars += 1;
-            }
-            // The background's own entries 0..63 are the palette the release
-            // transformed; 192..255 index them (`(3 * bg + 5) & 63`).
-            let entry = pad_entry(part.background_palette.entry(index - 192));
-            let expected = [
-                dac_expand(entry[0]),
-                dac_expand(entry[1]),
-                dac_expand(entry[2]),
-            ];
-            if rgb == expected {
-                formula_matches += 1;
-            }
-        }
-        assert_eq!(above_192, 57_600, "the pixels that use indices >= 192");
-        assert_eq!(stars, 84, "the index-195 star pixels");
-        assert_eq!(formula_matches, 57_516, "the pixels the formula reproduces");
+    fn the_pre_gate_frame_is_the_background_under_the_merged_palette() {
+        let (mut rig, mut part) = started_with(Player::closed());
+        let (_, frame) = rig.step_render(&mut part);
+        assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
+        // Not the neon: the 30,000-cycle 6500 frame's formula
+        // `(3v + 5) & 63` would put entry 195's 63 at 2.
+        assert_ne!(part.merged_palette.entry(195), [2, 2, 2]);
+        assert_eq!(part.merged_palette.entry(195), part.background_palette.entry(3));
     }
 
     #[test]
@@ -765,14 +702,14 @@ mod tests {
             (GATE_ONE.0 + 1, GATE_ONE.1),
             (GATE_ONE.0 + 1, GATE_ONE.1 + 1),
         ]));
-        let pad_page = rig.page(0).to_vec();
-        let pad_palette = rig.palette;
+        let hold_page = rig.page(0).to_vec();
+        let hold_palette = rig.palette;
         // Row 46 is not `> 46`, and order 10 is not `> 10`: two closed ticks.
         for _ in 0..2 {
             assert_eq!(rig.step(&mut part), PartStatus::Continuing);
             assert_eq!(part.phase, Phase::Pad);
-            assert_eq!(rig.page(0), pad_page, "the pad holds");
-            assert_eq!(rig.palette, pad_palette, "the pad DAC holds");
+            assert_eq!(rig.page(0), hold_page, "the hold holds");
+            assert_eq!(rig.palette, hold_palette, "the hold DAC holds");
             assert!(part.driver.is_none(), "no ring before the gate");
             assert!(!rig.copper.is_set(2), "no copper before the gate");
         }
@@ -792,9 +729,9 @@ mod tests {
         let (mut rig, mut part) = started_with(Player::closed());
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
-        // `U2A.C:239`'s bare `return` leaves the pad: no copper, no clear.
-        assert_eq!(rig.page(0), part.background, "the pad screen stays up");
-        assert_eq!(rig.palette, part.pad_palette, "and the pad DAC");
+        // `U2A.C:239`'s bare `return` leaves the hold: no copper, no clear.
+        assert_eq!(rig.page(0), part.background, "the hold screen stays up");
+        assert_eq!(rig.palette, part.merged_palette, "and its DAC");
         assert!(!rig.copper.is_set(2), "no copper was installed");
         assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
 
@@ -928,18 +865,29 @@ mod tests {
         assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
         assert_eq!(rig.page(0), part.background);
 
-        // The pad before the gate is the same pixels under the pad palette.
+        // The hold before the gate is the same pixels under the same palette.
         let (mut rig, mut part) = started_with(Player::closed());
         let (_, frame) = rig.step_render(&mut part);
-        assert_eq!(frame, plain_rgb(&part.background, &part.pad_palette));
+        assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
     }
 
     #[test]
-    fn the_pad_hold_is_the_reference_6500() {
+    fn the_pre_gate_hold_is_the_four_speeds_captures() {
+        let (mut rig, mut part) = started_with(Player::closed());
+        let (_, frame) = rig.step_render(&mut part);
+        for path in TEST_SPEED_FRAMES {
+            assert_eq!(differing_pixels(&frame, &reference(path)), 0, "{path}");
+        }
+    }
+
+    #[test]
+    fn the_30000_cycle_neon_6500_differs_by_the_registered_count() {
+        // A32: the 30,000-cycle reference's 6500 is a timing race the port
+        // does not copy. This is also the guard against a regression to it.
         let (mut rig, mut part) = started_with(Player::closed());
         let (_, frame) = rig.step_render(&mut part);
         let differing = differing_pixels(&frame, &reference(TEST_REFERENCE_6500));
-        assert_eq!(differing, 0, "the pad frame is not the reference's");
+        assert_eq!(differing, NEON_DIFFERING, "A32's count");
     }
 
     /// One image through one palette, widened as the engine widens it.

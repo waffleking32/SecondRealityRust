@@ -209,14 +209,15 @@ fn the_reference_tree_the_repository_ships_checks_out() {
     // fifty-two files past that (`docs/fidelity/reference-indices.md` §25).
     // Phase 9 Task 2's full `SECOND 1` run adds fifteen captures and sixty-two
     // files: the thirteen `fullrun/*` screens (44 frames, 16 index planes) and
-    // the two traces `music/second1e` and `music/second1f` (§26).
+    // the two traces `music/second1e` and `music/second1f` (§26). `fix-user-glitches`
+    // adds the four `u2a-speed/c*` captures, eight files (§27).
     let reference = repo_root().join("reference");
     let run = xtask(&repo_root(), &reference, "verify");
 
     assert_eq!(run.code, 0, "{}", run.output());
     assert!(
         run.stdout
-            .contains("verdict: ok — 67 capture(s), 262 file(s)"),
+            .contains("verdict: ok — 71 capture(s), 270 file(s)"),
         "{}",
         run.output()
     );

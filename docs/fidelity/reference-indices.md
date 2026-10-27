@@ -6162,7 +6162,7 @@ removed.
   difference, worst displacement 8) and `second1f` (row index 502, trace 27 / port 26; port-only value
   at 38376; worst displacement 12). **Task 6 owns resolving or registering each.**
 
-`cargo xtask reference verify --tree reference` passes over **67 captures (262 files)**: the
+`cargo xtask reference verify --tree reference` passes over **71 captures (270 files)** (67 / 262 until `u2a-speed`, §27): the
 thirteen `parts/fullrun/*` captures (44 frames, 60 files) and the two traces (one file each).
 
 ### 26.8 The port's column (Phase 9 Task 6; re-measured by Task 6b)
@@ -6323,7 +6323,7 @@ comparisons, every one at its registered count**:
 | capture | reference → rendered (plane): count |
 |---|---|
 | `01-alku` | 1719 → 1719: 0 |
-| `02-u2a-pam` | 5961 → 6008: 63,788 · 6500 → 6547: 0 · 7707 → 7704: 0 (and idx 0) · 7880 → 7877: 0 (idx 48,786) · 7920 → 7884: 0 |
+| `02-u2a-pam` | 5961 → 6008: 60,160 · 6500 → 6547: 64,000 (the 30,000-cycle neon, A32; was 0 until 2026-10-26) · 7707 → 7704: 0 (and idx 0) · 7880 → 7877: 0 (idx 48,786) · 7920 → 7884: 0 |
 | `03-beglogo` | 7930 → 7893: 81,273 · 8300 → 8263: 0 (and idx 0) · 8522 → 8527: 0 |
 | `04-glenz-techno` | 8572 → 8577: 0 (and idx 0) · 8900 → 8905: 0 (and idx 0) · 11159 → 11152: 192 · 11900 → 11893: 4,336 · 12214 → 12216: 0 · 12400 → 12402: 0 |
 | `05-troll-panicend` | 16000 → 16002: 0 · 16193 → 16181: 108,923 |
@@ -6336,10 +6336,39 @@ comparisons, every one at its registered count**:
 | `12-cred` | 38583 → 38564: 0 · 40600 → 40581: 7,204 (A10's) |
 | `13-endscrl` | 46280 → 46192: 42 · 46283 → 46195: 67 · 46286 → 46198: 149 |
 
-**Every held frame compares at 0 in RGB** — 1719, 6500, 7880, 8300, 8900, 12400, 16000, 16500,
+**Every held frame compares at 0 in RGB** — 1719, 7880, 8300, 8900, 12400, 16000, 16500,
 16636, 16690, 29800, 33900, 34250 and 38300 — except the two that carry their part's own
-registered count (19000 is `lnszoom`'s 2700 at A25's 2,058; 40600 is `cred`'s 3240 at A10's 7,204)
+registered count (6500 is the 30,000-cycle neon at A32's 64,000; 19000 is `lnszoom`'s 2700 at A25's 2,058; 40600 is `cred`'s 3240 at A10's 7,204)
 and 34110, whose white the port does not show (its index plane is the hold's, 0). The non-zero
 index planes under a 0 RGB (7880, 24540, 37970) are memory under a white or black DAC that no screen
 shows. The moving frames' counts, and the pairing of every frame at a start difference other than
 0, are A53's.
+
+## 27. U2A's pre-gate hold at four other CPU speeds (`fix-user-glitches`, 2026-10-26)
+
+The 30,000-cycle reference's `u2a/frame_006500.rgb` (`11a66eb0...`) is a neon palette (A32). To see
+whether that is stable, the same recipe was captured at four other speeds, two frames each, one
+session per speed. Each capture is
+
+```bash
+cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter" --cycles <N> --frames 6400,6600 --out <dir>
+```
+
+with `<N>` = 15000, 25000, 35000, 60000, taken to the scratch `out/glitch-pad-c<N>` and then copied
+byte for byte to `reference/parts/u2a-speed/c<N>` (the only new directories under `reference/`;
+each frame's sha256 was checked against its manifest after the copy):
+
+| directory | cycles | 6400 sha256 | 6600 sha256 |
+|---|---|---|---|
+| `u2a-speed/c15000` | 15000 | `0a68ffb92f0e208a...` | `0a68ffb92f0e208a...` |
+| `u2a-speed/c25000` | 25000 | `0a68ffb92f0e208a...` | `0a68ffb92f0e208a...` |
+| `u2a-speed/c35000` | 35000 | `0a68ffb92f0e208a...` | `0a68ffb92f0e208a...` |
+| `u2a-speed/c60000` | 60000 | `0a68ffb92f0e208a...` | `0a68ffb92f0e208a...` |
+
+`0a68ffb9...` is the `U2ABG.UH` picture under the merged palette; it is the port's post-gate frame
+7000 and PAM's held 7600/7640. At 30,000 cycles (scratch `out/glitch-u2a-pad`, every 100 frames
+6100-7700) 6100-6900 are `11a66eb0...` and 7000 is `0a68ffb9...`. The port at 6400 and 6600 compares
+at 0 against all eight (`cargo xtask rediff --only u2a-speed`, and `tests/u2a.rs`
+`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`). These are fidelity evidence, not
+keyframes with ±1 supports: the pre-gate hold is held, so no support frames are needed (§1.3).
+

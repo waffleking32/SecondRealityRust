@@ -2002,41 +2002,46 @@ the_keyframes_record_the_measured_session_phase_and_gouraud_residual` and the
 (D17); the port's intro is exact against the sessions that agree with it, and moving the anchor
 would move it.
 
-## A32 — U2A: the pre-gate pad palette is the release's measured bright transform (adopted)
+## A32 — U2A: the pre-gate hold shows the normal landscape, not the 30,000-cycle reference's neon (registered divergence, adopted on the user's decision)
 
-**Part:** U2A (`VISU/C/U2A.C` over the VISU engine), Phase 6.
+**Part:** U2A (`VISU/C/U2A.C` over the VISU engine), Phase 6; revised 2026-10-26 (`fix-user-glitches`).
 
-**Original:** the tree draws nothing before its first music gate (`U2A.C:229-240`), but the
-release paints the `U2ABG.UH` picture at the part's start and shows it under a **bright**
-palette until the gate. The released palette is not the tree's merged scene palette and not
-ALKU's final DAC: both match **0 of 64,000** pixels of the reference's 6500 frame. It is the
-background palette passed through `(3 × bg + 5) & 63` on every channel — reconstructed with
-zero conflicts from the 6500 RGB and the 7640 index plane (52 entries) and independently from
-7300's own RGB by its own index plane — with **entry 195 black**, the entry the background's
-white stars use.
+**Original:** the tree draws nothing before its first music gate (`U2A.C:229-240`); the release
+shows the `U2ABG.UH` picture from the part's start to the gate (boot ~5961 to ~7000, ~13.5 s). What
+palette it shows depends on the emulated CPU speed. The reference at **30,000** cycles
+(`reference/parts/u2a/frame_006500.rgb`, sha256 `11a66eb0...`) holds a neon yellow-green palette,
+the background palette through `(3v + 5) & 63` with entry 195 black; the `out/glitch-u2a-pad`
+scratch capture (every 100 frames, 6100-7700) has 6100-6900 all `11a66eb0...` and 7000 `0a68ffb9...`.
+At **15,000, 25,000, 35,000 and 60,000** cycles the same recipe gives, at boot 6400 and 6600,
+`0a68ffb9...` every time (eight frames, filed as `reference/parts/u2a-speed/c{15000,25000,35000,60000}`,
+`reference-indices.md` §27). `0a68ffb9...` is the `U2ABG.UH` picture under the **merged** palette
+(`U2A.C:152`): the port's own post-gate frames (7000, and PAM's held 7600/7640) are the same bytes. So
+four speeds out of five agree, and the neon is a timing race the 30,000-cycle reference happens to hit.
+**Its mechanism is not traced**: the release's U2A is PKLITE-packed, and a guest-memory dump found the
+gate loop at linear 0x23a11 (`a > 10 && b > 46`, as the tree) but did not establish where the neon DAC
+comes from. An 8.8 fixed-point copper fade running about 3x its count (giving ~3v, wrapping at 64) is a
+plausible reading and is **unproven**.
 
-**Port:** `init` paints page 0 with the `U2ABG.UH` payload and uploads
-`pad_entry(v) = (3v + 5) & 63` over all 256 entries with entry 195 forced black; the merged
-scene palette goes up at gate 1, as the source has it. The whole 6500 frame then compares at
-**0 of 64,000** pixels.
+**Port:** `init` paints page 0 with the `U2ABG.UH` payload and uploads the **merged** palette
+(`U2A.C:152`) for the whole pre-gate hold; the same palette stays at gate 1, so the hold, the first
+draw and PAM's hold share one DAC. The previous `(3v + 5) & 63` pad palette (`pad_entry`, entry 195
+black) is removed.
 
-**Why (D24, adopted).** This is the release behaving where the tree does not, and the measured
-formula is one constant expression the tree can carry; it reproduces every used entry but one,
-and that one is a single forced black. Adopting the release's picture is the rule D24's
-procedure gives when the value is measurable and reproducible; inventing the tree's silence
-would be a visible miss at the reference's own keyframe. The 195 entry's 84 star pixels are
-the exception the formula cannot express (it predicts `(2,2,2)` there), so the port carries
-the measured exception rather than the formula's value.
+**Why (D24, applied to all the evidence; the user's decision).** The earlier entry adopted the
+30,000-cycle frame as "the release's" behaviour on the evidence of that one capture speed. Four other
+speeds show the normal landscape, so the neon is not a stable property of the release; the user
+chose the normal landscape. This is a divergence from the 30,000-cycle reference, registered here,
+not a claim that the reference is wrong at its speed.
 
-**Measured difference:** the formula matches **57,516 of the 57,600** pixels that use indices
-≥ 192; the remaining **84** are the index-195 pixels, which the adopted black entry renders
-black — exactly the reference's pixels — so the full frame is **0/64,000**. Task 1's two
-index-plane reconstructions and the candidate comparison are
-`.superpowers/sdd/06-vector-engine/task-1-report.md` §4; the counts are now produced in-tree
-by `cargo test -p secondreality --bin secondreality
-the_pad_palette_is_the_measured_formula_with_entry_195_black`, which reads
-`reference/parts/u2a/frame_007640.idx` and `frame_006500.rgb` with the `U2ABG.UH` palette and
-asserts **57,600 / 84 / 57,516**, and the port's whole frame by `the_pad_hold_is_the_reference_6500`.
+**Measured difference:** the port's pre-gate frame compares at **0/64,000** against all eight
+`u2a-speed` frames (`cargo test --release -p secondreality --test u2a
+the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`, and the unit test
+`the_pre_gate_hold_is_the_four_speeds_captures`) and at **64,000/64,000** against the 30,000-cycle
+6500 frame (`the_30000_cycle_neon_6500_differs_by_the_registered_count`, both in the unit and the
+integration tests; every pixel is off because the palette differs). `cargo xtask rediff` registers it
+for `u2a` 6500 (64,000) and for `fullrun/02-u2a-pam` 6500 (64,000) and 5961 (60,160, was 63,788
+under the neon; the frame is U2A's first, 47 frames late, A53). The old 57,600 / 84 / 57,516 pad-formula
+counts are retired with the test that produced them.
 
 ## A33 — U2A: the first draw uses `fov = 0` for the C's uninitialised variable (substitution; no measured difference)
 
@@ -2909,9 +2914,9 @@ the three frames the original shows during a loader stretch the port does not ha
 fullrun` compares all 60 (44 frames, 16 index planes) at their registered counts — the same 60
 counts at Task 6's pairings and at Task 6b's, every one re-measured
 (`xtask/src/rediff/table.rs`'s `fullrun/*` entries; the full list is `reference-indices.md` §26.8).
-Every held frame is 0 in RGB but A25's 19000 (2,058), A10's 40600 (7,204) and 34110 (72,363: the
+Every held frame is 0 in RGB but U2A's 6500 (64,000: the 30,000-cycle neon, A32), A25's 19000 (2,058), A10's 40600 (7,204) and 34110 (72,363: the
 reload's white, which the port never shows; its index plane is 0). The moving frames this entry
-registers are 5961 (63,788: U2A's opening, 47 frames late), 7930 (81,273, at BEGLOGO's −37),
+registers are 5961 (60,160: U2A's opening, 47 frames late), 7930 (81,273, at BEGLOGO's −37),
 11159 (192), 11900 (4,336), 16193 (108,923: PANICEND's squashed troll), 18656 (129), 24500
 (45,808), 29174 (875), 31272 (4), 31901 (33,554; idx 34,036 — 3DSINFLD draws every second frame),
 46280/46283/46286 (42/67/149); and three index planes under a 0 RGB, memory no screen shows: 7880
@@ -2922,7 +2927,7 @@ registers are 5961 (63,788: U2A's opening, 47 frames late), 7930 (81,273, at BEG
 --only fullrun`, every frame at its count; `cargo test --release -p secondreality --test fullrun --
 --nocapture` prints the table above unchanged):
 
-- **U2A's opening, 63,788 px at 5961** — the frame is U2A's first, 47 frames late; that ALKU's
+- **U2A's opening, 60,160 px at 5961** — the frame is U2A's first, 47 frames late; that ALKU's
   end is at least as late is measured, its cause is not established (the leads are above), and no
   `alku` keyframe sees ALKU's end.
 - **PANICEND's first frame, 108,923 px at 16193** — not attributed: a moving frame at the part's

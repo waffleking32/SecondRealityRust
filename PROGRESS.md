@@ -2589,9 +2589,9 @@ the two shell seams the restart needed — `Part::drains_after_exit` (default `f
 `a_part_that_does_not_drain_retires_on_the_exit_tick`,
 `a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown` and
 `the_drain_follows_a_restart_to_the_runs_new_player`. The register gains **A28–A31** (the two
-parts' four registered divergences) and **A32–A35** (the adopted pad palette and the three
+parts' four registered divergences) and **A32–A35** (the pre-gate hold, whose pad palette 2026-10-26 replaced with the merged one, and the three
 zero-difference substitutions: `fov = 0`, the linear fill page and the packed four-page
-layout); A32's port frame is **0/64,000** after its one forced entry, and A33–A35 measure 0 on
+layout); A32's port frame is, since 2026-10-26, the merged-palette landscape (**0/64,000** against the four `u2a-speed` captures, 64,000 against the 30,000-cycle neon 6500), and A33–A35 measure 0 on
 every shipped comparison. Every entry names its reproducing test or command.
 
 **The suite and both clippy gates.** `cargo test --workspace` is green — **1,201 passed, 0
@@ -2968,7 +2968,7 @@ Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered 
 | `endlogo` | 4 | 4 | — | — |
 | `endscrl` | 4 | 0 | 7289 / 28333 / 25502 / 17108 | A11 |
 | `fullrun/01-alku` | 1 | 1 | — | — |
-| `fullrun/02-u2a-pam` | 7 | 5 | 63788 / 48786 | A53 |
+| `fullrun/02-u2a-pam` | 7 | 4 | 60160 / 64000 / 48786 | A53, A32 |
 | `fullrun/03-beglogo` | 4 | 3 | 81273 | A53 |
 | `fullrun/04-glenz-techno` | 8 | 6 | 192 / 4336 | A53 |
 | `fullrun/05-troll-panicend` | 2 | 1 | 108923 | A53 |
@@ -3115,7 +3115,7 @@ value: `error: unexpected argument 'assets' found`, exit 2.)
 ```text
 $ cargo xtask reference verify --tree reference
 (…)
-verdict: ok — 67 capture(s), 262 file(s), 66654129 bytes        exit 0
+verdict: ok — 71 capture(s), 270 file(s), 68190129 bytes        exit 0
 
 $ cargo xtask assets verify --tree --decode
 (…)

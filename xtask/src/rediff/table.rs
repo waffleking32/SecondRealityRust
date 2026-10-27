@@ -402,8 +402,8 @@ pub const TABLE: &[Entry] = &[
         capture: "fullrun/02-u2a-pam",
         args: &["--block", "1"],
         frames: &[
-            rgb_at(5961, Part::U2a, 63788, "A53"),
-            rgb_at(6500, Part::U2a, 0, "A53"),
+            rgb_at(5961, Part::U2a, 60160, "A53"),
+            rgb_at(6500, Part::U2a, 64000, "A53"),
             rgb_at(7707, Part::Pam, 0, "A53"),
             idx_at(7707, Part::Pam, 0, "A53"),
             rgb_at(7880, Part::Pam, 0, "A53"),
@@ -774,18 +774,46 @@ pub const TABLE: &[Entry] = &[
             rgb0(603, 600),
         ],
     },
-    // tests/u2a.rs, block 1 (:55): 6500 RGB at 0 (:237), 7300 at 1,098 in both planes
-    // (:270, :273, A29), 7640 at 0 in both planes (:248, :253).
+    // tests/u2a.rs, block 1 (:55): 6500 RGB at 64,000 (the 30,000-cycle neon frame, A32),
+    // 7300 at 1,098 in both planes (A29), 7640 at 0 in both planes.
     Entry {
         capture: "u2a",
         args: &["--block", "1"],
         frames: &[
-            rgb0(6500, 6500),
+            rgb(6500, 6500, 64000, "A32"),
             idx(7300, 7300, 1098, "A29"),
             rgb(7300, 7300, 1098, "A29"),
             idx0(7640, 7640),
             rgb0(7640, 7640),
         ],
+    },
+    // The original at 15000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
+    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    Entry {
+        capture: "u2a-speed/c15000",
+        args: &["--block", "1"],
+        frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
+    },
+    // The original at 25000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
+    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    Entry {
+        capture: "u2a-speed/c25000",
+        args: &["--block", "1"],
+        frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
+    },
+    // The original at 35000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
+    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    Entry {
+        capture: "u2a-speed/c35000",
+        args: &["--block", "1"],
+        frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
+    },
+    // The original at 60000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
+    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    Entry {
+        capture: "u2a-speed/c60000",
+        args: &["--block", "1"],
+        frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
     // tests/u2e.rs, block 4 (:55): the test's own index rule, the reference's state at the
     // port's K − 4 (:221-251), where the silhouettes are exact and the residual is the

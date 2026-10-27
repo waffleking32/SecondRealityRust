@@ -1,8 +1,8 @@
-//! U2A through the real binary: the block-1 numbering, the release's pad,
+//! U2A through the real binary: the block-1 numbering, the pre-gate hold,
 //! the saucer frame and the cleared hold.
 //!
 //! The part's arithmetic is unit-tested beside it in `src/parts/u2a.rs`: the
-//! pad palette and the merged palette, the two gates, the first stream frame
+//! merged palette and the pre-gate hold, the two gates, the first stream frame
 //! and frame 16's toggle, the END's tick and the teardown, and the measured
 //! stream state behind the reference's 7300. What is left over here is the
 //! wiring only a process can answer: the registry name, the asset paths as a
@@ -16,8 +16,9 @@
 //! frame the evidence does not name, which is why this test runs the block.
 //!
 //! **The reference's three keyframes, and what the port's run shows.** 6500
-//! is the release's pre-gate pad — the `U2ABG` picture under
-//! `(3 * background + 5) & 63`, entry 195 black — and it compares at 0. 7640
+//! is the 30,000-cycle reference's neon pre-gate frame, which the port does not show (A32):
+//! it differs in all 64,000 pixels, while the port's hold compares at 0 against the four
+//! `reference/parts/u2a-speed` captures. 7640
 //! is the cleared hold after U2A's END; the screen is U2A's, but the part
 //! running is PAM, which is in its own sync gate and leaves the predecessor's
 //! picture up, so the dump names the frame `pam_007640`. It compares at 0,
@@ -164,8 +165,9 @@ fn trace_position(name: &str, frame: u32) -> (u8, u8) {
     panic!("{name} holds no frame {frame}")
 }
 
-/// 6500 is held (the pad), 7300 moves, and 7640 is held; the dump carries
+/// 6500 is held (the pre-gate hold), 7300 moves, and 7640 is held; the dump carries
 /// the moving keyframe's neighbours so the port's own page phase is visible.
+const NEON_6500: usize = 64_000;
 const FRAMES: &str = "6500,7299,7300,7301,7640";
 
 #[test]
@@ -228,13 +230,32 @@ fn the_block_one_clock_matches_second1_at_boot_5900() {
 }
 
 #[test]
-fn the_pad_reference_6500_compares_at_zero() {
+fn the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures() {
     let (dir, manifest) = dump("pad", FRAMES);
+    let rendered = dumped_file(&dir, &manifest, 6500, "rgb");
+    for speed in ["c15000", "c25000", "c35000", "c60000"] {
+        for index in [6400, 6600] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../reference/parts/u2a-speed")
+                .join(speed)
+                .join(format!("frame_{index:06}.rgb"));
+            let expected = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let count = differing(&rendered, &expected, 3);
+            println!("{speed} boot {index}: {count}/64000 px differ");
+            assert_eq!(count, 0, "{speed} {index}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_30000_cycle_neon_6500_differs_by_the_registered_count() {
+    let (dir, manifest) = dump("neon", FRAMES);
     let rendered = dumped_file(&dir, &manifest, 6500, "rgb");
     let expected = reference_frame(6500, "rgb");
     let count = differing(&rendered, &expected, 3);
     println!("boot 6500: {count}/64000 px differ");
-    assert_eq!(count, 0, "the pad is not the reference's");
+    assert_eq!(count, NEON_6500, "A32's count");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

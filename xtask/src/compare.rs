@@ -2125,13 +2125,14 @@ mod tests {
         // `docs/fidelity/reference-indices.md` §25). Phase 9 Task 2 adds
         // thirteen: `fullrun` holds one capture per screen geometry the
         // `SECOND 1` run passes through, in run order (`01-alku` … `13-endscrl`,
-        // §26). A scan of the first level
+        // §26). `fix-user-glitches` adds four: `u2a-speed/c15000`, `c25000`, `c35000` and
+        // `c60000` (§27). A scan of the first level
         // measured 18 of the 23 and still said `verdict: identical`, so the
         // whole-tree form is pinned against the per-part form: the two have to
         // find the same directories, no more and no fewer.
         let parts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/parts");
         let whole = resolve_captures(&parts).unwrap();
-        assert_eq!(whole.len(), 47, "the tree's capture directories, reviewed and pinned");
+        assert_eq!(whole.len(), 51, "the tree's capture directories, reviewed and pinned");
 
         let mut per_part: Vec<PathBuf> = Vec::new();
         for entry in fs::read_dir(&parts).unwrap() {
@@ -2141,13 +2142,13 @@ mod tests {
             }
             // Every subdirectory of `parts/` holds captures: twenty-one hold one
             // each, the two Mode X parts hold two and three, `loop` holds two,
-            // the two lead-ins three each and `fullrun` thirteen — so a
+            // the two lead-ins three each, `fullrun` thirteen and `u2a-speed` four — so a
             // subdirectory with none is a change to the tree this test is about.
             let captures = resolve_captures(&path)
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             per_part.extend(captures.into_iter().map(|capture| capture.dir));
         }
-        assert_eq!(per_part.len(), 47, "the same 47, one invocation per part");
+        assert_eq!(per_part.len(), 51, "the same 51, one invocation per part");
 
         // Both directions: a whole-tree run may not miss a capture the per-part
         // form finds, and may not measure one no per-part form finds.

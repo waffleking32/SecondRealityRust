@@ -1,7 +1,7 @@
 # U2A — the landing pad and the saucer
 
-`SECOND 1`'s second part: the VISU vector engine's debut. The release holds a
-bright landing pad through the first music gate, then draws a small saucer
+`SECOND 1`'s second part: the VISU vector engine's debut. The release holds the
+landscape picture through the first music gate, then draws a small saucer
 against the same landscape for about 520 stream frames before clearing the
 screen and holding the plain background for PAM.
 
@@ -50,12 +50,15 @@ to it.
 The release does more **before** the gate than the tree: `U2A.C` draws
 nothing until `:259`, while the reference's 6500 frame — 534–540 frames after
 the paint measured in (5960, 5966] — is the `U2ABG.UH` picture under a
-different DAC. Task 1 measured it
-(`.superpowers/sdd/06-vector-engine/task-1-report.md` §4) and the controller's
-ruling made it the port's `init`: set the view to 320×200, paint page 0 with
-the background, upload the pad palette. The pad appears in that window, and
-this is the *release's* behaviour, not the tree's (D24's first kind of
-difference: the shipped build does something a source in the tree does not).
+neon palette at the 30,000-cycle reference speed. Task 1 measured that frame
+(`.superpowers/sdd/06-vector-engine/task-1-report.md` §4); four other speeds
+(15,000, 25,000, 35,000, 60,000 cycles, `reference/parts/u2a-speed`,
+`reference-indices.md` §27) show the background under the **merged** palette
+instead, so the neon is a timing race. The port's `init` sets the view to
+320×200, paints page 0 with the background and uploads the merged palette
+(A32, adopted on the user's decision 2026-10-26). That the release shows
+the picture before the gate at all is its behaviour, not the tree's (D24's
+first kind of difference); the palette it shows is speed-dependent.
 
 ## 2. The screen and the four pages
 
@@ -149,7 +152,7 @@ awk -F, '$1==7617 || $1==7618 {print $1":"$2":"$3}' \
   draws. This is the original's own schedule (`U2A.C:278-336`) and the port's
   ring unit tests pin its cadence (`parts/visu/mod.rs`).
 
-## 4. The palette merge and the measured pad
+## 4. The palette merge, and the pre-gate hold
 
 `U2A.C:152` is the merge, quoted:
 
@@ -165,30 +168,32 @@ builds the expected palette from both files and asserts it, plus that entry
 191 is still the scene's and that the scene's own 192 differs from the
 background's 0 (so the merge is observable).
 
-The release's pad palette is **not** the merged one. It is the background
-palette passed through `(3*v + 5) & 63` on every channel of every entry, with
-entry 195 forced black: Task 1 reconstructed 52 entries from the 6500 RGB
-against the 7640 index plane with no conflicts, and the formula reproduces
-57,516 of the 57,600 pixels that use indices ≥192, the other 84 being the
-index-195 stars the black entry renders. The counts are reproduced in-tree by
-`the_pad_palette_is_the_measured_formula_with_entry_195_black`, which reads
-`frame_007640.idx` and `frame_006500.rgb` with the `U2ABG.UH` palette and
-asserts 57,600 / 84 / 57,516. The port applies the formula to all 256 entries
-(`pad_entry`) and blacks entry 195; the resulting whole frame compares at
-**0 of 64,000 pixels** against `frame_006500.rgb`
-(`the_pad_hold_is_the_reference_6500`, and the integration test).
+The pre-gate hold is the background under this merged palette. At 15,000,
+25,000, 35,000 and 60,000 cycles the original shows exactly that at boot 6400
+and 6600 (`0a68ffb9...`, eight frames in `reference/parts/u2a-speed`), and the
+port's hold compares at **0 of 64,000** against all eight. The 30,000-cycle
+reference's 6500 (`11a66eb0...`) is instead a neon palette, the background
+through `(3v + 5) & 63` with entry 195 black; its mechanism is not traced
+(the release's U2A is PKLITE-packed), and the port does not copy it: it
+differs from that frame in **64,000 of 64,000** pixels (A32). An 8.8
+fixed-point copper fade running ~3x its count would give ~3v and wrap at 64;
+that is unproven. Both counts are asserted by
+`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures` and
+`the_30000_cycle_neon_6500_differs_by_the_registered_count` in
+`tests/u2a.rs`.
 
-At gate 1 the merged palette goes up (`U2A.C:243-246` in the source, after
-the gate); the port uploads it on the gate-open tick, before the first draw.
+Because the same palette is up before and at gate 1 (`U2A.C:243-246` is the
+source's upload, after the gate), the gate-open tick re-uploads it unchanged
+before the first draw.
 
 ## 5. The reference comparison, and the 7300 divergence
 
 Three keyframes, captured with `SECOND 1` (`reference/parts/u2a/`:
-6500 the pad, 7300 the saucer, 7640 the cleared hold):
+6500 the 30,000-cycle neon hold, 7300 the saucer, 7640 the cleared hold):
 
 | index | port | result |
 |---|---|---|
-| 6500 | `u2a_006500` | **0 differing** RGB pixels (`the_pad_reference_6500_compares_at_zero`, and the unit test) |
+| 6500 | `u2a_006500` | **64,000 differing** RGB pixels: the neon palette, registered under A32 (`the_30000_cycle_neon_6500_differs_by_the_registered_count`); the port's hold is **0 differing** against the four `u2a-speed` captures' 6400/6600 (`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`) |
 | 7640 | `pam_007640` | **0 differing** indices and RGB pixels (`the_cleared_hold_reference_7640_compares_at_zero_in_both_planes`) |
 | 7300 | `u2a_007300` | **1098 differing** indices and RGB pixels (`the_saucer_frame_records_its_measured_divergence`) |
 
@@ -301,7 +306,7 @@ The 7300 divergence, measured rather than fitted:
   because every page holds the same cleared background.
 - **The two exits leave different screens.** `dis_exit()` inside the gate's
   wait is a bare `return` (`U2A.C:239`): no copper has been installed and no
-  page cleared, so the pad stays up and the shell retires the part
+  page cleared, so the hold stays up and the shell retires the part
   (`the_gate_holds_until_the_scripted_cue_and_exits_on_request` asserts the
   untouched page and DAC). Inside the loop, `while(!dis_exit() && !xit)`
   falls through to the teardown (`:432`), so the four cleared pages are
@@ -314,8 +319,8 @@ The 7300 divergence, measured rather than fitted:
   copies `Image::pixels()` and does not port the shuffle.
 - **The wait is a tick, not a spin.** Every `while(cl[clw].ready)` and every
   gate iteration is one `frame()` call at the fixed 70 Hz tick;
-  `ctx.exit_requested` is read every tick, including the pad hold (where the
-  source's `if(dis_exit()) return;` leaves the pad and the shell retires the
+  `ctx.exit_requested` is read every tick, including the pre-gate hold (where the
+  source's `if(dis_exit()) return;` leaves the hold and the shell retires the
   part).
 - **No music is a refusal.** The gates read the player's published order and
   row; a run with no player is a `PartError` at `init`, following PAM.
@@ -323,7 +328,7 @@ The 7300 divergence, measured rather than fitted:
 ## 7. Reproducing the numbers
 
 ```bash
-# the part's unit tests: the pad palette and merge, the two gates, the first
+# the part's unit tests: the merged palette and hold, the two gates, the first
 # stream frame and frame 16's toggle, the END's tick and the teardown, and the
 # 7300 state search with its silhouette and per-object attribution
 cargo test -p secondreality --bin secondreality u2a
@@ -356,7 +361,7 @@ sha256sum reference/parts/u2a/frame_007640.rgb
 ```
 
 `cargo xtask compare` pairs by index and searches ±1 frame. On the dump above
-it reports `0.0000%` at 6500 and 7640, `1.7156%` (1098/64000, max delta 238)
+it reports `0.0000%` at 7640 (6500 is A32's 64,000), `1.7156%` (1098/64000, max delta 238)
 at 7300, `verdict: different`, and exits 1: the port's page at that index is
 a different stream state, so no ±1 phase match applies.
 
