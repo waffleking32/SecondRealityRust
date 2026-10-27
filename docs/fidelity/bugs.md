@@ -653,7 +653,7 @@ different animation. **Frame.** 4200 (the rotazoomer). **Test.**
 
 Tests are in `bins/secondreality/src/parts/plzpart.rs`. Frames: `reference/parts/plzpart/` plasma
 (6000, 7000, 7600), cube (8500, 9500), band (8400-8800) (`reference-indices.md` §13). The cube's
-residuals are registered (A23: 26.161 % at 8500, 99.483 % at 9500), so no cube frame is exact.
+residuals are registered (A23: 17.577 % at 8500, 95.570 % at 9500), so no cube frame is exact.
 
 ### 17.1 `do_clear`'s zero-count mask underflows into the previous table
 
@@ -661,7 +661,7 @@ residuals are registered (A23: 26.161 % at 8500, 99.483 % at 9500), so no cube f
 `0x08`, not the `0x0F` the periodic pattern would give. **Where.** `PLZPART/PLZA.ASM:350-363`.
 **Port must.** Read the same flat table, with the 16-bit displacement wrapping. **Frame.** None
 shows it, measured: replacing the underflowed byte by the `0x0F` the periodic pattern would give
-leaves 8500 and 9500 at exactly 26.161 % and 99.483 % (**an uncommitted mutation**: in
+leaves 8500 and 9500 at exactly 17.577 % and 95.570 % (**an uncommitted mutation**: in
 `Plzpart::do_clear` replace the `end_mask` read by `if x == 0xFFFF { 0x0F } else { <the read> }`, run
 `cargo test --release -p secondreality --test plzpart -- --nocapture`, which prints the two
 percentages and passes, then `git checkout` the file), so the keyframes never take the `x = 0` case.
@@ -1133,8 +1133,9 @@ These came up while classifying and are deliberately elsewhere:
 - **HARD's two extra displays at the mode-4/part-2 boundary** (`hard.md` §"The mode-5 boundary",
   A48): the original's missed retrace, reproduced by two static ticks — a registered timing
   approximation.
-- **D24 adoptions** (the release over the tree): MNTSCRL's `scp` 640, PLZPART's exit index 4 and the
-  cube's 213/100 projection, GLENZ's low-byte `rolcol` key (A37; the exhaustion it avoids is §5's
+- **D24 adoptions** (the release over the tree): MNTSCRL's `scp` 640, PLZPART's exit index 4 (the cube's
+  extent and projection were once on this list; A23's 2026-10-26 correction removed them, the
+  tree's 134 rows and 142/66 being the release's too), GLENZ's low-byte `rolcol` key (A37; the exhaustion it avoids is §5's
   "not in this register"), RAYSCRL's gate confirmation, LNS&ZOOM's forehead asset. Each is an
   `APPROXIMATIONS.md` entry; none is a bug of the original's code.
 - **Port deviations recorded in the notes**: ALKU's exit path skips `:147-152`'s three closing
@@ -1187,7 +1188,7 @@ groups (a line can be in more than one):
 - "artifact" meaning the shipped binary (D24: `grid.md`, `hard.md`, `ddstars.md`, `u2a.md`,
   `reference-indices.md`'s HARD rows, `APPROXIMATIONS.md` A57's "which artifact to follow"), or a
   build, capture or trace artefact (`asset-inventory.md`, `music.md:1638`, `music-clock.md`, most of `reference-indices.md`);
-- port-side mentions: the port's own page-slot spill (A23: `plzpart.md`, `APPROXIMATIONS.md`), the
+- port-side mentions: the port's own page-slot spill (A23: `plzpart.md`, `APPROXIMATIONS.md`; fixed 2026-10-26 — the cube is a 134-row screen), the
   conversion "bug" at `APPROXIMATIONS.md:216`, and `music.md:762`'s "a fix of a Task 3 timeline bug",
   which is the port's own earlier player (§28.2 is the original's behaviour that fixed it);
 - a behaviour classified above under another name: A14's "bug" (§28.4, in `APPROXIMATIONS.md`

@@ -246,16 +246,24 @@ const PAGE_PAN: [u8; 6] = [4, 0, 4, 0, 4, 0];
 const PAGE_VMEM: [u16; 6] = [0x0000, 0x5500, 0xAA00, 0x0000, 0x5500, 0xAA00];
 /// `PLZFILL.C:22,67`: the clear's eight rotation slots.
 const CLR_SLOTS: usize = 8;
-/// The release draws the cube to the foot of the 320×200 screen. The tree's
-/// development build clips at `cmp yy,134` (`PLZA.ASM:77`), which leaves the
-/// cube's lower band undrawn; the filed 8500/9500 frames and the committed
-/// band capture show content to row 181 at 8500 and 199 at 9500, so the
-/// release's extent is the full screen.
-const CUBE_DRAWN_ROWS: i32 = 200;
-/// The clear mirrors the draw's extent: the tree's `ycnt=134`/mask 134 walk
-/// 135/134 lines for its 134-row clip, so the release's 200-row clip walks
-/// 201/200.
-const CLEAR_LINES: i32 = 201;
+/// `PLZA.ASM:77` `cmp yy,134`: the rasteriser clips at 134 rows. The cube's
+/// screen is 134 rows, not 200: `TWEAK.ASM:31-33` (`mov ax,0209h` / `out
+/// dx,ax ; 134 y`) sets CRTC 0x09 (max scan line) = 2, so each row is shown
+/// on three scanlines of the 400-line display (400/3 = 133.3 rows). The three
+/// draw buffers, 0x5500 bytes (136 rows of 160 bytes) apart, are sized for it.
+const CUBE_DRAWN_ROWS: i32 = 134;
+/// The clear's walk (`ycnt=134`, mask 134): one line more than the rows drawn.
+const CLEAR_LINES: i32 = CUBE_DRAWN_ROWS + 1;
+/// `VECT.OBJ`: `imul eax,eax,0x8e; add ax,0x42` — the vertical projection
+/// `yyy = yy*142/zz + 66`, centred on row ~67 of the 134.
+const PROJECTION_Y: (i32, i32) = (142, 66);
+/// The linear address of output pixel (x, y). `TWEAK.ASM:31-33`: CRTC 0x09 =
+/// 2 shows each image row on three scanlines of the 400-line display. The
+/// 200-line frame is every other scanline (the reference's geometry), so line
+/// y is scanline 2y, which is row floor(2y/3).
+fn cube_linear(base: u32, y: u32, x: u32) -> u32 {
+    (base + ((2 * y) / 3) * 640 + x) & VIDEO_MASK
+}
 
 /// `ASMYT.ASM`'s two 200-entry periodic mask tables: `start_mask = 1111b,
 /// 1110b, 1100b, 1000b` and `end_mask = 0001b, 0011b, 0111b, 1111b`
@@ -861,23 +869,6 @@ pub struct Plzpart {
     from_texture: usize,
     dseg_row: usize,
     ctau_row: i32,
-    /// A23's band-fit probe. **Test-only and `None` in every real run**: the
-    /// projection/extent measurement needs the tree's 134-row development
-    /// extent (`PLZA.ASM:77`) and the counterfactual 142/66 projection to
-    /// compare against the release, and neither may change what a run draws.
-    #[cfg(test)]
-    fit_probe: Option<FitProbe>,
-}
-
-/// The two values A23's projector-fit test varies: the rasteriser's row
-/// extent and the vertical projection pair. A real run keeps the release's
-/// adopted `200` rows and `213/100`.
-#[cfg(test)]
-#[derive(Clone, Copy)]
-struct FitProbe {
-    rows: i32,
-    y_scale: i32,
-    y_origin: i32,
 }
 
 /// Where the copper's pending palette upload reads from (`cop_pal`).
@@ -956,39 +947,7 @@ impl Plzpart {
             from_texture: 0,
             dseg_row: 0,
             ctau_row: 0,
-            #[cfg(test)]
-            fit_probe: None,
         }
-    }
-
-    /// The rows the rasteriser draws: the release's adopted 200, or the
-    /// tree's 134 in A23's projection-fit probe.
-    fn drawn_rows(&self) -> i32 {
-        #[cfg(test)]
-        if let Some(probe) = self.fit_probe {
-            return probe.rows;
-        }
-        CUBE_DRAWN_ROWS
-    }
-
-    /// The clear mirrors the draw: `CLEAR_LINES` is the draw's extent plus
-    /// one, so the probe's 134 rows walk the tree's 135/134.
-    fn clear_lines(&self) -> i32 {
-        #[cfg(test)]
-        if let Some(probe) = self.fit_probe {
-            return probe.rows + 1;
-        }
-        CLEAR_LINES
-    }
-
-    /// The vertical projection pair: the release's measured 213/100, or the
-    /// probe's counterfactual.
-    fn projection(&self) -> (i32, i32) {
-        #[cfg(test)]
-        if let Some(probe) = self.fit_probe {
-            return (probe.y_scale, probe.y_origin);
-        }
-        (213, 100)
     }
 }
 
@@ -1653,7 +1612,7 @@ impl Plzpart {
         for y in 0..CUBE_HEIGHT as usize {
             let row = &mut surface[y * 640..y * 640 + CUBE_WIDTH as usize];
             for (x, out) in row.iter_mut().enumerate() {
-                let linear = (base + (y as u32) * 640 + x as u32) & VIDEO_MASK;
+                let linear = cube_linear(base, y as u32, x as u32);
                 *out = self.video[linear as usize];
             }
         }
@@ -1743,7 +1702,7 @@ impl Plzpart {
     /// product is an `imulw`, its low word shifted, the sums 16-bit, and the
     /// projection `xxx = (xx*256)/zz + 160 + 160`.
     fn rotate(&mut self) {
-        let (y_scale, y_origin) = self.projection();
+        let (y_scale, y_origin) = PROJECTION_Y;
         let add16 = |a: i32, b: i32| -> i32 { (a.wrapping_add(b) as i16) as i32 };
         let term = |value: i32, coefficient: i32| -> i32 {
             ((value.wrapping_mul(coefficient) as i16) as i32) >> 1
@@ -1767,17 +1726,9 @@ impl Plzpart {
             let zz = (zz.wrapping_add(self.dis) as i16) as i32;
             self.xx[index] = [xx, yy, zz];
             let xxx = xx.wrapping_mul(256) / zz + 160 + 160;
-            // The release's vertical projection origin and scale, measured
-            // against the six committed band frames 8400-8800 at the
-            // corrected phase and extent (D24, APPROXIMATIONS A23): the
-            // tree's development build
-            // compiles 142/66 (`VECT.OBJ`: `imul eax,eax,0x8e; add ax,0x42`),
-            // but the release's cube sits 1.5x taller and is centred on the
-            // screen. On the cube band (rows 0-133, the tree extent, to
-            // exclude the full-extent page-slot spill) the six silhouette
-            // frames 8400-8800 differ by a total 0.46 % at 213/100 and
-            // 9.99 % at 142/66; 213 is the 3/2 value and the scale fit is
-            // flat over 206-216 at origin 100 (an earlier scratch sweep).
+            // `VECT.OBJ`'s `yy*142/zz + 66` on the 134-row screen. (A23 once
+            // adopted 213/100 for a 200-row screen; that mis-modelled the
+            // display: 213/100 is 142/66 times 1.5 — see APPROXIMATIONS A23.)
             let yyy = yy.wrapping_mul(y_scale) / zz + y_origin;
             self.xxx[index] = [xxx, yyy];
         }
@@ -1971,7 +1922,7 @@ impl Plzpart {
         let mut lines = ycount;
         let mut to = self.to_row;
         let mut ctau = self.ctau_row;
-        let drawn_rows = self.drawn_rows();
+        let drawn_rows = CUBE_DRAWN_ROWS;
         loop {
             if self.ryy >= 0 && self.ryy < drawn_rows {
                 self.block_line(to as u16, ctau);
@@ -2105,7 +2056,7 @@ impl Plzpart {
         // carries the page (0x5500/0xAA00), which is what aims the fill at
         // the buffer the draw used.
         let mut dx = (PAGE_VMEM[self.page] & 0xFF00) | u16::from(self.video[0]);
-        let clear_lines = self.clear_lines();
+        let clear_lines = CLEAR_LINES;
         for line in 0..clear_lines as usize {
             let old = self.clrtau[old_slot * 256 + line];
             let new = self.clrtau[new_slot * 256 + line];
@@ -2511,21 +2462,24 @@ mod tests {
         }
     }
 
+    /// One draw buffer's size in the linear image: 0x5500 plane bytes (136 rows).
+    const PAGE_SLOT_LINEAR: usize = 4 * 0x5500;
+
     #[test]
-    fn the_cube_draws_the_releases_full_screen() {
-        // The tree's development build clips at row 134 (`PLZA.ASM:77`); the
-        // discriminating capture evidence is the lower band's face
-        // continuation (the 134-row render fills it with the wrapped top face
-        // through the page slot, and its content reaches row 199 anyway) and
-        // the band-silhouette fits, so the release draws the full 320x200
-        // screen. The clear mirrors the draw (the tree's 134-row clip walks
-        // 135/134 lines). Reverting either value must fail here.
-        assert_eq!(CUBE_DRAWN_ROWS, 200);
-        assert_eq!(CLEAR_LINES, CUBE_DRAWN_ROWS + 1);
+    fn the_cube_is_a_134_row_screen() {
+        // `TWEAK.ASM:31-33` CRTC 0x09 = 2 (three scanlines a row, "134 y"),
+        // `PLZA.ASM:77` `cmp yy,134`, the clear's `ycnt=134`. Reverting any
+        // of them fails here.
+        assert_eq!(CUBE_DRAWN_ROWS, 134);
+        assert_eq!(CLEAR_LINES, 135);
+        assert_eq!(PROJECTION_Y, (142, 66));
+        // The buffers are 0x5500 bytes apart: 136 rows of 160 bytes.
+        assert_eq!(0x5500, 136 * CUBE_ROW_BYTES);
+        assert_eq!(PAGE_SLOT_LINEAR, 136 * 640);
     }
 
     #[test]
-    fn the_cube_projection_is_the_releases_centred_scale() {
+    fn the_cube_projection_is_the_trees_142_66() {
         let mut part = Plzpart::new();
         part.cxx = 256; // an 8.8 identity in x
         part.cyy = 256;
@@ -2537,248 +2491,60 @@ mod tests {
         // (125,125,125) with the identity matrix and dis 320:
         // xx = 125, yy = 125, zz = 125+320 = 445.
         assert_eq!(part.xx[0], [125, 75, 445]);
-        // The release's projection: x = xx*256/zz + 320 (the tree's literal
-        // 160+160), y = yy*213/zz + 100 (measured; see APPROXIMATIONS A23 —
-        // the tree's development build compiles 142 and 66).
+        // x = xx*256/zz + 320 (the tree's literal 160+160), y = yy*142/zz + 66.
         assert_eq!(part.xxx[0][0], (125 * 256) / 445 + 160 + 160);
-        assert_eq!(part.xxx[0][1], (75 * 213) / 445 + 100);
+        assert_eq!(part.xxx[0][1], (75 * 142) / 445 + 66);
         assert_eq!(part.xxx[0][0], 391);
-        assert_eq!(part.xxx[0][1], 135);
+        assert_eq!(part.xxx[0][1], 89);
     }
 
-    /// A23's projection/extent fit over the **committed** band capture
-    /// (`reference/parts/plzpart/band/`), at the tree's 134-row development
-    /// extent (`PLZA.ASM:77`: `cmp [yy], 134d / jge @@end`). The probe
-    /// renders the two projection pairs through the real engine and player;
-    /// the comparison is A23's rule: a pixel is set iff any RGB channel is
-    /// nonzero, the shift is the integer `(dx, dy)` in `[-20, 20]` that
-    /// minimises the differing-mask fraction over the 134-row band, and the
-    /// frame's percentage is XOR over the band's pixels. The adopted release
-    /// pair must be far better than the tree's at every frame, and the
-    /// numbers below are this test's own.
+    /// A draw taller than the screen stays inside its own 0x5500-byte slot:
+    /// no write reaches the neighbouring buffer (the bug a 200-row draw had,
+    /// which spilled into the next page and showed as cube pixels on black).
     #[test]
-    fn the_projection_fit_is_the_committed_release_bands() {
-        use crate::audio::{lock, test_player, PlayerMusic};
-        use crate::shell::ModuleId;
-        use sr_engine::{Engine, IndexedFrame, View, MAX_HEIGHT, MAX_WIDTH};
-
-        const BOOTS: [u32; 6] = [8400, 8450, 8500, 8600, 8700, 8800];
-        const BAND_ROWS: usize = 134;
-        const SHIFT: i32 = 20;
-
-        /// A frame's mask as 200 rows of five 64-bit words (320 bits a row).
-        type Mask = Vec<[u64; 5]>;
-
-        fn mask_of(set: &[bool]) -> Mask {
-            let mut rows = vec![[0u64; 5]; 200];
-            for y in 0..200usize {
-                for x in 0..320usize {
-                    if set[y * 320 + x] {
-                        rows[y][x / 64] |= 1u64 << (x % 64);
-                    }
-                }
-            }
-            rows
-        }
-
-        /// The port's frame masks at the six boots, rendered with the probe's
-        /// projection pair at the tree's 134-row extent.
-        fn render(y_scale: i32, y_origin: i32) -> Vec<Mask> {
-            let player = test_player(ModuleId::Music1).expect("MUSIC1 loads");
-            lock(&player).play_song(62);
-            let mut engine = Engine::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200));
-            engine.set_music(Box::new(PlayerMusic::new(player, 0)));
+    fn a_134_row_draw_stays_inside_its_slot() {
+        for (page, &vmem) in PAGE_VMEM.iter().enumerate().take(3) {
             let mut part = Plzpart::new();
-            // The unit test's working directory is the crate's.
-            part.table_directory = "../../assets/PLZPART";
-            part.fit_probe = Some(FitProbe {
-                rows: BAND_ROWS as i32,
-                y_scale,
-                y_origin,
-            });
-            engine.start(&mut part).expect("the part starts");
-            let mut frame = IndexedFrame::new(engine.view().width, engine.view().height);
-            let mut masks = Vec::new();
-            for tick in 0..=BOOTS[BOOTS.len() - 1] - REFERENCE_FIRST_INDEX {
-                // The 8500 keyframe's phase state. The tick's compose uses
-                // the display start slot 1 wrote at the end of the previous
-                // tick, so the drawn page and the beam's start are read
-                // before this tick runs; the animation count is the tick's
-                // own.
-                let before = (tick == 8500 - REFERENCE_FIRST_INDEX)
-                    .then(|| (part.page, part.copper.borrow().display_start));
-                engine.tick(&mut part, &mut frame);
-                if let Some((page, display_start)) = before {
-                    // 136 animation frames in, drawing page 4 with the beam
-                    // at page 4's start 0x0028, and the published music row
-                    // the trace holds there (`68:46`). The tick's own
-                    // swap_page moves the next draw to page 5.
-                    assert_eq!(part.frames, 136, "frames at tick 2777");
-                    assert_eq!(page, 4, "the page the 8500 frame composes");
-                    assert_eq!(PAGE_START[4], 0x0028, "page 4's display start");
-                    assert_eq!(display_start, 0x0028, "the beam's start at 8500");
-                    assert_eq!(part.page, 5, "the next draw's page");
-                    let position = engine.music().expect("the player").position();
-                    assert_eq!(
-                        (position.order, position.row),
-                        (68, 46),
-                        "the published music position at tick 2777"
+            part.video = vec![0; VIDEO_BYTES];
+            part.kuva1 = vec![7; 16_384];
+            part.dist1 = vec![0; 32_768];
+            part.page = page;
+            part.frames = 0;
+            // A quad from above the top to far below the foot of any screen.
+            part.do_poly([(10, -20), (300, -20), (300, 250), (10, 250)], 0, 0);
+            let slot = usize::from(vmem) * 4;
+            let mut inside = 0usize;
+            for (linear, &byte) in part.video.iter().enumerate() {
+                if byte != 0 {
+                    assert!(
+                        (slot..slot + PAGE_SLOT_LINEAR).contains(&linear),
+                        "page {page}: a write at linear {linear:#x} left its slot \
+                         {slot:#x}..{:#x}",
+                        slot + PAGE_SLOT_LINEAR
                     );
-                }
-                if BOOTS
-                    .iter()
-                    .any(|&boot| boot - REFERENCE_FIRST_INDEX == tick)
-                {
-                    assert_eq!((frame.width, frame.height), (320, 200));
-                    // The frame's palette is in force from scanline 0 (one
-                    // band); the original is RGB, so the mask widens the
-                    // index through it exactly as the dump does.
-                    let palette = *frame.palettes.palette_at(0);
-                    let set: Vec<bool> = frame
-                        .pixels
-                        .iter()
-                        .map(|&index| palette.entry(index) != [0, 0, 0])
-                        .collect();
-                    masks.push(mask_of(&set));
+                    inside += 1;
                 }
             }
-            masks
+            assert!(inside > 134 * 280, "page {page}: the quad drew ({inside})");
+            // The last drawn row is 133; row 134 is untouched.
+            let row_end = |row: usize| slot + (row + 1) * 640;
+            assert!(part.video[row_end(133) - 640..row_end(133)].iter().any(|&b| b != 0));
+            assert!(part.video[row_end(134) - 640..row_end(134)].iter().all(|&b| b == 0));
         }
+    }
 
-        /// The reference's own mask, from the committed RGB capture.
-        fn reference_mask(boot: u32) -> Mask {
-            let path = root().join(format!(
-                "reference/parts/plzpart/band/frame_{boot:06}.rgb"
-            ));
-            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-            assert_eq!(bytes.len(), 320 * 200 * 3, "a full 320x200 RGB frame");
-            let set: Vec<bool> = bytes
-                .chunks_exact(3)
-                .map(|pixel| pixel.iter().any(|&channel| channel != 0))
-                .collect();
-            mask_of(&set)
-        }
-
-        /// `row` shifted so output bit `x` is the input's bit `x + dx`; bits
-        /// shifted past either edge are dropped. A row is five words because
-        /// 320 = 5 × 64, so no word carries a partial edge.
-        fn shift_row(row: &[u64; 5], dx: i32) -> [u64; 5] {
-            let mut out = [0u64; 5];
-            if dx >= 0 {
-                // out bit x = in bit x+dx: a right shift by dx.
-                let shift = dx as usize;
-                let (word, bit) = (shift / 64, shift % 64);
-                for (i, slot) in out.iter_mut().enumerate() {
-                    let source = i + word;
-                    if source < 5 {
-                        *slot = row[source] >> bit;
-                        if bit != 0 && source + 1 < 5 {
-                            *slot |= row[source + 1] << (64 - bit);
-                        }
-                    }
-                }
-            } else {
-                // out bit x = in bit x-dx: a left shift by -dx.
-                let shift = (-dx) as usize;
-                let (word, bit) = (shift / 64, shift % 64);
-                for (i, slot) in out.iter_mut().enumerate().skip(word) {
-                    let source = i - word;
-                    *slot = row[source] << bit;
-                    if bit != 0 && source > 0 {
-                        *slot |= row[source - 1] >> (64 - bit);
-                    }
-                }
-            }
-            out
-        }
-
-        /// `(differing mask pixels, dx, dy)` for the best shift, comparing
-        /// the port at `(x, y)` with the reference at `(x + dx, y + dy)` and
-        /// treating the reference's out-of-frame pixels as unset.
-        fn fit(port: &Mask, reference: &Mask) -> (usize, i32, i32) {
-            let mut best = (usize::MAX, 0, 0);
-            for dy in -SHIFT..=SHIFT {
-                for dx in -SHIFT..=SHIFT {
-                    let mut differing = 0usize;
-                    for (y, row_port) in port.iter().take(BAND_ROWS).enumerate() {
-                        let ry = y as i32 + dy;
-                        let row = if (0..200).contains(&ry) {
-                            shift_row(&reference[ry as usize], dx)
-                        } else {
-                            [0u64; 5]
-                        };
-                        for word in 0..5 {
-                            differing += (row_port[word] ^ row[word]).count_ones() as usize;
-                        }
-                    }
-                    if differing < best.0 {
-                        best = (differing, dx, dy);
-                    }
-                }
-            }
-            best
-        }
-
-        let reference: Vec<Mask> = BOOTS.iter().map(|&boot| reference_mask(boot)).collect();
-        let band_pixels = BAND_ROWS * 320;
-        // This test's own measurements: the differing-mask count per frame and
-        // the total over the six. The release pair is the one the port adopts;
-        // the tree's development pair is the counterfactual it was chosen
-        // over.
-        let expected: [(&str, i32, i32, [usize; 6], usize); 2] = [
-            (
-                "213/100 (the release)",
-                213,
-                100,
-                [130, 214, 244, 151, 209, 248],
-                1196,
-            ),
-            (
-                "142/66 (the tree)",
-                142,
-                66,
-                [2284, 5849, 3353, 5749, 4876, 3585],
-                25696,
-            ),
-        ];
-        let mut means = Vec::new();
-        for (name, y_scale, y_origin, counts, expected_total) in expected {
-            let masks = render(y_scale, y_origin);
-            let mut total = 0usize;
-            for (index, (&boot, (port, reference))) in BOOTS
-                .iter()
-                .zip(masks.iter().zip(&reference))
-                .enumerate()
-            {
-                let (differing, dx, dy) = fit(port, reference);
-                let percent = 100.0 * differing as f64 / band_pixels as f64;
-                println!(
-                    "{name}: boot {boot}: {percent:.2}% ({differing}/{band_pixels} px), \
-                     shift ({dx}, {dy})"
-                );
-                assert_eq!(
-                    differing, counts[index],
-                    "{name}: boot {boot}'s differing mask pixels"
-                );
-                total += differing;
-            }
-            assert_eq!(total, expected_total, "{name}: the six-band total");
-            let measured = 100.0 * total as f64 / (band_pixels * BOOTS.len()) as f64;
-            println!("{name}: mean {measured:.2}%");
-            means.push(measured);
-        }
-        assert!(
-            means[0] < means[1] / 5.0,
-            "the release pair ({:.4}) must beat the tree's ({:.4}) by a wide margin",
-            means[0],
-            means[1]
-        );
-        // The adopted constants themselves: the release pair and the release
-        // extent are what a real run uses.
-        let part = Plzpart::new();
-        assert_eq!(part.projection(), (213, 100));
-        assert_eq!(part.drawn_rows(), 200);
-        assert_eq!(part.clear_lines(), 201);
+    /// Output line y shows row floor(2y/3) of the image (CRTC 0x09 = 2,
+    /// `TWEAK.ASM:31-33`; the 200-line frame is every other scanline).
+    #[test]
+    fn the_cube_frame_shows_row_two_y_over_three() {
+        let rows: Vec<u32> = (0..200u32).map(|y| (cube_linear(0, y, 0)) / 640).collect();
+        assert_eq!(&rows[..7], &[0, 0, 1, 2, 2, 3, 4]);
+        assert_eq!(rows[199], 132);
+        // Line 200 would be row 133: the 134-row image is exactly covered.
+        assert_eq!(2 * 199 / 3, 132);
+        // The column is added unchanged, and the address wraps at the image.
+        assert_eq!(cube_linear(160, 3, 5), 160 + 2 * 640 + 5);
+        assert_eq!(cube_linear(VIDEO_MASK, 0, 1), 0);
     }
 
     #[test]

@@ -916,11 +916,13 @@ cargo xtask reference capture --arg 3 --boot autoexec \
     --frames 8400,8450,8500,8600,8700,8800 --out reference/parts/plzpart/band
 ```
 
-It was taken so A23's cube projection could be fitted against evidence a clone can re-run:
-the six frames' band silhouettes give `yy*213/zz + 100` (**0.46 %** at 213/100
-against **9.99 %** at the tree's `142/66`), and the 8500 frame pins the phase state
-(frames 136, page 4, display start 0x0028, music 68:46). `the_projection_fit_is_the_committed_
-release_bands` renders the port through the real engine and asserts both. The corpus has a
+It was taken so A23's cube projection could be fitted against evidence a clone can re-run.
+That fit (213/100, **0.46 %** against **9.99 %** at the tree's `142/66`) was retracted on
+2026-10-26: the 200-line frames show row ⌊2y/3⌋ of a 134-row image (CRTC 0x09 = 2,
+`TWEAK.ASM:31-33`), so the tree's 142/66 is the release's too. The corpus now serves as A23's
+whole-frame counts (`cargo xtask rediff --only plzpart/band`: 6,531 / 6,092 / 11,249 / 21,722 /
+11,190 / 33,457), and the 8500 frame pins the phase state (frames 136, page 4, display start
+0x0028, music 68:46). The corpus has a
 manifest whose per-frame `sha256` `reference verify` checks, like any capture (D23).
 
 Its indices are **not** reference keyframes. Nothing pairs the port against them with

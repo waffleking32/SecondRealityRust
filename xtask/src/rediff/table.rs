@@ -686,25 +686,25 @@ pub const TABLE: &[Entry] = &[
     // 5723 (tests/plzpart.rs:93). It is not a keyframe set and no test compares the port's
     // frames with it; the counts are this command's, and A23 registers them as whole-frame
     // counts beside its band-mask fit percentages. 8500's count is the cube capture's 8500
-    // count, 16,743.
+    // count, 11,249.
     Entry {
         capture: "plzpart/band",
         args: &["--part", "plzpart"],
         frames: &[
-            rgb(8400, 2677, 20315, "A23"),
-            rgb(8450, 2727, 21832, "A23"),
-            rgb(8500, 2777, 16743, "A23"),
-            rgb(8600, 2877, 32287, "A23"),
-            rgb(8700, 2977, 14979, "A23"),
-            rgb(8800, 3077, 37374, "A23"),
+            rgb(8400, 2677, 6531, "A23"),
+            rgb(8450, 2727, 6092, "A23"),
+            rgb(8500, 2777, 11249, "A23"),
+            rgb(8600, 2877, 21722, "A23"),
+            rgb(8700, 2977, 11190, "A23"),
+            rgb(8800, 3077, 33457, "A23"),
         ],
     },
-    // tests/plzpart.rs:333-438: 8500 at 26.161 % — its decomposition 6,333 + 105 + 10,305
-    // = 16,743 px (:382-384) — and 9500 at 99.483 % (:360), A23.
+    // tests/plzpart.rs:333-439: 8500 at 17.577 % — its decomposition 304 + 51 + 10,894
+    // = 11,249 px (:382-384) — and 9500 at 95.570 % (:360), A23.
     Entry {
         capture: "plzpart/cube",
         args: &["--part", "plzpart"],
-        frames: &[rgb(8500, 2777, 16743, "A23"), rgb(9500, 3777, 63669, "A23")],
+        frames: &[rgb(8500, 2777, 11249, "A23"), rgb(9500, 3777, 61165, "A23")],
     },
     // tests/plzpart.rs:305-328: 11.209 / 5.848 / 4.052 % of 128,000 to 0.001 points (A24);
     // the counts are this command's — 11.2094 / 5.8484 / 4.0516 % — inside that window.

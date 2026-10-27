@@ -1351,10 +1351,9 @@ amendment. A **fit corpus** is neither a keyframe nor a trace. A keyframe is a s
 port must reproduce at a run index, paired by `compare` with its ±1 supports; a trace is the
 original player's own state, a row a frame (`docs/fidelity/music-clock.md`). A fit corpus is
 a run of reference frames used to **determine a constant or a phase** by fitting a model
-over them — here the silhouette bands give `yy*213/zz + 100` (0.46 % at 213/100
-against 9.99 % at the tree's 142/66 over the six frames) and the phase state (frames 136,
-page 4, start 0x0028, music 68:46), and `the_projection_fit_is_the_committed_release_bands`
-pins both. It lives under `reference/parts/<part>/` with a manifest whose per-frame `sha256`
+over them — here the silhouette bands gave `yy*213/zz + 100` (0.46 % at 213/100
+against 9.99 % at the tree's 142/66 over the six frames; **retracted 2026-10-26**, D24's
+correction below) and the phase state (frames 136, page 4, start 0x0028, music 68:46). It lives under `reference/parts/<part>/` with a manifest whose per-frame `sha256`
 `reference verify` checks (D23), and it is named by the test that consumes it. Its indices
 are **not** reference keyframes: nothing pairs the port against them with `compare`, they
 are not in `reference-indices.md` §2's table, and a difference at one of them is a fit
@@ -1750,6 +1749,28 @@ read.
 *Cost if wrong:* two phases resolving the same divergence in opposite directions, or a phase "fixing"
 a faithful port towards a build it cannot reconstruct — and losing, in the process, the tree's own
 provenance for the algorithm.
+
+**Corrected 2026-10-26 (`fix-user-glitches`) — PLZPART's cube extent and projection were not
+release divergences.** A23 adopted a 200-row draw (`CUBE_DRAWN_ROWS = 200`) and a
+`yy*213/zz + 100` projection as "single-value release divergences", on the evidence of the
+200-line reference captures and a six-frame fit (`the_projection_fit_is_the_committed_release_bands`).
+That was a mis-modelled display, and this entry's rule ("the tree and the release are not the same
+build") was misapplied: **the release does the same as the tree.** `PLZPART/TWEAK.ASM:31-33`
+(`mov ax,0209h` / `out dx,ax ; 134 y`) sets CRTC 0x09 = 2, so each row is shown on three scanlines
+of the 400-line display — a 134-row screen, matching `PLZA.ASM:77`'s `cmp yy,134`, `VECT.OBJ`'s
+142/66 and the 0x5500-byte (136-row) buffers. A 200-line frame is every other scanline, row
+⌊2y/3⌋ of the image, which is what made the cube look 1.5x taller (213/100 = 142/66 × 1.5). The
+200-row draw overflowed its page slot, which the user saw as cube pixels where the screen should
+be black, and which A23 had filed as an unresolved port-side artifact. The release's registers were
+then read live (`tools/crtc_probe.py 3 8500 30`: CRTC 0x09 = 2, 0x12 = 143, 0x13 = 80, display
+starts 0x0028/0x5528/0xAA28 in the majority of 30 frames). The port now draws 134 rows at 142/66 and
+composes row ⌊2y/3⌋; the 8500 keyframe goes from 26.161 % to 17.577 % and the port-only spill from
+6,333 pixels to 304 (`cargo xtask rediff --only plzpart/cube --only plzpart/band`; A23 has the
+table). The lesson for the procedure: before adopting a release/tree difference, check that the
+reference's *geometry* (scanlines per row, line count, page size) is modelled — a fit that
+recovers an exact rational factor (3/2) is a hint that the capture, not the build, differs. The
+test-only `FitProbe` and the fit test are removed; `the_cube_is_a_134_row_screen` and
+`a_134_row_draw_stays_inside_its_slot` replace them.
 
 ## D25 — Every number in a fidelity note is reproducible, and an unobservable claim is stated as one (2026-10-13)
 

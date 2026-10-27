@@ -335,10 +335,10 @@ fn the_cube_keyframes_are_measured_and_recorded() {
     // The cube's gate is pinned to boot 8364 by the music (the published
     // order-68 row 13; `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`
     // measures eight pre-polls), so the animation's frame count is the
-    // reference's. With the release's extent, projection and phase (A23) the
-    // 8500 keyframe differs in 26.161 % of pixels (max delta 247); 9500's
-    // close-up needs the release's camera data, which the tree does not carry,
-    // so it stays 99.483 %. The percentages are pinned to 0.001 points and the
+    // reference's. With the tree's 134-row screen, 142/66 projection and the
+    // floor(2y/3) line mapping (A23) the 8500 keyframe differs in 17.577 % of
+    // pixels (max delta 247); 9500's close-up needs the release's camera data,
+    // which the tree does not carry, so it stays 95.570 %. The percentages are pinned to 0.001 points and the
     // max deltas exactly; the 8500 decomposition and the 9500 aligned
     // measurement are pinned beside them. `docs/fidelity/plzpart.md` §7
     // carries the evidence.
@@ -357,7 +357,7 @@ fn the_cube_keyframes_are_measured_and_recorded() {
         "the published music position at boot 8500"
     );
     let mut verdicts = Vec::new();
-    for (boot, recorded, expected_delta) in [(8500u32, 26.161f64, 247u8), (9500, 99.483, 255)] {
+    for (boot, recorded, expected_delta) in [(8500u32, 17.577f64, 247u8), (9500, 95.570f64, 255)] {
         let tick = tick_of(boot);
         let rendered = frame_file(&dir, tick, "rgb");
         let expected = reference_frame("cube", boot);
@@ -379,63 +379,64 @@ fn the_cube_keyframes_are_measured_and_recorded() {
             // The residual's decomposition (note §7): port-only spill,
             // reference-only, and the both-set shade/pose differences.
             let a = attribution(&rendered, &expected);
-            assert_eq!(a.port_only, 6333, "the 8500 frame's port-only spill");
-            assert_eq!(a.reference_only, 105, "the 8500 reference-only pixels");
-            assert_eq!(a.both_differing, 10305, "the 8500 both-set differences");
+            assert_eq!(a.port_only, 304, "the 8500 frame's port-only spill");
+            assert_eq!(a.reference_only, 51, "the 8500 reference-only pixels");
+            assert_eq!(a.both_differing, 10894, "the 8500 both-set differences");
             assert_eq!(
-                a.both_le_20, 8677,
+                a.both_le_20, 9406,
                 "the both-set differences at delta <= 20"
             );
-            assert_eq!(a.delta_247, 3137, "the 8500 delta-247 pixels");
+            assert_eq!(a.delta_247, 47, "the 8500 delta-247 pixels");
             assert_eq!(
-                a.delta_247_port_only, 2805,
+                a.delta_247_port_only, 47,
                 "the delta-247 port-only pixels"
             );
             assert_eq!(
-                a.both_histogram[4], 5084,
+                a.both_histogram[4], 5699,
                 "delta 4 among the both-set pixels"
             );
             assert_eq!(
-                a.both_histogram[8], 1802,
+                a.both_histogram[8], 1755,
                 "delta 8 among the both-set pixels"
             );
             assert_eq!(
-                a.both_histogram[12], 713,
+                a.both_histogram[12], 807,
                 "delta 12 among the both-set pixels"
             );
             // The 332 both-set pixels at delta 247, pinned exactly (the note's
             // "332 more at 247"): the bound below is for every other delta.
             assert_eq!(
-                a.both_histogram[247], 332,
+                a.both_histogram[247], 0,
                 "delta 247 among the both-set pixels"
             );
             for delta in 0..256 {
                 if delta != 4 && delta != 8 && delta != 12 {
                     assert!(
-                        a.both_histogram[delta] <= 713,
+                        a.both_histogram[delta] <= 807,
                         "delta {delta} outnumbers the recorded 4/8/12 top three"
                     );
                 }
             }
         } else {
-            // The close-up's aligned measurement (note §7): the recorded best
-            // global shift is the reference by (-32, +83) — the port by
-            // (+32, -83) — over the 288x117 overlap. Translation alone cannot
-            // rescue the frame.
-            let a = aligned_overlap(&rendered, &expected, 32, -83);
-            assert_eq!(a.region, 33696, "the 288x117 overlap");
-            assert_eq!(a.xor, 3482, "the aligned mask XOR (10.33 % of the overlap)");
-            assert_eq!(a.intersection, 30214);
-            assert_eq!(a.union, 33696);
+            // The close-up's aligned measurement (note §7): the best global
+            // shift (minimum mask-XOR fraction over overlaps of at least
+            // 10,000 pixels, shifts within +-100) is the port by (+53, +9)
+            // over the 267x191 overlap. Translation alone cannot rescue the
+            // frame: the faces inside the aligned silhouette still differ.
+            let a = aligned_overlap(&rendered, &expected, 53, 9);
+            assert_eq!(a.region, 50997, "the 267x191 overlap");
+            assert_eq!(a.xor, 3812, "the aligned mask XOR (7.47 % of the overlap)");
+            assert_eq!(a.intersection, 45738);
+            assert_eq!(a.union, 49550);
             assert!(
-                (a.intersection as f64 / a.union as f64 - 0.897).abs() <= 0.0005,
-                "the aligned IoU is {:.4}, not the recorded 0.897",
+                (a.intersection as f64 / a.union as f64 - 0.923).abs() <= 0.0005,
+                "the aligned IoU is {:.4}, not the recorded 0.923",
                 a.intersection as f64 / a.union as f64
             );
-            assert_eq!(a.common, 30214);
-            assert_eq!(a.common_differing, 30198, "99.95 % of the common pixels");
+            assert_eq!(a.common, 45738);
+            assert_eq!(a.common_differing, 45584, "99.66 % of the common pixels");
             assert_eq!(a.max_delta, 255);
-            assert_eq!(a.modal, (194, 9226));
+            assert_eq!(a.modal, (61, 8062));
         }
         verdicts.push((boot, percent, max_delta));
     }
