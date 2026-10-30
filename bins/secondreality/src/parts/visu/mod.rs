@@ -12,8 +12,13 @@
 pub mod draw;
 pub mod math;
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+use sr_engine::copper::COPPER_SLOTS;
+use sr_engine::part::{PartCtx, PartError};
+use sr_engine::View;
 
 use sr_assets::visu::{
     read_animation, read_master, read_object, read_scene_list, Animation, Master,
@@ -25,6 +30,71 @@ use math::{
     apply_matrix, camera_angle, project_all, rotate_normals, rotate_vertices, single_z, window,
     Matrix, NormalData, PVert, Projection, Rotated, RotatedNormal, VertexData,
 };
+
+/// The packed scenes' directory (`U2A.C:148`, `U2E.C:208`).
+const SCENE_DIR: &str = "assets/VISU/C/SCENE";
+
+/// Both parts' displayed picture, the shipped 320x200 tweak (`U2A.C:242`,
+/// `U2E.C:275`, `AVIDM1.ASM:17-69`).
+pub const VIEW_WIDTH: u16 = 320;
+pub const VIEW_HEIGHT: u16 = 200;
+/// One ring page's pixels (`U2A.C:90-95`).
+pub const PAGE_PIXELS: usize = 64_000;
+/// The four-page ring (`cl[4]`, `U2A.C:90-94`, `U2E.C:97-103`).
+pub const PAGES: usize = 4;
+/// The surface pixels the four pages reach.
+const SURFACE_PIXELS: usize = PAGES * PAGE_PIXELS;
+
+/// Which of the two parts drives the engine: the ring's cadence and the
+/// draw order's hacks differ between them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Variant {
+    /// `VISU/C/U2A.C`: a one-retrace step and the city hacks.
+    U2a,
+    /// `VISU/C/U2E.C`: a two-retrace step and the name hacks.
+    U2e,
+}
+
+/// `part`'s error unless the surface holds the four-page ring.
+pub fn check_surface(ctx: &PartCtx, part: &'static str) -> Result<(), PartError> {
+    let held = ctx.surface.pixels().len();
+    if held < SURFACE_PIXELS {
+        return Err(PartError::new(
+            part,
+            format!("the four-page ring reaches pixel {SURFACE_PIXELS} and the surface holds {held}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Both parts' view: `vid_init` is state only for the port (the shipped
+/// 320x200 mode, rows packed at 320), with page 0 displayed until the ring's
+/// copper moves the start.
+pub fn view() -> View {
+    View { y_line_offset: Some(VIEW_WIDTH), ..View::new(VIEW_WIDTH, VIEW_HEIGHT) }
+}
+
+/// `while(repeat-- && !xit) { parse one animation frame }` (`U2A.C:336-430`,
+/// `U2E.C:445-539`): up to `frames` stream frames, each frame's FOV becoming
+/// the next draw's angle. True when the stream ended (`0xFF 0xFF` resets the
+/// scene and sets `xit`) and the part tears down.
+pub fn parse_frames(scene: &mut Scene, driver: &RefCell<Driver>, frames: usize) -> bool {
+    for _ in 0..frames {
+        match scene.step_frame() {
+            Some(angle) => driver.borrow_mut().fov = angle,
+            None => return true,
+        }
+    }
+    scene.xit
+}
+
+/// The teardown's `dis_setcopper(2,NULL)` (`U2A.C:432`, `U2E.C:541`): the port
+/// installs no-ops in all three slots, so nothing a slot held can run again.
+pub fn clear_copper(ctx: &mut PartCtx) {
+    for slot in 0..COPPER_SLOTS {
+        ctx.set_copper(slot, Box::new(|_ctx: &mut PartCtx| {}));
+    }
+}
 
 /// `F_DEFAULT` (`AD.INC:66`, `CD.H:123`): the flags `vis_loadobject` gives
 /// every object (`VISU.C:19`). Neither part changes them, so every object is
@@ -203,13 +273,16 @@ fn read_file(dir: &Path, file: &str) -> Result<(PathBuf, Vec<u8>), String> {
     Ok((path, bytes))
 }
 
-/// Load a packed scene (`U2A.C:148-227`, `U2E.C:208-271`).
+/// Load a packed scene from the scene directory (`U2A.C:148-227`,
+/// `U2E.C:208-271`).
 ///
-/// Reads `dir/<name>.00M`; one object file for each distinct number in the
+/// Reads `<name>.00M`; one object file for each distinct number in the
 /// master's object table, with later duplicates sharing the `Rc` and taking
-/// fresh matrices; `dir/<name>.0AA`; and the first scene stream it names,
+/// fresh matrices; `<name>.0AA`; and the first scene stream it names,
 /// decoded with `conum` objects (the camera included).
-pub fn load_scene(dir: &Path, name: &str) -> Result<Scene, String> {
+pub fn load_scene(name: &str) -> Result<Scene, String> {
+    let root = crate::parts::asset(SCENE_DIR);
+    let dir = Path::new(&root);
     let (path, bytes) = read_file(dir, &format!("{name}.00M"))?;
     let master = read_master(&bytes).map_err(|error| format!("{}: {error}", path.display()))?;
 
@@ -293,17 +366,14 @@ pub struct Ring {
     coppercnt: i32,
     deadlock: i32,
     displayed_page: usize,
-    frames_per_step: usize,
+    variant: Variant,
 }
 
 impl Ring {
     /// The ring in the state both parts set up before their loops
     /// (`U2A.C:251-258`, `U2E.C:368-374`): page 3 pre-queued, the display on
     /// page 0, and sixteen retraces of start-up delay.
-    ///
-    /// `frames_per_step` selects the cadence: `1` is U2A's one-retrace step,
-    /// `2` is U2E's two-retrace step.
-    pub fn new(frames_per_step: usize) -> Ring {
+    pub fn new(variant: Variant) -> Ring {
         Ring {
             ready: [0, 0, 0, 1],
             frames: [0; 4],
@@ -317,7 +387,7 @@ impl Ring {
             coppercnt: 0,
             deadlock: 0,
             displayed_page: 0,
-            frames_per_step,
+            variant,
         }
     }
 
@@ -389,7 +459,7 @@ impl Ring {
     /// syncframe-currframe`, queues `max(a+1, 1)` retraces and advances the
     /// stream by `(a+2)/2` frames of two retraces.
     pub fn schedule(&mut self) -> (usize, usize) {
-        if self.frames_per_step == 1 {
+        if self.variant == Variant::U2a {
             self.avgrepeat = (self.avgrepeat + (self.syncframe - self.currframe) + 1) / 2;
             let repeat = self.avgrepeat.max(1);
             self.repeat = repeat;
@@ -517,7 +587,7 @@ impl Driver {
     /// flag. The name hacks are U2E's (`U2E.C:408-416`); U2A has neither.
     /// Both shipped masters say city 0.
     fn order_instances(&self, scene: &mut Scene) -> Vec<usize> {
-        let u2a = self.ring.frames_per_step == 1;
+        let u2a = self.ring.variant == Variant::U2a;
         let cam = scene.cam;
         let mut order = Vec::new();
         let mut distances = vec![0i32; scene.instances.len()];
@@ -534,8 +604,7 @@ impl Driver {
             apply_matrix(&mut instance.r, &cam);
 
             let object = Rc::clone(&instance.object);
-            let u2e = !u2a;
-            if u2e && object.name.get(1) == Some(&b'_') {
+            if !u2a && object.name.get(1) == Some(&b'_') {
                 // `if(co[a].o->name[1]=='_') co[a].dist=1000000000L`
                 // (`U2E.C:408`); the stored name keeps its opening quote.
                 *distance = 1_000_000_000;
@@ -723,7 +792,6 @@ mod tests {
     use sr_engine::Palette;
     use std::path::Path;
 
-    const SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
     const BACKGROUND: &str = "../../assets/VISU/C/U2ABG.UH";
 
     fn identity() -> Matrix {
@@ -807,7 +875,7 @@ mod tests {
         // U2A.00M's object list is `[1, 2, 3, 1, 1]` (`conum` = 6 with the
         // camera): three objects load, and the last two share the first's
         // `Rc` while carrying their own matrices (`U2A.C:170-204`).
-        let mut scene = load_scene(Path::new(SCENE_DIR), "U2A").unwrap();
+        let mut scene = load_scene("U2A").unwrap();
         assert_eq!(scene.instances.len(), 6);
         assert_eq!(scene.master.objects, vec![1, 2, 3, 1, 1]);
         assert_eq!(scene.master.city, 0);
@@ -855,7 +923,7 @@ mod tests {
 
     #[test]
     fn reset_zeroes_the_matrices_and_rewinds_but_keeps_on_and_xit() {
-        let mut scene = load_scene(Path::new(SCENE_DIR), "U2A").unwrap();
+        let mut scene = load_scene("U2A").unwrap();
         // Frame 0 moves the camera and frame 16 turns instance 2 on.
         for _ in 0..=16 {
             scene.step_frame().unwrap();
@@ -998,11 +1066,11 @@ mod tests {
         // single_z on the ORD0 centre vertex with an identity camera and
         // r0 (`VISU.C:108`, `U2A.C:291-299`): the distances are the local z.
         let mut scene = scene_with(vec![plane_object(100), plane_object(50)]);
-        let driver = Driver::new(Ring::new(1), false);
+        let driver = Driver::new(Ring::new(Variant::U2a), false);
         assert_eq!(driver.order_instances(&mut scene), vec![1, 2]);
 
         let mut scene = scene_with(vec![plane_object(10), plane_object(40)]);
-        let driver = Driver::new(Ring::new(1), false);
+        let driver = Driver::new(Ring::new(Variant::U2a), false);
         assert_eq!(driver.order_instances(&mut scene), vec![2, 1]);
 
         // Equal distances keep their order (`dis > co[order[b]].dist` is
@@ -1018,7 +1086,7 @@ mod tests {
         let mut scene = scene_with(vec![plane_object(30), plane_object(20)]);
         scene.instances[0].on = true;
         scene.instances[2].on = false;
-        let driver = Driver::new(Ring::new(1), false);
+        let driver = Driver::new(Ring::new(Variant::U2a), false);
         assert_eq!(driver.order_instances(&mut scene), vec![1]);
     }
 
@@ -1131,7 +1199,7 @@ mod tests {
         let objects = (1..=14).map(plane_object).collect::<Vec<_>>();
         let mut scene = scene_with(objects);
         scene.master.city = 1;
-        let driver = Driver::new(Ring::new(1), false);
+        let driver = Driver::new(Ring::new(Variant::U2a), false);
         assert_eq!(
             driver.order_instances(&mut scene),
             vec![2, 7, 13, 14, 12, 11, 10, 9, 8, 6, 5, 4, 3, 1]
@@ -1155,7 +1223,7 @@ mod tests {
         let objects = (1..=14).map(plane_object).collect::<Vec<_>>();
         let mut scene = scene_with(objects);
         scene.master.city = 1;
-        let u2e = Driver::new(Ring::new(2), false);
+        let u2e = Driver::new(Ring::new(Variant::U2e), false);
         assert_eq!(
             u2e.order_instances(&mut scene),
             vec![14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
@@ -1167,17 +1235,17 @@ mod tests {
         // U2E stores the quotes: `"_p"` has `name[1] == b'_'`, and the
         // distance becomes 1e9 instead of the computed z (`U2E.C:408`).
         let mut scene = scene_with(vec![plane_object_named(b"\"_p\"", 10), plane_object(100)]);
-        let driver = Driver::new(Ring::new(2), false);
+        let driver = Driver::new(Ring::new(Variant::U2e), false);
         assert_eq!(driver.order_instances(&mut scene), vec![1, 2]);
 
         // U2A.C has neither name hack: the same scene sorts by distance.
-        let u2a = Driver::new(Ring::new(1), false);
+        let u2a = Driver::new(Ring::new(Variant::U2a), false);
         assert_eq!(u2a.order_instances(&mut scene), vec![2, 1]);
 
         // `s01` is forced to 1 only strictly inside 1800 < currframe < 2200
         // (`U2E.C:410-416`).
         let mut scene = scene_with(vec![plane_object_named(b"\"s01\"", 100), plane_object(50)]);
-        let mut driver = Driver::new(Ring::new(2), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2e), false);
         driver.ring.currframe = 1800;
         assert_eq!(driver.order_instances(&mut scene), vec![1, 2]);
         driver.ring.currframe = 1801;
@@ -1202,8 +1270,8 @@ mod tests {
     /// One fixed 70 Hz tick: the copper interrupt runs, then the part's loop
     /// takes the writer page if one is free, schedules, queues and parses the
     /// stream (`U2A.C:259-336`). "Displayed" is sampled after the tick.
-    fn ring_ticks(frames_per_step: usize, ticks: usize) -> (Queued, Vec<usize>) {
-        let mut ring = Ring::new(frames_per_step);
+    fn ring_ticks(variant: Variant, ticks: usize) -> (Queued, Vec<usize>) {
+        let mut ring = Ring::new(variant);
         let mut queued = Vec::new();
         let mut displayed = Vec::new();
         for tick in 1..=ticks {
@@ -1220,7 +1288,7 @@ mod tests {
 
     #[test]
     fn ring_starts_in_the_original_s_state() {
-        let ring = Ring::new(1);
+        let ring = Ring::new(Variant::U2a);
         assert_eq!(ring.ready, [0, 0, 0, 1]);
         assert_eq!((ring.clr, ring.clw), (0, 0));
         assert_eq!(ring.copperdelay, 16);
@@ -1233,7 +1301,7 @@ mod tests {
     fn ring_matches_the_u2a_cadence_over_twenty_ticks() {
         // U2A.C:326-336: avgrepeat tracks the lag, and the page is queued for
         // that many retraces; the stream advances the same number of frames.
-        let (queued, displayed) = ring_ticks(1, 20);
+        let (queued, displayed) = ring_ticks(Variant::U2a, 20);
         assert_eq!(
             queued,
             vec![
@@ -1256,7 +1324,7 @@ mod tests {
         // U2E.C:434-444: `repeat = a + 1` (clamped at 0), the page is queued
         // for `max(repeat, 1)` retraces and the stream advances `(repeat+1)/2`
         // two-retrace steps.
-        let (queued, displayed) = ring_ticks(2, 20);
+        let (queued, displayed) = ring_ticks(Variant::U2e, 20);
         assert_eq!(
             queued,
             vec![
@@ -1275,7 +1343,7 @@ mod tests {
 
     #[test]
     fn next_page_waits_for_the_copper_then_escapes_a_deadlock() {
-        let mut ring = Ring::new(1);
+        let mut ring = Ring::new(Variant::U2a);
         ring.ready[0] = 1;
         assert_eq!(ring.next_page(), None);
         // The original spins while `cl[clw].ready` and breaks at deadlock >
@@ -1299,12 +1367,12 @@ mod tests {
 
     #[test]
     fn u2a_draws_the_background_and_frame_sixteen_shows_object_two() {
-        let mut scene = load_scene(Path::new(SCENE_DIR), "U2A").unwrap();
+        let mut scene = load_scene("U2A").unwrap();
         let background = load_path(Path::new(BACKGROUND)).unwrap();
         assert_eq!(background.pixels().len(), 320 * 200);
 
         let mut pixels = vec![0xFFu8; 320 * 200];
-        let mut driver = Driver::new(Ring::new(1), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2a), false);
         // The acceptance checks the object's first on-frame against the full
         // 320x200 page. At frame 16 every one of the saucer's projected
         // vertices is still above the shipped 25..174 window, so
@@ -1354,10 +1422,10 @@ mod tests {
         // `vis_drawobject` returns before the list (`VISU.C:111-112`). The
         // stream's negative `dy` deltas descend it into the window only at
         // frame 22: frames 16..=21 draw nothing and frame 22 draws.
-        let mut scene = load_scene(Path::new(SCENE_DIR), "U2A").unwrap();
+        let mut scene = load_scene("U2A").unwrap();
         let background = load_path(Path::new(BACKGROUND)).unwrap();
         let mut pixels = vec![0u8; 320 * 200];
-        let mut driver = Driver::new(Ring::new(1), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2a), false);
         let draw = |scene: &mut Scene, driver: &mut Driver, pixels: &mut Vec<u8>| {
             let mut page = Page::new(pixels, 320);
             driver.draw_frame(scene, &mut page, Clear::Background(background.pixels()));
@@ -1397,7 +1465,7 @@ mod tests {
         // (`U2E.C:386-387`, `:433`).
         let mut scene = scene_with(Vec::new());
         let mut pixels = vec![0x5Au8; 320 * 200];
-        let mut driver = Driver::new(Ring::new(2), true);
+        let mut driver = Driver::new(Ring::new(Variant::U2e), true);
         driver.ring.syncframe = 99;
         driver.ring.coppercnt = 99;
         {
@@ -1414,7 +1482,7 @@ mod tests {
     fn byte_clear_fills_the_whole_page() {
         let mut scene = scene_with(Vec::new());
         let mut pixels = vec![0u8; 320 * 200];
-        let mut driver = Driver::new(Ring::new(2), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2e), false);
         {
             let mut page = Page::new(&mut pixels, 320);
             driver.draw_frame(&mut scene, &mut page, Clear::Byte(0xFF));

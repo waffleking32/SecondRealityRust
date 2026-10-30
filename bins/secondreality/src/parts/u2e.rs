@@ -24,32 +24,22 @@
 //! `docs/fidelity/u2e.md`.
 
 use std::cell::RefCell;
-use std::path::Path;
 use std::rc::Rc;
 
-use sr_engine::copper::COPPER_SLOTS;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use super::visu::draw::Page;
-use super::visu::{load_scene, Clear, Driver, Ring, Scene};
+use super::visu::{
+    check_surface, clear_copper, load_scene, parse_frames, view, Clear, Driver, Ring, Scene,
+    Variant, PAGES, PAGE_PIXELS, VIEW_WIDTH,
+};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "u2e";
 
-/// The packed scene directory and name (`U2E.C:208`).
-const SCENE_DIR: &str = "assets/VISU/C/SCENE";
+/// The packed scene's name (`U2E.C:208`).
 const SCENE_NAME: &str = "U2E";
-
-/// The displayed picture: the shipped 320x200 mode (`U2E.C:275`, `:336`).
-const VIEW_WIDTH: u16 = 320;
-const VIEW_HEIGHT: u16 = 200;
-/// One ring page's pixels: 320x200.
-const PAGE_PIXELS: usize = 64_000;
-/// The four-page ring (`cl[4]`, `U2E.C:97-103`).
-const PAGES: usize = 4;
-/// The surface pixels the four pages reach.
-const SURFACE_PIXELS: usize = PAGES * PAGE_PIXELS;
 
 /// The gate (`U2E.C:365`): break when `order > 18`.
 const GATE_ORDER: u8 = 18;
@@ -116,7 +106,6 @@ pub struct U2e {
     /// CRTC register 9's scan-doubling bit (`U2E.C:305-308`): display hardware
     /// state only, kept for the record and the tests.
     crtc_scan_doubled: bool,
-    scene_dir: &'static str,
 }
 
 impl U2e {
@@ -131,23 +120,6 @@ impl U2e {
             teardown_dirty: false,
             phase: Phase::FadeIn { step: 0 },
             crtc_scan_doubled: false,
-            scene_dir: SCENE_DIR,
-        }
-    }
-
-    /// [`new`](U2e::new) reading its assets from elsewhere.
-    #[cfg(test)]
-    fn at(scene_dir: &'static str) -> U2e {
-        U2e {
-            scene_dir,
-            ..U2e::new()
-        }
-    }
-
-    fn error(&self, message: String) -> PartError {
-        PartError {
-            part: NAME,
-            message,
         }
     }
 
@@ -173,14 +145,8 @@ impl U2e {
              has no music to wait on",
         )?;
 
-        if ctx.surface.pixels().len() < SURFACE_PIXELS {
-            return Err(self.error(format!(
-                "the four-page ring reaches pixel {SURFACE_PIXELS} and the surface holds {}",
-                ctx.surface.pixels().len()
-            )));
-        }
-        let mut scene =
-            load_scene(Path::new(self.scene_dir), SCENE_NAME).map_err(|message| self.error(message))?;
+        check_surface(ctx, NAME)?;
+        let mut scene = load_scene(SCENE_NAME).map_err(|message| PartError::new(NAME, message))?;
         scene.reset();
 
         let mut main_palette = scene.master.palette;
@@ -202,14 +168,7 @@ impl U2e {
         // the window is `Driver::new`'s `vid_window(0,319,25,174,512,
         // 9999999)` (`U2E.C:352`). Page 0 is the intro's picture; the display
         // start stays 0 until the ring's copper moves it.
-        ctx.view.width = VIEW_WIDTH;
-        ctx.view.height = VIEW_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(VIEW_WIDTH);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.split = None;
-        ctx.view.border = None;
+        *ctx.view = view();
 
         self.scene = Some(scene);
         self.main_palette = main_palette;
@@ -265,7 +224,7 @@ impl U2e {
     /// `dis_setcopper(2,copper2)` (`U2E.C:353`): the ring's copper, shared
     /// with the part through the `Rc`.
     fn install_copper(&mut self, ctx: &mut PartCtx) {
-        let driver = Rc::new(RefCell::new(Driver::new(Ring::new(2), true)));
+        let driver = Rc::new(RefCell::new(Driver::new(Ring::new(Variant::U2e), true)));
         let slot2 = Rc::clone(&driver);
         ctx.set_copper(
             2,
@@ -364,25 +323,8 @@ impl U2e {
             }
         };
 
-        // `while(repeat-- && !xit) { parse one animation frame }`
-        // (`U2E.C:445-539`): each frame's FOV becomes the next draw's angle,
-        // and `0xFF 0xFF` resets the scene and sets `xit`.
-        let mut ended = false;
-        for _ in 0..parse {
-            let angle = self
-                .scene
-                .as_mut()
-                .expect("the scene is loaded before the loop")
-                .step_frame();
-            match angle {
-                Some(angle) => driver.borrow_mut().fov = angle,
-                None => {
-                    ended = true;
-                    break;
-                }
-            }
-        }
-        if ended || self.scene.as_ref().is_some_and(|scene| scene.xit) {
+        let scene = self.scene.as_mut().expect("the scene is loaded before the loop");
+        if parse_frames(scene, &driver, parse) {
             self.teardown(ctx);
         }
     }
@@ -391,9 +333,7 @@ impl U2e {
     /// the first of the sixteen fade steps computed on this tick. The first
     /// upload is the next tick's, as `dis_waitb()` precedes it in the source.
     fn teardown(&mut self, ctx: &mut PartCtx) {
-        for slot in 0..COPPER_SLOTS {
-            ctx.set_copper(slot, Box::new(|_ctx: &mut PartCtx| {}));
-        }
+        clear_copper(ctx);
         self.fpal = capture_palette(ctx.palette);
         self.palette_dirty = false;
         self.teardown_dirty = false;
@@ -606,10 +546,11 @@ fn rotated_palette(fpal: &[u8; 768]) -> Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::visu::VIEW_HEIGHT;
+    use sr_engine::copper::COPPER_SLOTS;
     use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
     use sr_engine::dac_expand;
 
-    const TEST_SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
 
     fn constant(order: u8, row: u8) -> ScriptedMusic {
         ScriptedMusic::positions(vec![(order, row)])
@@ -644,7 +585,7 @@ mod tests {
 
     fn started_with(music: ScriptedMusic) -> (Rig, U2e) {
         let mut rig = rig(music);
-        let mut part = U2e::at(TEST_SCENE_DIR);
+        let mut part = U2e::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -678,7 +619,7 @@ mod tests {
         live.set_entry(7, [5, 6, 7]);
         live.set_entry(255, [63, 1, 2]);
         rig.palette = live;
-        let mut part = U2e::at(TEST_SCENE_DIR);
+        let mut part = U2e::new();
         part.init(&mut rig.ctx(0)).unwrap();
         assert_eq!(part.fpal, capture_palette(&live));
         assert_eq!(&part.fpal[0..3], &[1, 2, 3]);
@@ -703,7 +644,7 @@ mod tests {
         live.set_entry(7, [5, 6, 7]);
         live.set_entry(247, [11, 12, 16]);
         rig.palette = live;
-        let mut part = U2e::at(TEST_SCENE_DIR);
+        let mut part = U2e::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!(
             part.fpal,
@@ -1153,7 +1094,7 @@ mod tests {
     #[test]
     #[ignore]
     fn search_reference_states() {
-        let mut scene = load_scene(Path::new(TEST_SCENE_DIR), SCENE_NAME).unwrap();
+        let mut scene = load_scene(SCENE_NAME).unwrap();
         scene.reset();
         let mut main = scene.master.palette;
         main.set_entry(252, [0, 0, 0]);
@@ -1164,7 +1105,7 @@ mod tests {
             .into_iter()
             .map(|index| (index, reference("u2e", index, "rgb")))
             .collect();
-        let mut driver = Driver::new(Ring::new(2), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2e), false);
         let mut pixels = vec![0u8; PAGE_PIXELS];
         let mut best = vec![(usize::MAX, usize::MAX); references.len()];
         let mut counts = vec![Vec::new(); references.len()];
@@ -1201,12 +1142,12 @@ mod tests {
         // object that covers it, by drawing every object alone.
         for (at, (index, reference)) in references.iter().enumerate() {
             let state = best[at].1;
-            let mut solo_scene = load_scene(Path::new(TEST_SCENE_DIR), SCENE_NAME).unwrap();
+            let mut solo_scene = load_scene(SCENE_NAME).unwrap();
             solo_scene.reset();
             for _ in 0..state {
                 solo_scene.step_frame().unwrap();
             }
-            let mut solo_driver = Driver::new(Ring::new(2), false);
+            let mut solo_driver = Driver::new(Ring::new(Variant::U2e), false);
             solo_driver.fov = driver.fov;
             solo_driver.ring.set_currframe((2 * state) as i32);
             let on: Vec<bool> = solo_scene
@@ -1295,7 +1236,7 @@ mod tests {
     #[test]
     fn init_without_music_is_a_part_error() {
         let mut rig = rig(closed());
-        let mut part = U2e::at(TEST_SCENE_DIR);
+        let mut part = U2e::new();
         let error = {
             let mut ctx = rig.machine.ctx(None, 0, 0, 1, false, true);
             part.init(&mut ctx).unwrap_err()

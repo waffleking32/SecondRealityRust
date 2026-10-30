@@ -35,35 +35,25 @@
 //! `docs/fidelity/u2a.md` carries the measured map.
 
 use std::cell::RefCell;
-use std::path::Path;
 use std::rc::Rc;
 
-use sr_assets::load_path;
-use sr_engine::copper::COPPER_SLOTS;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use super::visu::draw::Page;
-use super::visu::{load_scene, Clear, Driver, Ring, Scene};
+use super::visu::{
+    check_surface, clear_copper, load_scene, parse_frames, view, Clear, Driver, Ring, Scene,
+    Variant, PAGES, PAGE_PIXELS, VIEW_HEIGHT, VIEW_WIDTH,
+};
+use crate::parts::load_image;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "u2a";
 
-/// The packed scene directory and name (`U2A.C:148`, `:206`).
-const SCENE_DIR: &str = "assets/VISU/C/SCENE";
+/// The packed scene's name (`U2A.C:206`).
 const SCENE_NAME: &str = "U2A";
 /// The background the parts clear with (`U2A.C:160`, `:285`).
 const BACKGROUND_PATH: &str = "assets/VISU/C/U2ABG.UH";
-
-/// The displayed picture: `vid_init(3)`'s oversampled 320x200 (`U2A.C:242`).
-const VIEW_WIDTH: u16 = 320;
-const VIEW_HEIGHT: u16 = 200;
-/// One ring page's pixels (`U2A.C:90-95`, `:153-166`).
-const PAGE_PIXELS: usize = 64_000;
-/// The four-page ring (`cl[4]`, `U2A.C:90-94`).
-const PAGES: usize = 4;
-/// The surface pixels the four pages reach.
-const SURFACE_PIXELS: usize = PAGES * PAGE_PIXELS;
 
 /// The first gate (`U2A.C:238`): break when `order > 10 && row > 46`.
 const GATE_ONE: (u8, u8) = (10, 46);
@@ -99,8 +89,6 @@ pub struct U2a {
     /// The ring and projection, shared with copper slot 2.
     driver: Option<Rc<RefCell<Driver>>>,
     phase: Phase,
-    scene_dir: &'static str,
-    background_path: &'static str,
 }
 
 impl U2a {
@@ -113,25 +101,6 @@ impl U2a {
             merged_palette: Palette::new(),
             driver: None,
             phase: Phase::Pad,
-            scene_dir: SCENE_DIR,
-            background_path: BACKGROUND_PATH,
-        }
-    }
-
-    /// [`new`](U2a::new) reading its assets from elsewhere.
-    #[cfg(test)]
-    fn at(scene_dir: &'static str, background: &'static str) -> U2a {
-        U2a {
-            scene_dir,
-            background_path: background,
-            ..U2a::new()
-        }
-    }
-
-    fn error(&self, message: String) -> PartError {
-        PartError {
-            part: NAME,
-            message,
         }
     }
 
@@ -151,34 +120,30 @@ impl U2a {
              has no music to wait on",
         )?;
 
-        let scene = load_scene(Path::new(self.scene_dir), SCENE_NAME)
-            .map_err(|message| self.error(message))?;
-        let background = load_path(Path::new(self.background_path)).map_err(|error| {
-            self.error(format!("{}: {error}", self.background_path))
-        })?;
+        let scene = load_scene(SCENE_NAME).map_err(|message| PartError::new(NAME, message))?;
+        let background = load_image(NAME, BACKGROUND_PATH)?;
         if (background.width(), background.height()) != (VIEW_WIDTH, VIEW_HEIGHT) {
-            return Err(self.error(format!(
-                "{} is {}x{}; the part's clear image is {VIEW_WIDTH}x{VIEW_HEIGHT}",
-                self.background_path,
-                background.width(),
-                background.height()
-            )));
+            return Err(PartError::new(
+                NAME,
+                format!(
+                    "{BACKGROUND_PATH} is {}x{}; the part's clear image is {VIEW_WIDTH}x{VIEW_HEIGHT}",
+                    background.width(),
+                    background.height()
+                ),
+            ));
         }
         let background_palette = background.palette;
         let background_pixels = background.pixels().to_vec();
         if background_pixels.len() != PAGE_PIXELS {
-            return Err(self.error(format!(
-                "{} holds {} pixels; one page is {PAGE_PIXELS}",
-                self.background_path,
-                background_pixels.len()
-            )));
+            return Err(PartError::new(
+                NAME,
+                format!(
+                    "{BACKGROUND_PATH} holds {} pixels; one page is {PAGE_PIXELS}",
+                    background_pixels.len()
+                ),
+            ));
         }
-        if ctx.surface.pixels().len() < SURFACE_PIXELS {
-            return Err(self.error(format!(
-                "the four-page ring reaches pixel {SURFACE_PIXELS} and the surface holds {}",
-                ctx.surface.pixels().len()
-            )));
-        }
+        check_surface(ctx, NAME)?;
 
         // `memcpy(scene0+16+192*3,bg+16,64*3)` (`U2A.C:152`): the scene's
         // entries 0..191 stay, the background's 0..63 land at 192..255.
@@ -190,14 +155,7 @@ impl U2a {
         // `vid_init(3)` is state only (`U2A.C:242`): the part runs in the
         // shipped 320x200 mode; `vid_window(0,319,25,174,512,9999999)`
         // (`:247`) is `Driver::new`'s window.
-        ctx.view.width = VIEW_WIDTH;
-        ctx.view.height = VIEW_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(VIEW_WIDTH);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.split = None;
-        ctx.view.border = None;
+        *ctx.view = view();
 
         // The release holds page 0 under the merged palette (`U2A.C:152`)
         // before the gate. The original at 15,000, 25,000, 35,000 and 60,000
@@ -229,7 +187,7 @@ impl U2a {
     /// gate's first draw. The ring starts in the setup state (`Ring::new`),
     /// and from the end of this tick on every retrace runs `copper2`.
     fn install_ring(&mut self, ctx: &mut PartCtx) {
-        let driver = Rc::new(RefCell::new(Driver::new(Ring::new(1), false)));
+        let driver = Rc::new(RefCell::new(Driver::new(Ring::new(Variant::U2a), false)));
         let slot2 = Rc::clone(&driver);
         ctx.set_copper(
             2,
@@ -295,25 +253,8 @@ impl U2a {
             parse
         };
 
-        // `while(repeat-- && !xit) { parse one animation frame }`
-        // (`U2A.C:336-430`): each frame's FOV becomes the next draw's angle,
-        // and `0xFF 0xFF` resets the scene and sets `xit`.
-        let mut xit = false;
-        for _ in 0..parse {
-            let angle = self
-                .scene
-                .as_mut()
-                .expect("the scene is loaded before the loop")
-                .step_frame();
-            match angle {
-                Some(angle) => driver.borrow_mut().fov = angle,
-                None => {
-                    xit = true;
-                    break;
-                }
-            }
-        }
-        if xit || self.scene.as_ref().is_some_and(|scene| scene.xit) {
+        let scene = self.scene.as_mut().expect("the scene is loaded before the loop");
+        if parse_frames(scene, &driver, parse) {
             self.teardown(ctx);
         }
     }
@@ -325,12 +266,7 @@ impl U2a {
     /// teardown ruling, and every page holds the same cleared background, so
     /// the choice is unobservable.
     fn teardown(&mut self, ctx: &mut PartCtx) {
-        // The source removes slot 2 (`dis_setcopper(2,NULL)`); the port
-        // installs no-ops in all three, the way `PAM` retires its copper, so
-        // nothing an unregistered slot held can run again.
-        for slot in 0..COPPER_SLOTS {
-            ctx.set_copper(slot, Box::new(|_ctx: &mut PartCtx| {}));
-        }
+        clear_copper(ctx);
         let pixels = ctx.surface.pixels_mut();
         for page in 0..PAGES {
             let start = page * PAGE_PIXELS;
@@ -397,11 +333,10 @@ impl Part for U2a {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sr_engine::copper::COPPER_SLOTS;
     use crate::parts::visu::math::Matrix;
     use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
 
-    const TEST_SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
-    const TEST_BACKGROUND: &str = "../../assets/VISU/C/U2ABG.UH";
     const NEON_DIFFERING: usize = 64_000;
     const TEST_SPEED_FRAMES: [&str; 8] = [
         "../../reference/parts/u2a-speed/c15000/frame_006400.rgb",
@@ -439,7 +374,7 @@ mod tests {
 
     fn started_with(music: ScriptedMusic) -> (Rig, U2a) {
         let mut rig = rig(music);
-        let mut part = U2a::at(TEST_SCENE_DIR, TEST_BACKGROUND);
+        let mut part = U2a::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -572,7 +507,7 @@ mod tests {
         // refuses to start when the run has no player, rather than waiting
         // for ever.
         let mut rig = rig(closed());
-        let mut part = U2a::at(TEST_SCENE_DIR, TEST_BACKGROUND);
+        let mut part = U2a::new();
         let error = {
             let mut ctx = rig.ctx_without_music(0);
             part.init(&mut ctx).unwrap_err()
@@ -701,13 +636,13 @@ mod tests {
         // record which state the reference's picture is. The port's own tick
         // map decides when that state reaches the screen; this pins what it
         // looks like.
-        let mut scene = load_scene(Path::new(TEST_SCENE_DIR), SCENE_NAME).unwrap();
-        let background = load_path(Path::new(TEST_BACKGROUND)).unwrap();
+        let mut scene = load_scene(SCENE_NAME).unwrap();
+        let background = load_image(NAME, BACKGROUND_PATH).unwrap();
         let mut merged = scene.master.palette;
         for index in 0..64u8 {
             merged.set_entry(MERGE_FIRST + index, background.palette.entry(index));
         }
-        let mut driver = Driver::new(Ring::new(1), false);
+        let mut driver = Driver::new(Ring::new(Variant::U2a), false);
         let mut pixels = vec![0u8; PAGE_PIXELS];
         let reference_7300 = reference("u2a", 7300, "rgb");
         let mut best = (usize::MAX, usize::MAX);
@@ -785,7 +720,7 @@ mod tests {
         // it, by drawing each object alone at the same state. The paint order
         // is the z sort's: U2A.002 (flat, `F_SHADE16`) first, then the three
         // U2A.001 copies (each face Gouraud, `F_SHADE32`).
-        let mut alone_scene = load_scene(Path::new(TEST_SCENE_DIR), SCENE_NAME).unwrap();
+        let mut alone_scene = load_scene(SCENE_NAME).unwrap();
         for _ in 0..294 {
             alone_scene.step_frame();
         }
