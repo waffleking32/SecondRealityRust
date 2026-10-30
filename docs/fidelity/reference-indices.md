@@ -4447,6 +4447,15 @@ Full hashes of the five files in `reference/parts/cred/`:
 | 7640 | `frame_007640.rgb` | `9215557393733c471c344096934035511f4f06b42efd5029423118eb352eb9f7` |
 | 8740 | `frame_008740.rgb` | `cd5f27a573c90adea0e1a98969b89b57b35b2a170ec014ffbf33d1aa07271797` |
 
+*(2026-10-29, D49.)* **The sheet's readings are the release's own data.** The unpacked
+`MAIN/DATA/CRED.EXE`'s `main` is 21 `screenin` calls (image `0x193a` to `0x1b56`, 27 bytes apart),
+and their captions — read out of the image, not off the sheet — are the ones §20's table records,
+"OBJECTS – WILDFIRE" on screen 2, "SKETCH – SKAVEN" on 11 and 12, "WORLD – TRUG" on 19 and "MUSIC –
+SKAVEN" on 20 and 21 among them; the pictures are the image's `FC FC` blobs, all 21 distinct (so
+`pic5b`, `pic10b` and `pic14b` are pictures of their own, not second screens of the same one). With
+the port's screens read from the image, all five keyframes here are 0 differing bytes, and so are all
+49 hold samples and all 28 wipe frames of the sweep (`cred.md` §7, §9).
+
 ### 20.2 Held or moving, measured — and why no `.idx`
 
 Every keyframe is **held**, and held across sessions, not just within one: in each of
@@ -6246,7 +6255,9 @@ is 8 frames early at `second1f`'s first row and level at the last the run reache
 holds JPLOGO's whitened screen (A53); ENDLOGO and CRED follow at −11 and −19. ENDSCRL's −69 change
 is CRED's span, first frame to ENDSCRL's first, being 69 frames shorter in the port (7,625 against
 7,694); why is not measured here — A10's record of CRED running 6–105 frames early is a lead, not
-the measurement.
+the measurement. *(2026-10-29: measured from CRED's record frames — the release spends 3 to 4 frames a
+screen between one screen's close and the next one's open that the port does not, ~70 over 21
+screens; `APPROXIMATIONS.md` A11, `cred.md` §9.)*
 
 **The loader (D31's question).** The port hands each part over in one tick and the original spends
 the loader's frames. Modelling that as one `LOADER_TICKS` would need one constant to explain every
@@ -6333,12 +6344,12 @@ comparisons, every one at its registered count**:
 | `09-jplogo` | 33263 → 33255: 0 (and idx 0) · 33900 → 33892: 0 (and idx 0) · 34110 → 34042: 72,363 (idx 0) |
 | `10-u2e` | 34120 → 34075: 0 · 34250 → 34205: 0 (and idx 0) |
 | `11-endlogo` | 37970 → 37959: 0 (idx 46,997) · 38300 → 38289: 0 (and idx 0) |
-| `12-cred` | 38583 → 38564: 0 · 40600 → 40581: 7,204 (A10's) |
+| `12-cred` | 38583 → 38564: 0 · 40600 → 40581: 0 (2026-10-29, CRED's screens read from the release's image; was 7,204, A10's) |
 | `13-endscrl` | 46280 → 46192: 0 · 46283 → 46195: 0 · 46286 → 46198: 0 (2026-10-29, since ENDSCRL reads the release's image, A11; were 42 · 67 · 149) |
 
 **Every held frame compares at 0 in RGB** — 1719, 7880, 8300, 8900, 12400, 16000, 16500,
 16636, 16690, 29800, 33900, 34250 and 38300 — except the two that carry their part's own
-registered count (6500 is the 30,000-cycle neon at A32's 64,000; 19000 is `lnszoom`'s 2700 at A25's 2,058; 40600 is `cred`'s 3240 at A10's 7,204)
+registered count (6500 is the 30,000-cycle neon at A32's 64,000; 19000 is `lnszoom`'s 2700 at A25's 2,058; 40600 was `cred`'s 3240 at A10's 7,204 and is 0 since 2026-10-29)
 and 34110, whose white the port does not show (its index plane is the hold's, 0). The non-zero
 index planes under a 0 RGB (7880, 24540, 37970) are memory under a white or black DAC that no screen
 shows. The moving frames' counts, and the pairing of every frame at a start difference other than

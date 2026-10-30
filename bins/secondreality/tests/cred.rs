@@ -4,8 +4,9 @@
 //! The part's arithmetic is unit-tested beside it in `src/parts/cred.rs`. What
 //! is left over here is the wiring only a process can answer — the registry,
 //! the block-5 chain's numbering, the assets read at the paths a run really
-//! uses — and the comparison with `reference/parts/cred` broken down by region,
-//! which is where the three frames that differ differ.
+//! uses — and the comparison with `reference/parts/cred` broken down by region:
+//! all five keyframes are the reference's, byte for byte, now that the screens
+//! are read from the shipped `CRED.EXE`.
 //!
 //! **The chain is part of the test.** These indices are reached through
 //! ENDLOGO: 1440 is only answerable if ENDLOGO's duration was right, and the
@@ -119,22 +120,30 @@ fn the_five_keyframes_dump_in_the_references_own_numbering() {
 }
 
 #[test]
-fn the_frames_the_shipped_build_and_the_tree_agree_on_are_byte_for_byte() {
-    // 1440 and 7640 are screens 1 and 18: the tree's `PIC01.LBM`/`PIC15.LBM`
-    // with their captions, and the port's frames are the reference's, byte for
-    // byte — 0 of 192,000 bytes each. That is the whole machinery in one
-    // number: the tweak mode's display geometry, the palette repair, the
-    // ramp, the font's metrics, the caption, the `+16` picture offset, and the
-    // split.
+fn the_five_keyframes_are_the_references_byte_for_byte() {
+    // Screens 1, 6, 12, 18 and 21, read from the shipped image, and the port's
+    // frames are the reference's, byte for byte — 0 of 192,000 bytes each. That
+    // is the whole machinery in one number a frame: the tweak mode's display
+    // geometry, the palette repair, the ramp, the font's metrics, the caption,
+    // the `+16` picture offset, and the split. Three of the five (3240, 5440,
+    // 8740) are screens the release changed from the tree, which the port drew
+    // from the tree's data until the image was read (A10, retired): the band
+    // and the caption are asserted separately so a regression says which.
     let (dir, _) = dump("agreed");
-    for index in [1440, 7640] {
+    for index in [1440, 3240, 5440, 7640, 8740] {
         let dumped = frame_file(&dir, index);
         let expected = reference_frame(index);
         assert_eq!(
-            differing_bytes(&dumped, &expected, None),
+            differing_bytes(&dumped, &expected, Some(BAND)),
             0,
-            "frame {index} is not the reference's"
+            "frame {index}: the picture band"
         );
+        assert_eq!(
+            differing_bytes(&dumped, &expected, Some(CAPTION)),
+            0,
+            "frame {index}: the caption"
+        );
+        assert_eq!(differing_bytes(&dumped, &expected, None), 0, "frame {index}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -169,53 +178,6 @@ fn the_five_keyframes_are_inside_the_chains_own_holds() {
         let after = frame_file(&dir, key + 1);
         assert_eq!(before, at, "{key} moves between {0} and {key}", key - 1);
         assert_eq!(at, after, "{key} moves between {key} and {}", key + 1);
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_three_frames_that_differ_differ_where_the_records_own_text_does() {
-    // The three remaining keyframes are the screens whose *shipped* data the
-    // tree does not hold, and each one's difference is localised, which is what
-    // says the port is not simply wrong:
-    //
-    // - **3240** (screen 6): the caption is the tree's and the *picture* is
-    //   not. `reference-indices.md` §20.1 describes screen 6 as "a dotted
-    //   vortex" and the tree's `PIC05B.LBM` is a 44-index noise; the
-    //   reference's band is drawn in greys the screen's own palette does not
-    //   contain at all (8 of its 14 colours, 3,524 of the band's 16,000
-    //   pixels — measured in the part's unit test).
-    // - **5440** (screen 12): the *picture* is the tree's `PIC10B.LBM` — the
-    //   band is byte-identical — and the caption is not: the reference's line 0
-    //   is a string `CREDITS/MAIN.C` never draws. §20.1's table says the same
-    //   of screens 11 and 12, whose captions it reads as "SKETCH - SKAVEN /
-    //   GRAPHICS - PIXEL / …", and `grep -rn SKETCH upstream/SecondReality`
-    //   finds nothing: the shipped build's credits differ from the source tree's.
-    // - **8740** (screen 21): both. §20.1 records its caption as "MUSIC -
-    //   SKAVEN", where `MAIN.C:154` draws "MUSIC - PURPLE MOTION".
-    //
-    // The numbers below are the differences, in bytes: 3 bytes a pixel, so
-    // 20,122 bytes of band is 6,707 pixels of 32,000.
-    let (dir, _) = dump("differing");
-    let cases = [
-        // (index, band bytes, caption bytes)
-        (3240u32, 20_122usize, 0usize),
-        (5440, 0, 18_264),
-        (8740, 5_702, 5_520),
-    ];
-    for (index, band, caption) in cases {
-        let dumped = frame_file(&dir, index);
-        let expected = reference_frame(index);
-        assert_eq!(
-            differing_bytes(&dumped, &expected, Some(BAND)),
-            band,
-            "frame {index}: the picture band"
-        );
-        assert_eq!(
-            differing_bytes(&dumped, &expected, Some(CAPTION)),
-            caption,
-            "frame {index}: the caption"
-        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

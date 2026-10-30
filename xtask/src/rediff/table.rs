@@ -280,19 +280,19 @@ pub const TABLE: &[Entry] = &[
             rgb(436, 436, 0, "A5"),
         ],
     },
-    // tests/cred.rs:22 KEYFRAMES through the block-5 chain (:40). 1440/7640 at 0 bytes
-    // (:129-137); 3240/5440/8740 asserted as band and caption *bytes* (:200-218), so the
-    // pixel counts are this command's, against A10's 11.2563 / 9.5125 / 5.8453 % of
-    // 64,000.
+    // tests/cred.rs:22 KEYFRAMES through the block-5 chain (:40), every one at 0 bytes in
+    // the band, the caption and the frame (`the_five_keyframes_are_the_references_byte_for_byte`)
+    // since the screens are read from the shipped CRED.EXE (A10, retired; they were 7,204 /
+    // 6,088 / 3,741 at 3240 / 5440 / 8740 from the tree's data).
     Entry {
         capture: "cred",
         args: &["--block", "5"],
         frames: &[
             rgb0(1440, 1440),
-            rgb(3240, 3240, 7204, "A10"),
-            rgb(5440, 5440, 6088, "A10"),
+            rgb0(3240, 3240),
+            rgb0(5440, 5440),
             rgb0(7640, 7640),
-            rgb(8740, 8740, 3741, "A10"),
+            rgb0(8740, 8740),
         ],
     },
     // tests/ddstars.rs:102 boot = 414 + tick; every keyframe 0 bytes (:169-177).
@@ -387,7 +387,8 @@ pub const TABLE: &[Entry] = &[
     // stretch the port does not have (FULLRUN_LOADER_FRAMES) on the port's last frame
     // before the next part starts. xtask/tests/rediff.rs checks every fullrun row against
     // that rule. Held frames compare at 0 but for the two that carry their part's own
-    // registered count (19000 is A25's 2,058, 40600 is A10's 7,204); every other count is
+    // registered count (19000 is A25's 2,058; 40600 was A10's 7,204 until CRED's screens
+    // were read from its image, and is 0); every other count is
     // this command's and is A53's, which also names every pairing at a non-zero difference.
     Entry {
         capture: "fullrun/01-alku",
@@ -523,13 +524,13 @@ pub const TABLE: &[Entry] = &[
             idx_at(38300, Part::Endlogo, 0, "A53"),
         ],
     },
-    // Its 40600 hold is `cred`'s 3240, at A10's 7,204.
+    // Its 40600 hold is `cred`'s 3240 (screen 6), at 0 since the screens are the image's.
     Entry {
         capture: "fullrun/12-cred",
         args: &["--block", "1"],
         frames: &[
             rgb_at(38583, Part::Cred, 0, "A53"),
-            rgb_at(40600, Part::Cred, 7204, "A10"),
+            rgb_at(40600, Part::Cred, 0, "A53"),
         ],
     },
     Entry {

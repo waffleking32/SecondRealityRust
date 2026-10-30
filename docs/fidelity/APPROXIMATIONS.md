@@ -521,8 +521,8 @@ raster that has **40** (60,000 `db` values, the 1,500×40 raster the inventory's
 The strip's real structure is 47 ink runs, one per character of `fonaorder`
 (`:32`), which the routine *scans* (`:250-269`) rather than indexes by cell.
 
-**Port.** The part reads the raster itself, from the file's own values, and
-translates `:250-269`'s scan. It does **not** load the strip through
+**Port.** The part reads the raster itself — since 2026-10-29 out of the shipped image, whose
+array is this file's values byte for byte (below) — and translates `:250-269`'s scan. It does **not** load the strip through
 `sr_assets::font::Font`: `Font::from_image` refuses this strip, because the
 routine's 32-column cell is not a whole number of cells across the 1,500-column
 raster, and passing a cell that *does* divide would state a geometry no line of
@@ -544,14 +544,25 @@ identical whether the scan reads 32 rows or 40
 which measures both). The drawn difference is those 92 pixels, and the display
 shows every other logical line, so **46** of them fall on rows a caption shows.
 Where they do, a build that read 40 rows would differ from this one and this one
-agrees with the reference: on the five keyframes the caption region (rows
-100-199) is byte-identical to the reference's on 1440, 3240 and 7640, and on
-5440 and 8740 it differs for a *different* reason entirely — the shipped build's
-caption text, which the source tree does not hold. That is **A10**, not this
-entry; it is only mentioned here because it is the other thing a caption region
-can differ by (`bins/secondreality/tests/cred.rs`,
-`the_three_frames_that_differ_differ_where_the_records_own_text_does`, which
-prints both numbers per frame).
+agrees with the reference: on all five keyframes the caption region (rows 100-199) is
+byte-identical to the reference's (`bins/secondreality/tests/cred.rs`,
+`the_five_keyframes_are_the_references_byte_for_byte`, which asserts the band and the caption
+separately). Until 2026-10-29 5440 and 8740 differed there for another reason — the shipped
+build's caption text, A10, retired.
+
+**Re-measured against the release's image (2026-10-29, D49).** The strip the shipped routine reads
+is the far array at image `0x29f0` of the unpacked `MAIN/DATA/CRED.EXE` (`mov dx,029fh` at
+`0x1e83`/`0x1ec5` in `init`, `0x1db0` in `prt`; row stride `mov dx,05dch`, 1,500): 40 rows, the
+60,000 bytes up to the first picture at `0x11450`, and **the tree's `FONA.INC` byte for byte**.
+`fonaorder` (the far pointer at DGROUP `0x92`) is the tree's 47 characters, and the release's scan
+and `prt` read 32 rows (`cmp word [bp-4],20h` at `0x1e95`, `y+20h` at `0x1d60`). So this entry
+stands as it was: the release has the same 40-row raster and the same 32-row window. The part now
+reads the raster and the order out of the image rather than from `FONA.INC`
+(`parts::cred::tests::the_images_font_and_order_are_the_trees_byte_for_byte`), and the measured
+difference is unchanged — the same 92 pixels, 46 on displayed rows. One thing the reading
+corrected: the port's own copy of `fonaorder` had `"` and `.` swapped (`…:,".()+-` where
+`MAIN.C:32` and the image have `…:,."()+-`), so the two marks' runs were each other's. No caption
+contains either, so no frame moved.
 
 ## A9 — ALKU: two rows of the font strip the routine reads are not in the file
 
@@ -598,102 +609,69 @@ bits a black palette hides remain unmeasured; the lead is the packed `MAIN/DATA/
 `MAIN/DATA/ALKU.EXE` (D12; its pack line is `MAIN/PACKFINA.INC:47`), and no screen shows them; the
 visible half is measured (the held cards 1719 and 2719 at 0, `cargo xtask rediff --only alku`).
 
-## A10 — CRED: three of the five keyframes are the shipped build's credits, not the tree's
+## A10 — CRED: ~~three of the five keyframes are the shipped build's credits, not the tree's~~ **retired 2026-10-29 — the 21 screens are read from the shipped image**
 
-**Part:** CRED (`CREDITS/MAIN.C` over `CREDITS/PICS/*.LBM`), Phase 2. A **data** divergence of the
-same kind A6 records for TUNNELI, and the one that decides this part's acceptance comparison: the
-port below the register *is* this tree's source, and the reference is the **released demo**, whose
-CRED was not built from the source this tree holds.
+**Retired 2026-10-29 (D49), and what replaced it.** The entry registered that nine of the 21 credit
+screens were the shipped build's, whose captions and pictures the tree does not hold, with "inside
+the packed EXE" as the lead. The packed EXE is now read: `sr_assets::exe::unpack` turns
+`MAIN/DATA/CRED.EXE` (PKLITE 1.14 large, one layer) into its 426,384-byte load image, and the part
+builds its 21 screens out of it (`bins/secondreality/src/parts/cred.rs`, `docs/fidelity/cred.md`
+§9). Every frame this entry measured is now 0. What the entry recorded before, kept as the record
+of what the release changed: the three keyframes' band and caption bytes (3240: 20,122 / 0;
+5440: 0 / 18,264; 8740: 5,702 / 5,520), the nine screens the record's hold samples put off the
+tree's data (2, 6, 10, 11, 12, 17, 19, 20, 21), and the pixel counts 7,204 / 6,088 / 3,741 at
+3240 / 5440 / 8740 and 7,204 at the full run's 40600.
 
-**Original.** What the shipped `CRED.EXE` draws — `MAIN/DATA/CRED.EXE`, 148,711 bytes,
-PKLITE-packed, its pack entry at `MAIN/PACKFINA.INC:70` — is recorded screen by screen, read off
-its own sheet, in `reference-indices.md` §20.1.
+**Part:** CRED (`CREDITS/MAIN.C` over the pictures `main` links), Phase 2; retired under D49.
 
-**The tree.** `CREDITS/MAIN.C:41-156` calls `screenin(pic, text)` 21 times with the captions this
-port draws, and `CREDITS/INCLUDE.ASM`/`INCLUD2.ASM` link the 21 `PIC*.LBM` files into it.
+**Original.** The release's `main` (image `0x190c-0x1b68`) is 21 `if(!dis_exit()) screenin(pic,
+text)` calls at image `0x193a`, `0x1955`, …, `0x1b56`, 27 bytes apart, each
+`push ds; push text; push pic_seg; push 0; lcall 0190:0269` (`1e 68 TT TT 68 SS SS 68 00 00 9a 69
+02 90 01`). The picture is the `FC FC` blob at image `SS SS × 16` — segments `0x1145` to `0x6339`,
+`0x419` paragraphs (16,784 bytes) apart, each a 16-byte header (160×100, 256 colours, pixels at
+paragraph 49), a 768-byte palette at 16 and the pixels at 784, the tree's own blob layout. The
+caption is the NUL-separated lines at DGROUP (`0x67520`, `mov dx,6752h` at image 0) + `TT TT`,
+ending at a double NUL. Against the tree's `CREDITS/MAIN.C:41-156` and `CREDITS/PICS/`, **nine
+screens differ** — the nine this entry found in the record — and twelve are the tree's
+(`parts::cred::tests::the_release_changes_nine_of_the_trees_screens`):
 
-**Port.** The tree's: those 21 `screenin` calls, their captions and the 21 linked pictures, through
-the part's own tick map and palette repair (the *Why* below).
-
-**Where they differ, measured.** The brief's acceptance command exits 1, and each difference is
-localised (`bins/secondreality/tests/cred.rs` asserts both regions' byte counts per frame):
-
-| index (screen) | picture band, rows 0-99 | caption, rows 100-199 | reading |
+| screen | picture pixels that differ (of 16,000) | shown palette entries that differ | caption |
 |---|---|---|---|
-| 3240 (6) | 20,122 bytes differ | 0 | the caption is the tree's; the picture is not |
-| 5440 (12) | 0 | 18,264 bytes differ | the picture is the tree's; the caption is not |
-| 8740 (21) | 5,702 bytes differ | 5,520 bytes differ | both |
+| 2 | 15,996 | 223 | "+ OBJECTS - WILDFIRE" |
+| 6 | 15,997 | 44 | the tree's |
+| 10 | 15,452 | 231 | the tree's |
+| 11 | 0 | 0 | "SKETCH - SKAVEN / GRAPHICS - PIXEL / …" |
+| 12 | 0 | 0 | the same as 11 |
+| 17 | 15,992 | 156 | the tree's |
+| 19 | 15,998 | 234 | "MUSIC - SKAVEN / CODE - PSI / WORLD - TRUG" |
+| 20 | 15,990 | 239 | "GRAPHICS - PIXEL / MUSIC - SKAVEN" |
+| 21 | 15,882 | 32 | "GRAPHICS - PIXEL / MUSIC - SKAVEN / CODE - WILDFIRE" |
 
-At 3240 the picture difference is not a palette the tree could upload: **8 of the band's 14 colours
-— 3,524 of its 16,000 pixels — are in none of the screen's 256 palette entries**
-(`the_references_sixth_screen_is_not_the_trees_picture_at_all`). And the captions are strings no
-source file in the tree contains: `grep -rnia sketch upstream/SecondReality` returns exactly **one**
-hit, and it is in the shipped *data* — `MAIN/DATA/CRED.EXE` (line 958 of grep's own counting of a
-binary file, not a byte offset) — while a search restricted to the sources (`--include='*.C'
---include='*.ASM' --include='*.H' --include='*.INC' --include='*.PAS'`) returns none in any letter
-case. §20.1's table — written from the shipped build's own sheet — reads screens 11 and 12's
-captions as "SKETCH - SKAVEN / GRAPHICS - PIXEL / …" and describes screen 6 as "a dotted vortex".
-A port of this tree cannot produce either sentence's screen.
-*(Corrected at the Phase 2 close-out: this entry said "`grep -rn SKETCH upstream/SecondReality`
-returns no hits in any letter case", which the `-a` run contradicts — the word is in the packed EXE,
-which is where the release's own data lives.)*
+A *shown* entry is one the screen indexes: the caption's ramp (0-9) or `v + 16` for a picture value
+`v`. On seven of the twelve unchanged screens the blob's palette differs from the LBM's in entries no
+pixel of theirs indexes (1: 129, 3: 83, 4: 74, 7: 128, 8: 58, 13: 27, 15: 81), which no frame shows.
 
-**The divergence is not confined to those three screens, and that is measured too.** The record's
-own sweep of this part (`out/b5-s5-cred-map`, the source of §20.1's table) holds a *hold sample* for
-every one of the 21 screens, and each sample against the port's hold puts **nine** of the 21 off the
-tree's data — the three above and six more:
+**Port.** The release's: the 21 calls are found by scanning `main` for that pattern (refusing an
+image with another count, or whose picture word is not a relocation), and each screen's picture,
+palette and caption are read at the offsets its own call names
+(`the_screens_are_mains_twenty_one_calls_read_from_the_image` pins all 21). The tick map, the
+palette repair and the geometry are unchanged — the image's `init` and `screenin` are the tree's
+code in those respects (`cred.md` §9). The tree's 21 `PIC*.LBM` files are no longer read by the
+part; the tests read them to measure the release against, and they stay in `assets/`.
 
-| screen | sample | picture band | caption | reading |
-|---|---|---|---|---|
-| 2 | 1740 | 25,286 | 3,297 | both |
-| 6 | 3240 | 20,122 | 0 | the picture is not the tree's |
-| 10 | 4640 | 8,080 | 0 | the picture is not the tree's |
-| 11 | 5040 | 0 | 18,264 | the caption is not the tree's |
-| 12 | 5440 | 0 | 18,264 | the caption is not the tree's |
-| 17 | 7240 | 21,871 | 0 | the picture is not the tree's |
-| 19 | 7940 | 34,668 | 8,832 | both |
-| 20 | 8340 | 14,272 | 11,343 | both |
-| 21 | 8740 | 5,702 | 5,520 | both |
+**Why.** D49: the shipped captions and pictures are data inside the release's own artifact, so the
+port reads them from it rather than registering their absence.
 
-Measured by `bins/secondreality/src/parts/cred.rs`'s
-`the_records_other_holds_measure_which_else_the_release_changed` (an `#[ignore]`d test, because it
-reads the scratch capture), over **all 21** of those screens' hold samples — the table above is one
-sample per screen, and the samples on any one screen agree. The three keyframes' rows are unchanged
-in it; screens 11 and 12's captions differ from the tree's by the same 18,264 bytes — §20.1 reads
-both as the one four-line caption — and §20.1's sheet text names the release's own caption lines on
-screens 2, 19 and 20 ("OBJECTS – WILDFIRE", "WORLD – TRUG", "MUSIC – SKAVEN") where
-`CREDITS/MAIN.C` has none. The remaining twelve screens' holds are the tree's, byte for byte
-(asserted at one sample each, 0 of 192,000 bytes).
+**Measured difference: 0.** `cargo xtask rediff --only cred`: 0 / 0 / 0 / 0 / 0 at 1440 / 3240 /
+5440 / 7640 / 8740 (were 0 / 7,204 / 6,088 / 0 / 3,741); `cargo xtask rediff --only
+fullrun/12-cred`: 0 at 40600 (was 7,204). Against the record's sweep (`out/b5-s5-cred-map`,
+scratch), all 49 hold samples are the port's hold of their own screen, 0 of 192,000 bytes each, and
+all 28 wipe frames are one state of one screen byte for byte
+(`the_records_hold_samples_are_the_releases_screens`,
+`the_records_transition_frames_are_the_states_this_part_writes`, both `#[ignore]`d on the scratch
+capture).
 
-**Why the port does not follow the reference here.** Copying the shipped captions would be inventing
-text that is in no file in the tree, and nothing in the tree says which pictures they were paired
-with. The port translates `CREDITS/MAIN.C` as it stands, and this entry is what the register is for
-— the same call A6 made for TUNNELI's second ramp.
-
-**Measured difference: 11.2563 % / 9.5125 % / 5.8453 % of one frame at 3240 / 5440 / 8740, and
-0.0000 % at 1440 and 7640.** The two frames that agree are byte-identical, 0 of 192,000 bytes each,
-which is what says the residue is the *data* and not the port: the same machinery, the same tick
-map, the same palette repair and the same geometry reproduce them exactly.
-
-**For whoever unpacks it.** `MAIN/DATA/CRED.EXE` is PKLITE-compressed, so its captions and its
-pictures are recorded but unread. Unpacking it **would** yield the 21 pictures the credits draw as
-`FC FC` blobs plus the caption strings, which is what would turn "the shipped window differs" into
-"here is what it says". The count and the layout are **inferred, not read**: the 21 is
-`CREDITS/INCLUDE.OBJ`'s 12 plus `INCLUD2.OBJ`'s 9 `FC FC` pictures, at a 16,784-byte stride
-(`docs/fidelity/asset-inventory.md` §E.20, the row for those two objects) — the tree's own linked
-objects, which is what the credits were built from — and the internal layout (a 16-byte header, a
-768-byte palette at offset 16, pixels at offset 784) is the one those objects' blobs have, not one
-read out of the packed EXE. Nothing here has been unpacked; what the markers inside `CRED.EXE` are
-is unmeasured. Phase 9 compares every frame; these three are where that phase will first look.
-
-**Measured difference (restated at `rediff`'s and the full run's numbers, Phase 9 Task 10).** As
-pixels of 64,000 the three are **7,204 / 6,088 / 3,741** at 3240 / 5440 / 8740 — the percentages
-above, 0 at 1440 and 7640 (`cargo xtask rediff --only cred`). The full `SECOND 1` run's one filed
-CRED hold, 40600, differs by **7,204** as well (`cargo xtask rediff --only fullrun/12-cred`, A53):
-the same release-versus-tree screen, reached through block 1's chain.
-
-**Status (Phase 9):** Carried — the shipped captions and pictures are inside the packed
-`MAIN/DATA/CRED.EXE` (D12; `MAIN/PACKFINA.INC:70`), which nothing here unpacks.
+**Status (Phase 9):** Closed — the screens are the release's, read from its image (D49).
 
 ## A11 — ENDSCRL: the shipped build is read from its image; the block-5 chain offset remains
 
@@ -748,10 +726,26 @@ up to 31,750, black at 31,500 and 31,750, and text mode with the end box from 32
 `%` at 8917 + 22,967 = 31,884, plus the 64-frame fade, puts text mode near 31,948, inside
 (31,750, 32,000]. The port's block-5 run ends its ENDSCRL at 31,802, the same 82 frames early.
 
+**Where the 82 frames are, measured in CRED (2026-10-29).** CRED's own image does not explain
+them: its loops are the tree's (102 open steps, a 200-wait hold, 59 close steps), and its tick map
+is the port's (`docs/fidelity/cred.md` §9). The record's 28 wipe frames
+(`out/b5-s5-cred-map`, each one state of one screen byte for byte now that the screens are the
+image's) say where the frames go instead: the release shows each state **14** frames after the
+port's chain at screen 1 and **77** after it at screen 20, 3 to 4 more a screen, while an open
+frame and its close partner are 300 frames apart in both
+(`parts::cred::tests::the_records_transition_frames_are_the_states_this_part_writes`). So the
+release spends 3 to 4 frames a screen that the port does not, between one screen's last close step
+and the next one's first open step — where `screenin` uploads the palette and draws the caption and
+the 16,000-pixel picture one far `tw_putpixel` call a pixel, and DIS's `waitb` waits for the next
+frame whatever has passed (`DIS/DISINT.ASM:161-181`). Twenty-one screens at that rate is ~70
+frames, which is A53's −69 CRED→ENDSCRL change in the full run; with the 14 frames already behind at
+screen 1 it is the block-5 82. It is the emulated CPU's time, which no image settles, so the port's
+tick map stays the source's and the offset stays here.
+
 **Status (Phase 9):** Carried — the block-5 offset of 82 frames is CRED's span (A53's class), not
-ENDSCRL's; its cause inside CRED is not established (A10's record of CRED running early is the lead).
-Everything this entry registered about the part's own drawing is closed, read from the release's
-image (D49).
+ENDSCRL's: CRED's drawing between screens costs the release 3 to 4 frames a screen of CPU time the
+port's tick map does not model (measured above). Everything this entry registered about the part's
+own drawing is closed, read from the release's image (D49).
 
 ## A12 — The music clock: the port's tick clock is exact, the reference's frame counter is not
 
@@ -2841,8 +2835,9 @@ session, which is 5 frames late at its first rows and 3 early at its last (A38's
 within −12…+16 of the original; the `MUSIC0@18` session after U2E is 8 frames early at its first row
 and level at its last. *(Task 6 measured +230…+259 here, A38's lag before the restart kept the
 channel volumes.)* ENDSCRL's −69 change is CRED's span (first frame to ENDSCRL's) being 69 frames
-shorter in the port, 7,625 against 7,694 — why is not measured; A10's record of CRED running early is
-a lead. The parts' own residuals at the seams are: **U2A's first frame is 47 frames late, so ALKU's
+shorter in the port, 7,625 against 7,694 — *(2026-10-29: measured in CRED's record frames — the release
+spends 3 to 4 frames a screen drawing between one screen's close and the next one's open, ~70 over
+21 screens, A11.)* The parts' own residuals at the seams are: **U2A's first frame is 47 frames late, so ALKU's
 end is at least 47 frames late** (the original's last ALKU frame may be its loader holding the
 screen; no keyframe of `alku` sees it; the cause is not established, and the leads are the batches' `dis_sync()<4+tptr`
 waits and the scroll's `frame_count<SCRLF`, `ALKU/MAIN.C:138`, `:400`); **BEGLOGO's −37 is A5's
@@ -2871,7 +2866,7 @@ the three frames the original shows during a loader stretch the port does not ha
 fullrun` compares all 60 (44 frames, 16 index planes) at their registered counts — the same 60
 counts at Task 6's pairings and at Task 6b's, every one re-measured
 (`xtask/src/rediff/table.rs`'s `fullrun/*` entries; the full list is `reference-indices.md` §26.8).
-Every held frame is 0 in RGB but U2A's 6500 (64,000: the 30,000-cycle neon, A32), A25's 19000 (2,058), A10's 40600 (7,204) and 34110 (72,363: the
+Every held frame is 0 in RGB but U2A's 6500 (64,000: the 30,000-cycle neon, A32), A25's 19000 (2,058), 40600 (7,204 under A10 until 2026-10-29; 0 since CRED's screens are read from its image) and 34110 (72,363: the
 reload's white, which the port never shows; its index plane is 0). The moving frames this entry
 registers are 5961 (60,160: U2A's opening, 47 frames late), 7930 (81,273, at BEGLOGO's −37),
 11159 (192), 11900 (4,336), 16193 (108,923: PANICEND's squashed troll), 18656 (129), 24500
@@ -3149,7 +3144,7 @@ ALKU's fade-in is lit at 10045 and holds from 10106.
 the port fit: CRED's retirement tick is CRED's (the fade's end, 9092, is trace-measured, §25.3,
 so the two-tick tail is the port's CRED: D42's cost); the restart recipe's 3 frames would be a
 second constant needing its own measurement; ALKU follows the music; and CRED's 81-frame chain
-drift is CRED's span (A10, A53).
+drift is CRED's span (A11, A53: 3 to 4 frames a screen of drawing time).
 
 **Measured difference**, every figure re-measured by
 `cargo test --release -p secondreality --test loop -- --nocapture` (`the_loop_seam_is_the_originals`

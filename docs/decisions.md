@@ -1696,6 +1696,9 @@ every one of them diffs a part whose shipped build may not be the tree's.
    in **none** of that screen's 256 palette entries. Nine of the shipped build's 21 screens are off
    the tree's data at one hold sample each (`cred.md` §7, A10). *Decided:* the port keeps
    `CREDITS/MAIN.C`'s own 21 screens and captions.
+   *(2026-10-29, under D49: reversed for CRED. The 21 screens are read from the unpacked image —
+   each `screenin` call's picture segment and caption offset, in `main`'s own order — and all five
+   keyframes match the reference byte for byte. A10, retired.)*
 3. **ENDSCRL — a build's behaviour and its art.** The shipped scroller's text pitch is **25 rows a
    line** where `MAIN.C:6` says `FONAY 30`; its `[NN` control lines — **163** in the shipped text —
    advance the ring by the number in the marker and draw nothing, where the tree's renderer draws the
@@ -3255,3 +3258,12 @@ the other parts; their frames decide as before.
 control-line rule, blank and `%` exit are the unpacked image's, and both builds' text-mode `read`
 strips the CRs (`docs/fidelity/endscrl.md`, A11). The part now ends by itself, and the shell's end
 path did not change: a part's own `Finished` and an ESC already retire it alike.
+
+*(2026-10-29.)* **CRED is the second**: its 21 screens are `main`'s 21 `screenin` calls in the
+unpacked image (`0x193a`-`0x1b56`), each picture the `FC FC` blob at its pushed segment and each
+caption the lines at its pushed DGROUP offset; the font raster (`0x29f0`) and `fonaorder` are read
+from the image too and are the tree's byte for byte (A8 stands). Its code is the tree's in every
+respect the port models; the three differences it has (a `printf`, a display-enable wait in place
+of a delay loop, a flip-flop reset) are recorded and not modelled (`docs/fidelity/cred.md` §9).
+A10 is retired. The image does not settle the CRED→ENDSCRL chain offset: its loops are the tree's,
+and the 3 to 4 frames a screen the release spends past the port's are CPU time (A11).

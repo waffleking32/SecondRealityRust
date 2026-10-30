@@ -2949,7 +2949,7 @@ report: out/rediff/report.json
 exit 0
 ```
 
-Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count *(2026-10-29: `fullrun/13-endscrl`'s three are now 0 — ENDSCRL reads the release's image, A11; today's `cargo xtask rediff` is 51 entries and 239 frames, **170** at 0 and **69** at a registered count)*. By capture
+Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count *(2026-10-29: `fullrun/13-endscrl`'s three are now 0 — ENDSCRL reads the release's image, A11; today's `cargo xtask rediff` is 51 entries and 239 frames, **170** at 0 and **69** at a registered count; later the same day `cred`'s three and `fullrun/12-cred`'s 40600 are 0 too — CRED reads its 21 screens from the release's image, A10 retired — so **174** at 0 and **65** at a registered count)*. By capture
 (frames, frames at 0, the non-zero counts in table order, and the entries that register them):
 
 | capture | frames | at 0 | non-zero counts | register of the non-zero frames |
@@ -2960,7 +2960,7 @@ Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered 
 | `beglogo-leadin/odd` | 10 | 10 | — | — |
 | `beglogo-leadin/plane-436` | 2 | 1 | 127998 | A5 |
 | `beglogo` | 5 | 5 | — | — |
-| `cred` | 5 | 2 | 7204 / 6088 / 3741 | A10 |
+| `cred` | 5 | 5 | — (2026-10-29, the screens read from the release's image; were 7204 / 6088 / 3741, A10) | — |
 | `ddstars` | 4 | 4 | — | — |
 | `endlogo-leadin/even` | 10 | 10 | — | — |
 | `endlogo-leadin/odd` | 10 | 10 | — | — |
@@ -2978,7 +2978,7 @@ Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered 
 | `fullrun/09-jplogo` | 6 | 5 | 72363 | A53 |
 | `fullrun/10-u2e` | 3 | 3 | — | — |
 | `fullrun/11-endlogo` | 4 | 3 | 46997 | A53 |
-| `fullrun/12-cred` | 2 | 1 | 7204 | A10 |
+| `fullrun/12-cred` | 2 | 2 | — (2026-10-29; was 7204, A10) | — |
 | `fullrun/13-endscrl` | 3 | 3 | — (2026-10-29; were 42 / 67 / 149) | — |
 | `glenz` | 5 | 2 | 5208 / 2289 / 5941 | A37 |
 | `grid` | 5 | 0 | 6 / 2 / 36 / 33 / 14 | A41 |
