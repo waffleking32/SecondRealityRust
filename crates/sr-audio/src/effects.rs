@@ -14,7 +14,7 @@
 //!   `K` also reads (`+0x4000`); `G` keeps `alasteff2` (`+0x2c`).
 //! - **Everything is measured in periods**, `note_period × 8363/c2spd` (`+0x5813`).
 //! - **The `Q` tables' zero slots are zero in the object** (`+0x96c`), which sends the codes
-//!   that are not multipliers down the addend path ([`Channel::retrigger`]).
+//!   that are not multipliers down the addend path (`Channel::retrigger`).
 
 /// One channel's tracker state: the fields of `struct st_zchn` (`MAIN/STMIK.H:203-258`) that
 /// the notes and the effects own, each with the object's field name and offset.
@@ -573,7 +573,7 @@ pub fn scaled_period(period: u16, c2spd: u16) -> u16 {
 /// reference steps at 8362, not 8363 (`music.md` §9.11).
 pub(crate) const BASE_FREQ: u32 = 0x00da_7600;
 
-/// `+0x582b`'s step: [`BASE_FREQ`] over the period, 0 for a period of 0 (`+0x5876`). The
+/// `+0x582b`'s step: `BASE_FREQ` over the period, 0 for a period of 0 (`+0x5876`). The
 /// mixer divides it by the mixing rate ([`crate::step`]).
 pub fn period_step(period: u16) -> u32 {
     if period == 0 {
