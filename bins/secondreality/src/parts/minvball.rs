@@ -146,6 +146,7 @@
 use sr_engine::part::{Part, PartCtx, PartStatus};
 use sr_engine::Palette;
 
+use crate::parts::mode_view;
 use crate::parts::msrand::MsRand;
 use crate::parts::sin1024::SIN1024;
 
@@ -444,19 +445,6 @@ impl Minvball {
         (d1, d2, d3)
     }
 
-    /// `MAIN.C:125-126`: mode 13h and the display geometry the port's view
-    /// needs to see the packed 320-wide picture.
-    fn set_display(ctx: &mut PartCtx) {
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = SCREEN_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = Some(LINE_LEN);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
-    }
-
     /// The DAC from `pal2`, the array the fades write.
     fn palette_of(pal2: &[u8; 768]) -> Palette {
         Palette::from_six_bit(pal2)
@@ -698,8 +686,9 @@ impl Part for Minvball {
         // `:151`: the DAC zeroed after the read-back.
         ctx.set_palette(Palette::new());
 
-        // The mode set's picture is up before the fade's first wait.
-        Self::set_display(ctx);
+        // `MAIN.C:125-126`: mode 13h, whose picture is up before the fade's
+        // first wait.
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
         let memory = ctx.surface.pixels_mut();
         memory[..VIDEO_BYTES].copy_from_slice(&self.video[..VIDEO_BYTES]);
         Ok(())

@@ -133,7 +133,7 @@ use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image, read_asset};
+use crate::parts::{asset, load_image, mode_view, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "mntscrl";
@@ -371,19 +371,6 @@ impl Mntscrl {
             phase: Phase::Setup,
             tick: 0,
         }
-    }
-
-    /// `:101-108`: mode 13h, `dis_partstart`, and the display state a mode set
-    /// leaves: origin 0, 320 pixels a row, no split, overscan entry 0.
-    fn set_display(ctx: &mut PartCtx) {
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = SCREEN_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = Some(LINE_LEN);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
     }
 
     /// Tick 0: `:120-128` — the black DAC, the background blit, and the two
@@ -676,8 +663,9 @@ impl Part for Mntscrl {
             });
         }
 
-        // `:101-108`.
-        Mntscrl::set_display(ctx);
+        // `:101-108`: mode 13h, `dis_partstart`, and the display state a mode
+        // set leaves, overscan entry 0.
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
         Ok(())
     }
 

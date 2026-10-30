@@ -156,7 +156,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
 use sr_engine::Palette;
 
-use crate::parts::load_image;
+use crate::parts::{load_image, mode_view};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "alku";
@@ -630,19 +630,6 @@ impl Alku {
     #[cfg(test)]
     fn curated() -> Alku {
         Alku { shipped_palette: false, ..Alku::new() }
-    }
-
-    /// The mode set's display state (`TWEAK.ASM:18-54`): 320×400, a 704-pixel
-    /// line, origin 0, no split.
-    fn set_display(ctx: &mut PartCtx) {
-        ctx.view.width = VIEW_WIDTH;
-        ctx.view.height = VIEW_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(LINE_PIXELS as u16);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
     }
 
     /// `MAIN.C:161-167`: `outline` twice for every byte column 0-87, which
@@ -1448,7 +1435,9 @@ impl Alku {
         // rows 50-349 (`MAIN.C:165-167`).
         ctx.surface.clear(0);
         self.blit_picture(ctx.surface.pixels_mut());
-        Alku::set_display(ctx);
+        // The mode set's display state (`TWEAK.ASM:18-54`): 320×400, a
+        // 704-pixel line.
+        *ctx.view = mode_view(VIEW_WIDTH, VIEW_HEIGHT, Some(LINE_PIXELS as u16), Some(0));
         // `MAIN.C:160`: `tw_setpalette(fade1)`, black.
         ctx.set_palette(Palette::new());
 

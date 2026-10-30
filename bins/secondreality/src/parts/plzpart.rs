@@ -168,7 +168,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::{Split, View};
 use sr_engine::Palette;
 
-use crate::parts::{asset, read_asset};
+use crate::parts::{asset, mode_view, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "plzpart";
@@ -1623,14 +1623,7 @@ impl Plzpart {
     fn set_cube_mode(&mut self, ctx: &mut PartCtx) {
         // `TWEAK.ASM:18-37`: chain-4 off and the 64 KB clear, all planes.
         self.video.fill(0);
-        ctx.view.width = CUBE_WIDTH;
-        ctx.view.height = CUBE_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = Some(640);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
+        *ctx.view = mode_view(CUBE_WIDTH, CUBE_HEIGHT, Some(640), Some(0));
         self.page = 0;
         self.frames = 0;
         self.clrptr = 0;

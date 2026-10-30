@@ -147,7 +147,7 @@ use std::sync::OnceLock;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::load_image;
+use crate::parts::{load_image, mode_view};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "ddstars";
@@ -854,14 +854,7 @@ impl Part for Ddstars {
 
         // `resetmode13`'s cleared DAC and the inherited display state.
         ctx.set_palette(Palette::new());
-        ctx.view.width = SCREEN_WIDTH as u16;
-        ctx.view.height = SCREEN_HEIGHT as u16;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = None;
-        ctx.view.pan = 0;
-        ctx.view.border = Some(255);
-        ctx.view.split = None;
+        *ctx.view = mode_view(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16, None, Some(255));
         // The mode set cleared the picture; the first frame() presents page 0
         // as it stands, which is black until the first pass is blitted.
         let stride = ctx.surface.width();

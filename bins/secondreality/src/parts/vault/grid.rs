@@ -21,7 +21,7 @@
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image};
+use crate::parts::{asset, load_image, mode_view};
 
 /// The registry name (`parts::registry`).
 pub const GRID_NAME: &str = "grid";
@@ -395,14 +395,12 @@ impl Part for Grid {
         // packed at the start of the engine's surface, so the beam reads it at
         // stride 320; no split, origin 0, and the blanking border the source
         // sets to 0 (`setborder(0)`, invisible in dumps).
-        ctx.view.width = SCREEN_WIDTH as u16;
-        ctx.view.height = SCREEN_HEIGHT as u16;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(SCREEN_WIDTH as u16);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
+        *ctx.view = mode_view(
+            SCREEN_WIDTH as u16,
+            SCREEN_HEIGHT as u16,
+            Some(SCREEN_WIDTH as u16),
+            Some(0),
+        );
         // The DAC a mode set leaves; the source's first palette upload comes
         // only at the end of the first loop iteration.
         ctx.set_palette(crate::shell::hardware_default_palette());

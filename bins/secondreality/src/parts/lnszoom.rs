@@ -119,7 +119,7 @@
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{load_image, read_asset};
+use crate::parts::{load_image, mode_view, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "lnszoom";
@@ -339,18 +339,6 @@ impl Lnszoom {
             phase: Phase::Gate,
             tick: 0,
         }
-    }
-
-    /// `MAIN.C:290-292`: mode 13h's display state.
-    fn set_display(ctx: &mut PartCtx) {
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = SCREEN_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = Some(LINE_LEN);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
     }
 
     /// `LENS.EX0`+4's nine bytes: the three overlay RGB triples.
@@ -867,7 +855,7 @@ impl Part for Lnszoom {
         self.tick = 0;
 
         // `:290-292`, the mode set's clear, and `:370-371`'s palette upload.
-        Self::set_display(ctx);
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
         self.compose_linear(ctx);
         let palette = self.live_palette();
         ctx.set_palette(palette);

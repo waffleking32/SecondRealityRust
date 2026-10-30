@@ -42,6 +42,7 @@ use std::path::Path;
 use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartError};
 use sr_engine::testcard::TestCard;
+use sr_engine::View;
 
 /// Where a part finds `rel`, a path under the repository root. A run reads it
 /// relative to the working directory, the repository root (`README.md`); a
@@ -51,6 +52,13 @@ pub(crate) fn asset(rel: &str) -> String {
     return test_rig::repo(rel);
     #[cfg(not(test))]
     rel.to_owned()
+}
+
+/// The CRTC state a mode set leaves: `width`×`height` from origin 0, no pan,
+/// split or double scan, rows `line` pixels apart (`None`: the surface's own
+/// stride) and overscan colour `border`.
+pub(crate) fn mode_view(width: u16, height: u16, line: Option<u16>, border: Option<u8>) -> View {
+    View { y_line_offset: line, border, ..View::new(width, height) }
 }
 
 /// The bytes of [`asset`]`(rel)`, or `part`'s error naming the path.

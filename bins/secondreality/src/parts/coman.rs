@@ -134,7 +134,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024;
-use crate::parts::{asset, read_asset};
+use crate::parts::{asset, mode_view, read_asset};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "3dsinfld";
@@ -679,14 +679,7 @@ impl Part for Coman {
         self.wave2 = Coman::read_wave(W2_PATH)?;
         self.palette = palette();
         ctx.set_palette(self.palette);
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = SCREEN_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(LINE_LEN);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
         // `mov ax,13h; int 10h` and `inittwk`'s 64 KB clear leave the video
         // memory (and so the screen) black before `doit`'s gate; without this
         // a chain would show the previous part's picture through the gate.

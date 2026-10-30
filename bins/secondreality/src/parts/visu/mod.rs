@@ -71,7 +71,7 @@ pub fn check_surface(ctx: &PartCtx, part: &'static str) -> Result<(), PartError>
 /// 320x200 mode, rows packed at 320), with page 0 displayed until the ring's
 /// copper moves the start.
 pub fn view() -> View {
-    View { y_line_offset: Some(VIEW_WIDTH), ..View::new(VIEW_WIDTH, VIEW_HEIGHT) }
+    crate::parts::mode_view(VIEW_WIDTH, VIEW_HEIGHT, Some(VIEW_WIDTH), None)
 }
 
 /// `while(repeat-- && !xit) { parse one animation frame }` (`U2A.C:336-430`,

@@ -92,7 +92,7 @@
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image};
+use crate::parts::{asset, load_image, mode_view};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "jplogo";
@@ -573,13 +573,7 @@ impl Part for Jplogo {
         // `inittwk` (`ASM.ASM:36-74`): CRTC 0x09 = 0 (400 lines, one a row),
         // no offset register written — 80 plane bytes a row = 320 pixels — and
         // AC 0x11 = 0xFF. `scrolly(400)` is the entry's first start address.
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = SCREEN_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(LINE_LEN);
-        ctx.view.pan = 0;
-        ctx.view.split = None;
-        ctx.view.border = Some(255);
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(255));
         ctx.view.set_origin(u32::from(400u16) * u32::from(LINE_LEN));
 
         // `inittwk`'s 64 KB `rep stosw` reaches all 256 KB through the

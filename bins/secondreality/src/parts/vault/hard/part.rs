@@ -59,7 +59,7 @@ use super::math::{project, rotate, rotate_project, PVert};
 use super::poly::{clip_easy_list, FaceMode, Poly, PolyDef};
 use super::span::Compositor;
 
-use crate::parts::read_asset;
+use crate::parts::{mode_view, read_asset};
 
 /// The registry name (`parts::registry`).
 pub const HARD_NAME: &str = "hard";
@@ -863,14 +863,12 @@ impl Part for Hard {
         // The mode set leaves this DAC in place until the pre-roll's first
         // `loadpal(defpal,768)`.
         self.shown = crate::shell::hardware_default_palette();
-        ctx.view.width = SCREEN_WIDTH as u16;
-        ctx.view.height = SCREEN_HEIGHT as u16;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(SCREEN_WIDTH as u16);
-        ctx.view.set_origin(0);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
+        *ctx.view = mode_view(
+            SCREEN_WIDTH as u16,
+            SCREEN_HEIGHT as u16,
+            Some(SCREEN_WIDTH as u16),
+            Some(0),
+        );
         ctx.set_palette(self.shown);
         Ok(())
     }

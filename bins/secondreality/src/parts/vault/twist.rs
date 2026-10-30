@@ -20,6 +20,7 @@
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
+use crate::parts::mode_view;
 use crate::parts::sin1024::SIN1024;
 
 /// The registry name (`parts::registry`).
@@ -346,16 +347,15 @@ impl Part for Twist {
         // 320×200, double-scanned frame. The port models the 200 raw rows, as
         // the rest of the port does for double-scanned parts, and the plane
         // rows are 80 bytes = 320 chunky pixels, mode 13h's untouched 0x13.
-        ctx.view.width = SCREEN_WIDTH as u16;
-        ctx.view.height = SCREEN_HEIGHT as u16;
-        ctx.view.double_scan = false;
-        ctx.view.y_line_offset = Some(SCREEN_WIDTH as u16);
-        ctx.view.set_origin(PAGE_1);
-        ctx.view.pan = 0;
-        ctx.view.split = None;
         // The overscan starts black; `waitb`'s Scroll-Lock toggle is dropped
         // (the reference is captured with no key, so the branch never runs).
-        ctx.view.border = Some(0);
+        *ctx.view = mode_view(
+            SCREEN_WIDTH as u16,
+            SCREEN_HEIGHT as u16,
+            Some(SCREEN_WIDTH as u16),
+            Some(0),
+        );
+        ctx.view.set_origin(PAGE_1);
         // `inittwk` clears all four planes through map mask 0x0F; in the port's
         // chunky mapping that is the whole 640×400 surface. (`memset(vram,0,
         // 64000)` and `vram[a]=a` are dead: the first twister draw overwrites

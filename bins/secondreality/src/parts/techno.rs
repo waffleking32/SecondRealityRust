@@ -74,7 +74,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024;
-use crate::parts::{load_image, read_asset};
+use crate::parts::{load_image, mode_view, read_asset};
 
 const NAME: &str = "techno";
 
@@ -1719,14 +1719,7 @@ impl Techno {
         self.page = 0;
         // The surface is the interleaved four-plane image.
         ctx.surface.pixels_mut().fill(0);
-        ctx.view.width = SCREEN_WIDTH;
-        ctx.view.height = TROLL_HEIGHT;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = Some(640);
-        ctx.view.pan = 0;
-        ctx.view.border = Some(0);
-        ctx.view.split = None;
+        *ctx.view = mode_view(SCREEN_WIDTH, TROLL_HEIGHT, Some(640), Some(0));
         self.phase = Phase::TrollWait1;
         self.present(ctx);
         PartStatus::Continuing
@@ -1886,14 +1879,7 @@ impl Techno {
             return;
         }
         if self.stride != TROLL_ROW {
-            ctx.view.width = SCREEN_WIDTH;
-            ctx.view.height = SCREEN_HEIGHT;
-            ctx.view.double_scan = false;
-            ctx.view.set_origin(0);
-            ctx.view.y_line_offset = None;
-            ctx.view.pan = 0;
-            ctx.view.border = Some(0);
-            ctx.view.split = None;
+            *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, None, Some(0));
             self.compose_ega(ctx.surface.pixels_mut());
         }
     }

@@ -77,7 +77,7 @@ use math::{clip_y, matrix_yxz, project, rotate, Matrix, PVert, INIT_320X200};
 use poly::{build, ColourState, DemoMode, EPOLYS, EPOLYSB};
 use span::Compositor;
 use crate::parts::sin1024::SIN1024;
-use crate::parts::{asset, load_image};
+use crate::parts::{asset, load_image, mode_view};
 
 /// The part's name: what `--part` accepts and the registry lists.
 const NAME: &str = "glenz";
@@ -568,14 +568,7 @@ impl Glenz {
     /// engine's view, whose flag doubles source rows into a 400-line frame.
     fn mode_set(&mut self, ctx: &mut PartCtx) {
         self.vram.fill(0);
-        ctx.view.width = VIEW_WIDTH;
-        ctx.view.height = VIEW_HEIGHT_200;
-        ctx.view.double_scan = false;
-        ctx.view.set_origin(0);
-        ctx.view.y_line_offset = None;
-        ctx.view.pan = 0;
-        ctx.view.split = None;
-        ctx.view.border = Some(0);
+        *ctx.view = mode_view(VIEW_WIDTH, VIEW_HEIGHT_200, None, Some(0));
         // The bounce's DAC setup (`MAIN.C:315-318`): all 256 entries black,
         // then the picture's entries 0..15.
         ctx.set_palette(Palette::new());
