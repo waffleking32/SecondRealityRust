@@ -3,14 +3,13 @@
 Sources: `TECHNO/KOE.C` (728 lines) over `KOEA.ASM` (1,065), `KOEB.ASM` (632),
 `POLYCLIP.ASM` (273) and `READP.C` (72); assets `assets/TECHNO/CIRCLE2.EGA` (8,000 bytes,
 the extern `_circle2`), `assets/DDSTARS/PIC.EGA` (24,000 bytes, `_circle`) and
-`assets/TECHNO/TROLL.UP` (70,718 bytes, Origin RLE). Port: `bins/secondreality/src/parts/techno.rs`
+`assets/TECHNO/TROLL.UP` (70,718 bytes, Origin RLE). Port: `bins/secondreality/src/parts/techno/`
 (`"techno"`); the module doc has the three stages, the two screens and the preserved bugs.
 Block 2's fourth part, after TUNNELI (`MAIN/U2.ASM`). Run: a mapping in three pieces,
 `boot = 4797 / 4799 / 4800 + tick` (§2); music MUSIC1 order 18, entry pre-roll 253 polls
 plus 2 (§2). Reference: `reference/parts/techno/{interference,troll}`, seven keyframes, all
 RGB only (§8). `PIC.EGA` is the right file for `_circle`: its plane 0 and `CIRCLE2.EGA`'s plane 2
-make the 4900 window's 7,888 cyan (index 5) pixels
-(`the_interference_picture_is_the_circles_in_the_reference_window`), and the keyframes match.
+make the 4900 window, which rediff holds at 0.
 
 ## 1. Timeline
 
@@ -24,7 +23,7 @@ part's own `tick` counter is one higher.
 | 0, 1 | ResetClear, ResetMode | `KOEB.ASM:175-403` | `resetmode13`, `init_interference` |
 | 2 | FirstPass | `KOEB.ASM:405-607` | iteration `n` is frame `n + 2` |
 | 258 | SecondPass | `KOEA.ASM:900-905` | until `getmframe >= 925` |
-| 1246..1250 | Flash32..MusplusMinus3 | `KOE.C:275` | five flashes, `mode16`, gate `musplus < -3` |
+| 1246..1250 | Flash(32)..MusplusMinus3 | `KOE.C:275` | five flashes, `mode16`, gate `musplus < -3` |
 | 1295 | RowWait | `KOE.C:277-281` | `musrow & 7 == 7` |
 | 1303..1435 | Wipe, WipeRowWait, WipeFlash | `KOE.C:262-316` | four bar wipes |
 | 1436 | Doit1 | `KOE.C:317-577` | 420 counts, eight pages |
@@ -40,7 +39,7 @@ part's own `tick` counter is one higher.
 
 The view is 320×200 through frame 3395 and 320×400 (`y_line_offset` 640) from 3396; a dump is
 sized at the tick's start, so the first 320×400 dump is 3397
-(`the_two_geometries_are_the_parts_two_screens`,
+(`the_sections_land_on_the_reference_ticks`,
 `the_run_is_numbered_in_its_own_frames_and_declares_the_music_row`). The doit3 shrink gate is
 `getmframe > 2520` and `count < 333` (`KOE.C:495-501`).
 
@@ -167,10 +166,10 @@ port's ticks 3351..3391 (boot 8150..8190) are byte-identical to the capture. Wit
 
 ## 6. The troll (`KOE.C:588-727`)
 
-The runtime decodes `TROLL.UP` through `sr_assets`' Origin reader; `readp_rows`, the literal
-`READP.C` transcription with its 80,000-byte pad, agrees row for row
-(`the_troll_rle_is_the_origin_readers_rows`), and the palette is the file's bytes at +16
-(`the_troll_palette_is_the_files_own_six_bit_palette`). 8200 is the black hold, 8300 a ripple
+The runtime decodes `TROLL.UP` through `sr_assets`' Origin reader, and the palette is the
+file's six-bit bytes at +16; the troll keyframes at 0 (§8) pin both. `lineblit`'s planes are
+what the emulator draws as one byte a pixel, so the port copies the decoded rows straight into
+the surface (`Techno::troll_compose`). 8200 is the black hold, 8300 a ripple
 frame and 8400 the held picture.
 
 ## 7. Decisions
@@ -187,7 +186,7 @@ No D24 divergence and no A-entry. The preserved bugs and dead paths (`bugs.md` �
 - `rotate1` rotates 31,936 of 32,000 bytes (`KOEA.ASM:605-627`); the last 64 stay
   (`rotate1s_last_sixty_four_bytes_are_untouched`, §4.1).
 - `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second 40,000-byte
-  read into it (`KOE.C:317`, §6).
+  read into it (`KOE.C:317`).
 - `clipanypoly`'s first edge is the pre-clipped closing edge (`cap3`'s `jmp cap35`). A
   pseudo-point first edge fails 6300.
 - `_PIC1`/`_PIC2` and `_COMBG` are in the tree but not linked (`TECHNO/MAKEFILE:6-7`,
@@ -203,13 +202,13 @@ No D24 divergence and no A-entry. The preserved bugs and dead paths (`bugs.md` �
 | `techno/troll` | 8200 (3401), 8300 (3500), 8400 (3600) | 320×400 | RGB | 0 each | exact |
 
 The rows are the rediff table's entries (`xtask/src/rediff/table.rs`), and
-`the_seven_keyframes_at_the_measured_mappings` asserts them with D19's support: 4900, 6300, 8100
-and 8300 differ from both port neighbours; 5000, 8200 and 8400 (the holds) do not.
+`the_keyframes_move_and_hold_as_the_references_do` (`tests/techno.rs`) checks D19's support:
+4900, 6300, 8100 and 8300 differ from both port neighbours; 5000, 8200 and 8400 (the holds) do not.
 
 All seven are RGB only by necessity. The 320×200 screen is EGA 16-colour, which the oracle's
 indexed read refuses (`reference-indices.md` §1.7, §9). The 320×400 screen's one `.idx`, at
-8200, is 128,000 bytes of index 0; the test asserts it but does not count it as a check, and
-8400's RGB witnesses the 160-byte stride. A re-capture session's 8300 was one fade step from the
+8200, is 128,000 bytes of index 0 (`tr -d '\0' < reference/parts/techno/troll/frame_008200.idx | wc -c`
+prints 0), which says nothing about the stride; 8400's RGB witnesses the 160-byte stride. A re-capture session's 8300 was one fade step from the
 tree's (`reference-indices.md` §9.5); the port matches the tree's. Reproduce:
 
 ```bash

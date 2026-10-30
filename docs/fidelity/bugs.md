@@ -338,7 +338,7 @@ Frames: `reference/parts/techno/interference/` 4900, 5000, 6300, 8100 and `troll
 
 **Original.** `patdir` is set to -3 at rows ≡ 0 or 4 (mod 8), never +3, so the `>= 24` wrap fires
 only from below 0. **Where.** `TECHNO/KOEB.ASM:509`, `:512`, `KOEA.ASM:827`, `:830`; the step is
-`add si,cs:patdir` at `KOEB.ASM:421`, `KOEA.ASM:758`. **Frame.** 4900 and 5000 (`techno.md` §4.1).
+`add si,cs:patdir` at `KOEB.ASM:421`, `KOEA.ASM:758`. **Frame.** 4900 and 5000 (`techno.md` §7).
 **Test.** `the_first_pass_reaches_white_at_its_two_hundred_and_first_iteration`.
 
 ### 14.2 `rotate1` leaves the last 64 bytes as they were
@@ -735,10 +735,10 @@ path. Where a note holds a counterfactual test, the row names it.
 | TECHNO | `setborder` returns before its assembly | `TECHNO/KOE.C:68-80` | The border is not a frame | `techno.md` §7 |
 | TECHNO | `flash(-2)` returns `pal1` without capturing or uploading; `mode16` writes `flash_pal` and uploads nothing | `TECHNO/KOE.C:82-103` | No DAC write | `techno.md` §7; `flash_minus_two_uploads_nothing` |
 | TECHNO | `mov cx,400` in `init_interference` is reloaded before it is read | `TECHNO/KOEB.ASM:356`, `:360` | The first value is never used | `techno.md` §7 |
-| TECHNO | The KOEB plane-8 loop is behind `jmp @@OVER3`; `sizefade` stays 0 and its `add ax,256` is commented out | `TECHNO/KOEB.ASM:454`, `:524` | The display start is 8020 either way; the port keeps `first_pass_move` with `p1_sizefade` 0 | `techno.md` §3 |
+| TECHNO | The KOEB plane-8 loop is behind `jmp @@OVER3`; `sizefade` stays 0 and its `add ax,256` is commented out | `TECHNO/KOEB.ASM:454`, `:524` | The display start is 8020 either way; the port writes it as `FIRST_PASS_START` | `techno.md` §3 |
 | TECHNO | `power1` is computed and never read | `TECHNO/KOE.C:173-211` | A dead table | `techno.md` §3 |
 | TECHNO | `dis_partstart()` is called a second time | `TECHNO/KOE.C:327` | The version check draws and waits on nothing | `techno.md` §5 |
-| TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C:317` | The 400 decoded rows are identical either way (`the_troll_rle_is_the_origin_readers_rows`) | `techno.md` §6 |
+| TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C:317` | The 400 decoded rows are the Origin reader's either way; 8300 and 8400 are at 0 | `techno.md` §7, §8 |
 | PANICEND | The part never polls the exit flag (`grep -c dis_exit` prints 0) | `PANIC/SHUTDOWN.C:1-157` | No reference frame is at an exit | `panicend.md` §9-10 |
 | MNTSCRL | `frame = veke` can never fire: `inc(frame)` is commented out | `FOREST/READ2.PAS:3`, `:221-224` | Dead bound (`the_dead_veke_bound_never_ends_the_part`) | `mntscrl.md` §8 |
 | LNS&ZOOM | `memcpy(back+64000, back+64000-1536, 1536)` copies the picture's last 1,536 bytes into the pad past it | `LENS/MAIN.C:302` | The copied bytes are all 0 (`tail -c 1536 assets/LENS/LENS.EXB`) and the buffer starts at 0; a mutation that drops the copy leaves the lens residuals unchanged. `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` pins the layout | `lnszoom.md` §2 |
