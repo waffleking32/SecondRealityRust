@@ -28,7 +28,7 @@ use crate::shell::{Ending, Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
 const USAGE: &str = "\
 usage: secondreality [--part <name> | --block <1|2|3|4|5|U>] [--frames <N>]
                      [--dump-frames <A,B,C>] [--dump-dir <DIR>] [--scale <N>]
-                     [--aspect 4:3|square] [--no-border] [--headless]
+                     [--aspect square|4:3] [--no-border] [--headless]
                      [--run-seconds <S>] [--audio-dump <FILE>] [--no-audio]
                      [--vault] [--loop] [--no-setup] [/gravis]
                      [--sound-quality authentic|enhanced] [--positions <FILE>]
@@ -40,6 +40,14 @@ setup: a windowed demo run opens on a settings screen first, as the original ask
        ESC leaves (the demo's end box is printed). The flags give the initial values and
        nothing is saved. --no-setup and /gravis skip it, and --part, --vault and
        --headless never show it.
+display: the window shows the picture at 2x by duplicating pixels, with no
+       interpolation: each 320x200 pixel is a 2x2 block, so the screen is
+       640x400, and the 320x400 and 640x400 parts are the same 640x400.
+       --scale <N> magnifies by any whole N instead (each 320x200 pixel N x N).
+       --aspect square is the default; --aspect 4:3 stretches the picture into
+       a 4:3 box as a 1993 monitor did, which resamples 200 lines into 288 and
+       so is not pure duplication. --no-border leaves out the overscan border,
+       a flat pad of 8 x N pixels a side. A --headless dump is always 1:1.
 loop:  --loop plays a block's run for ever, as the setup screen's looping row
        does: no end scroller, and after CRED the music fades and the demo
        begins again at ALKU (close the window to leave). /gravis plays once

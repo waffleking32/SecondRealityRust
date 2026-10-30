@@ -33,17 +33,19 @@ use crate::shell::Looping;
 
 /// The screen's frame: 16:10 like the demo's own 320×200, and wide enough for the font at its
 /// own size — "Sound quality" and "Authentic" are 307 columns between them, and the footer is
-/// 475. The width is a multiple of 5, as a 4:3 box needs, and it fits a 4:3 window of 624×468
-/// (the demo's own 4:3 frame is 384×288) on a desktop 600 lines tall.
+/// 475. The width is a multiple of 5, as a 4:3 box needs. Like every frame, it is shown at the
+/// window's scale: at the default 2× with square pixels it is 1040×650 inside its border (D48),
+/// and at `--scale 1` a 4:3 window of it is 624×468 (the demo's own 4:3 frame is 384×288).
 pub const FRAME_WIDTH: u16 = 520;
 pub const FRAME_HEIGHT: u16 = 325;
 
-/// The rows' labels, in order, and the two values each takes (the first is value 0).
+/// The rows' labels, in order, and the two values each takes (the first is value 0, and is
+/// the default).
 const ROWS: [(&str, [&str; 2]); 5] = [
     ("Sound", ["On", "Off"]),
     ("Sound quality", ["Authentic", "Enhanced"]),
     ("Demo looping", ["Disabled", "Enabled"]),
-    ("Aspect", ["4:3", "Square"]),
+    ("Aspect", ["Square", "4:3"]),
     ("Border", ["On", "Off"]),
 ];
 
@@ -124,7 +126,7 @@ impl Settings {
             0 => !self.sound as usize,
             1 => (self.quality == Quality::Enhanced) as usize,
             2 => self.looping as usize,
-            3 => (self.aspect == Aspect::SquarePixels) as usize,
+            3 => (self.aspect == Aspect::FourThree) as usize,
             _ => !self.border as usize,
         }
     }
@@ -143,9 +145,9 @@ impl Settings {
             2 => self.looping = second,
             3 => {
                 self.aspect = if second {
-                    Aspect::SquarePixels
-                } else {
                     Aspect::FourThree
+                } else {
+                    Aspect::SquarePixels
                 }
             }
             _ => self.border = !second,
@@ -487,7 +489,7 @@ mod tests {
     fn the_chosen_settings_are_the_runs_settings() {
         // The flags are the initial values...
         let cli = parse(&["--no-audio", "--sound-quality", "enhanced", "--loop",
-                          "--aspect", "square", "--no-border"]);
+                          "--aspect", "4:3", "--no-border"]);
         let from = Settings::from_cli(&cli);
         assert_eq!(
             from,
@@ -495,14 +497,14 @@ mod tests {
                 sound: false,
                 quality: Quality::Enhanced,
                 looping: true,
-                aspect: Aspect::SquarePixels,
+                aspect: Aspect::FourThree,
                 border: false,
             }
         );
         assert_eq!(Settings::from_cli(&Cli::default()).value(0), 0, "sound is on by default");
 
         // ...and every row's value reaches the run, from the other end of each.
-        let mut cli = parse(&["--scale", "2"]);
+        let mut cli = parse(&["--scale", "3"]);
         let mut setup = Setup::new(Settings::from_cli(&cli));
         for row in 0..ROWS.len() {
             setup.selected = row;
@@ -512,7 +514,7 @@ mod tests {
         assert!(cli.no_audio, "Sound Off is --no-audio");
         assert_eq!(cli.quality, Quality::Enhanced);
         assert_eq!(cli.looping, Looping::On);
-        assert_eq!(cli.aspect, Aspect::SquarePixels);
+        assert_eq!(cli.aspect, Aspect::FourThree);
         assert!(!cli.border);
         let run = cli.run_settings();
         assert_eq!(run.player.quality, Quality::Enhanced, "the run's player is mixed as chosen");
@@ -520,7 +522,7 @@ mod tests {
         assert_eq!(run.looping, Looping::On);
         assert_eq!(
             setup.settings.present_options(cli.scale),
-            PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: false }
+            PresentOptions { aspect: Aspect::FourThree, scale: 3, border: false }
         );
 
         // And back: the other value of every row.
@@ -536,7 +538,7 @@ mod tests {
         assert_eq!(cli.run_settings().player.output_rate(), 20_000);
         assert_eq!(
             setup.settings.present_options(cli.scale),
-            PresentOptions { aspect: Aspect::FourThree, scale: 2, border: true }
+            PresentOptions { aspect: Aspect::SquarePixels, scale: 3, border: true }
         );
 
         // `/gravis`'s `NoEndScroller` is not the screen's to rewrite: that run never

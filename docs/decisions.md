@@ -42,6 +42,10 @@ Accepted: default to 4:3 with rectangular pixels, matching a VGA monitor. Square
 Rejected: square pixels only (what the existing C++ ports do — geometrically wrong);
 4:3 only (no flexibility).
 
+*Superseded for the window's default (2026-10-29):* **D48** makes 2× square-dot pixel
+duplication the default, at the user's request; 4:3 remains `--aspect 4:3` and the setup's
+Aspect row.
+
 ## D5 — The music pattern data is scrambled, and the keystream is recovered (2026-10-10)
 
 **Finding.** `MAIN/MUSIC0.S3M` and `MUSIC1.S3M` (byte-identical copies of what is
@@ -3227,6 +3231,47 @@ palette entry overwritten before the next sample, a split no compared frame reac
 that is D18's and D19's recorded limit, not a new one. Building the stream later means
 instrumenting the oracle's VGA writes and adding a matching log to the engine; nothing built here
 would have to change for it.
+
+## D48 — The window's default is 2× pixel duplication with square dots; 4:3 stays an option (2026-10-29)
+
+Decided: the window presents at **scale 2 with square dots** by default (`PresentOptions::WINDOW`,
+which `Cli::default` reads): each pixel of a 320×200 frame is exactly a 2×2 block of output pixels,
+so the picture is 640×400, and **no step interpolates** — `present` copies one source pixel's colour
+into each output pixel, and SDL is never asked to scale (`window::blit` copies the texture into a
+rectangle of its own size, centred if the window manager gave another size, and the texture's own
+scale mode is nearest and its blend mode none). This was asked for directly ("scaled by 2x, just
+duplicate pixels, no interpolation"), and it reverses **D4**'s default: the 4:3 box needs 200 rows
+into 288 lines a step, which is a resample and not duplication, so it cannot be the default under
+that request. `--aspect 4:3` and the settings screen's Aspect row keep it; the row now lists
+**Square** first because a row's first value is its default.
+
+**The picture is sized by the display, not by the frame.** A VGA scans 320×200 (each row twice),
+320×400 and 640×400 out to the same 640×400 dots, so square dots are `scale / 2` output pixels and a
+source pixel's block is whole on both axes (`present::pixel_block`): at 2, 320×200 is 2×2, 320×400
+2×1 and 640×400 1×1, and all three are 640×400 on the screen — ENDSCRL and CRED are no longer twice
+their neighbours' size, and ALKU's 400 lines no longer make a window twice as tall as U2A's. At an
+odd scale a doubled axis cannot be halved, so such a frame takes the dot size `max(1, scale / 2)`:
+at `--scale 1` a 640×400 frame stays 640×400 rather than dropping every other pixel. The 4:3 box is
+likewise 384×288 a step for every demo mode, except that a 640-column frame takes at least two steps
+(768×576), as it always had at 1. A frame that is not a demo mode (the settings screen's 520×325) is
+`scale`×`scale`. The border stays `8 × scale` output pixels of flat colour around the picture (A1);
+it pads, it does not scale.
+
+**The dump is untouched.** `--headless` used `SquarePixels` at 1, which no longer means one output
+pixel a source pixel for a 320×400 frame, so it now names `Aspect::SourcePixels` — `scale`×`scale`
+per source pixel whatever the mode, the old square arithmetic — at 1 with no border. Its output is
+byte-for-byte what it was, and `cargo xtask rediff` still exits 0.
+
+**Pinned by** `present::tests` (the default, 2×2 duplication of a 320×200 frame against its 1:1
+colours with a palette of 256 distinct colours, the border's pad around an unscaled picture, the
+block at scales 1–4 and every mode, the 4:3 boxes) and `window::tests` (the same frame through
+`streaming_texture` and `blit` into SDL's software renderer, read back pixel by pixel at 640×400 and
+centred in a 700×450 output; the default `Cli`'s options; the three modes one size on the screen).
+
+**Cost if wrong.** If 4:3 should be the default again, it is `PresentOptions::WINDOW` and the
+Aspect row's order. If a 640×400 part should be shown larger at odd scales instead of smaller, it is
+the one `max(1, scale / 2)` in `pixel_block`. A HiDPI or fractionally scaled desktop can still
+resample the window after SDL has drawn it; the port draws whole pixels and cannot see that step.
 
 ## D49 — The shipped part EXEs are unpacked and read: the release's own data, not a fit to its frames (2026-10-29)
 
