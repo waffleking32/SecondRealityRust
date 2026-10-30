@@ -182,8 +182,34 @@ setup menu); a later task's `recovered assets` table uses paths under the same t
 | `START/HZPIC.LBM` | `upstream/SecondReality/START/HZPIC.LBM` | `071a82e` | 59352 | `ec3d65b55103fea4570561d7bac04291f2888098c226047db2122e7dc0e38ffb` | Unlicense / public domain | START |
 | `GRAB/BLOWFNT.1BM` | `upstream/SecondReality/GRAB/BLOWFNT.1BM` | `071a82e` | 64000 | `a822ac2c9ebaaa3afbc1fc82750313b59718c8a9c729827e8f735b8f5c4bea50` | Unlicense / public domain | GRAB |
 | `GLENZ/EYE4.UH` | `upstream/SecondReality/GLENZ/EYE4.UH` | `071a82e` | 64784 | `a49726062aa91c4bb4cc45ca641727797d2acb07e98a4d310f370fc576b65f4c` | Unlicense / public domain | GLENZ |
+| `MAIN/DATA/3DSINFLD.EXE` | `upstream/SecondReality/MAIN/DATA/3DSINFLD.EXE` | `071a82e` | 28208 | `5d984ff5b46257e53270180bcf982efbe26412a040d87f4455e22e5293a4b3fe` | Unlicense / public domain | 3DSINFLD |
+| `MAIN/DATA/ALKU.EXE` | `upstream/SecondReality/MAIN/DATA/ALKU.EXE` | `071a82e` | 31103 | `21b7531174763b3cf1c057e8fc4492252bc6b425d3d1dacaac0263a18abaa9a7` | Unlicense / public domain | ALKU |
+| `MAIN/DATA/BEGLOGO.EXE` | `upstream/SecondReality/MAIN/DATA/BEGLOGO.EXE` | `071a82e` | 30874 | `27f4e5a4b0bd4bed9f6a9a3b4caaf91810080fd5f45e36d1cd4a73b27f98ec0c` | Unlicense / public domain | BEGLOGO |
+| `MAIN/DATA/CRED.EXE` | `upstream/SecondReality/MAIN/DATA/CRED.EXE` | `071a82e` | 148711 | `aa6d3d6d977259ada269ccc89e770ba4185840e98852f8bd74e76da0468a586f` | Unlicense / public domain | CRED |
+| `MAIN/DATA/DDSTARS.EXE` | `upstream/SecondReality/MAIN/DATA/DDSTARS.EXE` | `071a82e` | 10573 | `850fa2182589baf76b66158fbed0ec6f4a0bbb23104e353795269a6b613feb60` | Unlicense / public domain | DDSTARS |
+| `MAIN/DATA/ENDLOGO.EXE` | `upstream/SecondReality/MAIN/DATA/ENDLOGO.EXE` | `071a82e` | 33018 | `538e7b7b339e361a094093fdc1c35991ff2f7943526c0c4e9b1c556e6fa5bc85` | Unlicense / public domain | ENDLOGO |
+| `MAIN/DATA/ENDSCRL.EXE` | `upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE` | `071a82e` | 9965 | `9fc42d30e5c34c4c943e557482c8a63795e3f95d861770b65d361a6b09c23236` | Unlicense / public domain | ENDSCRL |
+| `MAIN/DATA/GLENZ.EXE` | `upstream/SecondReality/MAIN/DATA/GLENZ.EXE` | `071a82e` | 57206 | `78851b8516036a43c71c9f834bb01a850d827983c07719185b0944706a89568c` | Unlicense / public domain | GLENZ |
+| `MAIN/DATA/JPLOGO.EXE` | `upstream/SecondReality/MAIN/DATA/JPLOGO.EXE` | `071a82e` | 46261 | `eb7363f84e687990868ba14ca6ca07d4e84dd1f49d6392a796ec16d58727a214` | Unlicense / public domain | JPLOGO |
+| `MAIN/DATA/LNS&ZOOM.EXE` | `upstream/SecondReality/MAIN/DATA/LNS&ZOOM.EXE` | `071a82e` | 67222 | `f456fad967107095c287a50446bcba0eab05908523de123a2b26b494fdf99580` | Unlicense / public domain | LNS&ZOOM |
+| `MAIN/DATA/MINVBALL.EXE` | `upstream/SecondReality/MAIN/DATA/MINVBALL.EXE` | `071a82e` | 7395 | `f4ecbf68fd60ebf73ed0e709b4d1b8fbbbda75ab58435d46db7e0fdb738ea071` | Unlicense / public domain | MINVBALL |
+| `MAIN/DATA/MNTSCRL.EXE` | `upstream/SecondReality/MAIN/DATA/MNTSCRL.EXE` | `071a82e` | 77047 | `46575cd79bdd45280bc2673d2663a83985ba206040cbce8b94220688b66d05ac` | Unlicense / public domain | MNTSCRL |
+| `MAIN/DATA/PAM.EXE` | `upstream/SecondReality/MAIN/DATA/PAM.EXE` | `071a82e` | 172476 | `1e91356f2006c2a49c8438a69d5823ee62ac775ba8a6f0c5938f039b64f5dfbf` | Unlicense / public domain | PAM |
+| `MAIN/DATA/PANICEND.EXE` | `upstream/SecondReality/MAIN/DATA/PANICEND.EXE` | `071a82e` | 20584 | `950cc1baacf34346ac0409fdac607b911b6ce989089d53feb42f1b97763dd7e7` | Unlicense / public domain | PANICEND |
+| `MAIN/DATA/PLZPART.EXE` | `upstream/SecondReality/MAIN/DATA/PLZPART.EXE` | `071a82e` | 58094 | `8813cd19ec7b32178d695b0c171d221c34f9da4ff594d62e6b4f040d6cb5bdfe` | Unlicense / public domain | PLZPART |
+| `MAIN/DATA/RAYSCRL.EXE` | `upstream/SecondReality/MAIN/DATA/RAYSCRL.EXE` | `071a82e` | 90351 | `1b791a6cf31786993aaa837a1337320d77a92bbe5371ff8974cbb6359edcb433` | Unlicense / public domain | RAYSCRL |
+| `MAIN/DATA/START.EXE` | `upstream/SecondReality/MAIN/DATA/START.EXE` | `071a82e` | 11458 | `4bee26a4a231b59a0b1082c9b9643335fa94aa134c09e066955b12b7eefe79a9` | Unlicense / public domain | START |
+| `MAIN/DATA/STARTMUS.EXE` | `upstream/SecondReality/MAIN/DATA/STARTMUS.EXE` | `071a82e` | 10656 | `d074c512cfd970ed4a69a5c27e061cf09ab78b58472b01b30f8a1825a43cc37e` | Unlicense / public domain | START |
+| `MAIN/DATA/TECHNO.EXE` | `upstream/SecondReality/MAIN/DATA/TECHNO.EXE` | `071a82e` | 31849 | `2339b059596ff0b9107e146f6bea91ca11e852ec281cbb7fc9ee2f4b21597c1f` | Unlicense / public domain | TECHNO |
+| `MAIN/DATA/TUNNELI.EXE` | `upstream/SecondReality/MAIN/DATA/TUNNELI.EXE` | `071a82e` | 33038 | `b3dd2778f63594270aa8c148e4b2ce319146d7fff85acfbd874b0a01195551e3` | Unlicense / public domain | TUNNELI |
 
 ### Notes on individual files
+
+**The shipped part EXEs (`MAIN/DATA/*.EXE`, twenty of them).** These are the release's own
+builds of the parts, packed (PKLITE 1.14 over LZEXE 0.91 or EXEPACK), and are read only through
+`sr_assets::exe::unpack`, which returns the image DOS runs; `docs/fidelity/release-images.md`
+records how that image was verified against the emulator. U2A's and U2E's staged copies are not
+the packed builds (`docs/decisions.md` D12's closing note) and are not copied.
 
 Facts about a file that a reader of the table above would otherwise have to rediscover. They
 are keyed by `path`; the table's columns are fixed and are not extended for them.

@@ -35,6 +35,7 @@
 //!   an [`AssetError`], never a panic and never a short read.
 
 pub mod anim;
+pub mod exe;
 pub mod font;
 pub mod iff;
 pub mod omf;
@@ -112,6 +113,8 @@ pub enum Format {
     /// and `.00N`. None has a magic, so [`sniff`] never returns this;
     /// [`visu`]'s four readers are the doors.
     Visu,
+    /// A DOS MZ executable — the shipped parts, packed. [`exe::unpack`] is its door.
+    Exe,
 }
 
 impl std::fmt::Display for Format {
@@ -126,6 +129,7 @@ impl std::fmt::Display for Format {
             Format::Ani => "ANI",
             Format::Omf => "OMF object",
             Format::Visu => "VISU scene",
+            Format::Exe => "DOS executable",
         })
     }
 }
@@ -256,6 +260,10 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
             what: "scene data, not a picture: visu::read_master, read_scene_list, \
                    read_animation and read_object are its doors"
                 .to_string(),
+        }),
+        Format::Exe => Err(AssetError::Unsupported {
+            format,
+            what: "a program, not a picture: exe::unpack(bytes) is its door".to_string(),
         }),
     }
 }

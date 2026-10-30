@@ -3217,3 +3217,33 @@ palette entry overwritten before the next sample, a split no compared frame reac
 that is D18's and D19's recorded limit, not a new one. Building the stream later means
 instrumenting the oracle's VGA writes and adding a matching log to the engine; nothing built here
 would have to change for it.
+
+## D49 — The shipped part EXEs are unpacked and read: the release's own data, not a fit to its frames (2026-10-29)
+
+D12's closing note (2026-10-25) said the packed part EXEs in `MAIN/DATA/` would not be unpacked,
+and every release-versus-tree divergence was registered against the frames with "its packed EXE
+as the lead" (A6, A9–A11, A17–A20, A22–A25, A28–A31, A37). **That is reversed.** The user, watching
+the demo, saw the end scroller print `[15` as text and the credits name the wrong people, both
+registered divergences (A11, A10), and asked for them fixed; those fixes need the release's own
+text rules, font and captions, which exist only inside the packed builds.
+
+Decided: `sr_assets::exe::unpack` reads the twenty packed part EXEs (copied byte for byte to
+`assets/MAIN/DATA/`) through every layer — PKLITE 1.14 small and large, then LZEXE 0.91 (ALKU,
+ENDSCRL, PLZPART) or EXEPACK (ten parts); CRED, PAM, PANICEND and the three Pascal parts have one
+layer. Each decoder is transliterated from its own stub, with the stub's tables read out of it.
+**The images are verified, not assumed**: run alone under DOS, every EXE unpacks itself, exits on
+`ERROR: DIS not loaded` and leaves its image in memory, and the port's image with its relocations
+applied matches that memory except for the C runtime's startup writes (`tools/release_images.py`;
+the counts are in `docs/fidelity/release-images.md`).
+
+What this changes for D24: where a part's shipped build differs from the tree and the difference
+is **data or code inside the shipped image**, the port now reads it from the image, which is the
+release's own artifact, not a fit to its screen. D24's first branch (adopt a single measured
+constant) and its "register, do not bend" branch stay for what the image cannot answer — timing,
+CPU cost, the emulator's session phase. Which divergences move from "registered" to "read" is
+decided part by part, each with its own measured result, in `APPROXIMATIONS.md`.
+
+The question D12 left open — whether the staged EXEs are the ones `SECOND.EXE` packs — is answered
+for ENDSCRL: the release's memory during block 5 (`tools/crtc_probe.py 5 9300 2`) holds the same
+80-character font order and the `endscrol.` file name the staged image does. It is still open for
+the other parts; their frames decide as before.
