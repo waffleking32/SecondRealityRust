@@ -1128,6 +1128,16 @@ mod tests {
         assert_eq!((close.len(), close[0], close.last()), (59, 0, Some(&24_795)));
         // The open loop's last step writes the hold's state.
         assert_eq!(Display::opening(1), Display { origin: 128_320, line_compare: 200, pan: 0 });
+        // Open step 1 (`yy` 25) and close step 58 (`yy` 629): AC 0x13 is twice the pan.
+        assert_eq!(open[1], 23_630);
+        assert_eq!(
+            Display::opening(open[1]),
+            Display { origin: 128_024, line_compare: 384, pan: 1 }
+        );
+        assert_eq!(
+            Display::closing(close[58]),
+            Display { origin: 128_628, line_compare: 393, pan: 1 }
+        );
         let open_first = SHOW_TICK + 1;
         let hold_first = open_first + open.len() as u32;
         let close_first = hold_first + HOLD_FRAMES;

@@ -152,7 +152,7 @@ reference 952) and part 2's count 0 (port 599, reference 955), and references 95
 | 1050 | 694 | 5 | 0 | exact |
 | 1600 | 1244 | 6 | 0 | exact |
 
-At offset 0 (`cargo xtask rediff --only hard`). 480 and 840 are held; the filed 480 is RGB-only because its read landed after mode 0 had
+At offset 0 (`cargo xtask rediff --only hard`). 480 and 840 are held (`reference-indices.md` §24.7); the filed 480 is RGB-only because its read landed after mode 0 had
 ended. The boundary (950-960 against 594-604) and the end (2245-2257 against 1889-1901) are compared
 against captures of their own, at 0 everywhere (A48 names the commands).
 

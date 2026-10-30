@@ -276,9 +276,9 @@ also states a 32-column cell (`fonap[32]=1500-32; fonaw[32]=8;`, `:270-271`, the
 1,500 columns wide, which the cell does not divide. The strip's real structure is 47 ink runs, one
 per character of `fonaorder` (`:32`), which the routine scans (`:250-269`).
 
-The release's image has the same raster and the same window. Its font array, at image `0x29f0` of
-the unpacked `CRED.EXE`, is `FONA.INC` byte for byte, 40 rows, and its scan and `prt` read 32 rows
-(`cred.md` §9).
+The release's image has the same window: its font array, at image `0x29f0` of the unpacked
+`CRED.EXE`, is 1,500×40, and its scan and `prt` read 32 rows
+(`the_images_font_and_order_are_where_init_reads_them`, `cred.md` §9).
 
 **Port:** the part reads the raster and `fonaorder` out of the release's image and translates
 `:250-269`'s scan. It does not load the strip through `sr_assets::font::Font`, whose glyphs are
@@ -302,11 +302,7 @@ The routine's rows 30–31 are uninitialised padding after the 30-row strip (`AL
 and the release's image holds zeros there, so the port's 30 rows are everything it inks
 (`the_release_font_is_the_strip_but_for_one_glyph_and_its_padding_is_zero`; `alku.md` §12).
 
-## A10 — Retired: CRED's 21 screens are read from the shipped image
-
-The nine screens the release changed (2, 6, 10, 11, 12, 17, 19, 20, 21) are read from
-`MAIN/DATA/CRED.EXE` (D49, `cred.md` §9); every CRED frame is 0
-(`cargo xtask rediff --only cred --only fullrun/12-cred`).
+## A10 — Retired: CRED's 21 screens are read from the shipped image (D49, `cred.md` §9); every CRED frame is 0 (`cargo xtask rediff --only cred --only fullrun/12-cred`).
 
 ## A11 — ENDSCRL: block 5's chain starts the part 82 frames early
 

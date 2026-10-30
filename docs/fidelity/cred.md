@@ -72,8 +72,9 @@ parked origin would read the even logical lines, which hold no picture, and a sp
 moves the caption by one displayed row, 320 pixels.
 
 The per-step values of both loops (open 1: `y` 23,630, `yy` 25, line compare 384, start 128,024,
-AC 0x13 2; close 58: 24,795, 629, 393, 128,628, 2) are in
-`the_three_registers_move_once_a_tick_through_both_wipes`'s table of named ticks.
+AC 0x13 2; close 58: 24,795, 629, 393, 128,628, 2) are
+asserted in `the_three_registers_move_once_a_tick_through_both_wipes` (the start in pixels, the
+line compare, and the pan in pixels, half the AC 0x13 value).
 
 **The record's wipe frames.** The five keyframes are all holds, so `reference/parts/cred` cannot see
 the iris. A scratch sweep of every 100th frame from 1240 to 8840 (not filed under `reference/`)
@@ -146,13 +147,13 @@ every pixel the machine has, so no state ENDLOGO leaves can show through a credi
 
 | screen | keyframe | the port's hold | frames into it | differing px |
 |---|---|---|---|---|
-| 1 | 1440 | 1315-1514 | 125 | 0 |
-| 6 | 3240 | 3130-3329 | 110 | 0 |
-| 12 | 5440 | 5308-5507 | 132 | 0 |
-| 18 | 7640 | 7486-7685 | 154 | 0 |
-| 21 | 8740 | 8575-8774 | 165 | 0 |
+| 1 | 1440 | 1316-1515 | 124 | 0 |
+| 6 | 3240 | 3131-3330 | 109 | 0 |
+| 12 | 5440 | 5309-5508 | 131 | 0 |
+| 18 | 7640 | 7487-7686 | 153 | 0 |
+| 21 | 8740 | 8576-8775 | 164 | 0 |
 
-Every keyframe is inside its hold, the tightest (screen 21) with 34 frames to spare, and
+Every keyframe is inside its hold, the tightest (screen 21) ending 35 frames after its keyframe, and
 `reference-indices.md` §20.2 measured all five as held, so a frame or two of phase cannot move a pixel. `tests/cred.rs` asserts
 the frames around each are the same (`the_five_keyframes_are_inside_the_chains_own_holds`). The
 full run's `fullrun/12-cred` frames are 0 too, and so were the sweep's 49 hold samples (§3).

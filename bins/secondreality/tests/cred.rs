@@ -58,8 +58,8 @@ fn the_five_keyframes_dump_in_the_references_own_numbering() {
 #[test]
 fn the_five_keyframes_are_inside_the_chains_own_holds() {
     // The frame either side of each keyframe is the same (D19's "held"): the
-    // port's holds, at 1316 + 363·k, contain all five, screen 21's with 34
-    // frames to spare.
+    // port's holds, at 1316 + 363·k, contain all five, screen 21's ending 35
+    // frames after its keyframe (`docs/fidelity/cred.md` §7).
     let indices: Vec<String> =
         KEYFRAMES.iter().flat_map(|k| [k - 1, *k, k + 1]).map(|i| i.to_string()).collect();
     let (dir, _) = dump("holds", &indices.join(","));
