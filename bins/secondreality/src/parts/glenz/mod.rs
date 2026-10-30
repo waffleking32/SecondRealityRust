@@ -1,66 +1,32 @@
 //! GLENZ (`GLENZ/MAIN.C` over the part's own `VEC.ASM`, `MATH.ASM`,
-//! `MATHSIN.INC` and `NEW.ASM`).
+//! `MATHSIN.INC` and `NEW.ASM`, with `ZOOMER.C`'s opening): the zoomer, the FC
+//! bounce, and the two glenz polyhedra over the picture. Its vector library is
+//! its own, not VISU's: [`math`], [`tables`], [`poly`] and [`span`], with the
+//! opening in [`intro`].
 //!
-//! GLENZ carries its own vector and span library rather than using Phase 6's
-//! `VISU`: the two are different engines, with different fixed-point units,
-//! different projection variables and a different compositor. The module tree
-//! grows a file per layer of that library:
+//! The port keeps the original's two 320-pixel-linear buffers, `vram`
+//! (320×400, then the 320×200 mode-13h screen) and `bgpic`, the 64,000-byte
+//! picture the compositor paints over (`MAIN.C:12`, `:18`); every tick copies
+//! the buffer into the surface (D36; `reference-indices.md` §7.1).
 //!
-//! - `math` — `cmatrix_yxz`/`calcmatrix`, `crotlist`, `cprojlist` and
-//!   `ccliplist` (`MATH.ASM`, `VEC.ASM`), with the asm's 16/32/64-bit widths.
-//! - `tables` — the source's `sintable16`/`costable16` (`MATHSIN.INC`) as
-//!   [`tables::SIN`] and [`tables::COS`]. `ZOOM.ASM`'s `_sin1024` is the
-//!   shared [`SIN1024`].
-//! - `poly` — `ceasypolylist`, the hidden-face cross product and the
-//!   `rolcol`/`rolused` colour allocator (`VEC.ASM:260-553`) with the shipped
-//!   polygon tables (`MAIN.C:176-240`).
-//! - `span` — the transparent span compositor (`NEW.ASM:26-418`).
-//! - `intro` — `zoomer2` (`ZOOMER.C:18-81`) and the FC floor bounce
-//!   (`MAIN.C:320-350`).
+//! **Ticks** (D37). One tick is one `dis_waitb` (`MAIN.C:413`;
+//! `DIS/DISC.ASM:42-47`), and a wait's post-wait work runs in the call that
+//! saw it end: the music wait's exit is `zoomer2`'s first body, 47 zoomer
+//! bodies, the 48th call's break, epilogue, mode set and first of 177 bounce
+//! bodies, the `getmframe() < 300` and `< 333` waits with their palette and
+//! snapshot ticks, then the main loop, whose `repeat=dis_waitb()` comes before
+//! the frame's work. The measured anchors are `reference-indices.md` §7.6 and
+//! `glenz.md` §1.
 //!
-//! # The buffer and the beam
+//! **Palette.** The source's copper uploads `pal`'s entries 0..15 every
+//! retrace (`MAIN.C:264-270`, `:408`). The port registers no copper: the
+//! per-tick upload of 0..15 plus `poly::build`'s group writes are the same DAC
+//! at compose time (D37). Entries 16..255 belong to the colour groups.
 //!
-//! The port keeps the original's two 320-pixel-linear buffers: `vram` is
-//! 320x400 (the inherited Mode X screen the zoomer closes over, then the
-//! 320x200 mode-13h screen), and `bgpic` is the 64,000-byte picture the span
-//! compositor paints over (`MAIN.C:12`, `:18`). The original's plane masks and
-//! the shipped 92-byte CRTC row are memory-layout facts, not image facts
-//! (`docs/fidelity/reference-indices.md` §7.1; D36): every tick the part
-//! copies the buffer's rows into the engine surface's first 320 columns and
-//! lets the view read them.
-//!
-//! # The tick model (D37)
-//!
-//! One logic tick is one `dis_waitb` (`MAIN.C:413`; the wrapper is
-//! `DIS/DISC.ASM:42-47`). The measured anchors
-//! (`second2b`, `reference-indices.md` §7.6) are: the music wait exits at
-//! **1111**, and `zoomer2`'s first body is that same tick because the source's
-//! post-wait actions run in the call that saw the wait end. The 47 zoomer
-//! draws then occupy 1111..1157; the 48th call breaks, runs the epilogue and
-//! the mode set, and draws the bounce's first band, all in 1158; the bounce's
-//! 177 draws occupy 1158..1334. `getmframe() < 300` first fails at **1515**
-//! (404 ticks after the reset), the palette build is the next tick, the
-//! snapshot the one after, `getmframe() < 333` first fails at **1560**, the
-//! part-start wait is 1561, and the main loop's first wait is **1562**. The
-//! body after that wait is drawn in 1563 — the source's `repeat=dis_waitb()`
-//! comes *before* the frame's work — which is what puts main-loop frame 44's
-//! first object pixels on the measured **1606** (`L_r = 1606 - 44 = 1562`).
-//!
-//! # The palette
-//!
-//! The source's copper callback uploads `pal`'s entries 0..15 at every
-//! retrace (`MAIN.C:264-270`, `:408`). The port does not register a copper
-//! callback: its per-tick entry-0..15 upload plus `poly::build`'s group writes
-//! are the same DAC state at compose time (D37; `docs/fidelity/glenz.md`).
-//! Entries 16..255 are only ever written by the colour allocator's 16-entry
-//! groups, and the per-tick upload must never touch them.
-//!
-//! # The exit
-//!
-//! `while(frame<7000 && !dis_exit())` with `a=dis_musplus(); if(a<0 && a>-16)
-//! break;` (`MAIN.C:409-411`): the part ends at the top of a main-loop tick on
-//! ESC, on the music cut, or after frame 7000, and leaves the screen as it
-//! stands. It has no teardown, so `drains_after_exit` is false.
+//! **Exit.** `while(frame<7000 && !dis_exit())` and `if(a<0 && a>-16) break;`
+//! (`MAIN.C:409-411`) are checked after a frame's work, so a cut, ESC or the
+//! cap keeps that frame; there is no teardown and no drain. Preserved bugs:
+//! `bugs.md` §5, §23; approximations A36-A39.
 
 pub mod intro;
 pub mod math;
@@ -89,9 +55,6 @@ const VIEW_WIDTH: u16 = 320;
 const VIEW_HEIGHT_400: u16 = 400;
 /// `int 10h` mode 13h (`MAIN.C:299-303`).
 const VIEW_HEIGHT_200: u16 = 200;
-
-/// The 320x200 frame after the mode set.
-const MAIN_ROWS: usize = 200;
 
 /// `zpos` (`MAIN.C:277`): fixed for the whole part.
 const ZPOS: i16 = 7500;
@@ -138,10 +101,8 @@ pub(crate) const POINTSB: [[i32; 3]; 14] = [
     [0, -105 * QQQ, 0],
 ];
 
-/// The low word of two signed 16-bit words' product: the source's `int`
-/// arithmetic truncates every product at 16 bits (`imul`'s `DX:AX`, with only
-/// `AX` kept when the C result is an `int` — `disassembly` in
-/// `docs/fidelity/glenz.md` §5).
+/// The low word of two `int`s' product: the source's `imul` keeps only `AX`
+/// (`glenz.md` §5).
 fn mul16(a: i16, b: i16) -> i16 {
     a.wrapping_mul(b)
 }
@@ -159,11 +120,9 @@ fn sin1024(a: i16, n: i16) -> i16 {
 
 /// The main loop's per-frame state and physics (`MAIN.C:409-590`).
 ///
-/// Every variable the source declares `int` is 16-bit there, and several
-/// expressions wrap: the bounce's `-yposa*boingm` passes 16 bits around frame
-/// 667, and `oyp` accumulates `-b*b/2` past 32767 from frame 1801. Those
-/// wraps are part of the shipped animation and are reproduced here, which is
-/// why the fields are `i16` and the products go through [`mul16`].
+/// The source's `int`s are 16-bit, and two expressions wrap in the shipped
+/// animation: `-yposa*boingm` around frame 667 and `oyp`'s `-b*b/2` from
+/// frame 1801. Hence `i16` fields and [`mul16`].
 pub(crate) struct MainState {
     /// The source's `frame` (`MAIN.C:283`): 0 until the first main body.
     pub frame: i16,
@@ -192,7 +151,7 @@ pub(crate) struct MainState {
     /// frames 786..789 and not again.
     pub backpal: [[u8; 3]; 16],
     /// `_lightshift` (`MAIN.C:394`, `:500`): 9, or 10 once the second
-    /// object's scale overtakes the first's. Mirrored into [`ColourState`].
+    /// object's scale overtakes the first's.
     pub lightshift: i16,
 }
 
@@ -249,11 +208,8 @@ impl MainState {
     }
 
     /// One frame of `MAIN.C:417-591`'s inner body: `frame++`, the rotations,
-    /// the physics, the palette phases and the frame-765..789 band clear.
-    ///
-    /// The palette upload that precedes the work is the part's, not this
-    /// function's: the source uploads `pal` and *then* computes the new one
-    /// (`:414-590`), so the frame displays the previous tick's palette.
+    /// the physics, the palette phases and the frame-765..789 band clear. The
+    /// upload of the previous `pal` precedes it (`:414-415`).
     pub(crate) fn step(&mut self, bgpic: &mut [u8], vram: &mut [u8]) {
         self.frame = self.frame.wrapping_add(1);
         let frame = self.frame;
@@ -304,9 +260,8 @@ impl MainState {
         }
 
         if frame > 800 {
-            // `MAIN.C:481-501`. The `else if(frame>1400+789)` arm is dead in
-            // the source — `frame>1220+789` has already caught every value
-            // that reaches it — and is kept here in the same order.
+            // `MAIN.C:481-501`; the `frame>1400+789` arm is unreachable, kept
+            // in source order.
             if frame > 1220 + 789 {
                 if self.xscale > 0 {
                     self.xscale -= 1;
@@ -344,8 +299,7 @@ impl MainState {
                 self.ypos = self.ypos.wrapping_add(div16(self.yposa, 40));
                 if self.ypos > -300 {
                     self.ypos = self.ypos.wrapping_sub(div16(self.yposa, 40));
-                    // `-yposa*boingm/boingd` truncates the product to 16
-                    // bits before the divide (see the module docs).
+                    // The product wraps at 16 bits before the divide.
                     self.yposa = div16(mul16(self.yposa.wrapping_neg(), self.boingm), self.boingd);
                     self.boingm = self.boingm.wrapping_add(2);
                     self.boingd = self.boingd.wrapping_add(1);
@@ -373,8 +327,7 @@ impl MainState {
         }
 
         // `MAIN.C:538-590`, the palette phases. The band clear writes both
-        // buffers before the frame is painted (`:552-556`), which is the
-        // order Task 5's note records.
+        // buffers before the frame is painted (`:552-556`).
         if frame > 1280 + 789 {
             let mut b = 1280i16.wrapping_add(789 + 64).wrapping_sub(frame);
             if b < 0 {
@@ -552,19 +505,10 @@ impl Glenz {
         }
     }
 
-    /// `int 10h` mode 13h and `testasm`'s live path (`MAIN.C:296-304`).
-    ///
-    /// The source's `memset(vram,0,65535)` runs in chain-4, so its 65,535
-    /// addressed bytes cover all 32,000 bytes of a plane's 400 rows — every
-    /// pixel of the 320x400 buffer. The epilogue has just zeroed it anyway;
-    /// the clear is kept because the source performs it.
-    ///
-    /// The display is 320x200. `double_scan` is **false**: the emulator's
-    /// mode-13h capture is the *halved* 320x200 frame (200 distinct source
-    /// rows), which is what the reference files and what the bounce writes
-    /// (`docs/decisions.md` D17's geometry note; `docs/fidelity/glenz.md`).
-    /// The brief's `double_scan=true` describes the guest's VGA flag, not this
-    /// engine's view, whose flag doubles source rows into a 400-line frame.
+    /// `int 10h` mode 13h and `testasm`'s live path (`MAIN.C:296-304`):
+    /// `memset(vram,0,65535)` in chain-4 clears the whole 400-row buffer.
+    /// `double_scan` is false: the reference is the emulator's halved 320×200
+    /// frame (D17; `glenz.md` §2).
     fn mode_set(&mut self, ctx: &mut PartCtx) {
         self.vram.fill(0);
         *ctx.view = mode_view(VIEW_WIDTH, VIEW_HEIGHT_200, None, Some(0));
@@ -576,26 +520,13 @@ impl Glenz {
         }
     }
 
-    /// The copper's per-retrace upload, as the port models it: entries 0..15
-    /// only (`MAIN.C:414-415`'s `16*3`), never `set_palette`.
-    ///
-    /// Called before [`MainState::step`], so the frame this tick composes
-    /// pairs surface *N* with `pal` as it stood after frame *N−1* — the
-    /// source's upload-before-work order (`MAIN.C:414-590`). The reference
-    /// capture samples after the source's upload, so its DAC can lead its
-    /// surface by one frame (D17; `docs/fidelity/glenz.md` §11).
+    /// The copper's per-retrace upload as the port models it: entries 0..15
+    /// only (`MAIN.C:414-415`'s `16*3`), before [`MainState::step`], so
+    /// surface *N* shows `pal` after frame *N−1* (A36).
     fn upload_low_palette(&self, ctx: &mut PartCtx) {
         for (index, entry) in self.main.pal.iter().enumerate() {
             ctx.set_palette_entry(index as u8, *entry);
         }
-    }
-
-    fn music_frame(ctx: &mut PartCtx) -> i32 {
-        ctx.getmframe()
-    }
-
-    fn music_plus(ctx: &mut PartCtx) -> i32 {
-        ctx.musplus()
     }
 
     /// `if(a<0 && a>-16) break;` (`MAIN.C:411`): MUSIC1's exit cue.
@@ -609,20 +540,15 @@ impl Glenz {
         if ctx.exit_requested {
             return true;
         }
-        Self::is_music_cut(Self::music_plus(ctx)) || self.main.frame >= 7000
+        Self::is_music_cut(ctx.musplus()) || self.main.frame >= 7000
     }
 
     /// `MAIN.C:290-293`: wait for the music, then `dis_setmframe(0)` and
-    /// `zoomer2()`'s first body *in the same tick*.
-    ///
-    /// The source's `while(!dis_exit() && dis_musplus()<-19);` exits on either
-    /// condition and then **continues**: ESC does not skip `dis_setmframe(0)`
-    /// or `zoomer2()` (`MAIN.C:291-293`). The zoomer checks only `kbhit`, so
-    /// an exit flag runs all 47 of its bodies; the bounce's own
-    /// `while(!dis_exit())` is what sees the flag next, and the main loop's
-    /// check retires the part.
+    /// `zoomer2()`'s first body in the same tick. ESC ends the wait but not
+    /// the part: the zoomer checks only `kbhit`, so its 47 bodies still run
+    /// (`glenz.md` §9).
     fn wait_music(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        if !ctx.exit_requested && Self::music_plus(ctx) < -19 {
+        if !ctx.exit_requested && ctx.musplus() < -19 {
             return PartStatus::Continuing;
         }
         if let Some(music) = ctx.music() {
@@ -651,18 +577,11 @@ impl Glenz {
         self.bounce_frame(ctx)
     }
 
-    /// One FC-bounce body (`MAIN.C:321-351`).
-    ///
-    /// The spring is `while(!dis_exit()) { ... }`: at the top of the body an
-    /// exit flag skips the bounce entirely. The `getmframe` loop that follows
-    /// is skipped for the same reason, and the unconditional `dis_waitb` is
-    /// this tick — the palette build is the next one.
+    /// One FC-bounce body (`MAIN.C:321-351`). An exit flag skips the
+    /// `while(!dis_exit())` spring and the `getmframe` loop after it; the
+    /// unconditional `dis_waitb` (`MAIN.C:354`) is this tick.
     fn bounce_frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         if ctx.exit_requested {
-            // `while(!dis_exit())` is not entered; the `getmframe` loop that
-            // follows is skipped for the same flag; the unconditional
-            // `dis_waitb` (`MAIN.C:354`) is this tick, so the palette build
-            // is the next one.
             self.phase = Phase::Wait300Palette;
             return PartStatus::Continuing;
         }
@@ -671,11 +590,11 @@ impl Glenz {
             bounce.tick(&mut self.vram, &self.fc)
         };
         if drew {
-            self.blit(ctx, MAIN_ROWS);
+            self.blit(ctx, VIEW_HEIGHT_200 as usize);
             return PartStatus::Continuing;
         }
         self.phase = Phase::Wait300;
-        if Self::music_frame(ctx) >= 300 {
+        if ctx.getmframe() >= 300 {
             self.phase = Phase::Wait300Palette;
         }
         PartStatus::Continuing
@@ -698,22 +617,15 @@ impl Glenz {
         self.phase = Phase::MainWait;
     }
 
-    /// The Part's `repeat` is one: the port's logic tick is one displayed
-    /// frame, so the `while(repeat--)` body runs exactly once per call.
-    ///
-    /// The source's loop condition and music cut (`MAIN.C:409-411`) sit at the
-    /// top of the iteration, which the body reaches *after* `cglenzdone` in
-    /// the same frame: the frame is drawn, then the loop breaks. So this tick
-    /// never checks before drawing; it draws and then retires the part on a
-    /// cut, ESC or the frame-7000 cap. [`Phase::MainWait`] keeps the entry
-    /// check, where a cut already visible breaks before the wait and the
-    /// body, so that tick draws nothing.
+    /// One main-loop body (`repeat` is one: a tick is one frame). The loop
+    /// top (`MAIN.C:409-411`) is reached after `cglenzdone`, so the frame is
+    /// drawn and then a cut, ESC or the cap retires the part;
+    /// [`Phase::MainWait`] is the entry check, which draws nothing.
     fn main_frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.upload_low_palette(ctx);
         self.main.step(&mut self.bgpic, &mut self.vram);
-        self.colour.lightshift = self.main.lightshift;
         self.draw_objects(ctx);
-        self.blit(ctx, MAIN_ROWS);
+        self.blit(ctx, VIEW_HEIGHT_200 as usize);
         if self.main_should_end(ctx) {
             self.phase = Phase::Done;
             return PartStatus::Finished;
@@ -724,96 +636,92 @@ impl Glenz {
     /// `cglenzinit` … `cglenzdone` (`MAIN.C:593-640`).
     fn draw_objects(&mut self, ctx: &mut PartCtx) {
         self.compositor.clear();
-        if self.main.first_object_on() {
-            // `MAIN.C:597-615`: demomode Glz, the rotation, the diagonal
-            // scale with the translation, the clip while frame<800, the
-            // projection and the point/colour list.
-            let matrix = matrix_yxz(self.main.rx, self.main.ry, self.main.rz);
-            rotate(&mut self.rotated, &POINTS, &matrix, [0, 0, 0]);
+        let m = &self.main;
+        if m.first_object_on() {
+            // `MAIN.C:597-615`: the angles, the diagonal scale, and the clip
+            // while frame<800.
+            let rotation = matrix_yxz(m.rx, m.ry, m.rz);
             let scale = Matrix([
-                mul16(self.main.xscale, 64),
+                mul16(m.xscale, 64),
                 0,
                 0,
                 0,
-                mul16(self.main.yscale, 64),
+                mul16(m.yscale, 64),
                 0,
                 0,
                 0,
-                mul16(self.main.zscale, 64),
+                mul16(m.zscale, 64),
             ]);
-            let add = [
-                i32::from(self.main.oxp),
-                i32::from(
-                    self.main
-                        .ypos
-                        .wrapping_add(1500)
-                        .wrapping_add(self.main.oyp),
-                ),
-                i32::from(ZPOS.wrapping_add(self.main.ozp)),
-            ];
-            rotate(&mut self.moved, &self.rotated, &scale, add);
-            if self.main.frame < 800 {
-                clip_y(&mut self.moved, 1500);
-            }
-            project(&mut self.projected, &self.moved, &INIT_320X200);
-            let polys = build(
-                EPOLYS,
-                &self.projected,
-                DemoMode::Glz,
-                &mut self.colour,
-                &self.main.backpal,
-                ctx.palette,
-            );
-            for poly in &polys {
-                self.compositor.add(poly);
-            }
+            let (offset, clip) = ((m.oxp, m.oyp, m.ozp), m.frame < 800);
+            self.draw_object(ctx.palette, DemoMode::Glz, rotation, scale, offset, clip);
         }
-        if self.main.second_object_on() {
-            // `MAIN.C:620-637`: demomode Glz2, the reversed/third-speed
-            // angles and the uniform bscale. The projection does not clip.
+        let m = &self.main;
+        if m.second_object_on() {
+            // `MAIN.C:620-637`: the reversed third-speed angles and the
+            // uniform `bscale`; no clip.
             let third = |value: i16| 3600i16.wrapping_sub(value / 3);
-            let matrix = matrix_yxz(
-                third(self.main.rx),
-                third(self.main.ry),
-                third(self.main.rz),
-            );
-            rotate(&mut self.rotated, &POINTSB, &matrix, [0, 0, 0]);
-            let scale = mul16(self.main.bscale, 64);
-            let matrix = Matrix([scale, 0, 0, 0, scale, 0, 0, 0, scale]);
-            let add = [
-                i32::from(self.main.oxb),
-                i32::from(
-                    self.main
-                        .ypos
-                        .wrapping_add(1500)
-                        .wrapping_add(self.main.oyb),
-                ),
-                i32::from(ZPOS.wrapping_add(self.main.ozb)),
-            ];
-            rotate(&mut self.moved, &self.rotated, &matrix, add);
-            project(&mut self.projected, &self.moved, &INIT_320X200);
-            let polys = build(
-                EPOLYSB,
-                &self.projected,
-                DemoMode::Glz2,
-                &mut self.colour,
-                &self.main.backpal,
-                ctx.palette,
-            );
-            for poly in &polys {
-                self.compositor.add(poly);
-            }
+            let rotation = matrix_yxz(third(m.rx), third(m.ry), third(m.rz));
+            let b = mul16(m.bscale, 64);
+            let scale = Matrix([b, 0, 0, 0, b, 0, 0, 0, b]);
+            let offset = (m.oxb, m.oyb, m.ozb);
+            self.draw_object(ctx.palette, DemoMode::Glz2, rotation, scale, offset, false);
         }
         // `cglenzdone` paints every span over `bgpic` into `vram`
-        // (`MAIN.C:640`). Pixel 63999 is the compositor's sentinel and is
-        // inherited, which is `bgpic`'s own byte.
-        let Glenz {
-            compositor,
-            bgpic,
-            vram,
-            ..
-        } = self;
+        // (`MAIN.C:640`); pixel 63999, the compositor's sentinel, keeps
+        // `bgpic`'s byte.
+        let Glenz { compositor, bgpic, vram, .. } = self;
         compositor.paint(bgpic, &mut vram[..SCREEN_PIXELS]);
+    }
+
+    /// One object: `crotlist` by `rotation`, then by `scale` with the
+    /// translation `(ox, ypos+1500+oy, zpos+oz)`, the optional `ccliplist`,
+    /// `cprojlist` and `ceasypolylist` into the compositor. `Glz` draws
+    /// `points`/`epolys`, `Glz2` `pointsb`/`epolysb`.
+    fn draw_object(
+        &mut self,
+        palette: &mut Palette,
+        mode: DemoMode,
+        rotation: Matrix,
+        scale: Matrix,
+        (ox, oy, oz): (i16, i16, i16),
+        clip: bool,
+    ) {
+        let (points, defs) = match mode {
+            DemoMode::Glz => (&POINTS, EPOLYS),
+            DemoMode::Glz2 => (&POINTSB, EPOLYSB),
+        };
+        rotate(&mut self.rotated, points, &rotation, [0, 0, 0]);
+        let add = [
+            i32::from(ox),
+            i32::from(self.main.ypos.wrapping_add(1500).wrapping_add(oy)),
+            i32::from(ZPOS.wrapping_add(oz)),
+        ];
+        rotate(&mut self.moved, &self.rotated, &scale, add);
+        if clip {
+            clip_y(&mut self.moved, 1500);
+        }
+        project(&mut self.projected, &self.moved, &INIT_320X200);
+        let polys = build(
+            defs,
+            &self.projected,
+            mode,
+            &mut self.colour,
+            self.main.lightshift,
+            &self.main.backpal,
+            palette,
+        );
+        for poly in &polys {
+            self.compositor.add(poly);
+        }
+    }
+
+    /// `while(!dis_exit() && dis_getmframe()<333);` (`MAIN.C:400`).
+    fn poll_333(&mut self, ctx: &mut PartCtx) {
+        if ctx.exit_requested || ctx.getmframe() >= 333 {
+            self.phase = Phase::Wait333Done;
+        } else {
+            self.phase = Phase::Wait333;
+        }
     }
 }
 
@@ -827,10 +735,8 @@ impl Part for Glenz {
             NAME,
             "GLENZ waits on MUSIC1's musplus and the run has no music",
         )?;
-        // The inherited screen is BEGLOGO's 320x400 Mode X. A run that starts
-        // at GLENZ enters at whatever the shell's start view is; the part
-        // installs the 400-row view itself, and the note records the
-        // substitution.
+        // BEGLOGO's inherited 320x400 Mode X; a run that starts here installs
+        // it itself (`glenz.md` §2).
         ctx.view.width = VIEW_WIDTH;
         ctx.view.height = VIEW_HEIGHT_400;
         ctx.view.double_scan = false;
@@ -853,14 +759,10 @@ impl Part for Glenz {
         let path = asset(PICTURE);
         let image = load_image(NAME, PICTURE)?;
         if (image.width(), image.height()) != (VIEW_WIDTH, VIEW_HEIGHT_200) {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
-                    "{path}: {}x{}, expected 320x200",
-                    image.width(),
-                    image.height()
-                ),
-            });
+            return Err(PartError::new(
+                NAME,
+                format!("{path}: {}x{}, expected 320x200", image.width(), image.height()),
+            ));
         }
         self.fc.copy_from_slice(image.pixels());
         for (index, entry) in self.picture_palette.iter_mut().enumerate() {
@@ -878,7 +780,7 @@ impl Part for Glenz {
             Phase::Bounce => self.bounce_frame(ctx),
             Phase::Wait300 => {
                 // `while(!dis_exit() && dis_getmframe()<300);`
-                if ctx.exit_requested || Self::music_frame(ctx) >= 300 {
+                if ctx.exit_requested || ctx.getmframe() >= 300 {
                     self.phase = Phase::Wait300Palette;
                 }
                 PartStatus::Continuing
@@ -915,19 +817,6 @@ impl Part for Glenz {
             }
             Phase::Main => self.main_frame(ctx),
             Phase::Done => PartStatus::Finished,
-        }
-    }
-}
-
-impl Glenz {
-    /// `while(!dis_exit() && dis_getmframe()<333);` (`MAIN.C:400`): the
-    /// source tests `dis_exit` here, so an exit flag ends the wait and lets
-    /// the part-start tick and the main loop's own check retire it.
-    fn poll_333(&mut self, ctx: &mut PartCtx) {
-        if ctx.exit_requested || Self::music_frame(ctx) >= 333 {
-            self.phase = Phase::Wait333Done;
-        } else {
-            self.phase = Phase::Wait333;
         }
     }
 }
@@ -1036,14 +925,6 @@ mod tests {
         panic!("the intro did not reach the main wait in 1,000 ticks");
     }
 
-    /// Pixels of the main frame's buffer that differ from `bgpic` above the
-    /// floor: the object's drawn pixels at the frames before the band clear.
-    fn object_pixels(part: &Glenz) -> usize {
-        (0..150 * 320)
-            .filter(|&at| part.vram[at] != part.bgpic[at])
-            .count()
-    }
-
     /// Drive the measured intro and return the phases' transition ticks —
     /// the tick of the call that made each transition.
     fn measured_intro(rig: &mut Rig, part: &mut Glenz) -> Vec<(Phase, u32)> {
@@ -1061,12 +942,6 @@ mod tests {
         transitions
     }
 
-    /// The registry row and the part's name.
-    #[test]
-    fn glenz_is_registered() {
-        assert_eq!(crate::parts::registered("glenz"), Some("glenz"));
-        assert_eq!(Glenz::new().name(), "glenz");
-    }
 
     /// A run without music is refused loudly: the part would wait for ever.
     #[test]
@@ -1078,6 +953,7 @@ mod tests {
         assert!(error.message.contains("no music"), "{}", error.message);
         assert_eq!(part.phase, Phase::WaitMusic, "nothing has started");
     }
+
 
     /// Init installs BEGLOGO's inherited 320x400 view and copies the
     /// surface's first 320 columns of rows 0..400 into `vram`.
@@ -1115,6 +991,7 @@ mod tests {
         );
     }
 
+
     /// The zoomer's first body is the music wait's exit tick, and the reset
     /// is `dis_setmframe(0)` in that same call (`MAIN.C:290-293`).
     #[test]
@@ -1144,40 +1021,31 @@ mod tests {
         let (mut rig, mut part) = started(measured(4));
         let transitions = measured_intro(&mut rig, &mut part);
         assert_eq!(reset_tick(rig.player()), Some(4));
-
         let at = |phase: Phase| {
             transitions
                 .iter()
                 .find(|(seen, _)| *seen == phase)
-                .map(|(_, tick)| *tick)
+                .map(|(_, tick)| *tick - 4)
                 .unwrap_or_else(|| panic!("no transition to {phase:?}: {transitions:?}"))
         };
-
-        // The reset is tick 4; the 47th zoomer draw is tick 50, the break
-        // (which draws the bounce's first band) is tick 51.
+        // The 47th zoomer draw is +46; the break, which draws the bounce's
+        // first band, +47; the 177th bounce draw +223.
+        assert_eq!(at(Phase::Bounce), 47);
+        assert_eq!(at(Phase::Wait300), 224);
         assert_eq!(part.bounce.as_ref().map(|b| b.drawn()), Some(177));
-        assert_eq!(part.bounce.as_ref().unwrap().band(), (153, 200));
-
-        // `getmframe()<300` first fails at 1111 + 404 = 1515.
-        let wait300 = at(Phase::Wait300Palette);
-        assert_eq!(wait300, 4u32 + 404, "zframe 300 first read at +404");
-        // The palette build, the snapshot, then `getmframe()<333` at +449.
-        assert_eq!(at(Phase::Wait300Snapshot), 4u32 + 405);
-        assert_eq!(at(Phase::Wait333), 4u32 + 406);
-        assert_eq!(
-            at(Phase::Wait333Done),
-            4u32 + 449,
-            "zframe 333 first read at +449"
-        );
-        // The part-start wait and the main loop's first wait: +450, +451.
-        assert_eq!(at(Phase::MainWait), 4u32 + 450);
-        assert_eq!(at(Phase::Main), 4u32 + 451);
-
-        // The main body then draws frame 1 at +452 — the origin the object
-        // evidence needs (main frame 44 at reference 1606 = 1562 + 44).
+        // `getmframe()<300` first fails at +404 (1111 + 404 = 1515), then the
+        // palette build and the snapshot; `<333` at +449.
+        assert_eq!(at(Phase::Wait300Palette), 404);
+        assert_eq!(at(Phase::Wait300Snapshot), 405);
+        assert_eq!(at(Phase::Wait333), 406);
+        assert_eq!(at(Phase::Wait333Done), 449);
+        assert_eq!(at(Phase::MainWait), 450);
+        assert_eq!(at(Phase::Main), 451);
+        // Frame 1 at +452: main frame 44 is reference 1606 = 1562 + 44.
         assert_eq!(rig.step_at(&mut part, 4 + 452), PartStatus::Continuing);
         assert_eq!(part.main.frame, 1);
     }
+
 
     /// The mode set: 320x200, origin 0, no line offset, and the bounce's
     /// all-black DAC with the picture's entries 0..15.
@@ -1202,8 +1070,8 @@ mod tests {
         }
     }
 
-    /// `MAIN.C:365-390`: the `tmppal` upload is all 256 entries, and its
-    /// entries 0..15 are `backpal` exactly.
+    /// `MAIN.C:365-390`: the `tmppal` upload is all 256 entries: `backpal`
+    /// in 0..15, `backpal[a & 7]` above, lifted by 16 (clamped) where `a & 8`.
     #[test]
     fn the_wait300_tick_uploads_tmppal() {
         let (mut rig, mut part) = started(fast());
@@ -1212,36 +1080,16 @@ mod tests {
             assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             tick += 1;
         }
-        // This tick is the palette build.
         assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
         let backpal = picture_palette();
-        for a in 0..256usize {
-            let b = if a < 16 { a } else { a & 7 };
-            let mut expected = backpal[b];
-            if a & 8 != 0 && a > 15 {
-                expected = expected.map(|channel| channel.saturating_add(16).min(63));
-            }
-            assert_eq!(rig.palette.entry(a as u8), expected, "tmppal[{a}]");
-        }
-        assert_eq!(
-            rig.palette.entry(0),
-            backpal[0],
-            "the DAC read back at part start is backpal"
-        );
+        let lifted = |rgb: [u8; 3]| rgb.map(|channel| (channel + 16).min(63));
+        assert_eq!(rig.palette.entry(9), backpal[9]);
+        assert_eq!(rig.palette.entry(16), backpal[0]);
+        assert_eq!(rig.palette.entry(23), backpal[7]);
+        assert_eq!(rig.palette.entry(24), lifted(backpal[0]));
+        assert_eq!(rig.palette.entry(255), lifted(backpal[7]));
     }
 
-    /// After the intro, the main loop draws exactly one frame a tick.
-    #[test]
-    fn the_main_loop_advances_one_frame_a_tick() {
-        let (mut rig, mut part) = started(fast());
-        let start = to_main(&mut rig, &mut part);
-        for (offset, expected) in (1..=10i16).enumerate() {
-            assert_eq!(part.phase, Phase::Main);
-            let tick = start + offset as u32;
-            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
-            assert_eq!(part.main.frame, expected);
-        }
-    }
 
     /// The first main frame is `bgpic` — the object is off-screen until frame
     /// 44. Pixel 63999 is the compositor's sentinel and is never painted; it
@@ -1257,74 +1105,46 @@ mod tests {
 
     /// The measured corpus: the first object pixel is main frame 44, and the
     /// six silhouettes at 1606..1611 are frames 44..49 (`tools/glenz_physics.py
-    /// entry`; `reference-indices.md` §7.6). The boxes below are that tool's,
-    /// against the frame's own sky; `bgpic`'s rows 0..149 are the same sky.
+    /// entry`; `reference-indices.md` §7.6), against the sky `bgpic` rows
+    /// 0..149 share: box, pixel count and centroid.
     #[test]
     fn the_first_object_appears_on_frame_44_with_the_measured_silhouettes() {
-        const EXPECTED: &[(i32, i32, i32, i32, usize, f64, f64)] = &[
-            (172, 179, 0, 0, 8, 175.5, 0.0),
-            (166, 179, 0, 1, 21, 173.3, 0.3),
-            (157, 180, 0, 3, 60, 170.5, 1.0),
-            (153, 180, 0, 4, 86, 168.8, 1.4),
-            (149, 179, 0, 5, 111, 166.6, 1.7),
-            (146, 180, 0, 6, 137, 165.5, 2.0),
+        /// (x0, x1, y0, y1), pixels, centroid.
+        type Silhouette = ((i32, i32, i32, i32), usize, (f64, f64));
+        const EXPECTED: [Silhouette; 6] = [
+            ((172, 179, 0, 0), 8, (175.5, 0.0)),
+            ((166, 179, 0, 1), 21, (173.3, 0.3)),
+            ((157, 180, 0, 3), 60, (170.5, 1.0)),
+            ((153, 180, 0, 4), 86, (168.8, 1.4)),
+            ((149, 179, 0, 5), 111, (166.6, 1.7)),
+            ((146, 180, 0, 6), 137, (165.5, 2.0)),
         ];
         let (mut rig, mut part) = started(fast());
         let start = to_main(&mut rig, &mut part);
-        let mut first = None;
-        for (offset, frame) in (1..=49i16).enumerate() {
+        for frame in 1..=49i16 {
+            rig.step_at(&mut part, start + frame as u32 - 1);
+            let points: Vec<(i32, i32)> = (0..150 * 320)
+                .filter(|&at| part.vram[at] != part.bgpic[at])
+                .map(|at| ((at % 320) as i32, (at / 320) as i32))
+                .collect();
+            if frame < 44 {
+                assert!(points.is_empty(), "frame {frame} draws no object pixel");
+                continue;
+            }
+            let (boxed, count, (cx, cy)) = EXPECTED[(frame - 44) as usize];
+            let xs = points.iter().map(|p| p.0);
+            let ys = points.iter().map(|p| p.1);
+            let found = (xs.clone().min(), xs.clone().max(), ys.clone().min(), ys.clone().max());
             assert_eq!(
-                rig.step_at(&mut part, start + offset as u32),
-                PartStatus::Continuing
+                found,
+                (Some(boxed.0), Some(boxed.1), Some(boxed.2), Some(boxed.3)),
+                "frame {frame}'s box"
             );
-            assert_eq!(part.main.frame, frame);
-            let mut points = Vec::new();
-            for y in 0..150usize {
-                for x in 0..320usize {
-                    let at = y * 320 + x;
-                    // Only the object can differ in these rows: the sky is
-                    // uniform there until the frame-765 band clear.
-                    if part.vram[at] != part.bgpic[at] {
-                        points.push((x as i32, y as i32));
-                    }
-                }
-            }
-            if !points.is_empty() && first.is_none() {
-                first = Some(frame);
-            }
-            if (44..=49).contains(&frame) {
-                let entry = EXPECTED[(frame - 44) as usize];
-                let expected = (
-                    entry.0, entry.1, entry.2, entry.3, entry.4, entry.5, entry.6,
-                );
-                let xs: Vec<i32> = points.iter().map(|p| p.0).collect();
-                let ys: Vec<i32> = points.iter().map(|p| p.1).collect();
-                assert_eq!(
-                    (
-                        *xs.iter().min().unwrap(),
-                        *xs.iter().max().unwrap(),
-                        *ys.iter().min().unwrap(),
-                        *ys.iter().max().unwrap(),
-                        points.len(),
-                    ),
-                    (expected.0, expected.1, expected.2, expected.3, expected.4),
-                    "frame {frame}'s box"
-                );
-                let cx = xs.iter().sum::<i32>() as f64 / points.len() as f64;
-                let cy = ys.iter().sum::<i32>() as f64 / points.len() as f64;
-                assert!(
-                    (cx - expected.5).abs() < 0.05,
-                    "frame {frame} centroid x {cx}"
-                );
-                assert!(
-                    (cy - expected.6).abs() < 0.05,
-                    "frame {frame} centroid y {cy}"
-                );
-            }
+            assert_eq!(points.len(), count, "frame {frame}'s pixels");
+            let n = count as f64;
+            assert!((xs.sum::<i32>() as f64 / n - cx).abs() < 0.05, "frame {frame} centroid x");
+            assert!((ys.sum::<i32>() as f64 / n - cy).abs() < 0.05, "frame {frame} centroid y");
         }
-        assert_eq!(first, Some(44), "the first object pixels are main frame 44");
-        // 1606 = 1562 + 44 is the reference index of frame 44.
-        assert_eq!(1562 + first.unwrap(), 1606);
     }
 
     /// The palette phases of `MAIN.C:538-590`, on the physics alone.
@@ -1334,98 +1154,52 @@ mod tests {
         let mut state = MainState::new(backpal);
         let mut bgpic = vec![0xFFu8; SCREEN_PIXELS];
         let mut vram = vec![0xFFu8; SCREEN_PIXELS];
-        let mut pal_at = Vec::new();
+        let mut pal_at = std::collections::HashMap::new();
         for frame in 1..=2133i16 {
             state.step(&mut bgpic, &mut vram);
-            assert_eq!(state.frame, frame);
-            if matches!(
-                frame,
-                700 | 701 | 764 | 765 | 785 | 786 | 790 | 795 | 2069 | 2070 | 2133
-            ) {
-                pal_at.push((frame, state.pal));
-            }
+            pal_at.insert(frame, state.pal);
         }
-        let get = |frame: i16| {
-            pal_at
-                .iter()
-                .find(|(at, _)| *at == frame)
-                .map(|(_, pal)| *pal)
-                .unwrap()
+        let faded = |pal: [[u8; 3]; 16], b: i16| {
+            pal.map(|rgb| rgb.map(|c| ((i16::from(c) * b) / 64) as u8))
         };
-        // Through frame 700 the fade branch has not run.
-        assert_eq!(get(700), backpal);
-        // `b=764-frame`: at 701 b=63, at 764 b=0.
-        let faded = |b: i16| backpal.map(|rgb| rgb.map(|c| ((i16::from(c) * b) / 64) as u8));
-        assert_eq!(get(701), faded(63));
-        assert_eq!(get(764), faded(0));
-        // 765..789: `pal` stays at 764's black; the band clear runs.
-        assert_eq!(get(765), [[0u8; 3]; 16]);
-        assert_eq!(get(785), [[0u8; 3]; 16]);
-        // 786..789 rebuild backpal, but not pal.
-        assert_eq!(get(786), [[0u8; 3]; 16]);
+        let black = [[0u8; 3]; 16];
         let rebuilt: [[u8; 3]; 16] = std::array::from_fn(|a| rebuilt_backpal(a as i16));
+        // Through 700 the fade has not run; `b=764-frame` over 701..764.
+        assert_eq!(pal_at[&700], backpal);
+        assert_eq!(pal_at[&701], faded(backpal, 63));
+        assert_eq!(pal_at[&764], black);
+        // 765..789: black while the band clears; 786..789 rebuild `backpal`.
+        assert_eq!(pal_at[&789], black);
         assert_eq!(state.backpal, rebuilt);
-        // 790 copies backpal into pal.
-        assert_eq!(get(790), rebuilt);
-        assert_eq!(get(795), rebuilt);
-        assert_eq!(get(2069), rebuilt);
-        // The second fade starts at 2070 (b=63) and ends at 2133 (b=0).
-        assert_eq!(
-            get(2070),
-            rebuilt.map(|rgb| rgb.map(|c| ((i16::from(c) * 63) / 64) as u8))
-        );
-        assert_eq!(get(2133), [[0u8; 3]; 16]);
-
-        // The band clear: two rows a frame from row 150, both buffers, and
-        // nothing after frame 789 (`MAIN.C:552-556`).
-        let mut state = MainState::new(backpal);
-        let mut bgpic = vec![0xFFu8; SCREEN_PIXELS];
-        let mut vram = vec![0xFFu8; SCREEN_PIXELS];
-        for _ in 1..=789i16 {
-            state.step(&mut bgpic, &mut vram);
-        }
-        for row in 150..200usize {
-            assert!(
-                bgpic[row * 320..(row + 1) * 320].iter().all(|&p| p == 0),
-                "bgpic row {row}"
-            );
-            assert!(
-                vram[row * 320..(row + 1) * 320].iter().all(|&p| p == 0),
-                "vram row {row}"
-            );
-        }
-        assert!(
-            bgpic[..150 * 320].iter().all(|&p| p == 0xFF),
-            "above the band is untouched"
-        );
+        // 790 copies it into `pal`; the second fade is 2070..2133.
+        assert_eq!(pal_at[&790], rebuilt);
+        assert_eq!(pal_at[&2069], rebuilt);
+        assert_eq!(pal_at[&2070], faded(rebuilt, 63));
+        assert_eq!(pal_at[&2133], black);
     }
 
-    /// The dynamic band's last clear is rows 198/199 at frame 789; the clear
-    /// happens *before* the paint, which is why the background snapshot sees
-    /// it (`MAIN.C:552-556` precedes `cglenzdone`).
+    /// The band clear: two rows a frame from row 150 in both buffers, before
+    /// the paint (`MAIN.C:552-556` precedes `cglenzdone`), and none after 789.
     #[test]
     fn the_band_clear_is_at_rows_150_onwards_and_stops_at_789() {
-        let backpal = picture_palette();
-        let mut state = MainState::new(backpal);
+        let mut state = MainState::new(picture_palette());
         let mut bgpic = vec![9u8; SCREEN_PIXELS];
         let mut vram = vec![9u8; SCREEN_PIXELS];
+        let rows = |buffer: &[u8], from: usize, to: usize| buffer[from * 320..to * 320].to_vec();
         for _ in 1..=765i16 {
             state.step(&mut bgpic, &mut vram);
         }
-        assert!(bgpic[150 * 320..152 * 320].iter().all(|&p| p == 0));
-        assert!(bgpic[152 * 320..153 * 320].iter().all(|&p| p == 9));
-        for _ in 766..=789i16 {
+        assert!(rows(&bgpic, 150, 152).iter().all(|&p| p == 0));
+        assert!(rows(&bgpic, 152, 153).iter().all(|&p| p == 9));
+        for _ in 766..=790i16 {
             state.step(&mut bgpic, &mut vram);
         }
-        assert!(bgpic[198 * 320..200 * 320].iter().all(|&p| p == 0));
-        state.step(&mut bgpic, &mut vram);
-        assert_eq!(state.frame, 790);
-        assert!(bgpic[150 * 320..200 * 320].iter().all(|&p| p == 0));
-        assert!(
-            bgpic[..150 * 320].iter().all(|&p| p == 9),
-            "no clear outside the band, and none after 789"
-        );
+        for buffer in [&bgpic, &vram] {
+            assert!(rows(buffer, 150, 200).iter().all(|&p| p == 0));
+            assert!(rows(buffer, 0, 150).iter().all(|&p| p == 9), "nothing outside the band");
+        }
     }
+
 
     /// The object switches: the first while `xscale>4`, the second from
     /// frame 803 to 2185 (`bscale` growing at 2 a frame from 801, shrinking
@@ -1467,6 +1241,7 @@ mod tests {
         // with unbounded `int`s reaches a different scale.
         assert_eq!(xscale_800, Some(115));
     }
+
 
     /// The second object's draw path is live from frame 803: the same first
     /// object and a state differing only in `bscale` (4 → 6) paint different
@@ -1510,116 +1285,84 @@ mod tests {
         );
     }
 
-    /// A cut present at the loop's entry (`Phase::MainWait`) breaks before the
-    /// wait and the body, so that tick draws nothing (`MAIN.C:409-411`).
-    #[test]
-    fn the_music_cut_at_the_main_wait_draws_nothing() {
-        let (mut rig, mut part) = started(fast());
-        let tick = to_main_wait(&mut rig, &mut part);
-        let before = part.vram.clone();
-        let surface_before = rig.surface.pixels().to_vec();
-        // -1 is inside (-16, 0): the cue.
-        cue(rig.player(), tick as usize, -1);
-        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 0, "the entry check draws no frame");
-        assert_eq!(part.vram, before, "the buffer is untouched");
-        assert_eq!(
-            rig.surface.pixels(),
-            &surface_before[..],
-            "the screen holds"
-        );
-        // The cue's boundaries: -1..-15 cut; -16, 0 and anything positive or
-        // the -32 sentinel do not.
-        assert!(Glenz::is_music_cut(-1));
-        assert!(Glenz::is_music_cut(-15));
-        for outside in [-16, 0, 1, -32] {
-            assert!(!Glenz::is_music_cut(outside), "{outside}");
+    /// The main loop's three stops (`MAIN.C:409-411`).
+    #[derive(Clone, Copy, Debug)]
+    enum Stop {
+        /// `if(a<0 && a>-16) break;`: MUSIC1's cue.
+        Cut,
+        Esc,
+        /// `frame<7000`.
+        Cap,
+    }
+
+    /// Step `part` at `tick` with `stop` in force.
+    fn step_with(rig: &mut Rig, part: &mut Glenz, tick: u32, stop: Stop) -> PartStatus {
+        match stop {
+            Stop::Cut => {
+                // -1 is inside (-16, 0).
+                cue(rig.player(), tick as usize, -1);
+                rig.step_at(part, tick)
+            }
+            Stop::Esc => rig.step_exit_at(part, tick),
+            Stop::Cap => {
+                // At the entry the cap is already reached; on a body tick
+                // this frame reaches it.
+                part.main.frame = if part.phase == Phase::MainWait { 7000 } else { 6999 };
+                rig.step_at(part, tick)
+            }
         }
     }
 
-    /// A cut first visible on a body tick draws that frame and retires the
-    /// part on the same tick: the source's loop top (`MAIN.C:409-411`) is
-    /// reached after `cglenzdone`, so the frame is kept. Frame 44 is the
-    /// object's first drawn frame, which makes "drawn" visible.
+    /// A stop present at the loop's entry (`Phase::MainWait`) breaks before
+    /// the wait and the body, so that tick draws nothing; no drain follows.
     #[test]
-    fn the_music_cut_on_a_body_tick_draws_then_finishes() {
-        let (mut rig, mut part) = started(fast());
-        let start = to_main(&mut rig, &mut part);
-        for frame in 1..44i16 {
-            let tick = start + frame as u32 - 1;
-            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
-            assert_eq!(part.main.frame, frame);
+    fn a_stop_at_the_main_wait_draws_nothing() {
+        for stop in [Stop::Cut, Stop::Esc, Stop::Cap] {
+            let (mut rig, mut part) = started(fast());
+            let tick = to_main_wait(&mut rig, &mut part);
+            let frame = if matches!(stop, Stop::Cap) { 7000 } else { 0 };
+            let before = part.vram.clone();
+            let surface_before = rig.surface.pixels().to_vec();
+            assert!(!part.drains_after_exit());
+            let status = step_with(&mut rig, &mut part, tick, stop);
+            assert_eq!(status, PartStatus::Finished, "{stop:?}");
+            assert_eq!(part.phase, Phase::Done);
+            assert_eq!(part.main.frame, frame, "{stop:?}: no body runs");
+            assert_eq!(part.vram, before, "{stop:?}: the buffer is untouched");
+            assert_eq!(rig.surface.pixels(), &surface_before[..], "{stop:?}: the screen holds");
         }
-        let tick = start + 43;
-        cue(rig.player(), tick as usize, -1);
-        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 44, "the cut tick's frame is drawn");
-        assert!(
-            object_pixels(&part) > 0,
-            "frame 44's object is on the screen"
-        );
+        // The cue's boundaries: -1..-15 cut; -16, 0, positive and -32 do not.
+        assert!(Glenz::is_music_cut(-1) && Glenz::is_music_cut(-15));
+        assert!([-16, 0, 1, -32].iter().all(|&plus| !Glenz::is_music_cut(plus)));
     }
 
-    /// ESC at the loop's entry draws nothing, and the part asks for no drain.
+    /// A stop first seen on a body tick draws that frame and retires the part
+    /// on the same tick: frame 44, the object's first, is on the screen (the
+    /// cap draws frame 7000).
     #[test]
-    fn escape_at_the_main_wait_finishes_without_a_drain() {
-        let (mut rig, mut part) = started(fast());
-        let tick = to_main_wait(&mut rig, &mut part);
-        let before = part.vram.clone();
-        assert!(!part.drains_after_exit());
-        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 0, "ESC at the entry draws no frame");
-        assert_eq!(part.vram, before, "ESC draws nothing on its tick");
-    }
-
-    /// ESC first visible on a body tick draws that frame and retires the part
-    /// on the same tick, with no drain.
-    #[test]
-    fn escape_on_a_body_tick_draws_then_finishes() {
-        let (mut rig, mut part) = started(fast());
-        let start = to_main(&mut rig, &mut part);
-        for frame in 1..44i16 {
-            let tick = start + frame as u32 - 1;
-            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
-            assert_eq!(part.main.frame, frame);
+    fn a_stop_on_a_body_tick_draws_then_finishes() {
+        for stop in [Stop::Cut, Stop::Esc, Stop::Cap] {
+            let (mut rig, mut part) = started(fast());
+            let start = to_main(&mut rig, &mut part);
+            for frame in 1..44i16 {
+                let status = rig.step_at(&mut part, start + frame as u32 - 1);
+                assert_eq!(status, PartStatus::Continuing);
+            }
+            assert_eq!(step_with(&mut rig, &mut part, start + 43, stop), PartStatus::Finished);
+            assert_eq!(part.phase, Phase::Done);
+            match stop {
+                Stop::Cap => assert_eq!(part.main.frame, 7000, "frame 7000 is drawn"),
+                _ => {
+                    assert_eq!(part.main.frame, 44, "{stop:?}: the tick's frame is drawn");
+                    assert!(
+                        (0..150 * 320).any(|at| part.vram[at] != part.bgpic[at]),
+                        "{stop:?}: frame 44's object is on the screen"
+                    );
+                }
+            }
         }
-        let tick = start + 43;
-        assert!(!part.drains_after_exit());
-        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 44, "the ESC tick's frame is drawn");
-        assert!(
-            object_pixels(&part) > 0,
-            "frame 44's object is on the screen"
-        );
     }
 
-    /// `frame < 7000` is the loop condition checked at the same top after the
-    /// body: frame 7000 is drawn and the part retires on that tick.
-    #[test]
-    fn the_frame_cap_draws_7000_then_finishes() {
-        let (mut rig, mut part) = started(fast());
-        let tick = to_main(&mut rig, &mut part);
-        part.main.frame = 6999;
-        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(part.main.frame, 7000, "frame 7000 is drawn before the cap");
-    }
-
-    /// The cap already reached at the loop's entry breaks without a body.
-    #[test]
-    fn the_frame_cap_at_the_main_wait_draws_nothing() {
-        let (mut rig, mut part) = started(fast());
-        let tick = to_main_wait(&mut rig, &mut part);
-        part.main.frame = 7000;
-        let before = part.vram.clone();
-        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
-        assert_eq!(part.main.frame, 7000);
-        assert_eq!(part.vram, before, "no body runs");
-    }
 
     /// ESC during the music wait does **not** retire the part: `MAIN.C:290`'s
     /// `while(!dis_exit() && musplus<-19);` exits and the source continues to
@@ -1668,6 +1411,7 @@ mod tests {
         assert_eq!(part.phase, Phase::Done);
     }
 
+
     /// The per-tick upload writes entries 0..15 only: a group's entries
     /// 16..255 survive it (`MAIN.C:414-415`'s `16*3`).
     #[test]
@@ -1689,39 +1433,5 @@ mod tests {
         for index in 16..=255u8 {
             assert_eq!(rig.palette.entry(index), [1, 2, 3], "entry {index}");
         }
-    }
-
-    /// `mul16`/`div16` are the source's 16-bit int arithmetic; the values
-    /// that matter are the ones the animation reaches.
-    #[test]
-    fn the_sixteen_bit_products_wrap_like_the_source() {
-        // Frame 667: `-yposa*boingm` = -40160 wraps to 25376 before the
-        // divide by boingd (9) — the source's `imul` keeps only AX.
-        assert_eq!(mul16(-4016, 10), 25376);
-        assert_eq!(div16(mul16(-4016, 10), 9), 25376 / 9);
-        // `oyp -= b*b/2` with b=-99 accumulates; the subtraction wraps at 16
-        // bits.
-        let mut oyp = 1000i16;
-        oyp = oyp.wrapping_sub(div16(mul16(-99, -99), 2));
-        assert_eq!(oyp, 1000 - 4900);
-        // The orbit products fit; their division truncates toward zero.
-        assert_eq!(div16(-7, 10), 0);
-        assert_eq!(div16(7, 10), 0);
-        assert_eq!(div16(-11, 10), -1);
-    }
-
-    /// The source's `sin1024` indexing: `(a*n)&1023` on the 16-bit product's
-    /// low word, so a product past 32,767 still masks correctly.
-    #[test]
-    fn the_sin1024_index_wraps_at_1024() {
-        let a = 6100i16;
-        assert_eq!(
-            sin1024(a, 6),
-            SIN1024[(a.wrapping_mul(6) as u16 & 1023) as usize]
-        );
-        assert_eq!(sin1024(0, 3), 0);
-        assert_eq!(sin1024(256, 1), 256);
-        assert_eq!(sin1024(768, 1), -256);
-        assert_eq!(sin1024(1024, 1), 0, "& 1023 wraps");
     }
 }

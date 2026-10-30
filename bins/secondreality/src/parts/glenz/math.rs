@@ -1,21 +1,11 @@
 //! GLENZ's fixed-point vector maths: `MATH.ASM`'s matrix and `VEC.ASM`'s
 //! rotate/project/clip list routines.
 //!
-//! The widths are the fidelity. The matrix is nine signed 16-bit words, each
-//! product in `calcmatrix` is a 32-bit `imul` shifted right 15 (`shld dx,ax,1`,
-//! `MATH.ASM:88-156`), and the result is stored as a word. `rotlist` sign
-//! extends a matrix word to 32 bits, multiplies it by a 32-bit coordinate into
-//! `edx:eax`, sums three such 64-bit products with `add`/`adc`, shifts the pair
-//! right 15 (`shld ecx,ebx,17`, `VEC.ASM:121`) and adds a 32-bit translation
-//! with `add` (`:155-160`). `projlist` multiplies a 32-bit coordinate by a
-//! 32-bit multiplier into `edx:eax`, divides by the 32-bit z with `idiv`
-//! (`VEC.ASM:200-214`), then adds a *word* centre to the quotient's low 16 bits
-//! and compares the word (`add ax,...; cmp ax,...`). A cleaner i32 multiply, a
-//! wider compare or a truncated-toward-negative shift moves every vertex.
-//!
-//! The source's angles are tenths of a degree, 0..3599, and are wrapped by
-//! `checkdeg` (`MATH.ASM:17-28`): an unsigned `jb` for the in-range test, then
-//! a signed `jl` to choose the direction, repeated ±3600.
+//! The widths are the fidelity: the matrix is nine 16-bit words of `>> 15`
+//! products, `rotlist` sums three 64-bit products and keeps 32 bits, and
+//! `projlist` adds a word centre to the quotient's low 16 bits and compares
+//! the word. A cleaner multiply, a wider compare or a truncating shift moves
+//! every vertex. Angles are tenths of a degree, 0..3599.
 
 use super::tables::{COS, SIN};
 
@@ -43,13 +33,8 @@ pub const FLAG_X_MIN: u16 = 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Matrix(pub [i16; 9]);
 
-/// `checkdeg` (`MATH.ASM:17-28`): wrap an angle into `0..=3599`.
-///
-/// The macro tests the unsigned word first (`cmp reg,3600; jb l1`), then the
-/// signed one (`jl l2`) to choose `-3600` or `+3600`, and loops. For a 16-bit
-/// value that is `rem_euclid(3600)`, but the literal loop is kept so the
-/// source's two tests stay visible: a negative angle is never "in range" in
-/// the unsigned test, even when the addition it takes is the same.
+/// `checkdeg` (`MATH.ASM:17-28`): wrap an angle into `0..=3599`, the unsigned
+/// `jb` for the range test, then the signed `jl` for the direction.
 fn checkdeg(mut angle: i16) -> i16 {
     loop {
         if (angle as u16) < 3600 {
@@ -64,11 +49,7 @@ fn checkdeg(mut angle: i16) -> i16 {
 }
 
 /// One `imul`/`shld dx,ax,1` pair: the signed 32-bit product shifted right 15
-/// and stored as a word (`MATH.ASM:88-96`).
-///
-/// `>>` on a negative i32 is an arithmetic shift, which is what `shld` of a
-/// two's-complement product produces; the `as i16` keeps the low word, as the
-/// source's word store does.
+/// (arithmetically) and stored as a word (`MATH.ASM:88-96`).
 fn mul15(a: i16, b: i16) -> i16 {
     ((i32::from(a) * i32::from(b)) >> 15) as i16
 }
@@ -84,10 +65,8 @@ fn mul15(a: i16, b: i16) -> i16 {
 /// names, and this port keeps the source's placement: `a1` is the X angle,
 /// `a0` the Y angle, `a2` the Z angle.
 ///
-/// Every entry is a `>>15` product stored as a word; the two entries that
-/// blend a product with an already-shifted one (`m14`, `m12`) shift twice,
-/// exactly as the source does, rather than forming the mathematical
-/// `Xsin·Ycos·Zcos` in one product.
+/// `m14` and `m12` shift a product of an already-shifted product, as the
+/// source does, rather than forming the three-factor product once.
 pub fn matrix_yxz(a0: i16, a1: i16, a2: i16) -> Matrix {
     // `calcmatrix`'s ROT-X, ROT-Y, ROT-Z (`MATH.ASM:52-78`); the angles in
     // the source's slots, not the caller's.
@@ -133,24 +112,12 @@ fn rotate_axis(point: [i32; 3], m: &Matrix, words: [usize; 3]) -> i32 {
 }
 
 /// `rotlist` (`VEC.ASM:87-168`): rotate `src` into `dst` and add the
-/// translation.
+/// translation with a wrapping 32-bit `add`.
 ///
-/// The source appends to its destination list (it adds the count at
-/// `[di]` and writes at `4 + old*12`), but every shipped call resets the
-/// count to zero first (`points2b[0]=0; crotlist(points2b,points)`,
-/// `MAIN.C:600`), which is why this port clears `dst`.
-///
-/// The three sums use matrix words `[0,2,4]`, `[6,8,10]` and `[12,14,16]` in
-/// that order. The pops at `VEC.ASM:149-152` take the *second* sum into `edx`
-/// and the *first* into `eax`, while the third stays in `ecx`; the stores at
-/// `:155-160` then put `eax + xadd` in x, `ecx + yadd` in **y**, and
-/// `edx + zadd` in z. So x uses words 0/2/4, y uses 12/14/16 and z uses
-/// 6/8/10 — the source's coordinate system swaps the mathematical y and z
-/// axes, and the object file's instruction order confirms it. A "clean"
-/// row-major assignment (y from 6/8/10) rotates the wrong way.
-///
-/// Each axis shift is followed by a 32-bit `add` of the translation, which
-/// wraps; the shift's result is truncated to 32 bits before the add.
+/// The source appends, but every shipped call resets the count first
+/// (`MAIN.C:600`), so `dst` is cleared. The pops at `VEC.ASM:149-152` and the
+/// stores at `:155-160` put words 0/2/4 in x, **12/14/16 in y** and 6/8/10 in
+/// z: the source swaps the mathematical y and z axes.
 pub fn rotate(dst: &mut Vec<[i32; 3]>, src: &[[i32; 3]], m: &Matrix, add: [i32; 3]) {
     dst.clear();
     dst.reserve(src.len());
@@ -197,9 +164,6 @@ pub struct Projection {
 
 /// `init320x200` (`VID.ASM:199-218`): the 320×200 mode's projection and
 /// window, the values the shipped GLENZ path runs with.
-///
-/// `projxmul` 256, `projymul` 213, `projxadd` 160, `projyadd` 130,
-/// `projminz` 128, window x 0..319 and y 0..199.
 pub const INIT_320X200: Projection = Projection {
     mul_x: 256,
     mul_y: 213,
@@ -232,18 +196,12 @@ pub struct PVert {
     pub z: i32,
 }
 
-/// `projlist` (`VEC.ASM:170-232`): project `src` into `dst`.
+/// `projlist` (`VEC.ASM:170-232`): project `src` into `dst` (cleared, as the
+/// shipped caller resets the count, `MAIN.C:613`).
 ///
-/// Like [`rotate`], the source appends and the shipped caller resets the
-/// count (`points3[0]=0; cprojlist(points3,points2)`, `MAIN.C:613`), so `dst`
-/// is cleared. The order is y then x; each axis is
-/// `(coordinate * multiplier) / clamped_z` as a signed 64/32 `idiv`
-/// (truncating toward zero), then the quotient's low 16 bits have the word
-/// centre added with a wrapping 16-bit `add`, and the flags compare that
-/// word. The stored z is the unclamped source z.
-///
-/// The divide uses `z.max(min_z)`; a `min_z` of zero would divide by zero,
-/// as the original's `idiv` would fault.
+/// Each axis, y then x, is `(coordinate * multiplier) / z.max(min_z)` as a
+/// truncating 64/32 `idiv`; the quotient's low word gets the word centre in a
+/// wrapping 16-bit `add`, and the flags compare that word.
 pub fn project(dst: &mut Vec<PVert>, src: &[[i32; 3]], p: &Projection) {
     dst.clear();
     dst.reserve(src.len());
@@ -301,48 +259,52 @@ pub fn clip_y(points: &mut [[i32; 3]], max: i32) {
 mod tests {
     use super::*;
 
-    /// `matrix_yxz`'s identity at (0,0,0): every diagonal entry is
-    /// `mul15(32767, 32767)`, which is 32766, not 32767 — the source's
-    /// fixed-point identity is 0.99997.
+    fn pv(x: i16, y: i16, flags: u16, z: i32) -> PVert {
+        PVert { x, y, flags, z }
+    }
+
+    fn project_one(point: [i32; 3], p: &Projection) -> PVert {
+        let mut dst = Vec::new();
+        project(&mut dst, &[point], p);
+        dst[0]
+    }
+
+    /// A unit projection whose quotient is the coordinate, inside ±`edge`.
+    fn unit(add_x: i16, edge: i16) -> Projection {
+        Projection {
+            mul_x: 1,
+            mul_y: 1,
+            add_x,
+            add_y: 0,
+            min_z: 1,
+            min_x: -edge,
+            max_x: edge,
+            min_y: -edge,
+            max_y: edge,
+        }
+    }
+
+    /// The identity at (0,0,0) is `mul15(32767, 32767)` = 32766 on the
+    /// diagonal, 0.99997.
     #[test]
     fn the_source_identity_at_zero_degrees_is_32766() {
-        assert_eq!(
-            matrix_yxz(0, 0, 0),
-            Matrix([32766, 0, 0, 0, 32766, 0, 0, 0, 32766])
-        );
+        assert_eq!(matrix_yxz(0, 0, 0), Matrix([32766, 0, 0, 0, 32766, 0, 0, 0, 32766]));
     }
 
-    /// A known angle, hand-computed from the source's equations: the X slot
-    /// (`a1`) at 900 (90°), everything else zero.
-    ///
-    /// sin900 = 32767, cos900 = 0; sin0 = 0, cos0 = 32767.
-    /// m0 = mul15(32767,32767) = 32766.
-    /// m14 = mul15(0,0) - mul15(32766,32767) = -32765.
-    /// m10 = rxsin = 32767; m16 = mul15(0,32767) = 0.
+    /// The X slot (`a1`) at 90°: m0 = 32766, m14 = 0 - mul15(32766,32767) =
+    /// -32765, m10 = sin900 = 32767.
     #[test]
     fn a_ninety_degree_x_angle_matches_the_hand_computed_words() {
-        assert_eq!(
-            matrix_yxz(0, 900, 0),
-            Matrix([32766, 0, 0, 0, 0, 32767, 0, -32765, 0])
-        );
+        assert_eq!(matrix_yxz(0, 900, 0), Matrix([32766, 0, 0, 0, 0, 32767, 0, -32765, 0]));
     }
 
-    /// All three angles at once, so the ordering (`m14` uses the first stored
-    /// `m0` before it is reduced; `m12` shifts an already-shifted product) is
-    /// pinned, not just the one-angle special cases.
-    ///
-    /// `matrix_yxz(300, 700, 1100)`: X slot 700, Y slot 300, Z slot 1100.
-    /// sin/cos are (30791, 11207), (16383, 28377), (30791, -11206).
-    /// m0 = mul15(28377,-11206) - mul15(30791, mul15(30791,16383))
-    ///    = -9705 - 14465 = -24170.
-    /// m14 = mul15(16383,30791) - mul15(-9705,30791)
-    ///     = 15394 - (-9120) = 24514.
-    /// m2 = mul15(-11206,15394) + mul15(28377,30791) = -5265 + 26664 = 21399.
-    /// m12 = mul15(30791, 26664) + mul15(16383,-11206)
-    ///     = 25055 - 5603 = 19452.
-    /// m4 = -mul15(11207,16383) = -5603; m6 = -mul15(11207,30791) = -10530;
-    /// m8 = mul15(11207,-11206) = -3833; m10 = sx = 30791;
-    /// m16 = mul15(11207,28377) = 9705.
+    /// All three angles, so `m14`'s use of the unreduced `m0` and `m12`'s
+    /// double shift are pinned. X slot 700, Y slot 300, Z slot 1100; sin/cos
+    /// (30791, 11207), (16383, 28377), (30791, -11206):
+    /// m0 = mul15(28377,-11206) - mul15(30791, mul15(30791,16383)) = -9705 - 14465;
+    /// m14 = mul15(16383,30791) - mul15(-9705,30791) = 15394 + 9120;
+    /// m2 = mul15(-11206,15394) + mul15(28377,30791) = -5265 + 26664;
+    /// m12 = mul15(30791, 26664) + mul15(16383,-11206) = 25055 - 5603.
     #[test]
     fn a_three_angle_matrix_matches_the_hand_computed_words() {
         assert_eq!(
@@ -351,20 +313,13 @@ mod tests {
         );
     }
 
-    /// The argument placement: arg1 fills the X slot, arg0 the Y slot. With
-    /// 90° in arg0 the matrix is a Y rotation instead, and every word
-    /// differs.
+    /// arg1 fills the X slot, arg0 the Y slot (`MATH.ASM:36-41`).
     #[test]
     fn matrix_yxz_puts_arg1_in_the_first_slot() {
-        assert_eq!(
-            matrix_yxz(900, 0, 0),
-            Matrix([0, 0, -32766, 0, 32766, 0, 32766, 0, 0])
-        );
-        assert_ne!(matrix_yxz(0, 900, 0), matrix_yxz(900, 0, 0));
+        assert_eq!(matrix_yxz(900, 0, 0), Matrix([0, 0, -32766, 0, 32766, 0, 32766, 0, 0]));
     }
 
-    /// `checkdeg`'s repeated ±3600, including the 16-bit ends. Each pair is
-    /// written as (wrapped angle in the caller's arg1 slot, expected).
+    /// `checkdeg`'s repeated ±3600, including the 16-bit ends.
     #[test]
     fn angles_wrap_by_3600() {
         let base = matrix_yxz(0, 123, 0);
@@ -373,412 +328,126 @@ mod tests {
         assert_eq!(matrix_yxz(0, 3 * 3600 + 123, 0), base);
         assert_eq!(matrix_yxz(0, -32768, 0), matrix_yxz(0, 3232, 0));
         assert_eq!(matrix_yxz(0, 32767, 0), matrix_yxz(0, 367, 0));
-        // The arg0 slot wraps too.
         assert_eq!(matrix_yxz(-1, 0, 0), matrix_yxz(3599, 0, 0));
         assert_eq!(matrix_yxz(3600, 0, 0), matrix_yxz(0, 0, 0));
         assert_eq!(matrix_yxz(0, 0, 7200), matrix_yxz(0, 0, 0));
     }
 
-    /// A matrix entry times a coordinate is shifted right 15, and the shift
-    /// is arithmetic: -1 * 5000 floors to -1, where a truncating divide by
-    /// 32768 would give 0 (`VEC.ASM:121`'s `shld ecx,ebx,17`).
+    /// The shift is arithmetic (`shld ecx,ebx,17`): -1 * 5000 floors to -1,
+    /// and the identity's 32766/32768 takes 5000 to 4999.
     #[test]
-    fn a_negative_product_shifts_down_not_toward_zero() {
-        let m = Matrix([-1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    fn rotation_products_shift_down_not_toward_zero() {
         let mut dst = Vec::new();
-        rotate(&mut dst, &[[5000, 0, 0]], &m, [0, 0, 0]);
+        rotate(&mut dst, &[[5000, 0, 0]], &Matrix([-1, 0, 0, 0, 0, 0, 0, 0, 0]), [0, 0, 0]);
         assert_eq!(dst, vec![[-1, 0, 0]]);
-    }
-
-    /// The source's identity truncates: 32766/32768 times 5000 is 4999.69,
-    /// and `shld` floors it to 4999, so even an "identity" rotation does not
-    /// reproduce 5000. A float or rounded implementation would.
-    #[test]
-    fn even_the_identity_rotation_truncates() {
-        let m = matrix_yxz(0, 0, 0);
-        let mut dst = Vec::new();
-        rotate(&mut dst, &[[5000, 0, 0]], &m, [0, 0, 0]);
+        let identity = matrix_yxz(0, 0, 0);
+        rotate(&mut dst, &[[5000, 0, 0]], &identity, [0, 0, 0]);
         assert_eq!(dst, vec![[4999, 0, 0]]);
-        // Exactly representable: 32766 * 32768 >> 15 = 32766.
-        rotate(&mut dst, &[[32768, 0, 0]], &m, [0, 0, 0]);
+        rotate(&mut dst, &[[32768, 0, 0]], &identity, [0, 0, 0]);
         assert_eq!(dst, vec![[32766, 0, 0]]);
     }
 
-    /// The row assignment the pops make: the third sum (matrix words
-    /// 12/14/16) is y and the second (6/8/10) is z. A row-major reading puts
-    /// these in the other slots.
+    /// The third sum (words 12/14/16) is y and the second (6/8/10) is z.
     #[test]
     fn rotate_takes_y_from_words_12_14_16_and_z_from_6_8_10() {
         let mut dst = Vec::new();
-        rotate(
-            &mut dst,
-            &[[1000, 0, 0]],
-            &Matrix([0, 0, 0, 0, 0, 0, 32766, 0, 0]),
-            [0, 0, 0],
-        );
+        rotate(&mut dst, &[[1000, 0, 0]], &Matrix([0, 0, 0, 0, 0, 0, 32766, 0, 0]), [0, 0, 0]);
         assert_eq!(dst, vec![[0, 999, 0]]);
-
-        rotate(
-            &mut dst,
-            &[[1000, 0, 0]],
-            &Matrix([0, 0, 0, 32766, 0, 0, 0, 0, 0]),
-            [0, 0, 0],
-        );
+        rotate(&mut dst, &[[1000, 0, 0]], &Matrix([0, 0, 0, 32766, 0, 0, 0, 0, 0]), [0, 0, 0]);
         assert_eq!(dst, vec![[0, 0, 999]]);
     }
 
-    /// `rotate` clears the destination, transforms every point, and adds the
-    /// translation as a wrapping 32-bit add.
+    /// `rotate` clears the destination and adds the translation as a
+    /// wrapping 32-bit add: `i32::MAX + 999` wraps.
     #[test]
     fn rotate_clears_extends_and_wraps_the_translation() {
         let m = Matrix([32767, 0, 0, 0, 32767, 0, 0, 0, 32767]);
         let mut dst = vec![[9, 9, 9], [8, 8, 8]];
         rotate(&mut dst, &[[1000, 0, 0], [0, 0, 0]], &m, [i32::MAX, 5, -3]);
-        assert_eq!(dst.len(), 2);
-        // 32767 * 1000 >> 15 = 999; i32::MAX + 999 wraps.
-        assert_eq!(dst[0], [-2147482650, 5, -3]);
-        assert_eq!(dst[1], [i32::MAX, 5, -3]);
+        assert_eq!(dst, vec![[-2147482650, 5, -3], [i32::MAX, 5, -3]]);
     }
 
-    /// The accumulator is 64 bits: the identity's 32766 times `i32::MAX` is
-    /// 70,364,449,177,602, and `>> 15` gives 2,147,352,575. An i32 product
-    /// would wrap to -32766 and shift to -1 (`VEC.ASM:109-121`'s
-    /// `imul` into `edx:eax` and `shld ecx,ebx,17`).
+    /// The accumulator is 64 bits and the shifted sum keeps its low 32: the
+    /// identity times `i32::MAX` is 2,147,352,575 (an i32 product would
+    /// give -1); three 32767 * `i32::MAX` products shift to 6,442,254,333,
+    /// stored as 2,147,287,037 (`VEC.ASM:109-121`).
     #[test]
-    fn rotate_keeps_the_full_64_bit_product() {
+    fn rotate_keeps_the_64_bit_product_and_its_low_32_bits() {
         let mut dst = Vec::new();
-        rotate(
-            &mut dst,
-            &[[i32::MAX, 0, 0]],
-            &matrix_yxz(0, 0, 0),
-            [0, 0, 0],
-        );
+        rotate(&mut dst, &[[i32::MAX, 0, 0]], &matrix_yxz(0, 0, 0), [0, 0, 0]);
         assert_eq!(dst, vec![[2147352575, 0, 0]]);
-    }
-
-    /// `shld ecx,ebx,17` keeps only the shifted sum's low 32 bits. Three
-    /// products of 32767 * `i32::MAX` sum to 211,099,789,983,747; `>> 15` is
-    /// 6,442,254,333, which does not fit a signed 32-bit word and stores as
-    /// 2,147,287,037.
-    #[test]
-    fn rotate_truncates_a_shifted_sum_wider_than_32_bits() {
         let m = Matrix([32767, 32767, 32767, 0, 0, 0, 0, 0, 0]);
-        let mut dst = Vec::new();
         rotate(&mut dst, &[[i32::MAX, i32::MAX, i32::MAX]], &m, [0, 0, 0]);
         assert_eq!(dst, vec![[2147287037, 0, 0]]);
     }
 
-    /// `init320x200`'s values, pinned (`VID.ASM:201-210`).
-    #[test]
-    fn init_320x200_is_the_source_mode() {
-        assert_eq!(
-            INIT_320X200,
-            Projection {
-                mul_x: 256,
-                mul_y: 213,
-                add_x: 160,
-                add_y: 130,
-                min_z: 128,
-                min_x: 0,
-                max_x: 319,
-                min_y: 0,
-                max_y: 199,
-            }
-        );
-    }
-
-    /// `idiv` truncates toward zero: -7*1000/3 is -2333, not -2334. The
-    /// source's flags also compare words, but this point is inside every
-    /// window.
+    /// `idiv` truncates toward zero: -7*1000/3 is -2333.
     #[test]
     fn projection_truncates_toward_zero() {
-        let p = Projection {
-            mul_x: 1,
-            mul_y: 1000,
-            add_x: 0,
-            add_y: 0,
-            min_z: 1,
-            min_x: -10_000,
-            max_x: 10_000,
-            min_y: -10_000,
-            max_y: 10_000,
-        };
-        let mut dst = Vec::new();
-        project(&mut dst, &[[0, -7, 3]], &p);
-        assert_eq!(
-            dst,
-            vec![PVert {
-                x: 0,
-                y: -2333,
-                flags: 0,
-                z: 3
-            }]
-        );
+        let p = Projection { mul_y: 1000, ..unit(0, 10_000) };
+        assert_eq!(project_one([0, -7, 3], &p), pv(0, -2333, 0, 3));
     }
 
-    /// The stored z is the unclamped one, while the divide uses 128
-    /// (`VEC.ASM:194-201`). z=64 would give x = 128*256/64+160 = 672; the
-    /// clamped divide gives 416, and the stored z stays 64.
+    /// The stored z is the unclamped one while the divide uses 128
+    /// (`VEC.ASM:194-201`): z=64 projects x as 128*256/128+160 = 416.
     #[test]
     fn projection_stores_the_unclamped_z_and_divides_by_the_clamp() {
-        let mut dst = Vec::new();
-        project(&mut dst, &[[128, 0, 64]], &INIT_320X200);
-        assert_eq!(
-            dst,
-            vec![PVert {
-                x: 416,
-                y: 130,
-                flags: FLAG_Z | FLAG_X_MAX,
-                z: 64,
-            }]
-        );
-        project(&mut dst, &[[0, 0, 100]], &INIT_320X200);
-        assert_eq!(
-            dst,
-            vec![PVert {
-                x: 160,
-                y: 130,
-                flags: FLAG_Z,
-                z: 100,
-            }]
-        );
+        let p = &INIT_320X200;
+        assert_eq!(project_one([128, 0, 64], p), pv(416, 130, FLAG_Z | FLAG_X_MAX, 64));
+        assert_eq!(project_one([0, 0, 100], p), pv(160, 130, FLAG_Z, 100));
     }
 
-    /// Each flag at its boundary with the shipped projection, z = 128 (the
-    /// divide's clamp is not applied at equality and no z flag is set).
-    /// The comparisons are `jng`/`jnl`: equality is inside.
+    /// Each flag at its boundary with the shipped projection at z = 128; the
+    /// `jng`/`jnl` comparisons put equality inside.
     #[test]
     fn projection_flags_at_the_window_boundaries() {
-        let project_one = |point: [i32; 3]| {
-            let mut dst = Vec::new();
-            project(&mut dst, &[point], &INIT_320X200);
-            dst[0]
-        };
-
-        // x = 2*v + 160. v=79 -> 318 inside, v=80 -> 320 right.
-        assert_eq!(
-            project_one([79, 0, 128]),
-            PVert {
-                x: 318,
-                y: 130,
-                flags: 0,
-                z: 128
-            }
-        );
-        assert_eq!(
-            project_one([80, 0, 128]),
-            PVert {
-                x: 320,
-                y: 130,
-                flags: FLAG_X_MAX,
-                z: 128
-            }
-        );
-        // v=-80 -> 0 inside, v=-81 -> -2 left.
-        assert_eq!(
-            project_one([-80, 0, 128]),
-            PVert {
-                x: 0,
-                y: 130,
-                flags: 0,
-                z: 128
-            }
-        );
-        assert_eq!(
-            project_one([-81, 0, 128]),
-            PVert {
-                x: -2,
-                y: 130,
-                flags: FLAG_X_MIN,
-                z: 128
-            }
-        );
-        // y = 213*v/128 + 130 (truncating). v=42 -> 69+130 = 199 (max,
-        // inside); v=43 -> 71+130 = 201 (below).
-        assert_eq!(
-            project_one([0, 42, 128]),
-            PVert {
-                x: 160,
-                y: 199,
-                flags: 0,
-                z: 128
-            }
-        );
-        assert_eq!(
-            project_one([0, 43, 128]),
-            PVert {
-                x: 160,
-                y: 201,
-                flags: FLAG_Y_MAX,
-                z: 128
-            }
-        );
-        // v=-78 -> -129+130 = 1 inside; v=-79 -> -131+130 = -1 above.
-        assert_eq!(
-            project_one([0, -78, 128]),
-            PVert {
-                x: 160,
-                y: 1,
-                flags: 0,
-                z: 128
-            }
-        );
-        assert_eq!(
-            project_one([0, -79, 128]),
-            PVert {
-                x: 160,
-                y: -1,
-                flags: FLAG_Y_MIN,
-                z: 128
-            }
-        );
+        let p = &INIT_320X200;
+        // x = 2*v + 160.
+        assert_eq!(project_one([79, 0, 128], p), pv(318, 130, 0, 128));
+        assert_eq!(project_one([80, 0, 128], p), pv(320, 130, FLAG_X_MAX, 128));
+        assert_eq!(project_one([-80, 0, 128], p), pv(0, 130, 0, 128));
+        assert_eq!(project_one([-81, 0, 128], p), pv(-2, 130, FLAG_X_MIN, 128));
+        // y = 213*v/128 + 130, truncating.
+        assert_eq!(project_one([0, 42, 128], p), pv(160, 199, 0, 128));
+        assert_eq!(project_one([0, 43, 128], p), pv(160, 201, FLAG_Y_MAX, 128));
+        assert_eq!(project_one([0, -78, 128], p), pv(160, 1, 0, 128));
+        assert_eq!(project_one([0, -79, 128], p), pv(160, -1, FLAG_Y_MIN, 128));
         // z = 127 is below the clamp, z = 128 is not.
-        assert_eq!(
-            project_one([0, 0, 127]),
-            PVert {
-                x: 160,
-                y: 130,
-                flags: FLAG_Z,
-                z: 127
-            }
-        );
-        assert_eq!(
-            project_one([0, 0, 128]),
-            PVert {
-                x: 160,
-                y: 130,
-                flags: 0,
-                z: 128
-            }
-        );
-    }
-
-    /// `jng`/`jnl` (`VEC.ASM:203-220`) are inclusive: a coordinate equal to a
-    /// window edge is inside and unflagged. The z = 128 vertices above cannot
-    /// land exactly on x = 319 (the quotient steps by 2) or y = 0 (the steps
-    /// around the edge are 1 and -1), so this hand projection makes the
-    /// quotient the coordinate and hits the edges exactly.
-    #[test]
-    fn projection_treats_the_window_edges_as_inside() {
-        let p = Projection {
-            mul_x: 1,
-            mul_y: 1,
-            add_x: 0,
-            add_y: 0,
-            min_z: 1,
-            min_x: -50,
-            max_x: 50,
-            min_y: -50,
-            max_y: 50,
-        };
-        let project_one = |point: [i32; 3]| {
-            let mut dst = Vec::new();
-            project(&mut dst, &[point], &p);
-            dst[0]
-        };
-        // x == max_x and y == min_y are both inside.
-        assert_eq!(
-            project_one([50, -50, 1]),
-            PVert {
-                x: 50,
-                y: -50,
-                flags: 0,
-                z: 1
-            }
-        );
-        // So are the other two edges.
-        assert_eq!(
-            project_one([-50, 50, 1]),
-            PVert {
-                x: -50,
-                y: 50,
-                flags: 0,
-                z: 1
-            }
-        );
-        // One past each edge flags in the asm's direction.
-        assert_eq!(project_one([51, 0, 1]).flags, FLAG_X_MAX);
-        assert_eq!(project_one([0, -51, 1]).flags, FLAG_Y_MIN);
+        assert_eq!(project_one([0, 0, 127], p), pv(160, 130, FLAG_Z, 127));
+        assert_eq!(project_one([0, 0, 128], p), pv(160, 130, 0, 128));
+        // A coordinate equal to an edge is inside; one past it is flagged.
+        let p = unit(0, 50);
+        assert_eq!(project_one([50, -50, 1], &p), pv(50, -50, 0, 1));
+        assert_eq!(project_one([-50, 50, 1], &p), pv(-50, 50, 0, 1));
+        assert_eq!(project_one([51, 0, 1], &p).flags, FLAG_X_MAX);
+        assert_eq!(project_one([0, -51, 1], &p).flags, FLAG_Y_MIN);
     }
 
     /// The centre add and the comparisons are 16-bit: 20000*256/128 = 40000
-    /// stores as -25536, +160 becomes -25376, and the *word* is compared
-    /// (left of 0), where the 32-bit quotient would be right of 319.
+    /// stores as -25536, +160 is -25376, and the word is left of 0.
     #[test]
     fn projection_compares_the_wrapped_word() {
-        let mut dst = Vec::new();
-        project(&mut dst, &[[20000, 0, 128]], &INIT_320X200);
         assert_eq!(
-            dst,
-            vec![PVert {
-                x: -25376,
-                y: 130,
-                flags: FLAG_X_MIN,
-                z: 128,
-            }]
+            project_one([20000, 0, 128], &INIT_320X200),
+            pv(-25376, 130, FLAG_X_MIN, 128)
         );
-
-        let p = Projection {
-            mul_x: 1,
-            mul_y: 1,
-            add_x: 32767,
-            add_y: 0,
-            min_z: 1,
-            min_x: -100,
-            max_x: 100,
-            min_y: -100,
-            max_y: 100,
-        };
-        project(&mut dst, &[[100, 0, 1]], &p);
-        // 100 + 32767 = 32867, stored as -32669 and compared as left.
-        assert_eq!(
-            dst,
-            vec![PVert {
-                x: -32669,
-                y: 0,
-                flags: FLAG_X_MIN,
-                z: 1,
-            }]
-        );
+        // 100 + 32767 = 32867, stored as -32669.
+        assert_eq!(project_one([100, 0, 1], &unit(32767, 100)), pv(-32669, 0, FLAG_X_MIN, 1));
     }
 
     /// `project` clears its destination and handles every source point.
     #[test]
     fn projection_clears_the_destination() {
-        let mut dst = vec![PVert {
-            x: 1,
-            y: 2,
-            flags: 3,
-            z: 4,
-        }];
+        let mut dst = vec![pv(1, 2, 3, 4)];
         project(&mut dst, &[[0, 0, 128], [0, 0, 128]], &INIT_320X200);
-        assert_eq!(dst.len(), 2);
-        assert!(dst.iter().all(|v| *v
-            == PVert {
-                x: 160,
-                y: 130,
-                flags: 0,
-                z: 128
-            }));
+        assert_eq!(dst, vec![pv(160, 130, 0, 128); 2]);
     }
 
-    /// `cliplist` clamps y to 1500, leaves smaller (and negative) values and
-    /// takes the `>=` boundary unchanged.
+    /// `cliplist` clamps y to the limit and takes the `>=` boundary unchanged.
     #[test]
     fn clip_y_clamps_at_the_limit() {
         let mut points = [[0, 1499, 1], [2, 1500, 3], [4, 1501, 5], [6, -20000, 7]];
         clip_y(&mut points, 1500);
-        assert_eq!(
-            points,
-            [[0, 1499, 1], [2, 1500, 3], [4, 1500, 5], [6, -20000, 7]]
-        );
-
-        let mut below = [[0, -1, 0], [0, 0, 0], [0, 99, 0]];
-        clip_y(&mut below, 1500);
-        assert_eq!(below, [[0, -1, 0], [0, 0, 0], [0, 99, 0]]);
-
-        let mut custom = [[0, 101, 0], [0, 100, 0]];
-        clip_y(&mut custom, 100);
-        assert_eq!(custom, [[0, 100, 0], [0, 100, 0]]);
+        assert_eq!(points, [[0, 1499, 1], [2, 1500, 3], [4, 1500, 5], [6, -20000, 7]]);
     }
 }

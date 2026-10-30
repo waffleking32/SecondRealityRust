@@ -578,8 +578,8 @@ Frames: `reference/parts/glenz/` 1499 (held), 2300, 3000, 3400 (`reference-indic
 
 **Original.** Every product in `main` is a 16-bit `imul`. `yposa = -yposa*boingm/boingd` wraps in
 the intro (-4,016×10 → 25,376); `oyp -= b*b/2` wraps from frame 1801. **Where.**
-`GLENZ/MAIN.C:511`, `:477`. **Port.** `i16` and `mul16`. **Frame.** 2300, 3000, 3400. **Tests.**
-`the_sixteen_bit_products_wrap_like_the_source`, `the_object_switches_follow_the_scales`.
+`GLENZ/MAIN.C:511`, `:477`. **Port.** `i16` and `mul16`. **Frame.** 2300, 3000, 3400. **Test.**
+`the_object_switches_follow_the_scales` (`xscale` 115 at frame 800 only with the wrap).
 
 ### 23.2 The DAC is uploaded before the new palette is computed
 

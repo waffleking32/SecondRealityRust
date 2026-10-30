@@ -42,7 +42,7 @@ here:
   the shell's black. The opening plays over black; the geometry and tick map are the same.
 - **Mode 13h is `height=200, double_scan=false`.** The guest's `is_double_scanned` (D17's geometry
   note) is not the engine's `View::double_scan`, which would display only surface rows 0..99; the
-  reference's frame is the emulator's halved 320×200, 200 distinct rows. The held-frame test (§6)
+  reference's frame is the emulator's halved 320×200, 200 distinct rows. 1499's rediff entry (§6)
   fails with the flag set.
 - **The mode-set tick composes at 320×400** (the engine sizes a frame from the view at the tick's
   start): one tick, 1158, outside every keyframe.
@@ -84,7 +84,7 @@ and `V.EXE`'s disassembly (`MAIN_TEXT`, `V.MAP:3`) shows each product is a 16-bi
 discarded by the `cwd` before `idiv`. Two places wrap in the shipped animation:
 `yposa = -yposa*boingm/boingd` (`MAIN.C:511`; −4,016×10 → 25,376, so `xscale` is 115 at frame 800)
 and `oyp -= b*b/2` (`:477`, from frame 1801)
-(`the_sixteen_bit_products_wrap_like_the_source`; `bugs.md` §23).
+(`the_object_switches_follow_the_scales` pins `xscale` 115; `bugs.md` §23).
 
 `sin1024` (`MAIN.C:456-471`) is `ZOOM.ASM:28-29`'s `_sin1024`, a different table from `SIN`/`COS`
 (`parts::sin1024::SIN1024`). The `frame>1400+789` bscale-shrink arm is unreachable (`frame>1220+789`
@@ -98,11 +98,9 @@ group loops are state only, held in variables.
 
 ## 6. The held opening, measured
 
-The final bounce frame is the reference's held 1499:
-`the_held_intro_is_the_reference_index_plane` builds it as the part does and reports **0** differing
+The final bounce frame is the reference's held 1499: rediff's `glenz` entry gives **0** differing
 indices against `frame_001499.idx` (rows 154..199; row 153, `fcrow[0]`, is black;
-`reference-indices.md` §7.3's census). Through the real binary,
-`the_held_opening_1499_is_the_reference_index_plane` gives 0 in both planes. The picture holds for 272 ticks, 1334..1605.
+`reference-indices.md` §7.3's census) and 0 in RGB. The picture holds for 272 ticks, 1334..1605.
 
 The first object at frames 44..49 matches `python3 -I tools/glenz_physics.py entry` exactly
 (8/21/60/86/111/137 pixels, centroids (175.5,0.0) … (165.5,2.0);
@@ -143,8 +141,8 @@ Each is decided by the reference; nothing was fitted.
   bounce skips the bounce and both waits; the `dis_waitb`s, `backpal`/`tmppal`, the `bgpic`
   snapshot and the part-start still run, and the part retires on its first main-loop check.
 - **The main loop** (`:409-411`): a cut, ESC or the frame-7000 cap first seen on a body tick keeps
-  that frame; one seen at the loop entry draws nothing (`the_music_cut_at_the_main_wait_draws_nothing`
-  and its siblings).
+  that frame; one seen at the loop entry draws nothing (`a_stop_at_the_main_wait_draws_nothing`,
+  `a_stop_on_a_body_tick_draws_then_finishes`).
 
 ## 10. Music and the block boundaries
 
@@ -240,9 +238,6 @@ one-frame DAC lead.
 | 3405 | 3400 | **5,261** (8.2203 %) | 4,780 | the same |
 | 3004 | 3000 | **2,289** (3.5766 %) | 711 | the surface minimum (`K + 4`, lag 1) |
 | 3404 | 3400 | **5,941** (9.2828 %) | 839 | the surface minimum |
-| 2306 | 2300 | **9,777** (15.2766 %) | 1,740 | `K + 6` (the DAC phase) |
-| 3006 | 3000 | **10,806** (16.8844 %) | 5,762 | the same |
-| 3406 | 3400 | **12,001** (18.7516 %) | 7,974 | the same |
 
 `cargo xtask rediff` registers 1499 at 0 in both planes and 2305/3004/3404 at 5,208 / 2,289 / 5,941
 (A37). At the surface minima the unexplained pixels are **711 / 839** of 35,896 / 43,938 object

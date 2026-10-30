@@ -1,25 +1,12 @@
 //! GLENZ's intro: `zoomer2` (`ZOOMER.C:18-81`) and the FC floor bounce
-//! (`MAIN.C:320-350`).
+//! (`MAIN.C:320-350`), each one `dis_waitb` a call, both drawing into the
+//! 400-row buffer of 320-pixel rows (D36: Mode X's one addressed byte is four
+//! pixels, so a source row of 80 bytes is 320 here).
 //!
-//! Both effects draw into the part's **400-row** 320-pixel buffer while the
-//! inherited BEGLOGO screen is still up, and both are one `dis_waitb` a tick:
-//! the zoomer draws its bands and then waits, so a call here is the work of
-//! one displayed frame. The zoomer's 47th call caps `zy` at 260; the 48th sees
-//! it and breaks (the source's `if(zy==260) break` at the loop top), which is
-//! why [`Zoomer::tick`] returns `false` rather than drawing a 48th band.
-//!
-//! The bounce is the source's integer spring (`MAIN.C:322-350`): `yy` grows
-//! by `ya`, flips `ya` every time `yy > 48*16`, and stops when the flipped
-//! speed is under 4. That is 177 drawn frames and a last band of
-//! `y1 = 153, y2 = 200`; the test pins both. Rows above the band are **not**
-//! cleared — the band's earlier, higher passes leave their picture there,
-//! which is what makes the final buffer the reference's held 1499 screen.
-//!
-//! The source's `memset(vram + y*80, ...)` runs in Mode X's chain-4, so one
-//! addressed byte is four plane bytes, i.e. four pixels; the port's buffer is
-//! already linear 320-pixel rows (`docs/decisions.md` D36), so a band row is
-//! 320 bytes here. The FC picture is 320x200: `fcrow` is its rows 0..99 and
-//! `fcrow2` its rows 100..115 (`MAIN.C:306-313`).
+//! The zoomer's 47th call caps `zy` at 260 and the 48th breaks. The bounce's
+//! integer spring draws 177 frames and ends on the band `y1 = 153, y2 = 200`;
+//! rows above the band are not cleared, so its earlier passes leave the
+//! picture that is the reference's held 1499.
 
 use sr_engine::Palette;
 
@@ -121,8 +108,7 @@ impl Zoomer {
         true
     }
 
-    /// `zy` after the last drawn call: 260, the cap (`ZOOMER.C:44`). The
-    /// test's readout of the 47-tick recurrence.
+    /// `zy` after the last drawn call.
     #[cfg(test)]
     pub(crate) fn zy(&self) -> i32 {
         self.zy
@@ -135,12 +121,8 @@ impl Zoomer {
     }
 }
 
-/// `zoomer2`'s epilogue (`ZOOMER.C:70-80`): entry 0 black, then every one of
-/// the 400 rows cleared.
-///
-/// The source's clear condition is `y<=274 || y>=260`, which is true for every
-/// `y` in 0..399; the band boundaries are not a gap. Entry 0 is set with three
-/// `outp`, and the rest of the DAC is left alone.
+/// `zoomer2`'s epilogue (`ZOOMER.C:70-80`): entry 0 black (three `outp`), and
+/// every row cleared (`y<=274 || y>=260` holds for every `y`).
 pub(crate) fn finish(vram: &mut [u8], palette: &mut Palette) {
     palette.set_entry(0, [0, 0, 0]);
     vram.fill(0);
@@ -252,7 +234,6 @@ impl Bounce {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parts::test_rig::reference;
     use sr_assets::Image;
     use std::path::Path;
 
@@ -273,12 +254,6 @@ mod tests {
     /// `FC.UH`'s pixels, decoded by the tree's own reader.
     fn fc_picture() -> Image {
         sr_assets::load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap()
-    }
-
-    /// The reference's held opening: the indexed plane the bounce's last frame
-    /// must reproduce.
-    fn held_reference() -> Vec<u8> {
-        reference("glenz", 1499, "idx")
     }
 
     /// The 47 drawn ticks and the break on the 48th (`ZOOMER.C:38-44`), with
@@ -402,51 +377,5 @@ mod tests {
             );
             c += 544;
         }
-    }
-
-    /// **The acceptance test**: the zoomer's epilogue, the mode-13h clear and
-    /// 177 bounce ticks leave exactly the reference's held index plane. The
-    /// reference frame 1499 is the bounce's last frame (§7.3, §7.6).
-    #[test]
-    fn the_held_intro_is_the_reference_index_plane() {
-        let picture = fc_picture();
-        let mut palette = test_palette();
-        let mut vram = vec![0u8; VRAM_PIXELS];
-
-        // The zoomer's 47 ticks and its epilogue.
-        let mut zoomer = Zoomer::new(&palette);
-        while zoomer.tick(&mut vram, &mut palette) {}
-        finish(&mut vram, &mut palette);
-
-        // `int 10h` 13h and the source's `memset(vram,0,65535)`, which in
-        // chain-4 clears the whole 400-row plane; the displayed 64,000 bytes
-        // are what the bounce and the reference use.
-        vram.fill(0);
-
-        let mut bounce = Bounce::new();
-        while bounce.tick(&mut vram, picture.pixels()) {}
-
-        let reference = held_reference();
-        assert_eq!(reference.len(), SCREEN_PIXELS);
-        let differing = vram[..SCREEN_PIXELS]
-            .iter()
-            .zip(&reference)
-            .filter(|(port, reference)| port != reference)
-            .count();
-        assert_eq!(
-            differing, 0,
-            "the held intro must be the reference's 64,000 indices"
-        );
-        // The reference's own shape, restated so a wrong file is visible:
-        // content only in rows 154..199 (§7.3).
-        for row in 0..154usize {
-            assert!(
-                reference[row * WIDTH..(row + 1) * WIDTH]
-                    .iter()
-                    .all(|&p| p == 0),
-                "reference row {row} is black"
-            );
-        }
-        assert!(reference[154 * WIDTH..].iter().any(|&p| p != 0));
     }
 }

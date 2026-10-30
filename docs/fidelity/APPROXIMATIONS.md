@@ -1004,7 +1004,7 @@ to the reset than `second2b`, and the rest is the capture's sampling instant. No
 
 **Measured difference:** at `K + 5` (2305 / 3005 / 3405) **5,208 / 3,114 / 5,261** of 64,000 pixels.
 At the surface minima (2305, 3004, 3404) **5,208 / 2,289 / 5,941**, which `cargo xtask rediff --only
-glenz` registers (A37). At `K + 6` 9,777 / 10,806 / 12,001. `cargo test -p secondreality --test glenz
+glenz` registers (A37). `cargo test -p secondreality --test glenz
 the_loop_start_is_1567`; `cargo test -p secondreality --test glenz
 the_moving_keyframes_record_the_registered_alignments_and_residuals`; `glenz.md` §11.
 
@@ -1747,6 +1747,6 @@ can see them, and two are not on the shipped path.
 | `COMAN/THELOOP.INC` | bit-identical: the 5,230-line include parsed and executed against the port's `theloop`, whole 64 KB vbuf, five columns | `the_ray_march_matches_the_shipped_generated_program`; four keyframes at 0 (A26) |
 | `HARD/LINEBLIT.INC` | not applicable: on no link line (`HARD/LINK.TMP:1-3`) | `hard.md` |
 | TUNNELI's "patched y-base" | bit-identical; what `TUN10.PAS` patches is the plot's colour immediate (`:168` `mov byte ptr cs:[@c+3],al`, the plot at `:187`), not a y-base; the port passes `bbc` as a variable | `tunneli.md` §5 |
-| `GLENZ/VEC.ASM`'s matrix-in-immediates | bit-identical: state only, held in variables | `glenz.md` §5; `the_held_opening_1499_is_the_reference_index_plane` |
+| `GLENZ/VEC.ASM`'s matrix-in-immediates | bit-identical: state only, held in variables | `glenz.md` §5; rediff's `glenz` entry (1499 at 0) |
 | `LENS/ASM.ASM`'s patched addressing | bit-identical: the patched displacement table is evaluated as a table | `the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps`; `the_forehead_asset_difference_is_the_whole_residual` (A25) |
 | PLZPART's "jump table" | bit-identical; `setplzparas` (`ASMYT.ASM:74-95`) patches four table bases into `plzline`'s instructions (the placeholders `0xC100`…`0xC400`, `:46-61`), not a jump table; the port evaluates the patched index expression over the map's flat segment | `the_table_bases_are_the_maps_not_the_assembly_placeholders`, `the_plasma_line_is_the_assemblers_index_expression` |

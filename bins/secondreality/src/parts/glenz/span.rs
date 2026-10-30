@@ -1,76 +1,29 @@
 //! The transparent span compositor: `__newgroup`'s edge builder and
-//! `ng_pass2`/`ng_pass3` (`GLENZ/NEW.ASM:26-418`).
+//! `ng_pass2`/`ng_pass3` (`GLENZ/NEW.ASM:26-418`), as the source's three calls
+//! [`Compositor::clear`] (`cglenzinit`), [`Compositor::add`] (one per polygon
+//! list entry) and [`Compositor::paint`] (`cglenzdone`).
 //!
-//! The source splits one frame of drawing into three calls:
-//! `cglenzinit` → `__newgroup(0)` (`ng_init`), one `cglenzpolylist` →
-//! `__newgroup(1)` per polygon list, and `cglenzdone` → `__newgroup(2)`
-//! (`ng_pass2` then `ng_pass3`). The port keeps the same three phases:
-//! [`Compositor::clear`], [`Compositor::add`] (called once per [`Poly`]; the
-//! source's list loop is the caller's) and [`Compositor::paint`].
+//! **Edges** (`NEW.ASM:311-374`): each consecutive point pair, the closing one
+//! included, ordered by y with a signed compare; horizontal edges and edges
+//! with `y2 <= 0` are dropped; the slope is the word x difference shifted
+//! left 16 and `idiv`ed by the height (`:344-346`); an edge crossing the top
+//! is advanced by the 32-bit `slope · (−y1)`. The source XORs a duplicate
+//! edge's colour into the earlier one (`:376-403`); keeping both paints the
+//! same pixels, since every boundary at a position is XORed.
 //!
-//! # The edge rule (`NEW.ASM:311-374`)
+//! **Boundaries** (`ng_pass2`, `:174-288`): each of 200 rows takes every live
+//! edge's `y*320 + clamp(x>>16, 1, 319)` (`:246-253`), a global position, so a
+//! fill can cross from one row's end into the next. The "same x" merge
+//! (`:255-260`) compares the colour word (`mov cx,ax`, `:267`), not x, and
+//! GLENZ's words are all ≥ 0x4000, so it never fires.
 //!
-//! Each consecutive pair of stored screen points, the closing pair included,
-//! becomes one edge. The endpoints are ordered by y with a signed 16-bit
-//! compare, swapping x and y together; a horizontal edge is skipped, and an
-//! edge with `y2 <= 0` is dropped. `x` is the upper endpoint's x in 16.16,
-//! and the slope is `((x2−x1) << 16) / (y2−y1)` with the x difference taken
-//! in the word **before** the shift (`neg ax; add ax,dx; shl eax,16`,
-//! `:344-346`) and the division truncating toward zero. An edge crossing the
-//! top is advanced by `slope · (−y1)` — the asm's 32-bit `imul`, whose high
-//! half is discarded — and its `y1` becomes 0.
-//!
-//! The source merges an edge that duplicates an earlier one by XORing its
-//! colour's low byte into the earlier edge (`@@h1-@@h3`, `:376-403`). The port
-//! keeps coincident edges separate: the boundary walk XORs every boundary at
-//! a position, so two coincident edges and one edge carrying their XOR paint
-//! the same pixels.
-//!
-//! # The boundary rule (`ng_pass2`, `NEW.ASM:174-288`)
-//!
-//! For each of the source's 200 rows (`mov cx,200`, `:177`) each live edge
-//! contributes the boundary `y*320 + clamp(x>>16)` at the edge's colour, then
-//! `x += dx`. The low word of `x>>16` is read signed and clamped by signed
-//! compares to **1..319** (`:246-253`) — x = 0 clamps to 1, x = 320 to 319.
-//! The position is global, not row-local: a boundary past 319 lands at
-//! `y*320+319` and the next row continues at `(y+1)*320 + x`, so a fill can
-//! cross from the end of one row into the start of the next.
-//!
-//! `ng_pass2` emits the boundaries row by row into the double-buffered
-//! `newdata1` list, insertion-sorting each row by the full 16.16 x. It also
-//! tries to XOR a boundary whose clamped x equals the previous one's into
-//! the previous entry (`:255-260`), but the register it compares is `cx`,
-//! which the preceding `mov cx,ax` (`:267`) has just loaded with the stored
-//! **colour word**, not the clamped x — the branch only fires when a colour
-//! word equals a column 1..319. (The linked `V.EXE` confirms it: `cmp
-//! %ax,%cx` at load offset 0x3daf follows `mov 0x8(%bx),%ax; mov %ax,%cx`
-//! at 0x3dc6-0x3dd1.) GLENZ's colour words are always at least 0x4000
-//! (`MAIN.C:176-240`'s tables; `demo_glz`/`demo_glz2` write only the low
-//! byte over the 0x40 high byte), so in the shipped path the branch is
-//! inert. The port emits every boundary and sorts by position; XOR is
-//! commutative, so boundaries at one position are equivalent whether the
-//! source merges them or not.
-//!
-//! # The paint rule and the dirty-span substitution (`ng_pass3`, `NEW.ASM:66-172`)
-//!
-//! The source's screen is not cleared between frames. `ng_pass3` walks the
-//! previous frame's boundary list and the new one together, keeping the new
-//! and old accumulated colours, and repaints `[prev, position)` only where
-//! the two colours differ. Every span's pixels are `colour | bgpic[pixel]`,
-//! so a span whose colour did not change already holds exactly the bytes a
-//! repaint would write, and the walk is an optimisation with identical
-//! pixels. The port drops it: [`Compositor::paint`] repaints every span from
-//! `bgpic` and never clears the buffer. The equivalence is not assumed — the
-//! test module keeps the source's two-list walk beside the port and compares
-//! whole frames below.
-//!
-//! The list ends with the sentinels `(63999, 0)` and `(-1, 0)` (`:279-285`);
-//! the fill is to the boundary exclusive and `-1` stops the walk, so **pixel
-//! 63999 is never painted** and `paint` must leave it alone.
-//!
-//! `bgpic` and `pixels` are the part's 64,000-byte linear 320-pixel-row
-//! buffers (D36); the source's `MAXLINES` 512 cap on the edge arena is
-//! dropped (the shipped scenes stay under 96 edges).
+//! **Paint** (`ng_pass3`, `:66-172`): the source repaints only the spans whose
+//! colour changed against the previous frame's list; every span is
+//! `colour | bgpic`, so the port repaints every span and never clears (A39;
+//! `the_full_repaint_equals_the_source_two_list_walk` keeps the source's walk
+//! beside it). The sentinels `(63999, 0)` and `(-1, 0)` (`:279-285`) leave
+//! pixel 63999 unpainted. The `MAXLINES` cap is dropped (the shipped scenes
+//! stay under 96 edges).
 
 use super::poly::Poly;
 

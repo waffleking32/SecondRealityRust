@@ -1,26 +1,13 @@
-//! `GLENZ/MATHSIN.INC`: the source's sine and cosine tables.
+//! `GLENZ/MATHSIN.INC`: `sintable16`, the 900-word sine quarter, and
+//! `costable16`, 3,600 words of `cos(a)` for `a` in 0..3599 tenths of a
+//! degree, both scaled by 32768.
 //!
-//! The file lays the two tables out back to back: `sintable16` is 900 words
-//! (line 2 onward, the sine quarter 0..90° in 0.1° steps) and `costable16` is
-//! 3,600 words (line 93 onward, `cos(a)` for `a` in 0..3599). Line 454's
-//! `ALIGN 4` and line 455's `dd -99999999` guard are not table data: each
-//! parse stops at its word count. There is a blank line at 363 and a
-//! `(cosine continued)` comment at the end of line 362, between `cos(269.9°)`
-//! and the quarter `cos(270°..360°) = sin(0°..90°)`.
-//!
-//! The source indexes both tables by the *same* word offset after
-//! `angle*2` (`MATH.ASM:56-61`): `sintable16[a]` for `sin(a)`, and
-//! `costable16[a]` for `cos(a)`. The labels are contiguous in memory, so
-//! `sintable16[a]` reads past the quarter into `costable16[a-900]` for
-//! `a >= 900` — which is `sin(a)` for the whole circle. [`SIN`] makes that
-//! layout explicit and [`COS`] is `costable16` verbatim.
-//!
-//! Transcribed mechanically from the file by a one-off script: every `dw`
-//! word in source order, 900 then 3,600, and the test below parses the
-//! vendored `.INC` and compares all 7,200 words.
-//!
-//! GLENZ's other table, `ZOOM.ASM:28-29`'s `_sin1024`, is the shared
-//! [`SIN1024`](crate::parts::sin1024::SIN1024), in different units.
+//! `MATH.ASM:56-61` indexes both by the same offset, and the labels are
+//! contiguous, so `sintable16[a]` reads on into `costable16[a-900]` for
+//! `a >= 900`: `sin(a)` for the whole circle. [`SIN`] makes that layout
+//! explicit and [`COS`] is `costable16`. The test parses the vendored `.INC`
+//! and compares all 7,200 words. GLENZ's other table, `ZOOM.ASM:28-29`'s
+//! `_sin1024`, is the shared [`SIN1024`](crate::parts::sin1024::SIN1024).
 
 /// `sintable16` (`MATHSIN.INC:1-91`), lines 2-91: the sine quarter,
 /// `sin(a * 0.1°)` scaled by 32768, 900 signed words.
@@ -570,8 +557,7 @@ mod tests {
         (sin, cos)
     }
 
-    /// The acceptance test: every one of the 3,600 `SIN` words and every one
-    /// of the 3,600 `COS` words equals the source's.
+    /// Every one of the 3,600 `SIN` and 3,600 `COS` words is the source's.
     #[test]
     fn sin_and_cos_are_the_source_words() {
         let (sin_quarter, cos_table) = source_tables();
@@ -586,26 +572,5 @@ mod tests {
         for (a, &word) in COS.iter().enumerate() {
             assert_eq!(word, cos_table[a], "COS[{a}]");
         }
-    }
-
-    /// Spot checks with the file's line numbers, so a readable diff says
-    /// which part of the layout broke.
-    #[test]
-    fn the_layouts_are_the_sources() {
-        // `MATHSIN.INC:2`: sintable16 starts `0, 57, 114, 172, ...`.
-        assert_eq!(&SIN[0..4], &[0, 57, 114, 172]);
-        // `MATHSIN.INC:91`: the quarter ends at 32767.
-        assert_eq!(SIN[899], 32767);
-        // The contiguous read: SIN[900] is costable16[0] = 32767 (sin 90°),
-        // and SIN[1800] is costable16[900] = 0 (sin 180°).
-        assert_eq!(SIN[900], 32767);
-        assert_eq!(SIN[1800], 0);
-        // `MATHSIN.INC:93`: costable16 starts at cos(0) = 32767.
-        assert_eq!(&COS[0..4], &[32767, 32767, 32767, 32767]);
-        // The 90° and 270° entries; the second is the line-362 `(cosine
-        // continued)` join.
-        assert_eq!(COS[900], 0);
-        assert_eq!(COS[2700], 0);
-        assert_eq!(COS[3599], 32767);
     }
 }

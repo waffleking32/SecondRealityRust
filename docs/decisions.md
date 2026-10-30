@@ -792,7 +792,7 @@ layout, not displayed geometry (`reference-indices.md` §7.3, §7.6, §1.7).
 port repaints every span (A39). The colour path keys `poly.rs`'s `slots` by the colour word's low
 byte, shared by the visible and hidden paths (A37, `glenz.md` §11.2).
 
-**Pinned by** `the_held_opening_1499_is_the_reference_index_plane` (0 of 64,000) and
+**Pinned by** rediff's `glenz` entry (1499 at 0 of 64,000 in both planes) and
 `parts::glenz::span::tests::the_full_repaint_equals_the_source_two_list_walk`.
 
 ## D37 — GLENZ's tick model is the source's phase machine
