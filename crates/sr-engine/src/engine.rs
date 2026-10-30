@@ -139,8 +139,8 @@ impl Engine {
         for band in 0..bands {
             let mut ctx =
                 self.machine.ctx(self.music.as_deref_mut(), frame, band, bands, self.exit_requested, false);
-            // `Finished` from any band retires the part, but the tick still runs
-            // the rest of its bands, as the original drew them.
+            // `Finished` from any band makes the tick report `Finished`, but the
+            // tick still runs the rest of its bands, as the original drew them.
             if part.frame(&mut ctx) == PartStatus::Finished {
                 status = PartStatus::Finished;
             }

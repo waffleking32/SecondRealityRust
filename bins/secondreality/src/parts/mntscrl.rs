@@ -556,7 +556,7 @@ impl Part for Mntscrl {
     /// the shell composes tick 0 at this geometry.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // `:153-159` is a music wait; a run with no player could never leave
-        // it. The shell refuses to start such a run (Task 7), and this is the
+        // it. The shell refuses to start such a run, and this is the
         // same refusal where the part can see it.
         ctx.require_music(
             NAME,

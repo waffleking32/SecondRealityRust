@@ -298,8 +298,7 @@ impl Part for Endlogo {
         // five thousand ticks against a silence that cannot break is not a fallback — it
         // is a part that looks like it works. `PartCtx::music()` is `Some` for every run
         // the shell can build that reaches this part (`shell::music_for_part`), and the
-        // refusal is the port's way of saying so where a hand-built run does not
-        // (`PartCtx::require_music`).
+        // refusal is the port's way of saying so where a hand-built run does not.
         ctx.require_music(
             NAME,
             "this part waits on the music player's position (`END/END.C:107-111`) \
