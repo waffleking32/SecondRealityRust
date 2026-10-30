@@ -159,7 +159,7 @@ impl U2e {
         // (`U2E.C:281-282`): the live DAC, six bits a component. Every run
         // shape reaches this branch — see the doc comment above — including a
         // block-4 entry, which captures the shell's boot DAC.
-        self.fpal = capture_palette(ctx.palette);
+        self.fpal = ctx.palette.to_six_bit();
         self.palette_dirty = false;
         self.teardown_dirty = false;
 
@@ -185,7 +185,7 @@ impl U2e {
     /// upload is one retrace after the mutation.
     fn flush_palette(&mut self, ctx: &mut PartCtx) {
         if self.palette_dirty {
-            ctx.set_palette(palette_from_six_bit(&self.fpal));
+            ctx.set_palette(Palette::from_six_bit(&self.fpal));
             self.palette_dirty = false;
         }
     }
@@ -334,7 +334,7 @@ impl U2e {
     /// upload is the next tick's, as `dis_waitb()` precedes it in the source.
     fn teardown(&mut self, ctx: &mut PartCtx) {
         clear_copper(ctx);
-        self.fpal = capture_palette(ctx.palette);
+        self.fpal = ctx.palette.to_six_bit();
         self.palette_dirty = false;
         self.teardown_dirty = false;
         self.phase = Phase::Teardown {
@@ -467,16 +467,6 @@ impl Part for U2e {
             }
         }
     }
-}
-
-/// The six-bit bytes of `palette`, entry order: the port's `inp(0x3c9)` read.
-fn capture_palette(palette: &Palette) -> [u8; 768] {
-    palette.to_six_bit()
-}
-
-/// A palette built from 768 six-bit bytes (`vid_setpal`, `AVID.ASM:160-188`).
-fn palette_from_six_bit(bytes: &[u8; 768]) -> Palette {
-    Palette::from_six_bit(bytes)
 }
 
 /// `fadeset` (`U2E.C:145-183`) into one packed page.
@@ -620,7 +610,7 @@ mod tests {
         rig.palette = live;
         let mut part = U2e::new();
         part.init(&mut rig.ctx(0)).unwrap();
-        assert_eq!(part.fpal, capture_palette(&live));
+        assert_eq!(part.fpal, live.to_six_bit());
         assert_eq!(&part.fpal[0..3], &[1, 2, 3]);
         assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
         assert_eq!(&part.fpal[3 * 255..], &[63, 1, 2]);
@@ -647,7 +637,7 @@ mod tests {
         part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!(
             part.fpal,
-            capture_palette(&live),
+            live.to_six_bit(),
             "the block-4 shape captures the shell's DAC, not vid_init(1)'s"
         );
         assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
@@ -969,7 +959,7 @@ mod tests {
         let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         // The live DAC is the main palette; the capture is that palette.
-        let captured = capture_palette(&part.main_palette);
+        let captured = part.main_palette.to_six_bit();
         // Tick T: the capture and the first +4 are computed, but the upload is
         // the next tick's (`fpal[a]+=4; dis_waitb(); outp(...)`,
         // `U2E.C:545-554`).
@@ -1055,7 +1045,7 @@ mod tests {
         // `Finished` on T+16.
         let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
-        let captured = capture_palette(&part.main_palette);
+        let captured = part.main_palette.to_six_bit();
 
         // Every tick from here carries the exit flag, exactly as the engine
         // hands it to a draining part's bands.

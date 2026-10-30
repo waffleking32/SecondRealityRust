@@ -376,7 +376,7 @@ impl Hard {
         // overwritten at `:200-201` with 255, which rows 0/1 already are.
         self.screen[0..256].fill(255);
         self.screen[SCREEN_WIDTH..SCREEN_WIDTH + 256].fill(255);
-        self.shown = palette_from_mirror(&self.dac);
+        self.shown = Palette::from_six_bit(&self.dac);
         self.phase = Phase::Main;
     }
 
@@ -689,7 +689,7 @@ impl Hard {
             // inside mode 4; it inserts the same two static displays here so
             // every later frame keeps the artifact's numbering.
             self.mode_five_hold -= 1;
-            self.shown = palette_from_mirror(&self.dac);
+            self.shown = Palette::from_six_bit(&self.dac);
             return false;
         }
         self.count += 1;
@@ -802,7 +802,7 @@ impl Hard {
                 self.mode = -1;
             }
         }
-        self.shown = palette_from_mirror(&self.dac);
+        self.shown = Palette::from_six_bit(&self.dac);
         self.mode == -1
     }
 }
@@ -1021,11 +1021,6 @@ pub fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
 }
 
 // ------------------------------------------------------------- palettes --
-
-/// A DAC mirror as an engine [`Palette`]. The bytes are already 6-bit.
-fn palette_from_mirror(bytes: &[u8; 768]) -> Palette {
-    Palette::from_six_bit(bytes)
-}
 
 /// `part1init`'s `pal1` build (`BP.C:10-28`), byte for byte.
 ///
