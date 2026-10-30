@@ -187,14 +187,7 @@ fn one_second_of(
     let mut mixer = Mixer::new_with_capacity(1 << 18);
     mixer.start_note(channel, module, instrument);
     // One second of authentic output is 20,000 stereo frames: 40,000 of the object's bytes.
-    mixer.mix(
-        module,
-        &mut channels,
-        &options,
-        module.global_volume(),
-        false,
-        40_000,
-    );
+    mixer.mix(module, &mut channels, &options, module.global_volume(), 40_000);
     let mut out = vec![0i16; mixer.pending()];
     let taken = mixer.take(&mut out);
     assert_eq!(taken, out.len());

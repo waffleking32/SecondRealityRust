@@ -1531,7 +1531,7 @@ numbering 8,898…8,920), pinned by `tests/loop.rs`.
 
 ## A56 — `dis_muscode()` returns 0: the `_np_zinfo` substitute
 
-**Part:** the engine's music seam (`sr_engine::music::muscode_from`, `sr_audio::Player::zinfo`),
+**Part:** the engine's music seam (`sr_engine::music::muscode_from`),
 under every part that calls `dis_muscode()`. In the demo none does: the callers are the vault's
 `GRID/MAIN.C:72`, `:160`, `HARD/B.C:138`, `HARD/BP.C:263`, and `ENDPIC/BEG.C:48`, the unshipped build
 of part 4 (D8). A substitution with measured difference 0.

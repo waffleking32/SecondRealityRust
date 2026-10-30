@@ -391,8 +391,6 @@ pub struct Mixer {
     /// The object has the same seam — its DMA is a stream of bytes, and a chunk boundary can
     /// fall between the two bytes of a frame.
     held_right: Option<i16>,
-    /// The last frame mixed, for a reader and for the tests.
-    last_frame: (i16, i16),
     /// The enhanced path's 12/5 accumulator ([`Quality::Enhanced`]): output frames owed, in
     /// units of `1/authentic rate` of a frame. Each authentic frame adds [`ENHANCED_RATE`] and
     /// emits one output frame per whole authentic rate it holds — 2 or 3 at the reference's
@@ -424,7 +422,6 @@ impl Mixer {
             curve: Curve::new(0xb0, true),
             dropped: 0,
             held_right: None,
-            last_frame: (0, 0),
             owed: 0,
         }
     }
@@ -461,11 +458,6 @@ impl Mixer {
         self.ring.len()
     }
 
-    /// The last frame the mixer produced — what `frame` is asserted against.
-    pub fn last_frame(&self) -> (i16, i16) {
-        self.last_frame
-    }
-
     /// Every voice silent and the ring empty: what `_zplaysong`'s channel clear does to the
     /// mixer's half of the channel struct (`+0x5614`, called at `+0x5716`, whose
     /// `+0x5641`/`+0x5644` zero `m_base`).
@@ -474,7 +466,6 @@ impl Mixer {
         self.ring.reset();
         self.dropped = 0;
         self.held_right = None;
-        self.last_frame = (0, 0);
         self.owed = 0;
         // The curve and the accumulator planes are the *card's*, not the song's: `_zplaysong`
         // clears the channels (`+0x5614`) and touches neither the table nor the planes.
@@ -554,7 +545,6 @@ impl Mixer {
         channels: &mut [Channel; CHANNELS],
         options: &PlayerOptions,
         global_volume: u8,
-        silenced: bool,
         samples: usize,
     ) {
         // `+0x55c4`: `[0x913] = min(global volume byte, 64) × 4`.
@@ -588,9 +578,9 @@ impl Mixer {
 
         while budget >= width {
             if enhanced {
-                self.enhanced_frame(module, channels, options, master, silenced);
+                self.enhanced_frame(module, channels, options, master);
             } else {
-                let (left, right) = self.frame(module, channels, options, master, silenced);
+                let (left, right) = self.frame(module, channels, options, master);
                 let overflow = self.ring.push(left);
                 self.dropped += u64::from(overflow);
                 if options.stereo {
@@ -603,10 +593,10 @@ impl Mixer {
 
         if budget == 1 {
             if enhanced {
-                let right = self.enhanced_frame(module, channels, options, master, silenced).1;
+                let right = self.enhanced_frame(module, channels, options, master).1;
                 self.held_right = Some(right);
             } else {
-                let (left, right) = self.frame(module, channels, options, master, silenced);
+                let (left, right) = self.frame(module, channels, options, master);
                 let overflow = self.ring.push(left);
                 self.dropped += u64::from(overflow);
                 self.held_right = Some(right);
@@ -634,7 +624,6 @@ impl Mixer {
         channels: &mut [Channel; CHANNELS],
         options: &PlayerOptions,
         master: u16,
-        silenced: bool,
     ) -> (i16, i16) {
         let pan = module.channel_pan();
         let mut left: i32 = 0;
@@ -643,9 +632,8 @@ impl Mixer {
         for index in 0..CHANNELS {
             let channel = &mut channels[index];
             let voice = &mut self.voices[index];
-            // `+0x5925` runs for every channel the mixer walks, and `_zshutup` is modelled as
-            // zeroing the volumes it reads.
-            voice.refresh_volume(if silenced { 0 } else { channel.volume }, master);
+            // `+0x5925` runs for every channel the mixer walks.
+            voice.refresh_volume(channel.volume, master);
             voice.refresh_speed(channel.period, options);
             let Some(contribution) = voice_contribution(module, voice, channel) else {
                 continue;
@@ -671,15 +659,9 @@ impl Mixer {
 
         // `+0x30b4`/`+0x2cb4`: the accumulator less the centre sums, indexed into the curve at
         // `0x400 + value` — the flush's own base (`Mixer::base`).
+        // A mono mix writes one byte a frame: only the left accumulator is an output sample.
         let left = self.emit(left);
-        // A mono mix writes one byte a frame, so only the left accumulator is an output sample;
-        // the right's value is still converted for `last_frame` but is not emitted.
-        let right = if options.stereo {
-            self.emit(right)
-        } else {
-            self.peek(right)
-        };
-        self.last_frame = (left, right);
+        let right = if options.stereo { self.emit(right) } else { 0 };
         (left, right)
     }
 
@@ -695,14 +677,13 @@ impl Mixer {
     /// small-signal gain ([`Mixer::enhanced_gain`]) and clamped to `i16`; the curve's own table,
     /// with its clamp and its `0xFF`/`0x00` ends (A13, A14), is not reproduced.
     ///
-    /// Returns the last output frame, which is what [`Mixer::last_frame`] then holds.
+    /// Returns the last output frame, which a split frame holds its right half from.
     fn enhanced_frame(
         &mut self,
         module: &Module,
         channels: &mut [Channel; CHANNELS],
         options: &PlayerOptions,
         master: u16,
-        silenced: bool,
     ) -> (i16, i16) {
         self.owed += ENHANCED_RATE;
         let rate = options.authentic_rate();
@@ -716,7 +697,7 @@ impl Mixer {
         for index in 0..CHANNELS {
             let channel = &mut channels[index];
             let voice = &mut self.voices[index];
-            voice.refresh_volume(if silenced { 0 } else { channel.volume }, master);
+            voice.refresh_volume(channel.volume, master);
             voice.refresh_speed(channel.period, options);
             if voice_contribution(module, voice, channel).is_none() {
                 continue;
@@ -770,7 +751,6 @@ impl Mixer {
                 self.dropped += u64::from(overflow);
             }
         }
-        self.last_frame = last;
         last
     }
 
@@ -799,11 +779,6 @@ impl Mixer {
 
     /// One output sample: the curve's entry for a frame's value at [`Mixer::base`].
     fn emit(&mut self, value: i32) -> i16 {
-        self.curve.sample(self.base() + value)
-    }
-
-    /// The same conversion, for a value that is not emitted (a mono mix's right side).
-    fn peek(&self, value: i32) -> i16 {
         self.curve.sample(self.base() + value)
     }
 }
@@ -1169,7 +1144,7 @@ mod tests {
         channels[0].volume = 0;
         let options = PlayerOptions::default();
         for frame in 0..4 {
-            mixer.frame(&module, &mut channels, &options, 64, false);
+            mixer.frame(&module, &mut channels, &options, 64);
             assert_eq!(
                 channels[0].position, MAX_POS,
                 "frame {frame}: a voice at m_pos 0xffff is skipped, not walked"
@@ -1180,7 +1155,7 @@ mod tests {
         // to the position or rewraps it at the voice's end — so the loop above is the gate and
         // not a voice that never had a speed.
         channels[0].position = MAX_POS - 1;
-        mixer.frame(&module, &mut channels, &options, 64, false);
+        mixer.frame(&module, &mut channels, &options, 64);
         assert_ne!(
             channels[0].position,
             MAX_POS - 1,

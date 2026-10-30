@@ -94,7 +94,6 @@ struct State {
     retrigger: u8,
     position: u32,
     offset: u32,
-    aequ: u8,
     last_info: u8,
     last_effect1: u8,
     info: u8,
@@ -112,7 +111,6 @@ fn state(player: &Player, channel: usize) -> State {
         retrigger: channel.retrigger_count,
         position: channel.position,
         offset: channel.sample_offset,
-        aequ: channel.aequ,
         last_info: channel.last_info,
         last_effect1: channel.last_effect1,
         info: channel.info,
@@ -1138,11 +1136,6 @@ fn o_starts_the_next_note_at_the_offset_in_bytes() {
         "and the position the note starts from"
     );
     assert_eq!(now.period, 3424, "note 0x30 at the 8363 reference");
-    // `aequ` is *not* set by a note on a channel that was not playing: `+0x491a` is on the
-    // other side of `+0x490e`'s test, so a fresh channel keeps whatever it had — zero here.
-    // Only a note that restarts a playing sample sets the 0xff the tail turns into
-    // `avol + 0x10` (`+0x496a`).
-    assert_eq!(now.aequ, 0, "a first note leaves aequ alone");
 
     // The 256-multiple form, from the module's own data: MUSIC0 pattern 11 (order 12) row 12
     // channel 0 is `O08` → 2048. It has no note of its own, so the offset waits for the next

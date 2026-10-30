@@ -280,7 +280,7 @@ fn one_voice_is_the_modules_own_sample_bytes() {
 
     let frames = 256;
     let mut out = vec![0i16; frames];
-    mixer.mix(&module, &mut channels, &options, 64, false, out.len());
+    mixer.mix(&module, &mut channels, &options, 64, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
     let values = expected_values(
@@ -400,7 +400,7 @@ fn a_solo_voice_is_audible_through_the_table_the_machine_holds() {
     mixer.start_note(0, &module, 11);
     let frames = 256;
     let mut out = vec![0i16; frames * 2];
-    mixer.mix(&module, &mut channels, &options, 64, false, out.len());
+    mixer.mix(&module, &mut channels, &options, 64, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
     // The machine's table at `mul` 64 is the halved-zero fill the builder's `rep stosw` bug
@@ -451,7 +451,7 @@ fn a_mono_frame_is_the_whole_mix_in_one_i16() {
     mixer.start_note(1, &module, 1);
 
     let mut out = vec![0i16; 256];
-    mixer.mix(&module, &mut channels, &options, 64, false, out.len());
+    mixer.mix(&module, &mut channels, &options, 64, out.len());
     assert_eq!(mixer.take(&mut out), out.len());
 
     let first = expected_values(
@@ -567,7 +567,7 @@ fn a_looping_sample_rewraps_at_its_loop_and_a_one_shot_stops() {
             header.length
         };
         let frames = end as usize + 16;
-        mixer.mix(&module, &mut channels, &options, 64, false, frames * 2);
+        mixer.mix(&module, &mut channels, &options, 64, frames * 2);
         let mut out = vec![0i16; frames * 2];
         assert_eq!(mixer.take(&mut out), frames * 2);
 
@@ -940,7 +940,7 @@ fn a_note_off_leaves_the_voice_silent() {
     let mut mixer = Mixer::new_with_capacity(1024);
     mixer.start_note(0, &module, 1);
     let mut out = vec![0i16; 128];
-    mixer.mix(&module, &mut channels, &options, 64, false, out.len());
+    mixer.mix(&module, &mut channels, &options, 64, out.len());
     assert_eq!(mixer.take(&mut out), 128);
     // A level of 0 makes every sample's value 0, so the samples are the table's own silence
     // entry — the byte 128, i.e. 0 — and never the note. (A misread marker's `0x501` would
@@ -952,34 +952,6 @@ fn a_note_off_leaves_the_voice_silent() {
         "the misread marker's byte 160"
     );
     assert!(out.iter().all(|sample| *sample == 0), "a level of 0 is the byte 128");
-}
-
-#[test]
-fn shutting_up_silences_the_voices_and_a_row_starts_them_again() {
-    // `_zshutup` (`MAIN/STMIK.H:39`) and the "volume 0" path's channel-freeing: the player's
-    // `silenced` flag is what the mixer reads, and a row's first tick clears it. The module is
-    // the one whose curve lets a solo voice through, so "was playing" and "is silent" are
-    // distinguishable at all.
-    let module = module_with_master_volume(0x82);
-    let options = PlayerOptions::default();
-    let mut channels = [Channel::default(); CHANNELS];
-    channels[0] = channel(1712, 63, 0);
-    let mut mixer = Mixer::new_with_capacity(1024);
-    mixer.start_note(0, &module, 1);
-
-    let mut loud = vec![0i16; 256];
-    mixer.mix(&module, &mut channels, &options, 64, false, loud.len());
-    assert_eq!(mixer.take(&mut loud), loud.len());
-    assert!(loud.iter().any(|sample| *sample != 0), "it was playing");
-
-    let mut quiet = vec![0i16; 256];
-    mixer.mix(&module, &mut channels, &options, 64, true, quiet.len());
-    assert_eq!(mixer.take(&mut quiet), quiet.len());
-    assert!(
-        quiet.iter().all(|sample| *sample == curve_with(16, 0)),
-        "shut up silences every voice, so the samples are the curve's own zero entry"
-    );
-    assert_ne!(quiet, loud, "and that is not what it was playing before");
 }
 
 #[test]

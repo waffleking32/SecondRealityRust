@@ -89,12 +89,6 @@ const FIFO_SLOTS: usize = 32;
 /// pointer at `0x0` (`+0x2ac1`, `+0x2ac8`) — ten entries, so ten polls of delay.
 const FIFO_DEPTH: usize = 10;
 
-/// `_np_zinfo`'s value. D8's route 1 was performed and the word is **0 in every sample of
-/// every filed trace** (`music-clock.md` §6), so D8 records the question as deferred with
-/// evidence rather than answered: what its other values are is not measured, and the port
-/// does not invent them.
-const ZINFO: i32 = 0;
-
 /// `[0x93a] == 0`: the next row advance is a plain row advance.
 const ADVANCE_NONE: u8 = 0;
 /// `[0x93a] == 1`: the next row advance is an order advance (`B`, `C`, `_zgotosong`).
@@ -118,10 +112,6 @@ const STATE_STARTED: u8 = 2;
 /// `cargo xtask music probe --arg 5 --cycles 30000 --frames 408..1300 --at 0x5AC5`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MixRate {
-    /// 12000 Hz.
-    Hz12000,
-    /// 16000 Hz.
-    Hz16000,
     /// 20000 Hz.
     Hz20000,
     /// 40000 Hz — the measured rate, and the port's default.
@@ -133,8 +123,6 @@ impl MixRate {
     /// The rate in samples a second, as `_zmixspeed` holds it.
     pub fn samples_per_second(self) -> u32 {
         match self {
-            MixRate::Hz12000 => 12_000,
-            MixRate::Hz16000 => 16_000,
             MixRate::Hz20000 => 20_000,
             MixRate::Hz40000 => 40_000,
         }
@@ -327,8 +315,6 @@ pub struct Player {
 
     /// The module's global-volume byte, which the shell's `fademusic` walks down.
     global_volume: u8,
-    /// `_zshutup` was called: the voices are silent until a row starts a note.
-    silenced: bool,
 
     /// The mixing engine: the voices, and the ring the device drains (Task 5).
     mixer: Mixer,
@@ -379,7 +365,6 @@ impl Player {
             pushed: Entry::default(),
             published: Entry::default(),
             global_volume,
-            silenced: false,
             mixer: Mixer::for_options(&options),
         }
     }
@@ -503,23 +488,6 @@ impl Player {
         self.play_song(order);
     }
 
-    /// `_zgotosong(order, row)` (`MAIN/STMIK.H:46`): seek to `order`, `row`.
-    ///
-    /// The original (`+0x2513`) writes the row into `[0x93b]`, the order into `[0x940]`,
-    /// raises the order-advance flag, sets `[0x2000] = np_speed` so the very next tick enters
-    /// the row, and sets `[0x939] = 2`. It clears **nothing** else — in particular not the
-    /// published row, which only `_zplaysong`'s own path reaches (`+0x570b`, inside the
-    /// routine called at `+0x258e`), because `_zgotosong` does not call it.
-    pub fn goto_song(&mut self, order: u8, row: u8) {
-        self.pending_row = row;
-        self.next_order = u16::from(order);
-        self.advance_flag = ADVANCE_ORDER;
-        self.tick_in_row = u16::from(self.pub_speed);
-        self.running = true;
-        self.state = STATE_STARTED;
-        self.at_end = false;
-    }
-
     /// `_zstopsong()` (`MAIN/STMIK.H:49`): stop playing, keeping the mixing engine on.
     ///
     /// The original (`+0x25c5`) writes `[0x939] = 0` and nothing else. The mixing loop then
@@ -532,21 +500,6 @@ impl Player {
     pub fn stop(&mut self) {
         self.running = false;
         self.state = STATE_STOPPED;
-    }
-
-    /// `_zshutup()` (`MAIN/STMIK.H:39`): "shuts up all the sounds playing without
-    /// deinitializing the player" — the voices are Task 5's, so this records the request.
-    ///
-    /// The original (`+0x25e3`) runs the song initialiser (`+0x5614`, [`Channel::initialise`]),
-    /// clears the DMA buffer (`+0x2922`) and writes `[0x938] = 0`. The port records the request
-    /// and leaves the channels alone; nothing in the port calls this but its own tests.
-    pub fn shut_up(&mut self) {
-        self.silenced = true;
-    }
-
-    /// True after [`Player::shut_up`] and until a voice is started (Task 5's business).
-    pub fn is_silenced(&self) -> bool {
-        self.silenced
     }
 
     /// The shell's `fademusic` (`MAIN/U2.ASM:333-346`) walks the **module's own**
@@ -620,7 +573,6 @@ impl Player {
             &mut self.channels,
             &options,
             self.global_volume,
-            self.silenced,
             samples,
         );
     }
@@ -671,12 +623,6 @@ impl Player {
         self.mixer.dropped()
     }
 
-    /// The last frame the mixer produced, left and right — the value `tests/mix.rs` checks its
-    /// hand-computed samples against, and a reader's window on the mixer without draining it.
-    pub fn last_mixed_frame(&self) -> (i16, i16) {
-        self.mixer.last_frame()
-    }
-
     /// The player's published words — the ones `DIS/DISINT.ASM` reads and the traces record.
     ///
     /// Order, pattern and row come through the ring and lag the player's own state by ten
@@ -711,11 +657,6 @@ impl Player {
     /// order the parts will not be told about.
     pub fn engine_zplus(&self) -> i32 {
         i32::from(self.zplus)
-    }
-
-    /// `_np_zinfo`. Zero, and D8 says why (see [`ZINFO`]).
-    pub fn zinfo(&self) -> i32 {
-        ZINFO
     }
 
     /// `_np_zframe`: the tick counter the parts set and wait on
@@ -804,7 +745,6 @@ impl Player {
     /// their notes (`+0x46c2`, whose install path is `+0x4733` and whose note work is
     /// `+0x4810`), and only then run the row's commands through the first-tick table.
     fn process_row(&mut self) {
-        self.silenced = false;
         for channel in &mut self.channels {
             channel.clear_cell();
         }
@@ -998,7 +938,6 @@ impl Player {
                             .map_or(0, |header| header.volume);
                         // `+0x485b`…`0x4867`: the header's volume byte, clamped to 0…63.
                         channel.volume = header_volume.min(0x3f);
-                        channel.org_volume = channel.volume;
                     }
                     None => channel.last_instrument = 0,
                 }
@@ -1030,9 +969,6 @@ impl Player {
                 // the position alone, which is what makes the glide a glide.
                 let fresh = channel.org_period == 0;
                 if fresh || channel.command != 0x07 {
-                    if !fresh {
-                        channel.aequ = 0xff;
-                    }
                     channel.position = channel.sample_offset;
                     channel.position_low = 0;
                 }
@@ -1047,14 +983,6 @@ impl Player {
             }
             if channel.cell_volume != 0xff {
                 channel.volume = channel.cell_volume;
-                channel.org_volume = channel.cell_volume;
-            }
-            // `+0x496a`: a note start that has not been given a volume yet keeps `avol + 0x10`
-            // as its `aequ`, the channel's playback-state byte. The mixer plays from `volume`,
-            // not this byte (`mix.rs`'s `refresh_volume`); `aequ`'s only readers are the two
-            // writes in this function, and the value is carried because the object carries it.
-            if channel.aequ == 0xff {
-                channel.aequ = channel.volume.wrapping_add(0x10);
             }
         }
     }

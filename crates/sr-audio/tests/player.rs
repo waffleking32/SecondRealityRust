@@ -1184,8 +1184,9 @@ fn initialiser_stores() -> BTreeMap<u8, u8> {
     stored
 }
 
-/// **A restart writes exactly what the song initialiser writes, and keeps the rest** (Phase 9
-/// Task 6b, D45): `Channel::initialise` against the stores the object's own bytes make.
+/// **A restart writes exactly what the song initialiser writes, and keeps the rest** (D45):
+/// `Channel::initialise` against the stores the object's own bytes make. The object's fields the
+/// port does not keep (`aequ`, `aorgvol`, `atreon`, `atremor`, `vibtretype`, `a0clearcnt`) have no row.
 ///
 /// Every field of the port's channel is given a value no store leaves, the initialiser is run,
 /// and each field must then hold the store's value if any of its bytes is stored to, and its own
@@ -1199,9 +1200,7 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
 
     let before = Channel {
         used: true,
-        aequ: 0x11,
         volume: 0x2a,
-        org_volume: 0x13,
         period: 0x1414,
         target_period: 0x1515,
         c2spd: 0x1616,
@@ -1209,9 +1208,7 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
         vibrato_position: 0x1818,
         last_effect1: 0x19,
         last_effect2: 0x1a,
-        tremor_on: true,
         retrigger_count: 0x1b,
-        tremor_count: 0x1c,
         zero_volume_count: 0x1d,
         note: 0x1e,
         instrument: 0x1f,
@@ -1221,8 +1218,6 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
         last_instrument: 0x23,
         last_note: 0x24,
         last_info: 0x25,
-        waveform: 0x26,
-        clear_count: 0x27,
         sample_offset: 0x2828,
         position: 0x2929_2929,
         position_low: 0x3030,
@@ -1232,9 +1227,8 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
 
     // (field, offset, width in the object's struct, the port's value as a number)
     type Read = fn(&Channel) -> u64;
-    let fields: [(&str, u8, u8, Read); 28] = [
+    let fields: [(&str, u8, u8, Read); 22] = [
         ("used (achannelused)", 0x01, 1, |c| u64::from(c.used)),
-        ("aequ", 0x02, 1, |c| u64::from(c.aequ)),
         // `sample_offset` *is* the word at `+0x06` (`Oxy` writes `info << 8` there), not its
         // high half: the projection is the field itself.
         ("sample_offset (aadr's high word)", 0x06, 2, |c| u64::from(c.sample_offset)),
@@ -1244,12 +1238,9 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
         ("c2spd (ac2spd)", 0x22, 2, |c| u64::from(c.c2spd)),
         ("org_period (aorgspd)", 0x24, 2, |c| u64::from(c.org_period)),
         ("vibrato_position (avibcnt)", 0x26, 2, |c| u64::from(c.vibrato_position)),
-        ("org_volume (aorgvol)", 0x2a, 1, |c| u64::from(c.org_volume)),
         ("last_effect1 (alasteff1)", 0x2b, 1, |c| u64::from(c.last_effect1)),
         ("last_effect2 (alasteff2)", 0x2c, 1, |c| u64::from(c.last_effect2)),
-        ("tremor_on (atreon)", 0x2d, 1, |c| u64::from(c.tremor_on)),
         ("retrigger_count (atrigcnt)", 0x2e, 1, |c| u64::from(c.retrigger_count)),
-        ("tremor_count (atremor)", 0x2f, 1, |c| u64::from(c.tremor_count)),
         ("zero_volume_count (a0volcut)", 0x31, 1, |c| u64::from(c.zero_volume_count)),
         ("note", 0x32, 1, |c| u64::from(c.note)),
         ("instrument (ins)", 0x33, 1, |c| u64::from(c.instrument)),
@@ -1259,8 +1250,6 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
         ("last_instrument (lastins)", 0x37, 1, |c| u64::from(c.last_instrument)),
         ("last_note (lastnote)", 0x38, 1, |c| u64::from(c.last_note)),
         ("last_info (alastnfo)", 0x39, 1, |c| u64::from(c.last_info)),
-        ("waveform (vibtretype)", 0x3d, 1, |c| u64::from(c.waveform)),
-        ("clear_count (a0clearcnt)", 0x3e, 1, |c| u64::from(c.clear_count)),
         ("position_low (m_poslow)", 0x42, 2, |c| u64::from(c.position_low)),
         ("position (m_pos)", 0x44, 4, |c| u64::from(c.position)),
     ];
@@ -1282,16 +1271,11 @@ fn the_song_initialiser_writes_exactly_what_initialise_writes() {
     assert_eq!(
         kept,
         [
-            "aequ",
             "sample_offset (aadr's high word)",
             "volume (avol)",
             "c2spd (ac2spd)",
-            "tremor_on (atreon)",
             "retrigger_count (atrigcnt)",
-            "tremor_count (atremor)",
             "zero_volume_count (a0volcut)",
-            "waveform (vibtretype)",
-            "clear_count (a0clearcnt)",
             "position_low (m_poslow)",
         ]
     );
@@ -1830,18 +1814,7 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
 }
 
 #[test]
-fn goto_song_enters_its_row_on_the_next_tick() {
-    // `+0x2513`: the row goes to `[0x93b]`, the order to `[0x940]`, the flag goes up, and
-    // `[0x2000]` is set to the speed so the very next tick enters the row.
-    let mut player = player("MUSIC0");
-    player.goto_song(28, 7);
-    poll_until(&mut player, 10, |player, _| player.engine_position().order == 28);
-    let position = player.engine_position();
-    assert_eq!((position.order, position.pattern, position.row), (28, 14, 7));
-}
-
-#[test]
-fn stop_keeps_the_position_and_shut_up_only_silences() {
+fn a_stopped_player_keeps_its_position() {
     let mut player = player("MUSIC0");
     player.play_song(25);
     for _ in 0..300 {
@@ -1863,19 +1836,6 @@ fn stop_keeps_the_position_and_shut_up_only_silences() {
         player.zframe(),
         zframe,
         "and its ticks stop counting: the original's stopped path never touches _np_zframe"
-    );
-
-    player.play_song(25);
-    player.poll();
-    assert!(!player.is_silenced());
-    player.shut_up();
-    assert!(player.is_silenced());
-    for _ in 0..300 {
-        player.poll();
-    }
-    assert!(
-        !player.is_silenced(),
-        "a new row starts voices again — which is Task 5's to make audible"
     );
 }
 
