@@ -1729,9 +1729,7 @@ TECHNO's state instead.
 **Measured difference:** through the handoff, **0**: `the_handoff_matches_the_collapse_8792_and_the_line_8800`
 (`cargo test -p secondreality --bin secondreality parts::panicend`). Standalone, **1,638** and **234**
 pixels, exactly the reference's non-black pixels (7 × 234 and 234): `cargo xtask rediff --only
-panicend`, and the 4,914 and 702 bytes that
-`the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so` pins (`cargo test -p
-secondreality --test panicend`).
+panicend`.
 
 ## Generated and self-modifying code
 

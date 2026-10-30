@@ -304,7 +304,7 @@ Frames: `reference/parts/panicend/` 8792, 8800, 9000 (`reference-indices.md` §1
 **Original.** `mov al, 0d` is decimal zero (hex is `0dh`, as `TWEAK.ASM:200` writes), so the fade
 tables are built from the inherited palette unrotated. **Where.** `PANIC/SHUTDOWN.C:148`. **Frame.**
 8792 and 8800 (a 13-entry rotation does not reproduce them). **Test.**
-`getpal_reads_from_dac_entry_zero_because_0d_is_decimal`.
+`the_handoff_matches_the_collapse_8792_and_the_line_8800`.
 
 ### 13.2 `copyline` moves 80 words and the VGA latch stores the pair's second byte twice
 

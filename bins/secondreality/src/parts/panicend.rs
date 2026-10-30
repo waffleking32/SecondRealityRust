@@ -2,62 +2,31 @@
 //!
 //! `PANIC/SHUTDOWN.C` (158 lines) over `PANIC/ASMYT.ASM` (`copyline`) and
 //! `PANIC/TWEAK.ASM` (`tw_putpixel`, `tw_getpixel`, `tw_setpalette`,
-//! `tw_setrgbpalette`, `tw_setstart`): the demo's shortest part and the only
-//! one that **draws nothing of its own**. It inherits TECHNO's 320×400
-//! interleaved picture (plane bytes 80..159 of every 160-byte row, displayed
-//! through a 640-pixel line stride) and TECHNO's DAC, and then:
+//! `tw_setrgbpalette`, `tw_setstart`). It draws nothing of its own: it inherits
+//! TECHNO's 320×400 interleaved picture (plane bytes 80..159 of every 160-byte
+//! row, through a 640-pixel line stride) and TECHNO's DAC, and then:
 //!
-//! 1. **The collapse** (`SHUTDOWN.C:57-114`): row 0 blacked, the 64 fade
-//!    tables built from the inherited DAC (`b = 3..767`, so entry 0 stays
-//!    black), the picture's every fourth row copied into memory rows
-//!    150..249, the display start set to row 100, the CRTC halved to 200
-//!    lines (`09h = 41h`) and the line offset set to `0xA0` words (1280
-//!    pixels, two memory rows), then eleven `copyline` passes that walk the
-//!    band inward until only row 200 is left — the last pass and its two
-//!    closing copies (`:104-105`) share one inter-wait segment, before the
-//!    line loop's first wait (`:118`).
+//! 1. **The collapse** (`SHUTDOWN.C:57-114`): row 0 blacked, the 64 fade tables
+//!    built, every fourth picture row copied into memory rows 150..249, the
+//!    start set to row 100, the CRTC halved to 200 lines (`09h = 41h`) and the
+//!    line offset set to `0xA0` words (two memory rows), then eleven
+//!    `copyline` passes walking the band in to row 200. The last pass and its
+//!    two closing copies (`:104-105`) share one tick, before the line loop's
+//!    first wait (`:118`).
 //! 2. **The line and the dot** (`:116-129`): 47 frames of eight symmetric
-//!    `tw_putpixel(x, 200, 0)` writes walking in from both edges, then
-//!    `tw_putpixel(160, 200, 1)`.
-//! 3. **The pulse** (`:130-136`): 60 frames of `cos(a/120·6π)·31 + 32` into
-//!    DAC entry 1, then `sleep(1)`, and the part is over.
+//!    `tw_putpixel(x, 200, 0)` writes, then `tw_putpixel(160, 200, 1)`.
+//! 3. **The pulse** (`:130-136`): 60 frames of `cos(a/120·6π)·31 + 32` into DAC
+//!    entry 1, then `sleep(1)`.
 //!
-//! # The evidence split
+//! **Preserved** (`bugs.md` §13): `getpal`'s `mov al, 0d` (`:148`) is decimal
+//! zero, so the fade tables use the inherited DAC unrotated; the tables start
+//! at `b = 3`, so entry 0 is black in all 64; `copyline` (`ASMYT.ASM:9-24`)
+//! stores each word's second planar byte twice through the write-mode-1 latch;
+//! `a = a*5/6` ends at 3. The part never polls `dis_exit`: the shell retires it.
 //!
-//! `reference/parts/panicend/frame_008792.rgb` (the collapse) and
-//! `frame_008800.rgb` (the line) depend on the predecessor's screen **and**
-//! DAC, so they are compared by the handoff unit test below — TECHNO's own
-//! port driven to `Done` on the same `Surface` and `Palette`. `frame_009000`
-//! (the dot) is self-contained: the screen is index 0 everywhere but one
-//! index-1 pixel at (160, 100), and the palette's entries 0 and 1 are black
-//! and `(1, 1, 1)` after the pulse, so the standalone `--part panicend` run
-//! (on a blank surface and the hardware's default DAC) reproduces it exactly.
-//! The process-level test `bins/secondreality/tests/panicend.rs` compares
-//! 9000 and records that 8792/8800 are the handoff's.
-//!
-//! # The preserved artefacts
-//!
-//! - `getpal` (`:139-157`) writes `0d` to the DAC read index. In the
-//!   assembler the tree uses a trailing `d` is **decimal**, so this loads 0,
-//!   not `0x0D`: the DAC is read from entry 0 and the fade tables are built
-//!   from the inherited palette unrotated. (The port's own `TWEAK.ASM:200`
-//!   spells the hex value `0dh`; `cmp ..., 0d` for zero is all over the
-//!   tree.) The reference frames pin it: a rotation by thirteen entries
-//!   misses every pixel of 8792 and 8800.
-//! - The fade tables are zero-initialised and the loop starts at `b = 3`, so
-//!   DAC entry 0 is black in all 64; the `:81` white entry 0 is overwritten
-//!   by `fadepals[20]` at `:84`.
-//! - `copyline` moves 80 **words** = 160 planar bytes with `rep movsw` in
-//!   GC write mode 1. Each 16-bit read leaves the VGA latch on the second
-//!   planar byte and the 16-bit write stores that latch to **both**
-//!   destination planar bytes: a copied row repeats each four-pixel group
-//!   twice. That is what makes the reference's line 234 pixels wide at
-//!   x = 40..276 with a three-pixel gap at 273..275; a straight byte copy is
-//!   233 at 44..276.
-//! - The collapse runs `a = 32; a > 2; a = a*5/6`, so its last pass is
-//!   `a = 3` and rows 202/198 are the only ones the final copies clear.
-//! - Nothing beyond memory row 0 is cleared, and the part never polls
-//!   `dis_exit` (`SHUTDOWN.C` has no `dis_exit()` call at all).
+//! **Evidence.** 8792 and 8800 need TECHNO's screen and DAC, so the handoff test
+//! here compares them; 9000 (the dot) is self-contained and a `--part` run
+//! reproduces it (A63). Measurements: `docs/fidelity/panicend.md`.
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::surface::Surface;
@@ -107,10 +76,6 @@ const LINE_LAST_STEP: u32 = LINE_FIRST_STEP + LINE_STEPS - 1;
 const DOT_STEP: u32 = LINE_LAST_STEP + 1;
 const PULSE_FIRST_STEP: u32 = DOT_STEP + 1;
 const PULSE_LAST_STEP: u32 = DOT_STEP + PULSE_FRAMES - 1;
-/// The tick `sleep(1)` ends the part on. The match's catch-all retires there;
-/// the tests name the number.
-#[cfg(test)]
-const FINISHED_STEP: u32 = PULSE_LAST_STEP + 1;
 
 /// The part.
 pub struct Panicend {
@@ -149,19 +114,8 @@ impl Panicend {
 }
 
 // ---------------------------------------------------------------- the DAC --
-/// `getpal` (`SHUTDOWN.C:139-157`): the read index is `0d`, decimal zero, and
-/// 768 bytes are read from it — the inherited DAC, entry for entry.
-///
-/// The assembler the tree uses reads a trailing `d` as **decimal**; the hex
-/// spelling for 13 is `0dh`, which is what `TWEAK.ASM:200` writes for the
-/// start-address register. The reference frames settle it: the fade tables
-/// built from a rotation by thirteen entries miss every pixel of 8792 and
-/// 8800 (see `docs/fidelity/panicend.md`).
-fn getpal(dac: &[u8; 768]) -> [u8; 768] {
-    *dac
-}
-
-/// `SHUTDOWN.C:62`: the 64 fade tables.
+/// `SHUTDOWN.C:62`: the 64 fade tables, from `getpal`'s read of the DAC from
+/// entry 0 (`:148`'s `0d` is decimal; the handoff test pins it).
 fn fade_tables(kuvapal: &[u8; 768]) -> Vec<u8> {
     let mut tables = vec![0u8; 64 * 768];
     for a in 0..64usize {
@@ -296,7 +250,7 @@ impl Part for Panicend {
             self.dac[index * 3 + 1] = entry[1];
             self.dac[index * 3 + 2] = entry[2];
         }
-        self.fadepals = fade_tables(&getpal(&self.dac));
+        self.fadepals = fade_tables(&self.dac);
         self.step = 0;
         Ok(())
     }
@@ -378,52 +332,15 @@ mod tests {
     use super::*;
     use crate::audio::PlayerMusic;
     use crate::parts::test_rig::{reference, rgb_of, Rig};
-    use sr_engine::view::View;
     use sr_engine::IndexedFrame;
+
+    /// The tick `sleep(1)` ends the part on: the match's catch-all.
+    const FINISHED_STEP: u32 = PULSE_LAST_STEP + 1;
 
     /// A 320×200 view over the part's 640×400 surface. The part sets no
     /// copper and reads no `ctx.frame`, so a step is its `frame` alone.
     fn blank_rig() -> Rig {
         Rig::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT)
-    }
-
-    fn find(bytes: &[u8], needle: &[u8]) -> bool {
-        bytes.windows(needle.len()).any(|window| window == needle)
-    }
-
-    #[test]
-    fn getpal_reads_from_dac_entry_zero_because_0d_is_decimal() {
-        // `PANIC/SHUTDOWN.C:148` is `mov al, 0d`: in the assembler's syntax a
-        // trailing `d` is decimal, so the read index is 0. The hex spelling
-        // the survey read it as is `0dh` — TWEAK's own start-address write.
-        let source =
-            std::fs::read("../../upstream/SecondReality/PANIC/SHUTDOWN.C").unwrap();
-        assert!(
-            find(&source, b"mov\tal, 0d\r\n"),
-            "SHUTDOWN.C:148 is not `mov al, 0d`"
-        );
-        assert!(
-            !find(&source, b"mov\tal, 0dh\r\n"),
-            "if the source spelled the index 0dh, the read would start at 13"
-        );
-        let tweak = std::fs::read("../../upstream/SecondReality/PANIC/TWEAK.ASM").unwrap();
-        assert!(
-            find(&tweak, b"mov\tal, 0dh\r\n"),
-            "TWEAK.ASM:200 is the hex spelling this file does not use"
-        );
-
-        let mut dac = [0u8; 768];
-        for (i, byte) in dac.iter_mut().enumerate() {
-            *byte = (i * 7 % 64) as u8;
-        }
-        assert_eq!(getpal(&dac), dac, "the DAC is read from entry 0, unrotated");
-        // The reading the survey made — a read from entry 13 — would differ.
-        let mut rotated = [0u8; 768];
-        for i in 0..256 {
-            let from = (i + 13) % 256;
-            rotated[i * 3..i * 3 + 3].copy_from_slice(&dac[from * 3..from * 3 + 3]);
-        }
-        assert_ne!(getpal(&dac), rotated);
     }
 
     #[test]
@@ -618,81 +535,6 @@ mod tests {
             .map(|(at, index)| (at, *index))
             .collect();
         assert_eq!(visible, vec![(100 * 320 + 160, 1)], "9000's dot");
-    }
-
-    #[test]
-    fn the_shell_retires_the_part_at_the_end_of_the_tick_the_exit_was_set_in() {
-        use crate::shell::Sequence;
-
-        // `SHUTDOWN.C` polls no exit flag, so the shell must own the
-        // retirement: `Sequence::tick` reads `Engine::exit_requested` back
-        // after the band and drops the part at the end of that tick.
-        let mut run = Sequence::with_source(
-            LINE_PIXELS,
-            FULL_HEIGHT as usize,
-            View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT),
-            vec!["panicend"],
-            crate::parts::new_part,
-        )
-        .unwrap();
-        for _ in 0..3 {
-            run.tick();
-        }
-        assert!(!run.holding());
-        assert!(run.request_exit(), "a part is live to ask");
-        run.tick();
-        assert!(
-            !run.holding(),
-            "the retirement is at the end of the tick, not before it"
-        );
-        run.tick();
-        assert!(run.holding(), "the shell retired the part, not the part itself");
-    }
-
-    #[test]
-    fn the_shell_also_retires_a_part_that_requests_its_own_exit() {
-        use crate::shell::Sequence;
-        use sr_engine::part::Part;
-
-        struct Stub {
-            ticks: u32,
-        }
-        impl Part for Stub {
-            fn name(&self) -> &'static str {
-                "stub"
-            }
-            fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
-                Ok(())
-            }
-            fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-                self.ticks += 1;
-                if self.ticks == 2 {
-                    ctx.request_exit();
-                }
-                PartStatus::Continuing
-            }
-        }
-        fn source(name: &str) -> Option<Box<dyn Part>> {
-            if name == "panicend" {
-                Some(Box::new(Stub { ticks: 0 }))
-            } else {
-                None
-            }
-        }
-        let mut run = Sequence::with_source(
-            LINE_PIXELS,
-            FULL_HEIGHT as usize,
-            View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT),
-            vec!["panicend"],
-            source,
-        )
-        .unwrap();
-        run.tick();
-        assert!(!run.holding());
-        run.tick(); // the stub's second tick requests the exit
-        assert!(!run.holding());
-        run.tick();
-        assert!(run.holding(), "the shell retires either kind of exit the same way");
     }
 
     // --- the handoff: TECHNO's end state, then this part ---------------------

@@ -64,8 +64,8 @@ is `FINISHED_STEP` (121).
 (the hex spelling is `TWEAK.ASM:200`'s `0dh`). `getpal` reads the inherited DAC from entry 0,
 unrotated. This corrects the survey's "reads the DAC starting at index 13"; it is not a D24
 divergence. The reference decides it: tables from the unrotated palette reproduce 8792 and
-8800 byte for byte, and a 13-entry rotation does not
-(`getpal_reads_from_dac_entry_zero_because_0d_is_decimal`, and the handoff test). A rotation
+8800 byte for byte (`the_handoff_matches_the_collapse_8792_and_the_line_8800`), and a 13-entry
+rotation does not. A rotation
 would need `TROLL.UP`'s palette and pixels shifted by thirteen in opposite directions, and the
 vendored `TROLL.UP` is the file the port reads.
 
@@ -147,10 +147,7 @@ so the standalone run answers it. The manifest and anchor rules are `part-sequen
 | 9000 | standalone | 218 | RGB and `.idx` | 0 | exact |
 
 The standalone rows are the `panicend` entry of the rediff table (`xtask/src/rediff/table.rs`):
-1,638 and 234 are exactly the reference's non-black pixels (7 × 234 and 234). The integration
-test pins the same frames as 4,914 and 702 of 192,000 bytes
-(`the_standalone_run_cannot_answer_the_handoffs_8792_and_8800_and_says_so`) and 9000 at 0
-(`the_standalone_run_matches_the_self_contained_dot_9000_exactly`). There is no D24
+1,638 and 234 are exactly the reference's non-black pixels (7 × 234 and 234). There is no D24
 divergence.
 
 Reproduce:
@@ -158,7 +155,6 @@ Reproduce:
 ```bash
 cargo xtask rediff --only panicend
 cargo test -p secondreality --bin secondreality parts::panicend
-cargo test -p secondreality --test panicend -- --nocapture
 ```
 
 ## 9. Retirement: the shell owns it
@@ -167,8 +163,8 @@ cargo test -p secondreality --test panicend -- --nocapture
 reaches it only through the shell's `partexecute`. `Panicend::frame` never reads
 `ctx.exit_requested`: with the flag set on every tick it still returns `Finished` at tick 121
 (`the_part_ignores_the_exit_flag_and_completes_its_finite_acts`). `Sequence::tick` drops the
-part at the end of the tick the flag was set in
-(`the_shell_retires_the_part_at_the_end_of_the_tick_the_exit_was_set_in`). No reference frame
+part at the end of the tick the flag was set in (`shell.rs`'s
+`a_part_that_does_not_drain_retires_on_the_exit_tick`). No reference frame
 is at an exit.
 
 ## 10. Decisions
