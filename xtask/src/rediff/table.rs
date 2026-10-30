@@ -106,7 +106,7 @@ pub struct Seam {
 /// Block 1's nineteen parts, in the demo's order (`MAIN/U2.ASM:789-912`).
 pub const FULLRUN_SEAMS: [Seam; 19] = [
     Seam { part: "alku", original: 404, port: 404, start: 404 },
-    Seam { part: "u2a", original: 5961, port: 6008, start: 6008 },
+    Seam { part: "u2a", original: 5961, port: 5956, start: 5956 },
     Seam { part: "pam", original: 7707, port: 7704, start: 7508 },
     Seam { part: "beglogo", original: 7922, port: 7885, start: 7885 },
     Seam { part: "glenz", original: 8522, port: 8527, start: 8057 },
@@ -206,8 +206,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(16800, 1772),
         ],
     },
-    // tests/alku.rs:149-178: boot numbering (anchor 404), 900/1719/2719 at 0 RGB px
-    // (:159-165), 5859 at 2353 (:178), the text batches' phase A20.
+    // tests/alku.rs: boot numbering (anchor 404), 900/1719/2719 at 0 RGB px, and 5859 at 0
+    // since the port runs the release's loop (the fifth batch stops the text, A20).
     Entry {
         capture: "alku",
         args: &["--part", "alku"],
@@ -215,7 +215,7 @@ pub const TABLE: &[Entry] = &[
             rgb0(900, 900),
             rgb0(1719, 1719),
             rgb0(2719, 2719),
-            rgb(5859, 5859, 2353, "A20"),
+            rgb0(5859, 5859),
         ],
     },
     // tests/beglogo.rs:16 KEYFRAMES at their own indices: 430 all index 15 and all white
@@ -397,7 +397,9 @@ pub const TABLE: &[Entry] = &[
             rgb_at(1719, Part::Alku, 0, "exact"),
         ],
     },
-    // U2A's opening is not the original's (ALKU's end is at least 47 frames late); 7880's
+    // 5961 is the original's first 320×200 frame — ALKU's closing page, or U2A's identical
+    // background — under the 30,000-cycle session's DAC; the port's U2A starts 5 frames
+    // earlier on the same picture under the merged palette (A20, A32, A53). 7880's
     // index plane is PAM's picture under a white DAC; 7920 is PAM's white under BEGLOGO's
     // load.
     Entry {

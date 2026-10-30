@@ -62,7 +62,10 @@ derivation, A14's (a), A5 for 430–438 and A7 for 436–443):
 - **The packed release EXEs (D12)**: A9, A10, A11, A17, A18, A20, A25, A28, A30 and A37. Each
   is a release behaviour or datum inside a packed `MAIN/DATA/*.EXE`, which nothing here unpacks.
   *(2026-10-29, D49: A23 left this list — PLZPART's camera path, sine table and rotation are read
-  from the unpacked image; what it still carries is CPU timing, below.)*
+  from the unpacked image; what it still carries is CPU timing, below.)* *(2026-10-29, D49: A9 and
+  A20 left it too — ALKU's font padding is zero in its image (A9 closed), and its credits loop and
+  closing routine are read from it; A20 still carries the batches' phase and the spin's `f`, CPU time
+  and session state.)*
 - **What the oracle cannot see**: A5 for 439–446 and A7 for 444–450 (the index plane is
   unreadable there), A12, A13, A23 (the four band frames' palette-timing residue), A24, A26, A27,
   A35, A41, A42, A44, A54 and A56.
@@ -70,7 +73,8 @@ derivation, A14's (a), A5 for 430–438 and A7 for 436–443):
 - **Unreachable paths**: A3, A15 and A51.
 - **Unattributed, or needing a constant D24 does not allow without its own measurement**: A6 (no
   session reproduces 4500/4600), A38 (the mid-run restart's +5), A48 (where mode 4's overrun falls),
-  A50 (two bytes no compared frame exercises), A53 (the full run: U2A's opening 47 frames late,
+  A50 (two bytes no compared frame exercises), A53 (the full run: U2A's opening 47 frames late —
+  *5 frames early since 2026-10-29, ALKU's release loop, A20* —
   PANICEND's first frame, and the loader's frames, D31), A55 (what a reload puts in the ring) and
   A61 (the loop seam's tail, Δ, the +5's recipe part and ALKU's pass-2 lag) and A62 (the
   `fonapois()` text clear an ESC in ALKU skips, unmeasured).
@@ -1704,7 +1708,7 @@ of its output.
 
 | part | reference keyframes | planes compared | the verdict |
 |---|---|---|---|
-| ALKU | 900, 1719, 2719, 5859 | RGB only — all four (176 × 400 = 70,400 > 65,536, so the oracle refuses the indexed read, `reference-indices.md` §1.6) | **0 of 128,000** pixels at 900/1719/2719; **2,353 (1.8383 %)** at 5859, all inside the old text's glyph region — A20's batch phase; 350 of 400 rows byte-identical |
+| ALKU | 900, 1719, 2719, 5859 | RGB only — all four (176 × 400 = 70,400 > 65,536, so the oracle refuses the indexed read, `reference-indices.md` §1.6) | **0 of 128,000** pixels at 900/1719/2719; **2,353 (1.8383 %)** at 5859, all inside the old text's glyph region — A20's batch phase; 350 of 400 rows byte-identical *(2026-10-29: **0** at 5859 — the release's credits loop, read from its image, A20)* |
 | PAM | 7710, 7760, 7830, 7900 | RGB all four; 7900 also carries `.idx` | **0 of 64,000** at all four RGB; 7900's index plane differs in **60,375/64,000**, max delta **194** — the plane is BEGLOGO's white field, not PAM's screen (**A21**, registered not adopted) |
 | DDSTARS | 1900, 3000, 5000, 8000 | RGB only — the emulator names the screen 16-colour and refuses the indexed read (§22.5) | **0 differing bytes** at all four |
 | DOTS (`minvball`) | 10900, 11200, 11800, 12400 | RGB only — every keyframe is a moving frame | **67 / 63 / 37 / 25** px of 64,000 (0.1047 / 0.0984 / 0.0578 / 0.0391 %), the release's coincident-dot overlay and the fitted `j` (**A19**) — *superseded:* the residual was the port's own borrow in the z rotation, removed in Phase 9 Task 9; all four are now **0** px (`bugs.md` §18.1, A19) |
@@ -2954,13 +2958,15 @@ exit 0
 
 Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count *(2026-10-29: `fullrun/13-endscrl`'s three are now 0 — ENDSCRL reads the release's image, A11; today's `cargo xtask rediff` is 51 entries and 239 frames, **170** at 0 and **69** at a registered count; later the same day `cred`'s three and `fullrun/12-cred`'s 40600 are 0 too — CRED reads its 21 screens from the release's image, A10 retired — so **174** at 0 and **65** at a registered count; later again `plzpart/cube`'s two and
 `plzpart/band`'s 8500 and 8600 are 0 — PLZPART's camera path and rotation are read from the
-release's image, A23 — so **178** at 0 and **61** at a registered count)*. By capture
+release's image, A23 — so **178** at 0 and **61** at a registered count; later again `alku`'s 5859
+is 0 — ALKU runs the release's credits loop, read from its image, A20 — so **179** at 0 and **60** at
+a registered count)*. By capture
 (frames, frames at 0, the non-zero counts in table order, and the entries that register them):
 
 | capture | frames | at 0 | non-zero counts | register of the non-zero frames |
 |---|---|---|---|---|
 | `3dsinfld` | 4 | 4 | — | — |
-| `alku` | 4 | 3 | 2353 | A20 |
+| `alku` | 4 | 4 | — (2026-10-29, the release's loop read from its image; was 2353, A20) | — |
 | `beglogo-leadin/even` | 11 | 11 | — | — |
 | `beglogo-leadin/odd` | 10 | 10 | — | — |
 | `beglogo-leadin/plane-436` | 2 | 1 | 127998 | A5 |
@@ -3040,6 +3046,9 @@ cue exit      16630  16632          +2
 test the_seam_table_is_the_ports_own_frames ... ok
 (…)
 ```
+
+*(2026-10-29: `u2a 5961 5956 -5 -5` and `pam … -3 +2` — ALKU runs the release's loop and closing
+routine, and U2A's row is its start, A20, A53.)*
 
 and the music against the traces, from the same run:
 

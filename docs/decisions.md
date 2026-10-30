@@ -3282,3 +3282,13 @@ and `rotate` are translated from the image's code, which differs from the tree's
 bands. Both cube keyframes are now exact (were 17.577 % / 95.570 %), A23 is rewritten around what
 is left (a palette-timing residue on four band frames), and A22's exit index 4 is now read in the
 image (`cmp word [0192h],4` at `0x1181c`) rather than only measured.
+
+*(2026-10-29.)* **ALKU's credits loop is the fourth.** The unpacked image's `main` (`0x0f0d`) runs
+while `a <= 320` (`0x1380`), its `do_scroll` returns past 320 (`0x2315`), `fmaketext` runs only when
+`aa < 304` (`0x134f`), and every pass ends `do_scroll(tptr<5 ? 1 : 0)` (`0x136c`): after the empty
+fifth batch the text is no longer carried and the pass spins. After the loop a closing routine the
+tree does not have (`0x13ce`) rebuilds the last window as the 320×200 page U2A's background continues
+and `exit(0)`s; `prt` and the strip's conversion cover 29 rows. 5859 is exact (was 2,353, A20), U2A
+starts at 5956 (was 6008, A53), and the font's padding rows are zero (A9 closed). What the image
+cannot answer — the spin's `f` at the loop's end, which decides the 64-tick final fade — is taken from
+the frames (no fade) and registered in A20, with the batches' phase.

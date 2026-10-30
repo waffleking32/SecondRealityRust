@@ -414,7 +414,9 @@ the negative `dl`; the part-2 keyframe 1050 and the part-3 1600 carry the dimmed
 
 Tests are in `bins/secondreality/src/parts/alku.rs`. Frames are `reference/parts/alku/` — 900, 1719,
 2719, 5859 (`reference-indices.md` §4); the port is byte-identical at the first three and 2,353 of
-128,000 pixels off at 5859, which is A20's text-batch phase, not any entry below.
+128,000 pixels off at 5859, which is A20's text-batch phase, not any entry below. *(2026-10-29: 0 at
+5859 too — the port runs the release's credits loop, read from its image, A20; the entries below are
+the release's as well as the tree's, and the release's own differences are `alku.md` §12.)*
 
 ### 10.1 The palette write-order alias — `palette[192..768] = palette[..576]`
 
@@ -434,7 +436,9 @@ every card. **Frame.** 1719 and 2719 (cards mid-hold): 0 of 128,000 pixels diffe
 inside the row. **Frame.** None: the pan ends at `a = 319` and the filed 5859 is mid-scroll (`a = 309`
 displayed), so no filed frame is at `a = 316`. **Test.**
 `the_picture_blit_writes_the_band_and_the_refresh_reads_past_the_row` (column 165 of `a = 316` is
-`picture[660..664] == picture[640+20..640+24]`).
+`picture[660..664] == picture[640+20..640+24]`). *(2026-10-29: the release's loop runs to `a = 321`,
+`alku.md` §12, so its last refresh is `a = 320`'s, columns 664-667 — the next row's 24-27 — in byte
+columns the last window does not show.)*
 
 ### 10.3 `memset` clears 186×320 of a 186×352 text buffer
 

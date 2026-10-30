@@ -56,6 +56,13 @@ const PLAN: [&str; 19] = [
 enum First {
     /// The run's first frame: ALKU at the boot's 404.
     Anchor,
+    /// The part's own first frame, its start: U2A's, whose screen nothing distinguishes from
+    /// the one before it. The release's ALKU closes by rebuilding its last window as the
+    /// 320×200 page U2A's background is (image `0x13ce`, A20), so the screen's geometry
+    /// changes two frames before U2A starts and its first frame is the closing page's bytes.
+    /// The original's 5961 is the first 320×200 frame by the same reading — ALKU's closing
+    /// page or U2A's identical background, which no frame tells apart (A53).
+    Start,
     /// The first frame of this geometry: the frame before is another one.
     Geometry(u64, u64),
     /// The first frame that differs from the one before it, after a frame that held.
@@ -78,7 +85,7 @@ enum First {
 /// ENDSCRL l2r's 46277.
 const RULES: [(&str, First); 19] = [
     ("alku", First::Anchor),
-    ("u2a", First::Geometry(320, 200)),
+    ("u2a", First::Start),
     ("pam", First::Bytes("02-u2a-pam", 7707)),
     ("beglogo", First::Change),
     ("glenz", First::Leaves("03-beglogo", 8300)),
@@ -315,6 +322,7 @@ fn meets(run: &Run, rule: First, index: u32) -> bool {
     let same = |a: &Shot, b: &Shot| a.geometry == b.geometry && a.hash == b.hash;
     match rule {
         First::Anchor => unreachable!("the anchor is the run's first start"),
+        First::Start => unreachable!("a start is the part's own"),
         First::Geometry(width, height) => {
             now.geometry == (width, height) && before.geometry != (width, height)
         }
@@ -395,9 +403,12 @@ fn the_seam_table_is_the_ports_own_frames() {
 
     println!("part        original  port   difference  change");
     let mut previous: Option<i64> = None;
-    for (seam, (_, rule)) in FULLRUN_SEAMS.iter().zip(RULES) {
+    for (part, (seam, (_, rule))) in FULLRUN_SEAMS.iter().zip(RULES).enumerate() {
         if let First::Anchor = rule {
             assert_eq!((seam.port, seam.start), (404, 404));
+        } else if let First::Start = rule {
+            assert_eq!(seam.port, seam.start, "{}: its first frame is its start", seam.part);
+            assert_eq!(run.timeline[&(seam.port - 1)].part, FULLRUN_SEAMS[part - 1].part);
         } else {
             // The first frame that meets the rule at or after the part's start is the pinned
             // one: none of the frames between them meets it.

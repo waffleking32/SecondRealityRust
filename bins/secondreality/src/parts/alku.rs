@@ -18,6 +18,29 @@
 //!    the picture, each gated on `dis_sync() < 4+tptr`.
 //! 5. `:147-152` — the exit: the final fade, `fonapois`, `close_copper`.
 //!
+//! # The release's build (D49)
+//!
+//! The port runs the shipped `MAIN/DATA/ALKU.EXE`'s loop, read from its unpacked image
+//! (`sr_assets::exe::unpack`; the offsets below are the image's, and
+//! `the_release_loop_and_its_closing_routine_are_the_images` pins their bytes). It differs
+//! from the tree's `MAIN.C` in five places:
+//!
+//! - the loop runs while `a <= 320` (`0x1380`), and `do_scroll` returns at once past 320
+//!   (`0x2315`);
+//! - `fmaketext` runs only when `aa < 304` (`0x134f`), not 308;
+//! - every pass ends `do_scroll(tptr<5 ? 1 : 0)` (`0x136c`): once the fifth batch (the
+//!   empty `case 4`) has cleared the text, the window no longer carries it, and the pass
+//!   no longer waits — it spins at CPU speed ([`MainPhase::Spin`]);
+//! - after the loop, `fonapois()` is followed by a closing routine the tree does not have
+//!   (`0x13ce`): it snaps the window to `p=0` and pan 0, compacts the last window into a
+//!   200-row page shown with CRTC 9 = 1, copies that to a linear page at `0xc000` with
+//!   every pixel moved to entries 192-255 and CRTC 0x13 = 0x28, and `exit(0)`s — the
+//!   320×200 screen U2A's background then continues ([`HandoverStep`]);
+//! - `prt` draws 29 rows (`0x1d49`) and `init` converts the strip's first 29 (`0x1857`).
+//!
+//! The release's `f` when the spin ends is its CPU's; the port takes the frames' answer
+//! ([`SPIN_LEAVES_F_ABOVE_THRESHOLD`], A20).
+//!
 //! # The display: 320×400 from a 640×200 picture
 //!
 //! `tw_opengraph` leaves the VGA in 320×400 with a **176-byte** line offset
@@ -92,14 +115,16 @@
 //!   repeats entries 0-63 three times, so every picture entry 64-255 is
 //!   entry `v mod 64`. That is what makes the text XOR invisible over the
 //!   picture (its values keep the low six bits).
-//! - The refresh reads the source dword at `(a/4+86)*4`; the last refresh the
-//!   scroll reaches is `a=316`'s, whose dword is columns 660-663 of a
+//! - The refresh reads the source dword at `(a/4+86)*4`; under the tree's loop
+//!   the last refresh is `a=316`'s, whose dword is columns 660-663 of a
 //!   640-column row. The last byte, 663, is past the picture's row and comes
-//!   from the *next* one; the port reads the flat picture the same way.
+//!   from the *next* one; the port reads the flat picture the same way. The
+//!   release's loop reaches `a=320`'s too (columns 664-667).
 //! - `memset(tbuf,0,186*320)` clears the first 59,520 bytes of a 65,472-byte
 //!   array, so the last 16 rows of `tbuf` keep the previous batch.
 //! - The final `dofade(palette2,palette)` (`MAIN.C:147-149`) only touches
-//!   entries 64-255, which the picture never indexes; it is kept as written.
+//!   entries 64-255, which the picture never indexes; it is kept as written,
+//!   and runs when the loop ends on a blocking pass with `f > 7`.
 //!
 //! # The assets, and the three palette entries the release ships
 //!
@@ -119,8 +144,9 @@
 //! at 784 (`asset-inventory.md` §8, A9). The port builds
 //! `sr_assets::font::Font` from the decoded strip with a 20×30 cell — the
 //! routine reads 32 rows of a 30-row strip, and the two rows past the file
-//! are the linker's uninitialised padding; A9's resolution stands. A test
-//! shows the one-byte shift moves no glyph the cards use.
+//! are zero in the release's image (A9). A test shows the one-byte shift
+//! moves no glyph the cards use, and another that the release's font is this
+//! strip but for one glyph the part never draws.
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -176,9 +202,17 @@ const FONT_PATH: &str = "assets/ALKU/FONA.UH";
 /// columns and the strip is a whole number of 20-column cells.
 const FONT_CELL: (u16, u16) = (20, 30);
 const FONT_FIRST: char = 'A';
-/// `MAIN.C:218`/`:225` scan 32 rows; the strip has 30 and A9 says the last two
-/// are linker padding. The port draws the 30 the file holds.
+/// The strip's rows. `faddtext`/`addtext` read 32 (`MAIN.C:335`, `:428`; the release's
+/// `cmp word [bp-4],20h`, image `0x24c9`), and rows 30 and 31 are zero in the release's
+/// image (A9), so the 30 the file holds are everything those loops can ink.
 const FONT_ROWS: usize = 30;
+/// The release converts the 2-bit strip to 0x40/0x80/0xC0 in its first **29** rows
+/// (`cmp word [bp-8],1dh`, image `0x1857`; the tree's `MAIN.C:169` says 32), so row 29
+/// keeps its raw 1/2/3 (A9).
+const FONT_CONVERTED_ROWS: usize = 29;
+/// The release's `prt` draws **29** rows: `y2w=y+1dh` (`add ax,1dh`, image `0x1d49`), where
+/// the tree's `MAIN.C:274` has `y+32`.
+const PRT_ROWS: usize = 29;
 /// `MAIN.C:40`'s `fonaorder`, the strip's 76 ink runs in order.
 const FONT_ORDER: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:\x8f\x8f()+-*='\x8f\x99";
@@ -192,8 +226,18 @@ const NO_CELL: u8 = u8::MAX;
 
 /// `MAIN.C:7` `#define SCRLF 9`.
 const SCRLF: u16 = 9;
-/// `MAIN.C:87` `a<320`; the inner wait's own bound is `a<319` (`:138`).
-const SCROLL_END: u16 = 320;
+/// The release's loop runs **while `a <= 320`** (`cmp word [9eh],140h; jg`, image
+/// `0x1380`), where the tree's `MAIN.C:87` has `a<320`; the inner wait's own bound is still
+/// `a<319` (`:138`, image `0x1341`).
+const SCROLL_LAST: u16 = 320;
+/// The release's `do_scroll` begins `if(a>320) return 0;` (`cmp word [9eh],140h; jle`,
+/// image `0x2315`), a guard the tree's `MAIN.C:397` does not have.
+const SCROLL_GUARD: u16 = 320;
+/// The release's every pass ends `do_scroll(tptr<5 ? 1 : 0)` (`cmp word [0a2h],5; jge`,
+/// image `0x136c`), where the tree's `MAIN.C:145` is `do_scroll(1)`: once the fifth batch
+/// (the empty `case 4`) is taken, the text is no longer carried with the window, and the
+/// pass no longer waits for the step.
+const SCROLL_TEXT_BATCHES: usize = 5;
 /// `MAIN.C:47` `int a=0,p=0,tptr=0` — the picture phase starts them at 1,1.
 const SCROLL_A_START: u16 = 1;
 const SCROLL_P_START: u16 = 1;
@@ -207,8 +251,9 @@ const CARD_FADE_STEPS: u32 = 64;
 const CARD_HOLD_TICKS: u32 = 300;
 /// `MAIN.C:148` `f>63/SCRLF` — `63/9 = 7`.
 const FINAL_FADE_THRESHOLD: i32 = 7;
-/// `MAIN.C:141` `if(aa<320-12) fmaketext(aa+16)`.
-const MAKETEXT_LIMIT: u16 = 320 - 12;
+/// The release's `if(aa<304) fmaketext(aa+16)` (`cmp word [9eh],130h; jge`, image
+/// `0x134f`), where the tree's `MAIN.C:141` has `320-12`, 308.
+const MAKETEXT_LIMIT: u16 = 304;
 const MAKETEXT_LEAD: u16 = 16;
 
 /// `MAIN.C:101` `memset(tbuf,0,186*320)` on the 186×352 array.
@@ -227,6 +272,42 @@ const FONAPOIS_END: usize = 160 * (64 + 256);
 const FFONAPOIS_FIRST: usize = 40 * 64;
 const FFONAPOIS_END: usize = 40 * (64 + 256 + 10);
 const FADE_MASK: u8 = 0x3F;
+
+/// What the release's `f` is when its loop ends on the spin (see [`MainPhase::Spin`]): its
+/// `if(f>7)` (image `0x13a2`) reads a counter the spin has stepped once a pass at CPU speed,
+/// wrapping through all 65,536 values, so the release's answer is its session's CPU time.
+/// The port takes the answer the release's frames give — **not above 7, no final fade** —
+/// because with the 64-tick fade ALKU would end after the original's U2A has started (boot
+/// 5961, `reference/parts/fullrun`); A20 registers it.
+const SPIN_LEAVES_F_ABOVE_THRESHOLD: bool = false;
+
+// ------------------------------------------------------ the release's hand-over --
+
+/// The release's `main` ends in a routine the tree's `MAIN.C` does not have (image
+/// `0x13ce`-`0x1723`, called at `0x13bd` after `fonapois`): it rebuilds the screen as a
+/// linear 320×200 page at `0xc000` and leaves the part with `exit(0)`. Its compaction reads
+/// memory row `2*min(y,180)` (`cmp word [bp-8],0b4h`, image `0x14e1`; `imul 160h`).
+const HANDOVER_CLAMP_ROW: usize = 180;
+/// `add dx,738h` (image `0x1511`): the compacted rows start 10 rows and 88 bytes in.
+const HANDOVER_COMPACT_BASE: usize = 0x738;
+/// `cmp word [bp-8],0c8h` (`0x1521`, `0x159d`) rows of `push 50h` (`0x14d2`) bytes: 320
+/// pixels by 200.
+const HANDOVER_ROWS: usize = 200;
+const HANDOVER_ROW_BYTES: usize = 0x50;
+/// `mov es:[10h],0c000h` (image `0x169b`): `cop_start` on the linear page, whose rows are
+/// `0x50` bytes apart (`imul 50h; add ax,0c000h`, `0x1589`).
+const HANDOVER_PAGE: usize = 0xc000;
+/// The recolouring loops' far pointer is `9fffh:0c000h` (`0x15be`, `0x15c3`) — video byte
+/// `0xbff0` — for `0x4000` bytes a plane (`0x15dd`).
+const HANDOVER_RECOLOUR_FIRST: usize = 0xbff0;
+const HANDOVER_RECOLOUR_BYTES: usize = 0x4000;
+/// `and al,3fh; add al,0c0h` (`0x15d0`): the picture moved to entries 192-255, which the
+/// palette alias (`MAIN.C:212`) makes the same colours.
+const HANDOVER_RECOLOUR_BASE: u8 = 0xC0;
+/// CRTC 9 = 1 (`mov ax,0109h`, image `0x1559`) shows each memory row twice — the 320×200
+/// the emulator captures — and CRTC 0x13 = 0x28 (`mov ax,2813h`, `0x16be`) is the linear
+/// page's 80 bytes a line.
+const HANDOVER_VIEW_HEIGHT: u16 = 200;
 
 // -------------------------------------------------------------- the music --
 
@@ -285,7 +366,8 @@ impl Strip {
         usize::from(self.width[usize::from(ch)])
     }
 
-    /// `MAIN.C:173-181`: a strip value 1/2/3 becomes 0x40/0x80/0xC0.
+    /// `MAIN.C:173-181`: a strip value 1/2/3 becomes 0x40/0x80/0xC0 in the rows the
+    /// release converts ([`FONT_CONVERTED_ROWS`]); row 29 is the raw value.
     fn ink(&self, ch: u8, column: usize, row: usize) -> u8 {
         let Some(glyph) = self.glyph(ch) else {
             return 0;
@@ -294,7 +376,12 @@ impl Strip {
         if column >= width || row >= FONT_ROWS {
             return 0;
         }
-        match glyph[row * width + column] & 3 {
+        let raw = glyph[row * width + column];
+        if row >= FONT_CONVERTED_ROWS {
+            // The release's row 29 is left as the file has it (image `0x1857`).
+            return raw;
+        }
+        match raw & 3 {
             1 => 0x40,
             2 => 0x80,
             3 => 0xC0,
@@ -420,6 +507,8 @@ enum Stage {
     Main(MainPhase),
     /// `MAIN.C:147-149`: the final `dofade(palette2,palette)`, 64 steps.
     FinalFade { a: u32 },
+    /// The release's closing routine (image `0x13ce`), a step per copper frame.
+    Handover(HandoverStep),
     /// The part has ended and keeps its last frame.
     Done,
 }
@@ -442,6 +531,28 @@ enum MainPhase {
     Tail { scrl: u16 },
     /// The outer loop's blocking `do_scroll(1)` (`:145`).
     Outer,
+    /// The release's `do_scroll(0)` once `tptr` has reached 5 (image `0x136c`): the call
+    /// does not wait, so the pass spins at CPU speed, stepping the window on the tick its
+    /// nine frames are up and running the `f` chain in between (see
+    /// [`SPIN_LEAVES_F_ABOVE_THRESHOLD`]).
+    Spin,
+}
+
+/// The release's closing routine (image `0x13ce`-`0x1723`). Each step after the first
+/// begins with the wait for `frame_count` the step before it set to zero
+/// (`while(frame_count==0);`, `0x1406`, `0x14b0`, `0x1549`, `0x16ae`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HandoverStep {
+    /// `0x1463`-`0x14a9`: `p=0`, `cop_start=a/4`, `cop_scrl=0`, `cop_pal=palette`.
+    Snap,
+    /// `0x14bd`-`0x1542`: write mode 1, the compaction, `cop_start=a/4+738h`.
+    Compact,
+    /// `0x1556`-`0x16a7`: CRTC 9 = 1, the linear copy to `0xc000`, the recolouring,
+    /// `cop_start=0c000h`.
+    Linear,
+    /// `0x16bb`-`0x171b`: CRTC 0x13 = 0x28, the three page copies, CRTC 9 = 0x41,
+    /// `close_copper`, `exit(0)`.
+    Exit,
 }
 
 /// Which of the three int[768] tables the fade applier adds this phase.
@@ -628,7 +739,8 @@ impl Alku {
         }
     }
 
-    /// `MAIN.C:272-291` `prt`: OR a glyph into the video memory at (`x`, `y`).
+    /// `MAIN.C:272-291` `prt`: OR a glyph into the video memory at (`x`, `y`), the
+    /// release's 29 rows ([`PRT_ROWS`]).
     fn prt(&self, video: &mut [u8], x: usize, y: usize, text: &[u8]) {
         let Some(strip) = self.strip.as_ref() else {
             return;
@@ -637,9 +749,7 @@ impl Alku {
         for &ch in text {
             let width = strip.width(ch);
             for column in 0..width {
-                for row in 0..32usize {
-                    // Rows 30 and 31 are the linker's padding (A9); the loop
-                    // keeps the source's bound and inks nothing there.
+                for row in 0..PRT_ROWS {
                     let ink = strip.ink(ch, column, row);
                     let at = (y + row) * LINE_PIXELS + pen + column;
                     if ink != 0 && at < video.len() {
@@ -827,8 +937,12 @@ impl Alku {
         }
     }
 
-    /// `MAIN.C:397-412`'s non-blocking half: one step if nine frames are up.
+    /// `MAIN.C:397-412`'s non-blocking half: one step if nine frames are up. The
+    /// release's `if(a>320) return 0;` comes first (image `0x2315`).
     fn do_scroll0(&mut self, video: &mut [u8]) {
+        if self.a > SCROLL_GUARD {
+            return;
+        }
         let count = self.shared.borrow().frame_count;
         if count >= SCRLF {
             self.shared.borrow_mut().frame_count = count - SCRLF;
@@ -837,8 +951,12 @@ impl Alku {
     }
 
     /// The blocking half: `false` when the tick was spent waiting, `true` when
-    /// a step happened.
+    /// the call returned — with a step, or at once past the release's guard (image
+    /// `0x2315`).
     fn blocking_scroll(&mut self, video: &mut [u8], mode: u8) -> bool {
+        if self.a > SCROLL_GUARD {
+            return true;
+        }
         let count = self.shared.borrow().frame_count;
         if count < SCRLF {
             return false;
@@ -1035,11 +1153,13 @@ impl Alku {
                         self.stage = Stage::FinalFade { a: a + 1 };
                         return PartStatus::Continuing;
                     }
-                    // `MAIN.C:150`: the final `fonapois()` after the fade.
+                    // `MAIN.C:150`: the final `fonapois()` after the fade, then the
+                    // release's closing routine (image `0x13bd`).
                     self.fonapois(video);
-                    self.stage = Stage::Done;
-                    return PartStatus::Finished;
+                    self.stage = Stage::Handover(HandoverStep::Snap);
+                    return PartStatus::Continuing;
                 }
+                Stage::Handover(_) => return PartStatus::Continuing,
                 Stage::Main(_) => return self.main_tick(video, code),
             }
         }
@@ -1105,29 +1225,172 @@ impl Alku {
                     self.stage = Stage::Main(MainPhase::Outer);
                 }
                 Stage::Main(MainPhase::Outer) => {
+                    if self.tptr >= SCROLL_TEXT_BATCHES {
+                        // The release's `do_scroll(0)` (image `0x1377`): the pass
+                        // stops waiting for the step.
+                        self.begin_spin(video);
+                        if self.a > SCROLL_LAST {
+                            return self.end_loop(video, SPIN_LEAVES_F_ABOVE_THRESHOLD);
+                        }
+                        return PartStatus::Continuing;
+                    }
                     if !self.blocking_scroll(video, 1) {
                         return PartStatus::Continuing;
                     }
-                    if self.a >= SCROLL_END {
-                        // `MAIN.C:147-149`: the final fade only when `f>7`,
-                        // and its first step is this tick's (the rest are the
-                        // `Stage::FinalFade` arm above).
-                        if self.f > FINAL_FADE_THRESHOLD {
-                            self.dofade_step(&self.palette2, &self.palette, 0);
-                            self.shared.borrow_mut().frame_count = 0;
-                            self.stage = Stage::FinalFade { a: 1 };
-                            return PartStatus::Continuing;
-                        }
-                        // `MAIN.C:150` runs `fonapois()` on this path too.
-                        self.fonapois(video);
-                        self.stage = Stage::Done;
-                        return PartStatus::Finished;
+                    if self.a > SCROLL_LAST {
+                        return self.end_loop(video, self.f > FINAL_FADE_THRESHOLD);
                     }
                     self.stage = Stage::Main(MainPhase::Branch);
+                }
+                Stage::Main(MainPhase::Spin) => {
+                    self.do_scroll0(video);
+                    if self.a > SCROLL_LAST {
+                        return self.end_loop(video, SPIN_LEAVES_F_ABOVE_THRESHOLD);
+                    }
+                    return PartStatus::Continuing;
                 }
                 _ => return PartStatus::Finished,
             }
         }
+    }
+
+    /// The first pass of the release's spin (see [`MainPhase::Spin`]), on the tick the
+    /// fifth batch ends. Its `do_scroll(0)` steps only if nine frames are up; the passes
+    /// after it take the chain's first two arms within microseconds — `f==0` sets the
+    /// `textin` fade and adds 20, thirty passes take `f` to 50, which sets the `textout`
+    /// fade (`MAIN.C:89-98`, image `0x1134`-`0x1181`) — and from there `f` counts passes at
+    /// CPU speed, which the port does not: it holds `f` at 51 and takes the loop's end from
+    /// [`SPIN_LEAVES_F_ABOVE_THRESHOLD`]. The fades touch entries 64-255 only, which no
+    /// pixel uses once the fifth batch's `ffonapois` has cleared the text.
+    fn begin_spin(&mut self, video: &mut [u8]) {
+        self.do_scroll0(video);
+        if self.a > SCROLL_LAST {
+            return;
+        }
+        if self.f == 0 {
+            self.set_fade_source(FadeSource::TextIn);
+            self.shared.borrow_mut().cop_dofade = TEXT_FADE_STEPS;
+            self.f = 50;
+        }
+        if self.f == 50 {
+            self.set_fade_source(FadeSource::TextOut);
+            self.shared.borrow_mut().cop_dofade = TEXT_FADE_STEPS;
+            self.f = 51;
+        }
+        self.stage = Stage::Main(MainPhase::Spin);
+    }
+
+    /// The loop has ended (`a > 320`, image `0x1380`). The release's `if(dis_exit())`
+    /// call of its closing routine (`0x1394`) is the port's exit path in [`Part::frame`];
+    /// then `if(f>7) dofade(palette2,palette)` (`0x13a2`, `MAIN.C:147-149`), `fonapois()`
+    /// (`0x13b8`) and the closing routine (`0x13bd`).
+    fn end_loop(&mut self, video: &mut [u8], fade: bool) -> PartStatus {
+        if fade {
+            // The final fade's first step is this tick's (the rest are the
+            // `Stage::FinalFade` arm).
+            self.dofade_step(&self.palette2, &self.palette, 0);
+            self.shared.borrow_mut().frame_count = 0;
+            self.stage = Stage::FinalFade { a: 1 };
+            return PartStatus::Continuing;
+        }
+        self.fonapois(video);
+        self.stage = Stage::Handover(HandoverStep::Snap);
+        PartStatus::Continuing
+    }
+
+    /// One tick of the release's closing routine (image `0x13ce`-`0x1723`).
+    ///
+    /// Each step's CRTC writes are the part's own `out`s, made right after the wait for the
+    /// copper's frame — in the retrace, so on the hardware they reach the frame the start
+    /// address `copper1` wrote before it does. The start is slot 1's, which the next tick's
+    /// frame reads. The engine sizes a frame from the view as the tick begins, so CRTC 9's
+    /// 200 lines are written on the tick that sets the compacted start (its own frame still
+    /// composes 400 lines at the old start); CRTC 0x13's stride, which the compose reads at
+    /// once, is written on the tick whose frame first reads the linear page. (The emulator
+    /// defers a CRTC 9 change by half a frame, `dosbox-automation`'s `VGA_StartResize`, so
+    /// its capture holds one frame of the compacted page that turns double-scanned at line
+    /// 185 — the original's 5950, `reference-indices.md` §4.5, which
+    /// `the_originals_5950_is_the_compacted_page_resized_mid_frame` matches line for line;
+    /// A20.)
+    ///
+    /// The three page copies of the last step (`0x16c2`-`0x1703`, 16,000 bytes from
+    /// `9fffh:0c000h` to `0a000h:0`, `:4000h` and `9fffh:8000h`) are not made: nothing
+    /// displays them before the part exits (the view stays on `0xc000`), and the port's
+    /// video memory is 256,000 pixels (D16), so the page at `0xc000` wraps its last 4,608
+    /// pixels onto pixel 0, which the first copy would overwrite on screen.
+    fn handover_tick(&mut self, ctx: &mut PartCtx) -> PartStatus {
+        let Stage::Handover(step) = self.stage else {
+            return PartStatus::Continuing;
+        };
+        if step != HandoverStep::Snap && self.shared.borrow().frame_count == 0 {
+            return PartStatus::Continuing;
+        }
+        let a = usize::from(self.a);
+        let video = ctx.surface.pixels_mut();
+        match step {
+            HandoverStep::Snap => {
+                // `0x142a`-`0x1460`: three `memcpy(palette+64*3*k, palette, 192)`, which
+                // repeat what `MAIN.C:212`'s alias already holds.
+                self.p = 0;
+                let palette = self.palette;
+                let mut shared = self.shared.borrow_mut();
+                shared.cop_start = (a / 4) as u16;
+                shared.cop_scrl = 0;
+                for (entry, rgb) in palette.iter().enumerate() {
+                    shared.cop_pal[entry * 3..entry * 3 + 3].copy_from_slice(rgb);
+                }
+                shared.do_pal = true;
+                shared.frame_count = 0;
+                drop(shared);
+                self.stage = Stage::Handover(HandoverStep::Compact);
+            }
+            HandoverStep::Compact => {
+                // Write mode 1: a latched copy of all four planes, 80 bytes a row.
+                for y in 0..HANDOVER_ROWS {
+                    let to = a / 4 + y * LINE_BYTES + HANDOVER_COMPACT_BASE;
+                    let from = a / 4 + y.min(HANDOVER_CLAMP_ROW) * 2 * LINE_BYTES;
+                    copy_bytes(video, from, to, HANDOVER_ROW_BYTES);
+                }
+                let mut shared = self.shared.borrow_mut();
+                shared.cop_start = (a / 4 + HANDOVER_COMPACT_BASE) as u16;
+                shared.frame_count = 0;
+                drop(shared);
+                // `0x1556`: CRTC 9 = 1, each memory row shown twice (the next frame's).
+                ctx.view.height = HANDOVER_VIEW_HEIGHT;
+                self.stage = Stage::Handover(HandoverStep::Linear);
+            }
+            HandoverStep::Linear => {
+                for y in 0..HANDOVER_ROWS {
+                    let to = HANDOVER_PAGE + y * HANDOVER_ROW_BYTES;
+                    let from = a / 4 + y * LINE_BYTES + HANDOVER_COMPACT_BASE;
+                    copy_bytes(video, from, to, HANDOVER_ROW_BYTES);
+                }
+                // Write mode 0, a plane at a time (the order cannot matter).
+                let len = video.len();
+                for byte in
+                    HANDOVER_RECOLOUR_FIRST..HANDOVER_RECOLOUR_FIRST + HANDOVER_RECOLOUR_BYTES
+                {
+                    for plane in 0..PIXELS_PER_BYTE {
+                        let at = (byte * PIXELS_PER_BYTE + plane) % len;
+                        video[at] = (video[at] & FADE_MASK).wrapping_add(HANDOVER_RECOLOUR_BASE);
+                    }
+                }
+                let mut shared = self.shared.borrow_mut();
+                shared.cop_start = HANDOVER_PAGE as u16;
+                shared.frame_count = 0;
+                drop(shared);
+                self.stage = Stage::Handover(HandoverStep::Exit);
+            }
+            HandoverStep::Exit => {
+                // `0x16bb`: CRTC 0x13 = 0x28, the linear page's 80 bytes a line.
+                ctx.view.y_line_offset = Some((HANDOVER_ROW_BYTES * PIXELS_PER_BYTE) as u16);
+                // `0x170d` CRTC 9 = 0x41 keeps the double scan; `close_copper` (`0x1714`)
+                // and `exit(0)` (`0x171b`) are the part's end.
+                self.stage = Stage::Done;
+                return PartStatus::Finished;
+            }
+        }
+        PartStatus::Continuing
     }
 
     /// Read the assets and prepare the screen; see the module docs.
@@ -1281,6 +1544,19 @@ impl Alku {
     }
 }
 
+/// A latched copy (write mode 1): `count` plane bytes from `from` to `to`, all four planes,
+/// in ascending order as the release's byte loop (image `0x1724`) makes it. Addresses past
+/// the port's video memory wrap, as the view reads them.
+fn copy_bytes(video: &mut [u8], from: usize, to: usize, count: usize) {
+    let len = video.len();
+    for byte in 0..count {
+        for plane in 0..PIXELS_PER_BYTE {
+            let value = video[((from + byte) * PIXELS_PER_BYTE + plane) % len];
+            video[((to + byte) * PIXELS_PER_BYTE + plane) % len] = value;
+        }
+    }
+}
+
 fn triple_byte(palette: &Palette768, at: usize) -> u8 {
     palette[at / 3][at % 3]
 }
@@ -1308,9 +1584,17 @@ impl Part for Alku {
             self.stage = Stage::Done;
             return PartStatus::Finished;
         }
+        if matches!(self.stage, Stage::Handover(_)) {
+            return self.handover_tick(ctx);
+        }
         let code = ctx.music().map_or(i32::MIN, |music| music.sync());
         let tick = self.tick;
-        self.tick_stage(ctx.surface.pixels_mut(), code, tick)
+        let status = self.tick_stage(ctx.surface.pixels_mut(), code, tick);
+        // The loop's end runs straight into the closing routine's first step.
+        if self.stage == Stage::Handover(HandoverStep::Snap) {
+            return self.handover_tick(ctx);
+        }
+        status
     }
 }
 
@@ -1935,80 +2219,278 @@ mod tests {
     }
 
     #[test]
-    fn the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase() {
-        // The reference's frame is bare: either its session reached the empty
-        // text batch's `fmaketext` (`MAIN.C:141`, `aa<308`), which rebuilds
-        // `dtau` from the zeroed `tbuf` and erases the old text, or its fade
-        // was elsewhere. The port's trace-faithful phase reaches the batch at
-        // `aa=308` and skips it, so its text survives into the next fade.
-        // **With the post-gate transitions moved by -9 frames — or by +10,
-        // which `the_5859_phase_sensitivity` also finds — the frame is
-        // byte-identical.** That is what makes the pixel machinery, the
-        // palette and the pan exact and the phase the only difference.
-        let tick = 5859 - 404;
-        let (mut rig, mut part) =
-            started_with(Player::scripted(trace_script_after_gate(tick, -9)));
-        while rig.tick < tick {
+    fn the_scrolling_keyframe_is_the_references() {
+        // The release's loop (A20): the fifth batch's `ffonapois` clears the text and
+        // its `do_scroll(tptr<5 ? 1 : 0)` no longer carries it, so 5859 is bare.
+        let key = render_at(5859);
+        assert_eq!(differing_pixels(&key, &reference(5859)), 0, "boot 5859");
+        // The window steps every nine ticks and nothing else moves: the port's 5858 is
+        // the same picture and its 5860 the next step's (14,048 pixels), where the
+        // reference's own session holds 5859-5861 (`reference-indices.md` §4.4).
+        assert_eq!(render_at(5858), key, "5858 is the same step");
+        assert_eq!(differing_pixels(&render_at(5860), &key), 14048, "5860 is the next step");
+    }
+
+    /// The trace's run, stepped until `stop` holds or `last` ticks have run.
+    fn run_until(last: u32, stop: impl Fn(&Alku) -> bool) -> (Rig, Alku) {
+        let (mut rig, mut part) = started_with(Player::scripted(trace_script(last)));
+        while !stop(&part) && rig.tick <= last {
             rig.step(&mut part);
         }
-        let (_, frame) = rig.step_render(&mut part);
-        assert_eq!(
-            differing_pixels(&frame, &reference(5859)),
-            0,
-            "boot 5859 with the batch transitions moved"
-        );
+        (rig, part)
     }
 
     #[test]
-    fn the_final_fade_runs_sixty_four_ticks_when_the_loop_leaves_f_above_seven() {
-        let tick = 6000;
-        let (mut rig, mut part) = started_with(Player::scripted(trace_script(tick)));
-        while !matches!(part.stage, Stage::FinalFade { .. }) && rig.tick <= tick {
+    fn the_fifth_batch_stops_carrying_the_text_and_the_pass_no_longer_waits() {
+        // The trace's fifth batch (`case 4`) ends at a=308 on tick 5429 (boot 5833),
+        // past the release's 304, so no `fmaketext`; the spin's first pass sets the
+        // `textin` and then the `textout` fade.
+        let (mut rig, mut part) =
+            run_until(6000, |part| part.stage == Stage::Main(MainPhase::Spin));
+        assert_eq!(part.stage, Stage::Main(MainPhase::Spin));
+        assert_eq!((rig.tick - 1, part.a, part.tptr, part.f), (5429, 308, 5, 51));
+        assert_eq!(part.shared.borrow().cop_dofade, TEXT_FADE_STEPS);
+        let dtau = part.dtau.clone();
+        // No video byte in the text's rows keeps a text bit, and none gains one: the
+        // window steps every nine ticks without `ascrolltext`.
+        let text_bits = |rig: &Rig| {
+            let first = (TEXT_BASE_ROW + TEXT_FIRST_ROW) * LINE_PIXELS;
+            let end = (TEXT_BASE_ROW + TEXT_FIRST_ROW + TEXT_ROWS) * LINE_PIXELS;
+            rig.surface.pixels()[first..end].iter().filter(|&&v| v & !FADE_MASK != 0).count()
+        };
+        assert_eq!(text_bits(&rig), 0, "the fifth batch's ffonapois cleared the text");
+        let a = part.a;
+        for _ in 0..90 {
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing);
+            assert_eq!(text_bits(&rig), 0);
+        }
+        assert_eq!(part.a, a + 10, "ten steps in ninety ticks: the cadence is unchanged");
+        assert_eq!(part.dtau, dtau, "no fmaketext ran");
+    }
+
+    #[test]
+    fn the_loop_ends_past_320_without_the_final_fade_and_hands_over_in_four_ticks() {
+        let (mut rig, mut part) = run_until(6000, |part| matches!(part.stage, Stage::Handover(_)));
+        // The release's `a<=320` (image `0x1380`): the step from 320 is the last.
+        assert_eq!(part.a, 321);
+        assert_eq!(rig.tick - 1, 5545, "boot 5949");
+        assert_eq!(part.stage, Stage::Handover(HandoverStep::Compact), "the snap ran");
+        assert_eq!(part.p, 0);
+        assert_eq!(part.shared.borrow().cop_start, 80);
+        assert_eq!(part.shared.borrow().cop_scrl, 0);
+        let mut steps = Vec::new();
+        loop {
+            let status = rig.step(&mut part);
+            steps.push((404 + rig.tick - 1, part.stage, status));
+            if status == PartStatus::Finished {
+                break;
+            }
+        }
+        assert_eq!(
+            steps,
+            [
+                (5950, Stage::Handover(HandoverStep::Linear), PartStatus::Continuing),
+                (5951, Stage::Handover(HandoverStep::Exit), PartStatus::Continuing),
+                (5952, Stage::Done, PartStatus::Finished),
+            ],
+            "one step a copper frame, and no 64-tick fade"
+        );
+    }
+
+    /// The frame the tick composes — at the view's geometry as the tick began, as
+    /// `Engine::tick` sizes it — and the view's start and pan.
+    fn step_render_view(rig: &mut Rig, part: &mut Alku) -> (u16, u16, u32, u8, Vec<u8>) {
+        let (width, height) = (rig.view.width, rig.view.height);
+        rig.run_slot(0);
+        let tick = rig.tick;
+        part.frame(&mut rig.ctx(tick));
+        let (start, pan) = (rig.view.start_addr, rig.view.pan);
+        let mut out = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let at = rig.view.source_index(&rig.surface, x, y);
+                let entry = rig.palette.entry(rig.surface.pixels()[at]);
+                out.extend(entry.iter().map(|&c| dac_expand(c)));
+            }
+        }
+        rig.run_slot(1);
+        rig.run_slot(2);
+        rig.tick += 1;
+        (width, height, start, pan, out)
+    }
+
+    #[test]
+    fn the_closing_routine_shows_the_last_window_as_a_320x200_page() {
+        let (mut rig, mut part) = run_until(5544, |_| false);
+        let frames: Vec<_> = (0..4).map(|_| step_render_view(&mut rig, &mut part)).collect();
+        // 5949 is a=319's window (byte 79 + 88, pan 3); 5950 is a=320's, which the snap
+        // repeats (`p=0`, `cop_start=a/4` = 80, pan 0) — both at 320×400.
+        assert_eq!((frames[0].0, frames[0].1, frames[0].2, frames[0].3), (320, 400, 4 * 167, 3));
+        assert_eq!((frames[1].0, frames[1].1, frames[1].2, frames[1].3), (320, 400, 4 * 80, 0));
+        // 5951: CRTC 9 = 1 over the compacted rows — each 400-line pair is one row.
+        assert_eq!((frames[2].0, frames[2].1), (320, HANDOVER_VIEW_HEIGHT));
+        assert_eq!(frames[2].2, (4 * (80 + HANDOVER_COMPACT_BASE)) as u32);
+        let tall = &frames[1].4;
+        let row = 320 * 3;
+        for y in 0..200usize {
+            assert_eq!(
+                &frames[2].4[y * row..(y + 1) * row],
+                &tall[2 * y * row..(2 * y + 1) * row],
+                "row {y} is the 400-line frame's row {}",
+                2 * y
+            );
+        }
+        // 5952: the linear page at 0xc000, 80 bytes a line, every pixel moved to
+        // entries 192-255 — the same colours under the palette alias.
+        assert_eq!(rig.view.start_addr, (HANDOVER_PAGE * PIXELS_PER_BYTE) as u32);
+        assert_eq!(rig.view.y_line_offset, Some(320));
+        assert_eq!(frames[3].4, frames[2].4, "the linear page is the same picture");
+        assert_eq!((frames[3].0, frames[3].1), (320, HANDOVER_VIEW_HEIGHT));
+        for y in 0..200u16 {
+            for x in 0..320u16 {
+                let at = rig.view.source_index(&rig.surface, x, y);
+                assert!(rig.surface.pixels()[at] >= HANDOVER_RECOLOUR_BASE, "({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn the_final_fade_runs_sixty_four_ticks_when_the_blocking_loop_leaves_f_above_seven() {
+        // With no code past 4 the first batch waits out the window (`a<319`), so the
+        // loop ends on the blocking pass with `tptr` 1 and `f` counted: 20 > 7.
+        let last = 6000;
+        let (mut rig, mut part) = started_with(Player::scripted(picture_script(last)));
+        while !matches!(part.stage, Stage::FinalFade { .. }) && rig.tick <= last {
             rig.step(&mut part);
         }
         assert!(
             matches!(part.stage, Stage::FinalFade { .. }),
-            "the scroll loop leaves f above 7, so the final fade runs; got {:?} at f={}",
+            "the loop leaves f above 7, so the final fade runs; got {:?} at f={}",
             part.stage,
             part.f
         );
+        assert_eq!((part.a, part.tptr, part.f), (321, 1, 20));
         let mut fade_ticks = 0u32;
-        let mut status = PartStatus::Continuing;
-        while part.stage != Stage::Done {
-            if matches!(part.stage, Stage::FinalFade { .. }) {
-                fade_ticks += 1;
-            }
-            status = rig.step(&mut part);
+        while matches!(part.stage, Stage::FinalFade { .. }) {
+            fade_ticks += 1;
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing);
             assert!(fade_ticks <= 64, "the fade ran past 64 ticks");
         }
         assert_eq!(fade_ticks, 64, "the final fade is the source's 64 steps");
-        assert_eq!(status, PartStatus::Finished, "and then the part retires");
+        assert_eq!(part.stage, Stage::Handover(HandoverStep::Compact));
+        let mut status = PartStatus::Continuing;
+        for _ in 0..3 {
+            status = rig.step(&mut part);
+        }
+        assert_eq!(status, PartStatus::Finished, "and then the closing routine");
     }
 
+    /// The release's image holds what the port names as constants (D49): the loop, its
+    /// closing routine and the text routines, compared byte for byte at the offsets the
+    /// constants cite (`out/glitches/alku-report.md`; `docs/fidelity/alku.md` §12).
     #[test]
-    fn the_scrolling_keyframes_port_phase_differs_only_in_the_text_xor_pixels() {
-        let key = render_at(5859);
-        let differing = differing_pixels(&key, &reference(5859));
-        assert_eq!(differing, 2358, "the measured residual of the port's own phase");
-        // Every differing pixel is inside the old text's glyph region (rows
-        // 150-243, columns 40-279); the picture band and the black margins are
-        // byte-identical.
-        let expected = reference(5859);
-        for y in 0..400u32 {
-            for x in 0..320u32 {
-                let at = ((y * 320 + x) * 3) as usize;
-                if key[at..at + 3] != expected[at..at + 3] {
-                    assert!(
-                        (150..=243).contains(&y) && (40..=279).contains(&x),
-                        "({x},{y}) differs outside the text's glyph region"
-                    );
+    fn the_release_loop_and_its_closing_routine_are_the_images() {
+        let file = std::fs::read("../../assets/MAIN/DATA/ALKU.EXE").unwrap();
+        let image = sr_assets::exe::unpack(&file).unwrap();
+        let at = |offset: usize, bytes: &[u8]| {
+            assert_eq!(&image.image[offset..offset + bytes.len()], bytes, "image {offset:#x}");
+        };
+        // `for(f=60;a<=320 && !dis_exit();)`: `cmp word [9eh],140h; jg`.
+        at(0x1380, &[0x81, 0x3e, 0x9e, 0x00, 0x40, 0x01, 0x7f]);
+        assert_eq!(u16::from_le_bytes([image.image[0x1384], image.image[0x1385]]), SCROLL_LAST);
+        // The batch wait's `a<319`, the tree's: `cmp word [9eh],13fh; jl`.
+        at(0x1341, &[0x81, 0x3e, 0x9e, 0x00, 0x3f, 0x01, 0x7c]);
+        // `if(a<304) fmaketext(aa+16)`: `cmp word [9eh],130h; jge`, `add ax,10h`.
+        at(0x134f, &[0x81, 0x3e, 0x9e, 0x00, 0x30, 0x01, 0x7d, 0x0b, 0x05, 0x10, 0x00]);
+        assert_eq!(u16::from_le_bytes([image.image[0x1353], image.image[0x1354]]), MAKETEXT_LIMIT);
+        // `do_scroll(tptr<5 ? 1 : 0)`: `cmp word [0a2h],5; jge; push 1; jmp; push 0`.
+        at(0x136c, &[0x83, 0x3e, 0xa2, 0x00, 0x05, 0x7d, 0x04, 0x6a, 0x01, 0xeb, 0x02, 0x6a, 0x00]);
+        assert_eq!(usize::from(image.image[0x1370]), SCROLL_TEXT_BATCHES);
+        // After the loop: `if(f>7)` dofade, `fonapois()`, the closing routine (cs:04ceh).
+        at(0x13a2, &[0x83, 0x7e, 0xfc, 0x07, 0x7e]);
+        assert_eq!(i32::from(image.image[0x13a5]), FINAL_FADE_THRESHOLD);
+        at(0x13b8, &[0x9a, 0x1e, 0x0d, 0xf0, 0x00, 0x9a, 0xce, 0x04, 0xf0, 0x00, 0xc9, 0xcb]);
+        // `do_scroll`'s guard: `cmp word [9eh],140h; jle`.
+        at(0x2315, &[0x81, 0x3e, 0x9e, 0x00, 0x40, 0x01, 0x7e]);
+        assert_eq!(u16::from_le_bytes([image.image[0x2319], image.image[0x231a]]), SCROLL_GUARD);
+        // The closing routine: the clamp, the compacted base, CRTC 9, the page, the
+        // recolouring, CRTC 0x13.
+        at(0x14e1, &[0x81, 0x7e, 0xf8, 0xb4, 0x00]);
+        assert_eq!(usize::from(image.image[0x14e4]), HANDOVER_CLAMP_ROW);
+        at(0x1511, &[0x81, 0xc2, 0x38, 0x07]);
+        assert_eq!(
+            usize::from(u16::from_le_bytes([image.image[0x1513], image.image[0x1514]])),
+            HANDOVER_COMPACT_BASE
+        );
+        at(0x1521, &[0x81, 0x7e, 0xf8, 0xc8, 0x00]);
+        assert_eq!(usize::from(image.image[0x1524]), HANDOVER_ROWS);
+        at(0x14d2, &[0x6a, 0x50]);
+        assert_eq!(usize::from(image.image[0x14d3]), HANDOVER_ROW_BYTES);
+        at(0x1556, &[0xba, 0xd4, 0x03, 0xb8, 0x09, 0x01, 0xef]);
+        at(0x15be, &[0xc7, 0x46, 0xfe, 0xff, 0x9f, 0xc7, 0x46, 0xfc, 0x00, 0xc0]);
+        assert_eq!(0x9fff0 + 0xc000 - 0xa0000, HANDOVER_RECOLOUR_FIRST);
+        at(0x15dd, &[0x81, 0x7e, 0xfa, 0x00, 0x40]);
+        assert_eq!(
+            usize::from(u16::from_le_bytes([image.image[0x15e0], image.image[0x15e1]])),
+            HANDOVER_RECOLOUR_BYTES
+        );
+        at(0x15d0, &[0x24, 0x3f, 0x04, 0xc0]);
+        assert_eq!(image.image[0x15d3], HANDOVER_RECOLOUR_BASE);
+        at(0x169b, &[0x26, 0xc7, 0x06, 0x10, 0x00, 0x00, 0xc0]);
+        assert_eq!(
+            usize::from(u16::from_le_bytes([image.image[0x16a0], image.image[0x16a1]])),
+            HANDOVER_PAGE
+        );
+        at(0x16bb, &[0xba, 0xd4, 0x03, 0xb8, 0x13, 0x28, 0xef]);
+        assert_eq!(usize::from(image.image[0x16c0]) * 2, HANDOVER_ROW_BYTES);
+        // The text: `prt`'s `y2w=y+1dh`, the conversion's and the scan's 29 rows,
+        // `faddtext`'s 32.
+        at(0x1d46, &[0x8b, 0x46, 0x08, 0x05, 0x1d, 0x00]);
+        assert_eq!(usize::from(image.image[0x1d4a]), PRT_ROWS);
+        at(0x1857, &[0x83, 0x7e, 0xf8, 0x1d]);
+        assert_eq!(usize::from(image.image[0x185a]), FONT_CONVERTED_ROWS);
+        at(0x1acf, &[0x83, 0x7e, 0xf8, 0x1d]);
+        at(0x24c9, &[0x83, 0x7e, 0xfc, 0x20]);
+    }
+
+    /// A9, read from the image: the release's font (segment `4254h`, read at `es:[bx+1]`)
+    /// is `FONA.UH[783:]` in rows 0-29 but for three bytes, and rows 30 and 31 are zero.
+    /// The three bytes join the tree's two 3-column glyphs at 938 and 944 into one
+    /// 9-column glyph, so the release's `fonaorder` has 75 characters where the tree's has
+    /// 76; every glyph the part draws is the same bytes at the same run.
+    #[test]
+    fn the_release_font_is_the_strip_but_for_one_glyph_and_its_padding_is_zero() {
+        let file = std::fs::read("../../assets/MAIN/DATA/ALKU.EXE").unwrap();
+        let image = sr_assets::exe::unpack(&file).unwrap().image;
+        let strip = std::fs::read("../../upstream/SecondReality/ALKU/FONA.UH").unwrap();
+        let font = 0x42541;
+        let mut differing = Vec::new();
+        for row in 0..30usize {
+            for x in 0..1500usize {
+                let shipped = image[font + row * 1500 + x];
+                let tree = strip[783 + row * 1500 + x];
+                if shipped != tree {
+                    differing.push((row, x, tree, shipped));
                 }
             }
         }
-        // D19's support rule: the frame moves, so K-1 and K+1 are different
-        // pictures. The reference's own sessions differ by a whole pan step.
-        assert_ne!(render_at(5858), key, "5858 is a different pan");
-        assert_ne!(render_at(5860), key, "5860 is a different pan");
+        assert_eq!(differing, [(0, 941, 0, 1), (0, 943, 0, 1), (1, 942, 0, 1)]);
+        assert!(image[font + 30 * 1500..font + 32 * 1500].iter().all(|&b| b == 0), "rows 30-31");
+        // The release's `fonaorder` (DGROUP `0c4h`, the far pointer at `9ah`) and the
+        // card that draws the two logos (`'['`, `']'`, DGROUP `14bh`/`14dh`).
+        let dgroup = 0x50fb0;
+        assert_eq!(&image[dgroup + 0x9a..dgroup + 0x9e], &[0xc4, 0x00, 0xfb, 0x50]);
+        let order = &image[dgroup + 0xc4..dgroup + 0xc4 + 76];
+        assert_eq!(
+            order,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:&()+-*=/[]\0"
+        );
+        assert_eq!(&image[dgroup + 0x14b..dgroup + 0x14f], b"[\0]\0");
+        // The tree's order names the two logos by their run, 74 and 75 — the release's
+        // '[' and ']' after the merged glyph.
+        assert_eq!(FONT_ORDER.len(), 76);
+        assert_eq!(&FONT_ORDER[74..], b"\x8f\x99");
+        assert_eq!(&order[73..75], b"[]");
     }
 
     /// The D24 measurement, ignored: with the curated `HOI.U` entries the
@@ -2040,7 +2522,7 @@ mod tests {
         }
         // A20's numbers, pinned: a silent change here would let the note's
         // counterfactual go stale.
-        assert_eq!(measured, [(900, 0), (1719, 1595), (2719, 4171), (5859, 2706)]);
+        assert_eq!(measured, [(900, 0), (1719, 1595), (2719, 4171), (5859, 966)]);
     }
 
     /// The text batches' transitions moved by `shift` while the four gates stay
@@ -2073,10 +2555,8 @@ mod tests {
     #[test]
     #[ignore]
     fn the_5859_phase_sensitivity() {
-        let mut at_zero = None;
-        let mut at_minus_nine = None;
-        let mut at_plus_ten = None;
-        for shift in -18..=18 {
+        let mut rows = Vec::new();
+        for shift in -60..=60 {
             let tick = 5859 - 404;
             let (mut rig, mut part) =
                 started_with(Player::scripted(trace_script_after_gate(tick, shift)));
@@ -2087,19 +2567,47 @@ mod tests {
             let expected = reference(5859);
             let differing = differing_pixels(&frame, &expected);
             println!(
-                "shift {shift:+3}: {differing:5} pixels differ; a={} p={} f={} stage={:?}",
-                part.a, part.p, part.f, part.stage
+                "shift {shift:+3}: {differing:5} pixels differ; a={} p={} f={} tptr={} stage={:?}",
+                part.a, part.p, part.f, part.tptr, part.stage
             );
-            match shift {
-                0 => at_zero = Some(differing),
-                -9 => at_minus_nine = Some(differing),
-                10 => at_plus_ten = Some(differing),
-                _ => {}
+            rows.push((shift, differing));
+        }
+        // A20's measurement, pinned: every phase up to 45 frames later than the trace's
+        // has taken the fifth batch by 5859 and is bare; from 46 the fourth batch's
+        // text is still up.
+        for &(shift, differing) in &rows {
+            if shift <= 45 {
+                assert_eq!(differing, 0, "shift {shift:+}");
+            } else {
+                assert_eq!(differing, 2065, "shift {shift:+}");
             }
         }
-        // A20's three measured rows, pinned.
-        assert_eq!(at_minus_nine, Some(0), "the reference phase's reproduction");
-        assert_eq!(at_plus_ten, Some(0), "a second phase that reproduces it");
-        assert_eq!(at_zero, Some(2358), "the port's own phase");
+    }
+
+    /// The original's 5950 (`out/b3-alku-boundary2`, an unfiled capture, `reference-indices.md`
+    /// §4.5) is the closing routine's compacted page: its lines 0-184 are the page's rows 0-184
+    /// at 400 lines and its lines 185-399 the page's row `L/2` — the emulator applying CRTC 9 = 1
+    /// half a frame late (`VGA_StartResize`), in the middle of the frame. Every line is the
+    /// port's page byte for byte. Ignored: the capture is under `out/`. Run with `--ignored`.
+    #[test]
+    #[ignore]
+    fn the_originals_5950_is_the_compacted_page_resized_mid_frame() {
+        let (rig, part) = run_until(5546, |_| false);
+        assert_eq!(part.stage, Stage::Handover(HandoverStep::Linear), "the page is compacted");
+        let reference = std::fs::read("../../out/b3-alku-boundary2/frame_005950.rgb").unwrap();
+        let start = 4 * (80 + HANDOVER_COMPACT_BASE);
+        for line in 0..400usize {
+            let row = if line < 185 { line } else { line / 2 };
+            for x in 0..320usize {
+                let index = rig.surface.pixels()[start + row * LINE_PIXELS + x];
+                let entry = rig.palette.entry(index);
+                let at = (line * 320 + x) * 3;
+                assert_eq!(
+                    [dac_expand(entry[0]), dac_expand(entry[1]), dac_expand(entry[2])][..],
+                    reference[at..at + 3],
+                    "line {line}, column {x}: page row {row}"
+                );
+            }
+        }
     }
 }

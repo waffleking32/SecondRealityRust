@@ -5,7 +5,9 @@ two blitters) and `ALKU/COPPER.ASM` (149 lines: the three copper routines), with
 `ALKU/TWEAK.ASM` (333 lines) as the shared `tw_*` library PAM and CRED also
 carry. (`awk 'END{print NR}'` over each file.) This note records what the source does, what the port does, the one
 D24 adoption (three palette bytes), and the measured difference at each of the
-four reference keyframes.
+four reference keyframes. **The port runs the shipped build's credits loop and closing routine**,
+read from the unpacked `MAIN/DATA/ALKU.EXE` (D49); where the release differs from `MAIN.C`, §12
+has it, and the sections below say which they describe.
 
 The port lives in `bins/secondreality/src/parts/alku.rs`; its integration test
 is `bins/secondreality/tests/alku.rs`. Every number below is reproduced by a
@@ -31,9 +33,11 @@ command named in §10 or by a test in the same commit (D25).
 6. `:87-146` — the scroll loop: `do_scroll(1)` at the bottom of every iteration
    and a text batch when `f>50 && cop_dofade==0`; the batches wait
    `dis_sync()<4+tptr` with `a&1` (`:138`) and `fmaketext` lays them on the
-   picture.
+   picture. The release runs it while `a<=320` and ends each pass with
+   `do_scroll(tptr<5 ? 1 : 0)` (§12).
 7. `:147-152` — `if(f>63/SCRLF) dofade(palette2,palette);`, `fonapois()`,
-   `close_copper()`.
+   `close_copper()`. The release replaces `close_copper()` with a closing routine that
+   rebuilds the last window as a 320×200 page and `exit(0)`s (§12).
 
 ## 2. The display: 320×400 from a 640×200 picture
 
@@ -142,7 +146,8 @@ The `f` chain (`:89-99`) is a counter of *outer iterations*, and an outer
 iteration is one 9-tick `do_scroll(1)`: `f==0` starts the `textin` fade and
 adds 20; `f==50` starts the `textout` fade; once `f>50` and `cop_dofade==0` a
 batch runs. The empty case 4 (`:129-131`) draws no text but calls
-`ffonapois`, and `fmaketext` is skipped when `aa >= 320-12 = 308` (`:141`).
+`ffonapois`, and `fmaketext` is skipped when `aa >= 320-12 = 308` (`:141`) —
+`aa >= 304` in the release (§12).
 
 ## 6. The bugs, preserved
 
@@ -159,14 +164,19 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   neighbours are the next row's columns 20-23. The unit test
   `the_picture_blit_writes_the_band_and_the_refresh_reads_past_the_row` pins
   `a=316`'s column 165 to `picture[660..664] == picture[640+20..640+24]`.
+  The release's loop runs to `a=321` (§12), so its last refresh is `a=320`'s:
+  columns 664-667, the next row's 24-27, written to byte columns 166 and 254 —
+  neither inside the last window (bytes 80-159) nor the closing page.
 - **The `memset` clears 186×320 of a 186×352 `tbuf`** (`MAIN.C:101`):
   `the_tbuf_clear_keeps_the_arrays_last_sixteen_rows` pins that the last 16
   rows survive.
 - **The final fade only when `f>7`** (`:148`): `63/SCRLF` is 7. The port runs
-  the 64-step `dofade(palette2,palette)` when `f` is above it and retires
-  immediately otherwise, as the source does, and `fonapois()` (`:150`) runs
+  the 64-step `dofade(palette2,palette)` when `f` is above it and goes straight
+  on otherwise, as the source does, and `fonapois()` (`:150`) runs
   after either branch of that `if`; the fade only touches entries 64-255,
-  which the picture never indexes.
+  which the picture never indexes. In the release the loop ends on the spin
+  (§12), whose `f` is CPU time, and the port takes the frames' answer: no fade
+  (A20).
 - **The exit path skips the source's three closing calls.** `:147-152` runs
   after either ending of the `for` loop (`:87`) — the `a=319` completion *and*
   `dis_exit` — so a prompt exit in the source still performs
@@ -177,7 +187,9 @@ batch runs. The empty case 4 (`:129-131`) draws no text but calls
   visible is misjudged by this — the engine clears the copper on the next
   start, `fonapois` only clears the text's top two bits (`:250-270`), and no
   reference frame is near an exit — but it is recorded as a deviation, not
-  claimed as equivalence. It is registered as `APPROXIMATIONS.md` A62.
+  claimed as equivalence. It is registered as `APPROXIMATIONS.md` A62. (The
+  release's exit path is its closing routine's: one black frame and `exit(1)`,
+  §12, A62.)
   *(2026-10-25 (Phase 9), the final review — restated in A62. On the exit
   path the source's `dofade` runs **zero** of its 64 steps, because its loop
   tests `!dis_exit()` (`:306`) and the flag stays set until the next part's
@@ -211,7 +223,7 @@ ignored; §10):
 | 900 | 0 of 128,000 | 0 |
 | 1719 | 1,595 of 128,000 | **0** |
 | 2719 | 4,171 of 128,000 | **0** |
-| 5859 | 2,706 of 128,000 | 2,358 (this file's script; 2,353 through the real binary, §8) — the text-batch phase, A20; the post-add upload fix leaves the counts unchanged |
+| 5859 | 966 of 128,000 (2,706 under the tree's loop) | **0** under the release's loop (§8, §12; 2,358 in this file's script and 2,353 through the real binary under the tree's) |
 
 The cards are the strong evidence: their text is drawn in entries 64, 128 and
 192 of `fade2`, which are palette entries 1, 2 and 3 (`MAIN.C:194-208`), so
@@ -222,8 +234,8 @@ the two palettes give visibly different cards and the shipped one is exact.
 (`asset-inventory.md` §8). The port builds `sr_assets::font::Font` from the
 decoded 1500×30 strip with a 20×30 cell. The routine reads 32 rows
 (`MAIN.C:218`/`:225`) of a 30-row strip; the two rows past the file are the
-linker's uninitialised padding and A9's resolution — the port draws the 30 the
-file holds. The shift itself is invisible: a test scans both
+linker's uninitialised padding — zero in the release's image, so the port's 30
+rows are all the release inks (A9, closed; §12). The shift itself is invisible: a test scans both
 `FONA.UH[783:]` and `[784:]` and asserts all 76 runs hold the same glyph bytes
 (they are the same runs one column over; byte 783 is zero).
 
@@ -243,43 +255,31 @@ cargo test -p secondreality --test alku -- --nocapture
 | 900 | the black screen | **0 of 128,000 pixels differ** |
 | 1719 | card 1 mid-hold | **0 of 128,000** |
 | 2719 | card 3 mid-hold (`in` over the Dolby logos) | **0 of 128,000** |
-| 5859 | the scrolled picture | **2,353 of 128,000 (1.8383 %)**, all in rows 150-243 and columns 40-279 |
+| 5859 | the scrolled picture | **0 of 128,000** (was 2,353 under the tree's loop, A20) |
 
 The three held frames are byte-identical, and their `K-1`/`K+1` support
-frames are the same bytes (the test asserts it). 5859 is the moving frame:
-its `K-1` and `K+1` are different pans, as D19 says a moving keyframe's
-support must be.
+frames are the same bytes (the test asserts it). 5859 is the moving frame, but
+the run's 5858 and 5860 are the same step (the window moves every nine
+frames), as the reference's session holds 5859-5861 (`reference-indices.md`
+§4.3); the test asserts both.
 
-**The 5859 residual, measured.** The picture band, the pan and the palette
-are the reference's: 350 of the 400 rows are byte-identical, and every
-differing pixel is inside the old text's glyph region. The difference is a
-*timing phase*, not a pixel: the empty text batch (case 4) calls
-`ffonapois`, which clears the text's XOR bits, but its `fmaketext` — which
-would rebuild the XOR list from the zeroed `tbuf` and so keep them cleared —
-runs only when `aa<308` (`MAIN.C:141`). The port's trace-faithful phase
-reaches that batch at `aa=308` and skips it, so the stale XOR list re-adds the
-old text on every subsequent scroll, and the next `textin` fade (in progress
-at 5859, `f=22`) makes it visible. In the reference's session the batch
-reached `aa=306` (or the fade was elsewhere), and the frame is bare. The
-phase sensitivity test `the_5859_phase_sensitivity` scans the batches'
-transitions relative to the fixed gates:
+**The 5859 residual, and why it is gone.** Under the tree's loop the port's
+5859 differed in 2,353 pixels, all in the old text's glyph region: the empty
+fifth batch skipped `fmaketext` (`aa=308`), the stale XOR list re-added the old
+text on every `do_scroll(1)`, and the next `textin` fade made it visible. The
+release's loop ends every pass after that batch with `do_scroll(0)`, which does
+not carry the text (§12): once `ffonapois` has cleared it, nothing puts it back,
+and 5859 is bare whatever the batches' phase. The phase scan
+(`the_5859_phase_sensitivity`, ignored) prints **0** for every shift of the
+batches' transitions from −60 to +45 and **2,065** from +46, where the fourth
+batch's text is still up.
 
-Three rows of the 37 the scan prints, others elided:
-
-```text
-shift  -9:     0 pixels differ; a=311 p=1 f=0 stage=Main(Tail { scrl: 322 })
-shift  +0:  2358 pixels differ; a=311 p=1 f=22 stage=Main(Outer)
-shift +10:     0 pixels differ; a=311 p=1 f=20 stage=Main(Outer)
-```
-
-With the post-gate transitions at a phase at which the frame is
-byte-identical (`-9`, and `+10` as well — the scan prints both), the picture,
-the palette and the pan are exact and the phase is the only difference
-(`the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`).
-The phase is the original's own CPU time in the batch loops (the port's
-`fmaketext`/`faddtext` are zero-cost; the original's were not) and the
-session's music clock; the port cannot reproduce either, and registers the
-difference as **A20**.
+**The dense capture.** `out/dense-orig` (block 1, every 35 frames) pairs with
+the port's block-1 run at offset 0 here (the pan decides it); 29 of its 43 ALKU
+frames from 4480 to 5950 are byte-identical, and the other 14 sit at text-fade
+edges, where that session's fades run ~30-40 frames before the port's from the
+second batch on. No frame has text where the other has none outside a fade
+(A20 registers the phase; `out/glitches/alku-report.md` has the procedure).
 
 ## 9. The music: block 1's start, and the anchor
 
@@ -345,6 +345,17 @@ cargo test -p secondreality --bin secondreality \
 cargo test -p secondreality --bin secondreality \
     parts::alku::tests::the_5859_phase_sensitivity -- --ignored --nocapture
 
+# The release's loop, closing routine and font, against the image's bytes and
+# the frames they make (§12).
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_release
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_fifth_batch
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_loop_ends
+cargo test -p secondreality --bin secondreality \
+    parts::alku::tests::the_closing_routine
+
 # The music start's measurement.
 cargo xtask music analyse --trace reference/music/second1
 ```
@@ -352,12 +363,87 @@ cargo xtask music analyse --trace reference/music/second1
 ## 11. What is not claimed
 
 - The port does not model the original's CPU time inside `fmaketext`,
-  `faddtext` and `prt`; that is A20's residual at 5859 and could move the
-  text's fade phase in any frame where a fade and a batch overlap.
+  `faddtext` and `prt`, nor the spin's (§12); that is A20's batch phase, which
+  the dense capture shows at text-fade edges, and the spin's `f`.
 - The 5859 picture is reproduced at the reference's pan (a=309 displayed);
   the reference's own sessions differ by 1-2 whole pixels of pan
   (`reference-indices.md` §4.4), and a future re-capture may show that offset.
-- The two rows of the font the routine reads past the strip are not drawn:
-  A9's resolution, cited rather than re-derived.
+- The two rows of the font the routine reads past the strip are not drawn: the
+  release's image holds zeros there (A9, closed).
 
 **Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §10 (the palette alias, the row-spill refresh, the `tbuf` clear, the code-5 gate; `dis_sync` itself is §3).
+
+## 12. The release's build (D49)
+
+`cargo test -p sr-assets --test exe -- --ignored dump_the_unpacked_images` writes
+`out/release-images/ALKU.img`, the 343,472-byte load image of `MAIN/DATA/ALKU.EXE` (PKLITE
+small over LZEXE 0.91; Borland large; DGROUP `0x50fb`). `main` is at image `0x0f0d`, in the code
+segment `0f0h` (image `0xf00`), and the credits loop is `0x10ee`-`0x13c3`:
+
+```bash
+objdump -D -b binary -mi8086 --start-address=0x10c0 --stop-address=0x13c4 \
+    out/release-images/ALKU.img
+```
+
+`a`, `p` and `tptr` are DGROUP `9eh`, `0a0h` and `0a2h`, `f` is `[bp-4]`, and the copper's
+`frame_count`, `cop_dofade`, `cop_start` and `cop_pal` are `0354h:0004h`, `:00b3h`, `:0010h` and
+`:000ah`. What differs from `MAIN.C`, each pinned by
+`the_release_loop_and_its_closing_routine_are_the_images`:
+
+| image | the release | `MAIN.C` |
+|---|---|---|
+| `0x1380` | the loop runs while `a <= 320` | `a<320` (`:87`) |
+| `0x2315` | `do_scroll` returns 0 at once when `a > 320` | no guard (`:397`) |
+| `0x134f` | `fmaketext` when `aa < 304` | `aa < 308` (`:141`) |
+| `0x136c` | each pass ends `do_scroll(tptr<5 ? 1 : 0)` | `do_scroll(1)` (`:145`) |
+| `0x13bd` | `fonapois()` then the closing routine (`0x13ce`) | `close_copper()` (`:151`) |
+| `0x1d49` | `prt` draws 29 rows | 32 (`:274`) |
+| `0x1857`, `0x1acf` | the strip's conversion and its metrics scan cover 29 rows | 32 (`:169`, `:218`) |
+
+Everything else the loop reaches is the tree's: the `f` chain, the five cases and their strings
+and positions (jump table `cs:04c4h`), the batch wait, `if(f>7)`, `addtext`'s and `faddtext`'s 32
+rows, `fmaketext`, `ffonapois`, `fonapois`, `dofade`, `wait`, `do_scroll`'s body and the three
+copper routines.
+
+**`do_scroll(0)` after the fifth batch.** Mode 0 neither runs `ascrolltext` nor waits, so after
+`case 4`'s `ffonapois` the text stays cleared, and the pass spins: the port's `MainPhase::Spin`
+steps the window on the tick its nine frames are up, sets the `textin` and then the `textout`
+fade on its first tick (the first passes' deterministic part), and holds `f` at 51. The trace's
+fifth batch ends at a=308 on tick 5429 (boot 5833), the loop's last step is a=320→321 on tick
+5545 (boot 5949), and no final fade runs (`the_fifth_batch_stops_carrying_the_text_and_the_pass_no_longer_waits`,
+`the_loop_ends_past_320_without_the_final_fade_and_hands_over_in_four_ticks`). When the loop ends
+on a blocking pass instead — a script whose codes stop at 4 — `f` is counted and the 64-step fade
+runs before the closing routine (`the_final_fade_runs_sixty_four_ticks_when_the_blocking_loop_leaves_f_above_seven`).
+
+**The closing routine** (`0x13ce`-`0x1723`), one step a copper frame:
+
+1. `p=0`, `cop_start=a/4` (80), `cop_scrl=0`, `cop_pal=palette` — the last step's window again;
+2. write mode 1; row `y` of a 200-row page at byte `a/4 + 176y + 0x738` gets 80 bytes of memory
+   row `2*min(y,180)`; `cop_start` moves there, and CRTC 9 = 1 doubles it (320×200);
+3. the page is copied to a linear one at `0xc000` (80 bytes a row), every byte of `0xbff0`-`0xffef`
+   becomes `(v&63)+0xc0`, and `cop_start=0xc000` with CRTC 0x13 = 0x28;
+4. three 16,000-byte page copies, CRTC 9 = 0x41, `close_copper`, `exit(0)`.
+
+In the unit script the frames are 5949 (a=319's window), 5950 (a=320's, the snap), 5951 (the
+compacted page, 320×200, each row the 400-line frame's even row) and 5952 (the linear page, the
+same RGB), and the part finishes on 5952 (`the_closing_routine_shows_the_last_window_as_a_320x200_page`).
+A block-1 run is three ticks later (its player's codes are the trace's 2-4 frames late, §9): ALKU's
+320×200 frames are 5954 and 5955, and U2A starts at **5956** (was 6008) — whose first frame is the
+linear page's RGB bytes (`0a68ffb9…`). The port does not make step 4's page copies, which nothing
+shows before the exit and which would land on the wrapped tail of the `0xc000` page in the port's
+256,000-pixel video memory (D16). The emulator applies CRTC 9 half a frame late, so the original's
+capture holds one frame of step 2's page that turns double-scanned at line 185 (5950,
+`reference-indices.md` §4.5) — and every line of it is a row of the port's page, byte for byte
+(`the_originals_5950_is_the_compacted_page_resized_mid_frame`, ignored, reads the capture from
+`out/`); the port follows the hardware and shows the page doubled from its first frame (A20).
+
+**The exit path.** `main` after each card gate, `fonapois`, `ffonapois` and the loop's end call the
+closing routine when `dis_exit()` is set; on an exit it uploads `fade1` (black), waits a frame,
+`close_copper`s and `exit(1)`s. The port ends on the ESC tick without drawing (A62).
+
+**The font** (segment `4254h`, read at `es:[bx+1]`, image `0x42541`): rows 30-31 are zero, and rows
+0-29 are `FONA.UH[783:]` but for three bytes that merge the tree's two glyphs at 938 and 944 into one;
+the release's `fonaorder` (DGROUP `0c4h`) is the 75-character `…:&()+-*=/[]`, and the third card is
+`'['`/`']'` — the same two logo runs as the tree's `\x8f`/`\x99`
+(`the_release_font_is_the_strip_but_for_one_glyph_and_its_padding_is_zero`, A9).
+

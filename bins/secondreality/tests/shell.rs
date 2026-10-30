@@ -409,9 +409,10 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     //
     // **The chain's own handover indices are measured, not fitted.** The port's
     // parts hand over with no loader gap (D31 §3): ALKU's first frame is boot
-    // 404 and its last is chain 6,007, so U2A starts at **6,008** — 48 frames
-    // after the reference's U2A (`reference-indices.md` §5 puts its first frame
-    // at 5,960/5,961). U2A's animation stream then ends before the reference's
+    // 404 and its last is chain 5,955 — the release's closing routine's linear
+    // 320×200 page (A20), whose geometry U2A's frames share — so U2A starts at
+    // **5,956**, 5 frames before the reference's first 320×200 frame
+    // (`reference-indices.md` §5 puts it at 5,960/5,961). U2A's animation stream then ends before the reference's
     // second gate (`D33`: the stream ends ~7,510 and the reference holds the
     // cleared background until PAM's 7,710), so PAM's part starts at chain
     // **7,508**. What the table below asserts is therefore (part, geometry,
@@ -424,7 +425,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // restarted MUSIC1's first order change and GLENZ's music wait to the first
     // zoomer body. 8,523..8,528 is the measured hold→zoom transition (the first
     // four are the held picture).
-    let frames = "900,6007,6008,6500,6988,7300,7507,7508,7618,7709,7710,7712,\
+    let frames = "900,5955,5956,6500,6988,7300,7507,7508,7618,7709,7710,7712,\
                   7884,7885,8055,8056,8057,8086,8087,8523,8524,8525,8526,8527,8528";
     let (dir, manifest) = block_dump("block1", "1", frames);
     assert_eq!(manifest["part"], "alku");
@@ -443,8 +444,8 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
 
     let expected: &[(u32, &str, u16, u16)] = &[
         (900, "alku", 320, 400),
-        (6007, "alku", 320, 400),
-        (6008, "u2a", 320, 200),
+        (5955, "alku", 320, 200),
+        (5956, "u2a", 320, 200),
         (6500, "u2a", 320, 200),
         (6988, "u2a", 320, 200),
         (7300, "u2a", 320, 200),
@@ -490,7 +491,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // reference holds in `second1b` as 12:55 even though the port's U2A has
     // already retired at its stream's end; 7,710 is PAM's measured first drawn
     // frame (`reference-indices.md` §6.1, §6.4).
-    for index in [900u32, 6008, 6988, 7508, 7618, 7710, 7884, 7885] {
+    for index in [900u32, 5956, 6988, 7508, 7618, 7710, 7884, 7885] {
         let (order, row) = block1_trace_position(index);
         assert_eq!(
             frame_position(dumped, index),

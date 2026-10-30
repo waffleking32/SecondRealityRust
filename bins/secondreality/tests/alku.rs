@@ -19,12 +19,9 @@
 //!
 //! **The reference holds four `.rgb` frames and no `.idx`** (§4.3, §1.6), so
 //! every comparison here is RGB. 900, 1719 and 2719 are held screens and
-//! match byte for byte; 5859 is the moving picture. Its picture, its pan and
-//! its palette match: the residual is the old text's XOR pixels made visible
-//! by a text fade, because the reference's session reaches the empty batch's
-//! `fmaketext` and the port's trace-faithful phase does not (the unit test
-//! `the_scrolling_keyframes_picture_is_the_references_under_its_batch_phase`
-//! reproduces the reference byte for byte with the batch transitions moved).
+//! match byte for byte; 5859 is the moving picture, and matches byte for byte
+//! too since the port runs the release's loop (the fifth batch stops the text,
+//! A20; `docs/fidelity/alku.md` §8).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -168,40 +165,16 @@ fn the_four_keyframes_against_the_reference() {
         assert_eq!(frame_file(&dir, index + 1), frame, "boot {index}: K+1 holds");
     }
 
-    // The moving keyframe: the picture band, the pan and the palette are the
-    // reference's. The residual is the old text's XOR pixels made visible by a
-    // text fade (the unit test with the batch transitions moved reproduces it
-    // byte for byte); every differing pixel is inside the text's glyph region.
+    // The moving keyframe: bare, as the release's loop leaves it once the fifth batch has
+    // cleared the text and the window stops carrying it (A20).
     let key = frame_file(&dir, 5859);
     let expected = reference_frame(5859);
-    let differing = differing_pixels(&key, &expected);
-    assert_eq!(differing, 2353, "boot 5859's measured text-phase residual");
-    let mut rows_identical = 0usize;
-    for y in 0..400u32 {
-        let row = (y * 320 * 3) as usize;
-        let same = key[row..row + 320 * 3] == expected[row..row + 320 * 3];
-        if same {
-            rows_identical += 1;
-        }
-        for x in 0..320u32 {
-            if key[row + (x * 3) as usize..row + (x * 3) as usize + 3]
-                != expected[row + (x * 3) as usize..row + (x * 3) as usize + 3]
-            {
-                assert!(
-                    (150..=243).contains(&y) && (40..=279).contains(&x),
-                    "({x},{y}) differs outside the text's glyph region"
-                );
-            }
-        }
-    }
-    assert_eq!(rows_identical, 350, "350 of 400 rows are byte-identical");
-    println!(
-        "5859: {differing}/128000 px differ ({:.4} %), all in rows 150-243, columns 40-279",
-        100.0 * differing as f64 / 128_000.0
-    );
-    // The frame moves: the neighbours are a different pan, not the same picture.
-    assert_ne!(frame_file(&dir, 5858), key, "5858 is a different pan");
-    assert_ne!(frame_file(&dir, 5860), key, "5860 is a different pan");
+    assert_eq!(differing_pixels(&key, &expected), 0, "boot 5859");
+    // The run's 5858 and 5860 are the same step, as the reference's session holds 5859,
+    // 5860 and 5861 (`reference-indices.md` §4.3): the window steps every nine frames
+    // and, with the text gone, nothing else moves.
+    assert_eq!(frame_file(&dir, 5858), key, "5858 is the same step");
+    assert_eq!(frame_file(&dir, 5860), key, "5860 is the same step");
 
     assert_eq!(manifest["index_origin"], "boot");
     let _ = std::fs::remove_dir_all(&dir);

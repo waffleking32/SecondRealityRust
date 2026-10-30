@@ -1393,7 +1393,12 @@ The last frames of the 320×400 screen are a transition, not the picture: 5800, 
 all have the same row structure — rows 50–349 picture, black above and below — while **5950** has
 rows 0–24 black, 25–174 picture, 175–184 black, 185–349 picture, 350–399 black: the window is being
 split and shifted as the next part takes the screen. No keyframe is taken in it, and 5950 is the
-last 320×400 index sampled under `out/b3-alku-boundary2`.
+last 320×400 index sampled under `out/b3-alku-boundary2`. *(2026-10-29: it is ALKU's own — the
+release's closing routine (image `0x13ce`, `alku.md` §12) compacts the last window into a 200-row page
+at byte `a/4+0x738` and sets CRTC 9 = 1; the emulator applies CRTC 9 half a frame late
+(`VGA_StartResize`), mid-frame, so lines 0-184 show the page's rows 0-184 — the window at half
+height, then the clamp's black rows — and lines 185-399 its row `L/2`, doubled. Every line is the
+port's page byte for byte (`the_originals_5950_is_the_compacted_page_resized_mid_frame`). A20.)*
 
 **The window is a measurement of where the change *can* be, not a fixed frame, and the next part's
 own first frames sit inside it.** `out/b3-alku-sweep1` was refused at 6300 with the message
@@ -6190,7 +6195,8 @@ cargo xtask rediff --only fullrun
 (its tests are ignored in a debug build only — a 48,000-tick run — and run by a release `cargo test`;
 `-- --ignored` runs them in debug, slowly). Its plan is block 1's own,
 once each in the demo's order — `alku u2a pam beglogo glenz tunneli techno panicend mntscrl lnszoom
-plzpart minvball rayscrl 3dsinfld jplogo u2e endlogo cred endscrl` — starting at 404, 6008, 7508,
+plzpart minvball rayscrl 3dsinfld jplogo u2e endlogo cred endscrl` — starting at 404, 6008 (*5956 since
+2026-10-29, A20*), 7508,
 7885, 8057, 11131, 12192, 16181, 16633, 18669, 21853, 26569, 29150, 31224, 33255, 34043, 37956,
 38564 and 46187; both restarts publish the new player's `0:0` at their boundary (GLENZ's
 `MUSIC1@0`, U2E's `MUSIC0@18` — the position ring is the one piece of the old player's state a
@@ -6240,6 +6246,15 @@ port's JPLOGO), **U2E** on its band (34120 = block 4's band, §18.7; the port's 
 | ENDLOGO | first 320×400 | 37967 | 37956 | −11 | +34 |
 | CRED | first 320×200 | 38583 | 38564 | −19 | −8 |
 | ENDSCRL | first 640×400 | 46277 | 46189 | −88 | −69 |
+
+*(2026-10-29: U2A's row is **5961 / 5956 / −5 / −5**, and PAM's change **+2**. The port runs the
+release's ALKU loop and closing routine, read from `MAIN/DATA/ALKU.EXE`'s image (A20, `alku.md`
+§12): the loop ends without the 64-tick fade, and ALKU closes on the 320×200 page U2A's background
+continues — RGB-identical to U2A's first frame — so the screen turns 320×200 at 5954, on ALKU's
+own frames, and U2A's row is its start (`First::Start` in `tests/fullrun.rs`). The original's
+5961 is the first 320×200 frame of that session: the closing page or U2A's identical background;
+§4.5's 5950 is the closing routine's compacted page at 400 lines, the emulator applying CRTC 9 half a
+frame late.)*
 
 **Read with the music, the table has two halves.** Up to BEGLOGO the port's clock is the
 original's (the traces below agree at offset 0/−1), and the start differences are the parts' own:
@@ -6335,7 +6350,7 @@ comparisons, every one at its registered count**:
 | capture | reference → rendered (plane): count |
 |---|---|
 | `01-alku` | 1719 → 1719: 0 |
-| `02-u2a-pam` | 5961 → 6008: 60,160 · 6500 → 6547: 64,000 (the 30,000-cycle neon, A32; was 0 until 2026-10-26) · 7707 → 7704: 0 (and idx 0) · 7880 → 7877: 0 (idx 48,786) · 7920 → 7884: 0 |
+| `02-u2a-pam` | 5961 → 6008: 60,160 · 6500 → 6547: 64,000 *(2026-10-29: 5961 → 5956 and 6500 → 6495, the same counts — U2A starts 5 frames before the original's 5961, A20)* (the 30,000-cycle neon, A32; was 0 until 2026-10-26) · 7707 → 7704: 0 (and idx 0) · 7880 → 7877: 0 (idx 48,786) · 7920 → 7884: 0 |
 | `03-beglogo` | 7930 → 7893: 81,273 · 8300 → 8263: 0 (and idx 0) · 8522 → 8527: 0 |
 | `04-glenz-techno` | 8572 → 8577: 0 (and idx 0) · 8900 → 8905: 0 (and idx 0) · 11159 → 11152: 192 · 11900 → 11893: 4,336 · 12214 → 12216: 0 · 12400 → 12402: 0 |
 | `05-troll-panicend` | 16000 → 16002: 0 · 16193 → 16181: 108,923 |
