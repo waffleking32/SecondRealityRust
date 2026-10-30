@@ -2090,6 +2090,13 @@ pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
     }
 }
 
+/// rediff's table, for the trace window [`rediff_table::JITTER_FRAMES`] (A12) that the shell's
+/// tests share with `tests/fullrun.rs`.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../../xtask/src/rediff/table.rs"]
+mod rediff_table;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3042,16 +3049,7 @@ mod tests {
             .collect()
     }
 
-    /// How far a published position may be from the frame the trace publishes it at.
-    ///
-    /// **Measured, not chosen**, and the same measurement `crates/sr-audio/tests/trace.rs`
-    /// uses: the two filed sessions of one recipe (`second5` and `second5b` — the same
-    /// command, the same emulator, the same cycles) disagree with *each other* about which
-    /// frame eight of their row changes land on, and the port — whose clock is exact —
-    /// sits between the sessions. The worst displacement against any filed trace is 3
-    /// frames (`docs/fidelity/APPROXIMATIONS.md` A12, whose evidence is that test's own
-    /// per-trace counts).
-    const JITTER_FRAMES: u32 = 3;
+    use super::rediff_table::JITTER_FRAMES;
 
     /// How far the port's `_np_zframe` may sit from the trace's own column, in ticks, once
     /// the sample instant's one-frame shift is taken out.

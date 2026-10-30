@@ -1,4 +1,4 @@
-//! The port's `--block 1` against the original's whole `SECOND 1` run (Phase 9 Task 6):
+//! The port's `--block 1` against the original's whole `SECOND 1` run:
 //! part by part (`reference-indices.md` §26.3's boundary table), row by row (block 1's six
 //! music traces, `reference/music/second1*`), and frame by frame at the boundaries.
 //!
@@ -38,7 +38,9 @@ use std::sync::OnceLock;
 #[path = "../../../xtask/src/rediff/table.rs"]
 mod table;
 
-use table::{at, Part, FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS, TABLE};
+use table::{
+    at, Part, FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS, JITTER_FRAMES, TABLE,
+};
 
 /// The original's ENDSCRL begins at 46,277 (§26.3); the run goes 2,000 frames past it.
 const RUN_TO: u32 = 46_277 + 2_000;
@@ -110,12 +112,6 @@ const RULES: [(&str, First); 19] = [
 /// before MNTSCRL starts.
 const CUE_EXIT: (u32, u32) = (16_630, 16_632);
 
-/// How far a published position may be from the frame the trace publishes it at — the
-/// shell's own window, `src/shell.rs`'s `JITTER_FRAMES` (A12), which lives in the binary's
-/// test module where this file cannot reach it; `the_jitter_window_is_the_shells` holds the
-/// two equal.
-const JITTER_FRAMES: u32 = 3;
-
 /// How far the worst-displacement search looks either side of a frame: past it, a
 /// position is counted as one the trace never publishes nearby.
 const SEARCH_FRAMES: u32 = 60;
@@ -137,24 +133,21 @@ struct Agreement {
     last_offset: i64,
 }
 
-/// Measured by this file's run (Phase 9 Task 6; the post-GLENZ rows re-measured by Task 6b,
-/// after the restart carry-over D45) and recorded in `reference-indices.md` §26.8 and
-/// `music-clock.md`:
+/// Measured by this file's run, with the restart carry-over D45 (`music-clock.md` §2):
 ///
 /// - `second1`, `second1c`, `second1b` — block 1 up to BEGLOGO, under the boot's MUSIC0:
 ///   the run's own clock, 97.4 / 100 / 99.7 % within the window at offset 0 / −1 / −1, as
 ///   `crates/sr-audio/tests/trace.rs` and the shell's own block-1 test hold them (`second1`'s
 ///   worst 7 is A12's; `second1b`'s one frame past the search is its last, where the port is
-///   a row ahead of the window's edge). Task 6b moves none of them.
+///   a row ahead of the window's edge).
 /// - `second1d`, `second1e` — the `MUSIC1@0` session from GLENZ to JPLOGO: **5 frames late**
-///   at the first row change of each (Task 6 measured 247 and 248 before the restart kept
-///   MUSIC0's channel volumes, A38), 100 % and 75.3 % within the window at that offset.
+///   at the first row change of each (A38), 100 % and 75.3 % within the window at that offset.
 ///   `second1e`'s lag falls from +5 to −3 at its last row change — the drift its worst 8 is
 ///   (A54) — so with no offset at all 91.8 % of it agrees.
 /// - `second1f` — the `MUSIC0@18` session from U2E to ENDSCRL: **8 frames early** at its first
-///   row change and 0 at the last the run reaches (Task 6: 235 and 243 late), 44.8 % within
-///   the window at −8 and 95.7 % with no offset; worst 12, and the one frame (38,376) whose
-///   position the trace never publishes: the speed-1 row (A54).
+///   row change and 0 at the last the run reaches, 44.8 % within the window at −8 and 95.7 %
+///   with no offset; worst 12, and the one frame (38,376) whose position the trace never
+///   publishes: the speed-1 row (A54).
 const AGREEMENTS: [Agreement; 6] = [
     Agreement { trace: "second1", offset: 0, frames: 5541, within: 5399, worst: 7, beyond: 0, unshifted: 5399, last_offset: 3 },
     Agreement { trace: "second1c", offset: -1, frames: 1699, within: 1699, worst: 1, beyond: 0, unshifted: 1698, last_offset: -2 },
@@ -583,15 +576,4 @@ fn the_full_runs_music_is_where_the_trace_holds_it() {
         .map(|a| (a.trace, a.offset, a.frames, a.within, a.worst, a.beyond, a.unshifted, a.last_offset))
         .collect();
     assert_eq!(measured, wanted, "the music's agreement with block 1's traces");
-}
-
-/// This file's window is the shell's: `src/shell.rs` declares its `JITTER_FRAMES` in the
-/// binary's own test module, which an integration test cannot import, so the declaration is
-/// read from the source and held to this file's.
-#[test]
-fn the_jitter_window_is_the_shells() {
-    let shell = include_str!("../src/shell.rs");
-    let declaration = format!("const JITTER_FRAMES: u32 = {JITTER_FRAMES};");
-    assert_eq!(shell.matches("const JITTER_FRAMES: u32 =").count(), 1, "one declaration");
-    assert!(shell.contains(&declaration), "src/shell.rs declares {declaration}");
 }

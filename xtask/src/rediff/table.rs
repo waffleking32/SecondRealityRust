@@ -57,6 +57,15 @@ pub struct Frame {
 /// mapping is.
 pub const PENDING: &[&str] = &[];
 
+/// How far, in frames, a published music position may be from the frame a filed trace
+/// publishes it at. **Measured, not chosen**: the two filed sessions of one recipe
+/// (`second5`, `second5b`) disagree with each other about the frame some of their row changes
+/// land on, the port, whose clock is exact, sits between them, and its worst displacement
+/// against `second5` is 3 frames (A12). The shell's `second5` test and `fullrun.rs` both hold
+/// the port to it; it lives here because both include this file.
+#[allow(dead_code)]
+pub const JITTER_FRAMES: u32 = 3;
+
 const fn rgb(reference: u32, rendered: u32, registered: u32, register: &'static str) -> Frame {
     Frame {
         reference,

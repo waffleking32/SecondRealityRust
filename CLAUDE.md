@@ -132,10 +132,13 @@ image per frame.
   or D-entry that explains it). Exit **0**: every frame at its count; **1**: a count moved, either
   way; **2**: it could not compare. The report goes to `out/rediff/`. Run it after any change that
   could move a picture, and re-register a count only with the measurement that moved it.
+- **The same table is a cargo test.** `bins/secondreality/tests/reference_frames.rs` runs the binary
+  once per distinct set of run arguments and holds every frame to its registered count, the way
+  rediff compares it. Its block-1 group is `#[cfg_attr(debug_assertions, ignore)]`; the rest run in
+  both profiles. Run it all as `cargo test --release -p secondreality --test reference_frames`.
 - **The full run is release-only.** `bins/secondreality/tests/fullrun.rs` checks block 1 end to end
-  against `reference/parts/fullrun`: part order, seams and music against the traces. Three of its
-  four tests are `#[cfg_attr(debug_assertions, ignore)]`; the fourth,
-  `the_jitter_window_is_the_shells`, reads only the source and runs in both profiles. Run them as
+  against `reference/parts/fullrun`: part order, seams and music against the traces. Every test in
+  it is `#[cfg_attr(debug_assertions, ignore)]`. Run them as
   `cargo test --release -p secondreality --test fullrun`, **without** `-- --ignored`, which in
   release runs only the genuinely ignored tests. `tests/loop.rs` (the loop seam) runs in both
   profiles; `-- --nocapture` prints its figures.
