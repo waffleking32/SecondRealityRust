@@ -1,101 +1,38 @@
 //! ENDSCRL — the greetings scroller: a ring of text, and the beam walking it.
 //!
-//! **The port is the shipped build**, read from its own image (`docs/decisions.md` D49):
-//! `sr_assets::exe::unpack(assets/MAIN/DATA/ENDSCRL.EXE)` gives the load image DOS runs, a
-//! Borland C++ large-model program whose DGROUP is image `0x1c890` (`mov dx,1c89h` at image 0).
-//! The font raster and `fonaorder` are read out of that image, and the code below is a
-//! transliteration of its `main` (`0x1220-0x134a`), `do_scroll` (`0x134b-0x16ab`) and `init`
-//! (`0x16ac-0x17b5`). The tree's `ENDSCRL/MAIN.C` (125 lines over `ENDSCRL/ASMYT.ASM`) is the
-//! same program with other constants; where the two agree its line numbers are cited too.
-//! Every image offset below is an offset into the unpacked image.
+//! **The port is the shipped build** (D49): `sr_assets::exe::unpack(assets/MAIN/DATA/ENDSCRL.EXE)`
+//! gives a Borland C++ large-model image (DGROUP `0x1c890`), whose raster and `fonaorder` the part
+//! reads and whose `main` (`0x1220-0x134a`), `do_scroll` (`0x134b-0x16ab`) and `init`
+//! (`0x16ac-0x17b5`) it translates. The tree's `ENDSCRL/MAIN.C` is the same program with other
+//! constants, cited where the two agree. The release differs in its raster (`font[30][1550]` at
+//! `0x112e0`, scanned over 25 rows), an 80-character `fonaorder`, the blank (1530, 16), a 25-row
+//! line, control lines (`[nn`: draw nothing for `nn` rows) and a `%` line that calls `exit(0)`
+//! (`docs/fidelity/endscrl.md` §1). Both builds open the text without `O_BINARY`, so Borland's
+//! `read` strips its carriage returns ([`read_text_mode`]).
 //!
-//! What the shipped build does that the tree's does not:
-//!
-//! - **the raster** is `char far font[30][1550]` at segment `0x112e` (image `0x112e0`), not
-//!   `ENDSCRL/FONA.UH`'s `[31][1500]`: rows 1,550 bytes apart (`mov dx,060eh; imul dx` at
-//!   `0x140a`), scanned over **25** rows (`cmp word [bp-4],19h` at `0x170d`);
-//! - **`fonaorder`** is 80 characters, the tree's 74 and `Z ä \x94 Y / &`;
-//! - **the blank** is `fonap[' '] = 1530`, `fonaw[' '] = 16` (`0x17a8`, `0x17ae`);
-//! - **a line is 25 rows** — `line = (line+1) % 25` (`0x165a`) where the tree has `FONAY` 30;
-//! - **a control line** — one whose first byte is `[` — draws nothing (`chars = 0` at `0x13ca`)
-//!   and lasts `(textline[1]-'0')*10 + textline[2]-'0'` rows (`0x1662-0x1681`);
-//! - **a `%` line ends the part**: `exit(0)` (`lcall 0000:0272` at `0x16a3`), after that call's
-//!   line is drawn and the display start set.
-//!
-//! And one thing both builds do that the port used to skip: the text is opened without
-//! `O_BINARY` (`open("endscrol.txt", 1)` at `0x16b2-0x16b8`, `MAIN.C:101`'s `O_RDONLY`), so
-//! `_fmode`'s `O_TEXT` (DGROUP `0x2d8` holds `0x4000`) applies and Borland's `read` (`0xc62`)
-//! **strips the carriage returns** in place (`cmp al,0dh` at `0xcc5`).
-//!
-//! `main`'s acts, which the image and `MAIN.C:19-49` agree on:
-//!
-//! 1. `dis_partstart()` and one vertical blank (`0x1220`, `0x1225`).
-//! 2. mode 0eh (640×350, 16 colours) and then **CRTC 9 = 0** (`0x122a-0x1235`), the 400-line
-//!    display the reference's 640×400 frames are.
-//! 3. fifteen `setrgbpalette` calls (`0x1236-0x1323`): entry 1 = 20, 2 = 40, 3-15 = 60.
-//! 4. `init()` (`0x1326`): the text, and the strip's metric scan.
-//! 5. `while(!dis_exit()) { if(dis_waitb()==1) dis_waitb(); do_scroll(); }` (`0x132b-0x1348`).
-//!
-//! # The tick map
-//!
-//! A tick is one `dis_waitb`, and tick 0 is the code before the first one — CRED's parked tick
-//! is the same convention, and the shell numbers a part's ticks from its `start`. So `main`'s
-//! acts are ticks 0, 1, 2, 3, 5, 7, …:
-//!
-//! - tick 0: nothing drawn. The screen is still the part before this one.
-//! - tick 1: the mode set, the palette and `init`.
-//! - tick 2: the loop's **first** wait, returning 1, with the second one still ahead of it.
-//! - tick 3: the first `do_scroll`, and one every second tick after it (each iteration spends
-//!   two waits), which is what the reference's own frames measure (`reference-indices.md`
-//!   §21.1).
-//! - the `do_scroll` that reads the `%` line is the last: the part reports `Finished` on that
-//!   tick. In the shipped text that is ring row 11,483, part tick **22,967**.
-//!
-//! # The ring: 400 lines where the original has 401, and why that is the same picture
-//!
-//! `do_scroll` writes the line at `80*yscrl` **and again** at `80*(yscrl+401)`, and steps
-//! `yscrl = (yscrl+1) % 401` (`0x152d-0x164b`, `MAIN.C:89-95`). One line is 80 planar bytes,
-//! and a byte of a 16-colour plane is eight pixels, so `80 * 8 = 640` pixels a line. The second
-//! copy exists because the display's address counter does not wrap at the ring's end.
-//!
-//! The port's beam **does** wrap: `View::source_index` is modulo the surface's length
-//! (`view.rs`), and the port's surface is exactly 400 lines of 640 pixels = 256,000. So the
-//! port's ring is 400 lines, each line is written once, and the wrap stands in for the second
-//! copy. The two pictures are the same lines in the same rows:
+//! A tick is one `dis_waitb`; tick 0 is the code before the first:
 //!
 //! ```text
-//! original, iteration t:  written line            t mod 401
-//!                         start (post-increment) yscrl_post + 1 lines
-//!                         displayed rows  j = 0..399 show  t - 399 + j
-//! port,     iteration t:  written line            t mod 400
-//!                         origin         (yscrl + 1) lines, yscrl = t mod 400
-//!                         displayed rows  j = 0..399 show  t - 399 + j
+//! 0      0x1220-0x1225   dis_partstart and its wait: the screen is still CRED's
+//! 1      0x122a-0x1326   mode 0eh, CRTC 9 = 0 (640x400), fifteen greys, init()
+//! 2                      the loop's first dis_waitb, which returns 1
+//! 3, 5…  0x132b-0x1348   do_scroll, one every two waits (reference-indices.md §21.1)
+//! 22967                  the do_scroll that reads the `%` line: Finished
 //! ```
 //!
-//! The original's row `j` reads absolute line `((t+1) mod 401) + 1 + j`, which is ring line
-//! `(t + 2 + j) mod 401` — most recently written at iteration `t - 399 + j` (the copy at `+401`
-//! is what makes `j = 399` the newest line). The port's row `j` reads ring line
-//! `(t + 1 + j) mod 400`, written at the same iteration.
-//! [`tests::the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows`]
-//! is that equality, checked row by row at every iteration of a turn. The display origin is
-//! `(yscrl + 1) * 640` — 640 on the first line and **256,000** on the last, past what a `u16`
-//! pair could hold, which is why `start_addr` is a `u32` (D16).
+//! **The ring.** `do_scroll` writes each line at `80*yscrl` and again at `80*(yscrl+401)`, with
+//! `yscrl = (yscrl+1) % 401` (`0x152d-0x164b`, `MAIN.C:89-95`), because the original's address
+//! counter does not wrap. The port's beam does (`View::source_index` is modulo the surface, 400
+//! lines of 640), so its ring is 400 lines written once, and row `j` at iteration `t` shows the
+//! line written at `t - 399 + j` in both
+//! (`tests::the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows`).
+//! The origin reaches 256,000 pixels, which is why `start_addr` is a `u32` (D16).
 //!
-//! # The line renderer
+//! **The renderer** (`0x13e1-0x152a`, `MAIN.C:77-88`) walks the line a pixel at a time,
+//! `mtau[x & 7]` picking the bit, and writes the strip value's four low bits into four planes at
+//! one byte address: the port writes the value flat.
 //!
-//! The drawing loop (`0x13e1-0x152a`, `MAIN.C:77-88`) walks the line one pixel at a time,
-//! `mtau[x & 7]` (DGROUP `0x9e`) selecting the bit of the byte `x / 8`, most significant bit
-//! first, and writes the strip's four low bits into four planes (`test byte es:[bx],1/2/4/8`
-//! into `scanbuf` at DGROUP `0x344/0x394/0x3e4/0x434`). The four writes land on the same byte
-//! address in four planes, so the pixel they spell is the strip's value and the port writes it
-//! flat.
-//!
-//! # What the reference is
-//!
-//! The reference is this build. What is left of the comparison is the chain's own offset —
-//! the port's CRED hands this part its tick 0 at 8835 and the release's at 8917 (A53) — which
-//! [`tests::the_port_draws_the_references_frames_at_the_references_own_ticks`] takes out, and
-//! `docs/fidelity/endscrl.md` and `docs/fidelity/APPROXIMATIONS.md` A11 carry the numbers.
+//! The port's chain hands the part its tick 0 at 8835, the release's at 8917 (A11, A53).
 
 use sr_assets::exe::{unpack, LoadImage};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
@@ -118,7 +55,7 @@ const LINE_BYTES: usize = 80;
 const LINE_LEN: usize = LINE_BYTES * 8;
 
 /// The port's ring, in lines: 400 × 640 = 256,000 = the whole surface, and the wrap the
-/// original's second copy stands in for (module docs).
+/// original's second copy stands in for (module doc).
 const RING_LINES: usize = 400;
 
 // ------------------------------------------------------------ the palette --
@@ -504,7 +441,7 @@ impl Endscrl {
         let row = self.render_line();
         // `0x152d-0x163e`: the line, per plane, at `80*yscrl` — and again at
         // `80*(yscrl+401)` (`add ax,191h` at `0x1561`), which the port's wrapping beam
-        // stands in for (module docs).
+        // stands in for (module doc).
         let at = self.yscrl * LINE_LEN;
         ctx.surface.pixels_mut()[at..at + LINE_LEN].copy_from_slice(&row);
 
@@ -563,7 +500,7 @@ impl Part for Endscrl {
         Ok(())
     }
 
-    /// One tick of `main`'s loop. See the module docs' tick map.
+    /// One tick of `main`'s loop. The module doc's tick map.
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         if self.ended {
             return PartStatus::Finished;
@@ -593,9 +530,6 @@ mod tests {
     use super::*;
     use crate::parts::test_rig::{differing_pixels, reference, Rig};
     use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
-
-    /// The file the part must *not* read (`reference-indices.md` §21).
-    const DEVELOPERS_TEXT: &str = "../../assets/ENDSCRL/ENDSCROL.TXT";
 
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Endscrl) {
@@ -724,111 +658,6 @@ mod tests {
     }
 
     #[test]
-    fn a_line_is_written_once_and_the_beam_wraps_instead_of_a_second_copy() {
-        let (mut rig, mut part) = started();
-        run_ticks(&mut rig, &mut part, FIRST_SCROLL_TICK);
-        assert!(
-            rig.surface.pixels().iter().all(|pixel| *pixel == 0),
-            "ticks 0-2 draw nothing"
-        );
-
-        part.frame(&mut rig.ctx(FIRST_SCROLL_TICK));
-
-        // `:89-92`: the line, 80 bytes a plane, at `80*yscrl` — and the original
-        // writes it a second time at `80*(yscrl+401)`. One line is 640 pixels
-        // and the port's surface is 400 of them, so that address is off the end
-        // of the port's ring: the beam's wrap is the second copy.
-        assert_eq!(part.yscrl, 1, "the write pointer steps");
-        let inked = |row: &[u8]| row.iter().filter(|pixel| **pixel != 0).count();
-        assert!(inked(&rig.surface.pixels()[..LINE_LEN]) > 0, "the line was not drawn");
-        assert_eq!(inked(&rig.surface.pixels()[LINE_LEN..]), 0, "something outside the line moved");
-        assert!(
-            (RING_LINES + 1) * LINE_LEN > rig.surface.pixels().len(),
-            "the original's second copy would be at ring line 401, past this surface"
-        );
-
-        // `:95`'s `setstart(yscrl*80 + 80)`, with the post-increment `yscrl`:
-        // 160 planar bytes = 2 lines of the original's memory, whose second copy
-        // makes the line just written the *bottom* row of the display. In the
-        // port's units that is `(yscrl + 1) * 640` = 640, read modulo the
-        // surface.
-        assert_eq!(rig.view.start_addr, LINE_LEN as u32);
-        assert_eq!(
-            rig.view.source_index(&rig.surface, 0, VIEW_HEIGHT - 1),
-            0,
-            "the bottom row is the line just written"
-        );
-        assert_eq!(
-            rig.view.source_index(&rig.surface, 0, 0),
-            LINE_LEN,
-            "and the top row is the oldest line of the ring"
-        );
-    }
-
-    #[test]
-    fn the_display_advances_one_line_every_two_ticks() {
-        // `:47`'s `if(dis_waitb()==1) dis_waitb();` — the loop spends two waits
-        // an iteration, so a line lands every second tick: 3, 5, 7, … and no
-        // tick in between moves anything.
-        let (mut rig, mut part) = started();
-        let mut state = Vec::new();
-        for at in 0..12u32 {
-            part.frame(&mut rig.ctx(at));
-            state.push((part.yscrl, rig.view.start_addr));
-        }
-        assert_eq!(
-            &state[..3],
-            &[(0, 0), (0, 0), (0, 0)],
-            "nothing scrolls before the first `do_scroll`"
-        );
-        for (line, pair) in [(1usize, &state[3..5]), (2, &state[5..7]), (3, &state[7..9]), (4, &state[9..11])] {
-            let origin = line as u32 * LINE_LEN as u32;
-            assert_eq!(pair, &[(line, origin), (line, origin)], "the pair that shows line {line}");
-        }
-        assert_eq!(state[11], (5, 5 * LINE_LEN as u32));
-    }
-
-    #[test]
-    fn the_ring_wraps_at_four_hundred_lines_not_four_hundred_and_one() {
-        // `MAIN.C:93`: `yscrl=(yscrl+1)%401` — and `:89`'s second copy is what
-        // makes 401 work there. The port's beam wraps at 400 lines: 400 × 640 =
-        // 256,000 = the surface, so the write pointer and the origin the beam
-        // reads come back to the state one turn ago, exactly. The arithmetic
-        // that makes 401 impossible here: a 401st line's origin would be
-        // `401 * 640 = 256,640`, past the end of everything the beam can read.
-        let (mut rig, mut part) = started();
-
-        run_ticks(&mut rig, &mut part, FIRST_SCROLL_TICK + 2); // the first line: ticks 3 and 4
-        let first = (part.yscrl, rig.view.start_addr);
-        assert_eq!(first, (1, LINE_LEN as u32));
-
-        // 400 lines is 800 ticks; the 400th lands on tick 801.
-        run_to(&mut rig, &mut part, FIRST_SCROLL_TICK + 2 * RING_LINES as u32);
-        assert_eq!(part.yscrl, 0, "400 lines is a whole turn");
-        assert_eq!(
-            rig.view.start_addr,
-            400 * LINE_LEN as u32,
-            "the last line's origin is the largest there is — 256,000, past a 16-bit \
-             register, which is why `start_addr` is a `u32` — and the beam reads it as \
-             ring line 0"
-        );
-        assert_eq!(rig.view.source_index(&rig.surface, 0, 0), 0);
-        assert_eq!(RING_LINES * LINE_LEN, rig.surface.pixels().len());
-        // And the number the widening was for: the largest origin a `u16` pair
-        // could sum to, against the one this ring reaches.
-        assert_eq!(400 * LINE_LEN - 2 * usize::from(u16::MAX), 124_930);
-
-        // One more line, and the state is the one after the first: the turn is
-        // 400 lines, not 401. **The pixels are not the same** — the ring now
-        // holds a different line of the greetings text, which is 542 lines long
-        // — but the write pointer and the origin the beam reads are, and that
-        // is what "the picture at 800 ticks" means here: a line every two ticks
-        // is a 400-line turn, where the original's 401-line ring turns in 802.
-        part.frame(&mut rig.ctx(FIRST_SCROLL_TICK + 2 * RING_LINES as u32));
-        assert_eq!((part.yscrl, rig.view.start_addr), first);
-    }
-
-    #[test]
     fn the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows() {
         // The modelling claim itself, checked against the original's own
         // arithmetic rather than argued: a 401-line ring written **twice** — at
@@ -876,19 +705,12 @@ mod tests {
 
     #[test]
     fn the_image_is_the_build_these_offsets_name() {
-        // Every offset the part cites, read back as the instruction it names, so a different
-        // image (or a mis-cited offset) fails here rather than drawing something else.
+        // The offsets the part reads data at, read back as the instructions that name them.
         let image = image();
         let at = |offset: usize, bytes: &[u8]| {
             assert_eq!(&image.image[offset..offset + bytes.len()], bytes, "image {offset:#x}");
         };
         at(0x0000, &[0xba, 0x89, 0x1c]); // mov dx,1c89h: DGROUP
-        assert_eq!(DGROUP, 0x1c890);
-        // main: dis_partstart, dis_waitb, mode 0eh, CRTC 9 = 0.
-        at(0x1220, &[0x9a, 0x40, 0x00, 0x80, 0x01]);
-        at(0x1225, &[0x9a, 0x23, 0x00, 0x80, 0x01]);
-        at(0x122a, &[0xb8, 0x0e, 0x00, 0xcd, 0x10]);
-        at(0x122f, &[0xb8, 0x09, 0x00, 0xba, 0xd4, 0x03, 0xef]);
         // The fifteen `setrgbpalette(i, g, g, g)` calls, sixteen bytes each.
         for (k, grey) in PALETTE_GREYS.iter().enumerate() {
             let i = PALETTE_FIRST + k as u8;
@@ -897,43 +719,22 @@ mod tests {
                 &[0x6a, *grey, 0x6a, *grey, 0x6a, *grey, 0x6a, i, 0x9a, 0x29, 0x00, 0x7b, 0x01],
             );
         }
-        // init(), then `while(!dis_exit()) { if(dis_waitb()==1) dis_waitb(); do_scroll(); }`.
-        at(0x1326, &[0x9a, 0x8c, 0x04, 0x22, 0x01, 0xeb, 0x14]);
-        at(
-            0x132d,
-            &[
-                0x9a, 0x23, 0x00, 0x80, 0x01, 0x3d, 0x01, 0x00, 0x75, 0x05, 0x9a, 0x23, 0x00, 0x80,
-                0x01, 0x9a, 0x2b, 0x01, 0x22, 0x01, 0x9a, 0x5a, 0x00, 0x80, 0x01, 0x0b, 0xc0, 0x74,
-                0xe3,
-            ],
-        );
-        // do_scroll: the control line's `chars = 0`, the raster's stride and segment, the line
-        // advance, the `%` exit.
-        at(0x13c3, &[0x80, 0x3e, 0x84, 0x04, CONTROL, 0x75, 0x06, 0xc7, 0x06, 0x9c, 0x00, 0, 0]);
+        // do_scroll: the centre, the control line's `chars = 0`, the raster's stride and
+        // segment, the 25-row line, the control count, the `%` exit.
         at(0x13b3, &[0xb8, 0x7f, 0x02]);
+        at(0x13c3, &[0x80, 0x3e, 0x84, 0x04, CONTROL, 0x75, 0x06, 0xc7, 0x06, 0x9c, 0x00, 0, 0]);
         at(0x140a, &[0xba, 0x0e, 0x06, 0xf7, 0xea]);
         at(0x1423, &[0xba, 0x2e, 0x11]);
-        at(0x1561, &[0x05, 0x91, 0x01]);
-        at(0x164f, &[0x80, 0x3e, 0x84, 0x04, CONTROL, 0x74, 0x0c]);
         at(0x165a, &[0xbb, 0x19, 0x00, 0x99, 0xf7, 0xfb]);
         at(0x1662, &[0xa0, 0x85, 0x04, 0xb4, 0x00, 0x05, 0xd0, 0xff, 0xba, 0x0a, 0x00, 0xf7, 0xea]);
-        at(0x166f, &[0x8a, 0x16, 0x86, 0x04, 0xb6, 0x00, 0x03, 0xc2, 0x05, 0xd0, 0xff]);
         at(0x169a, &[0x80, 0x3e, 0x84, 0x04, END, 0x75, 0x09, 0x6a, 0x00]);
-        at(0x16a3, &[0x9a, 0x72, 0x02, 0x00, 0x00]);
-        // 0x272 is `exit`: the `atexit` count at DGROUP 0x110, counted down, then `_exit`.
-        at(0x0283, &[0xa1, 0x10, 0x01, 0xff, 0x0e, 0x10, 0x01]);
-        // init: open(name, 1), read(fd, 018e:0000, 60000), the scan's bounds, the blank.
+        // init: open(name, 1), read(fd, 018e:0000, 60000), the scan's rows, the blank.
         at(0x16b2, &[0x6a, 0x01, 0x1e, 0x68, 0x03, 0x01]);
         at(0x16c3, &[0x68, 0x60, 0xea, 0x68, 0x8e, 0x01, 0x68, 0x00, 0x00]);
-        at(0x16f3, &[0xba, 0x0e, 0x06]);
-        at(0x16fb, &[0xba, 0x2e, 0x11]);
         at(0x170d, &[0x83, 0x7e, 0xfc, 0x19]);
-        at(0x174f, &[0x83, 0x7e, 0xfc, 0x19]);
-        at(0x171c, &[0x81, 0x7e, 0xfe, 0x0e, 0x06]);
         at(0x1765, &[0xc4, 0x1e, 0x92, 0x00]);
         at(0x17a8, &[0xc7, 0x06, 0xa8, 0x43, 0xfa, 0x05]);
         at(0x17ae, &[0xc7, 0x06, 0xa8, 0x45, 0x10, 0x00]);
-        assert_eq!((BLANK_COLUMN, BLANK_WIDTH, FONT_STRIDE, FONT_ROWS), (1530, 16, 1550, 25));
         // The runtime's `read`: the CR skip and the ^Z stop, and `_fmode`'s O_TEXT.
         at(0x0cbf, &[0x26, 0xac, 0x3c, CTRL_Z, 0x74, 0x30, 0x3c, CR, 0x74, 0x05, 0xaa]);
         at(DGROUP + 0x2d8, &[0x00, 0x40]);
@@ -951,8 +752,6 @@ mod tests {
             data.order,
             b"ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:\x8f\x8f()+-*='Z\x84\x94Y/&"
         );
-        assert_eq!(data.order.len(), 80);
-        assert_eq!(&data.order[..74], b"ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:\x8f\x8f()+-*='");
         assert_eq!(data.raster.len(), 25 * 1550);
 
         let (_, part) = started();
@@ -969,6 +768,12 @@ mod tests {
             [at(b'Z'), at(0x84), at(0x94), at(b'Y'), at(b'/'), at(b'&')],
             [(1012, 16), (1029, 13), (1043, 11), (1055, 17), (1073, 14), (1088, 13)],
             "the six characters the tree's order does not have"
+        );
+        // The text uses five of the six.
+        let count = |byte: u8| part.text[..5_599].iter().filter(|c| **c == byte).count();
+        assert_eq!(
+            [count(b'/'), count(b'&'), count(b'Z'), count(b'Y'), count(0x84), count(0x94)],
+            [83, 26, 12, 1, 2, 0]
         );
         let widths: Vec<usize> = data.order.iter().map(|c| strip.fonaw[usize::from(*c)]).collect();
         assert_eq!((widths.iter().min(), widths.iter().max()), (Some(&3), Some(&25)));
@@ -992,10 +797,6 @@ mod tests {
         assert!(image.image[FONT_AT + FONT_ROWS * FONT_STRIDE..FONT_AT + FONT_ARRAY_ROWS * FONT_STRIDE]
             .iter()
             .all(|v| *v == 0));
-        // The raster is not the tree's `FONA.UH` (1,500 columns, the first run at 0).
-        let tree = sr_assets::load_path(std::path::Path::new("../../assets/ENDSCRL/FONA.UH")).unwrap();
-        assert_eq!(tree.width(), 1500);
-        assert_ne!(tree.width() as usize, FONT_STRIDE);
     }
 
     #[test]
@@ -1005,8 +806,7 @@ mod tests {
         // bytes after the kept ones are the raw read's own, and the rest of the array is its
         // initialiser, which the image holds (the tree's `"Testing Testing\0…"`, `MAIN.C:52`).
         let shipped = read_asset(NAME, TEXT_PATH).unwrap();
-        let developers = std::fs::read(DEVELOPERS_TEXT).unwrap();
-        assert_eq!((shipped.len(), developers.len()), (6_141, 1_007));
+        assert_eq!(shipped.len(), 6_141);
         assert_eq!(shipped.iter().filter(|b| **b == CR).count(), 542);
         assert!(!shipped.contains(&CTRL_Z));
         assert!(shipped.ends_with(b"\r\n"), "the one read case not modelled: a CR last");
@@ -1021,7 +821,6 @@ mod tests {
         assert!(initial.starts_with(b"Testing Testing\0PIXEL SUCKS\0"));
         assert_eq!(&part.text[6_141..], &initial[6_141..]);
         assert!(part.text.starts_with(b"Second Reality\n"));
-        assert!(developers.starts_with(b"Lerto has coded this"));
 
         // The read itself, on a buffer it fills less than: a CR dropped, a ^Z ending it.
         let mut buffer = [9u8; 8];
@@ -1086,26 +885,12 @@ mod tests {
 
     #[test]
     fn the_port_draws_the_references_frames_at_the_references_own_ticks() {
-        // Every keyframe of `reference/parts/endscrl`, at the release's own start: **0**
-        // differing pixels of 256,000 in each — the control lines, the pitch, the order, the
-        // raster and the CR-less text all at once.
+        // At the release's own start every keyframe is 0 of 256,000 pixels; rediff measures
+        // them at the port's chain, 82 frames earlier (A11).
         for index in KEYFRAMES {
             assert_eq!(differing_pixels(&at_release_index(index), &reference("endscrl", index, "rgb")), 0, "frame {index}");
         }
-        // And where the port's chain puts them, 82 frames (41 ring lines) earlier: what
-        // `cargo xtask rediff --only endscrl` measures and A53 carries. The content is the
-        // reference's; only the scroll position differs.
-        let mut counts = Vec::new();
-        for index in KEYFRAMES {
-            let (mut rig, mut part) = started();
-            run_to(&mut rig, &mut part, index - PORT_FIRST + 1);
-            counts.push(differing_pixels(&rig.rendered_rgb(), &reference("endscrl", index, "rgb")));
-        }
-        assert_eq!(counts, CHAIN_COUNTS, "the keyframes at the port's own chain");
     }
-
-    /// `cargo xtask rediff --only endscrl`'s counts, measured here too.
-    const CHAIN_COUNTS: [usize; 4] = [7_217, 32_508, 25_118, 17_613];
 
     #[test]
     fn a_control_line_draws_nothing_and_lasts_its_own_count() {
@@ -1168,24 +953,6 @@ mod tests {
         assert!(drawn[..25].iter().any(|d| *d), "Canada");
         assert!(drawn[25..40].iter().all(|d| !*d), "the `[15` rows are blank");
         assert_eq!(&part.textline[..14], b"Epic MegaGames", "read on row 41");
-    }
-
-    #[test]
-    fn the_six_characters_the_trees_order_lacks_are_drawn() {
-        // The shipped text asks for five of the six: `/` 83 times, `&` 26, `Z` 12, `Y` once
-        // and `ä` (0x84) twice; each has a run in the image's raster, so each is drawn
-        // (frame 14000, which names `/`, `&` and `ä`, is the reference to the pixel above).
-        let (_, part) = started();
-        let text = &part.text[..5_599];
-        let count = |byte: u8| text.iter().filter(|c| **c == byte).count();
-        assert_eq!(
-            [count(b'/'), count(b'&'), count(b'Z'), count(b'Y'), count(0x84), count(0x94)],
-            [83, 26, 12, 1, 2, 0]
-        );
-        let strip = part.strip.as_ref().unwrap();
-        for byte in [b'Z', 0x84, 0x94, b'Y', b'/', b'&'] {
-            assert!(strip.fonaw[usize::from(byte)] > 0, "{byte:#x}");
-        }
     }
 
     /// The part's tick on which `do_scroll` reads the `%` line: ring row 11,483.

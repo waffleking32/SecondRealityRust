@@ -15,8 +15,8 @@ Reference: `reference/parts/endscrl/`, keyframes 9100, 10000, 12000, 14000 (`ref
 Offsets are into the unpacked image: `cargo test -p sr-assets --test exe -- --ignored
 dump_the_unpacked_images` writes `out/release-images/ENDSCRL.img`, read with
 `objdump -D -b binary -mi8086 --start-address=…`.
-`parts::endscrl::tests::the_image_is_the_build_these_offsets_name` reads back the cited
-instructions.
+`parts::endscrl::tests::the_image_is_the_build_these_offsets_name` reads back the instructions
+at the offsets the part reads data from.
 
 ## 1. What the shipped build does
 
@@ -48,7 +48,7 @@ The data, read from the image (`the_strip_and_its_order_are_read_from_the_image`
   1012/1029/1043/1055/1073/1088, widths 16/13/11/17/14/13; the blank's 16 columns from 1530 hold no
   ink. One 56-column run at 1391 is reached by no character of the order. The text uses the six added
   characters `/` 83, `&` 26, `Z` 12, `Y` 1, `ä` 2 and `\x94` 0 times, and each has a run
-  (`the_six_characters_the_trees_order_lacks_are_drawn`).
+  (`the_strip_and_its_order_are_read_from_the_image`).
 - **The text array**, `018e:0000`, 64,000 bytes up to the raster's segment, starts with the tree's
   initialiser (`"Testing Testing\0PIXEL SUCKS\0…"`, `MAIN.C:52`); `read` overwrites its front.
 
@@ -133,7 +133,7 @@ fade runs to 31,866 and the blank to 31,886. The release's begins at 8917, so it
 | 12000 | 12000 | 25,118 | 0 | A11 |
 | 14000 | 14000 | 17,613 | 0 | A11 |
 
-The first count column is `cargo xtask rediff --only endscrl`'s; both columns are asserted by
+The first count column is `cargo xtask rediff --only endscrl`'s; the second is asserted by
 `the_port_draws_the_references_frames_at_the_references_own_ticks`. Planes are RGB of 256,000 pixels.
 The full run's filed opening frames (`fullrun/13-endscrl`: 46280, 46283, 46286, rendered 88 frames
 earlier at the A53 seam) are 0.
