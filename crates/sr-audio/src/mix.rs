@@ -710,8 +710,11 @@ impl Curve {
     /// zero fill is meant to be `0x800 − K` bytes, but `+0x559d`'s `rep stosw` leaves `CX` = 0,
     /// so `+0x55a1`'s `rep stosb` writes nothing: the fill is `2 × ⌊(0x800 − K)/4⌋` (the two
     /// `shr $1,%cx`), and `+0x55bd` fills the shortfall after the ramp with `0xFFFF` in
-    /// `2 × ⌊rem/2⌋` bytes (an odd last byte is the object's `0x01` filler; the port leaves it
-    /// zero). `tests/common/oracle.rs`'s `curve` writes the same arithmetic out independently.
+    /// `2 × ⌊rem/2⌋` bytes. `+0x55c1`'s `rep stosb` writes nothing either, so an odd last byte
+    /// keeps what the segment held, on a first build the object's zero (`cs:[0x6c]` is 0x6E, and
+    /// the object's 0x800 bytes there are zero); the port leaves it zero. `rem` is odd only for
+    /// an odd `K`, never at the modules' `mul` of 64 or 48. `tests/common/oracle.rs`'s `curve` writes the same
+    /// arithmetic out independently.
     pub fn build(mul: u8) -> Curve {
         let mul = mul.max(0x10);
         let ramp = 0x8000 / usize::from(mul);

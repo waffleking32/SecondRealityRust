@@ -1,5 +1,5 @@
 //! The music engine for the Second Reality port: STMIK's S3M player and mixer, read out of
-//! `MAIN/STMIK.300` (`docs/fidelity/music.md`). Dependency-free, like `sr-engine` (design §4.2).
+//! `MAIN/STMIK.300` (`docs/fidelity/music.md`). Dependency-free, like `sr-engine` (design §4.1).
 //!
 //! | module | what it holds |
 //! |---|---|
@@ -26,7 +26,7 @@ pub use player::{MixRate, Player, PlayerOptions, Position, Quality, ENHANCED_RAT
 
 #[cfg(test)]
 mod tests {
-    /// The audio crate keeps zero runtime dependencies (design §4.2), as `sr-engine` does. Any
+    /// The audio crate keeps zero runtime dependencies (design §4.1), as `sr-engine` does. Any
     /// table whose name mentions `dependencies` is an offender except `[dev-…]` and
     /// `[build-dependencies]`; the manifest is read as text so the guard is not itself a
     /// dependency.
@@ -63,11 +63,11 @@ mod tests {
         assert!(
             found_the_section,
             "`[dependencies]` is missing from the audio crate's manifest. This test reads that \
-             section, so removing it removes the guard: put it back, empty (design §4.2)"
+             section, so removing it removes the guard: put it back, empty (design §4.1)"
         );
         assert!(
             offenders.is_empty(),
-            "sr-audio must keep zero runtime dependencies (design §4.2); the manifest has {}",
+            "sr-audio must keep zero runtime dependencies (design §4.1); the manifest has {}",
             offenders.join(", ")
         );
     }
