@@ -938,9 +938,6 @@ pub struct Sequence {
     clock: Tick,
     /// Whether the run is past its parts and showing the screen they left.
     holding: bool,
-    /// The part the hold began at, when the port has not written it. `None`
-    /// when the plan itself ran out.
-    stopped_at: Option<&'static str>,
     finished: bool,
     /// The run's music, when it has any. See [`RunMusic`].
     music: Option<RunMusic>,
@@ -1241,7 +1238,6 @@ impl Sequence {
             anchor,
             clock: Tick::new(),
             holding: false,
-            stopped_at: None,
             finished: false,
             music: None,
             music_source: music,
@@ -1454,11 +1450,8 @@ impl Sequence {
     /// the same black palette, and dropping it would resize the window for twenty ticks.
     /// After the last, the run has [`ended`](Sequence::ended), and it keeps composing the
     /// blank for whoever is still ticking it.
-    ///
-    /// A hold that began at a part the port has not written is not the plan running out,
-    /// and is left to hold: there is no `@@partsdone` to reach.
     fn exit_stage(&mut self) {
-        if self.ending != Ending::Exit || !self.holding || self.stopped_at.is_some() {
+        if self.ending != Ending::Exit || !self.holding {
             return;
         }
         self.exit_ticks = self.exit_ticks.saturating_add(1);
@@ -1533,7 +1526,7 @@ impl Sequence {
             if self.looping == Looping::On {
                 return self.start_seam();
             }
-            return self.hold(None);
+            return self.hold();
         };
         // Only a loop seam rewinds the plan to its first name (`with_run` starts it
         // and leaves `next` at 1), so this is the next pass's first part.
@@ -1550,22 +1543,12 @@ impl Sequence {
             self.finished = true;
             return false;
         }
-        match self.start(name) {
-            Ok(()) => true,
-            // A part the port *has* but cannot start is a different thing from
-            // one it has not reached, and `tick` has no channel to report
-            // either on — so the loud one says so, and a run that ends here
-            // does not look like one that is holding.
-            Err(ShellError::Engine(error)) => {
-                eprintln!("secondreality: {error}; the run ends here");
-                self.finished = true;
-                false
-            }
-            // The port has not written this part: the run holds where it
-            // stands rather than skipping over it, and its frames keep the
-            // numbering the block gave them.
-            Err(_) => self.hold(Some(name)),
+        if let Err(error) = self.start(name) {
+            eprintln!("secondreality: {error}; the run ends here");
+            self.finished = true;
+            return false;
         }
+        true
     }
 
     /// Install the restart site's player when the part the run is about to start
@@ -1638,9 +1621,8 @@ impl Sequence {
         true
     }
 
-    /// Start holding the screen the run's last part left. `stopped_at` is the
-    /// plan name the run stopped at, when that is why the hold began.
-    fn hold(&mut self, stopped_at: Option<&'static str>) -> bool {
+    /// Start holding the screen the run's last part left.
+    fn hold(&mut self) -> bool {
         let mut part = Box::new(Holding { of: self.current });
         if let Err(error) = self.engine.start(&mut *part) {
             eprintln!("secondreality: {error}; the run ends here");
@@ -1650,7 +1632,6 @@ impl Sequence {
         self.live = Some(part);
         self.live_cue = false;
         self.holding = true;
-        self.stopped_at = stopped_at;
         true
     }
 
@@ -1673,22 +1654,15 @@ impl Sequence {
 
     /// Start `name` as the part this run is on.
     fn start(&mut self, name: &'static str) -> Result<(), ShellError> {
-        let mut part = (self.source)(name).ok_or_else(|| self.unbuildable(name))?;
+        let mut part = (self.source)(name).ok_or_else(|| ShellError::UnknownPart {
+            name: name.to_string(),
+        })?;
         self.engine.start(&mut *part)?;
         self.live = Some(part);
         self.current = name;
         self.live_cue = false;
         self.starts.push((self.index, name));
         Ok(())
-    }
-
-    /// Why a name in the plan has no part: the port has not reached it, or it
-    /// is not the demo's at all.
-    fn unbuildable(&self, name: &'static str) -> ShellError {
-        match demo_part(name) {
-            Some(part) => ShellError::NotPorted { name: part },
-            None => ShellError::UnknownPart { name: name.to_string() },
-        }
     }
 
     /// The last presented frame.
@@ -1767,13 +1741,6 @@ impl Sequence {
     /// §26.8).
     pub fn starts(&self) -> &[(u32, &'static str)] {
         &self.starts
-    }
-
-    /// The part the run stopped at: the plan's next name, when the hold began
-    /// because the port has not written it. `None` while a part is running, and
-    /// `None` when the run's own plan ran out.
-    pub fn stopped_at(&self) -> Option<&'static str> {
-        self.stopped_at
     }
 
     // --- the music ---------------------------------------------------------
@@ -2006,8 +1973,6 @@ pub enum ShellError {
     /// empty `--part` is a name that matched nothing, and the message echoes it
     /// so the caller can see which argument was empty.
     UnknownPart { name: String },
-    /// The name is a demo part the port has not reached yet.
-    NotPorted { name: &'static str },
     /// The plan named no parts. Its own variant rather than an empty
     /// [`UnknownPart`](ShellError::UnknownPart): a run with nothing in it has
     /// no name to quote, and quoting one anyway is how `--part ""` came to be
@@ -2030,7 +1995,6 @@ impl fmt::Display for ShellError {
         match self {
             ShellError::UnknownPart { name } => write!(f, "unknown part {name:?}"),
             ShellError::EmptyPlan => write!(f, "a run needs at least one part"),
-            ShellError::NotPorted { name } => write!(f, "{name} is not ported yet"),
             ShellError::Engine(e) => write!(f, "{e}"),
             ShellError::Music { message } => write!(f, "the run's music cannot be loaded: {message}"),
         }
@@ -2069,26 +2033,11 @@ fn block_mask(block: char) -> Option<u8> {
     BLOCKS.iter().find(|(name, _)| *name == block).map(|(_, mask)| *mask)
 }
 
-/// The demo part `name` is, as the run order spells it, or `None`.
-fn demo_part(name: &str) -> Option<&'static str> {
-    PART_ORDER.iter().find(|(part, _)| *part == name).map(|(part, _)| *part)
-}
-
-/// The name a run's plan may carry for `name`.
-///
-/// The distinction is the point: a name the demo has but the port has not
-/// reached is a task someone can pick up, and a name the demo never had is a
-/// typo.
+/// The registered name `name` is, for a run's plan.
 pub fn resolve(name: &str) -> Result<&'static str, ShellError> {
-    if let Some(registered) = parts::registered(name) {
-        return Ok(registered);
-    }
-    match demo_part(name) {
-        Some(part) => Err(ShellError::NotPorted { name: part }),
-        None => Err(ShellError::UnknownPart {
-            name: name.to_string(),
-        }),
-    }
+    parts::registered(name).ok_or_else(|| ShellError::UnknownPart {
+        name: name.to_string(),
+    })
 }
 
 /// rediff's table, for the trace window [`rediff_table::JITTER_FRAMES`] (A12) that the shell's
@@ -2682,7 +2631,8 @@ mod tests {
     /// which fills the screen and retires on its second tick, so its picture is the one the
     /// seam holds.
     fn loop_source(name: &str) -> Option<Box<dyn Part>> {
-        let name = demo_part(name)?;
+        let (name, _) = PART_ORDER.iter().find(|(part, _)| *part == name)?;
+        let name = *name;
         if name == "cred" {
             return Some(Box::new(Stub { name, fill: Some(7), retires: Some(1) }));
         }
@@ -3632,12 +3582,6 @@ mod tests {
 
     #[test]
     fn resolve_rejects_a_name_the_demo_never_had() {
-        // Every name in the demo's run order is registered now (GLENZ was the
-        // last), so `resolve` can no longer show the `NotPorted` arm: the only
-        // name left for it to answer is one that is not a part at all. The
-        // unported arm is still exercised through a source that declines a demo
-        // name (`a_run_that_stopped_says_which_part_it_stopped_at`), which is
-        // where a run meets it.
         assert_eq!(resolve("testcard").unwrap(), "testcard");
         assert!(matches!(resolve("nope"), Err(ShellError::UnknownPart { name }) if name == "nope"));
         // An empty name is a name that matched nothing, and the message has to
@@ -3799,106 +3743,37 @@ mod tests {
     }
 
     #[test]
-    fn a_block_run_stops_at_the_first_part_the_port_cannot_run() {
-        // A run whose source cannot build the next part holds where it stands rather than
-        // skipping over it and producing frames in a numbering nothing supports.
-        // `for_part("beglogo")` is a one-part plan, so it holds on its only part; the
-        // second half uses a source that declines TECHNO (registered, but this stub does
-        // not build it) and the run holds on "a".
-        let mut run = for_part("beglogo").unwrap();
-        run_out(&mut run, 8);
-        assert_eq!(run.part(), "beglogo");
-
-        // And with a demo name the source declines (TECHNO is registered now, but
-        // this stub does not build it): the run holds where it stands rather than
-        // skipping over the part.
-        let mut run = sequence_of(vec!["a", "techno"]).unwrap();
-        run_out(&mut run, 8);
-        assert_eq!(run.part(), "a", "the part the source lacks must not be skipped to");
-        assert!(!run.finished(), "the port ran out of parts; the run has not ended");
-        assert_eq!(run.index(), 8, "and it holds rather than stopping: the index keeps counting");
-    }
-
-    /// A one-frame stub for every name the registry builds, and nothing for the demo's
-    /// names the port has not reached: the registry, not a list in the test below, is
-    /// what decides which is which.
-    fn registered_stub_source(name: &str) -> Option<Box<dyn Part>> {
-        crate::parts::registered(name)
-            .map(|name| Box::new(Stub { name, fill: None, retires: Some(0) }) as Box<dyn Part>)
-    }
-
-    #[test]
-    fn every_blocks_plan_stops_at_the_first_part_the_registry_lacks() {
-        // The plan is the demo's own sequence and is not truncated (`block_plan`); where
-        // a run stops is `take_next`'s answer when the part source refuses the next name.
-        // The expected stop is the first plan name `parts.rs` does not register, so a
-        // part that lands moves the stop with it — and the run says which name it could
-        // not go on to (`stopped_at`, which the window's status line prints as
-        // "holding; <name> is not ported yet").
-        //
-        // This is the block-level claim the end-to-end runs rest on: **every block's plan
-        // is now fully ported** — GLENZ was the last name any of them lacked (Phase 7) — so
-        // each plan runs to its own end and stops nowhere. Block 1 runs ALKU → … → GLENZ →
-        // … → ENDSCRL, block 2 BEGLOGO → GLENZ → … → ENDSCRL, block 3 its whole tier and
-        // the end sequence (U2E's bit 8 is in 0x1c), block 4 U2E and the scrollers, block 5
-        // the scrollers and block U the hidden part alone.
-        let expected: &[(char, Option<&str>)] = &[
-            ('1', None),
-            ('2', None),
-            ('3', None),
-            ('4', None),
-            ('5', None),
-            ('U', None),
-        ];
-        for (block, stop) in expected {
+    fn every_part_of_the_demos_order_is_registered_and_every_block_runs_to_its_end() {
+        for (name, _) in PART_ORDER {
+            assert_eq!(crate::parts::registered(name), Some(*name), "{name} is registered");
+        }
+        for (block, _) in BLOCKS {
             let plan = block_plan(*block).unwrap();
-            let first_missing = plan
-                .iter()
-                .copied()
-                .find(|name| crate::parts::registered(name).is_none());
-            assert_eq!(first_missing, *stop, "{block}: the first part the port lacks");
-
-            let prefix = plan
-                .iter()
-                .position(|name| Some(*name) == *stop)
-                .unwrap_or(plan.len());
-            if prefix == 0 {
-                // A block whose *first* part is unported has no run at all: the command
-                // line refuses it (`resolve`) and a hand-built sequence names the part it
-                // could not start.
-                match Sequence::with_source(
-                    TEST_SURFACE,
-                    TEST_SURFACE,
-                    View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
-                    plan,
-                    registered_stub_source,
-                ) {
-                    Ok(_) => panic!("{block} begins at a part the port lacks"),
-                    Err(error) => assert_eq!(
-                        error.to_string(),
-                        format!("{} is not ported yet", stop.unwrap()),
-                        "{block}'s run does not start"
-                    ),
-                }
-                continue;
-            }
-
-            // Every prefix part builds, and the first missing name is where the run
-            // holds — with the part before it still on the screen.
-            let held = plan[prefix - 1];
+            let last = *plan.last().unwrap();
             let mut run = Sequence::with_source(
                 TEST_SURFACE,
                 TEST_SURFACE,
                 View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
                 plan,
-                registered_stub_source,
+                |name| {
+                    crate::parts::registered(name).map(|name| {
+                        Box::new(Stub { name, fill: None, retires: Some(0) }) as Box<dyn Part>
+                    })
+                },
             )
             .unwrap();
             run_out(&mut run, 64);
-            assert!(run.holding(), "{block}: the run holds where the port stopped");
-            assert_eq!(run.stopped_at(), *stop, "{block}: the part it could not go on to");
-            assert_eq!(run.part(), held, "{block}: the screen it holds");
+            assert!(run.holding(), "{block}: the plan ran out");
+            assert_eq!(run.part(), last, "{block}: the last part's screen is held");
         }
+    }
+
+    #[test]
+    fn a_name_the_source_cannot_build_mid_run_ends_the_run() {
+        let mut run = sequence_of(vec!["a", "techno"]).unwrap();
+        assert_eq!(run_out(&mut run, 8), 3, "a's two frames, then the failed start");
+        assert!(run.finished());
+        assert_eq!(run.part(), "a");
     }
 
     #[test]
@@ -4619,7 +4494,6 @@ mod tests {
         assert!(!run.holding(), "the wait retires at the end of its exit tick");
         run.tick(); // the hold
         assert!(run.holding(), "and then the run holds PANICEND's screen");
-        assert_eq!(run.stopped_at(), None, "the plan ran out; no part is to blame");
         assert_eq!(run.part(), "panicend");
     }
 
@@ -4659,34 +4533,6 @@ mod tests {
         assert_eq!(run.part(), "mntscrl", "the exit skipped the cue; the plan goes on");
         assert_eq!(run.index(), 2, "two ticks, and no cue tick between them");
         assert!(!run.holding());
-    }
-
-    #[test]
-    fn blocks_one_and_two_have_no_stop() {
-        // Block 1 and block 2 are the two plans that reach GLENZ, and with the
-        // part registered they run their whole sequence to ENDSCRL — neither
-        // stops at a part, and the plan's end is the hold, not a stopped-at name.
-        for block in ['1', '2'] {
-            let plan = block_plan(block).unwrap();
-            assert!(plan.contains(&"glenz"), "{block} reaches GLENZ");
-            assert_eq!(
-                plan.iter().copied().find(|name| crate::parts::registered(name).is_none()),
-                None,
-                "{block}: every part in the plan is registered"
-            );
-            let mut run = Sequence::with_source(
-                TEST_SURFACE,
-                TEST_SURFACE,
-                View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
-                plan,
-                registered_stub_source,
-            )
-            .unwrap();
-            run_out(&mut run, 64);
-            assert!(run.holding(), "{block}: the plan ran out");
-            assert_eq!(run.stopped_at(), None, "{block}: no part stopped it");
-            assert_eq!(run.part(), "endscrl", "{block}: the last part's screen is held");
-        }
     }
 
     // --- the keyboard (`DIS/DISINT.ASM:112-156`, `MAIN/U2.ASM:205-207`) ------
@@ -4807,36 +4653,6 @@ mod tests {
         assert!(!run.request_exit(), "no part is running to ask");
         assert!(!run.skip_part(), "and none to skip");
         assert_eq!(run.part(), "a", "the held screen is still a's");
-    }
-
-    #[test]
-    fn a_run_that_stopped_says_which_part_it_stopped_at() {
-        // Every part in the demo's order is registered now, so the hold-with-a-name
-        // path is reached through a source that declines a demo name — which is what
-        // a broken build or a missing part would look like. The run holds the screen
-        // it has and can name the part it could not go on to, which is what a
-        // window's status line has to say out loud.
-        let mut run = sequence_of(vec!["a", "techno"]).unwrap();
-        assert_eq!(run.stopped_at(), None, "nothing has stopped yet");
-        run_out(&mut run, 8);
-        assert!(run.holding());
-        assert_eq!(run.stopped_at(), Some("techno"));
-        assert_eq!(run.part(), "a", "and the held screen is still a's");
-        // `unbuildable` answers `NotPorted` for a demo name: TECHNO is the demo's,
-        // the source merely did not build it.
-        assert_eq!(
-            run.unbuildable("techno").to_string(),
-            "techno is not ported yet",
-            "a demo name the port has not written, not a typo"
-        );
-    }
-
-    #[test]
-    fn a_run_that_exhausted_its_plan_stopped_at_no_part_in_particular() {
-        let mut run = for_part("a").unwrap();
-        run_out(&mut run, 8);
-        assert!(run.holding());
-        assert_eq!(run.stopped_at(), None, "the plan ran out; no part is to blame");
     }
 
     #[test]

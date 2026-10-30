@@ -774,8 +774,7 @@ impl EscapeKey {
 /// The part named is the one that drew the frame on the screen. After a part
 /// retires the shell holds its screen, so the line keeps naming it while the
 /// hold lasts: that is whose picture is up, and naming the *next* part would be
-/// the line claiming a part the run is not playing. A run that has stopped says
-/// why — a window that simply stopped moving would not.
+/// the line claiming a part the run is not playing.
 fn status_line(run: &Sequence, block: Option<char>) -> String {
     let mut line = TITLE.to_string();
     if let Some(block) = block {
@@ -805,14 +804,7 @@ fn status_line(run: &Sequence, block: Option<char>) -> String {
         line.push_str(" (its own frame numbering, not the reference's)");
     }
     if run.holding() {
-        match run.stopped_at() {
-            Some(part) => {
-                line.push_str(" — holding; ");
-                line.push_str(part);
-                line.push_str(" is not ported yet");
-            }
-            None => line.push_str(" — holding; the run's parts are over"),
-        }
+        line.push_str(" — holding; the run's parts are over");
     }
     line
 }
@@ -919,11 +911,6 @@ mod tests {
             // The other anchored block entry, retiring at once, so a run of it
             // reaches the hold.
             "endlogo" => Some(Box::new(Stub { retires: Some(0) })),
-            // A demo part this stub declines, which is what a part the port has
-            // not written looks like to `Sequence`: the run holds and names it.
-            // (Every part of the demo's order is registered now, so the hold
-            // path is reached through a source that does not build one.)
-            "techno" => None,
             _ => Some(Box::new(Stub { retires: None })),
         }
     }
@@ -1448,13 +1435,13 @@ mod tests {
 
     #[test]
     fn an_escape_between_two_parts_is_kept_and_then_closes_the_window() {
-        // The seam after the last part of a block: `endlogo` retires on its
+        // The seam after the last part of a plan: `endlogo` retires on its
         // first tick, so the iteration that follows has no running part and no
         // hold yet — `Sequence::request_exit` has nothing to ask. That press is
         // "get me out", and a window that consumed it would need a third press
         // to close. It waits instead, and acts as soon as there is nothing left
         // to play.
-        let mut run = run_of(vec!["endlogo", "techno"]);
+        let mut run = run_of(vec!["endlogo"]);
         let mut escape = EscapeKey::default();
 
         run.tick();
@@ -1469,10 +1456,7 @@ mod tests {
         );
 
         run.tick();
-        assert!(
-            run.holding(),
-            "the next part is one this run's source does not build"
-        );
+        assert!(run.holding(), "the plan has run out");
         assert!(escape.apply(&mut run), "and now the press is the way out");
     }
 
@@ -1592,28 +1576,12 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_stopped_says_so_and_names_the_part_that_holds_the_screen() {
-        // A plan whose next part the run's source does not build: the run holds
-        // the screen it has rather than ending silently, and the status line is
-        // where the reason is. The part it names is the one whose picture is up
-        // — not the one the run could not reach. (Every part of the demo's
-        // order is registered now, so this stub declines TECHNO to reach the
-        // path a not-yet-written part used to reach.)
-        let mut run = run_of(vec!["endlogo", "techno"]);
-        run_out(&mut run, 4);
-        assert_eq!(
-            status_line(&run, Some('2')),
-            "Second Reality — block 2 — endlogo — frame 407 — holding; techno is not ported yet"
-        );
-        assert_eq!(run.stopped_at(), Some("techno"));
-
-        // And a run whose own plan simply ran out says that instead.
+    fn a_held_run_says_its_parts_are_over() {
         let mut run = run_of(vec!["endlogo"]);
         run_out(&mut run, 4);
         assert_eq!(
             status_line(&run, Some('5')),
             "Second Reality — block 5 — endlogo — frame 407 — holding; the run's parts are over"
         );
-        assert_eq!(run.stopped_at(), None);
     }
 }
