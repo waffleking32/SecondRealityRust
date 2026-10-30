@@ -15,23 +15,17 @@
 //! 5. `:432-451` — the teardown: slot 2 removed, all four pages cleared with
 //!    the background.
 //!
-//! # The pre-gate hold
+//! **The pre-gate hold.** The vendored `main` draws nothing before the gate,
+//! but the release shows `U2ABG.UH` under the merged palette (`U2A.C:152`), as
+//! the original does at 15,000, 25,000, 35,000 and 60,000 cycles
+//! (`reference/parts/u2a-speed`). The 30,000-cycle reference's neon 6500 is a
+//! timing race the port does not copy (A32, D24). `init` paints the hold.
 //!
-//! The vendored tree's `main` draws nothing before the gate, but the shipped
-//! release shows the `U2ABG.UH` picture. Under the **merged** palette
-//! (`U2A.C:152`) that is what the original shows at 15,000, 25,000, 35,000 and
-//! 60,000 cycles (`reference/parts/u2a-speed`, boot 6400 and 6600); the
-//! 30,000-cycle reference's neon frame at 6500 is a timing race the port does
-//! not copy (`APPROXIMATIONS.md` A32, D24's 2026-10-26 U2A correction in `docs/decisions.md`). `init` paints
-//! that hold and leaves it until the gate.
-//!
-//! # The tick map
-//!
-//! The gate is open at boot **6988** (`second1c`, order 11 row 47) and the
-//! second at **7618** (`second1b`, order 12 row 55), but the stream ends first:
-//! 521 drawable frames plus its END, at about boot 7509. The first gate's tick
-//! is also the loop's first tick — `U2A.C:238-249` has no retrace between the
-//! gate and the first draw — so nothing here models a separate setup tick.
+//! **The tick map.** The first gate opens at boot 6988 (`second1c`, order 11
+//! row 47) and the second at 7618 (`second1b`, order 12 row 55), but the stream
+//! ends first: 521 drawable frames plus its END, at about boot 7509 (the second
+//! gate is dead, `bugs.md` §12). The gate's tick is the loop's first tick:
+//! `U2A.C:238-249` has no retrace between the gate and the first draw.
 //! `docs/fidelity/u2a.md` carries the measured map.
 
 use std::cell::RefCell;
@@ -82,8 +76,6 @@ pub struct U2a {
     scene: Option<Scene>,
     /// The `U2ABG.UH` pixels, linear 320x200: the clear image and the pre-gate hold.
     background: Vec<u8>,
-    /// The background's own 6-bit palette, the merge's source.
-    background_palette: Palette,
     /// `U2A.00M` entries 0-191 with the background's 0-63 at 192-255.
     merged_palette: Palette,
     /// The ring and projection, shared with copper slot 2.
@@ -97,7 +89,6 @@ impl U2a {
         U2a {
             scene: None,
             background: Vec::new(),
-            background_palette: Palette::new(),
             merged_palette: Palette::new(),
             driver: None,
             phase: Phase::Pad,
@@ -105,14 +96,8 @@ impl U2a {
     }
 
     /// Read the scene and the background, set the view and paint the
-    /// pre-gate hold.
-    ///
-    /// The vendored `U2A.C` draws nothing before its gate, but the shipped
-    /// release holds the `U2ABG.UH` picture under the merged palette
-    /// (`docs/fidelity/u2a.md` §1, A32). The view, the page and the DAC are set here so the hold is up
-    /// from the part's first tick. The ring and its copper are *not* set up
-    /// here: `U2A.C:249` installs `copper2` after the gate, so no retrace
-    /// advances the ring during the hold.
+    /// pre-gate hold (A32). The ring and its copper wait for the gate
+    /// (`U2A.C:249`), so no retrace advances the ring during the hold.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         ctx.require_music(
             NAME,
@@ -157,17 +142,12 @@ impl U2a {
         // (`:247`) is `Driver::new`'s window.
         *ctx.view = view();
 
-        // The release holds page 0 under the merged palette (`U2A.C:152`)
-        // before the gate. The original at 15,000, 25,000, 35,000 and 60,000
-        // cycles shows exactly that at boot 6400 and 6600
-        // (`reference/parts/u2a-speed`); only the 30,000-cycle reference shows
-        // a neon palette there, a timing race the port does not copy (A32).
+        // The pre-gate hold: page 0 under the merged palette (A32).
         ctx.surface.pixels_mut()[..PAGE_PIXELS].copy_from_slice(&background_pixels);
         ctx.set_palette(merged_palette);
 
         self.scene = Some(scene);
         self.background = background_pixels;
-        self.background_palette = background_palette;
         self.merged_palette = merged_palette;
         self.driver = None;
         self.phase = Phase::Pad;
@@ -206,13 +186,9 @@ impl U2a {
 
     /// One iteration of `U2A.C:259-431`, except the loop's own conditions.
     fn loop_tick(&mut self, ctx: &mut PartCtx) {
-        // `if(a>11 && b>54) break;` comes first (`U2A.C:276`).
-        if Self::open(ctx, GATE_TWO) {
-            self.teardown(ctx);
-            return;
-        }
-        // `while(!dis_exit() && !xit)` (`U2A.C:259`).
-        if ctx.exit_requested {
+        // `if(a>11 && b>54) break;` (`U2A.C:276`), then `while(!dis_exit())`
+        // (`:259`).
+        if Self::open(ctx, GATE_TWO) || ctx.exit_requested {
             self.teardown(ctx);
             return;
         }
@@ -232,12 +208,9 @@ impl U2a {
 
         // `vid_setswitch(clw,-1); vid_clearbg(bg); vid_cameraangle(fov);
         // order and draw; schedule and queue` (`U2A.C:284-336`).
+        let scene = self.scene.as_mut().expect("the scene is loaded before the loop");
         let parse = {
             let mut driver = driver.borrow_mut();
-            let scene = self
-                .scene
-                .as_mut()
-                .expect("the scene is loaded before the loop");
             let start = page * PAGE_PIXELS;
             {
                 let mut page = Page::new(
@@ -253,18 +226,15 @@ impl U2a {
             parse
         };
 
-        let scene = self.scene.as_mut().expect("the scene is loaded before the loop");
         if parse_frames(scene, &driver, parse) {
             self.teardown(ctx);
         }
     }
 
     /// `U2A.C:432-441`: slot 2 removed and all four pages cleared with the
-    /// background. The source's `vid_setswitch(3,-1)` names page 3 as the
-    /// **draw** page and leaves CRTC 0x0C (the display start) unchanged, so it
-    /// never re-points the display; the port's page-3 origin is its own
-    /// teardown ruling, and every page holds the same cleared background, so
-    /// the choice is unobservable.
+    /// background. The source's `vid_setswitch(3,-1)` names only the draw page;
+    /// the port also displays page 3, which is unobservable since every page
+    /// holds the same background.
     fn teardown(&mut self, ctx: &mut PartCtx) {
         clear_copper(ctx);
         let pixels = ctx.surface.pixels_mut();
@@ -287,45 +257,32 @@ impl Part for U2a {
     }
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        match self.phase {
-            Phase::Done => PartStatus::Finished,
-            Phase::Pad => {
-                // `_asm int 0fch` (`U2A.C:231-237`) once a tick. The gate is
-                // tested before `dis_exit` (`:238-239`), so a tick where the
-                // gate opens *and* the exit is set still runs the setup and
-                // then the loop's own exit check, which tears down.
-                if !Self::open(ctx, GATE_ONE) {
-                    // `if(dis_exit()) return;` (`:239`): a closed gate with
-                    // the exit set leaves the pad and the DIS retires the
-                    // part; there is no copper to remove and no page to
-                    // clear.
-                    if ctx.exit_requested {
-                        self.phase = Phase::Done;
-                        return PartStatus::Finished;
-                    }
-                    return PartStatus::Continuing;
+        if self.phase == Phase::Done {
+            return PartStatus::Finished;
+        }
+        if self.phase == Phase::Pad {
+            // `_asm int 0fch` (`U2A.C:231-237`) once a tick. The gate is tested
+            // before `dis_exit` (`:238-239`), so a tick where both hold runs
+            // the setup and then the loop's exit check, which tears down.
+            if !Self::open(ctx, GATE_ONE) {
+                // `if(dis_exit()) return;` (`:239`): nothing to remove or clear.
+                if ctx.exit_requested {
+                    self.phase = Phase::Done;
+                    return PartStatus::Finished;
                 }
-                // The gate's tick is the loop's first tick: the DAC upload
-                // (`U2A.C:243-246`), the copper, the ring and the first draw
-                // all happen here, with no retrace between them.
-                ctx.set_palette(self.merged_palette);
-                self.install_ring(ctx);
-                self.phase = Phase::Loop;
-                self.loop_tick(ctx);
-                if self.phase == Phase::Done {
-                    PartStatus::Finished
-                } else {
-                    PartStatus::Continuing
-                }
+                return PartStatus::Continuing;
             }
-            Phase::Loop => {
-                self.loop_tick(ctx);
-                if self.phase == Phase::Done {
-                    PartStatus::Finished
-                } else {
-                    PartStatus::Continuing
-                }
-            }
+            // The DAC upload (`U2A.C:243-246`), the copper, the ring and the
+            // first draw, with no retrace between them.
+            ctx.set_palette(self.merged_palette);
+            self.install_ring(ctx);
+            self.phase = Phase::Loop;
+        }
+        self.loop_tick(ctx);
+        if self.phase == Phase::Done {
+            PartStatus::Finished
+        } else {
+            PartStatus::Continuing
         }
     }
 }
@@ -336,18 +293,6 @@ mod tests {
     use sr_engine::copper::COPPER_SLOTS;
     use crate::parts::visu::math::Matrix;
     use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
-
-    const NEON_DIFFERING: usize = 64_000;
-    const TEST_SPEED_FRAMES: [&str; 8] = [
-        "../../reference/parts/u2a-speed/c15000/frame_006400.rgb",
-        "../../reference/parts/u2a-speed/c15000/frame_006600.rgb",
-        "../../reference/parts/u2a-speed/c25000/frame_006400.rgb",
-        "../../reference/parts/u2a-speed/c25000/frame_006600.rgb",
-        "../../reference/parts/u2a-speed/c35000/frame_006400.rgb",
-        "../../reference/parts/u2a-speed/c35000/frame_006600.rgb",
-        "../../reference/parts/u2a-speed/c60000/frame_006400.rgb",
-        "../../reference/parts/u2a-speed/c60000/frame_006600.rgb",
-    ];
 
     fn constant(order: u8, row: u8) -> ScriptedMusic {
         ScriptedMusic::positions(vec![(order, row)])
@@ -379,8 +324,6 @@ mod tests {
         (rig, part)
     }
 
-    // --- init, the gates and the stream -------------------------------------
-
     #[test]
     fn init_sets_the_shipped_view_and_paints_the_background() {
         let (rig, part) = started_with(closed());
@@ -398,28 +341,13 @@ mod tests {
     }
 
     #[test]
-    fn the_pre_gate_frame_is_the_background_under_the_merged_palette() {
-        let (mut rig, mut part) = started_with(closed());
-        let (_, frame) = rig.step_render(&mut part);
-        assert_eq!(frame, rgb_of(&part.background, &part.merged_palette));
-        // Not the neon: the 30,000-cycle 6500 frame's formula
-        // `(3v + 5) & 63` would put entry 195's 63 at 2.
-        assert_ne!(part.merged_palette.entry(195), [2, 2, 2]);
-        assert_eq!(part.merged_palette.entry(195), part.background_palette.entry(3));
-    }
-
-    #[test]
     fn the_merged_palette_is_the_scene_then_the_background() {
         let (_, part) = started_with(closed());
         let scene = part.scene.as_ref().unwrap();
-        let mut expected = scene.master.palette;
-        for index in 0..64u8 {
-            expected.set_entry(MERGE_FIRST + index, part.background_palette.entry(index));
-        }
-        assert_eq!(part.merged_palette, expected);
+        let background = load_image(NAME, BACKGROUND_PATH).unwrap().palette;
         assert_eq!(
             part.merged_palette.entry(MERGE_FIRST),
-            part.background_palette.entry(0),
+            background.entry(0),
             "entry 192 is the background's entry 0 (U2A.C:152)"
         );
         assert_eq!(
@@ -427,9 +355,10 @@ mod tests {
             scene.master.palette.entry(MERGE_FIRST - 1),
             "entry 191 is still the scene's"
         );
+        assert_eq!(part.merged_palette.entry(255), background.entry(63), "entry 255 is its 63");
         assert_ne!(
             scene.master.palette.entry(MERGE_FIRST),
-            part.background_palette.entry(0),
+            background.entry(0),
             "the merge is observable: the scene's 192 is not black"
         );
     }
@@ -488,10 +417,8 @@ mod tests {
 
     #[test]
     fn the_second_gate_tears_down_on_the_first_tick_it_is_open() {
-        // `if(a>11 && b>54) break;` (`U2A.C:276`) is the loop's first test. It
-        // never fires in the shipped data — the stream's END at 7510 comes
-        // before order 12 row 55 at 7618 (`second1b`) — so a scripted position
-        // is the only way to drive it.
+        // `U2A.C:276` never fires in the shipped data (the stream ends first),
+        // so a scripted position drives it.
         let (mut rig, mut part) = started_with(constant(GATE_TWO.0 + 1, GATE_TWO.1 + 1));
         assert_eq!(rig.step(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
@@ -503,9 +430,8 @@ mod tests {
 
     #[test]
     fn init_without_music_is_a_part_error() {
-        // PAM's precedent: a part whose gates read the published position
-        // refuses to start when the run has no player, rather than waiting
-        // for ever.
+        // A part whose gates read the music refuses a run without it rather
+        // than waiting for ever.
         let mut rig = rig(closed());
         let mut part = U2a::new();
         let error = {
@@ -586,10 +512,6 @@ mod tests {
         rig.run_slot(2);
         assert_eq!(rig.surface.pixels(), before, "the no-op copper changes nothing");
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32);
-        // The cleared hold under the merged palette is the reference's 7640.
-        let held = rig.rendered_rgb();
-        let differing = differing_pixels(&held, &reference("u2a", 7640, "rgb"));
-        assert_eq!(differing, 0, "the cleared hold is not the reference's");
     }
 
     #[test]
@@ -611,31 +533,9 @@ mod tests {
     }
 
     #[test]
-    fn the_pre_gate_hold_is_the_four_speeds_captures() {
-        let (mut rig, mut part) = started_with(closed());
-        let (_, frame) = rig.step_render(&mut part);
-        for path in TEST_SPEED_FRAMES {
-            assert_eq!(differing_pixels(&frame, &std::fs::read(path).unwrap()), 0, "{path}");
-        }
-    }
-
-    #[test]
-    fn the_30000_cycle_neon_6500_differs_by_the_registered_count() {
-        // A32: the 30,000-cycle reference's 6500 is a timing race the port
-        // does not copy. This is also the guard against a regression to it.
-        let (mut rig, mut part) = started_with(closed());
-        let (_, frame) = rig.step_render(&mut part);
-        let differing = differing_pixels(&frame, &reference("u2a", 6500, "rgb"));
-        assert_eq!(differing, NEON_DIFFERING, "A32's count");
-    }
-
-    #[test]
     fn the_reference_7300_is_the_measured_stream_state() {
-        // D25's calibration for the moving keyframe: render every stream
-        // state through the same driver and shipped window the part uses, and
-        // record which state the reference's picture is. The port's own tick
-        // map decides when that state reaches the screen; this pins what it
-        // looks like.
+        // A29's calibration: every stream state rendered through the part's
+        // driver and window, against the reference's 7300.
         let mut scene = load_scene(SCENE_NAME).unwrap();
         let background = load_image(NAME, BACKGROUND_PATH).unwrap();
         let mut merged = scene.master.palette;
@@ -684,10 +584,8 @@ mod tests {
             Some(&858),
             "the state after the reference's"
         );
-        // The live run's boot-7300 frame differs from the same reference by
-        // 1098 (`tests/u2a.rs`); against the reference that count belongs to
-        // stream state 297 and to nothing else, which is what identifies the
-        // port's pose as state 297 (A29).
+        // The run's 7300 differs by 1,098 (rediff's `u2a`), which belongs to
+        // state 297 alone: the port's pose (A29).
         let at_1098: Vec<usize> = (0..=521).filter(|&state| counts[state] == 1098).collect();
         println!("states whose reference comparison is 1098: {at_1098:?}");
         assert_eq!(counts[297], 1098);

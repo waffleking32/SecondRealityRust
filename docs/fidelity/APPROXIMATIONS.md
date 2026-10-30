@@ -841,8 +841,8 @@ ticks of music phase move the gate, and the ring shows each page for four to fiv
 Changing the block-1 clock to match `second1c` would move ALKU's verified frames.
 
 **Measured difference:** **1,098 of 64,000** (1.7156 %), RGB and indices (`cargo xtask rediff --only
-u2a`). `cargo test -p secondreality --test u2a the_saucer_frame_records_its_measured_divergence`
-pins it, `the_block_one_clock_matches_second1_at_boot_5900` pins the clock, and
+u2a`) pins it, `cargo test -p secondreality --test u2a the_block_one_clock_matches_second1_at_boot_5900`
+pins the clock, and
 `cargo test -p secondreality the_reference_7300_is_the_measured_stream_state` shows 1,098 belongs to
 state 297 and to no other of the 522.
 
@@ -914,12 +914,9 @@ whole hold, so the hold, the first draw and PAM's hold share one DAC.
 reference happens to hit, not a stable property of the release. The user chose the normal
 landscape. This is a divergence from that one capture, not a claim that it is wrong at its speed.
 
-**Measured difference:** **0** against all eight `u2a-speed` frames
-(`cargo test --release -p secondreality --test u2a
-the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`;
-`the_pre_gate_hold_is_the_four_speeds_captures`), and **64,000 of 64,000** against the 30,000-cycle
-6500, where every pixel's palette differs (`the_30000_cycle_neon_6500_differs_by_the_registered_count`;
-`cargo xtask rediff --only u2a`). In the full run, 6500 is 64,000 and U2A's first frame, 5961 paired
+**Measured difference:** **0** against all eight `u2a-speed` frames (`cargo xtask rediff --only
+u2a-speed`), and **64,000 of 64,000** against the 30,000-cycle 6500, where every pixel's palette
+differs (`cargo xtask rediff --only u2a`). In the full run, 6500 is 64,000 and U2A's first frame, 5961 paired
 at 5956, is 60,160 (`cargo xtask rediff --only fullrun/02-u2a-pam`; A53).
 
 ## A33 — U2A: the first draw uses `fov = 0` for the C's uninitialised variable
@@ -961,7 +958,7 @@ the pixel set and its colours, which is what the reference compares.
 **Measured difference:** **0** on every shipped comparison. U2A's 6500-hold and 7640 are 0, U2E's
 intro is 0 at nine indices, and the Gouraud residuals A28/A30 have exact silhouettes, so they are
 colour deltas on faces the pipeline drew. `cargo test -p secondreality --bin secondreality
-parts::visu::draw`; `cargo test -p secondreality --test u2a`; `cargo test -p secondreality --test u2e`.
+parts::visu::draw`; `cargo xtask rediff --only u2a`; `cargo test -p secondreality --test u2e`.
 
 ## A35 — The four VGA pages are packed at 64,000 pixels, not the original's 65,536-pixel slots
 

@@ -3155,6 +3155,5 @@ cargo xtask reference capture --arg 1 --boot autoexec --keys "KBD_left KBD_enter
 
 `0a68ffb9…` is the `U2ABG.UH` picture under the merged palette, the bytes of U2A's 7640 and PAM's
 7660–7700 (§5.2, §6.1). At 30,000 cycles (every 100 frames, 6100–7700) 6100–6900 are `11a66eb0…` and
-7000 is `0a68ffb9…`. The port's side is `cargo xtask rediff --only u2a-speed` and `tests/u2a.rs`'s
-`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`. These are fidelity evidence, not
+7000 is `0a68ffb9…`. The port's side is `cargo xtask rediff --only u2a-speed`. These are fidelity evidence, not
 keyframes with ±1 supports: the hold is held (§1.3).

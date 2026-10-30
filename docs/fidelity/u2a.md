@@ -90,12 +90,8 @@ first draw.
 | 7300 | `u2a_007300` | **1,098** indices and RGB pixels | A29 |
 | 7640 | `pam_007640` | **0** indices and RGB pixels | exact |
 
-Tests: `the_30000_cycle_neon_6500_differs_by_the_registered_count`,
-`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`,
-`the_saucer_frame_records_its_measured_divergence` and
-`the_cleared_hold_reference_7640_compares_at_zero_in_both_planes` (`tests/u2a.rs`); `cargo xtask
-rediff` entries `u2a`, `u2a-speed/c*` and `fullrun/02-u2a-pam` (5961 at 60,160 and 6500 at 64,000,
-A53). The 7640 file is PAM's by name because PAM is running there with its gate still closed
+Pinned by `cargo xtask rediff` entries `u2a`, `u2a-speed/c*` and `fullrun/02-u2a-pam` (5961 at
+60,160 and 6500 at 64,000, A53). The 7640 file is PAM's by name because PAM is running there with its gate still closed
 (`dis_sync()<10`), holding U2A's cleared page.
 
 **The reference's 7300 is stream state 294.** `the_reference_7300_is_the_measured_stream_state`
