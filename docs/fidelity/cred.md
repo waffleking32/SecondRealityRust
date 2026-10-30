@@ -67,14 +67,13 @@ unit.
 
 **The hold state is checked, not fitted.** The open loop's last step (`y = 1`) writes line compare
 200, display start 32,080 bytes (128,320 pixels: logical line 401, one `LINE_LEN` past the parked
-128,000) and pan 0. Screens 1 and 18 reproduce frames 1440 and 7640 at 0 of 192,000 bytes; at the
-parked origin the same state differs in **29,523** bytes, because it reads the even logical lines,
-which hold no picture (`the_holds_display_state_reproduces_the_references_own_frames`). A split
-one row out moves the caption by one displayed row, 320 pixels.
+128,000) and pan 0. All five keyframes are that state at 0 of 192,000 bytes (rediff's `cred`); the
+parked origin would read the even logical lines, which hold no picture, and a split one row out
+moves the caption by one displayed row, 320 pixels.
 
 The per-step values of both loops (open 1: `y` 23,630, `yy` 25, line compare 384, start 128,024,
-AC 0x13 2; close 58: 24,795, 629, 393, 128,628, 2) are
-`the_two_ramps_write_the_three_registers_the_source_writes`'s table.
+AC 0x13 2; close 58: 24,795, 629, 393, 128,628, 2) are in
+`the_three_registers_move_once_a_tick_through_both_wipes`'s table of named ticks.
 
 **The record's wipe frames.** The five keyframes are all holds, so `reference/parts/cred` cannot see
 the iris. A scratch sweep of every 100th frame from 1240 to 8840 (not filed under `reference/`)
@@ -102,10 +101,9 @@ tick`, open step `k` on tick `2+k`, close step `k` on `304+k`):
 
 4940 and 7140 are each two steps' frame (the same pixels); the table names the step 300 ticks before
 its close partner. Nineteen of the frames **rule out** reading `(yy & 3) * 2` as whole pixels, by 167 to 46,722 bytes; 6340 is
-invariant under the shift, and the other eight have a pan of 0. The tests are
-`the_records_transition_frames_are_the_states_this_part_writes` and
-`the_records_hold_samples_are_the_releases_screens`, `#[ignore]`d because they read the scratch
-sweep; a re-capture cannot land on the same indices (D17).
+invariant under the shift, and the other eight have a pan of 0. These figures are a one-time
+measurement against that sweep (`reference-indices.md` §20 records it); a re-capture cannot land on
+the same indices (D17), so no test in the tree repeats it.
 
 **What the lag says.** Within a screen it does not grow: each open frame and its close partner are
 300 frames apart in the record and 300 or 301 ticks apart in the port (screens 5 and 8 show the
@@ -127,8 +125,8 @@ the offset it leaves is §7's chain residual (A11, A53).
 
 ## 5. The font, measured
 
-The image's raster (`0x29f0`, 1,500×40) is `CREDITS/FONA.INC`'s 60,000 values and its `fonaorder` is
-`MAIN.C:32`'s 47 characters (`the_images_font_and_order_are_the_trees_byte_for_byte`). The scan finds
+The image's raster is at `0x29f0`, 1,500×40, and its `fonaorder` is `MAIN.C:32`'s 47 characters
+(`the_images_font_and_order_are_where_init_reads_them`). The scan finds
 **47 runs**, 447 inked columns, the last ink at column 557; the widest run is 11 columns and the
 narrowest 2 (`I`, `!`, `:`, `,`, `.`). The routine's blank, `fonap[32] = 1500-32`, `fonaw[32] = 8`
 (`:270-271`), is a column and a width no run provides
@@ -156,9 +154,8 @@ every pixel the machine has, so no state ENDLOGO leaves can show through a credi
 
 Every keyframe is inside its hold, the tightest (screen 21) with 34 frames to spare, and
 `reference-indices.md` §20.2 measured all five as held, so a frame or two of phase cannot move a pixel. `tests/cred.rs` asserts
-the band, the caption and the frame of each (`the_five_keyframes_are_the_references_byte_for_byte`)
-and the frames around each (`the_five_keyframes_are_inside_the_chains_own_holds`). The full run's
-`fullrun/12-cred` frames are 0 too, and so are the sweep's 49 hold samples (§3).
+the frames around each are the same (`the_five_keyframes_are_inside_the_chains_own_holds`). The
+full run's `fullrun/12-cred` frames are 0 too, and so were the sweep's 49 hold samples (§3).
 
 **The chain residual.** The port's screens are 363 ticks; the release's are 3 to 4 frames longer
 (§3), so by screen 21's hold the port is about 80 frames early, inside the 200-frame hold. The
@@ -173,7 +170,7 @@ screen 21's 3 to 4, plus ENDSCRL's start), inside the bracket.
 ```bash
 cargo xtask rediff --only cred --only fullrun/12-cred
 cargo test --release -p secondreality --test cred
-cargo test -p secondreality cred::                 # the unit tests; -- --ignored needs the sweep
+cargo test -p secondreality cred::                 # the unit tests
 cargo run --release --bin secondreality -- --block 5 --headless \
     --dump-frames 1211,1212 --dump-dir out/cred    # the 1212 boundary (§2)
 ```
@@ -196,8 +193,8 @@ cargo run --release --bin secondreality -- --block 5 --headless \
 | `fonaorder` | far pointer at DGROUP `0x92` → DGROUP `0x96` | `les bx,[0092h]` at `0x1eed` |
 
 Each picture is an `FC FC` blob in the tree's layout (16-byte header, palette at 16, pixels at 784),
-decoded by `load(blob, Format::Origin)`. The 21 are distinct; nine differ from the tree's
-(`the_release_changes_nine_of_the_trees_screens`). A relocation inside any byte read is refused, and
+decoded by `load(blob, Format::Origin)`; `the_screens_are_mains_twenty_one_calls_read_from_the_image`
+pins each call's offsets and caption. A relocation inside any byte read is refused, and
 so is a `main` with another number of calls (`an_image_without_this_builds_calls_is_refused`).
 
 **The code is the tree's.** `init` (`0x1e63-0x271c`): the scan over 32 rows and 1,500 columns,
@@ -221,8 +218,8 @@ so is a `main` with another number of calls (`an_image_without_this_builds_calls
 
 ## Open items
 
-- §3's sweep is a scratch capture, not filed under `reference/`. Its figures are reproducible only
-  where the sweep exists; filing it would make the two `#[ignore]`d tests run.
+- §3's sweep is a scratch capture, not filed under `reference/`, so its figures are a one-time
+  measurement. Filing it would let a test hold them.
 
 **Register.** `bugs.md` (the inert `tw_setsplit(400)`); A8; A10 retired; A11 and A53 for the chain
 residual.

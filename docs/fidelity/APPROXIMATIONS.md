@@ -293,8 +293,8 @@ the scan reads 32 rows or 40
 (`parts::cred::tests::the_eight_rows_the_routine_never_reads_do_not_move_a_run`). The display shows
 every other logical line, so **46** of the 92 fall on displayed rows. On all five keyframes the
 caption region is byte-identical to the reference's
-(`tests/cred.rs`'s `the_five_keyframes_are_the_references_byte_for_byte`), and the image's font and
-order are the tree's (`parts::cred::tests::the_images_font_and_order_are_the_trees_byte_for_byte`).
+(`cargo xtask rediff --only cred`), and the image's raster and order are where `init` reads them
+(`parts::cred::tests::the_images_font_and_order_are_where_init_reads_them`).
 
 ## A9 — Closed: ALKU's two font rows past `FONA.UH` are zero in the release's image
 
@@ -305,8 +305,8 @@ and the release's image holds zeros there, so the port's 30 rows are everything 
 ## A10 — Retired: CRED's 21 screens are read from the shipped image
 
 The nine screens the release changed (2, 6, 10, 11, 12, 17, 19, 20, 21) are read from
-`MAIN/DATA/CRED.EXE` (D49, `cred.md` §9) and pinned by `the_release_changes_nine_of_the_trees_screens`;
-every CRED frame is 0 (`cargo xtask rediff --only cred --only fullrun/12-cred`).
+`MAIN/DATA/CRED.EXE` (D49, `cred.md` §9); every CRED frame is 0
+(`cargo xtask rediff --only cred --only fullrun/12-cred`).
 
 ## A11 — ENDSCRL: block 5's chain starts the part 82 frames early
 
