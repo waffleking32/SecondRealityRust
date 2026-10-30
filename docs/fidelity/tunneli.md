@@ -3,8 +3,11 @@
 **Sources.** `TUNNELI/TUN10.PAS` (227 lines of Turbo Pascal with an inline-assembly inner loop),
 staged as `tunneli.exe` by `TUNNELI/X.BAT:1`, over the linked data blobs `TUNNELI/TUNNELI.OBJ` and
 `TUNNELI/SINIT.OBJ` (assets `assets/TUNNELI/TUNNEL.DAT`, `SINIT.DAT`, §2). **The build that shipped
-is a later revision**: its second palette ramp is a fifth darker than `:122`'s (§5). **Port.**
-`bins/secondreality/src/parts/tunneli.rs` (`"tunneli"`); its module doc holds the acts, the
+is a later revision**: its second palette ramp is a fifth darker than `:122`'s (§5). `TUN9.PAS`,
+the revision before TUN10, differs in `veke` 980 (`TUN9.PAS:3`), its ramps (`:118-119`), the chain
+copy commented out (`:204`) and a live music exit (`:229-236`, quitting when `int 0fch` with
+`bx=6` returns -4), which TUN10 comments out (`TUN10.PAS:207-216`); so the part has no music exit.
+**Port.** `bins/secondreality/src/parts/tunneli.rs` (`"tunneli"`); its module doc holds the acts, the
 one-sided clip, the self-modified colour, `waitr`'s entry 0 and the fade-out. Integration test
 `bins/secondreality/tests/tunneli.rs`. **Run.** A mapping, not an anchor: `--part tunneli` numbers
 its own ticks, and **reference index = tick + 3,722** (§7.2). **Music.** None; the part runs
@@ -50,9 +53,9 @@ whose colour `:219-220` sets (`the_ring_chain_copies_the_last_ring_forward`).
 ## 2. The two data files, and why `sr-assets` is not their door
 
 Both files are the linked data segments of the originals' object files (`asset-inventory.md`), and
-neither is a picture: `sniff` returns `None` for both (no magic), so `load_path` refuses them, and
-`raw_surface` would need an invented geometry (35,328 is 384×92, 12,292 is 4×3,073). The port reads
-the bytes, and `init` refuses either file at another length:
+neither is a picture: `raw_surface` would need an invented geometry (35,328 is 384×92, 12,292 is
+4×3,073). The port reads the bytes, and `init` refuses a `TUNNEL.DAT` of any other length and a
+`SINIT.DAT` too short for `:102-103`'s copies:
 
 | file | bytes | what it is | the source's read |
 |---|---|---|---|

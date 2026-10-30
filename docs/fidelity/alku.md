@@ -239,9 +239,7 @@ compacted page, each row the 400-line frame's even row) and 5952 (the linear pag
 page copies, which nothing shows before the exit and which would land on the wrapped tail of the
 `0xc000` page in the port's 256,000-pixel video memory (D16). The emulator applies CRTC 9 half a
 frame late, so the original's capture holds one frame of step 2's page that turns double-scanned at
-line 185 (5950, `reference-indices.md` §4.5): its lines 0-184 are the page's rows 0-184 and its
-lines 185-399 row `L/2`, every line a row of the port's page, in a capture not filed under
-`reference/`.
+line 185 (5950, `reference-indices.md` §4.5).
 
 **The exit path.** After each card gate, `fonapois`, `ffonapois` and the loop's end, `main` calls
 the closing routine when `dis_exit()` is set: `fade1` (black), one frame, `close_copper`, `exit(1)`

@@ -839,11 +839,11 @@ while `second1c`, which supplied the gate-1 measurement, reads 9:50 / zframe 376
 ticks of music phase move the gate, and the ring shows each page for four to five stream states.
 Changing the block-1 clock to match `second1c` would move ALKU's verified frames.
 
-**Measured difference:** **1,098 of 64,000** (1.7156 %), RGB and indices (`cargo xtask rediff --only
-u2a`) pins it, `cargo test -p secondreality --test u2a the_block_one_clock_matches_second1_at_boot_5900`
-pins the clock, and
-`cargo test -p secondreality the_reference_7300_is_the_measured_stream_state` shows 1,098 belongs to
-state 297 and to no other of the 522.
+**Measured difference:** **1,098 of 64,000** (1.7156 %), RGB and indices: `cargo xtask rediff
+--only u2a` pins it, `cargo test -p secondreality --test u2a
+the_block_one_clock_matches_second1_at_boot_5900` pins the clock, and `cargo test -p secondreality
+the_reference_7300_is_the_measured_stream_state` shows 1,098 belongs to state 297 and to no other
+of the 522.
 
 **Status:** carried: the session's phase (D17), which the oracle's API does not reach.
 
@@ -957,7 +957,8 @@ the pixel set and its colours, which is what the reference compares.
 **Measured difference:** **0** on every shipped comparison. U2A's 6500-hold and 7640 are 0, U2E's
 intro is 0 at nine indices, and the Gouraud residuals A28/A30 have exact silhouettes, so they are
 colour deltas on faces the pipeline drew. `cargo test -p secondreality --bin secondreality
-parts::visu::draw`; `cargo xtask rediff --only u2a`; `cargo test -p secondreality --test u2e`.
+parts::visu::draw`; `cargo xtask rediff --only u2a --only u2a-speed` (7640 in `u2a`, the hold in
+`u2a-speed/*`); `cargo test -p secondreality --test u2e`.
 
 ## A35 — The four VGA pages are packed at 64,000 pixels, not the original's 65,536-pixel slots
 

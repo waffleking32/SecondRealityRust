@@ -37,7 +37,9 @@
 //!
 //! **The copper.** `init_copper` puts `copper3` (the 8.8 fade) in slot 0, `copper1`
 //! (start and pan) in slot 1 and `copper2` (`frame_count` and the upload) in slot 2,
-//! the engine's own order (`COPPER.ASM:42-145`). One tick is one copper frame, so
+//! the engine's own order (`COPPER.ASM:42-145`). Slot 2 uploads slot 0's fade in the
+//! same tick, so a frame shows the previous tick's upload: the original's line-20 write
+//! and retrace upload, seen one frame later. One tick is one copper frame, so
 //! `do_scroll`'s `while(frame_count<9);` is a nine-tick cadence.
 //!
 //! **Preserved** (`bugs.md` §10): batch 0 waits for code 5, not 4 (`tptr++`,
