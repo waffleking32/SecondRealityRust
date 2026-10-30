@@ -1704,6 +1704,9 @@ every one of them diffs a part whose shipped build may not be the tree's.
    from `FONA.UH` in 53 px of the header band's 11,520; and its text has **no carriage returns**
    (`endscrl.md` §6.2, A11). *Decided:* the port stays the tree's, as for CRED — including the
    **pitch**, which is measured exactly and deliberately not adopted; step 3 below says why.
+   *(2026-10-29, under D49: reversed for ENDSCRL. The packed EXE's image is now read, and every
+   one of these is the release's own code or data there; the port reads and translates it, and its
+   four keyframes match the reference to the pixel from the release's start. A11.)*
 
 **The procedure.** Three steps, in this order, before anything is changed:
 
@@ -3247,3 +3250,8 @@ The question D12 left open — whether the staged EXEs are the ones `SECOND.EXE`
 for ENDSCRL: the release's memory during block 5 (`tools/crtc_probe.py 5 9300 2`) holds the same
 80-character font order and the `endscrol.` file name the staged image does. It is still open for
 the other parts; their frames decide as before.
+
+*(2026-10-29.)* **ENDSCRL is the first part read from its image**: its raster, `fonaorder`, pitch,
+control-line rule, blank and `%` exit are the unpacked image's, and both builds' text-mode `read`
+strips the CRs (`docs/fidelity/endscrl.md`, A11). The part now ends by itself, and the shell's end
+path did not change: a part's own `Finished` and an ESC already retire it alike.

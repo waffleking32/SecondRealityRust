@@ -2949,7 +2949,7 @@ report: out/rediff/report.json
 exit 0
 ```
 
-Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count. By capture
+Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered count *(2026-10-29: `fullrun/13-endscrl`'s three are now 0 — ENDSCRL reads the release's image, A11; today's `cargo xtask rediff` is 51 entries and 239 frames, **170** at 0 and **69** at a registered count)*. By capture
 (frames, frames at 0, the non-zero counts in table order, and the entries that register them):
 
 | capture | frames | at 0 | non-zero counts | register of the non-zero frames |
@@ -2966,7 +2966,7 @@ Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered 
 | `endlogo-leadin/odd` | 10 | 10 | — | — |
 | `endlogo-leadin/plane-440` | 2 | 1 | 55499 | A7 |
 | `endlogo` | 4 | 4 | — | — |
-| `endscrl` | 4 | 0 | 7289 / 28333 / 25502 / 17108 | A11 |
+| `endscrl` | 4 | 0 | 7217 / 32508 / 25118 / 17613 (2026-10-29, the chain's 82 frames alone since the part reads the release's image; were 7289 / 28333 / 25502 / 17108) | A11 |
 | `fullrun/01-alku` | 1 | 1 | — | — |
 | `fullrun/02-u2a-pam` | 7 | 4 | 60160 / 64000 / 48786 | A53, A32 |
 | `fullrun/03-beglogo` | 4 | 3 | 81273 | A53 |
@@ -2979,7 +2979,7 @@ Of the 231 frames, **161** are 0 differing pixels and **70** carry a registered 
 | `fullrun/10-u2e` | 3 | 3 | — | — |
 | `fullrun/11-endlogo` | 4 | 3 | 46997 | A53 |
 | `fullrun/12-cred` | 2 | 1 | 7204 | A10 |
-| `fullrun/13-endscrl` | 3 | 0 | 42 / 67 / 149 | A53 |
+| `fullrun/13-endscrl` | 3 | 3 | — (2026-10-29; were 42 / 67 / 149) | — |
 | `glenz` | 5 | 2 | 5208 / 2289 / 5941 | A37 |
 | `grid` | 5 | 0 | 6 / 2 / 36 / 33 / 14 | A41 |
 | `hard` | 10 | 10 | — | — |

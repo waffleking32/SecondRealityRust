@@ -41,9 +41,10 @@ starts at once with the flags as given.
 ## Keys
 
 - **ESC** ends the part that is playing, and the next part starts.
-- **ESC in the end scroller** (ENDSCRL, the last part) ends the demo the way the original does.
-  The music fades for 64 frames (the demo runs at 70.086 frames a second), and the screen goes
-  blank for 20 more. The window then closes, and the demo's end box is printed to the terminal
+- **The end scroller** (ENDSCRL, the last part) ends by itself when its text runs out, as the
+  released demo's does, about five and a half minutes in; ESC in it ends it early. Either way the
+  demo then ends the way the original does. The music fades for 64 frames (the demo runs at
+  70.086 frames a second), and the screen goes blank for 20 more. The window then closes, and the demo's end box is printed to the terminal
   you started it from. ESC during the fade or the blank closes the window at once.
 - **Ctrl** skips the part that is playing, and the next one starts. In the original one Ctrl
   skips every part from then on. The port skips only the one you pressed it in.

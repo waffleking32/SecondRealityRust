@@ -6334,7 +6334,7 @@ comparisons, every one at its registered count**:
 | `10-u2e` | 34120 → 34075: 0 · 34250 → 34205: 0 (and idx 0) |
 | `11-endlogo` | 37970 → 37959: 0 (idx 46,997) · 38300 → 38289: 0 (and idx 0) |
 | `12-cred` | 38583 → 38564: 0 · 40600 → 40581: 7,204 (A10's) |
-| `13-endscrl` | 46280 → 46192: 42 · 46283 → 46195: 67 · 46286 → 46198: 149 |
+| `13-endscrl` | 46280 → 46192: 0 · 46283 → 46195: 0 · 46286 → 46198: 0 (2026-10-29, since ENDSCRL reads the release's image, A11; were 42 · 67 · 149) |
 
 **Every held frame compares at 0 in RGB** — 1719, 7880, 8300, 8900, 12400, 16000, 16500,
 16636, 16690, 29800, 33900, 34250 and 38300 — except the two that carry their part's own

@@ -116,9 +116,11 @@ play), where the original's `partexecute` calls `flushkbd` after each part (`MAI
 drops it — a knowing difference, registered with the Ctrl skip as `APPROXIMATIONS.md` **A58**
 (D21's dated 2026-10-25 correction). Nothing else does anything, and no part waits on a key.
 
-`--block 1` through `--block 5` end in ENDSCRL, whose own loop is `while(!dis_exit())`
-(`ENDSCRL/MAIN.C:45-49`) — the scroller runs until you exit, as it does in the demo, so leaving it
-is **one** ESC. A run built from a block (`--block`, or no argument) then ends the way `SECOND.EXE`
+`--block 1` through `--block 5` end in ENDSCRL, which **ends by itself at the end of its text**, as
+the release's build does: its `do_scroll` calls `exit(0)` when it reads the `%` line near the end
+of `ENDSCROL.TXT` (image `0x169a-0x16a3`, D49; `docs/fidelity/endscrl.md`), part tick 22,967 —
+index 31,802 in a `--block 5` run. Its loop is still `while(!dis_exit())`, so **one** ESC ends it
+early. A run built from a block (`--block`, or no argument) then ends the way `SECOND.EXE`
 does (D41): the hold fades the music for **64** ticks over the last picture (`@@partsdone`'s
 `fademusic`, `MAIN/U2.ASM:937-939`, `:333-346`), shows text mode's blank screen for **20** ticks
 (`fatalexit`, `:967-973`), and the window closes by itself; ESC during that stage closes it at once

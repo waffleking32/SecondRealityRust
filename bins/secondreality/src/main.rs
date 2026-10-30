@@ -47,9 +47,10 @@ loop:  --loop plays a block's run for ever, as the setup screen's looping row
        ignores it.
 keys:  in a window, ESC ends the part that is playing, and Ctrl skips it.
        A block's run ends the way the demo does: once its last part is over
-       (one ESC leaves ENDSCRL) the music fades, the screen goes blank, the
-       window closes and the demo's end box is printed here; ESC during the
-       fade closes the window at once. A --part run holds its last screen
+       (ENDSCRL ends by itself at the end of its text, and one ESC leaves it
+       early) the music fades, the screen goes blank, the window closes and
+       the demo's end box is printed here; ESC during the fade closes the
+       window at once. A --part run holds its last screen
        until ESC closes the window. No other key does anything, and nothing
        waits on a key but the setup screen.
 vault: --vault opens the window's menu for the three unreleased effects — GRID,

@@ -1,323 +1,222 @@
-# ENDSCRL — the greetings scroller: a 400-line ring, and the wrap that replaces the second copy
+# ENDSCRL — the greetings scroller, read from the release's own build
 
 The demo's last part: a ring of text, one line written per two vertical blanks, the display
-start walking the ring a line at a time. `ENDSCRL/MAIN.C` is 125 lines over
-`ENDSCRL/ASMYT.ASM` (75), of which the part uses `setstart` (`ASMYT.ASM:24-44`) and
-`setrgbpalette` (`:46-65`).
+start walking the ring a line at a time, until the text's `%` line ends the part.
 
-**The comparison is exit 1**, and this note says why: the reference is the **shipped
-build**, and it draws this part differently from the source this tree holds — a 25-row
-text pitch where `#define FONAY 30` (`MAIN.C:6`), a raster that differs from
-`ENDSCRL/FONA.UH`'s, and a text buffer with no carriage returns. §7 has the numbers and
-`docs/fidelity/APPROXIMATIONS.md` A11 is the register entry; §6 measures the chain's own
-offset, which the same comparison also shows.
+**The port is the shipped build.** The tree's `ENDSCRL/MAIN.C` (125 lines over
+`ENDSCRL/ASMYT.ASM`) is a development snapshot of this part, and the release's build differs from
+it in its constants, its font, its text rules and its end (§1). Since D49 the release's packed
+`MAIN/DATA/ENDSCRL.EXE` is unpacked (`sr_assets::exe::unpack`, PKLITE over LZEXE 0.91,
+`docs/fidelity/release-images.md`), and the part reads its font raster and `fonaorder` out of that
+image and translates that image's code. The four reference keyframes are drawn **to the pixel**
+from the release's own start (§6), and the part ends by itself where the release's does (§7).
 
-## 1. What the original does
+Everything below cites **image offsets**: offsets into the unpacked load image, which
+`cargo test -p sr-assets --test exe -- --ignored dump_the_unpacked_images` writes to
+`out/release-images/ENDSCRL.img`, read with
+`objdump -D -b binary -mi8086 --start-address=… out/release-images/ENDSCRL.img`. The image is
+Borland C++ large model; DGROUP is image `0x1c890` (`mov dx,1c89h` at image 0).
+`parts::endscrl::tests::the_image_is_the_build_these_offsets_name` reads back every instruction
+cited here.
 
-| `MAIN.C` | what it is |
-|---|---|
-| `:19-21` | `dis_partstart()`, one `dis_waitb()` |
-| `:22-26` | mode 0eh (640×350, 16 colours), then CRTC 9 = 0 — the **400-line** display |
-| `:27-41` | fifteen `setrgbpalette` calls: entry 1 = 20, 2 = 40, **3-15 = 60** |
-| `:43` | `init()`: the text into `char far text[64000]` (`:52`, `:101`) and the strip's metric scan (`:103-124`) |
-| `:45-49` | `while(!dis_exit()) { if(dis_waitb()==1) dis_waitb(); do_scroll(); }` |
-| `:60-96` | `do_scroll`: one line of the strip into four bit-planes, then the display start |
+## 1. What the shipped build does
 
-One line is **80 planar bytes**, and a byte of a 16-colour plane is eight pixels: 640
-pixels a line (`:89-92`). `do_scroll` writes the line at `80*yscrl` **and again** at
-`80*(yscrl+401)` (`:89-92`), steps `yscrl=(yscrl+1)%401` and sets the display start to
-`yscrl*80 + 80` (`:93-95`). The text is therefore a **401-line ring**: one line per
-iteration, the display showing the 400 lines below the write pointer.
+| image | what it is | the tree's `MAIN.C` |
+|---|---|---|
+| `0x1220-0x1225` | `dis_partstart()`, one `dis_waitb()` | `:19-21`, the same |
+| `0x122a-0x1235` | mode 0eh, then CRTC 9 = 0 (`mov ax,9; mov dx,3d4h; out dx,ax`) — the 400-line display | `:22-26`, the same |
+| `0x1236-0x1323` | fifteen `setrgbpalette` calls: entry 1 = 20, 2 = 40, 3-15 = 60 | `:27-41`, the same |
+| `0x1326` | `init()` | `:43` |
+| `0x132b-0x1348` | `while(!dis_exit()) { if(dis_waitb()==1) dis_waitb(); do_scroll(); }` | `:45-49`, the same |
+| `0x1351-0x13c0` | `do_scroll`'s line read: copy to `'\n'`, `tstart += fonaw[c]+2`, `tstart = (639-tstart)/2` | `:66-74`, the same |
+| `0x13c3-0x13ca` | **`if (textline[0] == '[') chars = 0;`** — a control line draws nothing | none |
+| `0x13e1-0x152a` | the drawing loop, `font[line*1550 + fonap[c] + b]` (`mov dx,060eh; imul dx` at `0x140a`; the far array at segment `0x112e`, `0x1423`) | `:77-88`, stride **1500** |
+| `0x152d-0x164b` | the four plane `memcpy`s at `80*yscrl` and `80*(yscrl+401)`, `yscrl = (yscrl+1) % 401` | `:89-93`, the same |
+| `0x164f-0x1683` | **`line = (line+1) % 25`**, or, for a control line, `% ((textline[1]-'0')*10 + textline[2]-'0')` | `:94`, `% FONAY` = **30** |
+| `0x1687-0x1693` | `setstart(yscrl*80 + 80)` | `:95`, the same |
+| `0x169a-0x16a3` | **`if (textline[0] == '%') exit(0);`** — `0x272` is the runtime's `exit` (the `atexit` loop over DGROUP `0x110`, then `_exit`) | none: the part never ends |
+| `0x16b2-0x16da` | `open("endscrol.txt", 1)`, `read(fd, text, 60000)` into `018e:0000`, `close` | `:101`, the same |
+| `0x16e1-0x17a3` | the scan, over **25** rows (`cmp word [bp-4],19h`, `0x170d`) and **1,550** columns | `:103-122`, `FONAY` 30 rows and 1,500 columns |
+| `0x17a8`, `0x17ae` | `fonap[' '] = 0x5fa` (**1530**), `fonaw[' '] = 16` | `:123-124`, 1480 and 16 |
 
-`:47` makes the step two frames wide. `dis_waitb` returns the frames elapsed and zeroes
-the counter (D22), so a part whose work fits a frame gets 1 and waits again: **one line
-every two ticks**. A picture is two ticks wide, which is what the reference's own frames
-measure — `reference-indices.md` §21.1, "the scroll is quantised in pairs of frames: the
-picture on screen at K is usually also the picture at K+1", measured there from the
-capture's own triples.
+The data, read from the image:
 
-The strip's rows are drawn in turn — `line=(line+1)%FONAY` — so a line of the text takes
-30 iterations and the next line of the text starts when `line` comes back to 0 (`:66-74`).
+- **`fonaorder`** is the far pointer at DGROUP `0x92`, `1c89:00b2`, and the 80 bytes there are
+  `ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwxyz0123456789!?,.:\x8f\x8f()+-*='Z\x84\x94Y/&` —
+  the tree's 74 (`MAIN.C:13`) and `Z ä \x94 Y / &`. `endscrol.txt` follows it at DGROUP `0x103`.
+- **The raster** is `char far font[30][1550]` at image `0x112e0`, values 0..3, ink in rows
+  0..20; rows 25..29 hold none and nothing reads them. Its runs, as the scan finds them, give
+  'A' at column 1 and width 20, `Z`/`ä`/`\x94`/`Y`/`/`/`&` at 1012/1029/1043/1055/1073/1088 with
+  widths 16/13/11/17/14/13, and the blank's 16 columns from 1530 hold no ink
+  (`the_strip_and_its_order_are_read_from_the_image`). The raster also holds one 56-column run at
+  1391 that no character of the order reaches.
+- **The text array**, `018e:0000`, 64,000 bytes up to the raster's segment, starts with the
+  tree's own initialiser (`"Testing Testing\0PIXEL SUCKS\0…"`, `MAIN.C:52`); `read` overwrites its
+  front.
 
-## 2. The ring: 400 lines, and the wrap that stands in for the second copy
+The chars are read unsigned throughout (`mov ah,0` before each table index, `0x1380`, `0x176c`), so
+`ä` (0x84) indexes entry 132; the tree's signed `char` would have indexed `fonaw[-124]`.
 
-The port's surface is 640×400 = **256,000** pixels = exactly 400 lines of 640. The
-original's 401-line ring needs the second copy because the display's address counter does
-not wrap at the ring's end; the port's beam does (`View::source_index` is modulo the
-surface's length, `view.rs`). Three consequences, and
-`the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` checks all
-three as bytes over a whole turn:
+## 2. The carriage returns
 
-1. **each line is written once** — the second copy at `80*(yscrl+401)` is at ring line
-   401, past this surface (256,640 pixels), and the beam's wrap replaces it;
-2. `yscrl` runs `0..400` where the original's runs `0..401`;
-3. the display origin is `(yscrl + 1) * 640` — 640 on the first line and **256,000** on
-   the last, which is `124,930` past the largest origin the `u16` pair
-   `start_addr + x_offset` could hold (`2 × 65,535 = 131,070`). Task 3 widened
-   `start_addr` to `u32` for this and for CRED's 128,000 (D16).
+`open("endscrol.txt", 1)` passes `O_RDONLY` and neither `O_TEXT` nor `O_BINARY`, so `open` (image
+`0xab0`) takes `_fmode`'s mode (`mov ax,[02d8h]; and ax,0c000h` at `0xac1`), and DGROUP `0x2d8`
+holds `0x4000`, `O_TEXT`. Borland's `read` (`0xc62`) on a text-mode handle compacts the bytes DOS
+returned **in place** — `lodsb`, `cmp al,1ah` (end of file), `cmp al,0dh` (skip), `stosb`, at
+`0xcbf-0xcc9`. The tree's `MAIN.C:101` makes the same call, so both builds read the text without
+its CRs, and the port's old buffer with them was the port's own deviation.
 
-The two pictures are not similar but **the same lines in the same rows**:
+The port's `read_text_mode` is that loop: the shipped 6,141-byte file has 542 CRs and no `^Z`, so
+5,599 bytes are kept, the next 542 are the raw read's own tail, and the rest of the array is its
+initialiser (`the_text_is_read_in_text_mode_without_its_carriage_returns`). The one case it does
+not model, a CR as the read's last byte (which makes the runtime read one byte more, `0xcd0`),
+cannot arise: the file ends in `\r\n`, and that test pins it.
+
+Which text: `MAIN/PACKFINA.INC:51` packs the 6,141-byte `MAIN/DATA/ENDSCROL.TXT`, the file the
+part reads, not the tree's 1,007-byte `ENDSCRL/ENDSCROL.TXT` ("Lerto has coded this…");
+`docs/fidelity/asset-inventory.md` §E.9 measures the pair.
+
+## 3. The control lines
+
+A line whose first byte is `[` draws nothing (`chars = 0`) and lasts its own count of rows; every
+other line lasts 25. On the CR-less text the count is `(t[1]-'0')*10 + t[2]-'0'` on the line's
+own bytes and its newline, so the four forms in the text are (`a_control_line_draws_nothing_and_lasts_its_own_count`):
+
+| form | lines | rows |
+|---|---|---|
+| `[12` | 135 | 12 |
+| `[10` | 14 | 10 |
+| `[15` | 8 | 15 |
+| `[8` | 6 | **42** — the third byte is the newline: `8*10 + 10 - 48` |
+
+`[8`'s 42 is the original's own arithmetic, kept (D7). None of the four reference keyframes shows
+a `[8` (the first is text line 430), so the 42 is read from the code, not from a frame.
+
+The same test renders the `[15` under "Canada" (text lines 17 and 18): its fifteen rows are
+blank, the next line ("Epic MegaGames") is read on the 41st row, and the same line drawn under the
+tree's rule inks — the digits are in the order — so a regression to printing `[15` fails it.
+
+## 4. The ring: 400 lines, and the wrap that stands in for the second copy
+
+The port's surface is 640×400 = **256,000** pixels = exactly 400 lines of 640. The original's
+401-line ring needs the second copy at `80*(yscrl+401)` because the display's address counter does
+not wrap at the ring's end; the port's beam does (`View::source_index` is modulo the surface's
+length). So each line is written once, `yscrl` runs `0..400` where the original's runs `0..401`,
+and the display origin is `(yscrl + 1) * 640` — 640 on the first line and **256,000** on the last,
+which is why `start_addr` is a `u32` (D16). The two pictures are the same lines in the same rows:
 
 ```text
 original, iteration t:  writes line  t mod 401, twice (the copy at +401)
-                        display start  ((t+1) mod 401) + 1  (post-increment, `:95`)
+                        display start  ((t+1) mod 401) + 1  (post-increment)
                         displayed row j shows the line written at  t - 399 + j
 port,     iteration t:  writes line  t mod 400, once
                         display origin (yscrl + 1) * 640,  yscrl = t mod 400
                         displayed row j shows the line written at  t - 399 + j
 ```
 
-The original's row `j` reads absolute line `((t+1) mod 401) + 1 + j`, which is ring line
-`(t + 2 + j) mod 401`, most recently written at iteration `t - 399 + j` — the copy at
-`+401` is exactly what makes `j = 399` the newest line rather than one that has not been
-written yet. The port's row `j` reads ring line `(t + 1 + j) mod 400`, written at the same
-iteration. Both put the line just written at the **bottom** row of the screen and the one
-written 399 lines ago at the top.
+`the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` checks that
+equality as bytes: a 401-line ring written twice with the display start at `yscrl*80 + 80`,
+against the port's ring, all 400 displayed rows at every iteration of a 500-line run.
 
-`the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` is that
-equality checked as bytes, not argued: a 401-line ring written **twice** at `80*yscrl` and
-`80*(yscrl+401)` with the display start at `yscrl*80 + 80`, against the port's 400-line
-ring, both driven by the port's own rendered lines, with all 400 displayed rows compared at
-every iteration of a 500-line run — past the port's wrap at 400 and the original's at 401.
+## 5. The tick map, and the end
 
-## 3. The tick map
+A tick is one `dis_waitb`, and tick 0 is the code before the first one:
 
-A tick is one `dis_waitb`, and tick 0 is the code before the first one — CRED's parked tick
-is the same convention. So `main`'s acts are ticks 0, 1, 2, 3, 5, 7, …:
-
-- **tick 0** (`:19-21`): nothing drawn; the screen is still CRED's, which is what the
-  loader shows while an EXE loads.
-- **tick 1** (`:22-43`): the mode set, the palette, `init`.
+- **tick 0**: nothing drawn; the screen is still CRED's.
+- **tick 1**: the mode set (which clears video memory — `int10_modes.cpp`'s `finish_set_mode` —
+  so the ring's unwritten lines are black), the palette, `init`.
 - **tick 2**: the loop's first wait returning 1, with the second still ahead of it.
-- **tick 3** (`:48`): the first `do_scroll`, and every second tick after it.
+- **tick 3**: the first `do_scroll`, and one every second tick after it — a picture is two ticks
+  wide, as `reference-indices.md` §21.1 measures on the reference's own triples.
+- **the `%` line**: text line 537. The rows before it sum to **11,482**, so the `do_scroll` that
+  reads it is the 11,483rd, on part tick 3 + 2 × 11,482 = **22,967**; that call draws its line,
+  sets the start and calls `exit(0)`, and the part reports `Finished` on that tick
+  (`the_part_ends_by_itself_on_the_percent_line`). The screen is black by then: tick 22,350 is
+  the last with ink in the ring, and it is blank from 22,351.
 
-The part never ends on its own: `while(!dis_exit())` (`:45-49`), and `dis_exit` is the DIS
-server's `exitflag`, which only a key sets. `PartCtx::exit_requested` is the port's
-equivalent, and the shell is what sees it.
+ESC still ends the part early, as before: the loop is `while(!dis_exit())`, and the shell retires
+a part on the tick the flag is set in.
 
-`ctx.surface.clear(0)` at tick 1 is `:22-26`'s mode set: `int 10h`'s mode set clears video
-memory (`int10_modes.cpp`'s `finish_set_mode`, `:813` and `:859`), and what it clears is
-CRED's last screen — which is why the reference's own frames are black behind the text
-(frame 9100 is 252,312 black of 256,000 pixels, and the part writes no background).
+**What the shell does next is the same either way.** A part's own `Finished` and an ESC both
+retire it (`Sequence::tick`), and a demo run whose plan has run out goes to the hold, which is
+`@@partsdone`: 64 ticks of fade, 20 of text mode's blank, the end (D41). Nothing in the shell
+assumed ENDSCRL ends only on ESC, so the shell is unchanged;
+`a_demo_run_ends_after_the_scroller_ends_itself` runs the real part under `Sequence` with
+`Ending::Exit` and finds the hold on the tick after 22,967 and the end 84 ticks after that. (That
+test composes 23,000 640×400 frames, about two minutes in a debug build, so it is
+`#[cfg_attr(debug_assertions, ignore)]`; run it with
+`cargo test --release -p secondreality --bin secondreality parts::endscrl`.)
 
-## 4. The strip, the metrics, and the renderer
-
-`sr_assets::font::Font` **accepts** this strip and runs the source's own scan: `MAIN.C:103-122`
-walks 1,500 columns, skips blank ones and hands each ink run to the next character of
-`:13`'s `fonaorder` — `Font::from_image`'s cells *are* those runs (`font.rs`), so the
-port's widths are the source's `fonaw` and not a slice of the raster at a stated pitch.
-The cell it is built with, `(20, 30)`, is `MAIN.C:123`'s `fonap[32]=1500-20`: the blank is
-the strip's last 20 columns, which hold no ink (the last inked column of the whole strip is
-**1,008**), and `:124`'s `fonaw[32]=16` is modelled as a 16-column width that advances the
-pen and draws nothing. This is the difference from CRED, whose strip `Font` refuses (A8):
-that one states a 32-column cell on a 1,500-column raster, `1500/32 = 46.875`.
-
-The measurements the port's tests pin over the raster: **74 ink runs** for the 74
-characters of the order, widths **3..25** columns, ink rows **0..17**, and every pixel
-value in 0..3 — a 2-bit mask, which is exactly the four plane bits `:80-87` tests (`&1`,
-`&2`, `&4`, `&8` into `scanbuf[0..3]`, one plane per bit).
-
-`:77-88` walks the line one pixel at a time, `mtau[x & 7]` (`:55`) selecting the bit of the
-byte `x / 8` — most significant bit first, so the leftmost pixel of a byte is its high bit —
-and the four plane writes land on the *same* byte address in four planes, so the pixel they
-spell is the strip's own value 0..15 (here 0..3) and the port can write it flat.
-
-The shipped text's own arithmetic is inside the arrays the source declares and never
-checks: the longest line is **40 characters** (`textline[100]`, `:57`), and its widest line
-needs `tstart = (639 - 579) / 2 = 30` with the last drawn column at 607 (`scanbuf[4][80]`,
-`:58`). Both are asserted, so the port's bounds checks are never reached — and the scan's
-end-of-buffer case, where the original reads past `text[64000]`, is unreachable in the
-reference's own longest run: 20,000 is 184 lines in from the reference's own start of 8917
-(`(20,000 - 8917 - 3) / 2 / 30`, the arithmetic the test asserts), and the shipped text holds
-542.
-
-## 5. Which text the part reads
-
-`MAIN.C:101` opens `"endscrol.txt"` with no path. Two files of that name are in the tree,
-and the part reads the shipped one: `assets/MAIN/DATA/ENDSCROL.TXT`, **6,141 bytes**, which
-is what `MAIN/PACKFINA.INC:51` packs (`0x17FD`) — not the 1,007-byte
-`ENDSCRL/ENDSCROL.TXT` beside the source, whose first line is "Lerto has coded this
-hilariously fantastic". `docs/fidelity/asset-inventory.md` §E.9 measures the same pair.
+**Where that lands.** In a `--block 5` run the port's ENDSCRL begins at 8835 (§6), so it ends at
+index **31,802**, the fade runs to 31,866 and the blank to 31,886. The release's ENDSCRL begins at
+8917, so its `%` is at **31,884** and its text mode, after the 64-frame fade, near 31,948. The
+controller's capture of the original agrees: `SECOND 5`, the standard recipe, 30,000 cycles, a
+frame grabbed every 250 frames from 30,500 (scratch, `out/endscrl-end2/`, not filed) has
+640×400 frames up to and including **31,750**, black at 31,500 and 31,750 (the text has scrolled
+off: the ring is blank from the release's 8917 + 22,351 = 31,268), and 720×400 text mode with
+the end box and `C:\>` from **32,000**. 31,948 lies in (31,750, 32,000].
 
 ## 6. The comparison
 
 ```
-$ cargo run --bin secondreality -- --block 5 --headless --dump-frames 9100,10000,12000,14000 \
-      --dump-dir out/p2-endscrl
-$ cargo xtask compare --reference reference/parts/endscrl --rendered out/p2-endscrl \
-      --out out/p2-endscrl-diff
-frame 9100: 2.8473% differing (7289/256000 px), max delta 243
-frame 10000: 11.0676% differing (28333/256000 px), max delta 243
-frame 12000: 9.9617% differing (25502/256000 px), max delta 243
-frame 14000: 6.6828% differing (17108/256000 px), max delta 243
-verdict: different
-exit: 1
+$ cargo xtask rediff --only endscrl --only fullrun/13-endscrl
+capture             reference  rendered  plane    differing  registered  register  verdict
+endscrl                  9100      9100  rgb           7217        7217  A11       ok
+endscrl                 10000     10000  rgb          32508       32508  A11       ok
+endscrl                 12000     12000  rgb          25118       25118  A11       ok
+endscrl                 14000     14000  rgb          17613       17613  A11       ok
+fullrun/13-endscrl      46280     46192  rgb              0           0  A53       ok
+fullrun/13-endscrl      46283     46195  rgb              0           0  A53       ok
+fullrun/13-endscrl      46286     46198  rgb              0           0  A53       ok
 ```
 
-`mode: rgb`, every frame paired at offset 0 (the reference holds no ±1 neighbours: the tool
-cannot take two adjacent frames on this screen, `reference-indices.md` §21.4). Two
-residuals are in that number, and they are measured separately.
+Before this change the same command gave 7,289 / 28,333 / 25,502 / 17,108 and 42 / 67 / 149.
 
-### 6.1 The chain's offset — 82 frames, measured
+**What is left is the chain's offset and nothing else.** The reference's scroller begins at
+**8917**: the tick whose display puts the text's first line on the reference's own rows of frame
+9100 is the port's **183** (and 184, its pair), and at those ticks the whole frame differs in **0**
+pixels (`the_references_own_header_pins_the_chains_offset`). Rendered from that start, all four
+keyframes differ in **0** pixels of 256,000; rendered from the port's own start, 8835, 82 frames
+(41 ring lines) earlier, they differ in 7,217 / 32,508 / 25,118 / 17,613, the `rediff` counts
+above (`the_port_draws_the_references_frames_at_the_references_own_ticks` asserts both sets). The
+82 frames are CRED's span in block 5, inside CRED's own measured bracket of 6 to 105 frames early
+(`cred.md` §7); the full run's is 88 (A53's seam table), and at that pairing the three filed opening
+frames are 0. `APPROXIMATIONS.md` A11 registers the block-5 counts.
 
-The reference's scroller does not begin where the port's chain begins it. Its start is known
-only as a window: the sweep's log shows 8840 still CRED's screen and refuses 8940 as
-`640x400` (`cred.md` §7), and this part's first 640×400 frame is its tick **2** (the mode set
-is tick 1, and the frame follows the view from the tick after) — so the reference's start
-lies in **[8841, 8938]**, and the port's CRED ends at 8834, so this part's tick 0 is
-index 8835.
-
-`the_references_own_header_pins_the_chains_offset` measures the gap from the reference's own
-picture. It uses the one thing both builds agree on — **the rows the first line of the text
-is drawn on**: for its first 24 ring lines both draw the same strip rows (`FONAY` only enters
-when the line counter comes round) and neither has read a control line yet (§6.2), so the
-tick whose display puts "Second Reality" on the reference's own rows is the tick that
-answers the reference's 9100. That tick is the port's **183**
-(index 9018), and it puts the reference's start at **8917** ±1 frame (a picture is two
-ticks wide, so nothing finer is observable):
-
-```
-reference's start of ENDSCRL = 8917      (tick 183 answers the reference's 9100)
-port's chain starts it at      8835
-chain's offset                 82 frames = 41 scrolled lines
-```
-
-82 is inside CRED's own measured bracket — "6 to 105 frames early" (`cred.md` §7), whose
-cause is CRED's 2-to-12-frames-per-screen drift over 21 screens — so the offset is the
-chain's, not this part's. `xtask compare --align 82` on a dump of the shifted indices shows
-the same shift from the other side, and what an alignment *cannot* absorb:
-
-```
-$ cargo run --bin secondreality -- --block 5 --headless \
-      --dump-frames 9018,9918,11918,13918 --dump-dir out/p2-endscrl-shift
-$ cargo xtask compare --reference reference/parts/endscrl --rendered out/p2-endscrl-shift \
-      --align 82 --out out/p2-endscrl-shift-diff
-frame 9100: 2.1758% differing (5570/256000 px), max delta 243
-frame 10000: 12.5437% differing (32112/256000 px), max delta 243
-verdict: different
-```
-
-The dump is a *measurement* of where the port's frames sit, not a way to pass: the
-acceptance's own command is the one above, run at `--align 0`.
-
-### 6.2 The shipped build, measured — the reason the diff cannot be zero
-
-Five differences, each a measurement of `reference/parts/endscrl`'s own frames against this
-tree's source and assets, in the order they matter:
-
-**1. The `[NN` control lines — the dominant term, and it is in the text.** This tree's
-`MAIN.C` has no notion of one: `:66-74` reads a line to its newline and `:77-88` draws
-whatever is in it, so a `[15` line is drawn as the two digits (the `[` is not in
-`fonaorder`, so it is a two-column gap). The reference reads it as a **directive: advance
-the ring NN rows and draw nothing** — and every other line advances it 25. The rule
-reproduces the reference's own bands *to the row* on the text file this tree ships, with no
-free parameter but the start measured above:
-`the_references_control_lines_advance_the_ring_and_draw_nothing` predicts every band of
-frames 10000 and 14000 from the tree's file and finds each one in the reference. The
-readable numbers of the same measurement:
-
-| what | measured |
-|---|---|
-| the shipped text's control lines | **163**, in four sizes: `[8` ×6, `[10` ×14, `[12` ×135, `[15` ×8 |
-| frame 10000, the tree's own lines 16, 17, 19, 20, 22 | ring rows **0, 25, 65, 90, 130** — a `[15` between each pair, so each step is **40 = 25 + 15** |
-| frame 14000, the personal greetings | **six** `[12` lines on screen, each a **37 = 25 + 12** step (`Lord Cyrix / Access Denied` sits across one) |
-
-The `[10` and `[8` lines are *not* visible in any of this part's four reference frames —
-their first is text line 430 and the deepest line frame 14000 reaches is 108 — so their 35-
-and 33-row steps cannot be measured from what is committed, and neither the note nor the
-test claims them.
-
-**2. The text pitch is 25 rows a line, not 30.** `MAIN.C:6` is `#define FONAY 30` and `:94`
-steps `line=(line+1)%FONAY`, so a line of text is 30 ring lines — 30 displayed rows — apart
-in the tree's source. The reference's frame 12000 — whose bands §21.2 identifies as the
-"Future Crew greets the following groups" block, twelve whole lines — has gaps of
-25, 100, 50, 25, 25, 25, 25, 25, 25 rows between them: every gap a whole multiple of 25,
-the smallest 25, which cannot be one line's fragments because a line's ink is 18 rows tall.
-`the_references_text_runs_at_twenty_five_rows_a_line_where_the_source_says_thirty` pins that
-list, and the same measurement on the port's own frame gives gaps that are multiples of 30
-and never 25.
-
-**3. The shipped `fonaorder` names six characters the tree's does not.** The tree's order
-(`MAIN.C:13`) is 74 characters; the shipped build's is **80** — the packed
-`MAIN/DATA/ENDSCRL.EXE` carries the tree's own tail followed by the six it adds:
-
-```
-$ xxd -s 9286 -l 40 upstream/SecondReality/MAIN/DATA/ENDSCRL.EXE
-00002446: 3637 3839 213f 2c2e 3a8f 8f28 292b 0000  6789!?,.:..()+..
-00002456: ff87 2d2a 3d27 5a84 9459 2f26 0065 2201  ..-*='Z..Y/&.e".
-```
-
-`Z`, `Y`, `/`, `&`, and the two high bytes `\x84` (`ä`) and `\x94` — the blob is
-PKLITE-packed, so the run is interrupted by four bytes of the stream between `()+` and
-`-*='`. The shipped text uses five of them: `/` 83 times, `&` 26, `Z` 12, `Y` once, and `ä`
-twice. `fonaw` is 0 for all six here, so the port draws a two-column gap where the reference
-draws a glyph. Measured on frame 14000's own lines, where the port's rendered extent meets
-the reference's band: `Daryl / Sun Projects` **15** columns wider, `Tran & White Shadow`
-**14**, `Dr.Weird / DanTe` **15**, `Jussi Leppänen` **14**, `Emphii, Mace & Shaft` **14** —
-and `Martti Palonen`, `Jussi Markula`, `Mikko Vierula` and `Wildfire:`, which name none of
-the six, within **1** column, which is the raster below.
-The appended run is **six** bytes — `Z \x84 \x94 Y / &`, the `xxd` dump above — so the
-shipped order is 74 + 6 = **80**; a count of seven contradicted this note's own dump and its
-own "`fonaw` is 0 for all six", and was corrected at the close-out.
-
-**4. The raster is not `ENDSCRL/FONA.UH`'s either.** At the tick whose header sits on the
-reference's own rows, the port's header band differs from the reference's in **53 pixels of
-11,520** (18 rows × 640), of which 22 are ink and the rest are values. The port's `FONA.UH`
-is the tree's — and the tree holds the same art twice: `ENDSCRL/FONA.LBM` decodes to that
-raster value for value (`the_strip_is_the_one_the_part_scans`, and `assets/PROVENANCE.md`
-rows 164-165 read the two as source and converted form). The shapes, widths and columns
-agree — the same 13 column runs in the header, to the pixel — so this is a re-drawn raster
-and not a misread one, and it is the same class of difference A10 records for CRED.
-
-**5. The text the renderer sees has no carriage returns.** `assets/MAIN/DATA/ENDSCROL.TXT`
-holds `\r\n`; the centring arithmetic `tstart=(639-tstart)/2` (`:73`) with `fonaw[13] = 0`
-and a two-column pen step makes a line with the CR exactly **one column** further left than
-without it. The reference's header starts at column **219** and its second line at **41** —
-the CR-less width in both cases; the port's are 218 and 40. What put the buffer in that state
-is **not established**: the part reads the file through the demo's own service — the packed
-`ENDSCROL.TXT` of `MAIN/PACKFINA.INC:51`, which is this same 6,141-byte file — and the tree
-holds no source for that service, so a text-mode read that drops CRs and a pack that stored
-the text without them are both open.
-
-**Two of these drift, and that is why no alignment reaches zero.** The pitch makes the port
-advance the text 5 rows further per line than the reference (60 frames against 50), and the
-control lines make the reference skip whole blocks the port renders — so the content moves
-apart as the part runs, at a rate a single frame shift cannot follow. `--align 82` shows it
-from the other side: 9100 improves (2.8473 % → **2.1758 %**, the chain's offset being the
-one thing an alignment *can* absorb), and 10000 worsens (11.0676 % → 12.5437 %).
-
-`the_references_own_header_pins_the_chains_offset` asserts the tick, the start and the
-53-pixel remainder in one place — the geometry, the metrics, the palette, the plane/bit
-mapping and the display's own walking of the ring are all exercised by that same
-comparison, which is what makes the remainder the font's.
+`tests/endscrl.rs` measures the port's start: the chain hands this part its tick 0 at **8835**, with
+CRED's screen at 8834 and the geometry change at 8837. The reference's start lies in
+**[8841, 8938]** (the sweep's log shows 8840 still CRED's and refuses 8940 as 640×400, `cred.md`
+§7), and 8917 is inside it.
 
 ## 7. Tests
 
-`bins/secondreality/src/parts/endscrl.rs` (12 unit tests, reading the curated `assets/` and
-the committed `reference/`):
+`bins/secondreality/src/parts/endscrl.rs` (15 unit tests, reading `assets/MAIN/DATA/ENDSCRL.EXE`,
+`assets/MAIN/DATA/ENDSCROL.TXT` and the committed `reference/`):
 
 | test | what it pins |
 |---|---|
-| `the_strip_is_the_one_the_part_scans` | 74 runs for the 74 characters of the order, widths 3..25, the blank's 16 columns and no cell, absent characters width 0, every value a 2-bit mask, ink rows 0..17 |
-| `the_text_is_the_shipped_one_and_not_the_developers` | 6,141 bytes read of the shipped file, the 1,007-byte one not, the buffer's tail `read`'s, and what each file opens with |
-| `the_shipped_text_fits_the_row_and_the_textline_buffer` | 542 lines, ≤ 100 characters each, `tstart ≥ 0` and the width inside the 640-column row — the two bounds the source never checks |
-| `the_mode_set_is_the_four_hundred_line_screen_with_the_inherited_dac` | the clear, 640×400, stride 640, CRTC 9 = 0, the start address back at 0, entries 1-15 grey and 0 and 16 untouched |
-| `a_line_is_written_once_and_the_beam_wraps_instead_of_a_second_copy` | the write lands in one ring line and nowhere else, `80*(yscrl+401)` is past the surface, and the line just written is the display's **bottom** row |
-| `the_display_advances_one_line_every_two_ticks` | ticks 3, 5, 7 … move the origin one line; the ticks between them do not |
-| `the_ring_wraps_at_four_hundred_lines_not_four_hundred_and_one` | 400 lines is a whole turn, the 400th origin is 256,000, and the 401st is the first state again |
-| `the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` | the modelling equivalence, 400 displayed rows compared as bytes at every iteration of a 500-line run against the original's own 401-line arithmetic |
-| `the_references_text_runs_at_twenty_five_rows_a_line_where_the_source_says_thirty` | §6.2's pitch, on the reference's frame and on the port's |
-| `the_references_own_header_pins_the_chains_offset` | §6.1's tick, start and residual, and §6.2's 53-pixel raster difference |
-| `the_references_control_lines_advance_the_ring_and_draw_nothing` | §6.2's `[NN` rule: the 163 control lines and their four sizes, and every band of frames 10000 and 14000 predicted from the tree's own text and found in the reference |
-| `the_shipped_order_names_six_characters_the_trees_does_not` | §6.2's six extra characters: `fonaw` 0 for each, the text's own counts, and the 14/15-column width of the lines that name them against ≤ 1 for the rest |
+| `the_image_is_the_build_these_offsets_name` | every instruction this note and the part cite, read back from the image: DGROUP, `main`'s mode set, palette and loop, the control and `%` tests, the stride, segment and 25-row bounds, the blank, `open`'s mode, `read`'s CR and `^Z` tests, `_fmode`, the file name, `fonaorder`'s pointer |
+| `the_strip_and_its_order_are_read_from_the_image` | the 80-character order, a run for every character, the six added characters' columns and widths, widths 3..25, the blank at 1530/16 with no ink, ink rows 0..20, rows 25..29 empty |
+| `the_text_is_read_in_text_mode_without_its_carriage_returns` | 6,141 bytes, 542 CRs, 5,599 kept, the raw tail and the initialiser after them, and `read_text_mode` on a CR and a `^Z` |
+| `the_shipped_text_fits_the_row_and_the_textline_buffer` | 542 lines, the longest 40 characters, the widest 592 columns starting at 23 and ending at 612 |
+| `the_mode_set_is_the_four_hundred_line_screen_with_the_inherited_dac` | the clear, 640×400, CRTC 9 = 0, entries 1-15 grey and 0 and 16 untouched |
+| `a_line_is_written_once_and_the_beam_wraps_instead_of_a_second_copy` | one ring line written, the bottom row is the line just written |
+| `the_display_advances_one_line_every_two_ticks` | ticks 3, 5, 7 … move the origin |
+| `the_ring_wraps_at_four_hundred_lines_not_four_hundred_and_one` | the turn, and the 256,000 origin |
+| `the_four_hundred_line_ring_shows_what_the_four_hundred_and_one_line_ring_shows` | §4's equivalence, as bytes |
+| `the_references_own_header_pins_the_chains_offset` | ticks 183/184 at 0 pixels, the start 8917, the 82 |
+| `the_port_draws_the_references_frames_at_the_references_own_ticks` | 0 at all four keyframes from 8917; the `rediff` counts from 8835 |
+| `a_control_line_draws_nothing_and_lasts_its_own_count` | §3's four forms, 42 for `[8`, the `[15` under "Canada" blank and lasting 15 rows |
+| `the_six_characters_the_trees_order_lacks_are_drawn` | the text's counts (`/` 83, `&` 26, `Z` 12, `Y` 1, `ä` 2, `\x94` 0) and a run for each |
+| `the_part_ends_by_itself_on_the_percent_line` | line 537, 11,482 rows, `Finished` on tick 22,967 and not before, the black screen, 31,884 and 31,802 |
+| `a_demo_run_ends_after_the_scroller_ends_itself` | release-only: the hold after the part's own end, and the end 84 ticks later |
 
-`bins/secondreality/tests/endscrl.rs` (2 tests through the real binary, and **two** runs of
-it — a far one is 13,596 ticks, so the checks are grouped by the dump they need): the four
-keyframes dump in the reference's own numbering (`index_origin: boot`, anchor 404, 640×400),
-each under the part that owns it, and the run leaves `reference/` alone; and the chain hands
-this part its tick 0 at **8835** with CRED's screen at 8834 and the geometry change at
-8837.
+`bins/secondreality/tests/endscrl.rs` (2 tests through the real binary): the four keyframes dump in
+the reference's own numbering, each under the part that owns it; and the chain's boundary at
+8834-8838.
 
-Every number in this note is produced by a test in this commit or by a command named here.
+Every number in this note is produced by a test in this commit or by a command named here, except
+the controller's capture in §5, whose command is named and whose frames are scratch.
 
-**Register.** ENDSCRL's one behaviour that the original has and the port keeps, the unreachable end-of-buffer read, is a row of `bugs.md`'s index; the part has no entry of its own.
+**Register.** A11 (the block-5 chain offset). The part's one unreachable behaviour, reading past the
+text array if the text had no `%`, is a row of `bugs.md`'s index.

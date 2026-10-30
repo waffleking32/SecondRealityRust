@@ -252,8 +252,8 @@ fn every_asset_in_the_tree_decodes() {
     // is exactly what this pin is here to catch.
     assert!(
         output.contains(
-            "decode: 159 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene \
-             file(s), 45 headerless with no decoder, 1 refused on record, 0 finding(s)"
+            "decode: 179 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene \
+             file(s), 65 headerless with no decoder, 1 refused on record, 0 finding(s)"
         ),
         "{output}"
     );
@@ -277,7 +277,7 @@ fn every_asset_in_the_tree_decodes() {
     // pinned here: a tree that gains or loses a file without the record
     // changing has a problem this test cannot see.
     assert!(
-        output.contains("tree: 159 file(s) recorded, 159 in the tree, 0 finding(s)"),
+        output.contains("tree: 179 file(s) recorded, 179 in the tree, 0 finding(s)"),
         "{output}"
     );
     assert!(!output.contains("FAIL"), "{output}");
@@ -292,13 +292,14 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     );
 
     assert_eq!(run.code, 0, "sheets are not a check:\n{}", run.output());
-    // The provenance's `parts` column names 22 parts. One sheet each, named
+    // The provenance's `parts` column names 24 parts (MINVBALL by its shipped EXE alone, D49;
+    // PLZPART's sheet was missing from this list before). One sheet each, named
     // after the part, is what makes "look at the sheets" a thing a person can
     // do — so every one of them is asserted, not a count.
     for part in [
         "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
-        "JPLOGO", "LNS&ZOOM", "MAIN", "MNTSCRL", "PAM", "PANICEND", "RAYSCRL", "START", "TECHNO",
-        "TUNNELI", "U2A", "U2E",
+        "JPLOGO", "LNS&ZOOM", "MAIN", "MINVBALL", "MNTSCRL", "PAM", "PANICEND", "PLZPART", "RAYSCRL",
+        "START", "TECHNO", "TUNNELI", "U2A", "U2E",
     ] {
         let file = sheets.join(format!("{part}.png"));
         let bytes = fs::read(&file)
@@ -322,25 +323,25 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     // and so the one a person most needs to see there.
     let output = run.output();
     let techno = sheet_tiles(&output, "TECHNO.png");
-    assert_eq!(techno.len(), 4, "TECHNO's sheet: {techno:?}");
+    assert_eq!(techno.len(), 5, "TECHNO's sheet (its shipped EXE among them, D49): {techno:?}");
     assert!(
         techno.iter().any(|tile| tile.contains("CIRCLE2.EGA")),
         "the recovered asset is on TECHNO's sheet: {techno:?}"
     );
 
-    // And nothing is silently on no sheet: the tile maps of all 21 sheets
+    // And nothing is silently on no sheet: the tile maps of all 24 sheets
     // between them name every path the record lists. Every file the record
     // names a part for has a tile somewhere, and this asserts the converse too
     // by counting.
     let mut tiles = Vec::new();
     for part in [
         "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
-        "JPLOGO", "LNS&ZOOM", "MAIN", "MNTSCRL", "PAM", "PANICEND", "RAYSCRL", "START", "TECHNO",
-        "TUNNELI", "U2A", "U2E",
+        "JPLOGO", "LNS&ZOOM", "MAIN", "MINVBALL", "MNTSCRL", "PAM", "PANICEND", "PLZPART", "RAYSCRL",
+        "START", "TECHNO", "TUNNELI", "U2A", "U2E",
     ] {
         tiles.extend(sheet_tiles(&output, &format!("{part}.png")));
     }
-    assert_eq!(tiles.len(), 152, "one tile per curated file");
+    assert_eq!(tiles.len(), 179, "one tile per recorded file");
     assert!(
         !output.contains("names no part for this file"),
         "every recorded file has a part: {output}"

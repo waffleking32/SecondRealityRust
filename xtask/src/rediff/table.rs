@@ -364,18 +364,19 @@ pub const TABLE: &[Entry] = &[
             rgb(440, 440, 0, "A7"),
         ],
     },
-    // tests/endscrl.rs:20 KEYFRAMES through `--block 5` (:52), at their own indices; the
-    // test asserts only geometry and distinctness (:111-131), so the counts are this
-    // command's, against A11's 2.8473 / 11.0676 / 9.9617 / 6.6828 % of 256,000 at offset 0
-    // (the chain's 82 inside them).
+    // tests/endscrl.rs:20 KEYFRAMES through `--block 5` (:52), at their own indices. Since the
+    // part reads the release's image (D49) every count is the chain's 82-frame offset alone:
+    // `parts::endscrl`'s `the_port_draws_the_references_frames_at_the_references_own_ticks`
+    // renders all four at 0 from the release's own start (8917) and these four from the
+    // port's (8835) — A11's residual.
     Entry {
         capture: "endscrl",
         args: &["--block", "5"],
         frames: &[
-            rgb(9100, 9100, 7289, "A11"),
-            rgb(10000, 10000, 28333, "A11"),
-            rgb(12000, 12000, 25502, "A11"),
-            rgb(14000, 14000, 17108, "A11"),
+            rgb(9100, 9100, 7217, "A11"),
+            rgb(10000, 10000, 32508, "A11"),
+            rgb(12000, 12000, 25118, "A11"),
+            rgb(14000, 14000, 17613, "A11"),
         ],
     },
     // The original's whole `SECOND 1` run (reference-indices.md §26) against the port's
@@ -535,9 +536,9 @@ pub const TABLE: &[Entry] = &[
         capture: "fullrun/13-endscrl",
         args: &["--block", "1"],
         frames: &[
-            rgb_at(46280, Part::Endscrl, 42, "A53"),
-            rgb_at(46283, Part::Endscrl, 67, "A53"),
-            rgb_at(46286, Part::Endscrl, 149, "A53"),
+            rgb_at(46280, Part::Endscrl, 0, "A53"),
+            rgb_at(46283, Part::Endscrl, 0, "A53"),
+            rgb_at(46286, Part::Endscrl, 0, "A53"),
         ],
     },
     // tests/glenz.rs, block 2 (:90): 1499 at 0 in both planes (:420-431); the moving
