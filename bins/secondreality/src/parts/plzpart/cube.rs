@@ -92,37 +92,24 @@ impl Plzpart {
         }
         self.sini = sini;
         let sini = &self.sini;
-        // `PLZFILL.C:37-55`: the three colour bands.
+        // `PLZFILL.C:37-55`: three 64-entry bands, each two 32-entry ramps
+        // (band 0's entry 0 stays black).
+        type Ramp = (usize, fn(u8) -> [u8; 3]);
         let mut pal = [0u8; 768];
-        for a in 1..32usize {
-            pal[a * 3] = 0;
-            pal[a * 3 + 1] = 0;
-            pal[a * 3 + 2] = (a * 2) as u8;
-        }
-        for a in 0..32usize {
-            pal[a * 3 + 32 * 3] = (a * 2) as u8;
-            pal[a * 3 + 1 + 32 * 3] = (a * 2) as u8;
-            pal[a * 3 + 2 + 32 * 3] = 63;
-        }
-        for a in 0..32usize {
-            pal[192 + a * 3] = (a * 2) as u8;
-            pal[192 + a * 3 + 1] = 0;
-            pal[192 + a * 3 + 2] = 0;
-        }
-        for a in 0..32usize {
-            pal[192 + a * 3 + 32 * 3] = 63;
-            pal[192 + a * 3 + 1 + 32 * 3] = (a * 2) as u8;
-            pal[192 + a * 3 + 2 + 32 * 3] = 0;
-        }
-        for a in 0..32usize {
-            pal[384 + a * 3] = a as u8;
-            pal[384 + a * 3 + 1] = 0;
-            pal[384 + a * 3 + 2] = (a * 2 / 3) as u8;
-        }
-        for a in 0..32usize {
-            pal[384 + a * 3 + 32 * 3] = (31 - a) as u8;
-            pal[384 + a * 3 + 1 + 32 * 3] = (a * 2) as u8;
-            pal[384 + a * 3 + 2 + 32 * 3] = 21;
+        let ramps: [Ramp; 6] = [
+            (0, |a| [0, 0, a * 2]),
+            (32, |a| [a * 2, a * 2, 63]),
+            (64, |a| [a * 2, 0, 0]),
+            (96, |a| [63, a * 2, 0]),
+            (128, |a| [a, 0, a * 2 / 3]),
+            (160, |a| [31 - a, a * 2, 21]),
+        ];
+        for (first, rgb) in ramps {
+            let from = if first == 0 { 1 } else { 0 };
+            for a in from..32u8 {
+                let at = (first + usize::from(a)) * 3;
+                pal[at..at + 3].copy_from_slice(&rgb(a));
+            }
         }
         self.pal = pal;
         // `PLZFILL.C:57-62`: the three textures, 64 rows of a 256-byte stride

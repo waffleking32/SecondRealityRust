@@ -28,136 +28,59 @@ use super::plasma::{apply_plasma_view, PLASMA_COP_START};
 use super::tables::Tables;
 use super::Plzpart;
 
-/// Build `pals[6][768]` exactly as `init_plz` does (`PLZ.C:181-217`).
+/// Build `pals[6][768]` exactly as `init_plz` does (`PLZ.C:181-217`). Each
+/// table is runs of `(r, g, b)` from entry 1 on (entry 0 stays zero).
 pub(super) fn build_pals(tables: &Tables) -> [[i16; 768]; 6] {
-    let ptau = &tables.ptau;
+    let p = |a: usize| tables.ptau[a];
     let mut pals = [[0i16; 768]; 6];
-    // --- pals[0], "RGB": entry 1 onward; entry 0 stays zero. ---
-    let mut at = 3usize;
-    for a in 1..64 {
-        pals[0][at] = ptau[a];
-        pals[0][at + 1] = ptau[0];
-        pals[0][at + 2] = ptau[0];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[0][at] = ptau[63 - a];
-        pals[0][at + 1] = ptau[0];
-        pals[0][at + 2] = ptau[0];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[0][at] = ptau[0];
-        pals[0][at + 1] = ptau[0];
-        pals[0][at + 2] = ptau[a];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[0][at] = ptau[a];
-        pals[0][at + 1] = ptau[0];
-        pals[0][at + 2] = ptau[63 - a];
-        at += 3;
-    }
-    // --- pals[1], "RB-black". ---
-    let mut at = 3usize;
-    for a in 1..64 {
-        pals[1][at] = ptau[a];
-        pals[1][at + 1] = ptau[0];
-        pals[1][at + 2] = ptau[0];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[1][at] = ptau[63 - a];
-        pals[1][at + 1] = ptau[0];
-        pals[1][at + 2] = ptau[a];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[1][at] = ptau[0];
-        pals[1][at + 1] = ptau[a];
-        pals[1][at + 2] = ptau[63 - a];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[1][at] = ptau[a];
-        pals[1][at + 1] = ptau[63];
-        pals[1][at + 2] = ptau[a];
-        at += 3;
-    }
-    // --- pals[3], "RB-white". ---
-    let mut at = 3usize;
-    for a in 1..64 {
-        pals[3][at] = ptau[a];
-        pals[3][at + 1] = ptau[0];
-        pals[3][at + 2] = ptau[0];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[3][at] = ptau[63];
-        pals[3][at + 1] = ptau[a];
-        pals[3][at + 2] = ptau[a];
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[3][at] = ptau[63 - a];
-        pals[3][at + 1] = ptau[63 - a];
-        pals[3][at + 2] = ptau[63];
-        at += 3;
-    }
-    for _ in 0..64 {
-        pals[3][at] = ptau[0];
-        pals[3][at + 1] = ptau[0];
-        pals[3][at + 2] = ptau[63];
-        at += 3;
-    }
-    // --- pals[2], "white". ---
-    let mut at = 3usize;
-    for _ in 1..64 {
-        pals[2][at] = ptau[0] / 2;
-        pals[2][at + 1] = ptau[0] / 2;
-        pals[2][at + 2] = ptau[0] / 2;
-        at += 3;
-    }
-    for &value in ptau.iter().take(64) {
-        pals[2][at] = value / 2;
-        pals[2][at + 1] = value / 2;
-        pals[2][at + 2] = value / 2;
-        at += 3;
-    }
-    for a in 0..64 {
-        pals[2][at] = ptau[63 - a] / 2;
-        pals[2][at + 1] = ptau[63 - a] / 2;
-        pals[2][at + 2] = ptau[63 - a] / 2;
-        at += 3;
-    }
-    for _ in 0..64 {
-        pals[2][at] = ptau[0] / 2;
-        pals[2][at + 1] = ptau[0] / 2;
-        pals[2][at + 2] = ptau[0] / 2;
-        at += 3;
-    }
-    // --- pals[4], "white II". ---
-    let mut at = 3usize;
-    for a in 1..75 {
-        let v = ptau[(63 - a * 64 / 75) as usize];
-        pals[4][at] = v;
-        pals[4][at + 1] = v;
-        pals[4][at + 2] = v;
-        at += 3;
-    }
-    for _ in 0..106 {
-        pals[4][at] = 0;
-        pals[4][at + 1] = 0;
-        pals[4][at + 2] = 0;
-        at += 3;
-    }
-    for a in 0..75 {
-        let v = ptau[(a * 64 / 75) as usize];
-        pals[4][at] = v * 8 / 10;
-        pals[4][at + 1] = v * 9 / 10;
-        pals[4][at + 2] = v;
-        at += 3;
-    }
+    // Appends `rgb(a)` for each `a` of each run, from entry 1.
+    type Run<'a> = (std::ops::Range<usize>, &'a dyn Fn(usize) -> [i16; 3]);
+    let fill = |pal: &mut [i16; 768], runs: &[Run]| {
+        let mut at = 3usize;
+        for (range, rgb) in runs {
+            for a in range.clone() {
+                pal[at..at + 3].copy_from_slice(&rgb(a));
+                at += 3;
+            }
+        }
+    };
+    // "RGB".
+    fill(&mut pals[0], &[
+        (1..64, &|a| [p(a), p(0), p(0)]),
+        (0..64, &|a| [p(63 - a), p(0), p(0)]),
+        (0..64, &|a| [p(0), p(0), p(a)]),
+        (0..64, &|a| [p(a), p(0), p(63 - a)]),
+    ]);
+    // "RB-black".
+    fill(&mut pals[1], &[
+        (1..64, &|a| [p(a), p(0), p(0)]),
+        (0..64, &|a| [p(63 - a), p(0), p(a)]),
+        (0..64, &|a| [p(0), p(a), p(63 - a)]),
+        (0..64, &|a| [p(a), p(63), p(a)]),
+    ]);
+    // "RB-white".
+    fill(&mut pals[3], &[
+        (1..64, &|a| [p(a), p(0), p(0)]),
+        (0..64, &|a| [p(63), p(a), p(a)]),
+        (0..64, &|a| [p(63 - a), p(63 - a), p(63)]),
+        (0..64, &|_| [p(0), p(0), p(63)]),
+    ]);
+    // "white".
+    fill(&mut pals[2], &[
+        (1..64, &|_| [p(0) / 2; 3]),
+        (0..64, &|a| [p(a) / 2; 3]),
+        (0..64, &|a| [p(63 - a) / 2; 3]),
+        (0..64, &|_| [p(0) / 2; 3]),
+    ]);
+    // "white II".
+    fill(&mut pals[4], &[
+        (1..75, &|a| [p(63 - a * 64 / 75); 3]),
+        (0..106, &|_| [0; 3]),
+        (0..75, &|a| {
+            let v = p(a * 64 / 75);
+            [v * 8 / 10, v * 9 / 10, v]
+        }),
+    ]);
     // `PLZ.C:215-217`: `(v-63)*2` over `pals[0]`, then `*8` over
     // `pals[1..4]`. `pals[5]` is never built.
     for value in pals[0].iter_mut() {
