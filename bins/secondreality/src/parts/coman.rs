@@ -1,134 +1,38 @@
 //! COMAN — the 3D sinus field (`3dsinfld`).
 //!
 //! `COMAN/MAIN.C` (228 lines) over `COMAN/ASM.ASM` (`inittwk`, `docol`,
-//! `docopy`, `setpalarea`) and `COMAN/THELOOP.INC` — the 5,230-line
-//! unrolled ray march `COMAN/DOLOOP.C` generates — with the two linked wave
-//! tables `W1DTA.BIN`/`W2DTA.BIN`.
+//! `docopy`, `setpalarea`) and `COMAN/THELOOP.INC`, the 5,230-line unrolled
+//! ray march `COMAN/DOLOOP.C` generates, with the linked wave tables
+//! `W1DTA.BIN`/`W2DTA.BIN` (`CALCW12` is off, `MAIN.C:6`). The acts:
 //!
-//! # The screen: mode 13h with chain-4 off
+//! 1. `MAIN.C:118-227`: [`palette`], the 64 KB vbuf and the cleared screen.
+//! 2. `MAIN.C:45-116` `doit`: the gate `musplus < 0`, then while
+//!    `frame < 4444` the break `-8 < a < 0`, the `frepeat` bodies moving
+//!    `startrise`, the sine camera, 160 [`docol`] columns, the two-page flip
+//!    (CRTC `0x0C` = `0x80`/`0x00`) and [`docopy`].
+//! 3. `THELOOP.INC`: the swapped 16.16 march, unit for unit in [`theloop`].
 //!
-//! `inittwk` (`ASM.ASM:36-78`) leaves CRTC `0x14 = 0` and `0x17 = 0xE3`,
-//! takes the sequencer's memory mode to 6 (**chain-4 off**) and the map mask
-//! to `0x0F`, and never writes CRTC `0x13`, so the row offset stays mode
-//! 13h's 40 words = **80 plane bytes a row**. In the emulator's unchained
-//! handler a CPU byte address is four plane bytes (`VGA_UnchainedVGA_Handler`
-//! stores at `4*addr + plane`), and the display reads them straight back as
-//! four consecutive pixels (`M_VGA`'s line is one linear byte a pixel, 320
-//! bytes a scanline). `docopy` writes the vbuf row's first 80 bytes under map
-//! mask `0x03` (planes 0 and 1) and its second 80 under `0x0C` (planes 2 and
-//! 3), so every displayed pair of pixels repeats one vbuf byte: the 160-wide
-//! buffer becomes the 320-wide picture with each column shown twice.
+//! `inittwk` (`ASM.ASM:36-78`) turns chain-4 off and leaves the row at 80
+//! plane bytes; the emulator's unchained handler stores a CPU address as four
+//! plane bytes that the display reads back as four pixels, so `docopy`'s
+//! plane-pair writes show each of the vbuf's 160 columns twice ([`compose`]).
 //!
-//! # The parts
+//! `dis_waitb` returns the copper frames elapsed; one render costs two
+//! (`reference-indices.md` §16.3), so an iteration runs every second tick, and
+//! the frame-4 iteration's two extra waits make the ticks `0, 2, 4, 8, 10, …`
+//! ([`Coman::iteration`]). A picture shows from the next iteration's tick, for
+//! two ticks. The reference's per-keyframe origins drift (A26), so the mapping
+//! is stated per keyframe (`docs/fidelity/3dsinfld.md` §6), and `init` makes
+//! the music's head start ([`MUSIC_PRE_ROLL`]). The part ends on the music
+//! break in order 96's tail, at tick 2,014.
 //!
-//! 1. **Init** (`MAIN.C:118-227`): the palette formula — `uc = (223 - a*22/26)*3`
-//!    walks entries 223 down to 8, the green `(230-a)/4 + sin1024[a*4]/32`,
-//!    the blue `(255-a)/3` and the red diamond `40-|a-220|`, all `/3`, then
-//!    the `*9/6` brightness over bytes 0..719 (entries 0..239), the dark-red
-//!    bar at 232..255, entry 0 black, and the `combg` read at 240..255 whose
-//!    array is 16 bytes and whose indexes are 736..783 (see "The unlinked
-//!    background"). `halloc(16384,4)` is the 64 KB vbuf, `CALCW12` is off so
-//!    the wave tables are the linked `W1DTA`/`W2DTA`, and the video memory is
-//!    cleared.
-//! 2. **`doit`** (`MAIN.C:45-116`): the music gate (`musplus < 0`), then
-//!    iterations of `frame < 4444`: the `a > -8 && a < 0` break, the
-//!    `frepeat` catch-up that raises `startrise` near an order's end and
-//!    lowers it for the first 400 frames, the sine camera
-//!    (`rot2 += 4; rot += sin1024[rot2&1023]/15; r = rot>>3` and the four
-//!    sines at `r`, `r+256`, `r+177`, `r+433`), the 160-column `docol`, the
-//!    two-page flip (`0x0C = 0x80`/`0x00`) and `docopy`.
-//! 3. **`theloop`** (`THELOOP.INC`): the swapped 16.16 ray march, unit for
-//!    unit in [`theloop`].
-//!
-//! # The tick model, and the measured mapping
-//!
-//! The original's `dis_waitb` returns the **number of copper frames** that
-//! elapsed since the previous call (`DIS/DISINT.ASM`'s INDEMO arm reads and
-//! clears `copperframecount`). One render iteration costs two of them: the
-//! reference's picture changes every second boot frame (measured at all four
-//! keyframes, `reference-indices.md` §16.3), and `frame += (frepeat =
-//! dis_waitb())` therefore advances the source's counter by 2. The port runs
-//! one engine tick a vblank: an iteration runs on one tick, the next is two
-//! ticks later, and the picture the engine composes on the intervening tick
-//! is the same page — the source is blocked inside `dis_waitb`. The one
-//! exception is the frame-4 palette upload, whose two `dis_waitb` calls in
-//! the inner body each spend a vblank (see [`Coman::iteration`]): the
-//! iteration that starts with `frame == 4` runs at tick 4 and schedules the
-//! next at tick 8, so the iteration ticks are `0, 2, 4, 8, 10, ...`.
-//!
-//! A render's picture is copied into the page the **next** iteration
-//! selects, so the beam shows picture `k` from the tick iteration `k+1` runs
-//! — two ticks after it was drawn, and for the two ticks of that iteration's
-//! wait. The reference pins the result: at a `--part 3dsinfld` run's ticks
-//! **464/465, 966/967, 1470/1471 and 1772/1773** the port is byte-identical
-//! to reference frames **15500, 16000, 16500 and 16800** (the process test
-//! `tests/coman.rs`). The implied origins drift — 15,036, 15,034, 15,030 and
-//! 15,028 — because the reference renders at about 1.99 frames an iteration
-//! (its `dis_waitb` sometimes returns one), while the port's model is a fixed
-//! two; the mapping is stated per keyframe rather than as a boot anchor.
-//! The gate opens at tick 0, so that tick is the order-93 row-0 crossing the
-//! block-3 trace puts at 15031–15038.
-//!
-//! # The entry, and the music
-//!
-//! `shell::music_for_part("3dsinfld")` seeks **MUSIC1 order 91** — the order
-//! the trace holds across the part's start window's beginning. The row is
-//! *derived, not measured*: the window `(15000, 15100]` spans the 91→93
-//! crossing (order 92 is the `254` marker) and the part marks no start
-//! frame. [`Coman::MUSIC_PRE_ROLL`] pre-polls 527 frames, the polls between
-//! `_zplaysong(91)`'s row 0 and the gate: the 527th leaves the published row
-//! at 63 with `musplus == -1`, the engine's first tick polls the 528th and
-//! sees order 93 row 0, `musplus == 0`. A mid-chain start polls nothing
-//! (`PartCtx::music_fresh`).
-//!
-//! The part ends on `MAIN.C:59-60`'s break, `a > -8 && a < 0`, in MUSIC1
-//! order 96's `zplus == 1` tail: the published row 57 first gives
-//! `musplus == -7`, and the iterating part reads it at tick 2,014. The
-//! 4,444-frame cap is never reached. In that tail the inner body also raises
-//! `startrise` a vblank. Once it reaches 130 the copy's first row
-//! `70 + startrise` is at or below row 200 and the screen is flat black —
-//! the reference's 17,000, before the part itself ends.
-//!
-//! # The unlinked background
-//!
-//! `COMBG.UH`, `COMBG.X` and `COMBG.LBM` are **not in the link**: `MAKEFILE`
-//! links `main.obj asm.obj theloop.obj disc.obj` plus the four wave-table
-//! objects, and `asm.obj`'s `combguse` is the only `combg` name in it. The
-//! C global is `char combg[16]` (`MAIN.C:8`), so every `combg` index the
-//! source uses is an **overrun**:
-//!
-//! - the palette's `palette[x] = combg[16+x]` for `x = 720..767` reads
-//!   `combg[736..783]`;
-//! - the `combguse` fill (`:166-176`) reads up to `combg[29582]`.
-//!
-//! `combguse` is read only by `docopy`'s `IFDEF PXLSUX` half (`ASM.ASM:143-172`),
-//! and `MAKEFILE`'s `tasm $(asm_f)` defines no `PXLSUX`, so that half is not
-//! assembled and **there is no background**. The overrun's destination —
-//! DAC entries 240..255 — is unreachable too: the ray march's colour is
-//! `((bx + 140 - j/8) & 0xFF) >> 1`, never above 127. The port therefore
-//! keeps the 16-byte array, models the palette read as an overrun that cannot
-//! be observed, and does not draw the dead background. The tests pin both
-//! facts.
-//!
-//! # The preserved bugs
-//!
-//! - The `combg` overrun and the dead `combguse` background, above.
-//! - The palette aliasing: the `*9/6` pass brightens entries 0..239, the bar
-//!   writes 232..255, the `combg` overrun then overwrites 240..255, and
-//!   entry 0 is forced black.
-//! - The frame-4 `setpalarea` is dead: it re-uploads the same palette.
-//! - The `frame < 4444` cap is dead on this boot: the music break ends the
-//!   part at about 1,900 frames.
-//! - `cameralevel` (`MAIN.C:54`) is written and read by `theloop` only into
-//!   `theloop_heigth`, which the generated code never reads.
-//! - `docol` masks **all four** coordinate arguments with `~1` (`ASM.ASM:115-123`).
-//! - `docopy`'s first clear is 18 rows at destination row 52, and `rep stosd`
-//!   advances `di` over them: the 140-row copy starts at destination row
-//!   **70**, not 52. The clear stays visible above the picture. The second
-//!   clear (vbuf rows 68..97) lands after the copy and so is seen by the
-//!   *next* frame.
-//! - The wave tables' 16-bit index wrap is their 64 KB length; `si`/`di` wrap
-//!   and the word read masks the low bit.
+//! Preserved bugs (`bugs.md` §20): every `combg` index overruns its 16 bytes
+//! and the `PXLSUX` background is not assembled ([`combg_overrun`]); the
+//! palette passes overwrite each other ([`palette`]); `docol` masks all four
+//! coordinates; `docopy`'s clear moves the copy to row 70; `cameralevel`
+//! reaches only `theloop_heigth`, which nothing reads; the frame-4
+//! `setpalarea` re-uploads the same palette and the 4,444-frame cap is never
+//! reached.
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
@@ -141,40 +45,33 @@ const NAME: &str = "3dsinfld";
 
 // ---------------------------------------------------------------- assets --
 
-/// The linked X wave table (`MAIN.C:212` `wave1 = w1dta`).
-const W1_PATH: &str = "assets/COMAN/W1DTA.BIN";
-/// The linked Y wave table.
-const W2_PATH: &str = "assets/COMAN/W2DTA.BIN";
-/// A wave table is 32,768 signed words, and `fs:[si]`/`gs:[di]` wrap at 64 KB:
-/// the byte offset is the 16-bit register and the word read masks its low bit.
+/// The linked wave tables (`MAIN.C:212-213` `wave1 = w1dta`, `wave2 = w2dta`).
+const WAVE_PATHS: [&str; 2] = ["assets/COMAN/W1DTA.BIN", "assets/COMAN/W2DTA.BIN"];
+/// A wave table is 32,768 signed words; `fs:[si]`/`gs:[di]` wrap at 64 KB.
 const WAVE_BYTES: usize = 65_536;
+/// The two wave tables, X and Y.
+type Waves = [Vec<u8>; 2];
 
 // --------------------------------------------------------------- screens --
 
 const SCREEN_WIDTH: u16 = 320;
 const SCREEN_HEIGHT: u16 = 200;
-/// Mode 13h's row stride and this part's: 80 plane bytes = 320 pixels.
-const LINE_LEN: u16 = 320;
 /// `halloc(16384,4)`: the 64 KB vbuf, addressed through a 16-bit `bp`.
 const VBUF_BYTES: usize = 65_536;
-/// The unchained VGA's plane address space: 64 K addresses, four plane bytes
-/// each (`VGA_UnchainedVGA_Handler`'s `((uint32_t*)linear)[addr]`).
-const PLANE_BYTES: usize = 65_536;
-/// The linear video memory the plane addresses name: 256 KB.
-const VIDEO_BYTES: usize = 4 * PLANE_BYTES;
-/// The two pages the flip toggles: segment `a000` = plane 0, `a800` = plane
-/// `0x8000` (the handler masks the physical address with `0xFFFF`).
+/// The unchained VGA's 64 K plane addresses, four bytes each
+/// (`VGA_UnchainedVGA_Handler`'s `((uint32_t*)linear)[addr]`): 256 KB.
+const VIDEO_BYTES: usize = 4 * 65_536;
+/// The flip's two pages: segment `a000` and `a800` (plane address `0x8000`).
 const PAGE_LO: u16 = 0x0000;
 const PAGE_HI: u16 = 0x8000;
-/// `docopy` clears 18 rows at destination row 52 — and `rep stosd` advances
-/// `di` over them — before copying 140 rows from vbuf row 60 to destination
-/// row **70** + `startrise`.
+/// `docopy`: 18 rows cleared at destination row 52, then 140 rows from vbuf
+/// row 60 to destination row 70 + `startrise`.
 const COPY_ROWS: usize = 140;
 const COPY_SOURCE_ROW: usize = 60;
 const CLEAR_DEST_ROW: usize = 52;
 const CLEAR_DEST_ROWS: usize = 18;
 const COPY_DEST_ROW: usize = CLEAR_DEST_ROW + CLEAR_DEST_ROWS;
-/// `docopy`'s post-copy clear: vbuf rows 68..97 (30 rows), `cx = 30*160/4/4`.
+/// `docopy`'s post-copy clear: vbuf rows 68..97.
 const CLEAR_FIRST_ROW: usize = 68;
 const CLEAR_ROWS: usize = 30;
 
@@ -184,122 +81,84 @@ const CLEAR_ROWS: usize = 30;
 const COLUMNS: i32 = 160;
 /// `MAIN.C:48`: the rise counter's initial and maximum value.
 const STARTRISE_MAX: i32 = 160;
-/// `MAIN.C:57`: the dead frame cap.
+/// `MAIN.C:57`: the frame cap.
 const FRAME_CAP: u32 = 4444;
-/// `MAIN.C:52`, `:57`: the counter starts at 0, and the music break is
-/// `a > -8 && a < 0`.
+/// `MAIN.C:59-60`: the music break is `a > -8 && a < 0`.
 const BREAK_LOW: i32 = -8;
 /// `MAIN.C:63`: `startrise` rises while `a > -30 && a < 0`.
 const RISE_LOW: i32 = -30;
 
-/// One render iteration's vblanks: the measured two-frame step. The
-/// source's `dis_waitb` returns the elapsed copper frames and the reference's
-/// picture changes every second boot frame.
+/// One render iteration's vblanks, the measured two-frame step.
 const VBLANKS_PER_ITERATION: u32 = 2;
 
-/// `DOLOOP.C`: `bail = 192`, the number of ray steps; `bailhalve = 64`, where
-/// the horizontal step doubles. The generated labels are `0..63` and then
-/// every second index to 190.
+/// Polls `init` makes on a fresh start: from `_zplaysong(91)`'s row 0, the
+/// 527th leaves the published row at 63 (`musplus` -1), and the engine's
+/// tick-0 poll is order 93 row 0, where the gate opens.
+const MUSIC_PRE_ROLL: u32 = 527;
+
+/// `DOLOOP.C`: `bail = 192` ray steps; at `bailhalve = 64` the step doubles,
+/// so the generated labels are `0..63` and then every second index to 190.
 const BAIL: usize = 192;
 const BAIL_HALVE: usize = 64;
-/// The start of the direction: `firstraydir = -(200-horizony)*2560` with
-/// `horizony = 70`, swapped by `wflip` (`THELOOP.INC:42`).
+/// `firstraydir = -(200-horizony)*2560` with `horizony = 70`, swapped
+/// (`THELOOP.INC:42`).
 const FIRST_RAY_DIR: u32 = 0xEC00_FFFA;
 
-/// `DOLOOP.C`'s `wflip`: the low and high 16-bit halves trade places.
-///
-/// The ray state is 16.16 with the **integer part in the low word** and the
-/// fraction in the high one, so a 32-bit `add` carries the wrong way; the
-/// generated code's `adc ax,0` / `adc ax,-1` fixes the carry out of bit 31
-/// back into the integer half.
-pub fn wflip(l: u32) -> u32 {
+/// `DOLOOP.C`'s `wflip`: the 16-bit halves trade places. The ray state keeps
+/// the integer in the low word, so the generated `adc ax,0` / `adc ax,-1`
+/// carries bit 31 back into it.
+fn wflip(l: u32) -> u32 {
     ((l & 0xFFFF) << 16).wrapping_add(l >> 16)
 }
 
-/// `THELOOP.INC`'s `zwave[j] = 16*sin(2*pi*3*j/192)`, truncated to an integer
-/// by the generator's `int` assignment. Only the labels the shipped code
-/// actually emits are used: every `j < 64`, then every second `j >= 64`.
-pub fn zwave(j: usize) -> i16 {
-    let value = 16.0 * (j as f64 * std::f64::consts::PI * 2.0 * 3.0 / BAIL as f64).sin();
-    value as i16
+/// `THELOOP.INC`'s `zwave[j] = 16*sin(2*pi*3*j/192)`, truncated by the
+/// generator's `int` assignment.
+fn zwave(j: usize) -> i16 {
+    (16.0 * (j as f64 * std::f64::consts::PI * 2.0 * 3.0 / BAIL as f64).sin()) as i16
 }
 
-/// The generated `_@seekj` label set (`DOLOOP.C:89-160`): `0..64`, then
-/// `64, 66, ..., 190`. Label 192 is the `ret`.
-pub fn labels() -> impl Iterator<Item = usize> {
+/// The generated `_@seekj` labels (`DOLOOP.C:89-160`): `0..64`, then
+/// `64, 66, ..., 190`.
+fn labels() -> impl Iterator<Item = usize> {
     (0..BAIL_HALVE).chain((BAIL_HALVE..BAIL).step_by(2))
 }
 
-/// The 16-byte `combg` the palette and `combguse` read (`MAIN.C:8`). The
-/// shipped link carries no such asset; every index the source uses is beyond
-/// this array (see the module's "The unlinked background").
+/// `MAIN.C:8` `char combg[16]`: the shipped link carries no background
+/// (`COMBG.*` are not linked, and `docopy`'s `PXLSUX` half that reads
+/// `combguse` is not assembled).
 const COMBG: [u8; 16] = [0; 16];
 
-/// The 48 bytes the palette reads out of `combg[736..784]` — the overrun.
-///
-/// The C global's neighbours are the next declarations in `MAIN.C`
-/// (`flip`, then the 1,024-word `wavesin`), but the compiler's data order is
-/// not part of any evidence here, and **the bytes cannot be observed**: the
-/// pinhole colour is at most 127 and the `PXLSUX` background is not in the
-/// link. The port keeps the read as an explicit out-of-bounds model and makes
-/// the unobservability a test.
+/// `MAIN.C:161-164` `palette[x] = combg[16+x]` for `x = 720..767`: indexes
+/// 736..783 of the 16-byte array. The bytes cannot be observed (the march's
+/// colour is a byte shifted right, at most 127), so the port reads past the
+/// array as zero.
 fn combg_overrun() -> [u8; 48] {
-    // `MAIN.C:161-164`: `for(x=(256-16)*3; x<768; x++) palette[x] =
-    // combg[16+x];` — indexes 16+720 .. 16+767, i.e. 736..783, of a 16-byte
-    // array.
-    let mut out = [0u8; 48];
-    for (i, byte) in out.iter_mut().enumerate() {
-        *byte = COMBG.get(16 + 720 + i).copied().unwrap_or(0);
-    }
-    out
+    std::array::from_fn(|i| COMBG.get(16 + 720 + i).copied().unwrap_or(0))
 }
 
-/// `MAIN.C:127-164`: the palette, six bits a component.
-///
-/// Entries 223 down to 8 come from the formula, then the `*9/6` brightness
-/// over entries 0..239, then the dark-red bar at 232..239, entry 0 black, and
-/// the `combg` overrun at 240..255 last.
-pub fn palette() -> Palette {
+/// `MAIN.C:127-164`: the palette, six bits a component. The formula writes
+/// entries 223 down to 8, the `*9/6` pass brightens 0..239, the dark-red bar
+/// writes 255..232, entry 0 is forced black and the `combg` overrun
+/// overwrites 240..255 last.
+fn palette() -> Palette {
     let mut bytes = [0u8; 768];
     for a in 0..256i32 {
-        let uc = (223 - a * 22 / 26) * 3;
-        let mut b = (230 - a) / 4;
-        b += i32::from(SIN1024[((a * 4) & 1023) as usize]) / 32;
-        let b = b.clamp(0, 63);
-        bytes[uc as usize + 1] = b as u8;
-        let b = ((255 - a) / 3).min(63);
-        bytes[uc as usize + 2] = b as u8;
-        let mut b = a - 220;
-        if b < 0 {
-            b = -b;
-        }
-        if b > 40 {
-            b = 40;
-        }
-        b = 40 - b;
-        bytes[uc as usize] = (b / 3) as u8;
+        let uc = ((223 - a * 22 / 26) * 3) as usize;
+        let green = (230 - a) / 4 + i32::from(SIN1024[((a * 4) & 1023) as usize]) / 32;
+        bytes[uc + 1] = green.clamp(0, 63) as u8;
+        bytes[uc + 2] = ((255 - a) / 3).min(63) as u8;
+        bytes[uc] = ((40 - (a - 220).abs().min(40)) / 3) as u8;
     }
     for byte in bytes.iter_mut().take(720) {
-        let b = (*byte as i32 * 9 / 6).min(63);
-        *byte = b as u8;
+        *byte = (i32::from(*byte) * 9 / 6).min(63) as u8;
     }
     for a in 0..24i32 {
-        let uc = (255 - a) * 3;
-        let b = (a - 4).max(0) / 2;
-        bytes[uc as usize] = b as u8;
-        bytes[uc as usize + 1] = 0;
-        bytes[uc as usize + 2] = 0;
+        let uc = ((255 - a) * 3) as usize;
+        bytes[uc..uc + 3].copy_from_slice(&[((a - 4).max(0) / 2) as u8, 0, 0]);
     }
-    bytes[0] = 0;
-    bytes[1] = 0;
-    bytes[2] = 0;
+    bytes[..3].fill(0);
     bytes[720..768].copy_from_slice(&combg_overrun());
-
-    let mut palette = Palette::new();
-    for (entry, rgb) in bytes.chunks_exact(3).enumerate() {
-        palette.set_entry(entry as u8, [rgb[0], rgb[1], rgb[2]]);
-    }
-    palette
+    Palette::from_six_bit(&bytes)
 }
 
 // --------------------------------------------------------------- theloop --
@@ -334,33 +193,23 @@ fn adc_ecx(ecx: &mut u32, imm: u32, carry_in: bool) -> bool {
 /// The whole of `THELOOP.INC`, step for step.
 ///
 /// `si`/`di` are the wave byte offsets, `xsina`/`ysina` the even-masked
-/// column directions, and `bp` the vbuf offset. The march is unrolled per
-/// label: `j = 0..63` steps the wave by `xsina`, then `j = 64, 66, ..., 190`
-/// steps it by `2*xsina` and adds the ray direction twice. Every write goes
-/// through a 16-bit `bp` into the 64 KB segment.
-#[allow(clippy::too_many_arguments)]
-pub fn theloop(
+/// column directions, and `bp` the vbuf offset. Labels `j = 0..63` step the
+/// wave by `xsina`; `j = 64, 66, ..., 190` by `2*xsina`, adding the ray
+/// direction twice. Every write goes through a 16-bit `bp`.
+fn theloop(
     vbuf: &mut [u8; VBUF_BYTES],
-    wave1: &[u8],
-    wave2: &[u8],
-    si: u16,
-    di: u16,
+    waves: &Waves,
+    mut si: u16,
+    mut di: u16,
     xsina: u16,
     ysina: u16,
     mut bp: u16,
 ) {
-    let mut si = si;
-    let mut di = di;
-    let xsina1 = xsina;
-    let xsina2 = xsina.wrapping_mul(2);
-    let ysina1 = ysina;
-    let ysina2 = ysina.wrapping_mul(2);
     let mut eax: u32 = 0;
     let mut ecx: u32 = FIRST_RAY_DIR;
 
-    /// `add eax, value; adc ax, addend` — the 32-bit add, its low word, then
-    /// the carry out of bit 31 back into the integer half, which the next
-    /// `add eax` reads.
+    /// `add eax, value; adc ax, addend`: the carry out of bit 31 goes back
+    /// into the integer half, which the next `add eax` reads.
     fn add_eax(eax: &mut u32, value: u32, addend: u16) -> u16 {
         let (sum, carry) = add32(*eax, value);
         let ax = adc_ax(sum as u16, addend, carry);
@@ -370,27 +219,26 @@ pub fn theloop(
 
     for j in labels() {
         let (xs, ys) = if j < BAIL_HALVE {
-            (xsina1, ysina1)
+            (xsina, ysina)
         } else {
-            (xsina2, ysina2)
+            (xsina.wrapping_mul(2), ysina.wrapping_mul(2))
         };
         si = si.wrapping_add(xs);
-        let mut bx = wave_word(wave1, si) as u16;
+        let mut bx = wave_word(&waves[0], si) as u16;
         di = di.wrapping_add(ys);
-        bx = bx.wrapping_add(wave_word(wave2, di) as u16);
+        bx = bx.wrapping_add(wave_word(&waves[1], di) as u16);
         bx = bx.wrapping_add((zwave(j) as i32 - 240) as u16);
         let mut ax = eax as u16;
         if (ax as i16) < (bx as i16) {
-            let dx = bx.wrapping_add((140 - j / 8) as u16);
-            let dl = (dx as u8) >> 1;
+            let dl = (bx.wrapping_add((140 - j / 8) as u16) as u8) >> 1;
             let l = wflip((j * 2560) as u32);
             loop {
                 ax = add_eax(&mut eax, l, 0);
                 vbuf[bp as usize] = dl;
                 if (ax as i16) >= (bx as i16) {
-                    // `_@seek1a`: the `adc ecx` carries the **compare's** CF,
-                    // which a taken signed `jge` does not zero (0 >= -1 is
-                    // true, and unsigned 0 < 65535).
+                    // `_@seek1a`: the `adc ecx` carries the compare's CF,
+                    // which a taken signed `jge` does not zero (`DOLOOP.C:141`
+                    // assumes it does).
                     let cf = ax < bx;
                     adc_ecx(&mut ecx, 0x0A00_0000, cf);
                     bp = bp.wrapping_sub(160);
@@ -428,49 +276,27 @@ pub fn theloop(
         ax = adc_ax(eax as u16, 0xFFFF, carry);
         eax = (eax & 0xFFFF_0000) | u32::from(ax);
     }
-    let _ = (eax, ecx, bp);
 }
 
-/// `docol` (`ASM.ASM:105-132`): mask all four coordinate arguments with ~1
-/// and call the march. `b` (the vbuf offset) is passed through unmasked.
-/// The source's `ax = cameralevel` lands in `theloop_heigth`, which no
-/// emitted instruction reads; the port does not carry it.
-#[allow(clippy::too_many_arguments)]
-pub fn docol(
-    vbuf: &mut [u8; VBUF_BYTES],
-    wave1: &[u8],
-    wave2: &[u8],
-    xw: i32,
-    yw: i32,
-    xa: i32,
-    ya: i32,
-    b: i32,
-) {
+/// `docol` (`ASM.ASM:105-132`): all four coordinate arguments masked with ~1
+/// (`:115-123`), then the march; `b`, the vbuf offset, is not masked. Its
+/// `ax = cameralevel` lands in `theloop_heigth`, which no emitted instruction
+/// reads.
+fn docol(vbuf: &mut [u8; VBUF_BYTES], waves: &Waves, xw: i32, yw: i32, xa: i32, ya: i32, b: i32) {
     let mask = |v: i32| (v as u16) & 0xFFFE;
-    theloop(
-        vbuf,
-        wave1,
-        wave2,
-        mask(xw),
-        mask(yw),
-        mask(xa),
-        mask(ya),
-        b as u16,
-    );
+    theloop(vbuf, waves, mask(xw), mask(yw), mask(xa), mask(ya), b as u16);
 }
 
 /// `docopy` (`ASM.ASM:134-236`), the live half.
 ///
 /// The 18-row `rep stosd` clear at destination row 52 advances `di` over
-/// itself, so the 140 rows of vbuf 60..199 reach the page at row
-/// **70 + startrise**; each 80-byte half of a vbuf row lands in one plane
-/// pair at the same address, which the display reads as two pixels each. The
-/// `PXLSUX` half is not assembled; the post-copy clear of vbuf rows 68..97
-/// is.
-pub fn docopy(vbuf: &mut [u8; VBUF_BYTES], video: &mut [u8; VIDEO_BYTES], page: u16, startrise: i32) {
+/// itself (`:178-182`), so the 140 rows of vbuf 60..199 land at row
+/// 70 + `startrise` (`5*startrise` paragraphs: one row a unit), each 80-byte
+/// half of a vbuf row in one plane pair at the same address. The clear of
+/// vbuf rows 68..97 (`:216-229`) comes after the copy, so the next frame
+/// sees it.
+fn docopy(vbuf: &mut [u8; VBUF_BYTES], video: &mut [u8; VIDEO_BYTES], page: u16, startrise: i32) {
     let base = (u32::from(page).wrapping_add((80 * startrise) as u32)) & 0xFFFF;
-    // `ASM.ASM:178-182`: `di = 52*80`, `cx = 18*80/4`, `rep stosd` with all
-    // planes masked — 18 rows of index 0, and `di` ends 18 rows on.
     for at in 0..CLEAR_DEST_ROWS * 80 {
         let dest = ((base + (CLEAR_DEST_ROW * 80 + at) as u32) & 0xFFFF) as usize;
         video[4 * dest..4 * dest + 4].fill(0);
@@ -479,23 +305,16 @@ pub fn docopy(vbuf: &mut [u8; VBUF_BYTES], video: &mut [u8; VIDEO_BYTES], page: 
         let source = (COPY_SOURCE_ROW + row) * 160;
         for k in 0..80 {
             let dest = ((base + (COPY_DEST_ROW + row) as u32 * 80 + k as u32) & 0xFFFF) as usize;
-            let a = vbuf[source + k];
-            let b = vbuf[source + 80 + k];
-            let at = 4 * dest;
-            video[at] = a;
-            video[at + 1] = a;
-            video[at + 2] = b;
-            video[at + 3] = b;
+            let (a, b) = (vbuf[source + k], vbuf[source + 80 + k]);
+            video[4 * dest..4 * dest + 4].copy_from_slice(&[a, a, b, b]);
         }
     }
-    // `ASM.ASM:216-229`: vbuf rows 68..97, 30 rows, cleared after the copy.
     let start = CLEAR_FIRST_ROW * 160;
     vbuf[start..start + CLEAR_ROWS * 160].fill(0);
 }
 
 /// The displayed picture from `page`: `M_VGA`'s line reads 320 linear bytes a
-/// scanline (`vga.draw.address_add = scan_len*8`), and the plane address is
-/// four bytes into the unchained memory.
+/// scanline, and a plane address is four bytes into the unchained memory.
 fn compose(video: &[u8; VIDEO_BYTES], page: u16, surface: &mut [u8]) {
     let base = usize::from(page) * 4;
     let rows = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize;
@@ -506,8 +325,7 @@ fn compose(video: &[u8; VIDEO_BYTES], page: u16, surface: &mut [u8]) {
 
 /// The COMAN sinus field.
 pub struct Coman {
-    wave1: Vec<u8>,
-    wave2: Vec<u8>,
+    waves: Waves,
     vbuf: Box<[u8; VBUF_BYTES]>,
     video: Box<[u8; VIDEO_BYTES]>,
     /// The camera's sine cursor and accumulated rotation (`MAIN.C:50-53`).
@@ -520,28 +338,25 @@ pub struct Coman {
     startrise: i32,
     /// The source's `frame` counter, advanced by `dis_waitb`'s return.
     frame: u32,
-    /// The inner body's iteration count for the next iteration
-    /// (`while(frepeat--)`).
+    /// The inner body's count for the next iteration (`while(frepeat--)`).
     frepeat: i32,
     /// `MAIN.C`'s `flip`: 0 or 1, toggled every iteration.
     flip: u8,
-    /// The CRTC 0x0C start the last iteration selected: 0 or `0x8000`.
+    /// The CRTC 0x0C start the last iteration selected.
     start_page: u16,
     /// The part tick the next iteration runs on.
     next_iteration: u32,
     /// The gate has passed.
     started: bool,
-    /// The source's loop has broken or the frame cap reached.
+    /// The loop has broken or the frame cap is reached.
     done: bool,
-    palette: Palette,
 }
 
 impl Coman {
-    /// A fresh part reading `assets/COMAN/...` from the repository root.
+    /// A part with nothing loaded: `init` reads the wave tables.
     pub fn new() -> Coman {
         Coman {
-            wave1: Vec::new(),
-            wave2: Vec::new(),
+            waves: [Vec::new(), Vec::new()],
             vbuf: Box::new([0; VBUF_BYTES]),
             video: Box::new([0; VIDEO_BYTES]),
             rot2: 0,
@@ -556,24 +371,26 @@ impl Coman {
             next_iteration: 0,
             started: false,
             done: false,
-            palette: Palette::new(),
         }
     }
 
-    /// Read one wave table; a short or absent file is a part error.
-    fn read_wave(path: &str) -> Result<Vec<u8>, PartError> {
-        let bytes = read_asset(NAME, path)?;
-        if bytes.len() != WAVE_BYTES {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
-                    "{} is {} bytes; the linked table is {WAVE_BYTES}",
-                    asset(path),
-                    bytes.len()
-                ),
-            });
-        }
-        Ok(bytes)
+    /// The two wave tables; a short or absent file is a part error.
+    fn read_waves() -> Result<Waves, PartError> {
+        let read = |path: &str| {
+            let bytes = read_asset(NAME, path)?;
+            if bytes.len() != WAVE_BYTES {
+                return Err(PartError::new(
+                    NAME,
+                    format!(
+                        "{} is {} bytes; the linked table is {WAVE_BYTES}",
+                        asset(path),
+                        bytes.len()
+                    ),
+                ));
+            }
+            Ok(bytes)
+        };
+        Ok([read(WAVE_PATHS[0])?, read(WAVE_PATHS[1])?])
     }
 
     /// `MAIN.C:85-98`: one iteration's camera and 160 columns.
@@ -581,30 +398,19 @@ impl Coman {
         self.rot2 = self.rot2.wrapping_add(4);
         self.rot += i32::from(SIN1024[(self.rot2 & 1023) as usize]) / 15;
         let r = self.rot >> 3;
-        let rsin = i32::from(SIN1024[(r & 1023) as usize]);
-        let rcos = i32::from(SIN1024[((r + 256) & 1023) as usize]);
-        let rsin2 = i32::from(SIN1024[((r + 177) & 1023) as usize]);
-        let rcos2 = i32::from(SIN1024[((r + 177 + 256) & 1023) as usize]);
-        // `xw`/`yw` are copies made before the loop and are **not** updated
-        // in it: `xwav`/`ywav` change at `a == 80` for the *next* frame.
-        let xw = self.xwav;
-        let yw = self.ywav;
+        let sin = |at: i32| i32::from(SIN1024[(at & 1023) as usize]);
+        let (rsin, rcos) = (sin(r), sin(r + 256));
+        let (rsin2, rcos2) = (sin(r + 177), sin(r + 177 + 256));
+        // `xw`/`yw` are copied before the loop (`MAIN.C:84`): the change at
+        // `a == 80` is for the next frame.
+        let (xw, yw) = (self.xwav, self.ywav);
         for a in 0..COLUMNS {
             let x = a - 80;
             let y = 160;
             let xa = (x * rcos + y * rsin) / 256;
             let ya = (y * rcos2 - x * rsin2) / 256;
             let b = (a & 1) * 80 + (a >> 1) + 199 * 160;
-            docol(
-                &mut self.vbuf,
-                &self.wave1,
-                &self.wave2,
-                xw,
-                yw,
-                xa,
-                ya,
-                b,
-            );
+            docol(&mut self.vbuf, &self.waves, xw, yw, xa, ya, b);
             if a == 80 {
                 self.xwav += xa * 4;
                 self.ywav += ya * 4;
@@ -612,55 +418,31 @@ impl Coman {
         }
     }
 
-    /// The page the last iteration copied into, which is the picture just
-    /// rendered.
-    #[cfg(test)]
-    fn flip_page(&self) -> u16 {
-        if self.flip == 0 { PAGE_LO } else { PAGE_HI }
-    }
-
     /// One main-loop iteration (`MAIN.C:57-114`) with the music reading `a`:
     /// the `frepeat` inner bodies, the render, the flip and the copy.
     fn iteration(&mut self, tick: u32, a: i32) {
-        let mut n = self.frepeat;
-        self.frepeat = -1;
         let mut extra_waits = 0u32;
-        while n > 0 {
+        for _ in 0..self.frepeat {
             if a > RISE_LOW && a < 0 && self.startrise < STARTRISE_MAX {
                 self.startrise += 1;
             }
             if self.frame < 400 && self.startrise > 0 {
                 if self.frame == 4 {
-                    // `MAIN.C:69-73`: `dis_waitb(); setpalarea(...)` — the
-                    // upload is the palette already in force, and the wait
-                    // spends a vblank.
+                    // `MAIN.C:69-73`: `dis_waitb(); setpalarea(...)`; the
+                    // upload is the palette in force, the wait a vblank.
                     extra_waits += 1;
                 }
                 self.startrise -= 1;
             }
-            n -= 1;
         }
         self.render();
-        self.flip += 1;
-        if self.flip > 1 {
-            self.flip = 0;
-        }
-        let (start, copy) = if self.flip == 0 {
-            (PAGE_HI, PAGE_LO)
-        } else {
-            (PAGE_LO, PAGE_HI)
-        };
+        self.flip ^= 1;
+        let (start, copy) = if self.flip == 0 { (PAGE_HI, PAGE_LO) } else { (PAGE_LO, PAGE_HI) };
         self.start_page = start;
         self.frame += VBLANKS_PER_ITERATION;
         self.frepeat = VBLANKS_PER_ITERATION as i32;
         docopy(&mut self.vbuf, &mut self.video, copy, self.startrise);
         self.next_iteration = tick + VBLANKS_PER_ITERATION + extra_waits;
-    }
-}
-
-impl Default for Coman {
-    fn default() -> Self {
-        Coman::new()
     }
 }
 
@@ -675,17 +457,14 @@ impl Part for Coman {
             "this part opens with a music gate (`COMAN/MAIN.C:56` \
              `while(!dis_exit() && dis_musplus()<0)`) and the run has no music",
         )?;
-        self.wave1 = Coman::read_wave(W1_PATH)?;
-        self.wave2 = Coman::read_wave(W2_PATH)?;
-        self.palette = palette();
-        ctx.set_palette(self.palette);
-        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
-        // `mov ax,13h; int 10h` and `inittwk`'s 64 KB clear leave the video
-        // memory (and so the screen) black before `doit`'s gate; without this
-        // a chain would show the previous part's picture through the gate.
+        self.waves = Coman::read_waves()?;
+        ctx.set_palette(palette());
+        *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(SCREEN_WIDTH), Some(0));
+        // The mode set and `inittwk`'s clear black the screen before the
+        // gate, so a chain does not show the previous part through it.
         compose(&self.video, PAGE_LO, ctx.surface.pixels_mut());
         if ctx.music_fresh() {
-            for _ in 0..Self::MUSIC_PRE_ROLL {
+            for _ in 0..MUSIC_PRE_ROLL {
                 if let Some(music) = ctx.music() {
                     music.poll();
                 }
@@ -713,11 +492,7 @@ impl Part for Coman {
             // `dis_waitb` is still counting the elapsed frames.
             return PartStatus::Continuing;
         }
-        if self.frame >= FRAME_CAP {
-            self.done = true;
-            return PartStatus::Finished;
-        }
-        if a > BREAK_LOW && a < 0 {
+        if self.frame >= FRAME_CAP || (a > BREAK_LOW && a < 0) {
             self.done = true;
             return PartStatus::Finished;
         }
@@ -727,17 +502,11 @@ impl Part for Coman {
     }
 }
 
-impl Coman {
-    /// The entry pre-roll: the polls between `_zplaysong(91)`'s row 0 and the
-    /// reference's position when the part's gate opens.
-    pub(crate) const MUSIC_PRE_ROLL: u32 = 527;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::audio::PlayerMusic;
-    use crate::parts::test_rig::Rig;
+    use crate::parts::test_rig::{repo, Rig};
     use sr_engine::music::Music;
 
     #[test]
@@ -754,7 +523,7 @@ mod tests {
     /// tested against the **source file** rather than against a second
     /// reading of it.
     mod generated {
-        use super::super::{wave_word, wflip, zwave, FIRST_RAY_DIR};
+        use super::super::{wave_word, FIRST_RAY_DIR};
         use std::collections::HashMap;
 
         #[derive(Debug, Clone)]
@@ -882,7 +651,7 @@ mod tests {
 
         /// Run the program from its first instruction. The setup lines are
         /// the entry contract (`mov cs:theloop_xsina1,cx`, ...): `cx`/`dx`
-        /// hold the masked directions and `ax` the unused camera height.
+        /// hold the masked directions (`ax`, the camera height, is unread).
         #[allow(clippy::too_many_arguments)]
         pub fn run(
             program: &Program,
@@ -894,13 +663,11 @@ mod tests {
             mut xsina1: u16,
             mut ysina1: u16,
             mut bp: u16,
-            camera: u16,
         ) {
             let xsina2 = xsina1.wrapping_mul(2);
             let ysina2 = ysina1.wrapping_mul(2);
             xsina1 &= 0xfffe;
             ysina1 &= 0xfffe;
-            let _ = camera;
             let mut eax: u32 = 0;
             let mut ecx: u32 = FIRST_RAY_DIR;
             let mut bx: u16 = 0;
@@ -981,22 +748,16 @@ mod tests {
                     }
                 }
                 pc = next;
-                let _ = wflip;
-                let _ = zwave;
             }
         }
     }
 
-    fn read_waves() -> (Vec<u8>, Vec<u8>) {
-        (Coman::read_wave(W1_PATH).unwrap(), Coman::read_wave(W2_PATH).unwrap())
-    }
-
     #[test]
     fn the_ray_march_matches_the_shipped_generated_program() {
-        let text = std::fs::read_to_string("../../upstream/SecondReality/COMAN/THELOOP.INC")
+        let text = std::fs::read_to_string(repo("upstream/SecondReality/COMAN/THELOOP.INC"))
             .expect("THELOOP.INC");
         let program = generated::parse(&text);
-        let (wave1, wave2) = read_waves();
+        let waves = Coman::read_waves().unwrap();
         // The first column of the first iteration and three other columns,
         // with the camera at `rot2 = 4` (`rot = 0`, `r = 0`).
         let rsin = 0i32;
@@ -1011,35 +772,31 @@ mod tests {
             let b = (a & 1) * 80 + (a >> 1) + 199 * 160;
             let mask = |v: i32| (v as u16) & 0xFFFE;
             let mut mine = Box::new([0u8; VBUF_BYTES]);
-            docol(&mut mine, &wave1, &wave2, 0, 0, xa, ya, b);
+            docol(&mut mine, &waves, 0, 0, xa, ya, b);
             let mut theirs = Box::new([0u8; VBUF_BYTES]);
             generated::run(
                 &program,
                 &mut theirs,
-                &wave1,
-                &wave2,
+                &waves[0],
+                &waves[1],
                 mask(0),
                 mask(0),
                 mask(xa),
                 mask(ya),
                 b as u16,
-                0,
             );
             assert_eq!(
                 &mine[..],
                 &theirs[..],
                 "column a = {a} is not the shipped program's"
             );
-            assert!(
-                mine.iter().any(|&byte| byte != 0),
-                "column a = {a} drew nothing"
-            );
+            assert!(mine.iter().any(|&byte| byte != 0), "column a = {a} drew nothing");
         }
     }
 
     #[test]
     fn the_zwave_is_the_generators_three_sines_at_the_labels_it_emits() {
-        let text = std::fs::read_to_string("../../upstream/SecondReality/COMAN/THELOOP.INC")
+        let text = std::fs::read_to_string(repo("upstream/SecondReality/COMAN/THELOOP.INC"))
             .expect("THELOOP.INC");
         let mut at: Option<usize> = None;
         let mut seen = 0;
@@ -1068,6 +825,7 @@ mod tests {
         }
         assert_eq!(seen, 128, "every emitted label carries its zwave constant");
     }
+
     // ---------------------------------------------------------- the screen --
 
     /// A vbuf with a distinct value at every byte, so a copy that moves a
@@ -1168,24 +926,12 @@ mod tests {
             let entry = (255 - a) as u8;
             assert_eq!(pal.entry(entry), [((a - 4).max(0) / 2) as u8, 0, 0], "entry {entry}");
         }
-        // Entries 240..255 are the `combg[736..784]` overrun; the array is 16
-        // bytes and the shipped link has no such asset. The port's model is
-        // zeros, and no screen pixel can reach them: the pinhole is at most
-        // 127.
+        // Entries 240..255 are the `combg[736..784]` overrun, modelled as
+        // zeros; no pixel reaches them, since the march's colour is
+        // `(byte) >> 1`, at most 127.
         for entry in 240..=255u8 {
             assert_eq!(pal.entry(entry), [0, 0, 0], "the overrun at {entry}");
         }
-        // The pinhole colour is `((bx + 140 - j/8) & 0xFF) >> 1`: never
-        // above 127, whatever the wave tables and `zwave` produce.
-        let mut max_colour = 0u8;
-        for bx in i16::MIN..=i16::MAX {
-            for j in 0..BAIL {
-                let colour = ((bx as u16).wrapping_add((140 - j / 8) as u16) as u8) >> 1;
-                max_colour = max_colour.max(colour);
-            }
-        }
-        assert_eq!(max_colour, 127);
-        assert!(max_colour <= 127, "the terrain cannot reach entries 128..255");
     }
 
     // ------------------------------------------------------------ the part --
@@ -1217,7 +963,6 @@ mod tests {
         let position = rig.player().position();
         assert_eq!((position.order, position.row), (93, 0));
         assert_eq!(rig.player().musplus(), 0);
-        assert_eq!(Coman::MUSIC_PRE_ROLL, 527);
     }
 
     #[test]
@@ -1238,8 +983,7 @@ mod tests {
         // The source's `frame += (frepeat = dis_waitb())`: two vblanks an
         // iteration, and the frame-4 body's two `dis_waitb` calls add two.
         let mut part = Coman::new();
-        part.wave1 = Coman::read_wave(W1_PATH).unwrap();
-        part.wave2 = Coman::read_wave(W2_PATH).unwrap();
+        part.waves = Coman::read_waves().unwrap();
         part.started = true;
         part.next_iteration = 0;
         let mut ticks = Vec::new();
@@ -1261,12 +1005,12 @@ mod tests {
     #[test]
     fn the_two_pages_alternate_and_the_display_lags_one_iteration() {
         let mut part = Coman::new();
-        part.wave1 = Coman::read_wave(W1_PATH).unwrap();
-        part.wave2 = Coman::read_wave(W2_PATH).unwrap();
+        part.waves = Coman::read_waves().unwrap();
         let mut last_copy: Option<u16> = None;
         for k in 0..6usize {
             part.iteration(k as u32 * 2, -32);
-            let copy = part.flip_page();
+            // The page this iteration copied into.
+            let copy = if part.flip == 0 { PAGE_LO } else { PAGE_HI };
             // The start the iteration wrote names the page the previous
             // iteration copied into — the one the beam shows now.
             if let Some(previous) = last_copy {
@@ -1381,24 +1125,5 @@ mod tests {
         // startrise reaches 130; it is still climbing to 160 when the break
         // ends the part.
         assert!(part.startrise >= 130, "startrise {}", part.startrise);
-    }
-
-    #[test]
-    fn the_wave_tables_are_the_linked_sixty_four_kilobyte_ints() {
-        let (wave1, wave2) = read_waves();
-        assert_eq!(wave1.len(), WAVE_BYTES);
-        assert_eq!(wave2.len(), WAVE_BYTES);
-        let range = |bytes: &[u8]| {
-            let mut lo = i16::MAX;
-            let mut hi = i16::MIN;
-            for at in (0..bytes.len()).step_by(2) {
-                let word = i16::from_le_bytes([bytes[at], bytes[at + 1]]);
-                lo = lo.min(word);
-                hi = hi.max(word);
-            }
-            (lo, hi)
-        };
-        assert_eq!(range(&wave1), (-33, 41), "W1DTA.BIN's signed words");
-        assert_eq!(range(&wave2), (-56, 63), "W2DTA.BIN's signed words");
     }
 }

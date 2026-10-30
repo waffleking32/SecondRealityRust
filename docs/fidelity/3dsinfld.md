@@ -38,7 +38,7 @@ the last loop overwrites 240..255 from `combg`. The pins
 | 232..239 | 23..16 | the dark-red bar, `((a-4)/2, 0, 0)` |
 | 240..255 | — | the `combg` overrun |
 
-The same test's exhaustive `i16` colour sweep reaches 127 and no more, so DAC 240..255 never reaches
+The march's colour is `((bx + 140 - j/8) & 0xFF) >> 1`, at most 127, so DAC 240..255 never reaches
 the screen. `SIN1024.INC` is the tree's common copy, `parts::sin1024::SIN1024`
 (`sin1024::tests::the_table_is_the_sources_1024_words`; asset-inventory §B.7 gives the md5 identity).
 
@@ -52,8 +52,7 @@ source's indices (all past the array, giving zero) and draws no background; `doc
 rows 0..51, where the `PXLSUX` half wrote, stay zero.
 
 **The wave tables.** `CALCW12` is off (`MAIN.C:6`), so `MAIN.C:212-213` takes the linked tables.
-Each is 32,768 signed little-endian words, `W1DTA` **−33..41** and `W2DTA` **−56..63**
-(`the_wave_tables_are_the_linked_sixty_four_kilobyte_ints`). The generator half (`MAIN.C:179-210`)
+Each is 32,768 signed little-endian words, 65,536 bytes, which `init` checks. The generator half (`MAIN.C:179-210`)
 is dead and not ported.
 
 ## 3. The tick model
@@ -110,7 +109,7 @@ Order 92 is the `254` marker. The window `(15000, 15100]` (`reference-indices.md
 91→93 crossing and the part marks no start frame, so order **91 is derived, not measured**: the order
 in force where the window opens.
 
-`init` pre-polls **527** frames (`Coman::MUSIC_PRE_ROLL`): the 527th leaves the published row at 63
+`init` pre-polls **527** frames (`coman::MUSIC_PRE_ROLL`): the 527th leaves the published row at 63
 with `musplus == -1`, and the first tick's poll reads order 93 row 0, `musplus == 0`, which passes
 `MAIN.C:56`'s gate (`the_entry_pre_roll_lands_the_gate_on_order_93_row_zero`). Tick 0 is therefore
 the order-93 crossing the traces put at 15031–15038. A mid-chain start polls nothing
@@ -126,8 +125,7 @@ for about fifty more ticks.
 ## 6. The mapping and the comparison
 
 All four keyframes are **RGB only**: the part writes CRTC `0x0C` every frame, and the oracle's
-indexed read of the `0x80` offset is racy, so no `.idx` is filed (`reference-indices.md` §16.2;
-`tests/coman.rs` asserts the files do not exist).
+indexed read of the `0x80` offset is racy, so no `.idx` is filed (`reference-indices.md` §16.2).
 
 | keyframe | rendered ticks | implied origin (boot − tick) | differing | register |
 |---|---|---|---|---|
@@ -137,8 +135,8 @@ indexed read of the `0x80` offset is racy, so no `.idx` is filed (`reference-ind
 | 16800 | 1772, 1773 | 15028 | 0 | exact |
 
 The counts are the `3dsinfld` rows of `xtask/src/rediff/table.rs` (first tick of each pair).
-Each keyframe is drawn on two consecutive ticks, so `tests/coman.rs` compares both and asserts that
-the tick before and the tick two after differ: the reference's two-frame step
+Each keyframe is drawn on two consecutive ticks, so `tests/coman.rs` asserts the second tick is the
+same picture and the tick before and the tick two after differ: the reference's two-frame step
 (`reference-indices.md` §16.3), D19's support made from the rendered side.
 
 **The mapping drifts, and it is a mapping, not an anchor.** The ticks between keyframes are 502, 504
