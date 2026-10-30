@@ -499,15 +499,7 @@ impl Lnszoom {
 
     /// The generated 256-entry palette, as the engine's type.
     fn live_palette(&self) -> Palette {
-        let mut palette = Palette::new();
-        for index in 0..256 {
-            let at = index * 3;
-            palette.set_entry(
-                index as u8,
-                [self.palette[at], self.palette[at + 1], self.palette[at + 2]],
-            );
-        }
-        palette
+        Palette::from_six_bit(&self.palette)
     }
 
     /// The white the part exits on (`MAIN.C:274-275`).

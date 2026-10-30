@@ -1033,15 +1033,7 @@ pub fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
 
 /// A DAC mirror as an engine [`Palette`]. The bytes are already 6-bit.
 fn palette_from_mirror(bytes: &[u8; 768]) -> Palette {
-    let mut palette = Palette::new();
-    for index in 0..256 {
-        let at = index * 3;
-        palette.set_entry(
-            index as u8,
-            [bytes[at] & 63, bytes[at + 1] & 63, bytes[at + 2] & 63],
-        );
-    }
-    palette
+    Palette::from_six_bit(bytes)
 }
 
 /// `part1init`'s `pal1` build (`BP.C:10-28`), byte for byte.

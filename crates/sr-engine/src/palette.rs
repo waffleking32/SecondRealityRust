@@ -69,6 +69,25 @@ impl Palette {
         out
     }
 
+    /// Up to 256 six-bit `[r, g, b]` triples, the DAC's own form (`out 3c9h`);
+    /// components are masked like [`set_entry`](Palette::set_entry)'s.
+    pub fn from_six_bit(bytes: &[u8]) -> Palette {
+        let mut p = Palette::BLACK;
+        for (index, rgb) in bytes.chunks_exact(3).take(256).enumerate() {
+            p.set_entry(index as u8, [rgb[0], rgb[1], rgb[2]]);
+        }
+        p
+    }
+
+    /// The 768 six-bit bytes, entry order (`in 3c9h`).
+    pub fn to_six_bit(&self) -> [u8; 768] {
+        let mut out = [0u8; 768];
+        for (chunk, entry) in out.chunks_exact_mut(3).zip(&self.entries) {
+            chunk.copy_from_slice(entry);
+        }
+        out
+    }
+
     /// The `[r, g, b]` triple at `index`.
     pub fn entry(&self, index: u8) -> [u8; 3] {
         self.entries[index as usize]
@@ -191,6 +210,16 @@ mod tests {
             let ideal = ((v as u32 * 255 + 31) / 63) as u8;
             assert_eq!(dac_expand(v), ideal, "at {v}");
         }
+    }
+
+    #[test]
+    fn six_bit_bytes_round_trip_and_are_masked() {
+        let mut bytes = [0u8; 768];
+        bytes[3..6].copy_from_slice(&[63, 64, 1]);
+        let p = Palette::from_six_bit(&bytes);
+        assert_eq!(p.entry(1), [63, 0, 1]);
+        bytes[4] = 0;
+        assert_eq!(p.to_six_bit(), bytes);
     }
 
     #[test]

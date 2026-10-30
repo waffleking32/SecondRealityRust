@@ -550,14 +550,7 @@ impl Minvball {
 
     /// The DAC from `pal2`, the array the fades write.
     fn palette_of(pal2: &[u8; 768]) -> Palette {
-        let mut dac = Palette::new();
-        for entry in 0..256usize {
-            dac.set_entry(
-                entry as u8,
-                [pal2[entry * 3], pal2[entry * 3 + 1], pal2[entry * 3 + 2]],
-            );
-        }
-        dac
+        Palette::from_six_bit(pal2)
     }
 
     /// One iteration of `MAIN.C:196-282`'s `while(repeat--)`. The port's

@@ -531,22 +531,12 @@ impl Part for U2e {
 
 /// The six-bit bytes of `palette`, entry order: the port's `inp(0x3c9)` read.
 fn capture_palette(palette: &Palette) -> [u8; 768] {
-    let mut bytes = [0u8; 768];
-    for index in 0..=255u8 {
-        let rgb = palette.entry(index);
-        let at = 3 * usize::from(index);
-        bytes[at..at + 3].copy_from_slice(&rgb);
-    }
-    bytes
+    palette.to_six_bit()
 }
 
 /// A palette built from 768 six-bit bytes (`vid_setpal`, `AVID.ASM:160-188`).
 fn palette_from_six_bit(bytes: &[u8; 768]) -> Palette {
-    let mut palette = Palette::new();
-    for (index, rgb) in bytes.chunks_exact(3).enumerate() {
-        palette.set_entry(index as u8, [rgb[0], rgb[1], rgb[2]]);
-    }
-    palette
+    Palette::from_six_bit(bytes)
 }
 
 /// `fadeset` (`U2E.C:145-183`) into one packed page.
