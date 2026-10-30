@@ -6,12 +6,13 @@
 //!
 //! ```text
 //! init   KOE.ASM:72-76     resetmode13: mode 13h, AC 0-15 identity, overscan 255, DAC black
-//!        STARS.ASM:56-176  init_stars: CRTC 9 bit 7 cleared, video and clearsbu's 64 units
-//!                          zeroed, the star and muldiv tables, 100 starfetch0/staradd passes
+//!        STARS.ASM:56-176  init_stars: CRTC 9 bit 7 cleared, video and clearsbu's 128 8 KB
+//!                          units zeroed (the ring uses 64), the star and muldiv tables, 100
+//!                          starfetch0/staradd passes
 //! tick   :540-770          flip, waitb, the fade while starpalfade <= 32, starframe's marks,
 //!                          risetext into the displayed page, a star pass, the blit into the
 //!                          back page; starframe 901-1200 draws no star (:670-676)
-//! exit   :773-775          DIS function 2 only: no cap
+//! exit   :772-776          DIS function 2 only: no cap
 //! ```
 //!
 //! The screen is 320×400 with a 40-byte plane row. The star blits write every
@@ -643,7 +644,7 @@ impl Part for Ddstars {
         Ok(())
     }
 
-    /// One `do_stars` iteration; DIS function 2 is the only way out (`:773-775`).
+    /// One `do_stars` iteration; DIS function 2 is the only way out (`:772-776`).
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         if ctx.exit_requested {
             self.finished = true;

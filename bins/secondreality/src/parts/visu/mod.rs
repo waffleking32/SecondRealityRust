@@ -475,8 +475,9 @@ pub struct Driver {
     pub proj: Projection,
     /// The current field of vision, as the stream's `fov << 8`.
     pub fov: u16,
-    /// U2E's `firstframe`: the first draw is skipped while this is set
-    /// (`U2E.C:386-387`, `:433`). U2A constructs its driver with `false`.
+    /// U2E's `firstframe` (`U2E.C:386-387`, `:433`): while it is set the
+    /// caller calls [`Driver::skip_first_draw`] instead of `draw_frame`. U2A
+    /// constructs its driver with `false`.
     pub first_draw: bool,
 }
 
@@ -510,6 +511,7 @@ impl Driver {
     /// The loop body of `U2A.C:284-324` / `U2E.C:386-433`: clear the page,
     /// order the enabled objects and draw them.
     pub fn draw_frame(&mut self, scene: &mut Scene, page: &mut Page<'_>, clear: Clear<'_>) {
+        debug_assert!(!self.first_draw, "U2E's first draw is skip_first_draw's");
         // `vid_cameraangle(fov)` (`U2A.C:287`, `U2E.C:397`) with the
         // `AVIDM1.ASM` aspect both parts install.
         let (mul_x, mul_y) = camera_angle(self.fov, ASPECT);

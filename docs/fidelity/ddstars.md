@@ -39,8 +39,9 @@ and tick 1's is not. `init_stars`'s 100 passes leave `emmpage4 = 36` and `starli
 
 The reference is `.rgb` only: the emulator names the screen 16-colour and refuses the indexed read
 (`reference-indices.md` §22.5, all 20 sweep frames). The port composes `index = plane0bit |
-plane1bit << 1 | plane2bit << 2`; the text forces plane 2, so its colours are 4-7 and the reference
-has seven: black (0 and 4), the stars' 1-3 and the text's 5-7. Through the engine's rounding the
+plane1bit << 1 | plane2bit << 2`; the text forces plane 2, so its colours are 4-7 and the palette
+has seven: black (0 and 4), the stars' 1-3 and the text's 5-7; the keyframes match the reference
+byte for byte (rediff). Through the engine's rounding the
 full-fade entries are `(65,81,101)`, `(97,125,150)`, `(166,210,251)` for the stars and
 `(40,81,142)`, `(81,121,182)`, `(121,162,243)` for the text
 (`the_full_fade_palette_is_the_references_seven_colours`).
@@ -59,8 +60,8 @@ manifest says `index_origin: "part"`, `anchor: null`
 (block seams / pre-roll / mapping conventions)).
 
 The pictures pin it. The four keyframes reproduce byte for byte at `tick = boot - 414` (rediff's
-`ddstars` entry), and so did the survey's frames at 500, 700, 900, 1100, 1300, 1500, 1700 and 2100
-when they were measured once against the capture in §8 (the measurement is not kept as a test):
+`ddstars` entry), and so do the survey's frames at 500, 700, 900, 1100, 1300, 1500, 1700 and 2100
+against the capture in §8 (§8's sweep comparison; it needs the capture, so it is not part of the gate):
 
 | boot | tick | what pins it |
 |---|---|---|
@@ -101,9 +102,9 @@ layer a frame out.
   finds row 99 of the `+32` unit at page row 100.
 - **`staradd2` writes two units**, `u` and `(u + 17) & 63` (`starfetch1`, `:260-267`, `:378-397`;
   `the_second_star_pass_writes_the_same_bits_into_the_plus_seventeen_unit`). The survey's 1700 frame
-  is the measurement: with both writes the port's page is byte-identical to the capture; with only
-  the fetched unit it differs in **729 pixels** (2,187 RGB bytes), a one-time measurement over the
-  survey capture (§8): rerunning it needs the capture and a one-unit `star_pass` call in `advance`.
+  is the evidence: with both writes the port's page is byte-identical to the capture (§8's sweep
+  comparison); with only the fetched unit it was observed once to differ, which is not part of the
+  gate.
 
 ## 5. The text wipe
 
@@ -186,9 +187,13 @@ cargo test -p secondreality --bin secondreality parts::ddstars
 cargo test -p secondreality --test ddstars
 cargo xtask rediff --only ddstars
 
-# the survey capture behind §3's sweep and §4's 729
+# the survey capture behind §3's sweep and §4's 1700, and the sweep comparison (exit 0, identical)
 cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 500,700,900,1100,1300,1500,1700,2100,3000,5000,8000 --out out/b5-su-sweep1
+cargo run --release --bin secondreality -- --part ddstars --headless \
+    --dump-frames 86,286,486,686,886,1086,1286,1686,2586,4586,7586 --dump-dir out/ddstars-sweep
+cargo xtask compare --reference out/b5-su-sweep1 --rendered out/ddstars-sweep --align 414 \
+    --out out/ddstars-sweep-diff
 
 # §7's support hashes
 cargo run --release --bin secondreality -- --part ddstars --headless \
