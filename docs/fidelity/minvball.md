@@ -1,164 +1,83 @@
 # MINVBALL — the mini vector balls
 
-`DOTS/MAIN.C` (291 lines) over `DOTS/ASM.ASM` (250 lines, the `drawdots`
-projector) and `DOTS/SIN1024.INC` (the sine table both halves use). 512 dots
-projected, depth-coloured and bounced over a grey floor, with four position
-phases and a palette fade-out; music-cued at the end. `DOTS/MAKEFILE:20`
-builds `dots.exe` and stages it as `minvball.exe`.
+Sources: `DOTS/MAIN.C` (291 lines) over `DOTS/ASM.ASM` (250 lines, `drawdots`) and
+`DOTS/SIN1024.INC`; no other assets. `DOTS/MAKEFILE:20` builds `dots.exe` and stages it as
+`minvball.exe`. Port: `bins/secondreality/src/parts/minvball.rs` (`"minvball"`); the module doc
+has the acts, the RNG, the tick map, the drawing and the preserved bugs. Block 3's fourth part,
+after PLZPART. Run: mapping `boot = 10,368 + tick` (§3); music MUSIC1 order 75, entry pre-roll
+256 polls (§5). Reference: `reference/parts/minvball`, 10,900, 11,200, 11,800, 12,400, RGB only
+(`reference-indices.md` §14).
 
-The port is `bins/secondreality/src/parts/minvball.rs`, registered as
-`"minvball"`. A `--part minvball` run seeks `MUSIC1` to order 75
-(`shell::music_for_part`), the order the block-3 trace holds when the part's
-start window opens.
+## 1. Timeline
 
-## 1. What the original does
+| tick | frame counter | boot | source | what |
+|---|---|---|---|---|
+| 0 | | 10,368 | `MAIN.C:79-167` | the setup is up; the fade's first wait |
+| 1..129 odd | | 10,369..10,497 | `:171-183` | the 65 fade uploads, `pal - b` for b = 64 down to 0 |
+| 130 | 1 | 10,498 | `:185-284` | the main loop's first iteration |
+| 532 / 832 / 1,432 / 2,032 | 403 / 703 / 1,303 / 1,903 | 10,900 / 11,200 / 11,800 / 12,400 | | the keyframes |
+| 2,579 | 2,450 | 12,947 | `:185` | the frame cap ends the loop; the part retires and holds its last frame |
 
-| source | act |
-|---|---|
-| `MAIN.C:79-124` | `dis_partstart`; `dotnum=512`; `dottaul` shuffled by 500 random swaps; every dot set to `(0, 2560-22000, 0)`; 500 more random swaps of x/y/z; `dropper=22000`, `grav=3`, `gravd=13`, `gravitybottom=8105` |
-| `:125-150` | mode 13h; the 16×4 colour ramp, the 100 greys at entries 64-163 and white's neighbours at 255; the DAC read back into `pal`, then zeroed |
-| `:152-155` | rows 100-199 of video memory filled with `a+64`; `bgpic = vram` |
-| `:156-167` | `depthtable1/2/3[a] = base + 0x04040404*c`, `c = 15 - clamp((a-31)*3/4 + 8, 0, 15)` |
-| `:171-183` | the fade-in: 65 steps, two `dis_waitb()` each, uploading `pal - b` clamped at 0 |
-| `:185-284` | the main loop: `while(!dis_exit() && frame<2450)`; `repeat = dis_waitb()`; `setpalette(pal2)` once `frame>2300`; the demo cue `-4 < dis_musplus() < 0`; the stage physics `repeat` times; `drawdots()` |
-| `MAIN.C:202-269` | the four position phases (`frame<500`, `<900`, `<1700`, `<2360`) and the two palette phases (`<2400` blue ramp, `<2440` every entry to black) |
-| `ASM.ASM:52-218` | `drawdots` |
+The position phases end at frame counters 500, 900, 1,700 and 2,360, and the palette phases at
+2,400 (blue ramp) and 2,440 (every entry to black) (`MAIN.C:202-269`). The cap tick is asserted
+by the integration test (`the_run_reaches_the_frame_cap_and_retires`).
 
-## 2. The RNG is Microsoft C's, not Turbo C's
+## 2. The RNG is Microsoft C's
 
-The brief names Turbo C's `rand()`. The source says otherwise, and the frames
-agree with the source:
+`DOTS/MAKEFILE:10-16` compiles with `cl /qc /AL` (Microsoft C 6.0's large model), assembles with
+`tasm` and links with Microsoft's `link /E`; the linked `DOTS.EXE` carries the "MS Run-Time
+Library - Copyright (c) 1990, Microsoft Corp" string (`strings -a DOTS/DOTS.EXE`). Its generator's
+first ten values are 41, 18,467, 6,334, 26,500, 19,169, 15,724, 11,478, 29,358, 26,962, 24,464
+(`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`). Borland's generator (seed
+1, multiplier `0x015A4E35`) is a different stream. With Microsoft's, all four keyframes match
+(§6), so the frames decide it (D24, A19).
 
-- `DOTS/MAKEFILE:10-16` compiles with **`cl /qc /AL`** — Microsoft C 6.0's
-  large model — assembles with `tasm` and links with Microsoft's `link /E`.
-- The linked `DOTS.EXE` carries the **“MS Run-Time Library - Copyright (c)
-  1990, Microsoft Corp”** string (`strings -a DOTS/DOTS.EXE`).
-- Microsoft C 6.0's generator is a 32-bit LCG with **modulus 2³²**,
-  multiplier **214,013**, increment **2,531,011**, seed **1**, returning
-  `(seed >> 16) & 0x7FFF`. Its first ten values are **41, 18,467, 6,334,
-  26,500, 19,169, 15,724, 11,478, 29,358, 26,962, 24,464**
-  (`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`).
-- The reference's dense 12,400 scatter frame is reproduced to **25 pixels**
-  with this generator (`the_four_keyframes_match_the_reference_at_the_mapping`);
-  the Borland generator (seed 1, multiplier `0x015A4E35`) is a different
-  stream and does not place the scatter's dots where the released frame has
-  them. The frames decide it (D24).
+The source never seeds. The setup's values are pinned by
+`the_setup_is_deterministic_and_its_permutation_is_fixed`: the first twelve `dottaul` entries are
+223, 464, 331, 287, 94, 64, 6, 173, 17, 208, 10, 216, and the 500 swaps are a permutation of
+0..511. The second shuffle changes no value (every dot starts identical), but its 1,000 calls put
+the scatter's stream where the reference has it, so the port runs it.
 
-The source never seeds: the seed is the library's initial 1. Every use is
-integer — `rand()%512` twice in each of the two setup shuffles, then
-`rand()-16384`, `8000-rand()/2`, `rand()-16384` in the scatter. The setup's
-exact values are pinned by
-`the_setup_is_deterministic_and_its_permutation_is_fixed` (the first twelve
-`dottaul` entries are 223, 464, 331, 287, 94, 64, 6, 173, 17, 208, 10, 216;
-the 500 swaps are a permutation of 0-511). The second shuffle is a no-op on
-the values — every dot starts identical — but its 1,000 calls are what put the
-scatter's stream where the reference has it, so the port runs it.
+## 3. Mapping: `boot = 10,368 + tick`
 
-## 3. The tick map, the mapping, and `repeat`
+The part's first frame is in the measured window `(10,300, 10,400]` (`reference-indices.md`
+§14.5). The four keyframes are reproduced at ticks 532, 832, 1,432 and 2,032, which is the fit's
+own evidence (`the_four_keyframes_match_the_reference_at_the_mapping`).
 
-One tick is one `dis_waitb()`. The port's engine gives one tick per `frame()`
-call, so the C's `frame` counter advances once a tick.
+**The independent pin is the survey's 12,900 flat-grey frame.** Its sessions record
+`(239,239,239)` and `(231,231,231)`, the `c = 59` and `c = 57` uploads (`reference-indices.md`
+§14.5). Under the mapping boot 12,900 is frame counter 2,403, whose upload is `pal2(2402)`, the
+`c = 59` step; the other session's `c = 57` is the same curve one frame on. A different capture
+and a different observable, it pins the mapping to ±1.
 
-```text
-tick 0            the setup is up; the fade's first wait
-ticks 1-129 odd   the 65 fade uploads, `pal - b` for b = 64 down to 0
-tick 130          the main loop's first iteration (frame counter 1)
-```
+**`repeat` is one.** The original advances the physics `repeat` times per iteration and the port
+once a tick. The keyframes' frame counters differ by 300, 600 and 600, exactly the boot-index
+differences, and the ball rows (one integration a draw) match at every keyframe; a `repeat` above
+one between two keyframes would advance the counter without a draw and move them. That covers
+10,900..12,400; the 12,947 end is the mapping's prediction from the source's 2,450-frame cap,
+not a measured frame.
 
-**The mapping is `boot = 10,368 + tick`, and it is a mapping, not an
-anchor.** `shell::boot_anchor("minvball")` stays `None`: the part's first
-frame is the measured window `(10,300, 10,400]`
-(`reference-indices.md` §14.5), a run of this part numbers its own frames from
-zero, and the manifest says `index_origin: "part"`, `anchor: null`
-(`the_run_is_numbered_in_its_own_frames_and_draws_320x200`). The mapping's
-evidence is the fit's own:
+The manifest and anchor rules are `part-sequence.md` §10 (mapping, pre-roll and block-seam
+conventions). In a full run the part's first frame is a `FULLRUN_SEAMS` row (26,673 in the
+original, 26,670 in the port; A53).
 
-- tick 0 is the fade's first wait at boot **10,368**; the main loop starts at
-  tick **130**, frame counter 1 at boot **10,498**
-  (`the_mapping_is_boot_equals_ten_thousand_three_hundred_sixty_eight_plus_tick`);
-- the reference's four keyframes are reproduced at frame counters
-  **403, 703, 1303, 1903**, i.e. ticks **532, 832, 1432, 2032**
-  (`the_four_keyframes_match_the_reference_at_the_mapping`) — the fit's own
-  evidence, not an independent check.
+## 4. The drawing, and the fitted `j`
 
-**The independent pin is the survey's 12,900 flat-grey frame**: the sessions
-record `(239,239,239)` and `(231,231,231)` — the c=59 and c=57 uploads
-(`reference-indices.md` §14.5). Under this mapping boot 12,900 is frame
-counter 2403, whose upload is pal2(2402), the c=59 step; the sibling
-session's c=57 is the same curve one frame on (a start one frame earlier).
-A different capture and a different observable, it pins the mapping to ±1.
+The z rotation (`ASM.ASM:65-74`) is `sub ax,bx` / `sub dx,cx`, object bytes `2b c3 2b d1`
+(`grep -obUaP '\x2b\xc3\x2b\xd1' upstream/SecondReality/DOTS/ASM.OBJ upstream/SecondReality/DOTS/DOTS.EXE`
+finds them once each, at offsets 782 and 3926). `sub dx,cx` ignores the carry and `ax` is
+overwritten at `:74`, so the stale `bx` never reaches `bp` (`the_stale_bx_never_reaches_bp`,
+`bugs.md` §18.1).
 
-**`repeat` is one, and the difference is zero.** The original advances the
-physics `repeat` times per iteration; the port advances it once per tick. The
-reference's own frames measure the difference: the four keyframes' frame
-counters differ by **300, 600 and 600**, exactly the boot-index differences
-between 10,900/11,200/11,800/12,400, and the y state — one `drawdots`
-integration a frame, not one an inner repeat — matches at every keyframe
-(`the_repeat_difference_is_zero_at_the_keyframes`; the integration test's
-residues are the frame-counter match). A `repeat` above one between two
-keyframes would advance the counter without a draw and move the ball rows.
-The reference's frame cap is reached at frame 2450, boot **12,947**; the
-player publishes -3 from boot **10,368** (order 75 row 61, during the fade),
-and the first -3 the main loop's own check would see is boot **12,950**, so
-the cap ends the loop first in both the reference and the port. The `repeat`
-measurement covers 10,900-12,400; the 12,947 end is the mapping's prediction
-from the source's 2,450-frame cap, not a measured frame.
+The off-screen shadow store (`ASM.ASM:194-196`) makes the largest byte any write touches
+64,642; only the first 64,000 are displayed, and `bgpic`'s bytes past 64,000 are the source's
+undefined read and the port's zero fill (D24;
+`the_shadow_restore_bug_stores_the_old_balls_third_row_word`). The gravity skip for an
+off-screen shadow is `an_off_screen_shadow_holds_the_dots_y_still`.
 
-## 4. The drawing, and the bugs kept
-
-For each dot, in array order:
-
-- `z' = Z*cos - X*sin` gives `bp = z' + 9000`; the screen x is
-  `((x'>>8)+(x'>>11))/bp + 160`, the shadow row `(8<<16)/bp + 100`, and the
-  ball row `(y<<6)/bp + 100`.
-- The shadow is a two-pixel word of colour **87** at `[bx]`; the ball is a
-  two-pixel word at `bx+1`, a four-pixel dword at `bx+320` and a two-pixel
-  word at `bx+641`, from `depthtable1/2/3` at `(bp>>6)&~3`.
-- Before drawing, the dot's old shadow and old three ball rows are restored
-  from `bgpic`.
-
-Two features of the assembly are translated literally, and one instruction is inert:
-
-- **`mov ax,ax`** (`ASM.ASM:65`) is a no-op where the rotation's low word
-  should have been saved (`mov bx,ax`), and the z rotation is `sub ax,bx` /
-  `sub dx,cx` (`:69-70`, object bytes `2b c3 2b d1` — `grep -obUaP '\x2b\xc3\x2b\xd1' upstream/SecondReality/DOTS/ASM.OBJ upstream/SecondReality/DOTS/DOTS.EXE` finds them once each, at offsets 782 and 3926 —). `sub dx,cx` ignores the
-  carry and `ax` is overwritten at `:74`, so the stale `bx` never reaches
-  `bp`: `bp = hi(Z*cos) - hi(X*sin) + 9000`. (The port once subtracted a
-  borrow from the previous dot's offset, a defect of its own, and the four
-  keyframes differed by 67/63/37/25 pixels for it; fixed in Phase 9 Task 9,
-  `bugs.md` §18.1, A19.)
-- **`mov ds:[si+6],ax`** (`:194-196`) stores a clobbered register as the next
-  frame's shadow offset when the shadow is off screen. The three 32-bit
-  restores before it (`:186`, `:189`, `:192`) each load `eax` from
-  `bgpic[old2+640..644]`, so `ax` at `:195` is that dword's **low word** —
-  the first two background pixels of the old ball's third row — not the
-  shadow's row. (For the defined floor bytes the word is 0 or a pair of
-  indices 64-163, i.e. 0x4040-0xA3A3; past 64,000 it is the source's undefined
-  read.) The next frame restores from that word as a pixel offset. The
-  port keeps the 64 KB video segment and a matching `bgpic` for the reads and
-  writes this produces
-  (`the_shadow_restore_bug_stores_the_old_balls_third_row_word`); the largest
-  byte any write touches is **64,642**, and only the first 64,000 are
-  displayed. `bgpic`'s bytes past 64,000 are the source's undefined read and
-  the port's zero fill (D24).
-- **The gravity integration is inside the ball block and skipped when the
-  shadow is off screen.** `ja @@2` (`:96`, `:105`) jumps past `yadd +=
-  gravity`, so an off-screen dot's `y` holds still until its shadow returns.
-  `integrate` is called only on the shadow's on-screen branch.
-
-The shadow's colour 87 sits inside the background's grey ramp (64-163), so a
-shadow pixel is a slightly darker grey than the floor it covers; the port
-writes it as it stands (`the_palette_is_the_sources_and_the_dac_starts_black`).
-The ball's rows and the depth entry are pinned by
-`the_ball_rows_are_the_three_depth_table_writes`; the depth ramp by
-`the_depth_tables_are_the_sources_ramp`.
-
-The initial `j` is never assigned (`MAIN.C:87` declares it beside the
-initialized locals; `:200` reads it). The port starts it at **88**
-(`INITIAL_J`), fitted to the reference: the drawing is identical for every
-dot's position, and `j` only decides which dot draws a coincident position,
-so the reference's overlaps are the only evidence the value has. The fit is
-committed and reproducible:
+**The initial `j` is fitted.** `MAIN.C:87` declares `j` and `:200` reads it, unassigned. `j` only
+decides which dot draws a coincident position, so the reference's overlaps are the only evidence.
+The port starts at `INITIAL_J = 88`:
 
 ```bash
 cargo test --release -p secondreality --bin secondreality \
@@ -166,125 +85,69 @@ cargo test --release -p secondreality --bin secondreality \
 # best five (pixels, j): [(0, 88), (283, 171), (296, 168), (297, 386), (300, 14)]
 ```
 
-88 is the minimum of all 512 (`the_initial_j_is_fitted_to_the_reference`), and
-it is the only one that reproduces the frame: 0 differing pixels, where the next
-best leaves 283. (With the z rotation's former borrow the same fit gave 67 against
-341; the borrow was the port's, not the original's, `bugs.md` §18.1.)
+88 is the minimum of all 512 against the 10,900 frame (`the_initial_j_is_fitted_to_the_reference`)
+and the only value at 0; the next best leaves 283. 10,900 is the fit's objective, so its 0 is by
+construction; the other three keyframes are out of sample (A19).
 
-## 5. The cue, `dis_indemo`, and the music
+## 5. The cue and the music
 
-`MAIN.C:191-195` breaks the loop when `dis_musplus()` is in the open interval
-`(-4, 0)`; the port tests `reading > -4 && reading < 0` and retires on that
-tick, before the physics
-(`the_cue_window_is_the_open_interval_minus_four_to_zero`). A skipped cue — a
-script that walks past the window without ever landing in it — leaves the
-part continuing and drawing (`a_skipped_cue_leaves_the_part_continuing_and_drawing`).
+`MAIN.C:191-195` breaks the loop when `dis_musplus()` is in the open interval `(-4, 0)`
+(`the_cue_window_is_the_open_interval_minus_four_to_zero`); a script that walks past the window
+leaves the part drawing (`a_skipped_cue_leaves_the_part_continuing_and_drawing`). The player
+publishes -3 from boot 10,368 (order 75 row 61), during the fade, which does not check the cue.
+The first -3 the main loop would see is boot **12,950**, after the cap at 12,947, so the cap ends
+the loop in both the reference and the port, and the cue never fires.
 
-**There is no `dis_indemo` in the port.** The run is always "in demo", so the
-cue applies to standalone runs too; the part's `standalone` flag decides
-nothing here. The source's non-demo branch (`:285-289`, the mode set back to
-3h) has no picture and no port equivalent.
+**There is no `dis_indemo`.** The run is always "in demo", so the cue applies to standalone runs
+too. The source's non-demo branch (`:285-289`, the mode set back to 3h) has no picture and no
+port equivalent.
 
-The part reads the cue as the first act of its main-loop tick, so it reads the
-words the engine's own poll published for that tick (D28: the original's check
-sits at the frame boundary and reads the previous frame's). **The port
-declines D28's held-reading pattern here**, and records the decision: the only
-reading the difference could change is one in the window, and the reference's
-first main-loop -3 is boot 12,950, past the frame cap at 12,947 (below); the
-earlier -3s (boot 10,368-10,379) fall inside the fade, which does not check
-the cue. Holding the previous reading would move the check one tick later and
-change no picture in this part's run. The decision is a choice about this
-part, not a ruling on other parts' cues.
+**D28's held reading is declined here.** The part reads the cue from the engine's own poll for
+the tick, not the previous tick's reading. The only reading the difference could change is one in
+the window, and the first main-loop -3 is past the cap, so holding the reading would move the
+check a tick and change no picture. This is a choice for this part, not a ruling on other cues.
 
-**The music's seek and pre-roll.** The shell seeks `MUSIC1` to order **75**,
-the order `reference/music/second3b/trace.csv` holds at the part's start
-window (frames 10,300-10,368). The reference's published position at boot
-10,368 — the part's tick 0 — is **75:61** (`zplus` 1, `musplus` -3). A player
-seeked to order 75 reaches that on its **257th** poll, so `init` pre-polls
-**256** times and the engine's tick-0 poll is the 257th
-(`the_music_pre_roll_puts_the_reference_state_at_tick_zero`). The fade's 130
-ticks then carry the player into order 77 (the trace's position at boot
-10,498), so order 75's cue rows fall inside the fade, where the source does
-not check the cue. With no player (a unit-test rig) the pre-roll is skipped;
-the part does not need music to run.
+**The seek and the pre-roll.** The shell seeks MUSIC1 to order 75, the order
+`reference/music/second3b/trace.csv` holds in the part's start window. The published position at
+boot 10,368 is **75:61** (`zplus` 1, `musplus` -3); a player seeked to 75 reaches it on its
+257th poll, so `init` pre-polls 256 on a fresh start
+(`the_music_pre_roll_puts_the_reference_state_at_tick_zero`). The fade's 130 ticks then carry the
+player into order 77, the trace's position at 10,498. With no player the part runs without the
+pre-roll. Reached mid-chain it takes none: the block-3 chain test publishes 75:60 on PLZPART's last
+frame and MINVBALL's first, one poll apart, and the trace's 75:61 at chain 9,946, which a 256-poll
+jump could not (`part-sequence.md` §10.2).
 
-**The 256 is calibrated for an entry-point run.** It stands for a run that
-starts the player with the part — `--part minvball`, whose shell seeks
-`MUSIC1` to order 75 — and not for a part reached mid-chain with the player
-already running. The first runnable block-3 chain (Phase 5's LNS&ZOOM/PLZPART)
-reaches this part with the player continuous since MNTSCRL; the player is
-then already at the reference's position, and `init`'s 256 pre-polls would
-advance it 256 polls past it. A mid-chain start therefore requires the entry
-pre-roll to be skipped. The Phase 5 seam is `PartCtx::music_fresh` (D31): true
-only for the init of the first part started after `Engine::set_music`, false
-for every later part, and `init` polls only when it is true. The block-3 chain
-test exercises it with the real player: PLZPART's last frame and MINVBALL's
-first publish **75:60** one poll apart and the trace's **75:61** (boot 10,368)
-arrives at chain 9,946 — a 256-poll jump could not publish that.
-`a_mid_chain_start_does_not_pre_roll_the_music` covers the unit case.
+## 6. Verification
 
-## 6. The keyframes, and the measured residue
+| keyframe | tick | frame counter | plane | differing px | register |
+|---|---|---|---|---|---|
+| 10,900 | 532 | 403 | RGB | 0 | exact (A19's fitted `j`) |
+| 11,200 | 832 | 703 | RGB | 0 | exact |
+| 11,800 | 1,432 | 1,303 | RGB | 0 | exact |
+| 12,400 | 2,032 | 1,903 | RGB | 0 | exact |
 
-The reference files four RGB-only frames (`reference/parts/minvball/`: the
-dots move every frame, so no frame carries `.idx`; the manifest's hashes are
-the four `sha256` values). All four are moving screens, and the integration
-test holds `K-1, K, K+1` for each (D19), so the mapping is exact and not a
-search's nearest fit.
+The rows are the `minvball` entry of the rediff table (`xtask/src/rediff/table.rs`), and
+`the_four_keyframes_match_the_reference_at_the_mapping` asserts them. The dots move every frame,
+so no frame carries `.idx`; the test holds `K-1, K, K+1` for each (D19), and each keyframe is
+reproduced at exactly one frame counter. The shadow layer (colour 87: 11 in the six-bit palette,
+45 widened) is at the same pixels in both frames at every keyframe: 1,860, 2,159, 2,187 and 2,170
+shared of as many (the same test).
 
-| reference | port tick | frame counter | differing pixels of 64,000 | percentage |
-|---|---|---|---|---|
-| 10,900 | 532 | 403 | **0** | 0 % |
-| 11,200 | 832 | 703 | **0** | 0 % |
-| 11,800 | 1,432 | 1,303 | **0** | 0 % |
-| 12,400 | 2,032 | 1,903 | **0** | 0 % |
+The release's `MAIN/DATA/MINVBALL.EXE` (7,395 bytes) is PKLITE-packed; the tree's
+`DOTS/DOTS.EXE` (10,372 bytes) is the development build of the source ported here. The tree's
+source reproduces all four frames, so no D24 adoption is needed beyond the fitted `j`.
 
-The counts are asserted exactly by
-`the_four_keyframes_match_the_reference_at_the_mapping` (`cargo test --release
--p secondreality --test minvball the_four_keyframes -- --nocapture` prints each),
-and `cargo xtask rediff` registers all four at 0. They were 67 / 63 / 37 / 25
-pixels until Phase 9 Task 9 removed the borrow the port's z rotation took from
-the previous dot's `bx`; the original's `sub dx,cx` has none (§4, `bugs.md`
-§18.1), and the residue A19 attributed to the release's unreadable stack `j` was
-that defect.
-
-**The geometry is exact.** The shadow — colour 87, a grey whose value is 11 in
-the six-bit palette and 45 in the widened RGB — is at the same pixels in the
-port's and the reference's frames for **every** shadow pixel at every keyframe
-(the same test: 1,860, 2,159, 2,187 and 2,170 shared of as many).
-
-**The D24 record.** The vendor tree and the shipped release are different
-artifacts:
+Reproduce:
 
 ```bash
-ls -l upstream/SecondReality/MAIN/DATA/MINVBALL.EXE upstream/SecondReality/DOTS/DOTS.EXE
-# 7395 ... MINVBALL.EXE   (PKLITE self-extractor; the header carries "PKLITE Copr.")
-# 10372 ... DOTS.EXE      (the development build of the source ported here)
+cargo xtask rediff --only minvball
+cargo test --release -p secondreality --test minvball the_four_keyframes -- --nocapture
+cargo test -p secondreality --bin secondreality parts::minvball
 ```
 
-The release's part is the packed one, while the tree's `DOTS/DOTS.EXE` is the
-development build of the source ported here. The tree's source reproduces all
-four filed frames exactly, so no D24 adoption is needed. The source leaves `j`
-uninitialized, so the port fits the one value the source permits to the
-reference (88, §4). Everything the source says — the projection, the depth
-tables, the clobbered-offset store, the y-integration skip, the Microsoft RNG, the cue and the
-frame cap — is implemented.
+## 7. Open items
 
-## 7. The real run
+None. The release's stack value for `j` is not readable; the fit stands in for it (A19).
 
-```bash
-cargo test -p secondreality --bin secondreality parts::minvball               # 20 unit tests (+1 ignored measurement)
-cargo test -p secondreality --test minvball                                    # 4 integration tests
-```
-
-The integration test drives `CARGO_BIN_EXE_secondreality --part minvball
---headless` from the repository root and asserts the manifest
-(`index_origin: "part"`, `anchor: null`, `MUSIC1` at order 75), the 320×200
-geometry, the black DAC and the floor ramp at tick 0, the four keyframes at
-the mapping, all byte-identical, the exact shadow agreement, the frame
-cap at tick 2,579 (boot 12,947) and that the retired part holds its last
-frame. The unit tests pin the RNG, the setup, the cue window and the skipped
-cue, the exit, the frame cap, the stage boundary, the gravity decrement, the
-depth tables, the palette, the fade uploads, the shadow bug, the ball rows,
-the pre-roll and the mapping.
-
-**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §2 (the painter's order) and §18 (the inert `mov ax,ax`, the clobbered offset, the skipped gravity, `j`).
+**Register.** `bugs.md` §2 (the painter's order) and §18 (the inert `mov ax,ax`, the clobbered
+offset, the skipped gravity, `j`).

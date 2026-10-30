@@ -1,368 +1,175 @@
 # U2A — the landing pad and the saucer
 
-`SECOND 1`'s second part: the VISU vector engine's debut. The release holds the
-landscape picture through the first music gate, then draws a small saucer
-against the same landscape for about 520 stream frames before clearing the
-screen and holding the plain background for PAM.
+**Sources.** `VISU/C/U2A.C` (515 lines) driving the VISU engine (`VISU/VISU.C`, `ACALC.ASM`,
+`ADRAW.ASM` + `ADRAWCLP.ASM`, `AVIDFILL.ASM`, `AVID.ASM` + `AVIDM1.ASM`); the packed scene
+`assets/VISU/C/SCENE/U2A.00M`, `.0AA`, `.0AB`, `.001`-`.003` and the clear image
+`assets/VISU/C/U2ABG.UH`. **Port.** `bins/secondreality/src/parts/u2a.rs` (`"u2a"`) over the shared
+engine in `parts/visu/{math,draw,mod}.rs`; the module docs hold the mechanism (the acts, the
+pre-gate hold, the page ring). Integration test `bins/secondreality/tests/u2a.rs`. **Run.** Block
+1's second part, no anchor of its own: its frames are in the block-1 run's boot numbering, and
+U2A starts at **5956** (`FULLRUN_SEAMS`; the original's first 320×200 frame is 5961). **Music.**
+Block 1's continuous `MUSIC0`; the gates read the published order and row.
 
-The tree's sources are `VISU/C/U2A.C` (515 lines, the part), the engine it
-drives — `VISU/VISU.C` (the object loop), `VISU/ACALC.ASM` (the fixed-point
-matrix, rotation and projection), `VISU/ADRAW.ASM` + `ADRAWCLP.ASM` (culling,
-clipping and span generation), `VISU/AVIDFILL.ASM` (the flat and Gouraud
-fillers), `VISU/AVID.ASM` + `AVIDM1.ASM` (the screen, palette, window, pages
-and clear) — and the packed scene `assets/VISU/C/SCENE/U2A.00M`, `.0AA`,
-`.0AB`, `.001`–`.003` with the clear image `assets/VISU/C/U2ABG.UH`. The port
-is `bins/secondreality/src/parts/u2a.rs`, registered as `"u2a"`, with its
-integration test in `bins/secondreality/tests/u2a.rs`. The engine itself is
-Tasks 3–5's (`parts/visu/{math,draw,mod}.rs`); this note covers what U2A adds
-to it.
+## 1. Timeline
 
-## 1. What the original does, stage by stage
+| boot | source | what is on screen |
+|---|---|---|
+| 5956-6985 | — | the pre-gate hold: `U2ABG.UH` under the merged palette (§4) |
+| 6986 (port) / 6988 (`second1c`) | `U2A.C:229-258` | gate 1 (`order > 10 && row > 46`); setup and first draw on the same tick |
+| first three loop ticks | `:259-336` | pages 0, 1, 2 drawn before the 16-retrace delay ends; the deadlock escape; then 8, 8, 4, 1 frames parsed on four draws |
+| ~6988-7508 | `:259-431` | the saucer: 521 drawable stream frames, one a tick in the steady state |
+| ~7508 | `:351-356`, `:432-441` | the stream's END: `resetscene(); xit=1`, all four pages cleared |
+| 7508-7709 | — | PAM's gate is still closed; PAM holds U2A's cleared page |
+| 7618 (`second1b`) | `:276` | gate 2 (order 12 row 55): dead, the END comes first |
 
-- **`:145-227` load.** `readfile("U2A.00M")`; the palette merge at `:152`;
-  the master's object table (the camera plus five entries, three distinct
-  files, two copies); `U2A.0AA`'s first scene stream (`U2A.0AB`); then
-  `resetscene()` (`:227`), which zeroes every `r`/`r0` and rewinds the stream.
-- **`:229-240` the first gate.** `_asm { mov bx,6; int 0fch }` reads the
-  published order into `a` and row into `b`; `if(a>10 && b>46) break;`, and
-  `if(dis_exit()) return;`. Nothing is drawn and nothing is set up until it
-  opens.
-- **`:242-258` the setup.** `vid_init(3)` — stated as "oversample x 4" but
-  `m1o_init` (`AVIDM1.ASM:71-99`) sets `_projoversampleshr` to 0 like the
-  other two, so the mode is the shipped 320×200 tweak; the DAC upload
-  (`:243-246`); `vid_window(0,319,25,174,512,9999999)` (`:247`);
-  `dis_setcopper(2,copper2)` (`:249`); and the ring's initial state
-  (`:251-258`): `coppercnt=syncframe=0`, `avgrepeat=1`, `cl[0..2].ready=0`,
-  `cl[3].ready=1`.
-- **`:259-431` the loop.** Each iteration checks the second gate
-  (`if(a>11 && b>54) break;`, `:276`) and `dis_exit`, waits for `cl[clw]` to
-  be free (breaking at `deadlock>16`, `:278-283`), points the draw segment at
-  page `clw`, clears it with the background, sets the camera angle, sorts and
-  draws the enabled objects, schedules the page (`:326-332`), and parses
-  `repeat` stream frames (`:336-430`). `0xFF 0xFF` calls `resetscene()`, sets
-  `xit`, and the outer loop ends (`:351-356`).
-- **`:432-451` teardown.** `dis_setcopper(2,NULL)`; all four pages cleared
-  with the background; `vid_setswitch(3,-1)` names page 3 as the **draw**
-  page, and its `-1` leaves CRTC 0x0C (the display start) unchanged, so the
-  source never re-points the display during teardown (`AVID.ASM:341-358`);
-  `vid_deinit()` only outside the demo.
+The gate rows come from the filed traces (§7). The port's END lands 521 part-ticks after its
+gate-open tick (`teardown_clears_all_four_pages_and_leaves_page_three_displayed`), and PAM starts at
+chain 7,508 (`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering`); the reference's
+dense scan shows the plain landscape from 7560 at the latest to 7700 (`reference-indices.md` §5.5,
+§6.1).
 
-The release does more **before** the gate than the tree: `U2A.C` draws
-nothing until `:259`, while the reference's 6500 frame — 534–540 frames after
-the paint measured in (5960, 5966] — is the `U2ABG.UH` picture under a
-neon palette at the 30,000-cycle reference speed. Task 1 measured that frame
-(`.superpowers/sdd/06-vector-engine/task-1-report.md` §4); four other speeds
-(15,000, 25,000, 35,000, 60,000 cycles, `reference/parts/u2a-speed`,
-`reference-indices.md` §27) show the background under the **merged** palette
-instead, so the neon is a timing race. The port's `init` sets the view to
-320×200, paints page 0 with the background and uploads the merged palette
-(A32, adopted on the user's decision 2026-10-26). That the release shows
-the picture before the gate at all is its behaviour, not the tree's (D24's
-first kind of difference); the palette it shows is speed-dependent.
+## 2. Mapping and music
 
-## 2. The screen and the four pages
-
-The mode is the 320×200 tweak (`AVIDM1.ASM:219-...`), with an 80-byte plane
-row. Drawing goes through `_vramseg`; the display through CRTC 0x0C.
-`_vid_setswitch(int draw,int show)` (`AVID.ASM:341-358`) is:
-
-```asm
-	movpar	ax,0
-	cmp	ax,-1
-	je	@@1
-	shl	ax,14-4
-	add	ax,0a000h
-	mov	ds:_vramseg,ax
-@@1:	movpar	ax,1
-	cmp	ax,-1
-	je	@@2
-	shl	ax,14
-	mov	dx,3d4h
-	mov	al,0ch
-	out	dx,ax
-@@2:
-```
-
-So page `p`'s drawing segment is `0xA000 + p*0x400` (physical byte
-`0xA0000 + p*0x4000`) and its display start is `p << 14` (CRTC 0x0C = the
-high byte of the start, `p*0x4000`). Each page is 16,000 plane bytes of
-picture in a 0x4000-byte slot. In the emulator's four-plane byte-group memory
-a plane byte is four linear pixels (`docs/fidelity/pam.md` §2,
-`reference-indices.md` §1.6), so the original's pages are **65,536 pixels**
-apart, with a 1,536-pixel gap between pictures.
-
-The port's surface is 640×400 = 256,000 pixels and its pages are packed at
-`page * 64_000`, the controller's ruling. The packing is unobservable: every
-page is cleared and drawn through the port's own origin and read back through
-the same `View` origin, so the picture each page shows is identical to the
-original's. The reference's 6500 and 7640 frames are page 0's picture at
-origin 0, and its 7300 `.idx` was read from offset 0, which is page 0 — the
-one page whose origin the two layouts share exactly.
-
-The ring is `Ring::new(1)` (`parts/visu/mod.rs`): the four logical pages
-`cl[0..3]`, the copper delay of 16 retraces, and the adaptive `avgrepeat`
-schedule. The port's copper slot 2 runs `ring.isr()` and then sets the view
-origin to `displayed() * 64_000`. Slot 2 runs after the tick's compose
-(`sr-engine/engine.rs:278-282`), so a page switch shows in the next tick's
-frame, the original's retrace timing.
-
-## 3. The tick map
-
-The two gates and the drawing window, from the filed traces:
+The block-1 music clock is the shell's (part-sequence.md (block seams / pre-roll / mapping
+conventions)). The port's gate opens at boot **6986**, two frames before `second1c`'s row change:
 
 ```bash
-awk -F, '$1==6987 || $1==6988 {print $1":"$2":"$3}' \
-    reference/music/second1c/trace.csv     # 6987:11:46, 6988:11:47
-awk -F, '$1==7617 || $1==7618 {print $1":"$2":"$3}' \
-    reference/music/second1b/trace.csv     # 7617:12:54, 7618:12:55
+cargo run --release --bin secondreality -- --block 1 --headless \
+    --dump-frames 6985,6986 --dump-dir out/u2a-gate
+# manifest music_position: 6985 "11:46", 6986 "11:47"
 ```
 
-- **Gate 1 at 6988** (`second1c`: order 11 row 47 — the first row above 46
-  in order 11). Gate 2 at **7618** (`second1b`: order 12 row 55), but it is
-  dead in the shipped data: the stream's END arrives first. 521 drawable
-  frames plus END, one stream frame a tick in the steady state, is about 522
-  ticks — the cleared hold begins around 7510, and the reference's dense scan
-  shows the plain landscape from 7560 at the latest to 7700
-  (`reference-indices.md` §5.5, §6.1).
-- **The port's END lands 521 part-ticks after its gate-open tick.** The unit
-  test `teardown_clears_all_four_pages_and_leaves_page_three_displayed`
-  drives a gate that opens at tick 0 and finds `Finished` at tick 521; with
-  an END at ~7510 this is the measured window.
-- **The gate-open tick is the loop's first tick.** `U2A.C:238-249` has no
-  retrace between the gate break, the setup and the first draw, so the port
-  uploads the merged palette, installs the ring's copper and draws in one
-  `frame()` call. There is no setup tick to count.
-- **The port's own gate opens at boot 6986, two frames before the trace's
-  row change.** The block-1 music clock is the shell's, not this part's, and
-  the trace is a different session (D17 measures sessions 1–4 frames apart):
+The trace is a different session (D17 measures sessions 1-4 frames apart). The port's clock is
+`second1`'s: at boot 5900 it reads **9:51 / zframe 3771**, the trace's own value, while `second1c`
+reads **9:50 / zframe 3768** at the same index (`the_block_one_clock_matches_second1_at_boot_5900`).
+At the keyframe the port and the trace agree: `second1c` at 7300 is `12:18`, and the integration
+test asserts the run's 7300 frame says `12:18`. Changing the block-1 clock to match `second1c`
+would move ALKU's verified frames (A29).
 
-  ```bash
-  cargo run --release --bin secondreality -- --block 1 --headless \
-      --dump-frames 6985,6986 --dump-dir out/u2a-gate
-  # manifest music_position: 6985 "11:46", 6986 "11:47"
-  ```
+## 3. Decisions
 
-  The port's position at the keyframe itself agrees with the trace:
-  `second1c` at 7300 is `12:18`, and the integration test asserts the run's
-  7300 frame says `12:18`.
-
-- **The first three loop ticks draw pages 0, 1 and 2 before the 16-retrace
-  delay ends**, then the part waits on page 3 until the deadlock escape, and
-  the schedule catches up by parsing 8, 8, 4 and 1 frames on four successive
-  draws. This is the original's own schedule (`U2A.C:278-336`) and the port's
-  ring unit tests pin its cadence (`parts/visu/mod.rs`).
+- **The pre-gate hold** (A32, D24's first kind of difference). `U2A.C` draws nothing before the
+  gate, but the release shows the background. The port paints it under the merged palette in
+  `init`, which is what the original shows at four of five capture speeds (§4).
+- **The Gouraud residual is registered, not fitted** (A28, §5).
+- **The 7300 pose is the session's phase** (A29, §5).
+- **Pages packed at `page * 64_000`.** The original's pages are 65,536 pixels apart (a plane byte
+  is four linear pixels, `pam.md` §2); the port packs them into its 640×400 surface at 64,000.
+  Every page is cleared, drawn and read through the same origin, so the packing is unobservable;
+  the reference's 6500 and 7640 frames and its 7300 `.idx` are page 0, whose origin the two layouts
+  share.
+- **The mode is the plain 320×200 tweak.** `U2A.C:242`'s `vid_init(3)` is commented "oversample x
+  4", but `m1o_init` (`AVIDM1.ASM:71-99`) sets `_projoversampleshr` to 0 as the other modes do.
+- **The background is not de-interleaved.** `U2A.C:153-166` reorders `bg` in place; the reference's
+  7640 index plane is the packed payload byte for byte, and `sr_assets` returns that payload as
+  linear 320×200, so the port copies `Image::pixels()`.
+- **The teardown's display origin** is set to page 3, which is unobservable: every page holds the
+  same cleared background (§6).
 
 ## 4. The palette merge, and the pre-gate hold
 
-`U2A.C:152` is the merge, quoted:
+`U2A.C:152`, `memcpy(scene0+16+192*3,bg+16,64*3)`: the scene's entries 0-191 stay, and the
+background's 0-63 land at 192-255. The background picture indexes 0 and 192-242 (52 values; §7's
+command), so its colours resolve through the background palette's entries 0-50 under the merged
+DAC (`the_merged_palette_is_the_scene_then_the_background`).
 
-```c
-	memcpy(scene0+16+192*3,bg+16,64*3);
-```
+At 15,000, 25,000, 35,000 and 60,000 cycles the original shows that merged hold at boot 6400 and
+6600 (`0a68ffb9…`, eight frames in `reference/parts/u2a-speed`, `reference-indices.md` §27), and the
+port compares at **0 of 64,000** against all eight. The 30,000-cycle reference's 6500
+(`11a66eb0…`) is a neon palette, the background through `(3v + 5) & 63` with entry 195 black; its
+mechanism is not traced (the release's U2A is PKLITE-packed), and the port differs from it in
+**64,000 of 64,000** pixels (A32). An 8.8 fixed-point copper fade running ~3× its count would give
+~3v and wrap at 64; that is unproven. The gate-open tick re-uploads the same palette before the
+first draw.
 
-The scene's entries 0–191 stay from `U2A.00M`; the background's 0–63 land at
-192–255. The background picture itself indexes 0 and 192–242 (the payload's own
-values, §7's command), so its colours resolve through the background
-palette's entries 0–50 under the merged DAC. The unit test `the_merged_palette_is_the_scene_then_the_background`
-builds the expected palette from both files and asserts it, plus that entry
-191 is still the scene's and that the scene's own 192 differs from the
-background's 0 (so the merge is observable).
+## 5. Verification, and the 7300 divergence
 
-The pre-gate hold is the background under this merged palette. At 15,000,
-25,000, 35,000 and 60,000 cycles the original shows exactly that at boot 6400
-and 6600 (`0a68ffb9...`, eight frames in `reference/parts/u2a-speed`), and the
-port's hold compares at **0 of 64,000** against all eight. The 30,000-cycle
-reference's 6500 (`11a66eb0...`) is instead a neon palette, the background
-through `(3v + 5) & 63` with entry 195 black; its mechanism is not traced
-(the release's U2A is PKLITE-packed), and the port does not copy it: it
-differs from that frame in **64,000 of 64,000** pixels (A32). An 8.8
-fixed-point copper fade running ~3x its count would give ~3v and wrap at 64;
-that is unproven. Both counts are asserted by
-`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures` and
-`the_30000_cycle_neon_6500_differs_by_the_registered_count` in
-`tests/u2a.rs`.
+| index | port frame | result | register |
+|---|---|---|---|
+| 6500 | `u2a_006500` | **64,000** RGB pixels (the neon); **0** against the four speed captures' 6400/6600 | A32 |
+| 7300 | `u2a_007300` | **1,098** indices and RGB pixels | A29 |
+| 7640 | `pam_007640` | **0** indices and RGB pixels | exact |
 
-Because the same palette is up before and at gate 1 (`U2A.C:243-246` is the
-source's upload, after the gate), the gate-open tick re-uploads it unchanged
-before the first draw.
+Tests: `the_30000_cycle_neon_6500_differs_by_the_registered_count`,
+`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`,
+`the_saucer_frame_records_its_measured_divergence` and
+`the_cleared_hold_reference_7640_compares_at_zero_in_both_planes` (`tests/u2a.rs`); `cargo xtask
+rediff` entries `u2a`, `u2a-speed/c*` and `fullrun/02-u2a-pam` (5961 at 60,160 and 6500 at 64,000,
+A53). The 7640 file is PAM's by name because PAM is running there with its gate still closed
+(`dis_sync()<10`), holding U2A's cleared page.
 
-## 5. The reference comparison, and the 7300 divergence
+**The reference's 7300 is stream state 294.** `the_reference_7300_is_the_measured_stream_state`
+renders all 522 states through the part's driver and shipped window: the minimum is **426** pixels
+at state 294 (892 at 293, 858 at 295), and 1,098 belongs to state 297 and no other.
 
-Three keyframes, captured with `SECOND 1` (`reference/parts/u2a/`:
-6500 the 30,000-cycle neon hold, 7300 the saucer, 7640 the cleared hold):
+**At state 294 the residual is on the Gouraud faces only** (A28). The silhouette is exact: **0**
+pixels differ between object and background against the reference's index plane. Attributing each
+differing pixel to the topmost object that writes it gives
+`[instance 1: 75, instance 2: 0, instance 4: 115, instance 5: 236]`. Instance 2 is `U2A.002`
+("Sippi", 75 faces, all `F_SHADE16`, flat-filled) and is exact; instances 1, 4 and 5 are `U2A.001`
+("s01", 124 faces, `F_SHADE32`/`F_SHADE16` Gouraud), with index deltas
+`{-5,-4,-3,-2,-1,1,2,3,4,5,6,7,8,10,11,12}`.
 
-| index | port | result |
-|---|---|---|
-| 6500 | `u2a_006500` | **64,000 differing** RGB pixels: the neon palette, registered under A32 (`the_30000_cycle_neon_6500_differs_by_the_registered_count`); the port's hold is **0 differing** against the four `u2a-speed` captures' 6400/6600 (`the_pre_gate_hold_compares_at_zero_with_the_four_speed_captures`) |
-| 7640 | `pam_007640` | **0 differing** indices and RGB pixels (`the_cleared_hold_reference_7640_compares_at_zero_in_both_planes`) |
-| 7300 | `u2a_007300` | **1098 differing** indices and RGB pixels (`the_saucer_frame_records_its_measured_divergence`) |
+**The variant scan.** An independent second transliteration of the same sources renders state 294
+identically to the Rust engine, and no plausible single difference improves on 426: every face-list
+choice and object draw order; reversed matrix multiplication; `nnum1`-only, source, dword and
+unsigned normal rotations; camera-only and transposed matrices; ±6 around the shipped multipliers;
+±2 camera-entry perturbations; the Gouraud slope divisor, tier bounds, buffer direction and
+`calclight`/`normallight` variants. The tree's two filler versions (`AVIDFILL.ASM`, `AVIDFILL.OK`)
+differ only in their copy loops. The release's code cannot be read: `SECOND.EXE` carries no `U2A`
+or `AVISTAN` strings and no six-byte light-vector sequence (`12118,10603,3030`).
 
-The 7640 file is PAM's by name because PAM is the part running there: U2A's
-END has retired it, and PAM's own music gate (`dis_sync()<10`, code 9 at
-order 12) is still closed, so PAM inherits and holds U2A's cleared page. Both
-planes agree with the reference exactly — the page is the `U2ABG` picture
-under the merged palette, which is the `0a68ffb9…` frame the reference holds.
+**The live run shows state 297 at 7300.** The gate's two-frame phase (§2) and the ring's page holds
+(each page shows four to five stream states) put the port's displayed page three states later: the
+whole pose differs, 1,098 pixels in both planes (A29).
 
-The 7300 divergence, measured rather than fitted:
+## 6. Preserved behaviours
 
-- **The reference's picture is stream state 294.** The unit test
-  `the_reference_7300_is_the_measured_stream_state` renders all 522 states
-  through the same driver and shipped window the part uses. The minimum
-  differs by **426** pixels at state 294; the states either side differ by
-  892 and 858.
-- **The residual at that best state is on the Gouraud-shaded faces only.**
-  The object's silhouette is exact — **0** pixels differ between "object" and
-  "background" against the reference's own index plane. Attributing every
-  differing pixel to the topmost object that writes it, by drawing each
-  object alone at the same state, gives
+Each is in `bugs.md` §12 or its index; the port's handling in one line:
 
-  ```
-  [instance 1: 75, instance 2: 0, instance 4: 115, instance 5: 236]
-  ```
+- **The uninitialised `fov`** (`U2A.C:261`, read at `:287`, set at `:348`): the driver starts at
+  fov 0; the first draw is background-only, so the value is invisible.
+- **The deadlock escape** (`:278-283`): `next_page` returns the busy page once the copper has
+  counted past 16 (`ring_matches_the_u2a_cadence_over_twenty_ticks`).
+- **The second gate is dead** (`:351-355`): the check stays first in the loop
+  (`the_second_gate_tears_down_on_the_first_tick_it_is_open`).
+- **The dead city hacks** (`:301-310`): `U2A.00M`'s byte 15 is 0, so neither branch runs; the
+  driver implements both (`the_city_hacks_are_u2a_s_and_guard_out_of_range_instances`).
+- **The teardown clears all four pages** (`:432-441`) and `vid_setswitch(3,-1)` names page 3 the
+  draw page without moving the display (`AVID.ASM:341-358`). The port installs no-ops in all three
+  slots.
+- **The two exits leave different screens.** ESC in the gate's wait is a bare `return` (`:239`):
+  the hold stays up (`the_gate_holds_until_the_scripted_cue_and_exits_on_request`). ESC in the loop
+  falls through to the teardown (`:432`).
+- **No music is a refusal**: a run with no player is a `PartError` at `init`.
 
-  Instance 2 is `U2A.002` ("Sippi", 75 faces, all flags `0x0800` =
-  `F_SHADE16`, flat-filled); instances 1, 4 and 5 are `U2A.001` ("s01", 124
-  faces, `F_SHADE32`/`F_SHADE16` Gouraud). The flat object reproduces
-  exactly; the Gouraud copies leave small index deltas on their faces:
-  `{-5,-4,-3,-2,-1,1,2,3,4,5,6,7,8,10,11,12}`.
-- **The port's live run does not show state 294 at 7300.** Its schedule
-  displays a different page of the same animation, and the whole pose
-  differs: 1098 pixels, in both planes. The gate tick measured above (6986)
-  and the fixed-tick ring's page holds put the port's displayed page at a
-  later state than the reference's page at this index, so the pose itself is
-  different. This is D17's session phase, made visible because the part's
-  animation is a stream of integer states and a page holds several of them,
-  not a continuous clock.
-- **The phase is the music clock's, and the port is faithful to `second1`.**
-  At boot 5900 the port's block-1 clock reads **9:51 / zframe 3771**, the
-  `second1` trace's own value; `second1c` — the trace that supplies the
-  gate-1 measurement the plan carried — reads **9:50 / zframe 3768** at the
-  same index. The 6988 gate is therefore that session's, not the keyframe
-  capture session's. The port's two-frame-early gate at 6986 is a different
-  session's phase, not a defect in the gate condition, and changing the
-  block-1 clock to match `second1c` would move ALKU's verified frames.
-- **The 426-pixel Gouraud residual is a D24 item, not a transliteration
-  slip.** The port's draw path is `parts/visu/draw.rs`'s transliteration of
-  `ADRAW.ASM`/`ADRAWCLP.ASM`/`AVIDFILL.ASM`, whose tier, clipping and
-  lighting tests are hand-derived from those files; the tree's two filler
-  versions (`AVIDFILL.ASM`, `AVIDFILL.OK`) differ only in their copy loops,
-  not in the Gouraud tier code; and every flat-shaded face matches the
-  reference exactly (the attribution above). An independent second
-  transliteration of the same sources — the diagnostic used to produce the
-  state and attribution numbers above — renders state 294 identically to the
-  Rust engine, and a scan of the plausible single differences finds none
-  that improves on 426: every face-list choice and object draw order;
-  reversed matrix multiplication; `nnum1`-only, source, dword and unsigned
-  normal rotations; camera-only and transposed matrices; ±6 around the
-  shipped multipliers; ±2 camera-entry perturbations; the Gouraud slope
-  divisor, tier bounds, buffer direction and `calclight`/`normallight`
-  variants. The residual is therefore the release's Gouraud output against
-  the tree's algorithm: small (±1–12 palette-index steps) and confined to
-  the Gouraud faces, not localised to a single constant the tree's algorithm
-  can carry.
-- **D24 step 2's limit: the release's code cannot be read.** `SECOND.EXE`
-  carries no `U2A` or `AVISTAN` strings and no six-byte light-vector sequence
-  (`12118,10603,3030`), so the packed build's constants are not recoverable
-  without unpacking it; "can the tree produce the release's Gouraud output"
-  cannot be answered from the artifact the reference was captured from.
-- **Ruled (registered, not fitted).** Both divergences are registered:
-  **A28** for the 426-pixel Gouraud difference at the reference's own state
-  and **A29** for the 1098-pixel session-phase offset at boot 7300
-  (`docs/fidelity/APPROXIMATIONS.md`). The port keeps the tree's translation
-  and the recorded numbers; no constant was fitted to the keyframe, and the
-  integration test asserts the measured 1098 with A29 named.
-
-## 6. The bugs and hardware behaviours, preserved
-
-- **The uninitialised `fov`.** `int fov;` is declared inside the outer loop
-  (`U2A.C:261`) and read by `vid_cameraangle(fov)` (`:287`) before the first
-  parse assigns it (`:348`). On the first draw every object is still off, so
-  the value is invisible; from the second draw on the stack slot holds the
-  last parsed frame's `0x2200`. The port's `Driver` starts at fov 0 and the
-  first draw is background-only, then the stream's `0x22` takes over.
-- **The deadlock escape draws into a queued page.** `while(cl[clw].ready)`
-  breaks at `deadlock>16` and draws anyway (`:278-283`); the port's
-  `next_page` returns the busy page once the copper has counted past 16.
-- **The 16-retrace start-up delay parses a burst.** The first pages are
-  drawn before the copper delay expires; the schedule then queues 8, 8, 4, 1
-  frames on four draws. The cadence is Task 5's modelled ring and is pinned
-  by `ring_matches_the_u2a_cadence_over_twenty_ticks`.
-- **The second gate is dead in the shipped stream.** The END's `resetscene();
-  xit=1` (`:351-355`) ends the loop before order 12 row 55; the port keeps
-  the check first in its loop (`the_second_gate_tears_down_on_the_first_tick_it_is_open`).
-- **The dead city hacks.** `U2A.C:301-310` forces sort distances to
-  1,000,000,000 for `co[2]`, `co[7]` and `co[13]` when the master's byte 15
-  is `'C'`, and for `co[14]` when it is `'R'`. `U2A.00M`'s byte 15 is 0
-  (`U2A.C:168-169` reads it into `city`), so neither branch runs for this
-  part. The driver implements both — guarded against instances the scene
-  does not have — and `parts/visu/mod.rs`'s
-  `the_city_hacks_are_u2a_s_and_guard_out_of_range_instances` pins them.
-- **The teardown clears all four pages.** `U2A.C:432-441`: the source
-  removes slot 2, and `vid_setswitch(3,-1)` names page 3 as the draw page
-  while the display start is left alone (`AVID.ASM:341-358`), so the display
-  never moves during teardown. The port installs no-ops in all three slots
-  (PAM's pattern, so nothing an unregistered slot held can run) and sets the
-  origin to page 3 per the controller's ruling; the choice is unobservable
-  because every page holds the same cleared background.
-- **The two exits leave different screens.** `dis_exit()` inside the gate's
-  wait is a bare `return` (`U2A.C:239`): no copper has been installed and no
-  page cleared, so the hold stays up and the shell retires the part
-  (`the_gate_holds_until_the_scripted_cue_and_exits_on_request` asserts the
-  untouched page and DAC). Inside the loop, `while(!dis_exit() && !xit)`
-  falls through to the teardown (`:432`), so the four cleared pages are
-  shown.
-- **The background is not de-interleaved.** `U2A.C:153-166` reorders `bg` in
-  place before the loop (`for(z=0;z<4;z++) for(y=0;y<200;y++)
-  for(x=z;x<320;x+=4) bg2[u++]=bg[16+768+x+y*320]`). Task 1 measured the
-  reference's 7640 index plane as the packed payload byte for byte, and Task
-  A8's decoder already returns that payload as linear 320×200, so the port
-  copies `Image::pixels()` and does not port the shuffle.
-- **The wait is a tick, not a spin.** Every `while(cl[clw].ready)` and every
-  gate iteration is one `frame()` call at the fixed 70 Hz tick;
-  `ctx.exit_requested` is read every tick, including the pre-gate hold (where the
-  source's `if(dis_exit()) return;` leaves the hold and the shell retires the
-  part).
-- **No music is a refusal.** The gates read the player's published order and
-  row; a run with no player is a `PartError` at `init`, following PAM.
-
-## 7. Reproducing the numbers
+## 7. Reproduce
 
 ```bash
-# the part's unit tests: the merged palette and hold, the two gates, the first
-# stream frame and frame 16's toggle, the END's tick and the teardown, and the
-# 7300 state search with its silhouette and per-object attribution
 cargo test -p secondreality --bin secondreality u2a
-
-# the integration test: the manifest, the 6500 and 7640 keyframes at zero,
-# and the measured 7300 divergence
 cargo test -p secondreality --test u2a -- --nocapture
+cargo xtask rediff --only u2a
 
-# the reference comparison by hand (from the repository root):
-cargo run --release --bin secondreality -- --block 1 --headless \
-    --dump-frames 6500,7299,7300,7301,7640 --dump-dir out/u2a
-cargo xtask compare --reference reference/parts/u2a --rendered out/u2a \
-    --out out/u2a-diff
-
-# the gates, from the filed traces:
+# the gates, from the filed traces (6987:11:46, 6988:11:47; 7617:12:54, 7618:12:55)
 awk -F, '$1==6987 || $1==6988 {print $1,$2,$3}' reference/music/second1c/trace.csv
 awk -F, '$1==7617 || $1==7618 {print $1,$2,$3}' reference/music/second1b/trace.csv
 
-# the port's own gate tick, from its manifest:
+# the comparison by hand: 7640 at 0.0000 %, 7300 at 1.7156 % (1098/64000, max delta 238),
+# exit 1 (the port's page is a different stream state, so no ±1 match applies)
 cargo run --release --bin secondreality -- --block 1 --headless \
-    --dump-frames 6985,6986 --dump-dir out/u2a-gate
+    --dump-frames 6500,7299,7300,7301,7640 --dump-dir out/u2a
+cargo xtask compare --reference reference/parts/u2a --rendered out/u2a --out out/u2a-diff
 
-# the background payload's own indices (the line §4 quotes): its distinct
-# values are {0} U {192..242}, 52 of them
+# the background payload's indices: {0} ∪ {192..242}, 52 values
 python3 -c "d=open('assets/VISU/C/U2ABG.UH','rb').read()[784:784+64000]; \
 print(sorted(set(d))[0], sorted(set(d))[1], sorted(set(d))[-1], len(set(d)))"
-
-# and the reference's held 7640 hash (§5's 0a68ffb9...):
-sha256sum reference/parts/u2a/frame_007640.rgb
+sha256sum reference/parts/u2a/frame_007640.rgb        # 0a68ffb9…
 ```
 
-`cargo xtask compare` pairs by index and searches ±1 frame. On the dump above
-it reports `0.0000%` at 7640 (6500 is A32's 64,000), `1.7156%` (1098/64000, max delta 238)
-at 7300, `verdict: different`, and exits 1: the port's page at that index is
-a different stream state, so no ±1 phase match applies.
+## 8. Open items
 
-**Register.** The behaviours of this part that the original does and the port must keep are in `bugs.md` §12 (the page cadence, the two exits), with the dead second gate, city hacks and `fov` in the index.
+- The neon 6500's mechanism (A32) and the release's Gouraud constants (A28) are in the packed
+  image, which the tree's staged `MAIN/DATA/U2A.EXE` is not.
+
+**Register.** `bugs.md` §12 (the page cadence, the two exits), with the dead second gate, city
+hacks and `fov` in the index.

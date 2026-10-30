@@ -1,23 +1,23 @@
 # Part sequence — transcription of `MAIN/U2.ASM`
 
 This file is the reference for **what order the original runs its parts in**, and **where
-the music is repositioned**. It replaces the survey-derived table that used to sit in
-spec §2.2. Every claim here is a transcription of a line of source, not a recollection.
+the music is repositioned**. Every claim in §1–§9 is a transcription of a line of source, not
+a recollection. §10 states the conventions the port's parts share at those seams, which the
+per-part notes point at rather than repeat.
 
 **Source of record:** `upstream/SecondReality` (submodule, pinned at `071a82e`,
 `mtuomi/SecondReality`). File: `MAIN/U2.ASM`. Line numbers are 1-based, as printed by
 `nl`/your editor, and refer to that file at that commit only. The file is CRLF
 ISO-8859-1; the assembly listing is unchanged by that.
 
-Spec §2.2 carries the same table in condensed form; where this file and §2.2 disagree,
-**this file wins** (see `docs/decisions.md` D13 for what changed and why).
+`docs/design.md` §2.2 summarises the table; where the two disagree, **this file wins**
+(`docs/decisions.md` D13).
 
 ## 1. The main sequence
 
-`Order` is the port's own sequence number, carried over from spec §2.2 (see §2 below for
-the numbering scheme). The original numbers its part slots with assembler labels
-`exe1` … `exe23`; those labels are quoted in **Source** so a reader can jump straight to
-the definition and the call site.
+`Order` is the port's own sequence number (§2 gives the numbering scheme). The original
+numbers its part slots with assembler labels `exe1` … `exe23`; those labels are quoted in
+**Source** so a reader can jump straight to the definition and the call site.
 
 `Directory` is the **source directory in the upstream tree**, not a runtime path — see
 the note at the end of this section.
@@ -51,8 +51,8 @@ the note at the end of this section.
 commented-out `txtNN` strings in `U2.ASM` lines 61-100 (the same labels appear, in menu
 order, in `MAIN/PARTS`). Where a row has no label, the source has none. The label
 attributions in parentheses are the authors' (`WILDF`, `PSI`, `TRUG`). The trailing
-descriptions ("dot tunnel", "landscape scroller", …) are the spec's, kept because they
-are useful, and they are **descriptive, not transcribed** — the label is the citation.
+descriptions ("dot tunnel", "landscape scroller", …) are **descriptive, not transcribed** —
+the label is the citation.
 
 **`MAIN/PARTS` is not this table.** It is a 20-entry label list in *menu* order, and it
 differs from the run order: it has no entry for BEGLOGO, and its `txt9`/`txt16` labels
@@ -85,22 +85,9 @@ column entry should be read as such.
 Two build notes worth knowing:
 
 - `ENDPIC/MAKEFILE:22` also stages `beg.exe` as `beglogo.exe`, so **two** directories
-  contain a version of part 4. `ENDPIC/` holds `BEG.C` + `SRTITLE.LBM`/`PIC.LBM`, whose
-  picture is linked in from `_PIC.OBK` (`:21`, and its payload is `SRTITLE.U` — every
-  16-byte window of that file is in the OBK); `BEG/` holds its own picture plus its own
-  `_pic.obk` blob. They are two different title pictures, not two packings of one: the two
-  decoded `.UP`/`.U` payloads differ in 126,261 of their 128,000 pixels and in 255 of
-  their 256 palette entries. Both build the same target name, and
-  **`BEG/` is the one the 1993 release shipped** — settled in `docs/fidelity/beglogo.md`
-  §1 by three measurements rather than by unpacking the binary: the reference's held frame
-  900 probes 57 palette entries that `BEG/SRTITLE.UP`'s palette matches entry for entry and
-  `ENDPIC/SRTITLE.U`'s matches none of; `SRTITLE.UP` decodes to that frame's 128,000
-  indices exactly while `ENDPIC/SRTITLE.U` decodes to a different picture (126,261 of
-  128,000 pixels apart); and the staged `MAIN/DATA/BEGLOGO.EXE` is 30,874 bytes, which a
-  packer can produce from `BEG/BEG.EXE`'s 50,830 and cannot from `ENDPIC/BEG.EXE`'s
-  13,286. The two builds are not interchangeable — `ENDPIC/BEG.C:18-20` sets its own video
-  mode and `:45-48` waits on the music, where `BEG/BEG.C` calls `dis_partstart`,
-  `dis_waitb` and nothing else — so part 4's port takes the `BEG/` reading throughout.
+  build a part 4, with different title pictures and different code. **`BEG/` is the one the
+  release shipped**, and the port takes it throughout; `docs/fidelity/beglogo.md` §1 holds
+  the three measurements that settle it.
 - Every part EXE staged in `MAIN/DATA/` — all 20, plus `START.EXE` — carries the PKLITE
   signature, except `U2A.EXE` and `U2E.EXE`, whose staged bytes are identical to
   `VISU/C/U2A.EXE` and `VISU/C/U2E.EXE` (checked by hash). That difference is compression,
@@ -108,9 +95,10 @@ Two build notes worth knowing:
 
 ## 2. Numbering
 
-- The port's `Order` numbers are its own and are kept so that phase plans and part notes
-  stay stable. Slot **17 is reserved for the hidden part** — the hidden part is not in the
-  main sequence but occupies that slot in the table so the ending keeps 18/19/20.
+- The port's `Order` numbers are its own and are kept so that the part notes' slot
+  citations stay stable. Slot **17 is reserved for the hidden part** — the hidden part is
+  not in the main sequence but occupies that slot in the table so the ending keeps
+  18/19/20.
 - The original's slot labels are `exe1` … `exe23` and contain **gaps and merges**:
   `exe8` never existed — its commented-out label `txt8` `Vector Part I - Space battle`
   (line 76) has no `exe` and no run site, so that part was cut; `exe10` (`DDSTARS.EXE`) is
@@ -130,7 +118,7 @@ arguments, established from the code and the STMIK interface:
 
 | Arg | Register | Meaning | Evidence |
 |---|---|---|---|
-| module | `ax` (low byte at `msg+12`) | `0` = `MUSIC0`, `1` = `MUSIC1` | `STARTMUS.C:251-262` switches on that byte and calls `loadmodule2(0)` / `loadmodule2(1)`, whose commented-out neighbours are `//loadmodule("music0.s3m")` / `//loadmodule("music1.s3m")`; it also patches `module[50]=0x78` (tempo 120) for module 0 only, matching spec §2.5 |
+| module | `ax` (low byte at `msg+12`) | `0` = `MUSIC0`, `1` = `MUSIC1` | `STARTMUS.C:251-262` switches on that byte and calls `loadmodule2(0)` / `loadmodule2(1)`, whose commented-out neighbours are `//loadmodule("music0.s3m")` / `//loadmodule("music1.s3m")`; it also patches `module[50]=0x78` (tempo 120) for module 0 only, matching `docs/design.md` §2.5 |
 | order | `bx` | the order to start playing at; `bx = -1` loads without starting | `MAIN/STMIK.H:43-44` — `extern int zplaysong(int order); /* this routine starts playing the module at order [order] */`; passed through at `U2.ASM:390-395` |
 | speed adjust | `cx` | written to `_zspeedadjust2`, but **only when `_zoutputmode` is 7 (no sound) or 2 (Gravis)** — skipped for SB/SBPro | `U2.ASM:384-390` |
 
@@ -152,8 +140,7 @@ worth transcribing: the restart that a given part hears depends on the entry arg
 | 902-905 `[entry]` | `whattorun & 16` **and not** `whattorun & 8` | MUSIC0 | 25 | 45000 | only `SECOND 5`; **not** on any run that played U2E |
 | 929-932 | loop-back | MUSIC0 | 0 | 45000 | start of every pass after the first (loop mode) |
 
-Initial load (lines 767-786) is **conditional on the entry argument**, which the spec did
-not record:
+Initial load (lines 767-786) is **conditional on the entry argument**:
 
 ```
 767  mov ax,0 / mov bx,-1 / mov cx,45000      ; MUSIC0, load only (order -1 = don't play)
@@ -169,7 +156,7 @@ So `SECOND 1` / no argument load **MUSIC0 and start it at order 0**; `SECOND 2..
 module already is). The line 786 `_zplaysong(0)` is unconditional — it is what actually
 starts MUSIC0 on a full run, because the load at 767 deliberately passed `bx = -1`.
 
-### What this means for the port
+### What a full run hears
 
 On a **full run** (`SECOND 1` or no argument), the music timeline is:
 
@@ -182,11 +169,14 @@ On a **full run** (`SECOND 1` or no argument), the music timeline is:
 5. MUSIC0 continues untouched through the hidden part's slot (skipped), ENDLOGO, CRED and
    ENDSCRL — **there is no restart in the ending either**.
 
-The `[entry]` sites are what a full run is expected to have reached at those points:
-order 42 of MUSIC1 at the mountain scroller, order 25 of MUSIC0 at the end picture. Their
+The `[entry]` sites stand for what a full run has reached at those points, and their
 guards (`not whattorun & 2`, `not whattorun & 8`) are exactly "we did not play the blocks
-that led up to this point". Treat the correspondence as the evident intent; the port will
-confirm the actual positions when the parts run against real captures.
+that led up to this point". The block-1 traces bear both out. In `second1e`, MUSIC1 enters
+order 42 at 16,622 and the cue wait (§6) exits on `42:1` at 16,630; MNTSCRL's first frame is
+16,637. In `second1f`, MUSIC0 enters order 25 at 37,766, and ENDLOGO's first frame is 37,967
+(`reference-indices.md` §26.3 has the part boundaries). The order changes come from
+`awk -F, 'NR>1 && $2!=prev {print $1, $2} {prev=$2}' reference/music/second1e/trace.csv`, and
+the same command over `second1f`.
 
 ## 4. Block arguments and `partsmask`
 
@@ -264,14 +254,9 @@ Three disagreements, in increasing order of importance:
 Anything else in the tail — `0`, `6`-`9`, or any other first character — sets `errorcode 2`
 and aborts before the demo starts (line 628-629, printed at 557-559).
 
-**Which the port follows:** the code, not the README. The port's CLI accepts `1`-`5` and
-`U`/`u` with those exact masks, treats no argument and `1` identically, and ignores
-unrecognised `/`-prefixed switches. The README's text is the *user-facing description*
-and is worth keeping as documentation, but every behavioural question is answered by
-`checkcmdline`. Record the `U` omission in the port's own user docs so the port does not
-reproduce a documentation gap as a functional one. `/gravis` selects a Gravis card and
-`m_looping = 2`; the port has no Gravis, so accept and ignore the switch rather than
-rejecting it.
+**The port follows the code, not the README.** `--block 1`–`5` and `--block U` (or `u`)
+take `shell::BLOCKS`' masks, no argument is `--block 1`, `/gravis` is `looping` 2 (§7, D42)
+and any other `/` switch is ignored; the port's `README.md` documents `U`.
 
 ## 5. The hidden part
 
@@ -305,15 +290,10 @@ music-position wait before starting MNTSCRL (lines 829-853):
 The value compared is `dx`, computed by `muscode_6` from STMIK's `_np_zplus` and `_np_row`
 (`DIS/DISINT.ASM:252-271`): `-32` when `_np_zplus == 0`, `row - 64` when `_np_zplus == 1`,
 `row` when `_np_zplus == 2`. The net effect is "wait until the music passes a boundary and
-then leave it", used to line the full run's MUSIC1 playback up with the mountain scroller.
-
-**Not determined here, and not guessed:** the exact musical event that `_np_zplus`
-encodes. The reading above is the literal behaviour of the code; which order/row the wait
-actually lands on depends on STMIK's `_np_zplus` semantics, which the project has not yet
-resolved — it is tracked as D8 in `docs/decisions.md`, with `_np_zinfo` named as the
-exposure. Phase 3 should settle it from live memory rather than from inference.
-What *is* certain: this wait is the only synchronisation before MNTSCRL on a full run,
-and on `SECOND 3` the equivalent effect is produced by restarting MUSIC1 at order 42.
+then leave it", which lines the full run's MUSIC1 up with the mountain scroller. How the
+player computes `_np_zplus` is `music-clock.md` §6. This wait is the only synchronisation
+before MNTSCRL on a full run; on `SECOND 3` the restart of MUSIC1 at order 42 does the same
+job (§3). The port's wait is §10.4.
 
 The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
 
@@ -332,17 +312,16 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
   (lines 929-932), then `jmp @@partsagain` (933). `fademusic` (lines 333-346) steps the
   module's **global-volume** byte `module[0x30]` — the S3M header's offset 0x30, **0x40** in
   both `MUSIC0.S3M` and `MUSIC1.S3M` — down by `cx` once a `dis_waitb` (`int 0fch` function 1,
-  line 340), and stores 0 when it is done: at `cx = 1` the fade is **64** frames. (This note
-  called it the tempo byte until Phase 9; it is not — the tempo is offset 0x32. Corrected in
-  Phase 9 Task 4; `audio.rs`'s `fade_music` and D41 already walk the global volume.)
-- **The port** (Phase 9 Task 4, D42): `--loop` is `looping` 1. `shell::run_plan` drops
+  line 340), and stores 0 when it is done: at `cx = 1` the fade is **64** frames. (The tempo
+  is offset 0x32, not this byte; the port's `audio::fade_music` walks the global volume, D41.)
+- **The port** (D42): `--loop` is `looping` 1. `shell::run_plan` drops
   ENDSCRL; when the plan runs out the shell's loop seam holds the last part's picture
   (CRED's on every block but U) for the 64 fade ticks (`EXIT_FADE_TICKS`), installs
   `LOOP_RESTART` (MUSIC0, order 0) at the fade's end, holds `LOOP_RELOAD_TICKS` = **11**
   more ticks — the original's 9093–9103, from its fade's end (9092) to ALKU's first frame
   `L` (9104), `reference-indices.md` §25.3 — and starts pass 2 at ALKU with block 1's plan
-  without ENDSCRL. The port's seam is 2 frames late against `C` (its CRED shows the closed
-  iris on two ticks before it retires; `tests/loop.rs` pins it). `/gravis` is `looping` 2:
+  without ENDSCRL. The seam's residuals against `reference/parts/loop` are `APPROXIMATIONS.md`
+  A61, pinned by `tests/loop.rs`. `/gravis` is `looping` 2:
   no ENDSCRL, then `@@partsdone` (§9).
 - `looping` is the setup menu's answer, read at lines 745-746 from `msg[6]`. `MENU.C:167-168`
   clamps the menu toggle to 0 or 1; the value **2** is set only by `/gravis`
@@ -355,17 +334,13 @@ The wait is skipped entirely if Ctrl is held down when the block-2 section ends.
 
 ## 8. What this file does not establish
 
-- **The shipped binary's bytes were not disassembled.** This is a transcription of the
-  source tree at `071a82e`. `reference/original/SECOND.EXE` is packed twice over
-  (LZEXE + FCPROT: `MAIN/MAKEFILE:36-37, 44`), so it yields no readable strings and no
-  filename table; confirming that the shipped build's runner matches this source would
-  require unpacking it, which was not attempted. The pack manifest at
-  `MAIN/PACKFINA.INC` does list exactly these 20 part EXEs plus the two helper programs,
-  which corroborates the *set* of parts but not the ordering code.
-- **`_np_zplus` / `_np_zinfo` semantics** (§6) — tracked as D8. Part 4 is no longer one of
-  its dependents: `BEG/` shipped (§1), so BEGLOGO calls no music service at all.
-- **The order-42 and order-25 correspondence** to where a full run's music actually is at
-  those moments is the evident intent of the code (§3); it is not measured here.
+**The shipped runner's bytes were not disassembled.** This is a transcription of the source
+tree at `071a82e`. `reference/original/SECOND.EXE` is packed twice over (LZEXE + FCPROT:
+`MAIN/MAKEFILE:36-37, 44`), so it yields no readable strings and no filename table, and it
+was not unpacked (the part EXEs are, D49; `release-images.md`). The pack manifest at
+`MAIN/PACKFINA.INC` lists exactly these 20 part EXEs plus the two helper programs, which
+corroborates the *set* of parts but not the ordering code. The full run's measured part
+boundaries (`reference-indices.md` §26.3) agree with the order in §1.
 
 ## 9. How the demo ends: `@@partsdone` and `fatalexit`
 
@@ -392,3 +367,132 @@ reached from `:921`, `:923` or `:925` (§7): Ctrl held, `looping` 0, or `looping
 D21's one-part skip, so a `--loop` run is left by closing the window, and the box is printed
 then (D42). `/gravis` (`looping` 2) reaches it after CRED, through the same exit stage as a
 `looping` 0 run reaches after ENDSCRL.
+
+## 10. Cross-part conventions
+
+The parts meet the shell at the same few seams, and every per-part note uses the four
+conventions below. Each is stated once, here; a note gives its own numbers and points here
+for the rule. The mechanism is in the items named, in `bins/secondreality/src/shell.rs` and
+`crates/sr-engine`.
+
+### 10.1 A mapping, not an anchor
+
+Every index under `reference/` is boot-relative (frame 0 is the emulator's first rendered
+frame). A part's own tick relates to that numbering in one of two ways.
+
+- **An anchor** is the measured reference index of the part's first drawn frame:
+  `shell::boot_anchor` returns it. Five parts have one: `alku`, `beglogo` and `endlogo` at
+  `FIRST_GRAPHICS_FRAME` (404), `pam` at `PAM_ANCHOR` (7710), `u2e` at `U2E_ANCHOR` (418).
+  A `--part` run of an anchored part, and a block run that begins at one, numbers its frames
+  in the reference's own numbering. Its manifest says `index_origin: "boot"` and
+  `anchor: N`, and `xtask compare` pairs its frames with the reference's indices directly.
+- **A mapping** is `boot = X + tick`, stated in the part's note and pinned there by its
+  keyframes or trace rows. A part has a mapping when the evidence bounds its start (a
+  window between a refusal and a probe, or a probe that finds the screen already up)
+  without naming the frame. `boot_anchor` stays `None`. A run numbers its own frames from
+  zero, the manifest says `index_origin: "part"` and `anchor: null`, and the part's tests
+  dump tick `K − X` to answer reference index `K`.
+
+"A mapping, not an anchor" in a note means the second case. A block that begins at a
+mapped part is part-numbered too: `--block 3` numbers from MNTSCRL's tick 0, which is boot
+419, so chain tick `t` is boot `419 + t`. Tests: `a_mid_block_part_has_no_anchor_and_says_so`
+(shell unit test), `a_dump_manifest_says_which_numbering_its_indices_are_in` and
+`a_block_three_run_starts_at_mntscrl_with_its_own_numbering` (`tests/shell.rs`).
+
+### 10.2 The music start, and the entry pre-roll
+
+**The run's player.** A run installs its player when it starts (`Engine::set_music`), placed
+by `MusicStart::for_part(first part, anchor)`:
+
+- The clock's first tick is at `BLOCK_ONE_MUSIC_START_FRAME` (400) for a plan that begins
+  at `alku`, `u2a` or `pam`. These parts run under the initial `_zplaysong(0)`
+  (`MAIN/U2.ASM:766-786`); `second1`'s first row change fits a start at 399.6
+  (`cargo xtask music analyse --trace reference/music/second1`). Every other entry is at
+  `MUSIC_START_FRAME` (408), the restart recipes' measured start (`music-clock.md` §2).
+- An anchor before the clock's start **waits** for it (`MusicStart::waiting`), and an
+  anchor after it **pre-polls** the frames it missed (`MusicStart::pre`). Block 2 and
+  block 5 draw from 404 and wait 4; block 1 draws from 404 and pre-polls 4; block 4 draws
+  from 418 and pre-polls 10; `--part pam` draws from 7710 and pre-polls 7,310
+  (`the_block_one_pre_roll_puts_the_player_at_the_traces_7710_position`). A part-numbered
+  run has no reference frame to synchronise to, so its music starts with it.
+- A pre-poll longer than the player's sample ring (`sr_audio::RING_SAMPLES`, about fourteen
+  polls) drops the ring's oldest samples. The position does not depend on the ring.
+
+**A part's entry pre-roll.** A mapped part whose keyframes need the music further on than
+the shell's seek leaves it polls the player `N` more times in its `init`. Its note
+measures `N`: MNTSCRL 11, LNS&ZOOM 490, PLZPART 8, TECHNO 253, MINVBALL 256, RAYSCRL 268,
+3DSINFLD 527, JPLOGO 483. PAM's open-gate `frame_count = 2` is the same kind of constant.
+
+**`N` is calibrated for an entry-point run.** It stands for a run whose player starts with
+the part: `--part X`, whose shell seeks to `shell::music_for_part`'s order, or a block that
+begins at `X`. A part reached mid-chain finds the player already where the reference's is,
+and `N` more polls would overshoot. `PartCtx::music_fresh` (D31 §1) tells the two apart.
+`Engine::set_music` arms it and the next `Engine::start` consumes it, so it is true only in
+the `init` of the first part after a player install. Every entry pre-roll polls only when
+it is true, and the part otherwise takes its source's own music gate. A mid-run restart
+(§10.3) installs a player, so the part it precedes is fresh too. Tests:
+`the_music_is_fresh_only_for_the_first_part_after_set_music` (engine), the parts' mid-chain
+unit tests (`a_mid_chain_start_does_not_pre_roll_the_music` in MNTSCRL, LNS&ZOOM, MINVBALL
+and RAYSCRL; PAM's `a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero`), and
+the block-3 chain test with the real player,
+`a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_roll`
+(`tests/shell.rs`).
+
+### 10.3 The block seams
+
+**The handover.** The port's parts hand over in one tick, with the surface and the player
+continuous. The loader's frames between two of the original's EXEs are not modelled (D31 §3,
+decided by `APPROXIMATIONS.md` A53). A part reached mid-chain therefore starts at a
+different boot index from the reference's, by an amount that differs from seam to seam:
+
+- **Chain tests pair by music.** The block-3 chain test asks for each keyframe at the
+  first chain tick whose published `(order, row)` is the trace's at `index + 419`. It
+  asserts the part, the geometry, the frame and that position, not pixel equality across a
+  seam.
+- **The full run's seams are one table.** `FULLRUN_SEAMS` (`xtask/src/rediff/table.rs`)
+  holds each block-1 part's first frame in the original and in the port.
+  `tests/fullrun.rs` asserts it, `cargo xtask rediff` derives every `fullrun/*` rendered
+  index from it, and A53 carries the residuals.
+
+**The mid-run restarts.** `MUSIC_RESTART_AT` holds the two `restartmus` sites a run crosses
+mid-chain (§3): `("glenz", Music1, 0)` at `MAIN/U2.ASM:813-818` and `("u2e", Music0, 18)` at
+`:880-885`. `Sequence::restart_music` installs a new player at the named part's boundary,
+under `MusicStart::restart`: no pre-poll, and `waiting` = `MUSIC_START_FRAME −
+FIRST_GRAPHICS_FRAME` = 4 (D34). The new player takes over the old one's channel state,
+which `_zplaysong`'s initialiser does not write (`Player::restart_from`, D45). The equality
+check skips a restart to the module and order already playing. The dump manifest's `music`
+records the last player installed, with the boundary as its `start_frame`.
+
+- **Block 1 at GLENZ.** GLENZ starts at 8,057 under the restarted MUSIC1, inside the
+  reference's restart interval (8,049, 8,100) (D38). GLENZ's music wait ends on `2:45` at
+  8,527, 6 frames after the reference's 8,521; that residual is A38
+  (`a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering`,
+  `the_block_one_run_restarts_music1_at_glenz`).
+- **Block 2 at GLENZ.** Block 2 already plays MUSIC1 from order 0 (§3), so it keeps its
+  player. GLENZ starts at 576 with `start_frame` still 408
+  (`a_block_two_run_reaches_glenz_without_reloading_music_one`,
+  `the_block_two_run_does_not_reload_at_glenz`).
+- **Blocks 1–3 at U2E.** In block 3, U2E starts at chain 17,418, nine ticks before the
+  17,427 that D34 derives from the block's mapping. The nine ticks are the accumulated
+  one-tick handovers, not the restart. The restarted player first publishes `18:1` at
+  17,440 and stays within one MUSIC0 row of `second3e` (`18:17` against `18:16` at 17,581,
+  `19:1` against `19:0` at 17,721), as the block-3 chain test asserts. Block 1's U2E seam
+  is a row of `FULLRUN_SEAMS`.
+
+### 10.4 The post-PANICEND cue wait
+
+§6 transcribes the original's wait. The port installs a private `CueWait` part in place of
+the next plan part when `PartStatus::Finished` retires `panicend`, and not when the exit flag
+retires it. The wait draws nothing and holds PANICEND's surface and picture. Each call is
+one `dis_waitb`, and the wait runs the two phases on the published `musplus`. It is
+exit-aware: an exit flag already set on PANICEND's last tick skips it (`@@skip5`). A plan
+that ends at `panicend` enters the wait and then the hold. `Sequence::part` still names
+`panicend` while the wait runs.
+
+**Calibration** (`reference/music/second2`, D38): PANICEND retires at boot 8,903 with
+`musplus` 19, so the first phase keeps waiting; 8,953 is the first negative (−32) and 9,219
+the first positive (1), the exit. Tests: `the_post_panicend_wait_ends_on_a_positive_musplus`,
+`the_post_panicend_wait_is_between_the_part_and_the_next_one`,
+`the_cue_wait_holds_the_screen`, `an_exit_on_panicends_last_tick_skips_the_cue_wait`. In the
+block-1 run the reference's wait exits at 16,630 (`second1e`, §3), and the port's
+PANICEND→MNTSCRL seam is a row of `FULLRUN_SEAMS`.

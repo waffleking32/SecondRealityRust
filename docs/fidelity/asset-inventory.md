@@ -1,27 +1,24 @@
 # Asset inventory — every asset the port's parts need, and what it is
 
-Task A1 of Phase 1. This is the list every later task draws its test fixtures and its loader
-work from: which files the 19 numbered parts (plus the hidden `DDSTARS`, the shell and the
-setup menu — 20 part EXEs in all) load, in what format, and whether the bytes exist as a
-standalone file or only inside a build blob.
+Which files the 19 numbered parts (plus the hidden `DDSTARS`, the shell and the setup menu —
+20 part EXEs in all) load, in what format, and whether the bytes exist as a standalone file or
+only inside a build blob. The port's loaders and asset tests are written against it.
 
-**Source of record** — `upstream/SecondReality` at `071a82e`. Two things name an asset, per
-the plan: the link inputs in a part's `MAKEFILE` (and the `.BAT`/`.LNK`/`.PRJ` equivalents
+**Source of record** — `upstream/SecondReality` at `071a82e`. Two things name an asset: the
+link inputs in a part's `MAKEFILE` (and the `.BAT`/`.LNK`/`.PRJ` equivalents
 where a part has no makefile) and the filenames its own `.C`/`.ASM`/`.PAS` mention. Every row
 below cites the line that names it. `MAIN/PACKFINA.INC:3-81` is the third source: it is what
 the shipped `SECOND.EXE` carries, and §C cross-checks the three against each other.
 
 **Format is decided by magic bytes, not by extension.** Where a file's leading bytes do not
 match what its extension suggests, the row says so and §E records it as a finding. The
-`0xFC…`/`UH`/`Uh` family's internal structure is established separately — the research report
-at `.superpowers/sdd/01-assets/a2-format-research-report.md`, which task A2's brief requires
-the implementer to read — so the rows below give each file's **literal leading bytes** and
-what its header says, and name no family variant. The two documents then cannot drift apart,
-and a file that fits no variant shows up here as literal bytes.
+`0xFC…`/`UH`/`Uh` family's variants are described by the decoder, `sr_assets::origin`'s module
+doc, so the rows below give each file's **literal leading bytes** and what its header says,
+and name no family variant; a file that fits no variant shows up here as literal bytes.
 
 **Curated copies** live in `assets/`, mirrored from upstream; `assets/PROVENANCE.md` carries
-their origin, digest and licence. Files whose bytes exist only inside a blob are the input to
-task A5, which recovers them; §D lists them.
+their origin, digest and licence. Files whose bytes exist only inside a blob are §A.2's and
+§D's.
 
 ---
 
@@ -38,57 +35,14 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | ALKU | `ALKU/FONA2.LBM` | 15268 | FORM | IFF PBM  (FORM .... PBM ) | standalone | second font strip (floor list) |
 | ALKU | `ALKU/HOI.U` | 128784 | FC FC | Origin raw PIC: 640x200, colours=256, pixels at paragraph 0x31 (784) | standalone | not the file that is linked: `ALKU/INCLUDE.ASM:7-12` assembles `INCLUDE 'hoi.in0'` + `'hoi.in1'` as the `PUBLIC` symbol `hzpic`, and those bytes differ from this file in three palette entries (§E.18) |
 | ALKU | `ALKU/HOI.LBM` | 33328 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of ALKU/HOI.U |
-| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2A.C:170) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | 8 bytes = two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2A.C:208-219) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.0AB` | 16081 | 20 EA D8 23 | 16081 bytes of binary data, no magic | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.001` | 8928 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.002` | 7684 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2A | `VISU/C/SCENE/U2A.003` | 2032 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2A.C:148 sprintf("%s.00M") and :150 readfile; object names at :178; the scene script at :206/:208; the animation names at :213/:215 |
-| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2E.C:214) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | 8 bytes = two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2E.C:252-263) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.0AB` | 77069 | 20 EB FD 78 | 77069 bytes of binary data, no magic | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.001` | 832 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.002` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.003` | 836 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.004` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.005` | 916 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.006` | 1292 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.007` | 1024 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.008` | 1260 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.009` | 4044 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.010` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.011` | 532 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.012` | 1404 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.013` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.014` | 564 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.015` | 800 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.016` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.017` | 1600 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.018` | 1432 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.019` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.020` | 756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.021` | 1760 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.022` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.023` | 12672 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.024` | 3704 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.025` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.026` | 1252 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.027` | 2212 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.028` | 8968 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.029` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.030` | 1756 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.031` | 448 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.032` | 1572 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.033` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.034` | 4092 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.035` | 1048 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.036` | 3696 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.037` | 2716 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.038` | 3356 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.039` | 1900 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.040` | 1116 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.041` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
-| U2E | `VISU/C/SCENE/U2E.042` | 796 | VERS | Visu object file: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | runtime scene data: U2E.C:208 sprintf("%s.00M") and :210 readfile; object names at :222; the scene script at :250/:252; the animation names at :257/:259 |
+| U2A | `VISU/C/SCENE/U2A.00M` | 796 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2A.C:170) | standalone | runtime scene data: `U2A.C:148` sprintf("%s.00M") and `:150` readfile; object names at `:178`; the scene script at `:206`/`:208`; the animation names at `:213`/`:215` |
+| U2A | `VISU/C/SCENE/U2A.0AA` | 8 | 01 00 00 00 | two 4-byte records of a u16 scene index and a u16 spare: index 1 (naming the .0AB scene) then the 0xFFFF end sentinel (the reader takes *ip and steps ip += 2 ints, VISU/C/U2A.C:208-219) | standalone | as `U2A.00M` |
+| U2A | `VISU/C/SCENE/U2A.0AB` | 16081 | 20 EA D8 23 | the animation stream, no magic | standalone | as `U2A.00M` |
+| U2A | `VISU/C/SCENE/U2A.001`–`.003` | 8928 / 7684 / 2032 | VERS | Visu object files: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | as `U2A.00M` |
+| U2E | `VISU/C/SCENE/U2E.00M` | 900 | 46 43 FC 1A | scene material file: 'FC' then a u32 material-table offset at offset 4 (read as LONGAT(scene0+4), VISU/C/U2E.C:214) | standalone | runtime scene data: `U2E.C:208` sprintf("%s.00M") and `:210` readfile; object names at `:222`; the scene script at `:250`/`:252`; the animation names at `:257`/`:259` |
+| U2E | `VISU/C/SCENE/U2E.0AA` | 8 | 01 00 00 00 | as `U2A.0AA` (the reader is VISU/C/U2E.C:252-263) | standalone | as `U2E.00M` |
+| U2E | `VISU/C/SCENE/U2E.0AB` | 77069 | 20 EB FD 78 | the animation stream, no magic | standalone | as `U2E.00M` |
+| U2E | `VISU/C/SCENE/U2E.001`–`.042` | 448–12,672 each (per file in `assets/PROVENANCE.md`) | VERS | 42 Visu object files: VERS / NAME / VERT chunks, u32 lengths (VISU/C.H's format) | standalone | as `U2E.00M` |
 | U2A | `VISU/C/SCENE/U2A.LBM` | 5916 | FORM | IFF ILBM (FORM .... ILBM) | standalone | scene bitmap: the material palette is copied out of the .00M at offset 16 (U2A.C:243), and the viewer reads .MAT/.PAL beside it (VISU/C/MAIN.C:225-239) |
 | U2A | `VISU/C/SCENE/U2A.MAT` | 304 | 3B 66 6F 72 | ASCII text | standalone | scene material list |
 | U2A | `VISU/C/SCENE/U2A.INF` | 19 | 66 6F 76 20 | ASCII text | standalone | scene info text |
@@ -106,7 +60,7 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | PAM | `PAM/OUT.IN4` | 179997 | 0A 09 64 62 | ASCII INCBIN fragment (\tdb ... lines), not the binary; it parses to the bytes of the file it replaces | standalone | linked: PAM/INCLUDE.ASM:26 INCLUDE 'out.in4' |
 | PAM | `PAM/OUT.ANI` | 324625 | 88 88 88 88 | the ANI delta stream PAM/ANIM.C's packframe() writes: no magic, frames back to back | standalone | the animation the OUT.IN* fragments carry |
 | PAM | `PAM/PAL.PAL` | 768 | 00 00 00 02 | 768 bytes, no magic: a VGA palette | standalone | runtime palette: PAM/ANIM.C:19 fopen("pal.pal"); PAM/PAL.INC is its INCBIN text |
-| PAM | `PAM/PRAX4.FLI` | 335476 | 74 1E 05 00 | Autodesk FLI animation: magic AF 11 at offset 4, 320x200; the first u32 is the file size | standalone | the FLI the animation was built from (task A6 reads it) |
+| PAM | `PAM/PRAX4.FLI` | 335476 | 74 1E 05 00 | Autodesk FLI animation: magic AF 11 at offset 4, 320x200; the first u32 is the file size | standalone | the FLI the animation was built from (`sr_assets::anim` reads it) |
 | BEGLOGO | `BEG/SRTITLE.UP` | 44575 | FD FC | Origin RLE PIC: 320x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: BEG/MAKEFILE:21 link ...+_pic.obk |
 | BEGLOGO | `BEG/SRTITLE.LBM` | 53254 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art of BEG/SRTITLE.UP |
 | GLENZ | `GLENZ/FC.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | linked: GLENZ/MAKEFILE:3 _fc.obk. **The part's picture**: the port reads `assets/GLENZ/FC.UH` through the **Uh1 reader** (`sr_assets::load_path`), its pixels as `fcrow`/`fcrow2` and its palette entries 0..15 as the part's `backpal` (`parts/glenz/mod.rs`) |
@@ -181,39 +135,39 @@ read directly, `blob-only` when the bytes exist only inside an `.OBK`/`.OBJ`/`.E
 | START | `START/HZPIC.P` | 60706 | FD FC | Origin RLE PIC: 640x400, colours=256, pixels at paragraph 0x31 (784) | standalone | linked: START/MAKEFILE:3 _hzpic.obj (built by START/DOHZ.BAT:1) |
 | START | `START/HZPIC.PAL` | 768 | 03 00 02 00 | 768 bytes, no magic: a VGA palette | standalone | the setup menu's palette (floor list) |
 | START | `START/HZPIC.LBM` | 59352 | FORM | IFF PBM  (FORM .... PBM ) | standalone | source art: START/DOHZ.BAT:1 lbm2p hzpic.lbm |
-| GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 320x200 canvas of 32-pixel cells on its first 160 rows, linked into nothing — dropped as a font strip by A7 (§E.14) (floor list) |
-| GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is Phase 8's vault part |
-| HARD | `HARD/FCRZ.U` | 64000 | `00 00 00 00` | 64000 bytes, no magic: an unheadered 320×200 screen. The effect's four `_dots*.tmp` streams are its build-time extraction, 40-row bands of `(value, 0, x-160, y-20)` records for `0 < value < 4` (`BDO.C:12-41`) | standalone | the effect's only asset: `HARD/BDO.C:34` reads `fcrz.u`; `B.EXE` links the four streams (`LINK.TMP:1-3`). Curated by Phase 8 Task 6 as `assets/HARD/FCRZ.U`; the port extracts the streams at run time |
+| GRAB | `GRAB/BLOWFNT.1BM` | 64000 | 00 00 00 00 | 64000 bytes, no magic: an unheadered 320x200 screen | standalone | a 320x200 canvas of 32-pixel cells on its first 160 rows, linked into nothing and not read as a font (§E.14) (floor list) |
+| GLENZ | `GLENZ/EYE4.UH` | 64784 | Uh1 00 | Origin Uh1 PIC: header says 320x200 = 64000 pixels, file is 64784 bytes as 16 + a 768-byte palette + 64000 pixels between them — the `colours` word is 0 and the palette is there all the same, §E.22 | standalone | the payload of GLENZ/_BGPIC.OBK (not on GLENZ/MAKEFILE:3's link line); GRID/_EYE.OBK carries the identical file, and GRID is a vault part |
+| HARD | `HARD/FCRZ.U` | 64000 | `00 00 00 00` | 64000 bytes, no magic: an unheadered 320×200 screen. The effect's four `_dots*.tmp` streams are its build-time extraction, 40-row bands of `(value, 0, x-160, y-20)` records for `0 < value < 4` (`BDO.C:12-41`) | standalone | the effect's only asset: `HARD/BDO.C:34` reads `fcrz.u`; `B.EXE` links the four streams (`LINK.TMP:1-3`). Curated as `assets/HARD/FCRZ.U`; the port extracts the streams at run time |
+| PLZPART | `PLZPART/PSINI.INC`, `LSINI4.INC`, `LSINI16.INC`, `SINIT.INC`, `PTAU.INC`, `SPLINE.INC`, `RATA.INC` | 84,992 / 42,496 / 42,496 / 10,616 / 525 / 9,493 / 1,926 | ASCII | the part's tables as source text, parsed at run time (D31 §2): assembler `db`/`dw` lines, and for `PTAU.INC` the C initialiser `PLZ.C:135-167` writes | standalone | included by `PLZPART/ASMYT.ASM:15-23` (`PSINI`, `LSINI4`, `LSINI16`), `INCLUDE.ASM:35` (`SINIT`) and `SPLINE.ASM:14-17` (`RATA`, `SPLINE`) (§F) |
+| all | `MAIN/DATA/<part>.EXE`: the 18 packed parts plus `START.EXE` and `STARTMUS.EXE` (20 files; sizes in `assets/PROVENANCE.md`) | — | MZ | the release's packed part EXEs: PKLITE over LZEXE 0.91, EXEPACK or nothing (`release-images.md`) | standalone | packed into `SECOND.EXE` by `MAIN/PACKFINA.INC:3-81`; `sr_assets::exe::unpack` reads them (D49). `U2A.EXE`/`U2E.EXE` are not curated (§F) |
 
-### A.2 Assets whose bytes exist only inside a build blob: one recovered, two answered
+### A.2 Assets whose bytes exist only inside a build blob
 
-Task A5 walked these three with its OMF `LEDATA` reader; **one of them is now recovered**, so this
-section is A5's result as much as A1's list. `bytes` is the size of the blob's `LEDATA` payload
-(measured, §D), not of the blob.
+Three blobs, read with the OMF `LEDATA` reader (`sr_assets::omf`); one is recovered as a
+standalone file. `bytes` is the size of the blob's `LEDATA` payload (measured, §D), not of the
+blob.
 
 | part | blob | payload bytes | magic | header / description | form | citation |
 |---|---|---|---|---|---|---|
-| TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | **recovered by A5** as `assets/TECHNO/CIRCLE2.EGA`: a 320×200 one-bit mask (8,000 = 320×200/8), byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes | recovered | linked: `TECHNO/MAKEFILE:6` and `:23` link it into `koe.exe`; it sits in the shipped image (`TECHNO/KOE.MAP:11`, `DATA__circle2` = 0x1F40 bytes) and `TECHNO/KOEA.ASM:665` reads it |
+| TECHNO | `TECHNO/_CIRCLE2.OBK` | 8000 | `FE 00 07 FF` | **recovered** as `assets/TECHNO/CIRCLE2.EGA`: a 320×200 one-bit mask (8,000 = 320×200/8), byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes | recovered | linked: `TECHNO/MAKEFILE:6` and `:23` link it into `koe.exe`; it sits in the shipped image (`TECHNO/KOE.MAP:11`, `DATA__circle2` = 0x1F40 bytes) and `TECHNO/KOEA.ASM:665` reads it |
 | TECHNO | `TECHNO/_PIC1.OBK` | 50000 | `FD FC` | Origin RLE container, 320×400 by its header, but the stream stops 119 bytes into row 282 — **281 of the 400 rows** (§E.13); the loader refuses it as truncation | blob-only | **not linked**: `TECHNO/MAKEFILE:7` comments `_pic1.obk _pic2.obk` out |
-| TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic; A5 measured it as `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859) | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
+| TECHNO | `TECHNO/_PIC2.OBK` | 20859 | `83 2E 2B 27` | no magic; it is `TECHNO/TROLL.UP`'s last 20,859 bytes, byte for byte (70,718 = 49,859 + 20,859) | blob-only | **not linked**: `TECHNO/MAKEFILE:7` |
 
 Every other blob in the tree whose payload is an asset has a standalone twin, and §A carries
 that twin's row; §D names the pairing. The exception is `ALKU/INCLUDE.OBJ`, whose payload
 differs from `ALKU/HOI.U` in three palette bytes (§E.18) — so this row's file is the curated
-copy and the linked bytes are the `.IN` text, not the other way round. `TECHNO/_CIRCLE.OBK`
-sat in this table until a reconstruction showed its payload **is** `DDSTARS/PIC.EGA` byte for
-byte (`c42cf0062e81fa19…`, 24,000 bytes each on both sides), so its twin's row is in §A like
-every other.
+copy and the linked bytes are the `.IN` text, not the other way round. `TECHNO/_CIRCLE.OBK`'s
+payload **is** `DDSTARS/PIC.EGA` byte for byte (24,000 bytes), so its twin's row is in §A.
 
-A5's walk covers **all 151 `.OBK`/`.OBJ` files**, not only the rows above; the pairs it found
-are §D's, and the three payloads that are not a standalone file are §D's table there. The one
-recovered file is the only entry in `assets/` with no upstream path (§G).
+The walk covers **all 151 `.OBK`/`.OBJ` files**, not only the rows above; the pairs it found
+are §D's, and so are the payloads that are not a standalone file. The one recovered file is the
+only entry in `assets/` with no upstream path (§G).
 
 ---
 
-## B. Spec §9's dedup list, verified
+## B. The design's dedup list, verified
 
-`sha256sum` over each claimed group. A claim that does not hold is corrected here and carried
+`sha256sum` over each group `docs/design.md` §9 claims. A claim that does not hold is corrected here and carried
 into §E as a finding.
 
 | # | §9 claims | sha256 verdict | what actually holds |
@@ -256,13 +210,11 @@ uncompressed while the table holds their packed size), and `MAIN/PACK.C:199-204`
 first two bytes of every entry whose name contains `EXE`, so the table is a name list first and
 a size list second.
 
-The manifest confirms the three-way agreement this inventory rests on:
-
-The 79 entries fall into exactly three groups, and they account for every one of them:
+The manifest confirms the three-way agreement this inventory rests on. The 79 entries fall into exactly three groups, and they account for every one of them:
 
 | manifest group | entries | agrees with |
 |---|---|---|
-| the 20 part EXEs (19 numbered + `DDSTARS`) and `START.EXE`, `STARTMUS.EXE` | 22 | `docs/fidelity/part-sequence.md` §1 (19 numbered parts + the hidden `DDSTARS`, slot 17 — §3: "19 numbered parts + 1 hidden = 20 part EXEs") |
+| the 20 part EXEs (19 numbered + `DDSTARS`) and `START.EXE`, `STARTMUS.EXE` | 22 | `docs/fidelity/part-sequence.md` §1 and §2 (19 numbered parts + the hidden `DDSTARS`, slot 17) |
 | `U2A.*` (6: `.00M`, `.0AA`, `.0AB`, `.001`–`.003`) and `U2E.*` (45: `.00M`, `.0AA`, `.0AB`, `.001`–`.042`) | 51 | the files §A lists under `VISU/C/SCENE` — byte-identical, §B.4 |
 | `O2.SCI`, `TROLL.UP`, `ENDSCROL.TXT`, `U2END.BIN` and the two text files | 6 | the four assets `SECOND.EXE` itself carries: `O2.SCI` (MNTSCRL, `FOREST/READ2.PAS:110`), `TROLL.UP` (TECHNO, `TECHNO/KOE.C:605`), `ENDSCROL.TXT` (ENDSCRL, `ENDSCRL/MAIN.C:101`), `U2END.BIN` (the shell's end screen, `MAIN/U2.ASM:506`). The remaining two are the distributor's text files, read by the setup program's copy-to-disk step (`MAIN/START.C:40,53`) and displayed by nothing; §F says why they are not copied |
 
@@ -280,8 +232,7 @@ Two consequences worth stating:
 
 ## D. Blobs: standalone file, or bytes that exist only in a build artifact
 
-Only A5's `LEDATA` recovery has to know this, but every row in §A depends on it, so it was
-measured rather than inferred.
+Every row in §A depends on this, so it was measured rather than inferred.
 
 Method: walk each `.OBK`/`.OBJ`'s OMF records (type byte, then a `u16` length), take the
 `LEDATA` (0xA0) payloads in record order, and reconstruct the segment. Each `LEDATA` payload
@@ -311,24 +262,24 @@ file **byte for byte** (`cmp`-identical):
 | `COMAN/_W1DTA.OBJ`, `_W2DTA.OBJ` | 65,536 | `W1DTA.BIN`, `W2DTA.BIN` | `COMAN/W1DTA.BIN`, `W2DTA.BIN` |
 | `COMAN/_W1DTA1/2.OBJ`, `_W2DTA1/2.OBJ` | 32,768 each | the two halves of the file | as `COMAN/DOOBJS.BAT:1-2,7-8` says (`getslice … 0 32768`, `32768 32768`) |
 
-**Blobs that hold bytes with no standalone twin** — three of them, the input to A5. The
-reconstruction is A1's; the descriptions are A5's, taken from the reconstructed payloads:
+**Blobs that hold bytes with no standalone twin** — three of them, described from the
+reconstructed payloads:
 
 | blob | payload | first bytes | what it is |
 |---|---|---|---|
-| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by `TECHNO/MAKEFILE:6`; a **320×200 one-bit mask** (8,000 = 320×200/8), not a picture: A5 measured it as byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes, and recovered it as `assets/TECHNO/CIRCLE2.EGA` |
+| `TECHNO/_CIRCLE2.OBK` | 8,000 | `FE 00 07 FF F0 00 1F FF` | linked by `TECHNO/MAKEFILE:6`; a **320×200 one-bit mask** (8,000 = 320×200/8), not a picture: byte-identical to what the generator at `DDSTARS/DOIT2.C:21-52` writes, and recovered as `assets/TECHNO/CIRCLE2.EGA` |
 | `TECHNO/_PIC1.OBK` | 50,000 | `FD FC 40 01 90 01` | an Origin RLE container, 320×400 by its header, that **does not hold a complete picture**: 281 of the 400 rows decode and the stream ends 119 bytes into row 282 (§E.13); **not** linked (the `#_pic1.obk _pic2.obk` line in `TECHNO/MAKEFILE:7` is commented out) |
-| `TECHNO/_PIC2.OBK` | 20,859 | `83 2E 2B 27` | no magic; A5 measured it as the last 20,859 bytes of `TECHNO/TROLL.UP`, byte for byte, so it carries a slice of an asset already curated; also not linked |
+| `TECHNO/_PIC2.OBK` | 20,859 | `83 2E 2B 27` | no magic; the last 20,859 bytes of `TECHNO/TROLL.UP`, byte for byte, so it carries a slice of an asset already curated; also not linked |
 
 `DDSTARS/PIC.EGA` and `DDSTARS/PIC2.EGA` are both outputs of the `DDSTARS/DOIT*.C` tools, and
 both are 24,000 and 8,000 bytes — the sizes of the two `_CIRCLE` payloads. The first **is**
 `_CIRCLE.OBK`'s stream byte for byte, so it is in `assets/` as that asset's standalone form
 (§A, `parts: TECHNO`); the second only looks as if it should be, and differs from
-`_CIRCLE2.OBK` in 7,162 of its 8,000 bytes (A5 confirmed both counts). Size is not evidence:
-hash both sides. A5 also settled which side of that pair is the stale one: `_CIRCLE2.OBK`'s
-payload is exactly what the `DOIT2.C` in the tree generates, and `DDSTARS/PIC2.EGA` is not.
+`_CIRCLE2.OBK` in 7,162 of its 8,000 bytes. Size is not evidence: hash both sides.
+`_CIRCLE2.OBK`'s payload is exactly what the `DOIT2.C` in the tree generates, so
+`DDSTARS/PIC2.EGA` is the stale one.
 
-**A5's verification of this section.** `tests/omf.rs` reconstructs every row of the first table
+**Verification.** `crates/sr-assets/tests/omf.rs` reconstructs every row of the first table
 above and asserts byte equality with the named file, plus the four `COMAN` half-blobs against
 the slices `COMAN/DOOBJS.BAT:1-2,7-8` cuts; all hold. The same walk over **all 151 `.OBK`/`.OBJ`
 files** (not only the rows above) found thirteen pairs beyond this table, the same relation on
@@ -338,8 +289,8 @@ files §A lists as standalone: `FOREST/HILLBACK.OBJ`→`HILLBACK.CLX`,
 `WATER/BKG.OBJ`→`BKG.CLX`, `WATER/MIEKKA.OBJ`→`MIEKKA.SCI` and `WATER/WAT1–4.OBJ`→`WAT1–4.DAT`
 — **35 blobs reconstruct a standalone file byte-for-byte in all.**
 
-The walk also found that **not every blob payload is a standalone file**, and A5 records each
-case rather than smoothing it over — three of them, four blobs:
+The walk also found that **not every blob payload is a standalone file** — three cases, four
+blobs:
 
 | payload | what it is | where |
 |---|---|---|
@@ -348,7 +299,7 @@ case rather than smoothing it over — three of them, four blobs:
 | `CREDITS/INCLUDE.OBJ`, `CREDITS/INCLUD2.OBJ` | 12 and 9 raw `FC FC` 160×100 pictures at a 16,784-byte stride (plus the credits font in the first); no file in the tree holds those pictures' bytes | §E.20 |
 
 Of the blobs the shipped parts link, four payloads are asset data that is not a standalone
-file: the three in the table above, plus `TECHNO/_CIRCLE2.OBK`, which A5 recovered (§A.2).
+file: the three in the table above, plus `TECHNO/_CIRCLE2.OBK`, which is recovered (§A.2).
 Everything else a part links reproduces a standalone file byte for byte. (`TECHNO/_PIC1.OBK`
 and `_PIC2.OBK` are not linked at all.)
 
@@ -356,7 +307,7 @@ and `_PIC2.OBK` are not linked at all.)
 
 ## E. Findings
 
-Each of these is something a later task must know before it writes a loader or a test.
+Each of these is a fact a loader or a test depends on.
 
 1. **`PANIC/MONSTER.U`, `LENS/LENS.U` and `GRAB/BLOWFNT.1BM` are 64,000 bytes with no header
    at all** (first four bytes `00 00 00 00`). A 320×200 screen of one byte per pixel,
@@ -367,8 +318,7 @@ Each of these is something a later task must know before it writes a loader or a
    64,000, a complete 320×200 byte-per-pixel image; `COMBG.UH` carries 32,752 bytes after its
    header where the header implies 64,000, i.e. 102 whole 320-byte rows plus a 112-byte stub.
    **A loader that trusts the header must refuse it** (`Truncated`), and it must not be
-   "repaired": the copy in `assets/` is the file as it shipped. Four further measured facts,
-   because a later task will otherwise trip on them:
+   "repaired": the copy in `assets/` is the file as it shipped. Four further measured facts:
    - `COMAN/COMBG.LBM` is the 320×**90** source: its `BMHD` reads `w=320 h=90`, and its decoded
      pixels equal `COMBG.X[16 : 16+28800]` exactly. `COMBG.X`'s remaining 35,200 pixel bytes
      (rows 90–199) are all zero, so the truncation is not visible in the picture either file
@@ -380,15 +330,11 @@ Each of these is something a later task must know before it writes a loader or a
      either file.
    - The palette read (`COMAN/MAIN.C:163`) takes `combg[736..783]`, and those bytes — along
      with the whole 768-byte palette region at offset 16 — are **zero** in both files. The
-     part therefore sets 16 black entries. A fidelity question for Phase 5, not a decode
-     failure.
+     part therefore sets 16 black entries — a fact about the part, not a decode failure.
    - Both files' `add` field (bytes 8–9) is 0, unlike the `0x31` the other shipped files in
      this family carry, so "pixels at 16" for these two rests on the file size and on the
      writer the archive implies, not on the header. The `55 48 01 00` magic alone does not say
      where the pixels start.
-
-   The independent research report reaches the same conclusion at its §"outlier 2"; these
-   numbers were measured separately, from the files.
 3. **`VISU/C/SCENE/U2ABG.UH`, `GLENZ/FC.UH`, `LENS/LENS.EXB`, `GLENZ/EYE4.UH` and
    `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH` start `55 68 31 00` (`Uh1\0`)** — a different magic from
    `COMBG.*`'s `55 48 01 00` (`UH\1\0`) — and are 64,784 bytes for 64,000 pixels: 784 bytes of
@@ -397,9 +343,9 @@ Each of these is something a later task must know before it writes a loader or a
    payload for 64,000 pixels** — four bits per pixel, so the `.16` extension tells the truth
    and the `0xFC…` family does not have one palette size. Header: 320×200, colours=16, pixels
    at paragraph 4 (offset 64 = 16 + 48).
-5. **`PAM/PRAX4.FLI`'s magic is `AF 11`, not `AF 12`.** A classic Autodesk FLI (the plan for
-   task A6 says `0xAF12`): the first `u32` is the file size (0x00051E74 = 335,476) and the
-   magic sits at offset 4, followed by 320×200 at offsets 8 and 10. A6 must accept `AF 11`.
+5. **`PAM/PRAX4.FLI`'s magic is `AF 11`, not `AF 12`.** A classic Autodesk FLI: the first
+   `u32` is the file size (0x00051E74 = 335,476) and the magic sits at offset 4, followed by
+   320×200 at offsets 8 and 10. `sr_assets::anim` accepts `AF 11`.
 6. **`START/HZPIC.P` is the one file in this family that declares 640×400** (the others are
    320×200, 320×400, 640×200 or 1500×30) — and the reason `START/HZPIC.PAL` sits beside it as
    a separate file.
@@ -419,11 +365,10 @@ Each of these is something a later task must know before it writes a loader or a
    text. Both are in `assets/`, both are cited, and the port must use the second.
 10. **Two builds of part 4 exist, and `assets/` holds `BEG/`'s — which is the one that
     shipped.** `ENDPIC/MAKEFILE:22` stages `beg.exe` as `beglogo.exe`, the same target name as
-    `BEG/MAKEFILE:21`, so which directory built part 4 was open here; Phase 2 settled it and it is
-    `BEG/` (`docs/fidelity/beglogo.md` §1, and part-sequence §1's build note): the reference's held
-    frame 900 probes palette entries that `BEG/SRTITLE.UP`'s palette matches and
-    `ENDPIC/SRTITLE.U`'s matches none of, and `SRTITLE.UP` decodes to that frame's indices exactly.
-    `BEG/`'s files are therefore the ones copied — and they are what the floor list names.
+    `BEG/MAKEFILE:21`. `BEG/` is the build that shipped (`docs/fidelity/beglogo.md` §1 measures
+    it), so `BEG/`'s files are the ones copied — and they are what the floor list names. The two
+    builds carry two different title pictures, not two packings of one: decoded, `BEG/SRTITLE.UP`
+    and `ENDPIC/SRTITLE.U` differ in 126,261 of 128,000 pixels and 255 of 256 palette entries.
     `ENDPIC/`'s are not, because its picture files are `SRTITLE.U` (unique to it, 6,936 bytes, and
     the payload of its `_PIC.OBK`) plus `PIC.UH`/`PIC.LBM`, which are byte-identical to
     `JPLOGO/`'s unused copies — copying the directory as a set would put three duplicate files in
@@ -433,14 +378,14 @@ Each of these is something a later task must know before it writes a loader or a
     (`MAIN/U2.ASM:511-535`, called at `:974`) reads exactly 4,000 bytes into a `getmem` block
     and `rep movsd`s them to the text page at `0xB8000`. 4,000 = 80 × 25 × 2, i.e. one text-mode
     page of (character, attribute) cells, and the first cell is `DA 08` — CP437 `┌` in dark
-    grey. So: **no magic, no header, 80×25 CP437 text-mode cells, which the port's ending
-    needs as a font-and-attributes image**, not as a bitmap.
+    grey. So: **no magic, no header, 80×25 CP437 text-mode cells**, not a bitmap; the port
+    prints it to the launching terminal at the end of a run (D41).
 12. **`MAIN/DATA/FCINFO10.TXT` and `MAIN/DATA/README.1ST` are packed but shown by nothing.**
     The setup program reads both and writes them back out (`MAIN/START.C:40,53`), a
     copy-to-disk step whose `fwrite` passes the already-closed `f1`, so even that write does
     nothing. They are the distributor's text files; the port has its own, so they are not in
     `assets/`.
-13. **The two unlinked TECHNO blobs are build residue, and A5 measured why.** `_PIC1.OBK`
+13. **The two unlinked TECHNO blobs are build residue.** `_PIC1.OBK`
     holds an Origin RLE *container* — 320×400, 256 colours by its header — that is not a
     complete picture: the stream holds **281 of the 400 rows** and ends 119 bytes into row
     282 (its payload is exactly 50,000 bytes, so the cut is slice-shaped, not a full write).
@@ -455,12 +400,11 @@ Each of these is something a later task must know before it writes a loader or a
     cells with the rules drawn between them — columns 31 + 32k inked in every row of 0..159,
     rows 31 + 32k filling the canvas, glyphs `A`, `B`, `C`, `D`, … in the 50 cells — and the
     canvas's last 40 rows hold nothing at all, so even that grid does not tile the file.
-    **A7 dropped it as a font strip**: no part links its glyph rows (no `.OBJ` or `.EXE` in
+    **It is not read as a font strip**: no part links its glyph rows (no `.OBJ` or `.EXE` in
     either tree contains any of them) and no part opens a `.1bm` — the extension is named
     once in all of `upstream/`, in a tool's comment (`GRAB/GFXSAVE.H:5`) — so no part's text
-    routine states what its cell is, and reading it as a font would be inventing the grid
-    (`.superpowers/sdd/01-assets/task-A7-report.md`). It stays in `assets/` as a floor file;
-    `sr_assets::raw_surface` is its door.
+    routine states what its cell is, and reading it as a font would be inventing the grid.
+    It stays in `assets/` as a floor file; `sr_assets::raw_surface` is its door.
 15. **`LENS/LENS.EXP` has a one-word header**: `u16 0` at offset 0 then a `u16` count at
     offset 2, which is what `LENS/MAIN.C:296-298` reads (`*(int *)(lensexp+2)`). It is data
     the part generates (`LENS/MAIN.C:374` writes it) as well as data it links, so the copy in
@@ -494,14 +438,14 @@ Each of these is something a later task must know before it writes a loader or a
     blits it into the EGA planes. Its bytes are exactly what the generator at
     `DDSTARS/DOIT2.C:21-52` writes — which
     is why the recovered file is named after the linker symbol, not after `DDSTARS/PIC2.EGA`,
-    the stale file of that name that differs from it in 7,162 of 8,000 bytes. A later TECHNO
-    task therefore needs a 1-bpp mask path, not the 8-bpp `raw_surface`; `assets/PROVENANCE.md`
-    carries the file's origin as a blob and its records.
+    the stale file of that name that differs from it in 7,162 of 8,000 bytes. TECHNO reads it
+    as EGA planes (`parts/techno`'s `CIRCLE2_PATH`), not through the 8-bpp `raw_surface`;
+    `assets/PROVENANCE.md` carries the file's origin as a blob and its records.
 18. **`ALKU`'s shipped palette is not the curated `HOI.U`'s: the linked hzpic's entries 1–3 are
     three brightened greys — two of which occur at no index of `HOI.LBM`'s `CMAP` at all.**
     This is the tree's only *linked* payload whose bytes differ by content from the curated
-    copy of the same art (the other divergence §D names, `WATER/MIEK.OBJ`, is unlinked), and
-    it is A5's, found by comparing the reconstruction with the `.IN` text. `ALKU/INCLUDE.OBJ`'s
+    copy of the same art (the other divergence §D names, `WATER/MIEK.OBJ`, is unlinked); it was
+    found by comparing the reconstruction with the `.IN` text. `ALKU/INCLUDE.OBJ`'s
     payload (173,786 bytes) is `decode(HOI.IN0)` (65,535) + `decode(HOI.IN1)` (63,250) +
     `decode(FONA.INC)` (45,001) byte for byte; `ALKU/INCLUDE.ASM:7-12` assembles those
     fragments as the `PUBLIC` symbol `hzpic`. (`decode(HOI.IN0)+decode(HOI.IN1)` is one byte
@@ -520,9 +464,9 @@ Each of these is something a later task must know before it writes a loader or a
     index of that `CMAP ÷ 4` at all**, and the shipped `(63, 63, 63)` occurs only as the ramp's
     saturated white (indices 64–254), not at index 3 — so the shipped palette cannot be
     reproduced by re-quantising `HOI.LBM`, only by reading the `.IN` text (or the 9 bytes
-    above). Which of the two an ALKU port should draw is a Phase 2 decision that needs
-    `ALKU`'s own loader read; **A5 does not curate `HOI.IN0`/`HOI.IN1`**, and this table is the
-    record so the values do not have to be re-derived.
+    above). The port draws the shipped bytes: ALKU patches entries 1–3 over `HOI.U`'s
+    (`parts/alku.rs`, `alku.md`). `HOI.IN0`/`HOI.IN1` are not curated, so this table is the
+    record of the nine bytes.
 19. **`WATER/MIEK.OBJ` is `MIEKKA.SCI` with one byte changed, and it is not the linked file.**
     Its payload is 14,778 bytes, identical to `WATER/MIEKKA.SCI` except at offset 2,563
     (`0x54` against `MIEKKA.SCI`'s `0x00`, i.e. one pixel byte in row 4 of the RIX3 payload).
@@ -540,8 +484,8 @@ Each of these is something a later task must know before it writes a loader or a
     21 pictures' bytes**: the `.UH` files `CREDITS/UNPACK.BAT:1-22` names do not exist in the
     tree (only the `.LBM` source art does), and the `picNN.inc` intermediates are not built
     either. So these are the only pictures in the shipment whose container bytes exist nowhere
-    but in the blobs — a fact for Phase 7 (CREDITS), which is the part that would need them;
-    A5 records it and recovers nothing.
+    but in the blobs; nothing is recovered, and CRED decodes the `.LBM` source art, whose
+    rasters are those bytes.
 21. **PAM's animation is 42 frames in both of its containers, and the FLI's header word says 41.**
     `PAM/PRAX4.FLI` carries 41 at offset 6 (`29 00`) and the record chain after its 128-byte
     header holds **42** `0xF1FA` frame records — one `0x000F` byte-run key frame plus 41 `0x000C`
@@ -557,14 +501,11 @@ Each of these is something a later task must know before it writes a loader or a
     decodes to the FLI's 42 frames byte for byte; each of its frames is a delta from the frame
     **two** back and never from the one before, because `PAM/OUTTAA.C:51-60` double-buffers two
     screen pages (`ulosta_frame(0x0a000)`/`tw_setstart(0)` alternating with `0x0a400`/`16384`).
-    Task A6's decoders assert all 42 pairs; this finding is the record so Phase 4 does not have
-    to re-derive it.
+    `crates/sr-assets/tests/anim.rs` asserts all 42 pairs.
 22. **The `Uh1` files carry a palette, and their own `colours` word says they do not.** Four
     curated files start `55 68 31 00` — `VISU/C/U2ABG.UH`, `GLENZ/FC.UH`, `GLENZ/EYE4.UH`,
-    `LENS/LENS.EXB` (and `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH`, the same file) — and §A's rows for
-    them said "(no palette in the file)". **That parenthetical is wrong**, and this is the
-    measurement that says so; the four rows have been corrected to point here. A8 found it by
-    looking at the sheet this tree's own decoder draws.
+    `LENS/LENS.EXB` (and `ENDPIC/PIC.UH` ≡ `JPLOGO/PIC.UH`, the same file) — and every one of
+    them carries a 768-byte palette, although the header's `colours` word is 0.
     - The bytes: words 0..7 are `6855 0031 0140 00c8 0000 0000 0000 0000` — magic `Uh`, word 1
       = 0x31 = 49, 320×200, then four zero words. Offsets 16..784 hold **768 bytes of palette**,
       252–255 of whose 256 entries are non-black, and the pixels run from 49×16 = **784** to the
@@ -581,32 +522,31 @@ Each of these is something a later task must know before it writes a loader or a
       `VISU/C/U2ABG.UH: Origin PIC 320x200, palette: 252 of 256 entries set` (254 and 255 for
       the two GLENZ files, 255 for LENS.EXB) — where a palette-less file prints `palette: none
       set in the file`.
-    - The sheet agrees: A8's `out/assets/GLENZ.png` draws `GLENZ/EYE4.UH` as the blue eye the
-      file is named for, and `LNS&ZOOM.png` draws `LENS/LENS.EXB` as the bald lens head.
-      `GLENZ/FC.UH`, `LENS/LENS.EXB` and `VISU/C/U2ABG.UH` each have their `.LBM` source art
-      beside them in `assets/`, drawn through its own `CMAP`, and the sheets show the pairs
-      agreeing.
+    - The pictures agree: `cargo xtask assets verify --sheet`'s contact sheets draw `GLENZ/EYE4.UH` as
+      the blue eye the file is named for and `LENS/LENS.EXB` as the bald lens head, and
+      `GLENZ/FC.UH`, `LENS/LENS.EXB` and `VISU/C/U2ABG.UH` agree with their `.LBM` source art,
+      drawn through its own `CMAP`.
 23. **One credits picture is the original's own placeholder, and it ships that way.**
     `CREDITS/PICS/PIC02.LBM` (7,000 bytes, IFF `ILBM`, 160×100, palette 48 of 256 entries set)
     decodes to a black frame hand-lettered in red and blue: **"PART-PIC MISSING (PXL SUX)"** —
     the authors' card for a picture that was never drawn. Nothing is wrong with the file or with
     the decoder: §E.20 measures each credits picture's blob payload as byte-identical to the
     matching `.LBM`'s decoded pixels (all 21), so the shipped credits really did show that card.
-    Recorded because "the picture looks wrong" is otherwise the obvious reading of it, and a
-    later CREDITS task must not "repair" it.
+    Recorded because "the picture looks wrong" is otherwise the obvious reading of it; the port
+    must not "repair" it.
 
 ---
 
 ## F. Files present upstream but not copied, and why
 
-The tree is large and most of it is not media. Recorded so that no later task has to wonder
-whether a file was missed.
+The tree is large and most of it is not media. Recorded so that a file left out is not
+mistaken for one missed.
 
 | what | why it is not in `assets/` |
 |---|---|
-| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts. `.OBK`/`.OBJ` are the *containers* A5 reads; the assets inside them are already in `assets/` as standalone files, except the three rows in §D with no standalone twin — A5 recovered one of those as a standalone file (`assets/TECHNO/CIRCLE2.EGA`) and the other two are unlinked residue |
+| `.EXE`, `.OBJ`, `.OBK`, `.LIB`, `.TPU`, `.MAP`, `.LST`, `.DSK`, `.PRJ` | build artifacts, except the release's part EXEs in `MAIN/DATA` (§A, D49). `.OBK`/`.OBJ` are the *containers* `sr_assets::omf` reads; the assets inside them are already in `assets/` as standalone files, except the three rows in §D with no standalone twin — one is recovered as a standalone file (`assets/TECHNO/CIRCLE2.EGA`) and the other two are unlinked residue |
 | `.C`, `.ASM`, `.PAS`, `.H`, `.INC`, `.BBK`, `.CUT`, `.PRE`, `.TPU`, `.LIB` | source and source-data fragments. The `INCBIN` fragments (`FONA.INC`, `PAL.INC`, the `picNN.inc` intermediate) are ASCII text of a binary that is in `assets/`; the port reads the binary |
-| `ALKU/HOI.IN0`, `HOI.IN1` | the `INCBIN` text of `ALKU/HOI.U`, which is in `assets/`; the binary is what the port reads. **`PAM/OUT.IN0`–`OUT.IN4` are the exception and are copied** — task A6's plan names them, and they are PAM's shipped data rather than a redundant text form (§A) |
+| `ALKU/HOI.IN0`, `HOI.IN1` | the `INCBIN` text of `ALKU/HOI.U`, which is in `assets/`; the binary is what the port reads. **`PAM/OUT.IN0`–`OUT.IN4` are the exception and are copied** — they are PAM's shipped data rather than a redundant text form (§A) |
 | `ALKU/HOIKKA.LBM`, `ALKU/PIC001.LBM`, `ALKU/RYPPIS.LBM`, `ALKU/U2-MOVIE.LBM` | working pictures in ALKU's directory that no ALKU source, makefile or project file names |
 | `GLENZ/PIC001.LBM`, `GLENZ/PIC002.LBM`, `GLENZ/FCX.LBM`, `GLENZ/FC.BBK`, `GLENZ/EDGE.*`, `GLENZ/NEW.*`, `GLENZ/VEC.*` | GLENZ's working files and the EDGE tool's sources; none is linked or loaded |
 | `GLENZ/_BGPIC.OBK` | an unused blob whose payload is `GLENZ/EYE4.UH`, the file next to it in `assets/` — nothing is lost by not copying the blob |
@@ -614,58 +554,42 @@ whether a file was missed.
 | `WATER/SWORD.SCI`, `WATER/RAY.SCI`, `WATER/GREEN.CLX`, `WATER/TAUSTA.LBM`, `WATER/FINAL*.LBM`, `WATER/*.LBM`, `WATER/DATA.*`, `WATER/MASK.MTV`, `WATER/WAT4.DAT`, `WATER/*.PAS`, `*.TPU` | the shipped part links `bkg.obj` (`BKR.PAS:2`), `miekka.obj` (`MIEK.PAS:2`) and `wat1..3.obj` (`T1/T2/T3.PAS:2`). `WAT4.DAT` is linked only by `T4.PAS`, which the shipped `DEMO.PAS:1` does not `uses` |
 | `TUNNELI/COLORS.CLX`, `TUNNELI/TUNNELI.OBJ`, `TUNNELI/*.PAS` (the generators) | `COLORS.CLX` is a 320×200 RIX3 screen that no TUNNELI source names (checked across every `.PAS`, `.ASM` and the project files); `TUNNEL.DAT` and `SINIT.DAT` are the linked data |
 | `LENS/G2.UH`, `LENS/MONSTER.LBM`, `LENS/LENS.LBM`, `LENS/LENSPIC1.LBM`, `LENS/LENSPICX.LBM` | not named by `LENS/MAIN.C`, `LENS/ASM.ASM`, `LENS/MAKEFILE` or `LENS/DOOBJS.BAT` |
-| `PLZPART/*` **except the seven copied fragments** | the part's media *is* seven `.INC` data fragments, and Task 4 copies them verbatim as the part's tables: `PSINI.INC`, `LSINI4.INC`, `LSINI16.INC`, `SINIT.INC`, `PTAU.INC`, `SPLINE.INC`, `RATA.INC` (`assets/PLZPART/`, provenance rows in `assets/PROVENANCE.md`). They are the part's data, not source: `ASMYT.ASM`/`INCLUDE.ASM`/`SPLINE.ASM` only link them. `TILE.INC` and `TILEPAL.INC` are **not** copied: `PLZPART/PLZPART.PRJ` names the seven fragments and neither of those two, and no shipped source includes them |
+| `PLZPART/*` **except the seven copied fragments** | the part's media *is* seven `.INC` data fragments, copied verbatim as the part's tables (§A, D31 §2): `PSINI.INC`, `LSINI4.INC`, `LSINI16.INC`, `SINIT.INC`, `PTAU.INC`, `SPLINE.INC`, `RATA.INC` (`assets/PLZPART/`, provenance rows in `assets/PROVENANCE.md`). They are the part's data, not source: `ASMYT.ASM`/`INCLUDE.ASM`/`SPLINE.ASM` only include them (`PTAU.INC` is what `PLZ.C:135-167` writes). `TILE.INC` and `TILEPAL.INC` are **not** copied: no shipped source includes them |
 | `DOTS/*` | none: `DOTS/ASM.ASM:243` includes `face.inc`, which `DOTS/MAKEFILE:5-7` regenerates from `FACE.C` at build time, and `SIN1024.INC` is a source fragment |
 | `CREDITS/TEST.LBM`, `CREDITS/TEST.INC` | a test picture and its fragment; neither is included by `CREDITS/INCLUDE.ASM` or `INCLUD2.ASM` |
 | `CREDITS/PICS/PIC19.*` (absent), `CREDITS/UNPACK.BAT:22` | the batch file names `PICS\PIC19.UH`, which does not exist in the tree, and no `INCLUDE` uses `pic19.inc`. A dead line in a build script, not a missing asset |
 | `DDSTARS/PIC2.EGA`, `DDSTARS/*.C` (the `DOIT` tools), `DDSTARS/TEST/` | outputs of the `DOIT*.C` tools, not inputs to the shipped part (`DDSTARS/MAKEFILE:2` links only `_textpic.obk` and `koe.obj`). `DDSTARS/PIC.EGA` is copied after all: it is `TECHNO/_CIRCLE.OBK`'s payload byte for byte, so the port needs it as TECHNO's data (§D) |
 | `ENDPIC/*` | the alternate build of part 4 — §E.10 |
-| `MAIN/DATA/*.EXE`, `MAIN/DISTR/*`, `MAIN/PROT/*`, `MAIN/TT.*`, `MAIN/U2*.BBK` | the pack's staged part binaries, the distributor's text files (`FCINFO10.TXT`, `README.1ST`, both cited in §C) and the protection tool's data |
+| `MAIN/DATA/U2A.EXE`, `MAIN/DATA/U2E.EXE`, `MAIN/DISTR/*`, `MAIN/PROT/*`, `MAIN/TT.*`, `MAIN/U2*.BBK` | the two unpacked vector-part builds, which are not the release's (D12; the other staged EXEs are curated, §A), the distributor's text files (`FCINFO10.TXT`, `README.1ST`, both cited in §C) and the protection tool's data |
 | `MAIN/DATA/REALITY.FC` | the shipped music container: an 8-word header (patched by `MAIN/PACK.C:56-63`) followed by `MUSIC0.S3M` and `MUSIC1.S3M` verbatim. Both modules are in `assets/`; the container itself is not, because the port plays the modules (decision D5, `reference/original/PROVENANCE.md`) |
 | `MAIN/PACKING.INC`, `MAIN/PACKING.INB`, `MAIN/PACKFINA.INC` | the pack manifest, cited in §C but not media |
-| `GRID/*`, `HARD/*` except `FCRZ.U`, `TWIST/*` | the three unreleased development effects, which are Phase 8's (task B5's note, `docs/plans/01-assets.md`) and are not in `SECOND.EXE`'s manifest. `GRID/_EYE.OBK` embeds the identical bytes to `assets/GLENZ/EYE4.UH`, which is that pair's canonical copy (§B); TWIST's texture is the shipped `TWSTLOOP.INC` fragment. HARD's only runtime asset, `HARD/FCRZ.U`, is curated (§A, Phase 8 Task 6); the rest of `HARD/` is source, working art and the EXEs |
+| `GRID/*`, `HARD/*` except `FCRZ.U`, `TWIST/*` | the three unreleased development effects (the vault, D39), which are not in `SECOND.EXE`'s manifest. `GRID/_EYE.OBK` embeds the identical bytes to `assets/GLENZ/EYE4.UH`, which is that pair's canonical copy (§B); TWIST's texture is the shipped `TWSTLOOP.INC` fragment. HARD's only runtime asset, `HARD/FCRZ.U`, is curated (§A); the rest of `HARD/` is source, working art and the EXEs |
 | `3DS/*`, `PICS/*`, `UTIL/*`, `FCP/*`, `CODE/*`, `SCRIPT/*`, `DESIGN/*`, `IDEAS/*` | the party's tool, design and source directories: inputs to the original's own toolchain, not to the demo |
 
 ---
 
 ## G. How the curated tree stays honest
 
-`assets/` is a copy, so it can be checked:
+`assets/` is a copy, so it can be checked. Every file in `assets/` has a path that exists
+upstream, its own path with `assets/` replaced by `upstream/SecondReality/`, except the one
+recovered from a blob (`TECHNO/CIRCLE2.EGA`, §A.2), whose origin is a record in
+`assets/PROVENANCE.md`.
 
-```sh
-cd /home/ew/workspace/reality/SecondRealityRust
-for f in $(find assets -type f ! -name PROVENANCE.md); do
-  up="upstream/SecondReality/${f#assets/}"
-  # The one recovered file (A5) has no upstream path; PROVENANCE.md carries its origin.
-  [ -f "$up" ] || { echo "RECOVERED: $f"; continue; }
-  cmp -s "$f" "$up" || echo "DIFFERS: $f vs $up"
-done
-echo "checked $(find assets -type f ! -name PROVENANCE.md | wc -l) files"
-```
+`cargo xtask assets verify --tree` re-hashes every file against that record's `sha256` and
+`bytes` columns, and reports a recorded file that is missing, a file that has no row, and a
+digest that does not match. On this tree it exits **0** with
+`tree: 179 file(s) recorded, 179 in the tree, 0 finding(s)`.
 
-Every file in `assets/` has a path that exists upstream — **except the one task A5 recovered
-from a blob**, whose origin is a record, not a path — which is what makes the loop one line
-plus that guard. As of the review-fix commit the loop printed no `DIFFERS` lines and
-`checked 149 files`; as of A5 it prints one `RECOVERED: assets/TECHNO/CIRCLE2.EGA`, still no
-`DIFFERS` lines, and `checked 150 files`.
-
-A8 made the loop a command: `cargo xtask assets verify --tree` re-hashes all 150 files against
-the record's own digests (the `sha256` column, and the `bytes` column beside it), reports a
-recorded file that is missing, a file that has no row, and a digest that does not match, and
-exits **0** on this tree with `150 file(s) recorded, 150 in the tree, 0 finding(s)`. It is the
-loop above plus the two things the loop cannot see: that the record's numbers are the file's,
-and that nothing was added to the tree without a row.
-
-`--decode` is the command's other half: it opens every asset with the port's own decoders and
-reports what each one is, so a file the port cannot read fails here as well as in a part. The
-formats with a magic are opened by it, and the headerless ones by the construction their names
-document — `.PAL`, `.ANI`, and, since Phase 6's packed scene readers, the vector engine's
-51-file scene set under `VISU/C/SCENE`: `.00M`, `.0AA`, `.0AB` and `.001`–`.042`, read through
-`sr_assets::visu` with the animation's object count taken from its own master. On this tree the
-run prints
+`--decode` opens every asset with the port's own decoders and reports what each one is, so a file
+the port cannot read fails here as well as in a part. The formats with a magic are opened by it,
+and the headerless ones by the construction their names document: `.PAL`, `.ANI`, and the
+vector engine's 51-file scene set under `VISU/C/SCENE` (`.00M`, `.0AA`, `.0AB` and
+`.001`–`.042`, read through `sr_assets::visu` with the animation's object count taken from its
+own master). On this tree the run prints
 
 ```text
-decode: 158 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene file(s), 44 headerless with no decoder, 1 refused on record, 0 finding(s)
+decode: 179 asset(s) — 55 picture(s), 2 animation(s), 5 palette(s), 51 Visu scene file(s), 65 headerless with no decoder, 1 refused on record, 0 finding(s)
 ```
 
-and `xtask/tests/assets.rs` pins that line (`cargo xtask assets verify --decode` reproduces it).
+and `xtask/tests/assets.rs` pins both lines (`cargo xtask assets verify --tree --decode`
+reproduces them).

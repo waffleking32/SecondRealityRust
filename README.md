@@ -44,8 +44,9 @@ starts at once with the flags as given.
 - **The end scroller** (ENDSCRL, the last part) ends by itself when its text runs out, as the
   released demo's does, about five and a half minutes in; ESC in it ends it early. Either way the
   demo then ends the way the original does. The music fades for 64 frames (the demo runs at
-  70.086 frames a second), and the screen goes blank for 20 more. The window then closes, and the demo's end box is printed to the terminal
-  you started it from. ESC during the fade or the blank closes the window at once.
+  70.086 frames a second), and the screen goes blank for 20 more. The window then closes, and the
+  demo's end box is printed to the terminal you started it from. ESC during the fade or the blank
+  closes the window at once.
 - **Ctrl** skips the part that is playing, and the next one starts. In the original one Ctrl
   skips every part from then on. The port skips only the one you pressed it in.
 - **The window's close button** leaves at any time. A demo run prints the end box however its
@@ -127,6 +128,25 @@ each pixel of a 320×200 part is a 2×2 block, so the picture is 640×400, and t
   pure duplication.
 - `--no-border` leaves out the overscan border colour, a flat pad around the picture.
 
+## Without a window
+
+`--headless` runs the demo with no window and no sound card, and writes its frames to files
+instead. It is what the frame comparisons use.
+
+```bash
+cargo run --release --bin secondreality -- --headless --part glenz --dump-dir out/glenz --frames 700
+```
+
+- `--dump-dir <DIR>` is where the frames go, and is required.
+- `--frames <N>` runs N frames and writes every one; `--dump-frames <A,B,C>` writes only those
+  frames and stops after the last; `--run-seconds <S>` runs for S seconds of real time and writes
+  the last frame. One of the three is needed.
+- `--positions <FILE>` also writes the run's timeline as CSV, one line a frame: the frame's
+  index, the loop pass, the part on screen, and the music's order and row. It needs `--frames` or
+  `--dump-frames`.
+
+A dump is always one file pixel per picture pixel, whatever `--scale` and `--aspect` say.
+
 ## How faithful it is
 
 Every part of the demo, and each vault effect, is compared against frames captured from the
@@ -136,11 +156,11 @@ original, and every known difference is measured and recorded:
   measured difference and why.
 - `docs/fidelity/bugs.md`: the original's own bugs, which the port keeps.
 - `docs/fidelity/`: one note per part, with what the original did and what the port does.
-- `PROGRESS.md`: the evidence, phase by phase.
 - `docs/decisions.md`: the decisions that shaped the port.
+- `docs/design.md`: how the port is built.
 
-`CLAUDE.md` is the working guide for developing the port: running headless, capturing reference
-frames and comparing.
+`CLAUDE.md` is the working guide for developing the port: capturing reference frames, comparing
+and the checks to run before committing.
 
 ## Licence
 
