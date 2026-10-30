@@ -308,7 +308,7 @@ mod tests {
     fn upstream_lines() -> Vec<String> {
         let path = "../../upstream/SecondReality/MAIN/U2.ASM";
         let bytes = std::fs::read(path).unwrap_or_else(|error| {
-            panic!("{path}: {error} — the upstream tree is a submodule; run `git submodule update --init`")
+            panic!("{path}: {error} — run `git submodule update --init`")
         });
         bytes
             .split(|byte| *byte == b'\n')
@@ -350,7 +350,7 @@ mod tests {
         for row in MUSIC_RESTARTS {
             let text: Vec<String> = row.citations.iter().map(|c| cited(&lines, c)).collect();
             let text = text.join("\n");
-            assert!(says_in_order(&text, row.said), "{}: {:?} is not in\n{text}", row.block, row.said);
+            assert!(says_in_order(&text, row.said), "{}: {:?} not in\n{text}", row.block, row.said);
             assert!(row.said.contains(&"call restartmus"), "{}", row.block);
             let module = format!("mov ax,{}", row.module.number());
             assert!(row.said.contains(&module.as_str()), "{}: {module}", row.block);
@@ -382,11 +382,19 @@ mod tests {
         // `:813-818` sits in the region `:801-802`'s `& 2` opens and `:855` closes, behind
         // its own `& 1`; the only mask with bit 0 is block 1's, and it has bit 1.
         let lines = upstream_lines();
-        assert!(says_in_order(&cited(&lines, "MAIN/U2.ASM:801-802"), &["test cs:whattorun,2", "jz @@skipp2"]));
+        let opening = cited(&lines, "MAIN/U2.ASM:801-802");
+        assert!(says_in_order(&opening, &["test cs:whattorun,2", "jz @@skipp2"]));
         assert!(cited(&lines, "MAIN/U2.ASM:855-855").contains("@@skipp2:"));
         assert!(says_in_order(
             &cited(&lines, "MAIN/U2.ASM:813-818"),
-            &["test cs:whattorun,1", "jz @@skip2b", "mov ax,1", "mov bx,0", "mov cx,48700", "call restartmus"],
+            &[
+                "test cs:whattorun,1",
+                "jz @@skip2b",
+                "mov ax,1",
+                "mov bx,0",
+                "mov cx,48700",
+                "call restartmus",
+            ],
         ));
         for (block, mask) in BLOCKS {
             if mask & 0x01 != 0 {
@@ -394,7 +402,8 @@ mod tests {
                 assert_ne!(mask & 0x02, 0);
             }
         }
-        assert_eq!(MUSIC_RESTART_AT, &[("u2e", ModuleId::Music0, 18), ("glenz", ModuleId::Music1, 0)]);
+        let sites = [("u2e", ModuleId::Music0, 18), ("glenz", ModuleId::Music1, 0)];
+        assert_eq!(MUSIC_RESTART_AT, &sites);
         assert_eq!(music_for('4').unwrap(), (ModuleId::Music0, 18), "the same call as block 4's");
     }
 
@@ -533,7 +542,8 @@ mod tests {
         // Placement: every position the port publishes is one the trace publishes within
         // the two filed sessions' jitter (A12). `music.md` §12 quotes the printout.
         let nearest = |frame: u32, position: (u8, u8)| -> Option<u32> {
-            wanted.iter().filter(|(_, value)| **value == position).map(|(at, _)| at.abs_diff(frame)).min()
+            let at = wanted.iter().filter(|(_, value)| **value == position);
+            at.map(|(at, _)| at.abs_diff(frame)).min()
         };
         let (mut exact, mut worst, mut unknown) = (0usize, 0u32, Vec::new());
         for (frame, position) in &port {
@@ -544,7 +554,8 @@ mod tests {
             }
         }
         println!(
-            "second5: {exact} of {} frames agree exactly ({:.3} %); worst displacement {worst} frame(s)",
+            "second5: {exact} of {} frames agree exactly ({:.3} %); worst displacement \
+             {worst} frame(s)",
             port.len(),
             100.0 * exact as f64 / port.len() as f64
         );
@@ -575,7 +586,8 @@ mod tests {
             }
         }
         println!(
-            "second5: {} position change(s) compared; the port's frame minus the trace's: {by_delta:?}",
+            "second5: {} position change(s) compared; the port's frame minus the trace's: \
+             {by_delta:?}",
             by_delta.values().sum::<usize>()
         );
         assert!(by_delta.keys().all(|delta| (-2..=0).contains(delta)), "{by_delta:?}");
@@ -640,7 +652,8 @@ mod tests {
             }
         }
         println!(
-            "second1: {} position change(s) compared; the port's frame minus the trace's: {by_delta:?}",
+            "second1: {} position change(s) compared; the port's frame minus the trace's: \
+             {by_delta:?}",
             by_delta.values().sum::<usize>()
         );
         // The code transitions ALKU's gates read.

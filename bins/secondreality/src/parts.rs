@@ -1,13 +1,6 @@
-//! The part registry: the names `--part` accepts, and what they construct,
-//! plus the asset reading every part shares.
-//!
-//! Adding a part means adding an entry here and a module beside this file:
-//! the registry is what the shell's run order is measured against
-//! (`shell::resolve`) and what a `--block` plan is stopped by.
-//!
-//! The names here are the port's own. Which of them the demo's run order
-//! (`shell::PART_ORDER`) has used, and which the port has therefore still to
-//! port, is the shell's table to say.
+//! The part registry, the names `--part` accepts and what they construct, plus the asset
+//! reading every part shares. The demo's run order is `shell::PART_ORDER`; every name in it is
+//! registered here.
 
 pub mod alku;
 pub mod beglogo;
@@ -77,96 +70,49 @@ pub(crate) fn load_image(part: &'static str, rel: &str) -> Result<Image, PartErr
 /// One registry row: a part's name and the constructor that builds it.
 pub type PartEntry = (&'static str, fn() -> Box<dyn Part>);
 
-/// Every part this binary can run, as (name, constructor).
+/// Every part this binary can run, as (name, constructor), with its original source.
 pub fn registry() -> &'static [PartEntry] {
     &[
         ("testcard", || Box::new(TestCard::new())),
-        // `ALKU/MAIN.C`, block 1's entry (`MAIN/U2.ASM:790-792`).
-        ("alku", || Box::new(alku::Alku::new())),
-        // `VISU/C/U2A.C`, block 1's second part (`MAIN/U2.ASM:793-799`).
-        ("u2a", || Box::new(u2a::U2a::new())),
-        // `PAM/OUTTAA.C`, block 1's third part (`MAIN/U2.ASM:793-799`).
-        ("pam", || Box::new(pam::Pam::new())),
-        // `BEG/BEG.C`, the block-2 entry point (`MAIN/U2.ASM:801-811`).
-        ("beglogo", || Box::new(beglogo::Beglogo::new())),
-        // `GLENZ/MAIN.C` over its own `VEC.ASM`/`MATH.ASM`/`NEW.ASM` — the
-        // zoom-and-bounce opening and the two polyhedra, block 2's second
-        // part (`MAIN/U2.ASM:812-815`, `exe4`; the block-1 run reaches it
-        // through the `restartmus` at `:813-818`).
-        ("glenz", || Box::new(glenz::Glenz::new())),
-        // `TUNNELI/TUN10.PAS`, block 2's third part (`MAIN/U2.ASM:816-826`).
-        ("tunneli", || Box::new(tunneli::Tunneli::new())),
-        // `FOREST/READ2.PAS`, block 3's entry (`MAIN/U2.ASM:856-866`).
-        ("mntscrl", || Box::new(mntscrl::Mntscrl::new())),
-        // `LENS/MAIN.C` over `ASM.ASM` — the face wipe, the lens and the
-        // rotazoomer, block 3's second (`MAIN/U2.ASM:856-874`).
-        ("lnszoom", || Box::new(lnszoom::Lnszoom::new())),
-        // `PLZPART/PLZ.C` over `VECT.C`, block 3's third (`MAIN/U2.ASM:856-874`).
-        ("plzpart", || Box::new(plzpart::Plzpart::new())),
-        // `DOTS/MAIN.C`, block 3's fourth (`MAIN/U2.ASM:856-874`).
-        ("minvball", || Box::new(minvball::Minvball::new())),
-        // `WATER/DEMO.PAS`, block 3's fifth (`MAIN/U2.ASM:856-874`).
-        ("rayscrl", || Box::new(rayscrl::Rayscrl::new())),
-        // `DDSTARS/KOE.ASM` over `STARS.ASM`, block U's only part — the
-        // hidden one, and the only way `SECOND U` reaches it
-        // (`MAIN/U2.ASM:889-896`).
-        ("ddstars", || Box::new(ddstars::Ddstars::new())),
-        // `END/END.C`, block 5's entry (`MAIN/U2.ASM:906-918`).
-        ("endlogo", || Box::new(endlogo::Endlogo::new())),
-        // `CREDITS/MAIN.C`, block 5's second part (`MAIN/U2.ASM:912-913`).
-        ("cred", || Box::new(cred::Cred::new())),
-        // `ENDSCRL/MAIN.C`, block 5's last (`MAIN/U2.ASM:914-917`).
-        ("endscrl", || Box::new(endscrl::Endscrl::new())),
-        // `TECHNO/KOE.C`, the interference, the bars and the troll.
-        ("techno", || Box::new(techno::Techno::new())),
-        // `PANIC/SHUTDOWN.C`, block 2's fifth part: the fake ending that
-        // inherits TECHNO's screen and collapses it to a dot
-        // (`MAIN/U2.ASM:75`, `:826-827`).
-        ("panicend", || Box::new(panicend::Panicend::new())),
-        // `COMAN/MAIN.C` over `ASM.ASM` and the generated `THELOOP.INC` — the
-        // 3D sinus field, block 3's sixth part (`MAIN/U2.ASM:856-874`).
-        ("3dsinfld", || Box::new(coman::Coman::new())),
-        // `JPLOGO/JP.C` over `ASM.ASM`, the generated `ZOOM.INC` and
-        // `READP.C` — the jelly logo, block 3's last part
-        // (`MAIN/U2.ASM:856-874`).
-        ("jplogo", || Box::new(jplogo::Jplogo::new())),
-        // `VISU/C/U2E.C` — the city flythrough, block 3's tail after the
-        // restart and block 4's entry (`MAIN/U2.ASM:880-887`).
-        ("u2e", || Box::new(u2e::U2e::new())),
-        // `GRID/MAIN.C` over `ASM.ASM` and the generated `LINEBLIT.INC` — the
-        // vault's line rider, one of the three unreleased development effects
-        // (`GRID/P.EXE`). Not in the demo's sequence; silent and unanchored,
-        // so a `--part grid` run numbers its own frames from zero.
-        ("grid", || Box::new(vault::grid::Grid::new())),
-        // `HARD/B.C` + `BP.C` over `BA.ASM` and the c-prefixed `VEC.ASM`
-        // engine — the vault's dots, grid and glenz cube (`HARD/B.EXE`). Not
-        // in the demo's sequence; silent and unanchored, so a `--part hard`
-        // run numbers its own frames from zero.
-        ("hard", || Box::new(vault::hard::part::Hard::new())),
-        // `TWIST/MAIN.C` over `TWIST.ASM`, `ASM.ASM` and the generated
-        // `TWSTLOOP.INC` — the vault's planar twister (`TWIST/T.EXE`). Not in
-        // the demo's sequence; silent and unanchored, so a `--part twist` run
-        // numbers its own frames from zero.
-        ("twist", || Box::new(vault::twist::Twist::new())),
+        ("alku", || Box::new(alku::Alku::new())), // ALKU/MAIN.C
+        ("u2a", || Box::new(u2a::U2a::new())), // VISU/C/U2A.C
+        ("pam", || Box::new(pam::Pam::new())), // PAM/OUTTAA.C
+        ("beglogo", || Box::new(beglogo::Beglogo::new())), // BEG/BEG.C
+        ("glenz", || Box::new(glenz::Glenz::new())), // GLENZ/MAIN.C
+        ("tunneli", || Box::new(tunneli::Tunneli::new())), // TUNNELI/TUN10.PAS
+        ("mntscrl", || Box::new(mntscrl::Mntscrl::new())), // FOREST/READ2.PAS
+        ("lnszoom", || Box::new(lnszoom::Lnszoom::new())), // LENS/MAIN.C
+        ("plzpart", || Box::new(plzpart::Plzpart::new())), // PLZPART/PLZ.C
+        ("minvball", || Box::new(minvball::Minvball::new())), // DOTS/MAIN.C
+        ("rayscrl", || Box::new(rayscrl::Rayscrl::new())), // WATER/DEMO.PAS
+        ("ddstars", || Box::new(ddstars::Ddstars::new())), // DDSTARS/KOE.ASM
+        ("endlogo", || Box::new(endlogo::Endlogo::new())), // END/END.C
+        ("cred", || Box::new(cred::Cred::new())), // CREDITS/MAIN.C
+        ("endscrl", || Box::new(endscrl::Endscrl::new())), // ENDSCRL/MAIN.C
+        ("techno", || Box::new(techno::Techno::new())), // TECHNO/KOE.C
+        ("panicend", || Box::new(panicend::Panicend::new())), // PANIC/SHUTDOWN.C
+        ("3dsinfld", || Box::new(coman::Coman::new())), // COMAN/MAIN.C
+        ("jplogo", || Box::new(jplogo::Jplogo::new())), // JPLOGO/JP.C
+        ("u2e", || Box::new(u2e::U2e::new())), // VISU/C/U2E.C
+        // The vault's unreleased effects: not in the demo's sequence, silent and unanchored,
+        // so a run numbers its own frames from zero.
+        ("grid", || Box::new(vault::grid::Grid::new())), // GRID/MAIN.C
+        ("hard", || Box::new(vault::hard::part::Hard::new())), // HARD/B.C
+        ("twist", || Box::new(vault::twist::Twist::new())), // TWIST/MAIN.C
     ]
 }
 
-/// The registered name `name` names, or `None`.
-///
-/// Returns the registry's own `&'static str` rather than the caller's, so a
-/// name resolved from the command line can be carried in a run's plan without
-/// borrowing the argument list.
+fn entry(name: &str) -> Option<&'static PartEntry> {
+    registry().iter().find(|(registered, _)| *registered == name)
+}
+
+/// The registry's own `&'static str` for `name`, so a plan can carry it without borrowing the
+/// argument list.
 pub fn registered(name: &str) -> Option<&'static str> {
-    registry()
-        .iter()
-        .find(|(registered, _)| *registered == name)
-        .map(|(registered, _)| *registered)
+    entry(name).map(|(registered, _)| *registered)
 }
 
 /// A fresh instance of `name`, or `None` if it is not registered.
 pub fn new_part(name: &str) -> Option<Box<dyn Part>> {
-    registry()
-        .iter()
-        .find(|(registered, _)| *registered == name)
-        .map(|(_, construct)| construct())
+    entry(name).map(|(_, construct)| construct())
 }

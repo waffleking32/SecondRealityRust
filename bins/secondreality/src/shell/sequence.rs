@@ -16,7 +16,7 @@ use super::music::{
     music_for_part, ModuleId, MusicSource, MusicStart, LOOP_RESTART, MUSIC_RESTART_AT,
 };
 use super::plan::{boot_anchor, loop_plan};
-use super::ShellError;
+use super::{start_view, ShellError, SURFACE_HEIGHT, SURFACE_WIDTH};
 use crate::parts;
 
 /// How a [`Sequence`] builds a part from a name; the binary's is [`parts::new_part`], and
@@ -151,20 +151,13 @@ struct RunMusic {
 }
 
 impl Sequence {
-    /// A run of `plan`'s parts on a `surface_width` × `surface_height` surface, starting at
-    /// `view`. The first part starts here, so a part that cannot start is an error the caller
-    /// sees.
-    pub fn new(
-        surface_width: usize,
-        surface_height: usize,
-        view: View,
-        plan: Vec<&'static str>,
-        settings: RunSettings,
-    ) -> Result<Sequence, ShellError> {
+    /// A run of `plan`'s registered parts on the shell's surface, with the demo's music. The
+    /// first part starts here, so a part that cannot start is an error the caller sees.
+    pub fn new(plan: Vec<&'static str>, settings: RunSettings) -> Result<Sequence, ShellError> {
         Sequence::with_run(
-            surface_width,
-            surface_height,
-            view,
+            SURFACE_WIDTH,
+            SURFACE_HEIGHT,
+            start_view(),
             plan,
             parts::new_part,
             Some(crate::audio::load_player),

@@ -34,7 +34,9 @@ mod test_support;
 
 pub(crate) use dac::hardware_default_palette;
 pub use music::{music_for_part, ModuleId, MUSIC_START_FRAME};
-pub use plan::{block_plan, boot_anchor, first_unreachable, resolve, run_plan, BLOCKS, FIRST_GRAPHICS_FRAME};
+pub use plan::{
+    block_plan, boot_anchor, first_unreachable, resolve, run_plan, BLOCKS, FIRST_GRAPHICS_FRAME,
+};
 pub use sequence::{Ending, Looping, RunSettings, Sequence, SequenceStatus};
 // What the binary's other tests read.
 #[cfg(test)]
@@ -78,7 +80,9 @@ impl fmt::Display for ShellError {
             ShellError::UnknownPart { name } => write!(f, "unknown part {name:?}"),
             ShellError::EmptyPlan => write!(f, "a run needs at least one part"),
             ShellError::Engine(e) => write!(f, "{e}"),
-            ShellError::Music { message } => write!(f, "the run's music cannot be loaded: {message}"),
+            ShellError::Music { message } => {
+                write!(f, "the run's music cannot be loaded: {message}")
+            }
         }
     }
 }

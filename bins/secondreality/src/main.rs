@@ -2,10 +2,9 @@
 //!
 //! Two ways to run it, chosen before anything is initialised: a window, which
 //! needs SDL2 and a display, or `--headless`, which needs neither and must not
-//! touch video at all. Both drive the same `Sequence` — a block's ported parts
-//! in the demo's own order, or one part — so what a window plays and what a
-//! dump holds are the same run. The engine keeps zero runtime dependencies;
-//! the window is a client of it like any other.
+//! touch video at all. Both drive the same `Sequence` — a block's parts in the
+//! demo's own order, or one part — so what a window plays and what a dump holds
+//! are the same run.
 
 mod audio;
 mod cli;
@@ -22,7 +21,7 @@ use std::error::Error;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use crate::shell::{Ending, Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
+use crate::shell::{Ending, Sequence};
 
 /// Printed when the command line does not parse.
 const USAGE: &str = "\
@@ -109,51 +108,15 @@ fn main() -> ExitCode {
     }
 }
 
-/// The run both modes drive: the ported parts of a block, in the demo's own
-/// order, or the one part `--part` named — numbered from the reference index
-/// the run's first part begins at, and drawn on the demo's own surface.
-///
-/// The view leaves its line stride unset, so the beam reads the surface's own
-/// rows whatever the picture's width is: a part that draws through `Surface`
-/// and never touches the stride still gets its picture back un-sheared.
-///
-/// Nothing here touches SDL: the window presents this run's frames and
-/// `--headless` dumps them, which is what keeps a machine with no display able
-/// to run the demo and answer for it.
+/// The run both modes drive: a block's plan, or the one part `--part` named. Nothing here
+/// touches SDL, so `--headless` runs on a machine with no display.
 fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
-    match cli.block {
-        Some(block) => Ok(Sequence::new(
-            SURFACE_WIDTH,
-            SURFACE_HEIGHT,
-            shell::start_view(),
-            shell::run_plan(block, cli.run_settings().looping)?,
-            cli.run_settings(),
-        )?),
-        None => new_sequence_for_part(shell::resolve(cli.part_name())?, cli.run_settings()),
-    }
-}
-
-/// A run of one part, by its registry name — the run `--part <name>` builds,
-/// and the run the vault menu starts for the row `Enter` chose.
-///
-/// The vault's three are silent and unanchored (`shell::music_for_part` says
-/// `None`, `shell::boot_anchor` says `None`), so the menu's runs play no music
-/// and number their frames from zero; the window presents them through the
-/// same loop a normal window run uses.
-///
-/// `settings` is the command line's ([`cli::Cli::run_settings`]): a part's run holds where it
-/// ends and mixes its music the way `--sound-quality` asks.
-pub fn new_sequence_for_part(
-    name: &'static str,
-    settings: shell::RunSettings,
-) -> Result<Sequence, Box<dyn Error>> {
-    Ok(Sequence::new(
-        SURFACE_WIDTH,
-        SURFACE_HEIGHT,
-        shell::start_view(),
-        vec![name],
-        settings,
-    )?)
+    let settings = cli.run_settings();
+    let plan = match cli.block {
+        Some(block) => shell::run_plan(block, settings.looping)?,
+        None => vec![shell::resolve(cli.part_name())?],
+    };
+    Ok(Sequence::new(plan, settings)?)
 }
 
 /// Whether this command line's run ends by printing the demo's end box: a **windowed

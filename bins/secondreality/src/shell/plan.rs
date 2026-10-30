@@ -138,7 +138,8 @@ mod tests {
     fn a_mid_block_part_has_no_anchor_and_says_so() {
         // The measured anchors, and `None` for every other part of the demo: their starts
         // are windows (`part-sequence.md` §10.1).
-        let anchored = [("alku", 404), ("beglogo", 404), ("endlogo", 404), ("pam", 7710), ("u2e", 418)];
+        let anchored =
+            [("alku", 404), ("beglogo", 404), ("endlogo", 404), ("pam", 7710), ("u2e", 418)];
         for (name, _) in PART_ORDER {
             let expected = anchored.iter().find(|(at, _)| at == name).map(|(_, index)| *index);
             assert_eq!(boot_anchor(name), expected, "{name}");

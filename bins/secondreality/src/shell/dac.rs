@@ -56,7 +56,7 @@ const VGA_DEFAULT_PALETTE: [[u8; 3]; 248] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::{start_view, RunSettings, Sequence, SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::shell::{RunSettings, Sequence};
 
     #[test]
     fn the_dac_the_shell_installs_is_the_one_a_mode_set_leaves() {
@@ -69,14 +69,7 @@ mod tests {
 
     #[test]
     fn the_shell_starts_from_the_hardwares_default_palette() {
-        let mut run = Sequence::new(
-            SURFACE_WIDTH,
-            SURFACE_HEIGHT,
-            start_view(),
-            vec!["testcard"],
-            RunSettings::default(),
-        )
-        .unwrap();
+        let mut run = Sequence::new(vec!["testcard"], RunSettings::default()).unwrap();
         run.tick();
         let dac = run.frame().palette_for(0);
         assert_eq!(dac.entry(15), [63, 63, 63], "BEGLOGO's 430 is this white");

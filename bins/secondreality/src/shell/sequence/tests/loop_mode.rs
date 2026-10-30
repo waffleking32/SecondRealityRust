@@ -171,7 +171,11 @@ fn a_loop_pass_fires_only_the_full_runs_restarts() {
         let (_, installs) = walk(&mut run, |run| run.pass() == 3);
         assert_eq!(
             installs,
-            [("glenz", (ModuleId::Music1, 0)), ("u2e", (ModuleId::Music0, 18)), ("cred", LOOP_RESTART)],
+            [
+                ("glenz", (ModuleId::Music1, 0)),
+                ("u2e", (ModuleId::Music0, 18)),
+                ("cred", LOOP_RESTART),
+            ],
             "block {block}"
         );
     }

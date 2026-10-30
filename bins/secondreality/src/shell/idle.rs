@@ -90,11 +90,12 @@ mod tests {
     #[test]
     fn the_post_panicend_wait_ends_on_a_positive_musplus() {
         // Negatives from the first call, a zero that still waits, then the first positive.
-        assert_eq!(statuses(vec![-3, -1, -32, 0, 1]), [Continuing, Continuing, Continuing, Continuing, Finished]);
+        let ends_on_the_fifth = [Continuing, Continuing, Continuing, Continuing, Finished];
+        assert_eq!(statuses(vec![-3, -1, -32, 0, 1]), ends_on_the_fifth);
         // The measured 8903 reading first: a non-negative is the first phase's wait.
         assert_eq!(sr_engine::musplus_from(2, 19), 19);
         assert_eq!(sr_engine::musplus_from(2, 32), -32);
-        assert_eq!(statuses(vec![19, 19, -32, 0, 1]), [Continuing, Continuing, Continuing, Continuing, Finished]);
+        assert_eq!(statuses(vec![19, 19, -32, 0, 1]), ends_on_the_fifth);
 
         let mut rig = Rig::new(8, 8).with(ScriptedMusic::musplus(vec![-3]));
         assert_eq!(rig.step_exit(&mut CueWait::default()), Finished, "the exit flag skips it");

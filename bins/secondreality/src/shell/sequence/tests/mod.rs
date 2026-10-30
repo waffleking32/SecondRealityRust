@@ -248,8 +248,14 @@ struct Watched {
     asked_to_quit: AtomicBool,
 }
 
-static BY_ESCAPE: Watched = Watched { frames: AtomicU32::new(0), asked_to_quit: AtomicBool::new(false) };
-static BY_CTRL: Watched = Watched { frames: AtomicU32::new(0), asked_to_quit: AtomicBool::new(false) };
+impl Watched {
+    const fn new() -> Watched {
+        Watched { frames: AtomicU32::new(0), asked_to_quit: AtomicBool::new(false) }
+    }
+}
+
+static BY_ESCAPE: Watched = Watched::new();
+static BY_CTRL: Watched = Watched::new();
 
 /// Draws nothing, never retires, and records what it was handed.
 struct Keyed {

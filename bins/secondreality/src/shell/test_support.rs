@@ -34,7 +34,11 @@ impl Part for Stub {
     }
 }
 
-pub(super) fn stub(name: &'static str, fill: Option<u8>, retires: Option<u32>) -> Option<Box<dyn Part>> {
+pub(super) fn stub(
+    name: &'static str,
+    fill: Option<u8>,
+    retires: Option<u32>,
+) -> Option<Box<dyn Part>> {
     Some(Box::new(Stub { name, fill, retires }))
 }
 

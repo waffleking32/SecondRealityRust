@@ -566,8 +566,7 @@ fn vault_loop(
             MenuAction::Choose(name) => {
                 // The vault's runs hold where they end and have no player, so the default
                 // settings are theirs whatever `--sound-quality` said.
-                let mut run =
-                    crate::new_sequence_for_part(name, crate::shell::RunSettings::default())?;
+                let mut run = Sequence::new(vec![name], crate::shell::RunSettings::default())?;
                 // The vault's parts are silent: `shell::music_for_part` has no
                 // row for them, so the run has no player and no device is
                 // opened. The slot is the same one the normal loop drains.
