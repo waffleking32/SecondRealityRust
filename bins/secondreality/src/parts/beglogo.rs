@@ -27,12 +27,14 @@
 //! of `init`: `:24`'s 32 vertical blanks come *before* `:73-78`, and the
 //! reference's frame 430 — 128,000 bytes of index 15, no picture in video
 //! memory yet — is inside them.
-
+//!
+//! The picture, the 400-line view, the blit, the white-to-picture ramp and
+//! `setpalarea` are [`logo`](super::logo)'s, shared with ENDLOGO.
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::load_image;
+use crate::parts::logo::{blit, load_picture, set_400_line_view, setpalarea, white_to_picture};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "beglogo";
@@ -40,11 +42,6 @@ const NAME: &str = "beglogo";
 /// The picture, read in its original format at runtime: `readp(palette,-1,pic)`
 /// copies its palette out of the container and `:74-78` decodes 400 rows.
 const PICTURE_PATH: &str = "assets/BEG/SRTITLE.UP";
-
-/// The picture's geometry, and the screen's: 320×400 Mode X (`BEG/BEG.C:47-53`
-/// clears CRTC 9's double-scan bit and its low five bits).
-const PICTURE_WIDTH: usize = 320;
-const PICTURE_HEIGHT: usize = 400;
 
 /// The index `:20-21` fills video memory with, and so the whole screen at the
 /// reference's 430.
@@ -97,7 +94,7 @@ const FADE_STEPS: u32 = 129;
 
 /// The picture and the palette it indexes, both as `readp` leaves them.
 pub struct Beglogo {
-    /// The decoded picture, row-major at [`PICTURE_WIDTH`] — the shape
+    /// The decoded picture, row-major at 320 pixels — the shape
     /// `readp(rowbuf,y,pic)` decodes one row of. Empty until `init`.
     picture: Vec<u8>,
     /// The container's palette, six bits a channel: the source of the fade's
@@ -130,56 +127,16 @@ impl Part for Beglogo {
         // chunky, so that is one `clear`, and it covers the whole plane the
         // original filled: video memory is 64 KB a plane either way.
         ctx.surface.clear(WHITE_FIELD);
-        // `:42-46`: CRTC 0x0c/0x0d = 0, so the display starts at the top of
-        // video memory whatever the part before this one left. That register
-        // pair is one 16-bit display start, which is why `set_origin(0)` zeroes
-        // `start_addr` **and** `x_offset` rather than leaving the offset alone:
-        // both halves of the port's origin are what those two writes set.
-        //
-        // The registers `BEG.C` does not write — AC 0x13's pan, CRTC 0x18's
-        // line compare, CRTC 0x13's line offset — are left as the run left them,
-        // which is what the original inherits from the mode set before it. In a
-        // run that starts here they are the shell's: no split, no pan.
-        //
-        // **The line offset is the one the original's picture is drawn at.**
-        // Every part the demo runs before this one (PAM, in block 1) leaves the
-        // 320-pixel tweak's CRTC 0x13 — 80 bytes a row — which is exactly the
-        // stride `:74-78`'s `lineblit(vram+(unsigned)y*80U,rowbuf)` writes, so
-        // the original reads its picture row by row whoever came before. The
-        // port draws through `Surface::set`, at the surface's own 640-pixel rows,
-        // and the stride that reads those is the unset offset (Part B's first
-        // convention); PAM's `Some(320)` kept here would read every second
-        // scanline from the picture's right margin — block 1's BEGLOGO was
-        // doubled that way until the full run's comparison found it
-        // (`reference-indices.md` §26.8).
-        ctx.view.y_line_offset = None;
-        ctx.view.set_origin(0);
-        // `:47-53` and `:62-71`: CRTC 9 with bit 7 and the low five bits
-        // cleared — a 400-line screen, one scanline a row — and AC 0x11 = 255,
-        // the overscan colour, which `:32-34` makes black.
-        ctx.view.height = PICTURE_HEIGHT as u16;
-        ctx.view.double_scan = false;
-        ctx.view.border = Some(OVERSCAN_ENTRY);
+        // `:42-71`: display start 0, the 400-line screen, and AC 0x11 = 255,
+        // the overscan colour, which `:32-34` makes black. In a run that
+        // starts here the registers `BEG.C` leaves alone are the shell's: no
+        // split, no pan.
+        set_400_line_view(ctx, OVERSCAN_ENTRY);
 
-        // `:73`'s `readp(palette,-1,pic)` copies the palette out of the
-        // container and `:74-78` decodes 400 rows through it. The port decodes
-        // the whole container in one call, which is the same bytes — and
-        // `docs/fidelity/beglogo.md` records that the decode is byte-identical
-        // to the reference's held frame, 0 of 128,000 pixels apart.
-        let image = load_image(NAME, PICTURE_PATH)?;
-        let (width, height) = (image.width() as usize, image.height() as usize);
-        if (width, height) != (PICTURE_WIDTH, PICTURE_HEIGHT) {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
-                    "{} is {width}x{height}; this part's screen is \
-                     {PICTURE_WIDTH}x{PICTURE_HEIGHT}",
-                    PICTURE_PATH
-                ),
-            });
-        }
-        self.picture = image.pixels().to_vec();
-        self.picture_palette = image.palette;
+        // `:73-78`. `docs/fidelity/beglogo.md` records that the decode is
+        // byte-identical to the reference's held frame, 0 of 128,000 pixels
+        // apart.
+        (self.picture, self.picture_palette) = load_picture(NAME, PICTURE_PATH)?;
 
         // `:17`'s `dis_partstart()` needs no modelling of its own: it is a
         // *version check* on the resident demo server — `DIS/DISC.ASM:51-64`
@@ -196,7 +153,7 @@ impl Part for Beglogo {
             // `:25-78` — the DAC, and then the picture into video memory.
             LEAD_IN_TICKS => {
                 install_white_dac(ctx);
-                self.blit(ctx);
+                blit(&self.picture, ctx);
                 PartStatus::Continuing
             }
             // The nine ticks between `:78` and the fade's first vertical blank:
@@ -209,7 +166,8 @@ impl Part for Beglogo {
                 let step = tick - FADE_FIRST_TICK;
                 if step < FADE_STEPS {
                     // `:82-84` — one step of the ramp per vertical blank.
-                    setpalarea(ctx.palette, &fade_step(&self.picture_palette, step), 0, 254);
+                    let ramp = white_to_picture(&self.picture_palette, step);
+                    setpalarea(ctx.palette, &ramp, 0, 254);
                     PartStatus::Continuing
                 } else {
                     // `:86` — the picture's own palette once more — and `:87`
@@ -243,88 +201,11 @@ fn install_white_dac(ctx: &mut PartCtx) {
     ctx.set_palette(white_dac());
 }
 
-impl Beglogo {
-    /// `BEG/BEG.C:74-78`: `readp(rowbuf,y,pic)` and `lineblit(vram+y*80,rowbuf)`,
-    /// one row per video row.
-    ///
-    /// `lineblit` (`BEG/ASM.ASM:53-82`, the four-plane loop at `:63-76`) is a
-    /// *plane* routine: for each of the four planes it writes 80 bytes to
-    /// `es:[di+zzz]`, which is 320 pixels of
-    /// one video row, and `vram + y*80` is that row's plane offset. The port
-    /// writes the same 320 pixels through [`Surface::set`] at the surface's own
-    /// row stride, with `y_line_offset` unset (Part B's first convention): the
-    /// plane interleave is a hardware detail the chunky model folds away, and
-    /// the picture the beam reads back is the same one.
-    ///
-    /// [`Surface::set`]: sr_engine::Surface::set
-    fn blit(&self, ctx: &mut PartCtx) {
-        for (y, row) in self.picture.chunks_exact(PICTURE_WIDTH).enumerate() {
-            for (x, pixel) in row.iter().enumerate() {
-                ctx.surface.set(x, y, *pixel);
-            }
-        }
-    }
-}
-
-/// `BEG/BEG.C:82`: `pal2[a] = ((128-c)*63 + palette[a]*c)/128`, integer
-/// division, over six-bit entries.
-///
-/// The original fills `a = 0..765` — `768-3`, so entry 255 is not computed —
-/// and this computes all 256; the difference cannot be read, because the upload
-/// stops inside entry 169 ([`setpalarea`], below).
-fn fade_step(picture: &Palette, c: u32) -> Palette {
-    let mut ramp = Palette::new();
-    for index in 0..=255u8 {
-        let entry = picture.entry(index);
-        let mut rgb = [0u8; 3];
-        for (channel, value) in rgb.iter_mut().enumerate() {
-            *value = (((128 - c) * 63 + entry[channel] as u32 * c) / 128) as u8;
-        }
-        ramp.set_entry(index, rgb);
-    }
-    ramp
-}
-
-/// `BEG/BEG.C:84`'s `setpalarea(pal2,0,254)`, which is `BEG/ASM.ASM:93-115` —
-/// **with the byte-count bug the original ships, which the port preserves**
-/// (`docs/fidelity/bugs.md`).
-///
-/// `:106-108` loads `count` into `cx`, `shl cx,1` — `2*count` — and `add cx,ax`
-/// (`start`), then `REPOUTSB` moves exactly that many bytes from the DAC's
-/// write index, which `:104-105` points at `start` (`0x3c8` then the index
-/// byte). So the length is **`2*count + start` bytes, not `3*count`**, and
-/// `setpalarea(ramp, 0, 254)` uploads **508** bytes: entries 0-168 whole, the
-/// red byte of 169, and nothing at all of entries 170-255. The shipped
-/// `BEG.EXE` contains exactly this — `_setpalarea` begins at file offset
-/// `0xcb7` and those three instructions are at `0xccb`-`0x0cd1`, followed by
-/// the copy loop at `0xcd2`. `END/ASM.ASM:107-108`, `JPLOGO/ASM.ASM:116-117`,
-/// `ENDPIC/ASM.ASM:98-99` and `TECHNO/KOEA.ASM:1054-1055` share the routine as
-/// it is; `LENS/ASM.ASM:253-255`, `START/ASM.ASM:192-194`, `COMAN/ASM.ASM:93-95`
-/// and `TWIST/ASM.ASM:85-87` are the copies that load `count` into `ax` before
-/// doubling, and so move `3*count`.
-///
-/// It is invisible on this art — the picture indexes 1, 2, 3, 14-58 and 71-79
-/// and the white field is 15, all inside the written range — so a port that
-/// uploaded the full 762 bytes would match every capture of this part. Writing
-/// the bug is therefore a decision and not an accident, and it is the reason
-/// entries 170-254 go into the next part still white.
-fn setpalarea(dac: &mut Palette, ramp: &Palette, start: u32, count: u32) {
-    let bytes = 2 * count + start;
-    for written in 0..bytes {
-        let at = 3 * start + written;
-        // The DAC's write index is eight bits and wraps, which no call here
-        // reaches: this part's two calls write 508 bytes from entry 0.
-        let entry = (at / 3 % 256) as u8;
-        let channel = (at % 3) as usize;
-        let mut rgb = dac.entry(entry);
-        rgb[channel] = ramp.entry(entry)[channel];
-        dac.set_entry(entry, rgb);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::load_image;
+    use crate::parts::logo::{PICTURE_HEIGHT, PICTURE_WIDTH};
     use crate::parts::test_rig::{reference, rgb_of, Rig};
 
     use crate::shell::{VIEW_HEIGHT, VIEW_WIDTH};
@@ -415,48 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn the_fade_ramp_truncates_where_the_original_truncates() {
-        // ((128-c)*63 + pal*c)/128, integer division, over 6-bit entries. A float
-        // version agrees on c=0 and c=128 and disagrees in the last third.
-        let mut pal = Palette::new();
-        pal.set_entry(0, [63, 40, 1]);
-        assert_eq!(fade_step(&pal, 1).entry(0)[0], ((127 * 63 + 63) / 128) as u8);
-        assert_eq!(fade_step(&pal, 64).entry(0)[0], ((64 * 63 + 63 * 64) / 128) as u8);
-        assert_eq!(fade_step(&pal, 1).entry(0)[1], ((127 * 63 + 40) / 128) as u8);
-        assert_eq!(fade_step(&pal, 128).entry(0), [63, 40, 1], "c = 128 is the picture");
-        assert_eq!(fade_step(&pal, 0).entry(0), [63, 63, 63], "c = 0 is white");
-        // The first step, where truncation is already visible: entry 0's blue
-        // is 1, and (127*63 + 1*1)/128 = 62.5 truncates to 62 where a rounded
-        // ramp would leave it at 63.
-        assert_eq!(fade_step(&pal, 1).entry(0)[2], 62);
-    }
-
-    #[test]
-    fn the_fade_upload_is_the_originals_508_bytes_and_stops_inside_entry_169() {
-        // `BEG/ASM.ASM:106-108` sets the transfer length to 2*count + start,
-        // not 3*count: `setpalarea(ramp, 0, 254)` moves 508 bytes, which is
-        // entries 0-168 whole and the red byte of 169. Entries 170-254 and 255
-        // keep whatever they held (docs/fidelity/bugs.md).
-        let mut ramp = Palette::new();
-        for index in 0u8..=255 {
-            ramp.set_entry(index, [index % 64, 5, 6]);
-        }
-        let mut dac = Palette::new();
-        dac.set_entry(169, [9, 9, 9]);
-        dac.set_entry(170, [1, 2, 3]);
-        dac.set_entry(254, [4, 5, 6]);
-        dac.set_entry(255, [7, 8, 9]);
-        setpalarea(&mut dac, &ramp, 0, 254);
-
-        assert_eq!(dac.entry(0), ramp.entry(0));
-        assert_eq!(dac.entry(168), ramp.entry(168), "the last entry written whole");
-        assert_eq!(dac.entry(169), [ramp.entry(169)[0], 9, 9], "only 169's red");
-        assert_eq!(dac.entry(170), [1, 2, 3], "the 509th byte is never written");
-        assert_eq!(dac.entry(254), [4, 5, 6]);
-        assert_eq!(dac.entry(255), [7, 8, 9], "this routine never writes 255");
-    }
-
-    #[test]
     fn the_picture_is_blitted_before_the_fade_starts() {
         // The screen at the first fade step is still white: the blit lands in
         // surface memory but the DAC shows entry 15 everywhere until c moves.
@@ -502,7 +341,7 @@ mod tests {
     fn scan_dac(picture: &Palette, c: u32, fixed: bool) -> Palette {
         let mut dac = white_dac();
         for step in 0..=c {
-            let ramp = fade_step(picture, step);
+            let ramp = white_to_picture(picture, step);
             if fixed {
                 for entry in 0..=254u8 {
                     dac.set_entry(entry, ramp.entry(entry));

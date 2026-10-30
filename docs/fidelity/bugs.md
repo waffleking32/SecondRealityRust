@@ -131,8 +131,8 @@ inside the written range, so a 762-byte upload also matches `reference/parts/beg
 scan with 762 bytes and gets the same `c` at 470, 560 and 900). ENDLOGO's 510 is invisible for the
 same reason (`endlogo.md` §6). The deciding evidence is the disassembly.
 
-**Tests.** `the_fade_upload_is_the_originals_508_bytes_and_stops_inside_entry_169` (BEGLOGO),
-`the_upload_is_the_originals_two_count_plus_start_bytes` (ENDLOGO; 510, and 254 as BEGLOGO's),
+**Tests.** `logo::tests::the_upload_is_two_count_plus_start_bytes` (BEGLOGO's 508 and ENDLOGO's
+510, one shared routine),
 `the_palette_upload_is_the_sources_512_bytes` and `init_clears_the_dac_before_the_512_byte_upload`
 (JPLOGO), `the_palette_upload_is_two_bytes_a_colour_and_truncates_at_512` (TECHNO; start 4 /
 count 2 → 8 bytes at offset 4).

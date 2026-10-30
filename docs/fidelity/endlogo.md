@@ -170,7 +170,7 @@ boot and `second5`, not about ENDLOGO (A7).
 
 `END.C:105` and `:116` call `setpalarea(pal2,0,255)`, the routine `beglogo.md` §6 and `bugs.md` §4
 describe: `2*count + start` = **510** bytes, entries 0-169 whole and 170-255 untouched
-(`the_upload_is_the_originals_two_count_plus_start_bytes`). BEGLOGO passes 254 and moves 508. It is
+(`logo::tests::the_upload_is_two_count_plus_start_bytes`). BEGLOGO passes 254 and moves 508. It is
 invisible on this art: the picture indexes 0-71 (72 distinct), the pre-blit screen is index 0, and
 the derivation scan rerun with 508 bytes returns the same `c` for 500. What it leaves is a DAC whose
 entries 170-254 have been white since `:90-91`, going into CRED.
@@ -204,7 +204,7 @@ ramps over the port's own decode. The scan is discriminating: moving `FADE_IN_FI
 or `FADE_OUT_FIRST_INDEX` to 1145, dropping `GATE_ALIGNMENT_TICKS` or the previous-tick reading, or
 taking `BLANKS_TICKS` to 31 each turns the part's tests red (a one-line edit in `endlogo.rs`,
 then §9's first command). The fade-in truncates where the original does
-(`c = 1, palette = 0` gives 62; `the_fade_in_ramp_is_white_to_picture_and_truncates_where_the_original_truncates`).
+(`c = 1, palette = 0` gives 62; `logo::tests::the_white_to_picture_ramp_truncates_where_the_original_truncates`).
 
 ## 9. Reproduce
 

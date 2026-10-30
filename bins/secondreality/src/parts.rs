@@ -19,6 +19,7 @@ pub mod endscrl;
 pub mod glenz;
 pub mod jplogo;
 pub mod lnszoom;
+pub mod logo;
 pub mod minvball;
 pub mod mntscrl;
 pub mod msrand;

@@ -107,7 +107,7 @@ original's byte for byte (`tests/fullrun.rs`). ENDLOGO takes the same convention
 entries 0-168, entry 169's red, and nothing of 170-254, which stay white for the whole part; entry
 255 keeps the black `:32-34` wrote. `bugs.md` §4 holds the bug, its disassembly in `BEG/BEG.EXE`
 and the other parts that carry it
-(`the_fade_upload_is_the_originals_508_bytes_and_stops_inside_entry_169`). It is invisible on this
+(`logo::tests::the_upload_is_two_count_plus_start_bytes`). It is invisible on this
 art: every index the screen uses is inside the written 169, and the §3 scan rerun with a 762-byte
 upload returns the same `c` for all three moving frames. GLENZ inherits entries 170-254 white.
 
