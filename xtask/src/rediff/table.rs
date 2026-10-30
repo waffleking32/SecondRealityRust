@@ -1,18 +1,16 @@
 //! What `cargo xtask rediff` re-renders and what it expects back: one entry per filed
 //! capture under `reference/parts`.
 //!
-//! **Every mapping and every count here is copied from the test or record that asserts
-//! it, never fitted** (Phase 9 Task 5). Each entry names its source. Where a part's test
-//! compares a frame, the row is that test's pairing — its run arguments, its
-//! reference→rendered rule, its plane — and that test's asserted count. Where no test
-//! asserts a pixel count (CRED's bands, PANICEND's standalone frames, ENDSCRL, TUNNELI,
-//! PLZPART's percentages and its fit corpus, the lead-in windows), the count is the one
-//! this command measured, and `register` names the A-entry whose figure it reproduces (A5, A7
-//! and A23 were restated at these counts, and PANICEND's handoff registered as A63, in Phase 9's
-//! register pass).
+//! An entry is a capture and the run that answers it; a row is one compared frame: the
+//! reference index, the rendered index (the part's boot↔tick mapping, from its note in
+//! `docs/fidelity/` and its section of `reference-indices.md`, cited as §N below), the plane,
+//! and the exact differing-pixel count. Counts are measured, never fitted: `exact` is 0 with
+//! nothing between the port and the reference, and any other count is the figure of the A- or
+//! D-entry its `register` names. Re-register a count only with the measurement that moved it.
 //!
-//! This file is self-contained (no imports) because `xtask/tests/rediff.rs` includes it by
-//! path to check it against the tree: `xtask` is a binary crate.
+//! `bins/secondreality/tests/reference_frames.rs` runs this table as a cargo test, and
+//! `xtask/tests/rediff.rs` checks it against the tree. They and other tests include this file
+//! by path (`xtask` is a binary crate), so it stays self-contained: no imports.
 
 /// Which plane a frame is compared in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +49,8 @@ pub struct Frame {
     pub register: &'static str,
 }
 
-/// Filed captures whose mapping a later task measures. `rediff` names each capture under
-/// one of these in its report as not compared. Empty since Phase 9 Task 6 measured the
-/// last of them (`fullrun`); the mechanism stays, for the next capture filed before its
-/// mapping is.
+/// Filed captures whose mapping is not yet measured: `rediff` reports each capture under one
+/// of these as not compared. Empty while every filed capture has an entry.
 pub const PENDING: &[&str] = &[];
 
 /// How far, in frames, a published music position may be from the frame a filed trace
@@ -96,13 +92,12 @@ const fn idx0(reference: u32, rendered: u32) -> Frame {
     idx(reference, rendered, 0, "exact")
 }
 
-/// One part of block 1's run, as the seam table of `reference-indices.md` §26.8 holds it: the
-/// original's first frame by §26.3's definition (in the session the part's `fullrun` capture was
-/// filed in), the port's first frame by the same definition, and the index the port starts the
-/// part at (`Sequence::starts`). **This is the one source of the full run's start differences**:
-/// the `fullrun/*` entries above derive every rendered index from it, and
-/// `bins/secondreality/tests/fullrun.rs` includes this file and asserts both port columns
-/// against the run's own frames and timeline.
+/// One part of block 1's run: the original's first frame by `reference-indices.md` §26.3's
+/// definition (in the session the part's `fullrun` capture was filed in), the port's first frame
+/// by the same definition, and the index the port starts the part at (`Sequence::starts`).
+/// **This is the one source of the full run's start differences** (§26.8, A53): the `fullrun/*`
+/// entries derive every rendered index from it, and `bins/secondreality/tests/fullrun.rs`
+/// asserts both port columns against the run's own frames and timeline.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // `part` is read by the tests that include this file
 pub struct Seam {
@@ -204,7 +199,7 @@ const fn idx_before(reference: u32, next: Part, registered: u32, register: &'sta
 }
 
 pub const TABLE: &[Entry] = &[
-    // tests/coman.rs:129 KEYFRAMES (reference, tick), RGB, 0 px and delta 0 (:184-185).
+    // §16.2's keyframes at the part's tick (`3dsinfld.md`), RGB at 0.
     Entry {
         capture: "3dsinfld",
         args: &["--part", "3dsinfld"],
@@ -215,8 +210,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(16800, 1772),
         ],
     },
-    // tests/alku.rs: boot numbering (anchor 404), 900/1719/2719 at 0 RGB px, and 5859 at 0
-    // since the port runs the release's loop (the fifth batch stops the text, A20).
+    // §4.3's keyframes at boot numbering (anchor 404), all 0; 5859 is 0 because the port runs
+    // the release's loop (the fifth batch stops the text, A20).
     Entry {
         capture: "alku",
         args: &["--part", "alku"],
@@ -227,9 +222,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(5859, 5859),
         ],
     },
-    // tests/beglogo.rs:16 KEYFRAMES at their own indices: 430 all index 15 and all white
-    // (:107-111, the reference's 430 is the same field, A5), 470/560 RGB at 0 (:126-133),
-    // 900 the picture's indices (:154-157, byte-identical to the filed `.idx`, :151).
+    // §3.1's keyframes at their own boot indices: 430 is the field (all index 15 and all white,
+    // as the reference's 430 is, A5), 470/560 RGB at 0, 900 the picture's indices byte for byte.
     Entry {
         capture: "beglogo",
         args: &["--part", "beglogo"],
@@ -241,9 +235,8 @@ pub const TABLE: &[Entry] = &[
             idx0(900, 900),
         ],
     },
-    // The lead-in window (reference-indices.md §25.6, captured `--arg 2`) at BEGLOGO's own
-    // boot numbering (tests/beglogo.rs:34). No test asserts these; the counts are this
-    // command's, and every one reproduces A5's "zero on every frame the reference holds".
+    // The lead-in window (§25.6, captured `--arg 2`) at BEGLOGO's own boot numbering; every
+    // count is A5's "zero on every frame the reference holds".
     Entry {
         capture: "beglogo-leadin/even",
         args: &["--part", "beglogo"],
@@ -279,8 +272,8 @@ pub const TABLE: &[Entry] = &[
     },
     // §25.6: the field (index 15) at the port's own blit index, 436 (A5: the port blits at
     // tick 32), filed unbatched for its index plane. The RGB is white on both sides; the
-    // port's plane already holds the picture (all but 2 of its 128,000 indices are not
-    // 15), which A5 predicted and now registers as its restated index-plane figure.
+    // port's plane already holds the picture (all but 2 of its 128,000 indices are not 15),
+    // A5's index-plane figure.
     Entry {
         capture: "beglogo-leadin/plane-436",
         args: &["--part", "beglogo"],
@@ -289,10 +282,8 @@ pub const TABLE: &[Entry] = &[
             rgb(436, 436, 0, "A5"),
         ],
     },
-    // tests/cred.rs:22 KEYFRAMES through the block-5 chain (:40), every one at 0 bytes in
-    // the band, the caption and the frame (`the_five_keyframes_are_the_references_byte_for_byte`)
-    // since the screens are read from the shipped CRED.EXE (A10, retired; they were 7,204 /
-    // 6,088 / 3,741 at 3240 / 5440 / 8740 from the tree's data).
+    // §20.1's keyframes through the block-5 chain, at their own indices, all 0: the screens are
+    // read from the shipped CRED.EXE (A10, retired).
     Entry {
         capture: "cred",
         args: &["--block", "5"],
@@ -304,7 +295,7 @@ pub const TABLE: &[Entry] = &[
             rgb0(8740, 8740),
         ],
     },
-    // tests/ddstars.rs:102 boot = 414 + tick; every keyframe 0 bytes (:169-177).
+    // §22.2's keyframes at boot = 414 + tick, all 0.
     Entry {
         capture: "ddstars",
         args: &["--part", "ddstars"],
@@ -315,8 +306,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(8000, 7586),
         ],
     },
-    // tests/endlogo.rs:17 KEYFRAMES at their own indices: 430's indices (:115-119),
-    // 500/1180 RGB (:138-146), 900's indices (:175).
+    // §19.2's keyframes at their own indices, all 0: 430 and 900 by their indices, 500 and 1180
+    // in RGB.
     Entry {
         capture: "endlogo",
         args: &["--part", "endlogo"],
@@ -327,9 +318,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(1180, 1180),
         ],
     },
-    // The lead-in window (§25.6, captured `--arg 5`) at ENDLOGO's own boot numbering
-    // (tests/endlogo.rs:35); the counts are this command's, and every one reproduces A7's
-    // "zero on every frame the reference holds".
+    // The lead-in window (§25.6, captured `--arg 5`) at ENDLOGO's own boot numbering; every
+    // count is A7's "zero on every frame the reference holds".
     Entry {
         capture: "endlogo-leadin/even",
         args: &["--part", "endlogo"],
@@ -364,7 +354,7 @@ pub const TABLE: &[Entry] = &[
     },
     // §25.6: the field (index 0) at the port's blit index, 440 (A7: tick 36). The RGB is
     // white on both sides; the port's plane holds the picture, 55,499 of whose indices are
-    // not 0 — A7's prediction, and its restated index-plane figure.
+    // not 0: A7's index-plane figure.
     Entry {
         capture: "endlogo-leadin/plane-440",
         args: &["--part", "endlogo"],
@@ -373,11 +363,11 @@ pub const TABLE: &[Entry] = &[
             rgb(440, 440, 0, "A7"),
         ],
     },
-    // tests/endscrl.rs:20 KEYFRAMES through `--block 5` (:52), at their own indices. Since the
-    // part reads the release's image (D49) every count is the chain's 82-frame offset alone:
-    // `parts::endscrl`'s `the_port_draws_the_references_frames_at_the_references_own_ticks`
-    // renders all four at 0 from the release's own start (8917) and these four from the
-    // port's (8835) — A11's residual.
+    // §21.2's keyframes through `--block 5`, at their own indices. The part reads the release's
+    // image (D49), so every count is the chain's 82-frame offset alone: `parts::endscrl`'s
+    // `the_port_draws_the_references_frames_at_the_references_own_ticks` renders all four at 0
+    // from the release's own start (8917), and this run starts the part at the port's (8835).
+    // A11's residual.
     Entry {
         capture: "endscrl",
         args: &["--block", "5"],
@@ -388,17 +378,14 @@ pub const TABLE: &[Entry] = &[
             rgb(14000, 14000, 17613, "A11"),
         ],
     },
-    // The original's whole `SECOND 1` run (reference-indices.md §26) against the port's
-    // `--block 1`. Every rendered index is derived, never written: `rgb_at`/`idx_at` put a
-    // frame at its reference index plus **its part's start difference** (FULLRUN_SEAMS,
-    // below the table — the one source tests/fullrun.rs asserts against the run's frames),
-    // and `rgb_before`/`idx_before` put the three frames the original shows during a loader
-    // stretch the port does not have (FULLRUN_LOADER_FRAMES) on the port's last frame
-    // before the next part starts. xtask/tests/rediff.rs checks every fullrun row against
-    // that rule. Held frames compare at 0 but for the two that carry their part's own
-    // registered count (19000 is A25's 2,058; 40600 was A10's 7,204 until CRED's screens
-    // were read from its image, and is 0); every other count is
-    // this command's and is A53's, which also names every pairing at a non-zero difference.
+    // The original's whole `SECOND 1` run (§26) against the port's `--block 1`. Every rendered
+    // index is derived, never written: `rgb_at`/`idx_at` put a frame at its reference index plus
+    // **its part's start difference** ([`FULLRUN_SEAMS`]), and `rgb_before`/`idx_before` put the
+    // three frames the original shows during a loader stretch the port does not have
+    // ([`FULLRUN_LOADER_FRAMES`]) on the port's last frame before the next part starts.
+    // `xtask/tests/rediff.rs` holds every fullrun row to that rule. Held frames compare at 0 but
+    // for 19000, which carries LNS&ZOOM's own A25 count; every other count is A53's, which names
+    // every pairing at a non-zero difference.
     Entry {
         capture: "fullrun/01-alku",
         args: &["--block", "1"],
@@ -406,11 +393,10 @@ pub const TABLE: &[Entry] = &[
             rgb_at(1719, Part::Alku, 0, "exact"),
         ],
     },
-    // 5961 is the original's first 320×200 frame — ALKU's closing page, or U2A's identical
-    // background — under the 30,000-cycle session's DAC; the port's U2A starts 5 frames
-    // earlier on the same picture under the merged palette (A20, A32, A53). 7880's
-    // index plane is PAM's picture under a white DAC; 7920 is PAM's white under BEGLOGO's
-    // load.
+    // 5961 is the original's first 320×200 frame (ALKU's closing page, or U2A's identical
+    // background) under the 30,000-cycle session's DAC; the port's U2A starts 5 frames earlier on
+    // the same picture under the merged palette (A20, A32, A53). 7880's index plane is PAM's
+    // picture under a white DAC; 7920 is PAM's white under BEGLOGO's load.
     Entry {
         capture: "fullrun/02-u2a-pam",
         args: &["--block", "1"],
@@ -424,10 +410,10 @@ pub const TABLE: &[Entry] = &[
             rgb_before(7920, Part::Beglogo, 0, "A53"),
         ],
     },
-    // BEGLOGO's −37 is A5's lead-in; its ramp is frame-locked — the port's 7930 is the
-    // original's byte for byte (tests/fullrun.rs) — so at −37 it is 81,273 px off. 8300 is
-    // BEGLOGO's held picture by §26.3 (its last frame is 8520), paired at BEGLOGO's
-    // difference, and the port shows that hold under GLENZ's wait: FULLRUN_ACROSS_HANDOVER.
+    // BEGLOGO's −37 is A5's lead-in; its ramp is frame-locked (the port's 7930 is the
+    // original's byte for byte, `tests/fullrun.rs`), so at −37 it is 81,273 px off. 8300 is
+    // BEGLOGO's held picture by §26.3 (its last frame is 8520), paired at BEGLOGO's difference,
+    // and the port shows that hold under GLENZ's wait: [`FULLRUN_ACROSS_HANDOVER`].
     Entry {
         capture: "fullrun/03-beglogo",
         args: &["--block", "1"],
@@ -553,9 +539,8 @@ pub const TABLE: &[Entry] = &[
             rgb_at(46286, Part::Endscrl, 0, "A53"),
         ],
     },
-    // tests/glenz.rs, block 2 (:90): 1499 at 0 in both planes (:420-431); the moving
-    // keyframes at the capture's surface minima, K+5 for 2300 and K+4 for 3000/3400
-    // (:461-479: 5208 / 2289 / 5941, A37).
+    // §7.2's keyframes through block 2: 1499 at 0 in both planes; the moving three at the
+    // capture's surface minima, K+5 for 2300 and K+4 for 3000/3400 (A37).
     Entry {
         capture: "glenz",
         args: &["--block", "2"],
@@ -567,7 +552,7 @@ pub const TABLE: &[Entry] = &[
             rgb(3400, 3404, 5941, "A37"),
         ],
     },
-    // tests/vault.rs:46 K0 = 353, :54 GRID_RESIDUALS at offset 0 (A41).
+    // §24.5: K0 = 353, the residuals at offset 0 (A41).
     Entry {
         capture: "grid",
         args: &["--part", "grid"],
@@ -579,8 +564,7 @@ pub const TABLE: &[Entry] = &[
             rgb(800, 447, 14, "A41"),
         ],
     },
-    // tests/vault.rs:71 K0 = 356, :81 HARD_RESIDUALS all 0 at offset 0, and 840's filed
-    // `.idx` byte for byte (:250-260).
+    // §24.7: K0 = 356, every keyframe at 0 at offset 0, and 840's filed `.idx` byte for byte.
     Entry {
         capture: "hard",
         args: &["--part", "hard"],
@@ -597,8 +581,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(1600, 1244),
         ],
     },
-    // tests/jplogo.rs:127 KEYFRAMES (reference, tick): 17300/17500 at 0 (:196-199), 17700
-    // at 51,445 against the filing no census session holds (:217, A27).
+    // §17.2's keyframes at the part's tick: 17300/17500 at 0, 17700 at 51,445 against a filing
+    // no census session holds (§17.5, A27).
     Entry {
         capture: "jplogo",
         args: &["--part", "jplogo"],
@@ -608,9 +592,8 @@ pub const TABLE: &[Entry] = &[
             rgb(17700, 635, 51445, "A27"),
         ],
     },
-    // tests/lnszoom.rs:96 boot = 2452 + tick: 2700 at 2,058 in both planes (:209, :211-217),
-    // 3400 at 1,935 (:233), 4200 at 0 (:244), 4900 at 1,396 (:267), 5650 RGB at 0 (:275) —
-    // its `.idx` is pinned as a memory read, not compared (:282-284). A25.
+    // §12.2's keyframes at boot = 2452 + tick: 2700 at 2,058 in both planes, 3400 at 1,935,
+    // 4200 at 0, 4900 at 1,396, 5650 RGB at 0 (its `.idx` is a memory read, not compared). A25.
     Entry {
         capture: "lnszoom",
         args: &["--part", "lnszoom"],
@@ -623,11 +606,11 @@ pub const TABLE: &[Entry] = &[
             rgb0(5650, 3198),
         ],
     },
-    // tests/loop.rs: `--block 5 --loop` (:62), the port's `C_port + (n − C)` = n − 196
-    // (:33, :37, :51), every seam frame at 0 (:171-183). The original's `L` = 9104 lands
-    // on the port's 8908, still CRED's 320×200 screen (:177) — a geometry mismatch, never a
-    // registered outcome — so it is paired with the port's own `L`, 8910, which the test
-    // asserts is 9104 byte for byte (:189-195): A61's 2-tick CRED tail (D42).
+    // The loop seam (§25.4) through `--block 5 --loop`: the port answers the original's n at
+    // `C_port + (n − C)` = n − 196, every seam frame at 0. The original's `L` = 9104 lands on
+    // the port's 8908, still CRED's 320×200 screen (a geometry mismatch, never a registered
+    // outcome), so it is paired with the port's own `L`, 8910, which is 9104 byte for byte:
+    // A61's 2-tick CRED tail (D42).
     Entry {
         capture: "loop/alku",
         args: &["--block", "5", "--loop"],
@@ -643,8 +626,7 @@ pub const TABLE: &[Entry] = &[
         args: &["--block", "5", "--loop"],
         frames: &[rgb0(9029, 8833), rgb0(9055, 8859), rgb0(9081, 8885)],
     },
-    // tests/minvball.rs boot = 10,368 + tick; KEYFRAMES' differing pixels, all four 0 since the
-    // z rotation stopped borrowing from the previous dot's `bx` (bugs.md §18.1, A19).
+    // §14.2's keyframes at boot = 10,368 + tick, all four 0 (bugs.md §18.1, A19).
     Entry {
         capture: "minvball",
         args: &["--part", "minvball"],
@@ -655,8 +637,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(12400, 2032),
         ],
     },
-    // tests/mntscrl.rs:96 tick = index − 419: 500 at 0 in both planes (:200-209), the three
-    // scroll keyframes RGB at 0 (:213-219).
+    // §11.2's keyframes at tick = index − 419: 500 at 0 in both planes, the three scroll
+    // keyframes RGB at 0.
     Entry {
         capture: "mntscrl",
         args: &["--part", "mntscrl"],
@@ -668,8 +650,8 @@ pub const TABLE: &[Entry] = &[
             rgb0(2300, 1881),
         ],
     },
-    // tests/pam.rs: anchor 7710, the four keyframes RGB at 0 (:169-178); 7900's index plane
-    // is BEGLOGO's white field, 60,375 indices off PAM's last frame (:253, A21).
+    // §6.2's keyframes at boot numbering (anchor 7710), RGB at 0; 7900's index plane is
+    // BEGLOGO's white field, 60,375 indices off PAM's last frame (A21).
     Entry {
         capture: "pam",
         args: &["--part", "pam"],
@@ -681,10 +663,8 @@ pub const TABLE: &[Entry] = &[
             idx(7900, 7900, 60375, "A21"),
         ],
     },
-    // tests/panicend.rs: boot = 8782 + tick (module docs), 9000 at tick 218 in both planes
-    // (:138-152). 8792/8800 are the handoff's frames, which a standalone run cannot
-    // reproduce; the test pins them at ticks 10/18 as 4,914 and 702 *bytes* (:178), and
-    // the counts here are this command's — A63, the standalone run's limitation.
+    // §10.2: boot = 8782 + tick, 9000 at tick 218 at 0 in both planes. 8792/8800 are the
+    // handoff's frames, which a standalone run cannot reproduce: A63.
     Entry {
         capture: "panicend",
         args: &["--part", "panicend"],
@@ -695,9 +675,7 @@ pub const TABLE: &[Entry] = &[
             idx0(9000, 218),
         ],
     },
-    // The fit corpus (reference-indices.md §1.13) at the part's mapping, tick = index −
-    // 5723 (tests/plzpart.rs:93). It is not a keyframe set; the counts are this command's, and
-    // A23 registers them. With the release's camera path and sine table read from its image,
+    // The fit corpus (§1.13) at tick = index − 5723: not a keyframe set, its counts A23's.
     // 8500 and 8600 are exact; the four others differ in both-set pixels of one face at a
     // channel delta of at most 9, where the reference shows one index in two colours.
     Entry {
@@ -712,15 +690,14 @@ pub const TABLE: &[Entry] = &[
             rgb(8800, 3077, 4, "A23"),
         ],
     },
-    // tests/plzpart.rs `the_cube_keyframes_match_the_reference`: both keyframes are the
-    // reference's byte for byte since the release's camera path is read from its image (A23).
+    // §13.3's cube keyframes, byte for byte: the release's camera path is read from its image
+    // (A23).
     Entry {
         capture: "plzpart/cube",
         args: &["--part", "plzpart"],
         frames: &[rgb0(8500, 2777), rgb0(9500, 3777)],
     },
-    // tests/plzpart.rs:305-328: 11.209 / 5.848 / 4.052 % of 128,000 to 0.001 points (A24);
-    // the counts are this command's — 11.2094 / 5.8484 / 4.0516 % — inside that window.
+    // A24's 11.209 / 5.848 / 4.052 % of 128,000 pixels.
     Entry {
         capture: "plzpart/plasma",
         args: &["--part", "plzpart"],
@@ -730,8 +707,8 @@ pub const TABLE: &[Entry] = &[
             rgb(7600, 1877, 5186, "A24"),
         ],
     },
-    // tests/rayscrl.rs:108 boot = 12962 + tick: 13000 at 0 (:198-205), 13500 at 0 in both
-    // planes (:226-238), 14000/14500 at 3/42 pixels (:252-258, A18).
+    // §15.2's keyframes at boot = 12962 + tick: 13000 at 0, 13500 at 0 in both planes,
+    // 14000/14500 at 3/42 pixels (A18).
     Entry {
         capture: "rayscrl",
         args: &["--part", "rayscrl"],
@@ -743,9 +720,8 @@ pub const TABLE: &[Entry] = &[
             rgb(14500, 1538, 42, "A18"),
         ],
     },
-    // tests/techno.rs:102-104 the three origins, :188-256 every keyframe at 0: 4900/5000
-    // on the first pass's 4797, 6300/8100/8200 on the music's 4799, 8300/8400 on the
-    // troll's 4800.
+    // §9.2's keyframes on the part's three origins, all 0: 4900/5000 on the first pass's 4797,
+    // 6300/8100/8200 on the music's 4799, 8300/8400 on the troll's 4800.
     Entry {
         capture: "techno/interference",
         args: &["--part", "techno"],
@@ -761,8 +737,7 @@ pub const TABLE: &[Entry] = &[
         args: &["--part", "techno"],
         frames: &[rgb0(8200, 3401), rgb0(8300, 3500), rgb0(8400, 3600)],
     },
-    // docs/fidelity/tunneli.md:30 and A6: offset 3,722 (port ticks 78/478/778/878). No test
-    // compares these frames; the counts are this command's, against A6's 179 / 373 / 321 /
+    // `tunneli.md` §7.2: offset 3,722 (port ticks 78/478/778/878), at A6's 179 / 373 / 321 /
     // 433.
     Entry {
         capture: "tunneli",
@@ -774,7 +749,7 @@ pub const TABLE: &[Entry] = &[
             rgb(4600, 878, 433, "A6"),
         ],
     },
-    // tests/vault.rs:59 K0 = 3, :66 TWIST_RESIDUALS all 0 at offset 0.
+    // §24.6: K0 = 3, every keyframe at 0 at offset 0.
     Entry {
         capture: "twist",
         args: &["--part", "twist"],
@@ -787,7 +762,7 @@ pub const TABLE: &[Entry] = &[
             rgb0(603, 600),
         ],
     },
-    // tests/u2a.rs, block 1 (:55): 6500 RGB at 64,000 (the 30,000-cycle neon frame, A32),
+    // §5.2's keyframes through block 1: 6500 RGB at 64,000 (the 30,000-cycle neon frame, A32),
     // 7300 at 1,098 in both planes (A29), 7640 at 0 in both planes.
     Entry {
         capture: "u2a",
@@ -800,37 +775,36 @@ pub const TABLE: &[Entry] = &[
             rgb0(7640, 7640),
         ],
     },
-    // The original at 15000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
-    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    // The original at 15000 cycles (§27): U2A's pre-gate hold is the background under the
+    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c15000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 25000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
-    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    // The original at 25000 cycles (§27): U2A's pre-gate hold is the background under the
+    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c25000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 35000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
-    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    // The original at 35000 cycles (§27): U2A's pre-gate hold is the background under the
+    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c35000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 60000 cycles (reference-indices.md §27): U2A's pre-gate hold is the
-    // background under the merged palette, which the port shows (A32; tests/u2a.rs).
+    // The original at 60000 cycles (§27): U2A's pre-gate hold is the background under the
+    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c60000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // tests/u2e.rs, block 4 (:55): the test's own index rule, the reference's state at the
-    // port's K − 4 (:221-251), where the silhouettes are exact and the residual is the
-    // release's Gouraud shading: 189 / 7,118 / 231 / 1,177 (:229-232, A30).
+    // §18.3's keyframes through block 4, each against the port's K − 4, where the silhouettes
+    // are exact and the residual is the release's Gouraud shading (A30).
     Entry {
         capture: "u2e",
         args: &["--block", "4"],
