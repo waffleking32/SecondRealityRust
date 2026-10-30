@@ -54,11 +54,13 @@ pub struct Frame {
 pub const PENDING: &[&str] = &[];
 
 /// How far, in frames, a published music position may be from the frame a filed trace
-/// publishes it at. **Measured, not chosen**: the two filed sessions of one recipe
-/// (`second5`, `second5b`) disagree with each other about the frame some of their row changes
-/// land on, the port, whose clock is exact, sits between them, and its worst displacement
-/// against `second5` is 3 frames (A12). The shell's `second5` test and `fullrun.rs` both hold
-/// the port to it; it lives here because both include this file.
+/// publishes it at (A12). The two filed sessions of one recipe (`second5`, `second5b`)
+/// disagree with each other by one frame at 8 of their 131 row changes, and the port's exact
+/// clock sits between them. 3 is the tolerance; the port's measured worst against `second5`
+/// is 2 (`endlogo.md` §5, printed by
+/// `shell::tests::the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`).
+/// That test and `fullrun.rs`'s `the_full_runs_music_is_where_the_trace_holds_it` both use
+/// it; it lives here because both include this file.
 #[allow(dead_code)]
 pub const JITTER_FRAMES: u32 = 3;
 

@@ -1,13 +1,12 @@
 //! `cargo xtask rediff`: every filed reference frame, re-rendered and re-compared in one
 //! command.
 //!
-//! Before this, each part was checked against its filed capture by its own test, and each
-//! test carried its own index mapping. This command holds those mappings in one table
-//! ([`TABLE`], `rediff/table.rs`) copied from the tests that assert them, runs the release
-//! binary once per entry with all of that entry's rendered indices in one `--dump-frames`,
-//! compares each frame exactly where the table says (no ±1 search: every test already
-//! states its index), and checks each frame's differing-pixel count against the count the
-//! table registers for it.
+//! The table ([`TABLE`], `rediff/table.rs`) registers a measured differing-pixel count per
+//! frame, each with the A- or D-entry that explains it (`register`). This command runs the
+//! release binary once per entry with all of that entry's rendered indices in one
+//! `--dump-frames`, compares each frame exactly at the index the table states (no ±1
+//! search), and checks each frame's count against the registered one.
+//! `bins/secondreality/tests/reference_frames.rs` is the cargo-test form of the same table.
 //!
 //! **The register is the point.** A frame that differs from the reference is not a failure
 //! here when its difference is registered — an A-entry, measured and explained — and a
