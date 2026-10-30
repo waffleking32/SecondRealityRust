@@ -62,11 +62,8 @@ fadeout likewise.
 2. **The fadeout ends inside (1200, 1240].** It runs to 1147 + 63 = **1210**; `SECOND 5`'s change
    to CRED's 320×200 screen lies in (1200, 1240] (`reference-indices.md` §20, §19.1).
 
-`the_sweeps_own_samples_are_the_ramps_frames` re-derives nine of the record's colour counts and
-means (two decimals over 384,000 bytes) from the two constants: 430, 460, 500, 540, 1160 and 1200,
-and 580, 900 and 1120 from the grouped row, which it also asserts are one frame. What pins the
-constants is 500 and 1180, one each; 900 only says the ramp had ended, and 430 pins the surface,
-not the fade.
+What pins the constants is 500 and 1180, one each; 900 only says the ramp had ended, and 430 pins
+the surface, not the fade.
 
 ## 4. The tick map, and what the port does
 
@@ -113,9 +110,8 @@ says so. A run with no player is refused at `init` (`a_run_with_no_player_is_ref
 | **1147** | the fadeout's `c = 63` (§3, from 1180) |
 
 `the_gate_opens_on_the_tick_the_reference_frames_derived` drives the gate with
-`reference/music/second5`'s words tick by tick; `the_runs_own_player_opens_the_gate_on_the_same_tick`
-runs it through the shell with the run's player and compares the composed frames with §3;
-`the_hold_is_the_cues_own_length_and_not_five_thousand` walks the hold with the trace's words.
+`reference/music/second5`'s words tick by tick; with the run's own player, rediff's 1180 (and
+block 1's `fullrun/11-endlogo`) holds the fadeout where §3 puts it.
 
 The gate's `!dis_exit()` half is not ported: the shell retires the part on the ESC tick.
 
@@ -193,13 +189,13 @@ The counts are the `endlogo`, `endlogo-leadin/*` and `fullrun/11-endlogo` rows o
 is the video memory U2E left, under ENDLOGO's white DAC). 430 and 900 go through the indexed path
 (900's `.idx` is a real one: 72 indices, 69 triples, none carrying two, §19.3); 500 and 1180 through
 RGB, because an indexed read is 20+ fade steps late and D15's coherence rule refuses those pairs.
-`tests/endlogo.rs` runs the binary in the reference's own numbering (`index_origin: boot`, anchor
-404) and makes the same comparisons; a `--block 5` run gives the same four frames.
+`tests/endlogo.rs` checks that a run is in the reference's own numbering (`index_origin: boot`,
+anchor 404); a `--block 5` run gives the same four frames.
 
 ## 8. The decode and the derivation's power
 
 The decoded `PIC.UH` is byte-identical to the reference's held frame at 900, 0 of 128,000 pixels
-(`the_held_frame_is_the_picture_the_part_read`), which is why the derivation can render candidate
+(`the_fade_constants_are_derived_by_matching_the_reference_bit_for_bit`), which is why the derivation can render candidate
 ramps over the port's own decode. The scan is discriminating: moving `FADE_IN_FIRST_INDEX` to 450
 or `FADE_OUT_FIRST_INDEX` to 1145, dropping `GATE_ALIGNMENT_TICKS` or the previous-tick reading, or
 taking `BLANKS_TICKS` to 31 each turns the part's tests red (a one-line edit in `endlogo.rs`,
