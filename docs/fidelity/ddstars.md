@@ -55,12 +55,12 @@ at 1; the reference's 400 rows are what the blits and the text occupy.
 start; its earliest evidence is a probe at 415 with the screen up (`reference-indices.md` §22), and a
 probe bounds a start without pinning it. `shell::boot_anchor("ddstars")` stays `None` and the
 manifest says `index_origin: "part"`, `anchor: null`
-(`the_mapping_is_boot_equals_four_hundred_fourteen_plus_the_tick`; conventions in part-sequence.md
+(`the_run_is_numbered_in_its_own_frames_and_draws_320x400`; conventions in part-sequence.md
 (block seams / pre-roll / mapping conventions)).
 
-The pictures pin it. The survey's frames at 500, 700, 900, 1100, 1300, 1500, 1700, 2100, 3000,
-5000 and 8000 reproduce byte for byte at `tick = boot - 414` (the ignored measurement
-`the_plus_seventeen_write_is_what_the_survey_frame_shows`, over the capture in §8):
+The pictures pin it. The four keyframes reproduce byte for byte at `tick = boot - 414` (rediff's
+`ddstars` entry), and so did the survey's frames at 500, 700, 900, 1100, 1300, 1500, 1700 and 2100
+when they were measured once against the capture in §8 (the measurement is not kept as a test):
 
 | boot | tick | what pins it |
 |---|---|---|
@@ -95,14 +95,15 @@ layer a frame out.
   The mark at 1500 sets `starlimit = 1024` (`:663-665`), so the field fills in four entries a frame
   again.
 - **The ring** never clears after `init`, so each reuse ORs in another generation and the field
-  densifies: the reference's mean byte grows 7.69 → 24.81 → 42.51 → 57.24 across the keyframes (§7).
+  densifies across the keyframes.
   `the_ring_wraps_every_sixty_four_ticks_and_never_clears` plants one star in unit 37, runs a whole
   ring and finds the bit still there; `the_blit_reads_the_fetched_unit_on_top_and_the_plus_thirty_two_reversed`
   finds row 99 of the `+32` unit at page row 100.
 - **`staradd2` writes two units**, `u` and `(u + 17) & 63` (`starfetch1`, `:260-267`, `:378-397`;
   `the_second_star_pass_writes_the_same_bits_into_the_plus_seventeen_unit`). The survey's 1700 frame
   is the measurement: with both writes the port's page is byte-identical to the capture; with only
-  the fetched unit it differs in **729 pixels** (2,187 RGB bytes), measured by the ignored test above.
+  the fetched unit it differs in **729 pixels** (2,187 RGB bytes), a one-time measurement over the
+  survey capture (§8): rerunning it needs the capture and a one-unit `star_pass` call in `advance`.
 
 ## 5. The text wipe
 
@@ -145,17 +146,16 @@ source's.
 
 The four keyframes all move (`reference-indices.md` §22.3), so D19's support is a frame each side.
 
-| keyframe | tick | plane | differing | colours | mean byte | register |
-|---|---|---|---|---|---|---|
-| 1900 | 1486 | RGB | 0 | 7 | 7.6920 | exact |
-| 3000 | 2586 | RGB | 0 | 7 | 24.8134 | exact |
-| 5000 | 4586 | RGB | 0 | 7 | 42.5059 | exact |
-| 8000 | 7586 | RGB | 0 | 4 | 57.2442 | exact |
+| keyframe | tick | plane | differing | register |
+|---|---|---|---|---|
+| 1900 | 1486 | RGB | 0 | exact |
+| 3000 | 2586 | RGB | 0 | exact |
+| 5000 | 4586 | RGB | 0 | exact |
+| 8000 | 7586 | RGB | 0 | exact |
 
 The counts are the `ddstars` rows of `xtask/src/rediff/table.rs`.
-`the_four_keyframes_match_the_reference_at_the_mapping` (unit) also asserts the colour counts and
-means and that `K-1`/`K+1` differ; `the_four_keyframes_and_their_support_frames_match_at_the_mapping`
-(`tests/ddstars.rs`) does the same through the binary. The rendered neighbours at ticks 1485, 1487,
+`the_keyframes_neighbours_differ_and_the_music_runs_twenty_two_frames_behind_the_trace`
+(`tests/ddstars.rs`) asserts through the binary that `K-1`/`K+1` differ. The rendered neighbours at ticks 1485, 1487,
 2585, 2587, 4585, 4587, 7585 and 7587 hash to `de6d1676`, `a1697853`, `f768ffbb`, `5eb100a6`,
 `062d91c4`, `0af0a960`, `fb4b902c`, `328201f6`: `reference-indices.md` §22.3's table, entry for entry.
 
@@ -167,7 +167,7 @@ The keyframes are past the fade.
 `hiddenu2` trace's boot 8000 stands at `30:54`. D27's clock starts at **408**, the mapping's zero is
 **414**, and the `hiddenu2` session's phase is **-16 frames** (`cargo test -p sr-audio --test trace --
 --nocapture`; `music-clock.md` §2), so the trace runs `414 - (408 - 16) = 22` frames ahead: its frame 7978
-reads **30:51**. The integration test asserts both trace frames and the difference. The picture does
+reads **30:51**. The integration test asserts the port's position and both trace frames. The picture does
 not depend on either.
 
 **The exit.** `STARS.ASM:772-776` draws the iteration, then checks DIS function 2. The port polls
@@ -186,10 +186,9 @@ cargo test -p secondreality --bin secondreality parts::ddstars
 cargo test -p secondreality --test ddstars
 cargo xtask rediff --only ddstars
 
-# the survey capture and the ignored measurement over it (§3, §4's 729)
+# the survey capture behind §3's sweep and §4's 729
 cargo xtask reference capture --arg U --boot autoexec --keys "KBD_left KBD_enter" --cycles 30000 \
     --frames 500,700,900,1100,1300,1500,1700,2100,3000,5000,8000 --out out/b5-su-sweep1
-cargo test -p secondreality --bin secondreality the_plus_seventeen_write -- --ignored
 
 # §7's support hashes
 cargo run --release --bin secondreality -- --part ddstars --headless \
