@@ -214,18 +214,7 @@ impl Panicend {
 
     /// Put this tick's DAC and CRTC state on the engine.
     fn present(&self, ctx: &mut PartCtx) {
-        let mut palette = Palette::new();
-        for index in 0..256usize {
-            palette.set_entry(
-                index as u8,
-                [
-                    self.dac[index * 3],
-                    self.dac[index * 3 + 1],
-                    self.dac[index * 3 + 2],
-                ],
-            );
-        }
-        ctx.set_palette(palette);
+        ctx.set_palette(Palette::from_six_bit(&self.dac));
         ctx.view.width = SCREEN_WIDTH as u16;
         ctx.view.height = self.view_height;
         ctx.view.start_addr = self.view_start;
@@ -244,12 +233,7 @@ impl Part for Panicend {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        for index in 0..256usize {
-            let entry = ctx.palette.entry(index as u8);
-            self.dac[index * 3] = entry[0];
-            self.dac[index * 3 + 1] = entry[1];
-            self.dac[index * 3 + 2] = entry[2];
-        }
+        self.dac = ctx.palette.to_six_bit();
         self.fadepals = fade_tables(&self.dac);
         self.step = 0;
         Ok(())
