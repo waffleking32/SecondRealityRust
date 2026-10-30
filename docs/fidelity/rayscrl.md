@@ -35,7 +35,7 @@ Four points pin it:
 
 | boot | tick | what pins it |
 |---|---|---|
-| 12969 | 7 | the 13000 keyframe: the fade's k=14 hold is 31 ticks after the blit, and the reference's 13000 is exactly the port's tick 38 (`the_fade_in_is_one_hundred_twenty_seven_iterations_and_pins_tick_zero`) |
+| 12969 | 7 | the 13000 keyframe: the fade's k=14 hold is 31 ticks after the blit, and the reference's 13000 is exactly the port's tick 38 (rediff's 13000 row) |
 | 13616 | 654 | the main-loop font phase: the reference's 14000 is the port's 384th main-loop draw, and the stage-2 confirmation puts the first draw at 13616 |
 | 14000 | 1038 | the font phase above, and the reference frame |
 | 14500 | 1538 | the same, 500 draws later |
@@ -108,7 +108,8 @@ The fade-in is 127 iterations (`for y := 0 to 63*2`), uploading and stepping on 
 show in the reference:
 
 - **At the k=14 upload** the displayed red is `2k+1 = 29` and green/blue are 14. That is the
-  reference's 13000 frame byte for byte (35 colours, mean **23.1535**).
+  reference's 13000 frame byte for byte (rediff's 13000 row; the frame is 35 colours, mean 23.15,
+  `reference-indices.md` §15.1).
 - **The last upload is one step short on the seven entries whose blue target is 63.** The 63rd
   upload (y=125) displays those blues at 62 and then steps the stored array to 63. The reference's
   13500 palette (`reference/parts/rayscrl/manifest.json`) is MIEKKA's with exactly **seven** blue
@@ -147,8 +148,8 @@ font-overlay region the strip has scrolled into (row 0 columns 2-4; rows 0-5, co
 draws from `MIEKKA.SCI`. At five sampled source positions the reference's byte is the tree's
 *previous* source column (`font[15*400+34]` for `+35`, `font[14*400+201]` for `+202`,
 `font[14*400+202]` for `+203`, `font[13*400+203]` for `+204`, `font[15*400+201]` for `+202`): the
-release ships a patched or re-rendered strip. The five pairs were recovered from the two keyframes'
-differing pixels. The tree's `MIEKKA.OBJ` carries the file's bytes exactly
+release ships a patched or re-rendered strip. The five pairs are recovered from the two keyframes'
+differing pixels (`the_keyframe_residue_is_the_releases_font_strip`). The tree's `MIEKKA.OBJ` carries the file's bytes exactly
 (`the_trees_miekka_object_carries_the_files_bytes`), so the port reads what the tree links.
 
 The assets, as `the_assets_are_read_the_way_the_source_reads_them` checks them:

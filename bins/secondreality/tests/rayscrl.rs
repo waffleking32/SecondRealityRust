@@ -1,23 +1,9 @@
-//! RAYSCRL through the real binary: the registry, the run's own numbering, the
-//! block-3 music position, and the reference keyframes at the mapping the
-//! evidence gives.
+//! RAYSCRL through the real binary: the registry, the run's own numbering,
+//! the blit, the music at the keyframes and D19's neighbours.
 //!
-//! The part's arithmetic is unit-tested beside it in `src/parts/rayscrl.rs`,
-//! including the exact reference comparisons that fix the release's seven-tick
-//! gate confirmation, the music pre-roll and the fade's buggy palette ramps.
-//! What is left over here is the wiring only a process can answer: the
-//! registry, the asset paths as a run resolves them from the repository root,
-//! the real player's position, and the frames the shell actually composes.
-//!
-//! **This part has no boot anchor.** Its first drawn frame is a measured
-//! window, `(12900, 13000]` (`docs/fidelity/reference-indices.md` §15), so a
-//! `--part rayscrl` run numbers its own frames from zero and its manifest says
-//! `index_origin: "part"`, `anchor: null`. The reference comparison below uses
-//! the mapping the reference itself pins — **boot = 12962 + tick** — and calls
-//! it a mapping, not an anchor. The number is the frame the reference's
-//! published order 88 row 0 first stands at; the blit lands on tick 7 (boot
-//! 12969), the main loop's first draw on tick 654 (boot 13616) and the fade's
-//! first upload on tick 1988 (boot 14950).
+//! The keyframes are rediff's `rayscrl` entry. The part has no boot anchor: a
+//! run numbers its own frames from zero, and the reference is reached by the
+//! mapping boot = 12962 + tick (`docs/fidelity/rayscrl.md` §2).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -63,48 +49,8 @@ fn frame_file(dir: &Path, index: u32, extension: &str) -> Vec<u8> {
     std::fs::read(dir.join(format!("rayscrl_{index:06}.{extension}"))).unwrap()
 }
 
-/// The reference's own frame, from the tree it is committed in.
-fn reference_frame(index: u32, extension: &str) -> Vec<u8> {
-    std::fs::read(repository_root().join(format!(
-        "reference/parts/rayscrl/frame_{index:06}.{extension}"
-    )))
-    .unwrap()
-}
-
-/// How many bytes of `rendered` differ from `expected`.
-///
-/// **The lengths are asserted first**: `zip` stops at the shorter side, so a
-/// truncated dump — the one failure a comparison test exists to catch — would
-/// compare a prefix and report zero differences as if it had compared the
-/// frame.
-fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-        rendered.len(),
-        expected.len()
-    );
-    rendered
-        .iter()
-        .zip(expected)
-        .filter(|(a, b)| a != b)
-        .count()
-}
-
-fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-    differing_bytes(rendered, expected);
-    rendered
-        .chunks_exact(3)
-        .zip(expected.chunks_exact(3))
-        .filter(|(a, b)| a != b)
-        .count()
-}
-
-/// The part tick that draws a reference index: the reference's published
-/// order 88 row 0 stands at boot 12962 and the port's tick 0 is that frame
-/// (`src/parts/rayscrl.rs`'s `REFERENCE_FIRST_INDEX`). A mapping, not an
-/// anchor.
+/// The part tick that draws a reference index (`src/parts/rayscrl.rs`'s
+/// module doc).
 const REFERENCE_FIRST_INDEX: u32 = 12_962;
 
 fn tick_of(index: u32) -> u32 {
@@ -113,10 +59,6 @@ fn tick_of(index: u32) -> u32 {
 
 #[test]
 fn the_run_is_numbered_in_its_own_frames_and_draws_320x200() {
-    // No anchor: the manifest says the indices are the run's own, and the
-    // reference indices below are reached by the stated mapping.
-    assert_eq!(tick_of(13_000), 38);
-    assert_eq!(tick_of(14_500), 1_538);
     let (dir, manifest) = dump("numbering", "0,7");
     assert_eq!(manifest["index_origin"], "part");
     assert_eq!(manifest["anchor"], serde_json::Value::Null);
@@ -168,110 +110,34 @@ fn the_music_is_the_block_three_position_at_every_keyframe() {
 }
 
 #[test]
-fn the_four_keyframes_match_the_reference_at_the_mapping() {
-    // The mapping: boot = 12962 + tick. 13000 is the fade's hold (`:120-131`,
-    // compared RGB-only — the reference files no `.idx`); 13500 is the held
-    // background, the reference's one indexed keyframe; 14000 and 14500 are
-    // RGB-only. D19's support: `K-1, K, K+1` around every moving keyframe, and
-    // the held 13500's neighbours are the same picture on both sides.
-    let mut indices = vec![
-        tick_of(13_000),
-        tick_of(13_500),
-        tick_of(14_000),
-        tick_of(14_500),
-    ];
-    for tick in [
-        tick_of(13_000),
-        tick_of(13_500),
-        tick_of(14_000),
-        tick_of(14_500),
-    ] {
-        indices.extend([tick - 1, tick + 1]);
+fn each_keyframes_neighbours_hold_or_move_as_the_reference_does() {
+    // D19's support: `K-1, K, K+1` around every keyframe.
+    let keyframes = [13_000, 13_500, 14_000, 14_500].map(tick_of);
+    let mut indices = Vec::new();
+    for tick in keyframes {
+        indices.extend([tick - 1, tick, tick + 1]);
     }
-    indices.sort_unstable();
-    indices.dedup();
     let list: Vec<String> = indices.iter().map(|index| index.to_string()).collect();
-    let (dir, manifest) = dump("keyframes", &list.join(","));
-    assert_eq!(manifest["index_origin"], "part");
+    let (dir, _) = dump("keyframes", &list.join(","));
+    let frame = |tick: u32| frame_file(&dir, tick, "rgb");
 
-    // 13000: mid fade-in.
-    assert_eq!(
-        differing_bytes(
-            &frame_file(&dir, tick_of(13_000), "rgb"),
-            &reference_frame(13_000, "rgb")
-        ),
-        0,
-        "boot 13000 (tick {})",
-        tick_of(13_000)
-    );
-    // Boot 13000 is the *hold* of the k=14 upload: `:120-131` uploads on odd
-    // `y` only, so tick 37 (y=29) and tick 38 (y=30) are one picture. The
-    // reference's 12999→13000 differs by 64 px only because the capture caught
-    // the palette upload mid-loop (`reference-indices.md` §15.3); the port's
-    // upload is one tick, so the pair is byte-identical here. The forward
-    // neighbour (y=31, the k=15 upload) is the different picture.
-    assert_eq!(
-        frame_file(&dir, tick_of(13_000) - 1, "rgb"),
-        frame_file(&dir, tick_of(13_000), "rgb"),
-        "boot 13000: the upload's hold"
-    );
-    assert_ne!(
-        frame_file(&dir, tick_of(13_000) + 1, "rgb"),
-        frame_file(&dir, tick_of(13_000), "rgb"),
-        "boot 13000: the next upload"
-    );
-
-    // 13500: the stage-2 hold, in both planes. Its neighbours are the same
-    // bytes — the reference's held keyframe.
-    let held = frame_file(&dir, tick_of(13_500), "idx");
-    assert_eq!(
-        differing_bytes(&held, &reference_frame(13_500, "idx")),
-        0,
-        "boot 13500's index plane"
-    );
-    assert_eq!(
-        differing_bytes(
-            &frame_file(&dir, tick_of(13_500), "rgb"),
-            &reference_frame(13_500, "rgb")
-        ),
-        0,
-        "boot 13500's RGB"
-    );
-    for neighbour in [tick_of(13_500) - 1, tick_of(13_500) + 1] {
-        assert_eq!(
-            frame_file(&dir, neighbour, "idx"),
-            held,
-            "boot 13500: tick {neighbour} is the same held picture"
-        );
+    // 13000 is the hold of the k=14 upload: `:120-131` uploads on odd `y`
+    // only, so ticks 37 and 38 are one picture (the reference's 64-px
+    // 12999/13000 difference is the capture catching the upload mid-loop,
+    // `reference-indices.md` §15.3); the next upload is a different one.
+    let [fade, held, first, second] = keyframes;
+    assert_eq!(frame(fade - 1), frame(fade), "boot 13000: the upload's hold");
+    assert_ne!(frame(fade + 1), frame(fade), "boot 13000: the next upload");
+    // 13500 is the stage-2 hold: its neighbours are the same picture.
+    for neighbour in [held - 1, held + 1] {
+        assert_eq!(frame(neighbour), frame(held), "boot 13500: tick {neighbour}");
     }
-
-    // 14000 and 14500: the main loop. The residual is the release's embedded
-    // MIEKKA differing from the tree's asset at the handful of bytes these two
-    // frames expose (`docs/fidelity/rayscrl.md` §6); the neighbours are
-    // different pictures, which is what makes the phase exact.
-    for (index, expected) in [(14_000u32, 3usize), (14_500, 42)] {
-        let key = frame_file(&dir, tick_of(index), "rgb");
-        assert_eq!(
-            differing_pixels(&key, &reference_frame(index, "rgb")),
-            expected,
-            "boot {index} (tick {})",
-            tick_of(index)
-        );
-        for neighbour in [tick_of(index) - 1, tick_of(index) + 1] {
-            assert_ne!(
-                frame_file(&dir, neighbour, "rgb"),
-                key,
-                "boot {index}: tick {neighbour} is not distinguishable"
-            );
+    // 14000 and 14500 are the main loop: the neighbours are different
+    // pictures, which is what makes the phase exact.
+    for tick in [first, second] {
+        for neighbour in [tick - 1, tick + 1] {
+            assert_ne!(frame(neighbour), frame(tick), "tick {tick}: tick {neighbour} is the same");
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// The guard above can fail, which is the point of it: a dump cut short is
-/// exactly the case a bare `zip` would report as identical.
-#[test]
-#[should_panic(expected = "a short read is not a comparison")]
-fn a_truncated_frame_is_refused_rather_than_counted() {
-    differing_bytes(&[0; 6], &[0; 9]);
 }

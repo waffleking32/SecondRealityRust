@@ -487,7 +487,7 @@ ten columns short. **Where.** `WATER/DEMO.PAS:183-185`. **Frame.** 14000, 14500.
 
 **Original.** `for y := 0 to 63*2` is 127 passes; the `pf := 0 to 3` loop steps `pal[x*3+3]`, so
 every red but entry 0's advances twice a pass. **Where.** `WATER/DEMO.PAS:122-126`. **Frame.** 13000
-(35 colours, mean 23.1535). **Tests.**
+(35 colours, mean 23.15, `reference-indices.md` §15.1). **Tests.**
 `the_fade_in_is_one_hundred_twenty_seven_iterations_and_pins_tick_zero`,
 `the_fade_loops_step_the_next_entrys_red_and_read_the_byte_past_the_array`.
 

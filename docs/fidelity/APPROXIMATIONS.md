@@ -516,7 +516,7 @@ uploads to black (`the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks`).
 the tree's immediate condition draws the keyframes early.
 
 **Measured difference:** **0 / 0 / 3 / 42** pixels at 13000 / 13500 / 14000 / 14500 (13500 in both
-planes; `cargo test -p secondreality --test rayscrl`; `cargo xtask rediff --only rayscrl`). The 3
+planes; `cargo xtask rediff --only rayscrl`). The 3
 and 42 are not timing but the release's embedded `MIEKKA.SCI`, which differs from the tree's at the
 strip bytes those frames expose (`rayscrl.md` §6). With `Rayscrl::confirm_ticks = 0` (the tree's
 condition) the main loop starts six draws early, and 14000 and 14500 differ by **8,375** and
