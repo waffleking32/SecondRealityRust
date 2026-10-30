@@ -481,8 +481,8 @@ in the part accounted for (D24's single-constant case). The mechanism behind it 
 constant's name says so.
 
 **Measured difference:** **0** at all four keyframes 500 / 1100 / 1700 / 2300, with `K±1`
-distinguishable (`cargo test -p secondreality --test mntscrl the_four_keyframes_match_the_reference`;
-`cargo xtask rediff --only mntscrl`). The tree's `musplus >= 0` would first hold at trace frame 2488,
+distinguishable (`cargo xtask rediff --only mntscrl`; `cargo test -p secondreality --test mntscrl
+each_scroll_keyframes_neighbours_differ_from_it`). The tree's `musplus >= 0` would first hold at trace frame 2488,
 and the part would still be holding at 1100, 1700 and 2300, **118,843 / 118,924 / 119,056** bytes
 away (`the_trees_own_wait_would_hold_through_the_scroll_keyframes`). The part's other release value,
 the `scp` bound, is `mntscrl.md` §7.

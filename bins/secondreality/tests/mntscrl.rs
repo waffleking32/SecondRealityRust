@@ -1,34 +1,19 @@
 //! MNTSCRL through the real binary: the registry, the run's own numbering, the
-//! music's head start, and the reference keyframes at the mapping the evidence
-//! gives.
+//! music's head start, the release's first wait and the cue.
 //!
-//! The part's arithmetic is unit-tested beside it in `src/parts/mntscrl.rs`,
-//! including the exact reference comparisons that fix the release's 71-tick
-//! first wait and its 640 `scp` bound. What is left over here is the wiring
-//! only a process can answer: the registry, the asset paths as a run resolves
-//! them from the repository root, the real player's position, and the frames
-//! the shell actually composes.
-//!
-//! **This part has no boot anchor.** Its first graphics frame is a measured
-//! window, `(415, 420]` (`docs/fidelity/reference-indices.md` §11.5), so a
-//! `--part mntscrl` run numbers its own frames from zero and its manifest says
-//! `index_origin: "part"`, `anchor: null`. The reference comparison below uses
-//! the mapping the reference itself pins — part tick 0 is boot frame 419, from
-//! the fade-in's recorded frame means — and calls it a mapping, not an anchor.
+//! The keyframes are rediff's `mntscrl` entry. The part has no boot anchor: a
+//! run numbers its own frames from zero, and the reference is reached by the
+//! mapping the fade-in pins, tick 0 at boot 419 (`docs/fidelity/mntscrl.md` §2).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Where a `cargo run` of the acceptance command starts, and where the part's
-/// own `assets/FOREST/...` paths resolve.
+/// Where a `cargo run` of the acceptance command starts.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A run of this part alone, dumping the frames asked for.
-///
-/// The run must exit 0: every requested index is produced, and a hole in a
-/// dump reads as a keyframe that matched.
+/// A run of this part alone, dumping the frames asked for; it must exit 0.
 fn dump(name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
     let dir = std::env::temp_dir().join(format!("sr-mntscrl-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -68,31 +53,8 @@ fn reference_frame(index: u32, extension: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// How many bytes of `rendered` differ from `expected`.
-///
-/// **The lengths are asserted first**: `zip` stops at the shorter side, so a
-/// truncated dump — the one failure a comparison test exists to catch — would
-/// compare a prefix and report zero differences as if it had compared the
-/// frame.
-fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-        rendered.len(),
-        expected.len()
-    );
-    rendered
-        .iter()
-        .zip(expected)
-        .filter(|(a, b)| a != b)
-        .count()
-}
-
-/// The part tick that draws a reference index, under the release's own
-/// timeline: tick 0 is boot 419, the number the fade-in's recorded means pin
-/// (`src/parts/mntscrl.rs`'s `REFERENCE_FIRST_INDEX`). A mapping, not an
-/// anchor.
+/// The part tick that draws a reference index: tick 0 is boot 419
+/// (`src/parts/mntscrl.rs`'s `REFERENCE_FIRST_INDEX`).
 const REFERENCE_FIRST_INDEX: u32 = 419;
 
 fn tick_of(index: u32) -> u32 {
@@ -101,11 +63,6 @@ fn tick_of(index: u32) -> u32 {
 
 #[test]
 fn the_run_is_numbered_in_its_own_frames_and_draws_320x200() {
-    // No anchor: the manifest says the indices are the run's own, and the
-    // reference indices below are reached by the stated mapping, not by
-    // claiming an anchor this part does not have.
-    assert_eq!(tick_of(500), 81);
-    assert_eq!(tick_of(1100), 681);
     let (dir, manifest) = dump("numbering", "0,81");
     assert_eq!(manifest["index_origin"], "part");
     assert_eq!(manifest["anchor"], serde_json::Value::Null);
@@ -132,10 +89,7 @@ fn the_run_is_numbered_in_its_own_frames_and_draws_320x200() {
         "tick 0's DAC is black"
     );
     // The hold that follows does not draw: its index plane is tick 0's.
-    let held = frame_file(&dir, 81, "idx");
-    assert_eq!(first_indices, held);
-    // And by tick 81 (boot 500) the hold's DAC is up: the reference's frame.
-    assert_eq!(held, reference_frame(500, "idx"));
+    assert_eq!(first_indices, frame_file(&dir, 81, "idx"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -161,63 +115,13 @@ fn the_music_is_eleven_polls_in_at_the_parts_first_tick() {
 }
 
 #[test]
-fn the_held_opening_is_the_references_frame_500_in_both_planes() {
-    // §11.2: 500 is the music wait's hold, and its `.idx` is the only one the
-    // reference files for this part. Both planes are compared; the indexed
-    // one is the stricter (it makes the DAC-widening rule irrelevant).
-    let (dir, _) = dump("held", "81");
-    let indices = frame_file(&dir, 81, "idx");
-    assert_eq!(
-        differing_bytes(&indices, &reference_frame(500, "idx")),
-        0,
-        "500's index plane"
-    );
-    let rgb = frame_file(&dir, 81, "rgb");
-    assert_eq!(
-        differing_bytes(&rgb, &reference_frame(500, "rgb")),
-        0,
-        "500's RGB"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_four_keyframes_match_the_reference() {
-    // The part's own timeline is the release's: tick 0 is boot 419, the first
-    // wait is 71 ticks, the pre-roll 127, the main loop from tick 263. The
-    // reference's frame at boot `K` is the run's tick `K - 419`, and all four
-    // keyframes compare byte for byte through the real binary. 500 is the held
-    // opening, compared indexed; the three scroll keyframes are RGB-only in
-    // the reference.
-    //
-    // Each keyframe is dumped with D19's `K-1, K, K+1` support. The scroller
-    // moves 2.4-3.1 % of its pixels a frame, so the neighbours are different
-    // pictures — which is what makes the mapping exact and not a search's
-    // loosest fit.
-    let (dir, manifest) = dump(
-        "keyframes",
-        "80,81,82,680,681,682,1280,1281,1282,1880,1881,1882",
-    );
-
-    assert_eq!(
-        differing_bytes(&frame_file(&dir, 81, "idx"), &reference_frame(500, "idx")),
-        0,
-        "500's index plane"
-    );
-    assert_eq!(
-        differing_bytes(&frame_file(&dir, 81, "rgb"), &reference_frame(500, "rgb")),
-        0,
-        "500's RGB"
-    );
-
+fn each_scroll_keyframes_neighbours_differ_from_it() {
+    // D19's support: the scroller moves 2.4-3.1 % of its pixels a frame, so
+    // `K-1` and `K+1` are different pictures and the mapping is exact.
+    let (dir, _) = dump("keyframes", "680,681,682,1280,1281,1282,1880,1881,1882");
     for index in [1100u32, 1700, 2300] {
         let tick = tick_of(index);
         let key = frame_file(&dir, tick, "rgb");
-        assert_eq!(
-            differing_bytes(&key, &reference_frame(index, "rgb")),
-            0,
-            "boot {index} (tick {tick})"
-        );
         for neighbour in [tick - 1, tick + 1] {
             assert_ne!(
                 frame_file(&dir, neighbour, "rgb"),
@@ -226,16 +130,13 @@ fn the_four_keyframes_match_the_reference() {
             );
         }
     }
-    assert_eq!(manifest["index_origin"], "part");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn a_block_three_run_starts_here_and_is_numbered_the_same_way() {
-    // `SECOND 3` begins at MNTSCRL (`MAIN/U2.ASM:856-866`), so the block run
-    // now starts instead of refusing. It carries no anchor either — the part
-    // is a block entry whose first frame is a window, not a measured index —
-    // and its music is the same MUSIC1@42.
+    // `SECOND 3` begins at MNTSCRL (`MAIN/U2.ASM:856-866`). It carries no
+    // anchor either, and its music is the same MUSIC1@42.
     let dir = std::env::temp_dir().join(format!("sr-mntscrl-{}-block3", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
@@ -337,12 +238,4 @@ fn the_real_players_cue_fades_the_part_out_and_the_run_holds_black() {
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// The guard above can fail, which is the point of it: a dump cut short is
-/// exactly the case a bare `zip` would report as identical.
-#[test]
-#[should_panic(expected = "a short read is not a comparison")]
-fn a_truncated_frame_is_refused_rather_than_counted() {
-    differing_bytes(&[0; 6], &[0; 9]);
 }

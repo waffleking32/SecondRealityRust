@@ -364,7 +364,7 @@ exact.
 (`font[0]` in the original); the release's `scp` bound of 640 reads exactly that byte for row 30
 (D24, `mntscrl.md` §7). **Where.** `FOREST/READ2.PAS:119` (`:88` is the tree's 639). **Frame.**
 2300 (exact under 640; the tree's 639 leaves 146 pixels off). **Tests.**
-`the_bias_includes_the_loops_one_byte_overrun`,
+`the_bias_adds_128_to_non_zero_bytes_and_wraps`,
 `the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`.
 
 ### 15.2 The forced-black bands and their ramp back
@@ -740,7 +740,7 @@ path. Where a note holds a counterfactual test, the row names it.
 | TECHNO | `dis_partstart()` is called a second time | `TECHNO/KOE.C:327` | The version check draws and waits on nothing | `techno.md` §5 |
 | TECHNO | `pic = halloc(20000,4)` is 80,000 bytes and the segment poke folds the second read into it | `TECHNO/KOE.C:317` | The 400 decoded rows are the Origin reader's either way; 8300 and 8400 are at 0 | `techno.md` §7, §8 |
 | PANICEND | The part never polls the exit flag (`grep -c dis_exit` prints 0) | `PANIC/SHUTDOWN.C:1-157` | No reference frame is at an exit | `panicend.md` §9-10 |
-| MNTSCRL | `frame = veke` can never fire: `inc(frame)` is commented out | `FOREST/READ2.PAS:3`, `:221-224` | Dead bound (`the_dead_veke_bound_never_ends_the_part`) | `mntscrl.md` §8 |
+| MNTSCRL | `frame = veke` can never fire: `inc(frame)` is commented out | `FOREST/READ2.PAS:3`, `:221-224` | Dead bound (no `frame` counter in the port) | `mntscrl.md` §8 |
 | LNS&ZOOM | `memcpy(back+64000, back+64000-1536, 1536)` copies the picture's last 1,536 bytes into the pad past it | `LENS/MAIN.C:302` | The copied bytes are all 0 (`tail -c 1536 assets/LENS/LENS.EXB`) and the buffer starts at 0; a mutation that drops the copy leaves the lens residuals unchanged. `the_tables_are_bounded_and_the_overrun_is_the_1536_byte_copy` pins the layout | `lnszoom.md` §2 |
 | LNS&ZOOM | `if(dis_musplus>-30)` tests the function pointer, so the wait always runs | `LENS/MAIN.C:104` | At entry the player publishes -5 (`the_entry_pre_roll_lands_the_reference_position_at_tick_zero`); the counterfactual is `the_missing_call_in_the_part1_guard_is_preserved` | `lnszoom.md` §3 |
 | LNS&ZOOM | The `a > 3` clamp on the frame advance | `LENS/MAIN.C:176` | The port advances one frame a tick | `lnszoom.md` §4 |

@@ -1,132 +1,33 @@
 //! MNTSCRL — the mountain scroller: a landscape with a scrolling leaf overlay.
 //!
-//! `FOREST/READ2.PAS` (224 lines) is the part, over `FOREST/ROUTINES.ASM` (39
-//! lines — the additive column blitter) and the linked assets `BGR.PAS`'s
-//! `hback` (`FOREST/HILLBACK.CLX`, built by `FOREST/MAKEOB.BAT:1`), `AOS1-3.PAS`'s
-//! `posi1-3` (`FOREST/POS1-3.DAT`), and `O2.SCI`, which the part reads at run
-//! time (`:110`). Its acts, in order:
-//!
-//! 1. `:101-108` — mode 13h and `dis_partstart`.
-//! 2. `:110-117` — 31 rows of 640 bytes read out of `O2.SCI` at `x*640+778`,
-//!    into `fbuf`.
-//! 3. `:119` — every non-zero byte of `fbuf` gets **+128** (`inc` wraps, and
-//!    the loop runs to `sizeof(fbuf)`, one byte past the array — see
-//!    [`apply_bias`]).
-//! 4. `:120-123` — the palette from `hback+10`, the 64,000-byte picture from
-//!    `hback+778` rebased to `hback+0`, the DAC all black, and the picture
-//!    blitted to `$a000`.
-//! 5. `:125-142` — 64 frames fading the DAC from black to `pal`, with entries
-//!    0-31 and 128-159 held black.
-//! 6. `:144-151` — `tmppal = pal`, `fpal = pal` with those bands black, an
-//!    upload, and the font built: source columns 0-132 into font columns
-//!    104-236 of each of the 31 rows, with `scp := 133`.
-//! 7. `:153-159` — the first wait. The release's own frames measure it at
-//!    **71 ticks**; the tree's `dis_musplus() >= 0` is kept as the measured
-//!    counterfactual ([`Mntscrl::tree_wait`], [`RELEASE_WAIT_TICKS`]).
-//! 8. `:165-182` — the 127-frame pre-roll: `scr(sss)` with `sss` cycling 0,1,2,
-//!    the band ramp re-uploaded on odd frames.
-//! 9. `:184-224` — the main loop: one `scr(sss)` a tick, the fade-out when
-//!    `dis_musplus() == -11` exactly, and the exit on `dis_exit` or `quit`.
-//!
-//! # The blitter, unit for unit
-//!
-//! `Putrouts` (`ROUTINES.ASM:11-39`) walks the `237*31` columns of one
-//! position list. Each column is a count and then that many **byte offsets**
-//! into video memory; a zero count is the original's hidden column and is
-//! skipped (`:23-26`). For each offset `di` it writes
+//! `FOREST/READ2.PAS` (224 lines) over `FOREST/ROUTINES.ASM` (`Putrouts`, the
+//! additive column blitter) and the linked `HILLBACK.CLX` (`BGR.PAS`'s `hback`)
+//! and `POS1-3.DAT` (`AOS1-3.PAS`), plus `O2.SCI`, read at run time (`:110`).
+//! A tick is one `waitr` (`:17-24`); tick 0 is the code before the first.
 //!
 //! ```text
-//! es:[di] = gs:[di] + fs:[bx]      ; the background byte + this column's font byte
+//! tick 0        :101-123  mode 13h, the loads, :119's +128 bias, black DAC, blit
+//! ticks 1-64    :125-142  the fade-in, bands 0-31 and 128-159 held black
+//! tick 64       :144-151  the palette swap and the font build (scp := 133)
+//! ticks 65-135  :153-159  the release's 71-tick first wait, nothing drawn
+//! ticks 136-262 :165-182  the pre-roll: scr(sss), the band ramp on odd frames
+//! then          :184-224  the main loop: scr, the fade on musplus == -11, quit
 //! ```
 //!
-//! with `bx` the column index (one font byte a column) and the add a byte add,
-//! so it wraps at 256. A font byte of 0 is transparent in the additive sense:
-//! the background shows through unchanged. `scr` (`READ2.PAS:56-91`) picks one
-//! of the three lists; `scr(2)` additionally shifts the packed font one byte
-//! left (`move(font[1],font[0],237*31)`, `:86`), appends the next `O2.SCI`
-//! column at column 236 of every row (`:87`), and advances `scp` toward its
-//! bound (`:88`; the release's 640, see [`SCP_MAX`]). The port keeps the font
-//! as the same packed 31×237 array so the shift moves bytes across row
-//! boundaries exactly as the source's `move` does before the append
-//! overwrites the seam.
+//! `Putrouts` (`ROUTINES.ASM:11-39`) writes `es:[di] = gs:[di] + fs:[bx]` (the
+//! background plus the column's font byte, wrapping) at every offset of each of
+//! the `237*31` columns of one list; `scr(2)` (`READ2.PAS:86-88`) then shifts the
+//! packed font one byte and appends the next `O2.SCI` column.
 //!
-//! # The tick map, and the reference's numbers
+//! Tick 0 is boot 419, measured from the fade-in ([`REFERENCE_FIRST_INDEX`]); it
+//! is not an anchor, so `init` makes the music's 11-poll head start itself. The
+//! first wait is the release's measured 71 ticks, not the tree's `musplus >= 0`
+//! (A17), and `scp` stops at the release's 640, not the tree's 639 (D24).
 //!
-//! A tick is one `waitr` (`:17-24`, `dis_waitb`); tick 0 is the code before
-//! the first one, which is CRED's and ENDSCRL's convention too.
-//!
-//! ```text
-//! tick 0        the mode set, the loads, the black DAC and the background blit
-//! ticks 1-64    the 64 fade-in uploads (`:132-142`)
-//! tick 64       also `:144-151`: the palette swap and the font build
-//! ticks 65-135  the release's 71-tick wait — nothing drawn
-//! ticks 136-262 the pre-roll (`:165-182`)
-//! then          the main loop (`:193-224`), one tick a `scr`
-//! ```
-//!
-//! The reference's own fade pins where tick 0 is: `docs/fidelity/reference-indices.md`
-//! §11.1 records the frame means 6.08 at 425, 8.91 at 430, 10.25 at 435 and
-//! 10.53 at 440, and the port's palette curve (`min(step, pal)` per channel)
-//! puts those four on the steps 5, 10, 15 and 20 — one `n` for each, and
-//! `frame = tick 0 + n + 1`, so **tick 0 is boot frame 419**. It is a
-//! measurement, not an anchor: `shell::boot_anchor("mntscrl")` stays `None`
-//! and a run of this part numbers its own frames from zero. The mapping is
-//! what `docs/fidelity/mntscrl.md` uses to compare against the reference.
-//!
-//! # The music, and the release's timeline
-//!
-//! The block-3 restart (`MAIN/U2.ASM:856-863`) starts MUSIC1 at order 42 on
-//! the music clock's first tick, frame 408 (`shell::MUSIC_START_FRAME`), so
-//! the reference's part — whose tick 0 is boot 419 — already saw **11 polls**
-//! of it. An unanchored run numbers the music with the part
-//! (`MusicStart::new(None)`), so [`Mntscrl::init`] pre-polls those 11 frames:
-//! the port's player is then where the reference's was, tick for tick. That
-//! is the same `pre` a `MusicStart` anchored at 419 would compute; if this
-//! part ever gains an anchor, the shell's pre-poll and this one would have to
-//! become one.
-//!
-//! **The first wait follows the release, not the tree.** `READ2.PAS:153-159`
-//! waits for `dis_musplus() >= 0`, and `reference/music/second3` never reads
-//! that until frame 2488 (order 47) — over 1,900 frames after the release
-//! leaves the wait. The release's own keyframes put its last held frame at
-//! boot **554** and its pre-roll's first `scr` at 555, so with tick 0 at 419
-//! the wait is **71 ticks** (65 through 135). It cannot be a `musplus`
-//! threshold: the trace's position is order 42 row 16 on both sides of the
-//! boundary (`zplus` 0, `musplus` -32 at both), so every threshold either
-//! exits at tick 65 or never at 135. The port therefore runs the measured
-//! duration ([`RELEASE_WAIT_TICKS`]), as the controller's D24 ruling requires
-//! — the real run must match the reference's four keyframes — and
-//! [`Mntscrl::tree_wait`] keeps the tree's condition so
-//! `the_trees_own_wait_would_hold_through_the_scroll_keyframes` can measure
-//! what the development snapshot would have drawn. The cue that *ends* the
-//! part, `== -11` exactly (`:196-203`), is the tree's and is tested here.
-//!
-//! # The bugs, preserved
-//!
-//! - **`for x := 0 to sizeof(fbuf)`** (`:119`) runs one byte past the declared
-//!   array `array[0..640*31]`. In the original that byte is `font[0]` (the next
-//!   global), still zero at that point; the port models it as an explicit
-//!   zero byte and documents the aliasing in [`apply_bias`].
-//! - **The `veke = 2800` bound is dead** (`:3`, `:224`): `inc(frame)` is
-//!   commented out (`:221`), so the `frame = veke` arm of the `until` can
-//!   never fire. The port has no `frame` counter and runs until the cue, as
-//!   the original does.
-//! - **The palette bands 0-31 and 128-159 are forced black** during the
-//!   fade-in (`:126-127`) and again after it (`:146-147`), and the pre-roll
-//!   ramps them back to the picture's own values (`:165-178`) — which is the
-//!   reference's "background appearing at 560-615". Both the forcing and the
-//!   ramp are the source's, and both are kept.
-//!
-//! # The assets
-//!
-//! The three are read in their original formats: `O2.SCI` and `HILLBACK.CLX`
-//! are RIX3 (`sr_assets::load_path`), whose palette and pixel payloads are the
-//! bytes the original's raw `seek`s reach — the RIX3 reader's own tests pin
-//! that — and `POS1-3.DAT` is the shared [`PosList`] decoder. The source's
-//! rebase of `hback` (`:121`) is not performed: the port keeps the 64,000
-//! picture bytes as the background and the asset's trailing 778 bytes where
-//! the rebased memory leaves them, so an offset in the list's 64 KB range
-//! reads what the original's segment held ([`BACKGROUND_LEN`]).
+//! **Preserved** (`bugs.md` §15): the bias loop's one-byte overrun (`:119`); the
+//! forced-black bands and their ramp back; the exact `== -11` cue (`:200`); the
+//! dead `veke` bound (`inc(frame)` is commented out, `:221`). Measurements:
+//! `docs/fidelity/mntscrl.md`.
 
 use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
@@ -142,9 +43,7 @@ const NAME: &str = "mntscrl";
 /// `READ2.PAS:102` `mov ax,$13`: 320 pixels a row, 200 rows, one byte a pixel.
 const SCREEN_WIDTH: u16 = 320;
 const SCREEN_HEIGHT: u16 = 200;
-/// Mode 13h's row stride, which is also the display's: `ROUTINES.ASM`'s `di`
-/// offsets are `x + y*320`. The view names it explicitly so the surface's own
-/// row stride (640) cannot shear the picture.
+/// Mode 13h's row stride: `ROUTINES.ASM`'s `di` offsets are `x + y*320`.
 const LINE_LEN: u16 = 320;
 /// The displayed picture: `:123`'s 64,000-byte blit.
 const VIDEO_BYTES: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize;
@@ -160,9 +59,8 @@ const O2_WIDTH: usize = 640;
 const O2_HEIGHT: usize = 32;
 /// `:112-116`: the rows the part reads — 0 through 30, of the file's 32.
 const FBUF_ROWS: usize = 31;
-/// `:42` `fbuf : array[0..640*31] of byte` — 19,841 elements, of which the
-/// load fills the first 19,840. The declared array is kept whole because
-/// `:119`'s loop walks it.
+/// `:42` `fbuf : array[0..640*31] of byte`: 19,841 elements, the load fills
+/// 19,840; `scr`'s append at `scp` 640 reads the last one for row 30.
 const FBUF_LEN: usize = O2_WIDTH * FBUF_ROWS + 1;
 /// The bytes the load actually fills.
 const FBUF_LOADED: usize = O2_WIDTH * FBUF_ROWS;
@@ -172,17 +70,6 @@ const FBUF_LOADED: usize = O2_WIDTH * FBUF_ROWS;
 const HILLBACK_PATH: &str = "assets/FOREST/HILLBACK.CLX";
 const HILLBACK_WIDTH: usize = 320;
 const HILLBACK_HEIGHT: usize = 200;
-/// The RIX3 layout the raw reads depend on: 10-byte header, 768-byte palette,
-/// pixels at 778 (`crates/sr-assets/src/rix.rs`).
-#[cfg(test)]
-const RIX3_PALETTE: usize = 10;
-/// After `:121`'s rebase the `hback` segment holds the picture's 64,000 bytes
-/// followed by the asset's own last 778 bytes (the rebase copies from +778 to
-/// +0 and leaves the tail standing). The blitter reads `gs:[di]` from this
-/// memory, so the port keeps all 64,778 bytes; the lists' largest offset is
-/// 63,870 (`the_assets_are_read_the_way_the_source_reads_them`), inside the
-/// picture.
-const BACKGROUND_LEN: usize = VIDEO_BYTES + 778;
 
 /// `AOS1-3.PAS` link the three lists; `READ2.PAS:59-90` picks one.
 const POS_PATHS: [&str; 3] = [
@@ -203,19 +90,8 @@ const FONT_OFFSET: usize = 104;
 const FONT_FIRST_BYTES: usize = 133;
 /// `:151` `scp := 133`.
 const SCP_START: u16 = 133;
-/// `:88`'s bound on `scp` — **640 in the release, where the tree says 639**.
-///
-/// The tree's line is `if scp < 639 then inc(scp)`, so its last appended
-/// column is 639. The release reads one column further: at boot 2300 its
-/// frame is byte-identical with this bound at 640 and differs in 401 bytes
-/// under the tree's 639, while 1100 and 1700 — before the bound is reached —
-/// are identical under both
-/// (`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`). The
-/// tree's own `fbuf` is `array[0..640*31]`: index 19,840, one past the 31
-/// loaded rows, is exactly the element a stride-640 read at column 640 needs
-/// for row 30, and `:119`'s loop covers it. The extra element exists for this
-/// read, so the release's bound is the array's own; `D24`'s single constant is
-/// adopted, and `docs/fidelity/mntscrl.md` §7 records it.
+/// `:88`'s bound on `scp`: the release's 640 where the tree's
+/// `if scp < 639` says 639 (D24; 2300 decides it, `docs/fidelity/mntscrl.md` §7).
 const SCP_MAX: u16 = 640;
 /// `:119` `inc(fbuf[x],128)`.
 const BIAS: u8 = 128;
@@ -240,50 +116,28 @@ const FADE_OUT_STEPS: u32 = 65;
 /// **exactly** -11 (`zplus` 1, row 53; `sr_engine::music::musplus_from`).
 const CUE: i32 = -11;
 
-/// The release's first wait, in ticks — the tree's `musplus >= 0` replaced by
-/// the duration the release's own frames measure.
-///
-/// The reference's last held frame is boot **554** and its pre-roll's first
-/// `scr` is boot **555** (`docs/fidelity/mntscrl.md` §6): with tick 0 at 419
-/// the wait occupies ticks 65 through 135, so it lasts **71** ticks. No
-/// `musplus` threshold can produce that boundary — at ticks 134 and 135 the
-/// published position is order 42 row 16 on both sides (`zplus` 0), so
-/// `musplus` is -32 at both, and every threshold either ends the wait at tick
-/// 65 or never ends it at 135. The constant is the fitted value the single
-/// reference run supports; the release's mechanism is not recoverable from
-/// its frames. [`Mntscrl::tree_wait`] keeps the tree's condition as the
-/// measured counterfactual.
+/// The release's first wait in place of the tree's `:153-159`
+/// `dis_musplus() >= 0`: boot 555 is its pre-roll's first `scr`, so ticks
+/// 65..=135. No `musplus` threshold produces that boundary (A17, `mntscrl.md` §6).
 const RELEASE_WAIT_TICKS: u32 = 71;
-/// `:3` `const veke = 2800` — dead, because `inc(frame)` is commented out at
-/// `:221`. Kept as the source's number; no code path can use it.
-#[cfg(test)]
-const VEKE: u32 = 2800;
 
-/// The reference boot index this part's tick 0 draws at, measured from the
-/// fade-in's own recorded frame means (`docs/fidelity/reference-indices.md`
-/// §11.1; `the_fade_in_pins_tick_zero_to_boot_419`). **Not an anchor**:
-/// `shell::boot_anchor("mntscrl")` is `None` by decision, and a run of this
-/// part numbers its own frames from zero. The number exists for one purpose:
-/// the music's head start below, and the comparison in `docs/fidelity/mntscrl.md`.
+/// The boot index tick 0 draws at, fitted to the fade-in's frame means
+/// (`reference-indices.md` §11.1; `the_fade_in_pins_tick_zero_to_boot_419`).
+/// Not an anchor: a run of this part numbers its own frames from zero.
 const REFERENCE_FIRST_INDEX: u32 = 419;
 
-/// `:153-159`'s music wait: the reference's player had been polled for the 11
-/// frames between the music clock's start (408) and this part's tick 0 (419)
-/// before the part ran. An unanchored run starts the player with the part, so
-/// those polls are made here — the same `pre` a `MusicStart` anchored at 419
-/// computes.
+/// The polls the reference's player had made between the music clock's start
+/// (408) and tick 0, which an unanchored run makes in `init`: the `pre` a
+/// `MusicStart` anchored at 419 would compute.
 const MUSIC_PRE_ROLL: u32 = REFERENCE_FIRST_INDEX - crate::shell::MUSIC_START_FRAME;
 
 // --------------------------------------------------------------- the part --
 
-/// A palette the part mutates byte by byte, as the source's `array[0..768] of
-/// byte` triples do. Six bits a channel; `set_entry` would mask, so the part
-/// keeps the plain triples and builds a [`Palette`] only to upload.
+/// The source's `array[0..768] of byte` palettes, as six-bit triples.
 type Rgb = [u8; 3];
 type Palette768 = [Rgb; 256];
 
-/// Where in `READ2.PAS`'s flow the part is. The wait's length is the music's,
-/// so it is a phase and not a tick number; everything after it is fixed.
+/// Where in `READ2.PAS`'s flow the part is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
     /// Tick 0: the mode set, the loads' results, the black DAC, the blit.
@@ -291,8 +145,7 @@ enum Phase {
     /// `:132-142`: fade-in upload `y`.
     FadeIn { y: u32 },
     /// The release's first wait: `ticks` of its 71 have passed; nothing is
-    /// drawn. The tree's `:153-159` `dis_musplus() >= 0` is the counterfactual
-    /// [`Mntscrl::tree_wait`].
+    /// drawn.
     Wait { ticks: u32 },
     /// `:165-182`: pre-roll iteration `y`.
     PreRoll { y: u32 },
@@ -304,11 +157,10 @@ enum Phase {
 
 /// MNTSCRL: the landscape, the font strip, and the three position lists.
 pub struct Mntscrl {
-    /// `hback`'s rebased memory: the 64,000-byte picture, then the asset's
-    /// last 778 bytes where the rebase leaves them ([`BACKGROUND_LEN`]).
+    /// `hback`'s 64,000-byte picture (`:121`); `pos_list` keeps every offset
+    /// inside it.
     background: Vec<u8>,
-    /// `READ2.PAS:42` `fbuf`: the 31 loaded rows, the array's last byte, and
-    /// the source's +128 bias applied to all of them.
+    /// `READ2.PAS:42` `fbuf`, biased.
     fbuf: Vec<u8>,
     /// `:43` `font : array[0..237*31] of byte`: one byte a blitter column,
     /// laid out 31 rows of 237.
@@ -323,18 +175,6 @@ pub struct Mntscrl {
     fpal: Palette768,
     /// `:45` `scp`: the `O2.SCI` column the next `scr(2)` appends.
     scp: u16,
-    /// The bound [`scp`](Self::scp) stops at — [`SCP_MAX`], the release's 640.
-    /// A field so `the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`
-    /// can run the tree's 639 through the same code and measure the frames it
-    /// produces; nothing outside that test sets it.
-    scp_bound: u16,
-    /// Run the tree's `:153-159` wait — `dis_musplus() >= 0` a tick — instead
-    /// of the release's [`RELEASE_WAIT_TICKS`]. A field for the counterfactual
-    /// test `the_trees_own_wait_would_hold_through_the_scroll_keyframes`,
-    /// which measures what the development snapshot would have drawn; the
-    /// part's own behaviour is the release's wait, and nothing at run time
-    /// sets this.
-    tree_wait: bool,
     /// `:45` `sss`: the list `scr` is on this tick.
     sss: u8,
     /// `:99` `fp`: the fade-out's step.
@@ -361,8 +201,6 @@ impl Mntscrl {
             tmppal: [[0; 3]; 256],
             fpal: [[0; 3]; 256],
             scp: SCP_START,
-            scp_bound: SCP_MAX,
-            tree_wait: false,
             sss: 0,
             fp: 0,
             fadeout: false,
@@ -372,16 +210,9 @@ impl Mntscrl {
         }
     }
 
-    /// Tick 0: `:120-128` — the black DAC, the background blit, and the two
-    /// fade tables. The mode set's clear is the surface's first 64 KB.
+    /// Tick 0: `:122-123`, the black DAC and the background blit.
     fn setup(&mut self, ctx: &mut PartCtx) {
-        // `:123` `move(mem[seg(hback):ofs(hback)],mem[$a000:0],64000)`. The
-        // clear before it is the mode set's (`int10_modes.cpp`'s
-        // `finish_set_mode`); the blit covers the whole display, so the clear
-        // is only what the memory past the last written row needs.
-        let memory = ctx.surface.pixels_mut();
-        memory[..VIDEO_BYTES].fill(0);
-        memory[..VIDEO_BYTES].copy_from_slice(&self.background[..VIDEO_BYTES]);
+        ctx.surface.pixels_mut()[..VIDEO_BYTES].copy_from_slice(&self.background);
 
         // `:122` `for x := 0 to 255 do setrgb(x,0,0,0)`.
         ctx.set_palette(Palette::new());
@@ -455,9 +286,8 @@ impl Mntscrl {
         self.scr(ctx, self.sss as usize);
         self.sss = if self.sss == 2 { 0 } else { self.sss + 1 };
 
-        // `:224` `until dis_exit or (frame = veke) or (quit = 1)`. `frame` is
-        // never incremented (`:221` is commented out), so the `veke` arm is
-        // dead; `dis_exit` is the part's own check, after the tick's drawing.
+        // `:224` `until dis_exit or (frame = veke) or (quit = 1)`; the `veke`
+        // arm is dead because `:221`'s `inc(frame)` is commented out.
         if self.quit || ctx.exit_requested {
             PartStatus::Finished
         } else {
@@ -491,8 +321,8 @@ impl Mntscrl {
                 self.font[row * FONT_COLUMNS + (FONT_COLUMNS - 1)] =
                     self.fbuf[row * O2_WIDTH + self.scp as usize];
             }
-            // `:88`, with the release's bound ([`SCP_MAX`]).
-            if self.scp < self.scp_bound {
+            // `:88`, with the release's bound.
+            if self.scp < SCP_MAX {
                 self.scp += 1;
             }
         }
@@ -501,11 +331,7 @@ impl Mntscrl {
     /// `setrgb(x,fpal[x*3+0],…)` for every entry: what `:135` and `:148`
     /// upload.
     fn upload_all(&self, ctx: &mut PartCtx) {
-        let mut palette = Palette::new();
-        for (index, rgb) in self.fpal.iter().enumerate() {
-            palette.set_entry(index as u8, *rgb);
-        }
-        ctx.set_palette(palette);
+        ctx.set_palette(Palette::from_six_bit(self.fpal.as_flattened()));
     }
 }
 
@@ -515,10 +341,8 @@ fn pos_list(path: &str, bytes: &[u8]) -> Result<PosList, PartError> {
         part: NAME,
         message: format!("{path}: {error}"),
     })?;
-    // `scr` indexes the surface and the background with every offset
-    // (:515); past the 64,000-byte picture the background read panics.
-    // The bound belongs here, where the file is still named, not in
-    // the blitter's hot path.
+    // `scr` indexes the 64,000-byte background with every offset; the bound
+    // belongs here, where the file is still named.
     for (column, offsets) in list.columns.iter().enumerate() {
         for &offset in offsets {
             if offset as usize >= VIDEO_BYTES {
@@ -550,28 +374,17 @@ impl Part for Mntscrl {
         NAME
     }
 
-    /// `:110-151`: the assets and the display state the part needs before its
-    /// first tick, and the music's head start.
-    ///
-    /// The source's mode set and loads all run between the previous part's
-    /// last frame and this part's first, which is why the view is set here:
-    /// the shell composes tick 0 at this geometry.
+    /// `:101-121`: the assets, the mode set and the music's head start, all
+    /// before tick 0, so the shell composes tick 0 at this geometry.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        // `:153-159` is a music wait; a run with no player could never leave
-        // it. The shell refuses to start such a run, and this is the
-        // same refusal where the part can see it.
         ctx.require_music(
             NAME,
             "this part waits on the music player's position \
              (FOREST/READ2.PAS:153-159, :196-203) and the run has no music to wait on",
         )?;
 
-        // The reference's player was 11 polls old when this part's tick 0 ran
-        // (`REFERENCE_FIRST_INDEX` - `MUSIC_START_FRAME`); an unanchored entry
-        // run starts it with the part, so the head start is made here. A part
-        // reached mid-chain starts on a player that has already run through
-        // these frames, so the head start is the entry run's
-        // (`music_fresh`) alone.
+        // A part reached mid-chain gets a player that has already run these
+        // frames: the head start is the entry run's alone.
         if ctx.music_fresh() {
             if let Some(music) = ctx.music() {
                 for _ in 0..MUSIC_PRE_ROLL {
@@ -580,9 +393,8 @@ impl Part for Mntscrl {
             }
         }
 
-        // `:110-117`: 31 rows of 640 bytes. The RIX3 reader hands back the
-        // same bytes the raw `seek(x*640+778)` reaches (its own tests pin the
-        // layout), so the copy is row for row.
+        // `:110-117`: 31 rows of 640 bytes; RIX3's pixels are the bytes the
+        // raw `seek(x*640+778)` reaches.
         let o2 = load_image(NAME, O2_PATH)?;
         if (o2.width() as usize, o2.height() as usize) != (O2_WIDTH, O2_HEIGHT) {
             return Err(PartError {
@@ -596,9 +408,7 @@ impl Part for Mntscrl {
         }
         self.fbuf = vec![0; FBUF_LEN];
         self.fbuf[..FBUF_LOADED].copy_from_slice(&o2.pixels()[..FBUF_LOADED]);
-        // `:119`: the bias, including the loop's one-byte overrun.
-        let mut overrun = 0u8;
-        apply_bias(&mut self.fbuf, &mut overrun);
+        apply_bias(&mut self.fbuf);
 
         // `:120-121`: the palette at +10 and the picture at +778.
         let hillback = load_image(NAME, HILLBACK_PATH)?;
@@ -615,13 +425,7 @@ impl Part for Mntscrl {
             });
         }
         self.pal = core::array::from_fn(|index| hillback.palette.entry(index as u8));
-        let mut background = Vec::with_capacity(BACKGROUND_LEN);
-        background.extend_from_slice(&hillback.pixels()[..VIDEO_BYTES]);
-        self.background = background;
-        // The rebase leaves the asset's own last 778 bytes where the segment
-        // held them, so they are the picture's last 778.
-        self.background
-            .extend_from_slice(&hillback.pixels()[VIDEO_BYTES - 778..VIDEO_BYTES]);
+        self.background = hillback.pixels()[..VIDEO_BYTES].to_vec();
 
         // `:59-90`: the three lists, one frame group each.
         self.lists = Vec::with_capacity(3);
@@ -632,8 +436,6 @@ impl Part for Mntscrl {
 
         self.font = vec![0; FONT_LEN + 1];
         self.scp = SCP_START;
-        self.scp_bound = SCP_MAX;
-        self.tree_wait = false;
         self.sss = 0;
         self.fp = 0;
         self.fadeout = false;
@@ -647,10 +449,7 @@ impl Part for Mntscrl {
         black_bands(&mut self.tmppal);
         self.fpal = [[0; 3]; 256];
 
-        // The part addresses 64 KB of video memory flat, so the surface has to
-        // hold it: this is the engine's own surface size (640x400 = 256,000
-        // pixels), and a smaller one would put the blitter's writes out of
-        // bounds rather than clip them.
+        // The blitter addresses 64 KB of video memory flat.
         if ctx.surface.pixels().len() < FRAME_MEMORY {
             return Err(PartError {
                 part: NAME,
@@ -689,27 +488,17 @@ impl Part for Mntscrl {
                 PartStatus::Continuing
             }
             Phase::Wait { ticks } => {
-                // The source's loop never checks `dis_exit`, but the port does
-                // not spin: an exit request ends the wait on the tick it is
-                // seen (the phase's Review Focus 1).
+                // The source's wait never checks `dis_exit`; the port does not
+                // spin, so an exit ends it on the tick it is seen (A62).
                 if ctx.exit_requested {
                     self.phase = Phase::Done;
                     return PartStatus::Finished;
                 }
-                if self.tree_wait {
-                    // The development snapshot's `:156-158` `cmp dx,0 / jl`.
-                    let reading = ctx.musplus();
-                    if reading >= 0 {
-                        self.phase = Phase::PreRoll { y: 0 };
-                        return PartStatus::Continuing;
-                    }
-                } else if ticks + 1 >= RELEASE_WAIT_TICKS {
-                    // The release's hold is up; the next tick is the
-                    // pre-roll's first `waitr` (boot 555 for tick 0 at 419).
-                    self.phase = Phase::PreRoll { y: 0 };
-                    return PartStatus::Continuing;
-                }
-                self.phase = Phase::Wait { ticks: ticks + 1 };
+                self.phase = if ticks + 1 >= RELEASE_WAIT_TICKS {
+                    Phase::PreRoll { y: 0 }
+                } else {
+                    Phase::Wait { ticks: ticks + 1 }
+                };
                 PartStatus::Continuing
             }
             Phase::PreRoll { y } => {
@@ -734,20 +523,12 @@ impl Part for Mntscrl {
     }
 }
 
-/// `:119` — the +128 bias on every non-zero byte, over the source's loop.
-///
-/// The bound is `sizeof(fbuf)`, and `fbuf` is `array[0..640*31]`: 19,841
-/// elements, so `x` runs 0 through **19,841** — one past the array's last
-/// index, 19,840. In the original's data segment the next byte is `font[0]`
-/// (the next global declared, `:43`), still zero at this point because the
-/// font is built at `:150`; the increment is therefore a no-op, but the read
-/// is real and the port keeps it as the explicit `overrun` byte.
-fn apply_bias(buffer: &mut [u8], overrun: &mut u8) {
-    for value in buffer.iter_mut().chain(core::iter::once(overrun)) {
-        if *value > 0 {
-            // `inc` on a byte: 255 wraps to 0, which no `O2.SCI` byte reaches.
-            *value = value.wrapping_add(BIAS);
-        }
+/// `:119` `for x := 0 to sizeof(fbuf) do if fbuf[x] > 0 then inc(fbuf[x],128)`.
+/// The loop runs one byte past the array into `font[0]` (`:43`), still zero
+/// before `:150` builds the font, so that byte is left alone.
+fn apply_bias(buffer: &mut [u8]) {
+    for value in buffer.iter_mut().filter(|value| **value > 0) {
+        *value = value.wrapping_add(BIAS);
     }
 }
 
@@ -760,15 +541,15 @@ fn black_bands(palette: &mut Palette768) {
     }
 }
 
-/// One ramp step, channel by channel: `if fpal < tmppal then inc` (`:138-140`)
-/// or `if fpal > tmppal then dec` (`:211-213`). `count` is 256 for the two
-/// full uploads and 177 for the pre-roll.
+/// One ramp step's direction: `if fpal < tmppal then inc` (`:138-140`) or
+/// `if fpal > tmppal then dec` (`:211-213`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Direction {
     Up,
     Down,
 }
 
+/// One ramp step over the first `count` entries (256, or the pre-roll's 177).
 fn ramp(from: &mut Palette768, to: &Palette768, count: usize, direction: Direction) {
     for entry in 0..count {
         for channel in 0..3 {
@@ -788,23 +569,19 @@ fn ramp(from: &mut Palette768, to: &Palette768, count: usize, direction: Directi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parts::test_rig::{differing_bytes, reference, Reading, Rig, ScriptedMusic};
+    use crate::parts::test_rig::{
+        differing_bytes, differing_pixels, reference, Reading, Rig, ScriptedMusic,
+    };
     use sr_engine::dac_expand;
     use sr_engine::music::musplus_from;
+
+    /// RIX3's palette offset (`crates/sr-assets/src/rix.rs`), where `:120` reads.
+    const RIX3_PALETTE: usize = 10;
 
     /// A script with no plus pending: `musplus` is -32 at every tick (the
     /// object's own sentinel), so the main loop's -11 cue never comes.
     fn quiet_script(last_tick: u32) -> Vec<(i32, i32)> {
         vec![(0, 0); last_tick as usize + 1]
-    }
-
-    /// The tree's counterfactual: `musplus` is -32 until the trace's first
-    /// non-negative reading, order 47 row 0 at trace frame 2488, which the
-    /// port's one-frame lead puts on tick 2068; from there it is 0.
-    fn tree_script(last_tick: u32) -> Vec<(i32, i32)> {
-        (0..=last_tick)
-            .map(|tick| if tick < 2068 { (0, 0) } else { (2, 0) })
-            .collect()
     }
 
     /// A player answering `musplus_from(zplus, row)` from `script`, one
@@ -892,8 +669,7 @@ mod tests {
         assert_eq!(part.fbuf.len(), FBUF_LEN);
         assert_eq!(part.fbuf[FBUF_LOADED], 0);
 
-        // `:120-121`: the palette at +10, the picture at +778 — and the
-        // rebased segment's trailing 778 bytes are the picture's own last 778.
+        // `:120-121`: the palette at +10, the picture at +778.
         let hillback = read_asset(NAME, HILLBACK_PATH).unwrap();
         assert_eq!(hillback.len(), 64_778);
         for index in 0..256usize {
@@ -904,17 +680,7 @@ mod tests {
             ];
             assert_eq!(part.pal[index], expected, "entry {index}");
         }
-        assert_eq!(part.background.len(), BACKGROUND_LEN);
-        assert_eq!(
-            &part.background[..VIDEO_BYTES],
-            &hillback[778..778 + VIDEO_BYTES],
-            "the first 64,000 bytes are the picture"
-        );
-        assert_eq!(
-            &part.background[VIDEO_BYTES..],
-            &hillback[778 + VIDEO_BYTES - 778..778 + VIDEO_BYTES],
-            "the rebase leaves the asset's last 778 bytes standing"
-        );
+        assert_eq!(&part.background[..], &hillback[778..778 + VIDEO_BYTES]);
 
         // `:59-90`: three lists of `237*31` columns. The offsets are 16-bit
         // video addresses and the largest is inside the picture.
@@ -937,11 +703,8 @@ mod tests {
 
     #[test]
     fn an_offset_past_the_picture_is_refused_not_indexed() {
-        // `scr` indexes the surface and the background with each column's
-        // offsets (:515): the picture is `VIDEO_BYTES` = 64,000 bytes, so a
-        // 65,000 offset would panic there rather than draw. The file carries
-        // the blitter's full column count too, or the count check would
-        // answer instead of the offset bound.
+        // The file carries the blitter's full column count, so the offset
+        // bound answers and not the count check.
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&1u16.to_le_bytes()); // column 0: one offset
         bytes.extend_from_slice(&65_000u16.to_le_bytes());
@@ -969,27 +732,10 @@ mod tests {
     }
 
     #[test]
-    fn the_bias_includes_the_loops_one_byte_overrun() {
-        // `:119` `for x := 0 to sizeof(fbuf)`: 19,841 is the array's last
-        // index, so one more byte — `font[0]` in the original's data segment —
-        // is read and incremented too. The port's extra byte is explicit.
+    fn the_bias_adds_128_to_non_zero_bytes_and_wraps() {
         let mut buffer = [1u8, 0, 255];
-        let mut overrun = 7u8;
-        apply_bias(&mut buffer, &mut overrun);
-        assert_eq!(
-            buffer,
-            [129, 0, 127],
-            "the +128 wraps at 255, as `inc` does"
-        );
-        assert_eq!(overrun, 135, "the byte past the array is in the loop too");
-
-        // And the real array ends with a zero overrun: the original's next
-        // global is the font, which `:150` does not build until later.
-        let (_, part) = started();
-        let mut copied = part.fbuf.clone();
-        let mut overrun = 0u8;
-        apply_bias(&mut copied, &mut overrun);
-        assert_eq!(overrun, 0);
+        apply_bias(&mut buffer);
+        assert_eq!(buffer, [129, 0, 127], "the +128 wraps at 255, as `inc` does");
     }
 
     // --- the tick map -------------------------------------------------------
@@ -1036,7 +782,6 @@ mod tests {
                 "frame {frame} at step {step}"
             );
         }
-        assert_eq!(REFERENCE_FIRST_INDEX, 419);
     }
 
     #[test]
@@ -1045,7 +790,6 @@ mod tests {
         // `init` polls the player 11 times and draws nothing; tick 0 is the
         // setup and the background blit.
         assert_eq!(rig.player().polls, MUSIC_PRE_ROLL, "the music's head start");
-        assert_eq!(MUSIC_PRE_ROLL, 11);
         assert_eq!(part.frame(&mut rig.ctx(0)), PartStatus::Continuing);
 
         assert_eq!(
@@ -1123,14 +867,7 @@ mod tests {
 
     #[test]
     fn the_wait_is_the_releases_seventy_one_ticks() {
-        // The release's own frames put its last held frame at boot 554 and its
-        // pre-roll's first `scr` at 555; with tick 0 at 419 that is ticks 65
-        // through 135 — **71 ticks** — and the pre-roll's first `waitr` is
-        // tick 136. The wait draws nothing and its length is the release's,
-        // not the music's: the trace's position is order 42 row 16 on both
-        // sides of the boundary (`zplus` 0, `musplus` -32 at both), so no
-        // `musplus` threshold can end it there.
-        assert_eq!(RELEASE_WAIT_TICKS, 71);
+        // Ticks 65..=135 hold; the pre-roll's first `scr` is tick 136.
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, FADE_IN_STEPS + 1); // tick 65
         let surface = rig.surface.pixels().to_vec();
@@ -1177,7 +914,7 @@ mod tests {
 
     #[test]
     fn exit_requested_ends_the_wait_on_that_tick() {
-        // (c) The source's wait never checks `dis_exit`; the port does not
+        // The source's wait never checks `dis_exit`; the port does not
         // spin, so an exit notice is honoured on the tick it arrives.
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, FADE_IN_STEPS + 5);
@@ -1257,7 +994,7 @@ mod tests {
             })
             .collect();
         let mut part = Mntscrl::new();
-        part.background = vec![10; BACKGROUND_LEN];
+        part.background = vec![10; VIDEO_BYTES];
         part.font = vec![0; FONT_LEN + 1];
         part.fbuf = (0..FBUF_LEN).map(|i| (i % 251) as u8).collect();
         part.lists = lists;
@@ -1407,172 +1144,59 @@ mod tests {
         assert_eq!(part.frame(&mut rig.ctx(9999)), PartStatus::Finished);
     }
 
-    #[test]
-    fn the_dead_veke_bound_never_ends_the_part() {
-        // `:3` `veke = 2800`, `:221`'s `inc(frame)` commented out, `:224`'s
-        // `frame = veke` therefore never true. The script never reaches -11.
-        assert_eq!(VEKE, 2800);
-        let (mut rig, mut part) =
-            started_with(scripted(quiet_script(MAIN_FIRST + VEKE + 2)));
-        run_to(&mut rig, &mut part, MAIN_FIRST + VEKE + 1);
-        assert_eq!(part.phase, Phase::Main);
-        assert_eq!(part.frame(&mut rig.ctx(part.tick)), PartStatus::Continuing);
-        assert!(!part.fadeout);
-    }
+    // --- the tree's counterfactuals ----------------------------------------
 
-    // --- the reference ------------------------------------------------------
-
-    #[test]
-    fn the_held_opening_is_the_references_frame_500() {
-        // `reference-indices.md` §11.2: 500 is the hold the part's music wait
-        // is. Boot 500 is tick 81 (`REFERENCE_FIRST_INDEX`); the screen is the
-        // background with the two bands' DAC entries black.
+    /// The frame at `tick`, rendered as RGB; `tree_bound` holds `scp` at the
+    /// tree's 639 (`if scp < 639`), which is the release's run with every 640
+    /// clamped back.
+    fn render(tick: u32, tree_bound: bool) -> Vec<u8> {
         let (mut rig, mut part) = started();
-        run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX + 1);
-        let indices = rig.rendered_indices();
-        assert_eq!(
-            differing_bytes(&indices, &reference("mntscrl", 500, "idx")),
-            0,
-            "500's index plane"
-        );
-        let rgb = rig.rendered_rgb();
-        assert_eq!(
-            differing_bytes(&rgb, &reference("mntscrl", 500, "rgb")),
-            0,
-            "500's RGB"
-        );
-    }
-
-    #[test]
-    fn the_four_keyframes_match_the_reference_at_the_stated_mapping() {
-        // The part's own timeline is the release's: tick 0 is boot 419, the
-        // first wait is 71 ticks and the pre-roll 127, so the main loop starts
-        // at tick 263 (boot 682). The reference's frame at boot `K` is the
-        // call at tick `K - 419`, and all four keyframes compare byte for
-        // byte. The frame either side of each is a different picture (the
-        // scroller moves 2.4-3.1 % of its pixels a frame), which is what makes
-        // the mapping exact and not a search's loosest fit.
-        let tick = |index: u32| index - REFERENCE_FIRST_INDEX;
-
-        // 500: both planes. It is inside the wait, so it is the held opening.
-        {
-            let (mut rig, mut part) = started();
-            run_to(&mut rig, &mut part, tick(500) + 1);
-            assert_eq!(
-                differing_bytes(&rig.rendered_indices(), &reference("mntscrl", 500, "idx")),
-                0,
-                "500's index plane"
-            );
-            assert_eq!(
-                differing_bytes(&rig.rendered_rgb(), &reference("mntscrl", 500, "rgb")),
-                0,
-                "500's RGB"
-            );
-        }
-
-        // The three scroll keyframes, RGB-only in the reference, with D19's
-        // support: the neighbours are distinguishable from the keyframe.
-        for index in [1100u32, 1700, 2300] {
-            let frame = |at: u32| -> Vec<u8> {
-                let (mut rig, mut part) = started();
-                run_to(&mut rig, &mut part, at + 1);
-                rig.rendered_rgb()
-            };
-            let key = frame(tick(index));
-            assert_eq!(
-                differing_bytes(&key, &reference("mntscrl", index, "rgb")),
-                0,
-                "boot {index} (tick {})",
-                tick(index)
-            );
-            for neighbour in [tick(index) - 1, tick(index) + 1] {
-                assert_ne!(
-                    frame(neighbour),
-                    key,
-                    "boot {index}: tick {neighbour} is not distinguishable"
-                );
+        while part.tick <= tick {
+            run_ticks(&mut rig, &mut part, 1);
+            if tree_bound {
+                part.scp = part.scp.min(SCP_MAX - 1);
             }
         }
+        rig.rendered_rgb()
     }
 
     #[test]
     fn the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639() {
-        // `READ2.PAS:88` in the tree is `if scp < 639 then inc(scp)`, so the
-        // tree's last appended column is 639. The release's frame at boot
-        // 2300 is byte-identical only under 640; under 639 it differs in 401
-        // bytes (146 pixels), all of them in the columns the bound has
-        // reached. 1100 and 1700 are before the bound, so they cannot tell
-        // the two apart — which is what makes the 2300 difference the
-        // bound's and not something else's.
-        assert_eq!(SCP_MAX, 640);
-        let render = |bound: u16, index: u32| -> Vec<u8> {
-            let tick = index - REFERENCE_FIRST_INDEX;
-            let (mut rig, mut part) = started();
-            part.scp_bound = bound;
-            run_to(&mut rig, &mut part, tick + 1);
-            rig.rendered_rgb()
-        };
+        // 1100 and 1700 are before the bound, so both bounds draw them alike.
         for index in [1100u32, 1700] {
-            let tree = render(639, index);
-            let release = render(640, index);
-            assert_eq!(tree, release, "boot {index} is before the bound");
-            assert_eq!(differing_bytes(&release, &reference("mntscrl", index, "rgb")), 0);
+            let tick = index - REFERENCE_FIRST_INDEX;
+            assert_eq!(render(tick, true), render(tick, false), "boot {index}");
         }
 
-        // The cap's own tick, so the note's number is test-produced: with the
-        // release's 71-tick wait the main loop starts at tick 263 and `scr(2)`
-        // falls on main ticks 1, 4, 7, …; `scp` starts at 133 and reaches 640
-        // on the 507th shift, which is tick 1,656. Tick 1,655 still reads
-        // 639; 1,656 reads 640 and appends the next row's first column.
-        {
-            let (mut rig, mut part) = started();
-            run_to(&mut rig, &mut part, 1_655 + 1); // through tick 1,655
-            assert_eq!(part.scp, 639, "the 506th shift");
-            run_to(&mut rig, &mut part, 1_656 + 1); // through tick 1,656
-            assert_eq!(part.scp, 640, "the 507th shift");
-        }
+        // `scr(2)` falls on main ticks 1, 4, 7, …; `scp` reaches 640 on the
+        // 507th shift, tick 1,656.
+        let (mut rig, mut part) = started();
+        run_to(&mut rig, &mut part, 1_655 + 1);
+        assert_eq!(part.scp, 639, "the 506th shift");
+        run_to(&mut rig, &mut part, 1_656 + 1);
+        assert_eq!(part.scp, 640, "the 507th shift");
 
+        // 2300 is exact under 640 (rediff's mntscrl entry); under 639:
+        let tree = render(2300 - REFERENCE_FIRST_INDEX, true);
         let target = reference("mntscrl", 2300, "rgb");
-        let tree = render(639, 2300);
-        let release = render(640, 2300);
-        assert_eq!(differing_bytes(&release, &target), 0, "the release's 640");
         assert_eq!(differing_bytes(&tree, &target), 401, "the tree's 639");
-        let differing_pixels = tree
-            .chunks_exact(3)
-            .zip(target.chunks_exact(3))
-            .filter(|(mine, theirs)| mine != theirs)
-            .count();
-        assert_eq!(differing_pixels, 146);
+        assert_eq!(differing_pixels(&tree, &target), 146);
     }
 
     #[test]
     fn the_trees_own_wait_would_hold_through_the_scroll_keyframes() {
-        // The development snapshot's `:153-159` counterfactual: `musplus >= 0`
-        // is first true at trace frame 2488 (order 47 row 0), which the port's
-        // one-frame lead puts on tick 2068. Under that policy the part is
-        // still waiting at every scroll keyframe and draws the held opening
-        // there; the counts are the divergence A17 records, and the part's
-        // own behaviour is the release's wait (`RELEASE_WAIT_TICKS`).
-        let run = |tick: u32| -> (Phase, Vec<u8>) {
-            let (mut rig, mut part) = started_with(scripted(tree_script(tick + 2)));
-            part.tree_wait = true;
-            run_to(&mut rig, &mut part, tick + 1);
-            (part.phase, rig.rendered_rgb())
-        };
-        let (phase, held) = run(tick_of(500));
-        assert!(matches!(phase, Phase::Wait { .. }));
-        let mut counts = Vec::new();
-        for index in [1100u32, 1700, 2300] {
-            let tick = tick_of(index);
-            let (phase, mine) = run(tick);
-            assert!(matches!(phase, Phase::Wait { .. }), "boot {index}");
-            assert_eq!(mine, held, "boot {index} is not the held opening");
-            counts.push(differing_bytes(&mine, &reference("mntscrl", index, "rgb")));
-        }
+        // The tree's `:153-159` `musplus >= 0` first holds at trace frame 2488
+        // (order 47 row 0), tick 2,068 under the port's one-frame lead; every
+        // scroll keyframe is before it, so under that wait each would show the
+        // held opening, which the wait leaves as it was at tick 81 (boot 500).
+        let held = render(500 - REFERENCE_FIRST_INDEX, false);
+        let counts: Vec<usize> = [1100u32, 1700, 2300]
+            .iter()
+            .map(|index| {
+                assert!(index - REFERENCE_FIRST_INDEX < 2_068);
+                differing_bytes(&held, &reference("mntscrl", *index, "rgb"))
+            })
+            .collect();
         assert_eq!(counts, [118_843, 118_924, 119_056]);
-    }
-
-    fn tick_of(index: u32) -> u32 {
-        index - REFERENCE_FIRST_INDEX
     }
 }

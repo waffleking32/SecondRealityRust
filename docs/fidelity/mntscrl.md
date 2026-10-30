@@ -104,8 +104,8 @@ The tree's `:88` is `if scp < 639 then inc(scp)`; the release reads one column f
 is first reached at tick **1,656**, the 507th `scr(2)` of the main loop: tick 1,655 reads 639
 and 1,656 reads 640. Boot 2300, 225 ticks on, is the first keyframe after it. Under 639 it
 differs in **401 bytes / 146 pixels**, and under 640 in 0; 1100 and 1700 are before the bound
-(`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`, which runs the tree's 639 as
-the counterfactual). The tree's own `fbuf` is `array[0..640*31]`: index 19,840, one past the 31
+(`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`, which runs the tree's 639 by
+clamping `scp`). The tree's own `fbuf` is `array[0..640*31]`: index 19,840, one past the 31
 loaded rows, is the element a stride-640 read at column 640 needs for row 30, and `:119`'s loop
 covers it. The extra element exists for this read, so 640 is the array's own bound. This is
 D24 step 3's single-constant branch.
@@ -113,11 +113,10 @@ D24 step 3's single-constant branch.
 ## 8. Decisions
 
 - **The `fbuf` overrun** (`:119`): the bias loop covers index 19,841, which in the original is
-  `font[0]`, still zero; the port keeps an explicit zero byte
-  (`the_bias_includes_the_loops_one_byte_overrun`).
+  `font[0]`, still zero, so the increment is a no-op; the port biases the array alone
+  (`apply_bias`, `the_bias_adds_128_to_non_zero_bytes_and_wraps`).
 - **The dead `veke` bound** (`:3`, `:221-224`): `inc(frame)` is commented out, so
-  `frame = veke` never fires; the part runs past 2,800 main-loop ticks without a cue
-  (`the_dead_veke_bound_never_ends_the_part`).
+  `frame = veke` never fires; the port has no `frame` counter and runs until the cue.
 - **The forced-black bands and their ramp** (`:126-127`, `:146-147`, `:165-178`) are kept
   (§4).
 - **The exact cue** (`:200`): -10 and -12 keep the part scrolling; only -11 starts the fade
@@ -139,8 +138,8 @@ D24 step 3's single-constant branch.
 | 2300 | 1881 | RGB | 0 | exact (A17's wait, D24's `scp`) |
 
 The rows are the `mntscrl` entry of the rediff table (`xtask/src/rediff/table.rs`); the
-reference files no `.idx` for the three scroll frames. `the_four_keyframes_match_the_reference`
-asserts them at the mapped ticks with D19's support: `K-1` and `K+1` differ from `K` at every
+reference files no `.idx` for the three scroll frames. D19's support holds:
+`each_scroll_keyframes_neighbours_differ_from_it` shows `K-1` and `K+1` differ from `K` at every
 scroll keyframe (the scroller moves 2.4–3.1 % of its pixels a frame), so the mapping is exact.
 `cargo xtask compare` does not apply: it pairs by manifest index, and the run is numbered from
 zero.
