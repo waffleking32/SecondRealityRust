@@ -1,7 +1,7 @@
 //! The shell's contract with the outside world: what the binary exits with.
 //!
 //! The shell's own behaviour — the anchor table, the numbering, the DAC the
-//! run starts from — is unit-tested in `src/shell.rs`, where the parts it
+//! run starts from — is unit-tested in `src/shell/`, where the parts it
 //! drives can be stubbed. What is left over is the part only a real process
 //! can answer: whether a command line that cannot produce a comparable dump
 //! says so, and says so as an *exit code* a script can branch on.

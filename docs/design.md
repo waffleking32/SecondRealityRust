@@ -137,7 +137,7 @@ crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, co
                       the Part trait and the Music seam, and the engine that ticks a part
 crates/sr-assets/     the original's formats: decoders, OMF reader, EXE unpacker, VISU scenes
 crates/sr-audio/      the S3M player: descrambling, tracker, effects, the STMIK mixer
-bins/secondreality/   the binary: shell.rs (the run), cli.rs, window.rs (SDL), headless.rs,
+bins/secondreality/   the binary: shell/ (the run), cli.rs, window.rs (SDL), headless.rs,
                       audio.rs (Player as Music, the sound card, the WAV dump), settings.rs,
                       vault_menu.rs, endscreen.rs, parts.rs (the registry) and parts/
 xtask/                capture, compare, rediff, asset and music tooling (§4.8)
@@ -266,7 +266,7 @@ A purpose-built S3M player with Scream Tracker 3 semantics that exposes STMIK's 
 
 ### 4.6 The shell
 
-`shell.rs` is the `U2.ASM` equivalent. `Sequence` holds the run: the block plans (`BLOCKS`,
+`shell/` is the `U2.ASM` equivalent. `Sequence` holds the run: the block plans (`BLOCKS`,
 `block_plan`), the boot anchors that put every frame in the reference's boot-relative numbering
 (D21), the music restarts (`part-sequence.md` §3), the post-PANICEND cue wait (D38), the ESC, Ctrl
 and drain semantics (A58, D35), loop mode (D42) and the run's end (D41). `window.rs` feeds it

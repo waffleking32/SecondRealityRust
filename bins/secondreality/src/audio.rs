@@ -153,7 +153,7 @@ impl Music for PlayerMusic {
 // Loading the modules
 // -------------------------------------------------------------------------------------------
 
-/// The real [`MusicSource`](crate::shell::MusicSource): the demo's own module, read from
+/// The real [`MusicSource`](crate::shell::music::MusicSource): the demo's own module, read from
 /// `assets/` under the working directory and patched as the shell patches it
 /// ([`sr_audio::Song::load`]).
 ///
@@ -179,7 +179,7 @@ pub(crate) fn player_at(
     Ok(Arc::new(Mutex::new(Player::new(module, options))))
 }
 
-/// The [`MusicSource`](crate::shell::MusicSource) the *tests* play with: the real modules,
+/// The [`MusicSource`](crate::shell::music::MusicSource) the *tests* play with: the real modules,
 /// read at the path a unit test reads them by (the crate's own directory, not the repository
 /// root a run starts in — the same `../../` the parts' tests read their media by), built with
 /// the run's options.

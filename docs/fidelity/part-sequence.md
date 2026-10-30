@@ -372,7 +372,7 @@ then (D42). `/gravis` (`looping` 2) reaches it after CRED, through the same exit
 
 The parts meet the shell at the same few seams, and every per-part note uses the four
 conventions below. Each is stated once, here; a note gives its own numbers and points here
-for the rule. The mechanism is in the items named, in `bins/secondreality/src/shell.rs` and
+for the rule. The mechanism is in the items named, in `bins/secondreality/src/shell/` and
 `crates/sr-engine`.
 
 ### 10.1 A mapping, not an anchor
@@ -493,6 +493,6 @@ that ends at `panicend` enters the wait and then the hold. `Sequence::part` stil
 `musplus` 19, so the first phase keeps waiting; 8,953 is the first negative (−32) and 9,219
 the first positive (1), the exit. Tests: `the_post_panicend_wait_ends_on_a_positive_musplus`,
 `the_post_panicend_wait_is_between_the_part_and_the_next_one`,
-`the_cue_wait_holds_the_screen`, `an_exit_on_panicends_last_tick_skips_the_cue_wait`. In the
+`an_exit_on_panicends_last_tick_skips_the_cue_wait`. In the
 block-1 run the reference's wait exits at 16,630 (`second1e`, §3), and the port's
 PANICEND→MNTSCRL seam is a row of `FULLRUN_SEAMS`.

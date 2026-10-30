@@ -159,7 +159,7 @@ earlier than the port's from the second batch on, at fade edges only.
 cargo test -p secondreality --test alku -- --nocapture          # §8's support frames
 cargo xtask rediff --only alku                                  # §8
 cargo test -p secondreality --bin secondreality \
-    shell::tests::a_block_one_run_starts_under_the_initial_play_song_and_matches_second1 \
+    shell::music::tests::a_block_one_run_starts_under_the_initial_play_song_and_matches_second1 \
     -- --nocapture                                              # §2's distributions
 cargo test -p secondreality --bin secondreality \
     parts::alku::tests::the_curated_palette_entries_leave_the_reference_different \

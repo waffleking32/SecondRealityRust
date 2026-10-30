@@ -58,7 +58,7 @@ pub const PENDING: &[&str] = &[];
 /// disagree with each other by one frame at 8 of their 131 row changes, and the port's exact
 /// clock sits between them. 3 is the tolerance; the port's measured worst against `second5`
 /// is 2 (`endlogo.md` §5, printed by
-/// `shell::tests::the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`).
+/// `shell::music::tests::the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`).
 /// That test and `fullrun.rs`'s `the_full_runs_music_is_where_the_trace_holds_it` both use
 /// it; it lives here because both include this file.
 #[allow(dead_code)]

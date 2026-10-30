@@ -24,17 +24,50 @@ pub(crate) fn reference(part: &str, index: u32, ext: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"))
 }
 
-/// `(order, row)` at boot frame `frame` in `reference/music/<name>/trace.csv`.
-pub(crate) fn trace_position(name: &str, frame: u32) -> (u8, u8) {
+/// One row of a filed music trace: the boot frame, the published `(order, row)` and
+/// `_np_zframe`.
+pub(crate) struct TraceRow {
+    pub frame: u32,
+    pub position: (u8, u8),
+    pub zframe: i32,
+}
+
+/// Every row of `reference/music/<name>/trace.csv`, the frames the trace holds (its gaps
+/// are missing rows). The columns are bound by the header's names.
+pub(crate) fn trace(name: &str) -> Vec<TraceRow> {
     let path = repo(&format!("reference/music/{name}/trace.csv"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
-    for line in text.lines().skip(1) {
-        let fields: Vec<&str> = line.split(',').map(str::trim).collect();
-        if fields[0].parse::<u32>().unwrap() == frame {
-            return (fields[1].parse().unwrap(), fields[2].parse().unwrap());
-        }
-    }
-    panic!("{name} holds no frame {frame}")
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines.next().expect("a header row").split(',').map(str::trim).collect();
+    let column = |wanted: &str| {
+        header
+            .iter()
+            .position(|field| *field == wanted)
+            .unwrap_or_else(|| panic!("{path}: no `{wanted}` column"))
+    };
+    let (frame, ord, row, zframe) = (column("frame"), column("ord"), column("row"), column("zframe"));
+    lines
+        .map(|line| {
+            let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+            let number = |index: usize| -> i64 {
+                fields[index].parse().unwrap_or_else(|error| panic!("{line}: {error}"))
+            };
+            TraceRow {
+                frame: number(frame) as u32,
+                position: (number(ord) as u8, number(row) as u8),
+                zframe: number(zframe) as i32,
+            }
+        })
+        .collect()
+}
+
+/// `(order, row)` at boot frame `frame` in `reference/music/<name>/trace.csv`.
+pub(crate) fn trace_position(name: &str, frame: u32) -> (u8, u8) {
+    trace(name)
+        .into_iter()
+        .find(|row| row.frame == frame)
+        .map(|row| row.position)
+        .unwrap_or_else(|| panic!("{name} holds no frame {frame}"))
 }
 
 /// Indexed pixels through `palette`, widened as the DAC widens.

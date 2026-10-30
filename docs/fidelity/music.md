@@ -17,7 +17,7 @@ the trace wins (D12). The preserved behaviours are `bugs.md` §28.
 | the channel effects (§9) | `crates/sr-audio/src/effects.rs` | `tests/effects.rs` |
 | the mixer (§10, §13) | `crates/sr-audio/src/mix.rs` | `tests/mix.rs`, `tests/enhanced.rs` |
 | the engine's seam (§11) | `crates/sr-engine/src/music.rs` | its unit tests |
-| the run's music (§12) | `bins/secondreality/src/shell.rs`, `src/audio.rs` | their unit tests, `tests/audio.rs` |
+| the run's music (§12) | `bins/secondreality/src/shell/`, `src/audio.rs` | their unit tests, `tests/audio.rs` |
 
 The container's numbers below are printed by
 
@@ -959,7 +959,7 @@ music boundary (`the_music_outlives_the_part_that_is_running`).
 
 What a run does with the player is three things: which module it starts and at which order, when
 that music's clock starts, and where its samples go. All three are the shell's
-(`bins/secondreality/src/shell.rs`, `src/audio.rs`).
+(`bins/secondreality/src/shell/`, `src/audio.rs`).
 
 ### Which module, at which order: the demo's own restart table
 
@@ -989,8 +989,7 @@ entry point (`:886-887`); for the other three the shell reaches it between JPLOG
 `:801-802` opens and `:855` closes) and `whattorun & 1` (`:813-814`), so only block 1 takes it.
 `:856-863`'s and `:898-905`'s second bits keep them entry-point-only, and `:889-894` is kept so by
 the masks (only `SECOND U` carries bit 7)
-(`one_row_of_the_table_is_not_entry_point_only_and_the_table_says_which`,
-`the_second_mid_run_restart_is_two_guards_and_the_masks_carry_both`). The port fires both mid-run
+(`the_mid_run_restarts_are_the_guards_the_masks_reach`). The port fires both mid-run
 sites: the new player continues from the old one's channel state (D45, §9.13) and waits four
 engine ticks (D34; `MusicStart::restart`).
 
@@ -1028,7 +1027,7 @@ A run reaches that clock by waiting, by pre-polling, or by starting with it (`Mu
 - **A run numbering its own frames** starts the music on its frame 0 (`--part tunneli`, `cred`,
   `endscrl`).
 
-`shell.rs`'s `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` drives a
+`shell::music`'s `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has` drives a
 `--block 5` run in process over every row of `reference/music/second5/trace.csv` from 404, holding
 content and placement (within A12's 3 frames):
 

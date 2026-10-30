@@ -14,7 +14,7 @@ crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, co
                       the Part trait and the Music seam (zero runtime dependencies)
 crates/sr-audio/      the S3M player and STMIK's mixer (zero runtime dependencies)
 crates/sr-assets/     decoders for the original formats (depends on sr-engine only)
-bins/secondreality/   shell.rs (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
+bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
                       settings.rs, vault_menu.rs, endscreen.rs, parts.rs (the registry), parts/
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
 tools/                emulator probes and the vault capture script
@@ -68,7 +68,7 @@ cargo run --release --bin secondreality -- --audio-dump out/music.wav
 - A block run's frame indices are the **reference's own numbering**: boot-relative emulator frames,
   the space everything under `reference/` is measured in (D21). A `--part` run of a part with no
   boot anchor numbers its own frames from zero, and the title bar says so.
-- ESC, Ctrl and the exit drain: `shell.rs`, A58, D21, `Part::drains_after_exit` (D35); where a
+- ESC, Ctrl and the exit drain: `shell/sequence.rs`, A58, D21, `Part::drains_after_exit` (D35); where a
   part polls the exit flag is in its module doc. The post-PANICEND cue wait is D38, the run's end
   D41, the settings screen D44, loop mode D42 (its seam A61), enhanced audio D43 (it never moves
   `(order, row)`, A60), the 2× display D48.

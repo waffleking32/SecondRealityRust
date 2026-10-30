@@ -840,7 +840,8 @@ tick earlier relative to the reset, so `L_p = 1567` and a keyframe is compared a
 
 **Pinned by** `the_block_one_run_restarts_music1_at_glenz`,
 `the_block_two_run_does_not_reload_at_glenz`, `the_post_panicend_wait_ends_on_a_positive_musplus`,
-`the_cue_wait_holds_the_screen` and `an_exit_on_panicends_last_tick_skips_the_cue_wait`.
+`the_post_panicend_wait_is_between_the_part_and_the_next_one` and
+`an_exit_on_panicends_last_tick_skips_the_cue_wait`.
 
 ## D39 — The vault boots the vendored effects behind the standalone DIS
 

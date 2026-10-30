@@ -163,7 +163,7 @@ cargo test -p secondreality --bin secondreality parts::panicend
 reaches it only through the shell's `partexecute`. `Panicend::frame` never reads
 `ctx.exit_requested`: with the flag set on every tick it still returns `Finished` at tick 121
 (`the_part_ignores_the_exit_flag_and_completes_its_finite_acts`). `Sequence::tick` drops the
-part at the end of the tick the flag was set in (`shell.rs`'s
+part at the end of the tick the flag was set in (`shell::sequence`'s
 `a_part_that_does_not_drain_retires_on_the_exit_tick`). No reference frame
 is at an exit.
 
