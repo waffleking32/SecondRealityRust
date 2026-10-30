@@ -1593,164 +1593,26 @@ impl Part for Alku {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
+    use crate::parts::test_rig::{differing_pixels, reference, Rig, ScriptedMusic};
     use sr_engine::{dac_expand, Surface};
 
     const TEST_HZPIC: &str = "../../assets/ALKU/HOI.U";
     const TEST_FONT: &str = "../../assets/ALKU/FONA.UH";
 
-    /// The player a unit test hands the part: `sync()` answers a scripted code
-    /// a tick, and every other call is the null reading.
-    struct Player {
-        codes: Vec<i32>,
-        at: usize,
+    /// A rig whose player answers `sync()` from `codes`, one a tick.
+    fn rig(codes: Vec<i32>) -> Rig {
+        Rig::new(320, 200).with(ScriptedMusic::sync_codes(codes))
     }
 
-    impl Player {
-        fn scripted(codes: Vec<i32>) -> Player {
-            Player { codes, at: 0 }
-        }
-    }
-
-    impl Music for Player {
-        fn poll(&mut self) {}
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-        fn musplus(&mut self) -> i32 {
-            -32
-        }
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-        fn sync(&mut self) -> i32 {
-            self.codes.get(self.at).copied().unwrap_or_else(|| *self.codes.last().unwrap_or(&0))
-        }
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-        fn setmframe(&mut self, _frame: i32) {}
-    }
-
-    /// The engine's pieces, so a `PartCtx` can be built for one call at a time.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-        tick: u32,
-    }
-
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(640, 400),
-                view: View::new(320, 200),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-                tick: 0,
-            }
-        }
-
-        fn ctx_at(&mut self, tick: u32, exit: bool) -> PartCtx<'_> {
-            self.player.at = tick as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                tick,
-                0,
-                1,
-                exit,
-                false,
-            )
-        }
-
-        fn ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_at(tick, false)
-        }
-
-        /// One engine slot, taken out of the registry for the call and put back
-        /// exactly as `Engine::run_copper` does.
-        fn run_slot(&mut self, slot: usize) {
-            let Some(mut callback) = self.copper.take(slot) else {
-                return;
-            };
-            {
-                let tick = self.tick;
-                let mut ctx = self.ctx(tick);
-                callback(&mut ctx);
-            }
-            self.copper.set(slot, callback);
-        }
-
-        /// One tick in the engine's order: slot 0, the part, slot 1, slot 2.
-        fn step(&mut self, part: &mut Alku) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        fn step_exit(&mut self, part: &mut Alku) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx_at(tick, true));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        /// The frame composed during the tick: the view and the palette as
-        /// slots 1 and 2 leave them are the *next* frame's, so this is called
-        /// from [`step_render`] before those slots run.
-        fn rendered_rgb(&self) -> Vec<u8> {
-            let mut out = Vec::with_capacity(usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT) * 3);
-            for y in 0..VIEW_HEIGHT {
-                for x in 0..VIEW_WIDTH {
-                    let at = self.view.source_index(&self.surface, x, y);
-                    let entry = self.palette.entry(self.surface.pixels()[at]);
-                    out.push(dac_expand(entry[0]));
-                    out.push(dac_expand(entry[1]));
-                    out.push(dac_expand(entry[2]));
-                }
-            }
-            out
-        }
-
-        fn step_render(&mut self, part: &mut Alku) -> (PartStatus, Vec<u8>) {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            let frame = self.rendered_rgb();
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            (status, frame)
-        }
-    }
-
-    fn started_with(player: Player) -> (Rig, Alku) {
-        let mut rig = Rig::new(player);
+    fn started_with(codes: Vec<i32>) -> (Rig, Alku) {
+        let mut rig = rig(codes);
         let mut part = Alku::at(TEST_HZPIC, TEST_FONT);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started() -> (Rig, Alku) {
-        started_with(Player::scripted(Vec::new()))
+        started_with(Vec::new())
     }
 
     /// A code script for `second1`'s transitions, one entry a tick.
@@ -1804,27 +1666,6 @@ mod tests {
         }
     }
 
-    fn reference(index: u32) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/alku/frame_{index:06}.rgb")).unwrap()
-    }
-
-    /// **The lengths are asserted first**: a short read must not compare a
-    /// prefix and report zero differences as if it had compared the frame.
-    fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
-    }
-
     // --- the brief's four tests ---------------------------------------------
 
     #[test]
@@ -1839,7 +1680,7 @@ mod tests {
                 _ => 3,
             };
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(script);
         assert_eq!(part.stage, Stage::Sync { code: 1, card: 0 });
         run_to(&mut rig, &mut part, 6);
         assert!(
@@ -1866,7 +1707,7 @@ mod tests {
 
     #[test]
     fn the_scroll_advances_one_step_every_nine_ticks() {
-        let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
+        let (mut rig, mut part) = started_with(picture_script(1500));
         run_to(&mut rig, &mut part, 1285);
         assert_eq!(part.stage, Stage::PictureFade);
         for tick in 1285..=1292u32 {
@@ -2053,7 +1894,7 @@ mod tests {
         // Drive the part's own batch branch (`MAIN.C:99-101`): fill the buffer
         // with a marker just before the tick that clears it, and read what the
         // production clear left.
-        let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
+        let (mut rig, mut part) = started_with(picture_script(1500));
         for _ in 0..1600 {
             // The picture fade's last tick falls through into the branch in the
             // same call, so the marker goes in on every tick before it.
@@ -2113,7 +1954,7 @@ mod tests {
         state.fadepal[768] = 200; // low
         state.fadepal[1] = 60;
         state.fadepal[769] = 0;
-        let mut rig = Rig::new(Player::scripted(Vec::new()));
+        let mut rig = rig(Vec::new());
         let mut ctx = rig.ctx(0);
         state.slot0(&mut ctx);
         // 2*256 + 200 + 100 = 812 = 0x032C; 60*256 - 240 = 15120 = 0x3B10.
@@ -2132,7 +1973,7 @@ mod tests {
 
     #[test]
     fn the_picture_fade_hands_over_to_a_batch_gated_on_code_five() {
-        let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
+        let (mut rig, mut part) = started_with(picture_script(1500));
         // The picture gate is tick 1284; the fade loop's first step is 1293
         // and its 15th is 1419, where `cop_dofade` has reached zero.
         run_to(&mut rig, &mut part, 1420);
@@ -2145,7 +1986,7 @@ mod tests {
 
     #[test]
     fn all_three_copper_slots_are_installed_and_each_does_its_job() {
-        let (mut rig, mut part) = started_with(Player::scripted(picture_script(1500)));
+        let (mut rig, mut part) = started_with(picture_script(1500));
         for slot in 0..3 {
             let set = rig.ctx(0).copper_is_set(slot);
             assert!(set, "slot {slot} is registered");
@@ -2174,7 +2015,7 @@ mod tests {
 
     #[test]
     fn an_exit_request_ends_every_wait_on_the_tick_it_is_seen() {
-        let (mut rig, mut part) = started_with(Player::scripted(vec![0; 10]));
+        let (mut rig, mut part) = started_with(vec![0; 10]);
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.stage, Stage::Done);
     }
@@ -2185,7 +2026,7 @@ mod tests {
     /// frame, which is what [`Rig::step_render`] captures.
     fn render_at(boot: u32) -> Vec<u8> {
         let tick = boot - 404;
-        let (mut rig, mut part) = started_with(Player::scripted(trace_script(tick)));
+        let (mut rig, mut part) = started_with(trace_script(tick));
         while rig.tick < tick {
             rig.step(&mut part);
         }
@@ -2198,7 +2039,7 @@ mod tests {
         for boot in [900u32, 1719, 2719] {
             let frame = render_at(boot);
             assert_eq!(
-                differing_pixels(&frame, &reference(boot)),
+                differing_pixels(&frame, &reference("alku", boot, "rgb")),
                 0,
                 "boot {boot}: the held frame is not the reference's"
             );
@@ -2210,7 +2051,7 @@ mod tests {
         // The release's loop (A20): the fifth batch's `ffonapois` clears the text and
         // its `do_scroll(tptr<5 ? 1 : 0)` no longer carries it, so 5859 is bare.
         let key = render_at(5859);
-        assert_eq!(differing_pixels(&key, &reference(5859)), 0, "boot 5859");
+        assert_eq!(differing_pixels(&key, &reference("alku", 5859, "rgb")), 0, "boot 5859");
         // The window steps every nine ticks and nothing else moves: the port's 5858 is
         // the same picture and its 5860 the next step's (14,048 pixels), where the
         // reference's own session holds 5859-5861 (`reference-indices.md` §4.4).
@@ -2220,7 +2061,7 @@ mod tests {
 
     /// The trace's run, stepped until `stop` holds or `last` ticks have run.
     fn run_until(last: u32, stop: impl Fn(&Alku) -> bool) -> (Rig, Alku) {
-        let (mut rig, mut part) = started_with(Player::scripted(trace_script(last)));
+        let (mut rig, mut part) = started_with(trace_script(last));
         while !stop(&part) && rig.tick <= last {
             rig.step(&mut part);
         }
@@ -2346,7 +2187,7 @@ mod tests {
         // With no code past 4 the first batch waits out the window (`a<319`), so the
         // loop ends on the blocking pass with `tptr` 1 and `f` counted: 20 > 7.
         let last = 6000;
-        let (mut rig, mut part) = started_with(Player::scripted(picture_script(last)));
+        let (mut rig, mut part) = started_with(picture_script(last));
         while !matches!(part.stage, Stage::FinalFade { .. }) && rig.tick <= last {
             rig.step(&mut part);
         }
@@ -2486,7 +2327,7 @@ mod tests {
     #[test]
     #[ignore]
     fn the_curated_palette_entries_leave_the_reference_different() {
-        let mut rig = Rig::new(Player::scripted(trace_script(5455)));
+        let mut rig = rig(trace_script(5455));
         let mut part = Alku::at_curated(TEST_HZPIC, TEST_FONT);
         part.init(&mut rig.ctx(0)).unwrap();
         let mut frames = Vec::new();
@@ -2500,7 +2341,7 @@ mod tests {
         }
         let mut measured = Vec::new();
         for (boot, frame) in frames {
-            let expected = reference(boot);
+            let expected = reference("alku", boot, "rgb");
             let differing = differing_pixels(&frame, &expected);
             println!(
                 "boot {boot}: {differing} of 128000 pixels differ with the curated entries"
@@ -2546,12 +2387,12 @@ mod tests {
         for shift in -60..=60 {
             let tick = 5859 - 404;
             let (mut rig, mut part) =
-                started_with(Player::scripted(trace_script_after_gate(tick, shift)));
+                started_with(trace_script_after_gate(tick, shift));
             while rig.tick < tick {
                 rig.step(&mut part);
             }
             let (_, frame) = rig.step_render(&mut part);
-            let expected = reference(5859);
+            let expected = reference("alku", 5859, "rgb");
             let differing = differing_pixels(&frame, &expected);
             println!(
                 "shift {shift:+3}: {differing:5} pixels differ; a={} p={} f={} tptr={} stage={:?}",

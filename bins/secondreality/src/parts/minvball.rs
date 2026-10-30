@@ -960,141 +960,38 @@ fn drawdots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::parts::test_rig::{differing_pixels, reference, Reading, Rig, ScriptedMusic};
+    use sr_engine::music::Music;
+    use sr_engine::dac_expand;
 
     /// The reference index that draws part tick 0 — the mapping's origin.
     const TICK_ZERO_INDEX: u32 = REFERENCE_FIRST_INDEX;
 
-    /// A player scripted one `musplus` reading a tick.
-    struct Player {
-        script: Vec<i32>,
-        at: usize,
-        /// `poll` calls made; the entry pre-roll's 256 are what the mid-chain
-        /// test proves absent.
-        polls: u32,
+    /// A player scripted one `musplus` reading a tick; a tick past the
+    /// script reads 0.
+    fn scripted(script: Vec<i32>) -> ScriptedMusic {
+        ScriptedMusic::musplus(script)
+            .past_end(Reading { musplus: 0, ..Reading::default() })
+            .never_syncs("`DOTS/MAIN.C` never syncs: its music call is `dis_musplus`")
     }
 
-    impl Player {
-        fn quiet(last_tick: u32) -> Player {
-            Player {
-                script: vec![0; last_tick as usize + 1],
-                at: 0,
-                polls: 0,
-            }
-        }
-
-        fn scripted(script: Vec<i32>) -> Player {
-            Player {
-                script,
-                at: 0,
-                polls: 0,
-            }
-        }
+    fn quiet(last_tick: u32) -> ScriptedMusic {
+        scripted(vec![0; last_tick as usize + 1])
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {
-            self.polls += 1;
-        }
-
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-
-        fn musplus(&mut self) -> i32 {
-            self.script.get(self.at).copied().unwrap_or(0)
-        }
-
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-
-        fn muscode(&mut self, wanted: i32) -> i32 {
-            sr_engine::music::muscode_from(MusicPosition::default(), wanted)
-        }
-
-        fn sync(&mut self) -> i32 {
-            unreachable!("`DOTS/MAIN.C` never syncs: its music call is `dis_musplus`")
-        }
-
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-
-        fn setmframe(&mut self, _frame: i32) {}
+    fn rig(music: ScriptedMusic) -> Rig {
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music)
     }
 
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-    }
-
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-            }
-        }
-
-        /// A band's context: never fresh, as the engine's band contexts are.
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, true, false)
-        }
-
-        /// The init context of an entry-point run — the part the run's music
-        /// was installed for.
-        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, true)
-        }
-
-        /// The init context of a part reached mid-chain, with the player
-        /// already running.
-        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
-            self.player.at = frame as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                exit,
-                music_fresh,
-            )
-        }
-    }
-
-    fn started_with(player: Player) -> (Rig, Minvball) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, Minvball) {
+        let mut rig = rig(music);
         let mut part = Minvball::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started() -> (Rig, Minvball) {
-        started_with(Player::quiet(0))
+        started_with(quiet(0))
     }
 
     /// Run `ticks` calls, asserting the part keeps going; the player's script
@@ -1200,12 +1097,12 @@ mod tests {
     fn the_cue_window_is_the_open_interval_minus_four_to_zero() {
         // `MAIN.C:194` `if(a>-4 && a<0) break`: -4 and 0 are *outside*.
         for (reading, fires) in [(-5, false), (-4, false), (-3, true), (-2, true), (-1, true), (0, false), (1, false)] {
-            let (mut rig, mut part) = started_with(Player::quiet(1_000));
+            let (mut rig, mut part) = started_with(quiet(1_000));
             run_fade(&mut rig, &mut part);
             // The script is indexed by the part's tick; write the reading at
             // the tick the check runs on.
             let tick = part.tick;
-            rig.player.script[tick as usize] = reading;
+            rig.player().script[tick as usize].musplus = reading;
             let status = part.frame(&mut rig.ctx(tick));
             if fires {
                 assert_eq!(status, PartStatus::Finished, "musplus {reading} must break");
@@ -1229,7 +1126,7 @@ mod tests {
         for (tick, reading) in [(140usize, -5), (150, -4), (160, 0), (170, 1)] {
             script[tick] = reading;
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 300);
         assert_eq!(part.phase, Phase::Main);
         // It is drawing: the video is not the untouched background.
@@ -1627,10 +1524,10 @@ mod tests {
         // A part the block's chain reaches is handed a player that has
         // already run through this stretch; 256 more polls would replay it.
         // The pre-roll is the entry run's (`music_fresh`) alone.
-        let mut rig = Rig::new(Player::quiet(0));
+        let mut rig = rig(quiet(0));
         let mut part = Minvball::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
-        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
+        assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
 
     // --- the uninitialized `j`, and the entry register -----------------------
@@ -1670,20 +1567,9 @@ mod tests {
         // 10,900 frame is the evidence: replay it under each of the 512
         // cursors and assert the port's value is the minimum. This is the
         // command the note and A19 name for the fitted number.
-        let reference =
-            std::fs::read("../../reference/parts/minvball/frame_010900.rgb").unwrap();
-        assert_eq!(reference.len(), VIDEO_BYTES * 3);
-        let mut scores: Vec<(usize, usize)> = (0..DOTNUM)
-            .map(|j| {
-                let rgb = replay(j, 403);
-                let diff = rgb
-                    .chunks_exact(3)
-                    .zip(reference.chunks_exact(3))
-                    .filter(|(a, b)| a != b)
-                    .count();
-                (diff, j)
-            })
-            .collect();
+        let reference = reference("minvball", 10_900, "rgb");
+        let mut scores: Vec<(usize, usize)> =
+            (0..DOTNUM).map(|j| (differing_pixels(&replay(j, 403), &reference), j)).collect();
         scores.sort_unstable();
         println!("best five (pixels, j): {:?}", &scores[..5]);
         assert_eq!(

@@ -398,16 +398,10 @@ impl Part for U2a {
 mod tests {
     use super::*;
     use crate::parts::visu::math::Matrix;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
+    use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
 
     const TEST_SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
     const TEST_BACKGROUND: &str = "../../assets/VISU/C/U2ABG.UH";
-    const TEST_REFERENCE_6500: &str = "../../reference/parts/u2a/frame_006500.rgb";
-    const TEST_REFERENCE_7300: &str = "../../reference/parts/u2a/frame_007300.rgb";
-    const TEST_REFERENCE_7640: &str = "../../reference/parts/u2a/frame_007640.rgb";
     const NEON_DIFFERING: usize = 64_000;
     const TEST_SPEED_FRAMES: [&str; 8] = [
         "../../reference/parts/u2a-speed/c15000/frame_006400.rgb",
@@ -420,228 +414,47 @@ mod tests {
         "../../reference/parts/u2a-speed/c60000/frame_006600.rgb",
     ];
 
-    /// The music a unit test hands the part: one scripted published position
-    /// a tick, every other call the null reading.
-    struct Player {
-        positions: Vec<MusicPosition>,
-        at: usize,
+    fn constant(order: u8, row: u8) -> ScriptedMusic {
+        ScriptedMusic::positions(vec![(order, row)])
     }
 
-    impl Player {
-        fn scripted(positions: Vec<(u8, u8)>) -> Player {
-            Player {
-                positions: positions
-                    .into_iter()
-                    .map(|(order, row)| MusicPosition {
-                        order,
-                        row,
-                        ..Default::default()
-                    })
-                    .collect(),
-                at: 0,
-            }
-        }
-
-        fn constant(order: u8, row: u8) -> Player {
-            Player::scripted(vec![(order, row)])
-        }
-
-        /// The gate's open position (`second1c`'s 6988: order 11 row 47).
-        fn open() -> Player {
-            Player::constant(GATE_ONE.0 + 1, GATE_ONE.1 + 1)
-        }
-
-        /// The gate's closed position (`second1c`'s 6987: order 11 row 46).
-        fn closed() -> Player {
-            Player::constant(GATE_ONE.0 + 1, GATE_ONE.1)
-        }
+    /// The gate's open position (`second1c`'s 6988: order 11 row 47).
+    fn open() -> ScriptedMusic {
+        constant(GATE_ONE.0 + 1, GATE_ONE.1 + 1)
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {}
-        fn position(&self) -> MusicPosition {
-            self.positions
-                .get(self.at)
-                .copied()
-                .unwrap_or_else(|| *self.positions.last().unwrap_or(&MusicPosition::default()))
-        }
-        fn musplus(&mut self) -> i32 {
-            -32
-        }
-        fn musrow(&mut self) -> i32 {
-            self.position().row as i32
-        }
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-        fn sync(&mut self) -> i32 {
-            0
-        }
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-        fn setmframe(&mut self, _frame: i32) {}
+    /// The gate's closed position (`second1c`'s 6987: order 11 row 46).
+    fn closed() -> ScriptedMusic {
+        constant(GATE_ONE.0 + 1, GATE_ONE.1)
     }
 
-    /// The engine's pieces, so a `PartCtx` can be built for one call at a time.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-        tick: u32,
+    fn rig(music: ScriptedMusic) -> Rig {
+        Rig::new(VIEW_WIDTH, VIEW_HEIGHT).with(music)
     }
 
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(640, 400),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-                tick: 0,
-            }
-        }
-
-        fn ctx_with(&mut self, tick: u32, exit: bool) -> PartCtx<'_> {
-            self.player.at = tick as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                tick,
-                0,
-                1,
-                exit,
-                false,
-            )
-        }
-
-        fn ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false)
-        }
-
-        /// A context for a run with no player at all.
-        fn ctx_without_music(&mut self, tick: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                None,
-                tick,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
-
-        fn run_slot(&mut self, slot: usize) {
-            let Some(mut callback) = self.copper.take(slot) else {
-                return;
-            };
-            {
-                let tick = self.tick;
-                let mut ctx = self.ctx(tick);
-                callback(&mut ctx);
-            }
-            self.copper.set(slot, callback);
-        }
-
-        /// One tick as the engine orders it: slot 0, the part, the compose,
-        /// slots 1 and 2.
-        fn step_render(&mut self, part: &mut U2a) -> (PartStatus, Vec<u8>) {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            let frame = self.rendered_rgb();
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            (status, frame)
-        }
-
-        fn step(&mut self, part: &mut U2a) -> PartStatus {
-            self.step_render(part).0
-        }
-
-        fn step_exit(&mut self, part: &mut U2a) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx_with(tick, true));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        /// The frame the engine would compose: the view's window through the
-        /// live palette, widened as the DAC widens.
-        fn rendered_rgb(&self) -> Vec<u8> {
-            let mut out =
-                Vec::with_capacity(usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT) * 3);
-            for y in 0..VIEW_HEIGHT {
-                for x in 0..VIEW_WIDTH {
-                    let at = self.view.source_index(&self.surface, x, y);
-                    let entry = self.palette.entry(self.surface.pixels()[at]);
-                    out.push(dac_expand(entry[0]));
-                    out.push(dac_expand(entry[1]));
-                    out.push(dac_expand(entry[2]));
-                }
-            }
-            out
-        }
-
-        fn page(&self, page: usize) -> &[u8] {
-            let start = page * PAGE_PIXELS;
-            &self.surface.pixels()[start..start + PAGE_PIXELS]
-        }
+    fn page_of(rig: &Rig, page: usize) -> &[u8] {
+        let start = page * PAGE_PIXELS;
+        &rig.surface.pixels()[start..start + PAGE_PIXELS]
     }
 
-    fn started_with(player: Player) -> (Rig, U2a) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, U2a) {
+        let mut rig = rig(music);
         let mut part = U2a::at(TEST_SCENE_DIR, TEST_BACKGROUND);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
-    }
-
-    fn reference(path: &str) -> Vec<u8> {
-        std::fs::read(path).unwrap()
-    }
-
-    /// **The lengths are asserted first**: a short read must not compare a
-    /// prefix and report zero differences as if it had compared the frame.
-    fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
     }
 
     // --- the brief's tests --------------------------------------------------
 
     #[test]
     fn init_sets_the_shipped_view_and_paints_the_background() {
-        let (rig, part) = started_with(Player::closed());
+        let (rig, part) = started_with(closed());
         assert_eq!(part.phase, Phase::Pad);
         assert_eq!((rig.view.width, rig.view.height), (VIEW_WIDTH, VIEW_HEIGHT));
         assert_eq!(rig.view.start_addr, 0, "page 0 is displayed");
         assert_eq!(rig.view.y_line_offset, Some(320), "CRTC 0x13: 320 pixels a line");
         assert!(!rig.view.double_scan);
-        assert_eq!(rig.page(0), part.background, "page 0 holds U2ABG.UH");
+        assert_eq!(page_of(&rig, 0), part.background, "page 0 holds U2ABG.UH");
         assert_eq!(rig.palette, part.merged_palette, "the merged palette is up before the gate");
         assert!(!rig.copper.is_set(0));
         assert!(!rig.copper.is_set(1));
@@ -651,9 +464,9 @@ mod tests {
 
     #[test]
     fn the_pre_gate_frame_is_the_background_under_the_merged_palette() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         let (_, frame) = rig.step_render(&mut part);
-        assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
+        assert_eq!(frame, rgb_of(&part.background, &part.merged_palette));
         // Not the neon: the 30,000-cycle 6500 frame's formula
         // `(3v + 5) & 63` would put entry 195's 63 at 2.
         assert_ne!(part.merged_palette.entry(195), [2, 2, 2]);
@@ -662,7 +475,7 @@ mod tests {
 
     #[test]
     fn the_merged_palette_is_the_scene_then_the_background() {
-        let (_, part) = started_with(Player::closed());
+        let (_, part) = started_with(closed());
         let scene = part.scene.as_ref().unwrap();
         let mut expected = scene.master.palette;
         for index in 0..64u8 {
@@ -688,18 +501,18 @@ mod tests {
 
     #[test]
     fn the_gate_holds_until_the_scripted_cue_and_exits_on_request() {
-        let (mut rig, mut part) = started_with(Player::scripted(vec![
+        let (mut rig, mut part) = started_with(ScriptedMusic::positions(vec![
             (GATE_ONE.0, GATE_ONE.1),
             (GATE_ONE.0 + 1, GATE_ONE.1),
             (GATE_ONE.0 + 1, GATE_ONE.1 + 1),
         ]));
-        let hold_page = rig.page(0).to_vec();
+        let hold_page = page_of(&rig, 0).to_vec();
         let hold_palette = rig.palette;
         // Row 46 is not `> 46`, and order 10 is not `> 10`: two closed ticks.
         for _ in 0..2 {
             assert_eq!(rig.step(&mut part), PartStatus::Continuing);
             assert_eq!(part.phase, Phase::Pad);
-            assert_eq!(rig.page(0), hold_page, "the hold holds");
+            assert_eq!(page_of(&rig, 0), hold_page, "the hold holds");
             assert_eq!(rig.palette, hold_palette, "the hold DAC holds");
             assert!(part.driver.is_none(), "no ring before the gate");
             assert!(!rig.copper.is_set(2), "no copper before the gate");
@@ -717,11 +530,11 @@ mod tests {
 
         // `dis_exit()` during the gate returns without touching the screen
         // (`U2A.C:239`).
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         // `U2A.C:239`'s bare `return` leaves the hold: no copper, no clear.
-        assert_eq!(rig.page(0), part.background, "the hold screen stays up");
+        assert_eq!(page_of(&rig, 0), part.background, "the hold screen stays up");
         assert_eq!(rig.palette, part.merged_palette, "and its DAC");
         assert!(!rig.copper.is_set(2), "no copper was installed");
         assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
@@ -729,11 +542,11 @@ mod tests {
         // The gate is tested first (`U2A.C:238-239`): an open gate with the
         // exit set runs the setup and then the loop's own exit check, which
         // tears down to the cleared page.
-        let (mut rig, mut part) = started_with(Player::open());
+        let (mut rig, mut part) = started_with(open());
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         for page in 0..PAGES {
-            assert_eq!(rig.page(page), part.background, "page {page} cleared");
+            assert_eq!(page_of(&rig, page), part.background, "page {page} cleared");
         }
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32);
     }
@@ -744,11 +557,11 @@ mod tests {
         // never fires in the shipped data — the stream's END at 7510 comes
         // before order 12 row 55 at 7618 (`second1b`) — so a scripted position
         // is the only way to drive it.
-        let (mut rig, mut part) = started_with(Player::constant(GATE_TWO.0 + 1, GATE_TWO.1 + 1));
+        let (mut rig, mut part) = started_with(constant(GATE_TWO.0 + 1, GATE_TWO.1 + 1));
         assert_eq!(rig.step(&mut part), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         for page in 0..PAGES {
-            assert_eq!(rig.page(page), part.background, "page {page} cleared");
+            assert_eq!(page_of(&rig, page), part.background, "page {page} cleared");
         }
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32);
     }
@@ -758,7 +571,7 @@ mod tests {
         // PAM's precedent: a part whose gates read the published position
         // refuses to start when the run has no player, rather than waiting
         // for ever.
-        let mut rig = Rig::new(Player::closed());
+        let mut rig = rig(closed());
         let mut part = U2a::at(TEST_SCENE_DIR, TEST_BACKGROUND);
         let error = {
             let mut ctx = rig.ctx_without_music(0);
@@ -774,7 +587,7 @@ mod tests {
 
     #[test]
     fn the_first_stream_frame_leaves_every_object_off_and_frame_sixteen_turns_object_two_on() {
-        let (mut rig, mut part) = started_with(Player::open());
+        let (mut rig, mut part) = started_with(open());
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         {
             let scene = part.scene.as_ref().unwrap();
@@ -808,7 +621,7 @@ mod tests {
 
     #[test]
     fn teardown_clears_all_four_pages_and_leaves_page_three_displayed() {
-        let (mut rig, mut part) = started_with(Player::open());
+        let (mut rig, mut part) = started_with(open());
         let mut finished_at = None;
         for step in 0..600u32 {
             if rig.step(&mut part) == PartStatus::Finished {
@@ -824,7 +637,7 @@ mod tests {
         assert!(scene.xit);
         assert_eq!(scene.stream, 0, "resetscene rewound the stream");
         for page in 0..PAGES {
-            assert_eq!(rig.page(page), part.background, "page {page} cleared");
+            assert_eq!(page_of(&rig, page), part.background, "page {page} cleared");
         }
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32, "the last cleared page");
         assert_eq!(rig.palette, part.merged_palette, "the DAC keeps the merged palette");
@@ -840,34 +653,34 @@ mod tests {
         assert_eq!(rig.view.start_addr, 3 * PAGE_PIXELS as u32);
         // The cleared hold under the merged palette is the reference's 7640.
         let held = rig.rendered_rgb();
-        let differing = differing_pixels(&held, &reference(TEST_REFERENCE_7640));
+        let differing = differing_pixels(&held, &reference("u2a", 7640, "rgb"));
         assert_eq!(differing, 0, "the cleared hold is not the reference's");
     }
 
     #[test]
     fn the_first_displayed_page_is_the_cleared_background() {
-        let (mut rig, mut part) = started_with(Player::open());
+        let (mut rig, mut part) = started_with(open());
         let (_, frame) = rig.step_render(&mut part);
         assert_eq!(
             part.driver.as_ref().unwrap().borrow().ring.displayed(),
             0,
             "the ring starts displaying page 0"
         );
-        assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
-        assert_eq!(rig.page(0), part.background);
+        assert_eq!(frame, rgb_of(&part.background, &part.merged_palette));
+        assert_eq!(page_of(&rig, 0), part.background);
 
         // The hold before the gate is the same pixels under the same palette.
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         let (_, frame) = rig.step_render(&mut part);
-        assert_eq!(frame, plain_rgb(&part.background, &part.merged_palette));
+        assert_eq!(frame, rgb_of(&part.background, &part.merged_palette));
     }
 
     #[test]
     fn the_pre_gate_hold_is_the_four_speeds_captures() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         let (_, frame) = rig.step_render(&mut part);
         for path in TEST_SPEED_FRAMES {
-            assert_eq!(differing_pixels(&frame, &reference(path)), 0, "{path}");
+            assert_eq!(differing_pixels(&frame, &std::fs::read(path).unwrap()), 0, "{path}");
         }
     }
 
@@ -875,22 +688,10 @@ mod tests {
     fn the_30000_cycle_neon_6500_differs_by_the_registered_count() {
         // A32: the 30,000-cycle reference's 6500 is a timing race the port
         // does not copy. This is also the guard against a regression to it.
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         let (_, frame) = rig.step_render(&mut part);
-        let differing = differing_pixels(&frame, &reference(TEST_REFERENCE_6500));
+        let differing = differing_pixels(&frame, &reference("u2a", 6500, "rgb"));
         assert_eq!(differing, NEON_DIFFERING, "A32's count");
-    }
-
-    /// One image through one palette, widened as the engine widens it.
-    fn plain_rgb(pixels: &[u8], palette: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(pixels.len() * 3);
-        for &index in pixels {
-            let entry = palette.entry(index);
-            out.push(dac_expand(entry[0]));
-            out.push(dac_expand(entry[1]));
-            out.push(dac_expand(entry[2]));
-        }
-        out
     }
 
     #[test]
@@ -908,7 +709,7 @@ mod tests {
         }
         let mut driver = Driver::new(Ring::new(1), false);
         let mut pixels = vec![0u8; PAGE_PIXELS];
-        let reference_7300 = reference(TEST_REFERENCE_7300);
+        let reference_7300 = reference("u2a", 7300, "rgb");
         let mut best = (usize::MAX, usize::MAX);
         let mut best_pixels = Vec::new();
         let mut neighbours = std::collections::BTreeMap::new();
@@ -921,7 +722,7 @@ mod tests {
                 let mut page = Page::new(&mut pixels, usize::from(VIEW_WIDTH));
                 driver.draw_frame(&mut scene, &mut page, Clear::Background(background.pixels()));
             }
-            let differing = differing_pixels(&plain_rgb(&pixels, &merged), &reference_7300);
+            let differing = differing_pixels(&rgb_of(&pixels, &merged), &reference_7300);
             *count = differing;
             if [293, 294, 295].contains(&state) {
                 neighbours.insert(state, differing);

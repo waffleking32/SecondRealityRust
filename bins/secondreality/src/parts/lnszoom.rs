@@ -1087,167 +1087,46 @@ impl Part for Lnszoom {
 mod tests {
     use super::*;
 
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
+    use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ScriptedMusic};
+    use sr_engine::music::Music;
 
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
-
-    /// A player scripted one `(order, row, musplus)` reading a tick.
-    struct Player {
-        script: Vec<(u8, u8, i32)>,
-        at: usize,
-        polls: u32,
-        mframe: i32,
+    /// A player scripted one `(order, row, musplus)` reading a tick; a tick
+    /// past the script reads 45:59 with no plus pending.
+    fn scripted(script: Vec<(u8, u8, i32)>) -> ScriptedMusic {
+        let reading = |(order, row, musplus)| Reading { order, row, musplus, sync: 0 };
+        ScriptedMusic::readings(script.into_iter().map(reading).collect())
+            .past_end(reading((45, 59, -32)))
+            .never_syncs("`LENS/MAIN.C` never syncs")
     }
 
-    impl Player {
-        fn scripted(script: Vec<(u8, u8, i32)>) -> Player {
-            Player {
-                script,
-                at: 0,
-                polls: 0,
-                mframe: 0,
-            }
-        }
-
-        /// The music never holds a gate: `musplus` is -5, which passes both
-        /// waits and never the part 3 break.
-        fn running(last_tick: u32) -> Player {
-            Player::scripted(vec![(45, 59, -5); last_tick as usize + 1])
-        }
-
-        /// A script whose part 3 break fires from `break_tick`.
-        fn breaking(break_tick: u32, last_tick: u32) -> Player {
-            let mut script = vec![(45, 59, -5); last_tick as usize + 1];
-            for entry in script.iter_mut().skip(break_tick as usize) {
-                *entry = (60, 60, 0);
-            }
-            Player::scripted(script)
-        }
+    /// The music never holds a gate: `musplus` is -5, which passes both
+    /// waits and never the part 3 break.
+    fn running(last_tick: u32) -> ScriptedMusic {
+        scripted(vec![(45, 59, -5); last_tick as usize + 1])
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {
-            self.polls += 1;
+    /// A script whose part 3 break fires from `break_tick`.
+    fn breaking(break_tick: u32, last_tick: u32) -> ScriptedMusic {
+        let mut script = vec![(45, 59, -5); last_tick as usize + 1];
+        for entry in script.iter_mut().skip(break_tick as usize) {
+            *entry = (60, 60, 0);
         }
-
-        fn position(&self) -> MusicPosition {
-            let (order, row, _) = self.script.get(self.at).copied().unwrap_or((45, 59, -5));
-            MusicPosition {
-                order,
-                row,
-                ..MusicPosition::default()
-            }
-        }
-
-        fn musplus(&mut self) -> i32 {
-            self.script
-                .get(self.at)
-                .map_or(-32, |(_, _, musplus)| *musplus)
-        }
-
-        fn musrow(&mut self) -> i32 {
-            i32::from(self.position().row)
-        }
-
-        fn muscode(&mut self, wanted: i32) -> i32 {
-            sr_engine::music::muscode_from(MusicPosition::default(), wanted)
-        }
-
-        fn sync(&mut self) -> i32 {
-            unreachable!("`LENS/MAIN.C` never syncs")
-        }
-
-        fn getmframe(&mut self) -> i32 {
-            self.mframe
-        }
-
-        fn setmframe(&mut self, frame: i32) {
-            self.mframe = frame;
-        }
+        scripted(script)
     }
 
-    trait RigMusic: Music {
-        fn seek_tick(&mut self, tick: u32);
-        fn pre_tick(&mut self) {}
+    fn rig<M: RigMusic>(music: M) -> Rig<M> {
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music)
     }
 
-    impl RigMusic for Player {
-        fn seek_tick(&mut self, tick: u32) {
-            self.at = tick as usize;
-        }
-    }
-
-    impl RigMusic for crate::audio::PlayerMusic {
-        fn seek_tick(&mut self, _tick: u32) {}
-        fn pre_tick(&mut self) {
-            self.poll();
-        }
-    }
-
-    struct Rig<M: RigMusic + 'static> {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: M,
-    }
-
-    impl<M: RigMusic + 'static> Rig<M> {
-        fn new(player: M) -> Rig<M> {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-            }
-        }
-
-        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
-            self.player.seek_tick(frame);
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                exit,
-                music_fresh,
-            )
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, true)
-        }
-
-        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, true, false)
-        }
-    }
-
-    fn started() -> (Rig<Player>, Lnszoom) {
-        let mut rig = Rig::new(Player::running(4_000));
+    fn started() -> (Rig, Lnszoom) {
+        let mut rig = rig(running(4_000));
         let mut part = Lnszoom::at("../../");
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
-    fn started_with(player: Player) -> (Rig<Player>, Lnszoom) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, Lnszoom) {
+        let mut rig = rig(music);
         let mut part = Lnszoom::at("../../");
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
@@ -1262,16 +1141,16 @@ mod tests {
 
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(45);
-        let mut rig = Rig::new(PlayerMusic::new(player, 0));
+        let mut rig = rig(PlayerMusic::new(player, 0));
         let mut part = Lnszoom::at("../../");
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
-    fn run_ticks<M: RigMusic + 'static>(rig: &mut Rig<M>, part: &mut Lnszoom, ticks: u32) {
+    fn run_ticks<M: RigMusic>(rig: &mut Rig<M>, part: &mut Lnszoom, ticks: u32) {
         for _ in 0..ticks {
             let at = part.tick;
-            rig.player.pre_tick();
+            rig.player().poll_for_tick();
             assert_eq!(
                 part.frame(&mut rig.ctx(at)),
                 PartStatus::Continuing,
@@ -1280,7 +1159,7 @@ mod tests {
         }
     }
 
-    fn run_to<M: RigMusic + 'static>(rig: &mut Rig<M>, part: &mut Lnszoom, tick: u32) {
+    fn run_to<M: RigMusic>(rig: &mut Rig<M>, part: &mut Lnszoom, tick: u32) {
         while part.tick < tick {
             run_ticks(rig, part, 1);
         }
@@ -1331,7 +1210,7 @@ mod tests {
         for entry in script.iter_mut().skip(5) {
             *entry = (45, 59, -6);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 5);
         assert_eq!(part.phase, Phase::Gate, "five ticks at -7");
         run_to(&mut rig, &mut part, 6);
@@ -1348,7 +1227,7 @@ mod tests {
         for entry in script.iter_mut().skip(310) {
             *entry = (48, 44, -20);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 310);
         assert_eq!(part.phase, Phase::LensWait, "nine ticks at -21");
         run_to(&mut rig, &mut part, 311);
@@ -1373,7 +1252,7 @@ mod tests {
         for entry in script.iter_mut().skip(6) {
             *entry = (45, 59, -6);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 3);
         assert_eq!(
             part.phase,
@@ -1462,7 +1341,7 @@ mod tests {
     fn the_music_break_ends_the_part_with_the_white_palette() {
         // `MAIN.C:213` `if(dis_musplus()>-4) break;` — the loop's first check
         // of each tick.
-        let (mut rig, mut part) = started_with(Player::breaking(1_024, 4_000));
+        let (mut rig, mut part) = started_with(breaking(1_024, 4_000));
         run_to(&mut rig, &mut part, 1_024);
         assert_eq!(
             part.frame(&mut rig.ctx(1_024)),
@@ -1495,7 +1374,7 @@ mod tests {
         for entry in script.iter_mut().skip(301) {
             *entry = (45, 59, -32);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 301);
         assert_eq!(part.phase, Phase::LensWait);
         assert_eq!(
@@ -1587,29 +1466,17 @@ mod tests {
 
     #[test]
     fn a_mid_chain_start_does_not_pre_roll_the_music() {
-        let mut rig = Rig::new(Player::running(10));
+        let mut rig = rig(running(10));
         let mut part = Lnszoom::at("../../");
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
-        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
+        assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
 
     #[test]
     fn a_run_without_music_is_refused() {
-        let mut rig = Rig::new(Player::running(10));
+        let mut rig = rig(running(10));
         let mut part = Lnszoom::at("../../");
-        rig.player.seek_tick(0);
-        let mut ctx = PartCtx::new(
-            &mut rig.surface,
-            &mut rig.view,
-            &mut rig.palette,
-            &mut rig.copper,
-            None,
-            0,
-            0,
-            1,
-            false,
-            true,
-        );
+        let mut ctx = rig.machine.ctx(None, 0, 0, 1, false, true);
         let error = part.init(&mut ctx).expect_err("no music, no gates");
         assert!(error.message.contains("music"), "{}", error.message);
     }
@@ -1845,7 +1712,7 @@ mod tests {
     }
 
     fn one_frame(part: &Lnszoom) -> Vec<u8> {
-        let mut rig = Rig::new(Player::running(1));
+        let mut rig = rig(running(1));
         let mut part = clone_for_rotate(part);
         let status = part.frame(&mut rig.ctx(0));
         assert_eq!(status, PartStatus::Continuing);
@@ -1943,37 +1810,11 @@ mod tests {
 
     /// The displayed frame as RGB, through the live palette and the engine's
     /// 6→8-bit widening — what `--dump-frames` writes.
-    fn rendered_rgb(rig: &Rig<Player>) -> Vec<u8> {
-        let mut out = Vec::with_capacity(VIDEO_BYTES * 3);
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                // The part composes a linear 320×200 picture; this helper is
-                // used on clones that never ran `init`, so it reads the same
-                // linear layout rather than a view those clones do not set.
-                let at = y as usize * SCREEN_WIDTH as usize + x as usize;
-                let entry = rig.palette.entry(rig.surface.pixels()[at]);
-                out.push(dac_expand(entry[0]));
-                out.push(dac_expand(entry[1]));
-                out.push(dac_expand(entry[2]));
-            }
-        }
-        out
-    }
-
-    fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(rendered.len(), expected.len());
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
-    }
-
-    fn reference(index: u32) -> Vec<u8> {
-        std::fs::read(format!(
-            "../../reference/parts/lnszoom/frame_{index:06}.rgb"
-        ))
-        .unwrap()
+    fn rendered_rgb(rig: &Rig) -> Vec<u8> {
+        // The part composes a linear 320×200 picture; this helper is used on
+        // clones that never ran `init`, so it reads the same linear layout
+        // rather than a view those clones do not set.
+        rgb_of(&rig.surface.pixels()[..VIDEO_BYTES], &rig.palette)
     }
 
     /// The D24 divergence and its proof: the tree's picture differs from the
@@ -2015,11 +1856,11 @@ mod tests {
         lens.palette = patched.palette.clone();
         lens.video[..VIDEO_BYTES].copy_from_slice(&patched.back[..VIDEO_BYTES]);
         lens.phase = Phase::Lens { uframe: 474, frame: 474 };
-        let mut rig = Rig::new(Player::running(1_000));
+        let mut rig = rig(running(1_000));
         rig.palette = lens.live_palette();
         assert_eq!(lens.frame(&mut rig.ctx(474)), PartStatus::Continuing);
         assert_eq!(
-            differing_pixels(&rendered_rgb(&rig), &reference(3_400)),
+            differing_pixels(&rendered_rgb(&rig), &reference("lnszoom", 3_400, "rgb")),
             0,
             "the patched picture alone accounts for 3400's residual"
         );
@@ -2029,14 +1870,14 @@ mod tests {
             let mut part = clone_for_rotate(&patched);
             part.palette = patched.palette.clone();
             part.phase = Phase::Rot { frame: frame as u32 };
-            let mut rig = Rig::new(Player::running(2_000));
+            let mut rig = Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(running(2_000));
             rig.palette = part.live_palette();
             assert_eq!(
                 part.frame(&mut rig.ctx(frame as u32)),
                 PartStatus::Continuing
             );
             assert_eq!(
-                differing_pixels(&rendered_rgb(&rig), &reference(index)),
+                differing_pixels(&rendered_rgb(&rig), &reference("lnszoom", index, "rgb")),
                 0,
                 "the patched picture alone accounts for {index}'s residual"
             );

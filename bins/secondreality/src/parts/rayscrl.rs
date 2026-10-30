@@ -757,12 +757,11 @@ fn ramp(pal: &mut [u8], tmppal: &[u8], direction: Direction) -> Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::parts::test_rig::{
+        differing_bytes, differing_pixels, reference, Reading, Rig, RigMusic, ScriptedMusic,
+    };
+    use sr_engine::dac_expand;
+    use sr_engine::music::Music;
 
     const TEST_BKG: &str = "../../assets/WATER/BKG.CLX";
     const TEST_MIEKKA: &str = "../../assets/WATER/MIEKKA.SCI";
@@ -779,171 +778,49 @@ mod tests {
     /// The tick the fade's first upload lands on: boot 14950.
     const FADE_FIRST: u32 = 1_988;
 
-    /// A player scripted one `(order, row, musplus)` reading a tick.
-    struct Player {
-        script: Vec<(u8, u8, i32)>,
-        at: usize,
-        polls: u32,
+    /// A player scripted one `(order, row, musplus)` reading a tick; a tick
+    /// past the script reads 88:0 with `musplus` 0.
+    fn scripted(script: Vec<(u8, u8, i32)>) -> ScriptedMusic {
+        let reading = |(order, row, musplus)| Reading { order, row, musplus, sync: 0 };
+        ScriptedMusic::readings(script.into_iter().map(reading).collect())
+            .past_end(reading((88, 0, 0)))
+            .never_syncs("`DEMO.PAS` never syncs: its music calls are `dis_musplus` and `dis_muscode`")
     }
 
-    impl Player {
-        fn scripted(script: Vec<(u8, u8, i32)>) -> Player {
-            Player {
-                script,
-                at: 0,
-                polls: 0,
+    /// The init passes (`musplus` 0) and the stage-2 gate never sees the
+    /// order change.
+    fn quiet(last_tick: u32) -> ScriptedMusic {
+        scripted(vec![(88, 0, 0); last_tick as usize + 1])
+    }
+
+    /// A script whose stage 2 passes at `stage_tick` (order 89, row 16)
+    /// and whose cue is `-11` from `cue_tick`.
+    fn through_stage_two(stage_tick: u32, cue_tick: Option<u32>, last_tick: u32) -> ScriptedMusic {
+        let mut script = vec![(88, 0, 0); last_tick as usize + 1];
+        for entry in script.iter_mut().skip(stage_tick as usize) {
+            *entry = (89, 16, 0);
+        }
+        if let Some(cue) = cue_tick {
+            for entry in script.iter_mut().skip(cue as usize) {
+                *entry = (91, 53, -11);
             }
         }
-
-        /// The init passes (`musplus` 0) and the stage-2 gate never sees the
-        /// order change.
-        fn quiet(last_tick: u32) -> Player {
-            Player::scripted(vec![(88, 0, 0); last_tick as usize + 1])
-        }
-
-        /// A script whose stage 2 passes at `stage_tick` (order 89, row 16)
-        /// and whose cue is `-11` from `cue_tick`.
-        fn through_stage_two(stage_tick: u32, cue_tick: Option<u32>, last_tick: u32) -> Player {
-            let mut script = vec![(88, 0, 0); last_tick as usize + 1];
-            for entry in script.iter_mut().skip(stage_tick as usize) {
-                *entry = (89, 16, 0);
-            }
-            if let Some(cue) = cue_tick {
-                for entry in script.iter_mut().skip(cue as usize) {
-                    *entry = (91, 53, -11);
-                }
-            }
-            Player::scripted(script)
-        }
+        scripted(script)
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {
-            self.polls += 1;
-        }
-
-        fn position(&self) -> MusicPosition {
-            let (order, row, _) = self.script.get(self.at).copied().unwrap_or((88, 0, 0));
-            MusicPosition {
-                order,
-                row,
-                ..MusicPosition::default()
-            }
-        }
-
-        fn musplus(&mut self) -> i32 {
-            self.script
-                .get(self.at)
-                .map_or(0, |(_, _, musplus)| *musplus)
-        }
-
-        fn musrow(&mut self) -> i32 {
-            i32::from(self.position().row)
-        }
-
-        fn muscode(&mut self, wanted: i32) -> i32 {
-            sr_engine::music::muscode_from(MusicPosition::default(), wanted)
-        }
-
-        fn sync(&mut self) -> i32 {
-            unreachable!(
-                "`DEMO.PAS` never syncs: its music calls are `dis_musplus` and `dis_muscode`"
-            )
-        }
-
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-
-        fn setmframe(&mut self, _frame: i32) {}
+    fn rig<M: RigMusic>(music: M) -> Rig<M> {
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music)
     }
 
-    /// What a `Rig` needs from its player: the scripted one is indexed by the
-    /// tick, the real adapter is advanced by the engine's once-a-tick poll.
-    trait RigMusic: Music {
-        fn seek_tick(&mut self, tick: u32);
-        fn pre_tick(&mut self) {}
-    }
-
-    impl RigMusic for Player {
-        fn seek_tick(&mut self, tick: u32) {
-            self.at = tick as usize;
-        }
-    }
-
-    impl RigMusic for crate::audio::PlayerMusic {
-        fn seek_tick(&mut self, _tick: u32) {}
-        fn pre_tick(&mut self) {
-            self.poll();
-        }
-    }
-
-    struct Rig<M: RigMusic + 'static> {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: M,
-    }
-
-    impl<M: RigMusic + 'static> Rig<M> {
-        fn new(player: M) -> Rig<M> {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-            }
-        }
-
-        /// A band's context: never fresh, as the engine's band contexts are.
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, true, false)
-        }
-
-        /// The init context of an entry-point run — the part the run's music
-        /// was installed for.
-        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, true)
-        }
-
-        /// The init context of a part reached mid-chain, with the player
-        /// already running.
-        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
-            self.player.seek_tick(frame);
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                exit,
-                music_fresh,
-            )
-        }
-    }
-
-    fn started_with<M: RigMusic + 'static>(player: M) -> (Rig<M>, Rayscrl) {
-        let mut rig = Rig::new(player);
+    fn started_with<M: RigMusic>(music: M) -> (Rig<M>, Rayscrl) {
+        let mut rig = rig(music);
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
-    fn started() -> (Rig<Player>, Rayscrl) {
-        started_with(Player::quiet(0))
+    fn started() -> (Rig, Rayscrl) {
+        started_with(quiet(0))
     }
 
     /// A part with the **real** player: `MUSIC1` seeked to order 86, the
@@ -955,16 +832,16 @@ mod tests {
 
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(86);
-        let mut rig = Rig::new(PlayerMusic::new(player, 0));
+        let mut rig = rig(PlayerMusic::new(player, 0));
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
-    fn run_ticks<M: RigMusic + 'static>(rig: &mut Rig<M>, part: &mut Rayscrl, ticks: u32) {
+    fn run_ticks<M: RigMusic>(rig: &mut Rig<M>, part: &mut Rayscrl, ticks: u32) {
         for _ in 0..ticks {
             let at = part.tick;
-            rig.player.pre_tick();
+            rig.player().poll_for_tick();
             assert_eq!(
                 part.frame(&mut rig.ctx(at)),
                 PartStatus::Continuing,
@@ -973,7 +850,7 @@ mod tests {
         }
     }
 
-    fn run_to<M: RigMusic + 'static>(rig: &mut Rig<M>, part: &mut Rayscrl, tick: u32) {
+    fn run_to<M: RigMusic>(rig: &mut Rig<M>, part: &mut Rayscrl, tick: u32) {
         while part.tick < tick {
             run_ticks(rig, part, 1);
         }
@@ -1009,7 +886,7 @@ mod tests {
         for entry in script.iter_mut().skip(1_100) {
             *entry = (91, 54, -10);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 1_300);
         assert!(!part.fadeout, "a skipped cue must not fade");
         assert_eq!(part.phase, Phase::Main);
@@ -1022,7 +899,7 @@ mod tests {
     fn the_cue_is_exactly_minus_eleven_and_fades_sixty_five_ticks() {
         // -11 exactly, confirmed seven ticks, then the 65-step fade: 64
         // increments and the 65th tick's `quit`.
-        let (mut rig, mut part) = started_with(Player::through_stage_two(
+        let (mut rig, mut part) = started_with(through_stage_two(
             700,
             Some(CUE_FIRST),
             FADE_FIRST + 200,
@@ -1069,7 +946,7 @@ mod tests {
         for entry in script.iter_mut().skip(CUE_FIRST as usize) {
             *entry = (91, 52, -12);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, FADE_FIRST + 100);
         assert!(!part.fadeout, "-12 is not the cue");
 
@@ -1080,7 +957,7 @@ mod tests {
         for entry in script.iter_mut().skip(CUE_FIRST as usize) {
             *entry = (91, 54, -10);
         }
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, FADE_FIRST + 100);
         assert!(!part.fadeout, "-10 is not the cue");
     }
@@ -1090,7 +967,7 @@ mod tests {
         // Stage 2 is the phase's only true spin and the source never checks
         // `dis_exit` in it. The port polls once a tick and must honour the
         // notice on the tick it arrives.
-        let (mut rig, mut part) = started_with(Player::quiet(1_000));
+        let (mut rig, mut part) = started_with(quiet(1_000));
         run_to(&mut rig, &mut part, 200);
         assert_eq!(part.phase, Phase::Stage2);
         assert_eq!(
@@ -1099,13 +976,13 @@ mod tests {
         );
         assert_eq!(part.phase, Phase::Done);
         // The init wait, the fade and the main loop honour it too.
-        let (mut rig, mut part) = started_with(Player::quiet(10));
+        let (mut rig, mut part) = started_with(quiet(10));
         assert_eq!(
             part.frame(&mut rig.ctx_exit(0)),
             PartStatus::Finished,
             "the init wait"
         );
-        let (mut rig, mut part) = started_with(Player::quiet(10));
+        let (mut rig, mut part) = started_with(quiet(10));
         run_to(&mut rig, &mut part, 20);
         assert!(
             matches!(part.phase, Phase::FadeIn { .. }),
@@ -1116,7 +993,7 @@ mod tests {
             PartStatus::Finished,
             "the fade"
         );
-        let (mut rig, mut part) = started_with(Player::through_stage_two(700, None, 900));
+        let (mut rig, mut part) = started_with(through_stage_two(700, None, 900));
         run_to(&mut rig, &mut part, 720);
         assert_eq!(part.phase, Phase::Main);
         assert_eq!(
@@ -1128,24 +1005,8 @@ mod tests {
 
     // --- the reference -------------------------------------------------------
 
-    /// The displayed frame as RGB, through the live palette and the engine's
-    /// 6→8-bit widening — what `--dump-frames` writes.
-    fn rendered_rgb<M: RigMusic + 'static>(rig: &Rig<M>) -> Vec<u8> {
-        let mut out = Vec::with_capacity(VIDEO_BYTES * 3);
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                let at = rig.view.source_index(&rig.surface, x, y);
-                let entry = rig.palette.entry(rig.surface.pixels()[at]);
-                out.push(dac_expand(entry[0]));
-                out.push(dac_expand(entry[1]));
-                out.push(dac_expand(entry[2]));
-            }
-        }
-        out
-    }
-
     /// The displayed frame as palette indices.
-    fn rendered_indices<M: RigMusic + 'static>(rig: &Rig<M>) -> Vec<u8> {
+    fn rendered_indices<M: RigMusic>(rig: &Rig<M>) -> Vec<u8> {
         let mut out = Vec::with_capacity(VIDEO_BYTES);
         for y in 0..SCREEN_HEIGHT {
             for x in 0..SCREEN_WIDTH {
@@ -1158,40 +1019,6 @@ mod tests {
 
     fn sci_byte(path: &str, at: usize) -> u8 {
         std::fs::read(path).unwrap()[at]
-    }
-
-    fn reference(index: u32, extension: &str) -> Vec<u8> {
-        std::fs::read(format!(
-            "../../reference/parts/rayscrl/frame_{index:06}.{extension}"
-        ))
-        .unwrap()
-    }
-
-    /// How many bytes differ, with the lengths asserted first: `zip` stops at
-    /// the shorter side, and a short read must not read as a match.
-    fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .iter()
-            .zip(expected)
-            .filter(|(a, b)| a != b)
-            .count()
-    }
-
-    fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(rendered.len(), expected.len());
-        assert_eq!(rendered.len() % 3, 0);
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
     }
 
     // --- the assets ----------------------------------------------------------
@@ -1309,7 +1136,7 @@ mod tests {
         let shown = file.to_string_lossy().into_owned();
         let path: &'static str = Box::leak(shown.clone().into_boxed_str());
 
-        let mut rig = Rig::new(Player::quiet(0));
+        let mut rig = rig(quiet(0));
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, [path, TEST_POS[1], TEST_POS[2]]);
         let error = part
             .init(&mut rig.init_ctx(0))
@@ -1384,10 +1211,10 @@ mod tests {
         // A part the block's chain reaches is handed a player that has
         // already run through this stretch; 268 more polls would replay it.
         // The pre-roll is the entry run's (`music_fresh`) alone.
-        let mut rig = Rig::new(Player::quiet(0));
+        let mut rig = rig(quiet(0));
         let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
-        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
+        assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
 
     // --- the fade ------------------------------------------------------------
@@ -1413,8 +1240,8 @@ mod tests {
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, 39);
         assert_eq!(part.tick, 39);
-        let mine = rendered_rgb(&rig);
-        let theirs = reference(13_000, "rgb");
+        let mine = rig.rendered_rgb();
+        let theirs = reference("rayscrl", 13_000, "rgb");
         assert_eq!(differing_bytes(&mine, &theirs), 0, "boot 13000 (tick 38)");
         // The reference's own description (`reference-indices.md` §15.1): 35
         // colours and mean byte 23.15. The port's frame is the same bytes, so
@@ -1542,7 +1369,7 @@ mod tests {
     fn the_blitter_replays_the_background_where_the_font_byte_is_zero() {
         // `ROUTINES.ASM:28-32`: a nonzero font byte is written as it stands (a
         // colour key); a zero replays the background — there is no +128 bias.
-        let mut rig = Rig::new(Player::quiet(0));
+        let mut rig = rig(quiet(0));
         let mut part = synthetic();
         part.fbuf[0] = 9;
         part.fbuf[2] = 0;
@@ -1611,7 +1438,7 @@ mod tests {
         // release acts on the tick after seven confirming reads: the stage-2
         // tick that sees the seventh is 653, and the first draw is 654 —
         // boot 13616.
-        let (mut rig, mut part) = started_with(Player::through_stage_two(647, None, 1_600));
+        let (mut rig, mut part) = started_with(through_stage_two(647, None, 1_600));
         run_to(&mut rig, &mut part, 653);
         assert_eq!(part.phase, Phase::Stage2);
         run_to(&mut rig, &mut part, 654);
@@ -1629,21 +1456,21 @@ mod tests {
         // reference has 385 draws (indices 0-384) and the tree's policy has
         // 391 (indices 0-390): the frame at tick 1038 is index 390, not 384.
         let tree = |tick: u32| -> Vec<u8> {
-            let (mut rig, mut part) = started_with(Player::through_stage_two(647, None, 2_000));
+            let (mut rig, mut part) = started_with(through_stage_two(647, None, 2_000));
             part.confirm_ticks = 0;
             run_to(&mut rig, &mut part, tick + 1);
             assert_eq!(part.phase, Phase::Main);
-            rendered_rgb(&rig)
+            rig.rendered_rgb()
         };
         // The tree's first draw is boot 13610; the reference's is 13616. At
         // 14000 the strip has scrolled six draws further.
         assert_eq!(
-            differing_pixels(&tree(1_038), &reference(14_000, "rgb")),
+            differing_pixels(&tree(1_038), &reference("rayscrl", 14_000, "rgb")),
             8_375,
             "boot 14000 under the tree's immediate gate"
         );
         assert_eq!(
-            differing_pixels(&tree(1_538), &reference(14_500, "rgb")),
+            differing_pixels(&tree(1_538), &reference("rayscrl", 14_500, "rgb")),
             11_958,
             "boot 14500 under the tree's immediate gate"
         );
@@ -1749,8 +1576,8 @@ mod tests {
                 rig.surface.pixels()[..VIDEO_BYTES],
                 "the replay is the drawn screen at boot {index}"
             );
-            let theirs = reference(index, "rgb");
-            let mine = rendered_rgb(&rig);
+            let theirs = reference("rayscrl", index, "rgb");
+            let mine = rig.rendered_rgb();
             for (at, rgb) in theirs.chunks_exact(3).enumerate() {
                 if mine[at * 3..at * 3 + 3] == *rgb {
                     continue;
@@ -1817,7 +1644,7 @@ mod tests {
         // 13000.
         let (rig, _) = frame(13_000);
         assert_eq!(
-            differing_bytes(&rendered_rgb(&rig), &reference(13_000, "rgb")),
+            differing_bytes(&rig.rendered_rgb(), &reference("rayscrl", 13_000, "rgb")),
             0,
             "boot 13000 (tick {})",
             tick_of(13_000)
@@ -1826,7 +1653,7 @@ mod tests {
         // 13500, in both planes.
         let (rig, _) = frame(13_500);
         {
-            let theirs = reference(13_500, "rgb");
+            let theirs = reference("rayscrl", 13_500, "rgb");
             let mut seen = std::collections::BTreeSet::new();
             for pixel in theirs.chunks_exact(3) {
                 seen.insert([pixel[0], pixel[1], pixel[2]]);
@@ -1837,12 +1664,12 @@ mod tests {
             assert!((mean - 27.8114).abs() < 0.0001, "mean {mean}");
         }
         assert_eq!(
-            differing_bytes(&rendered_indices(&rig), &reference(13_500, "idx")),
+            differing_bytes(&rendered_indices(&rig), &reference("rayscrl", 13_500, "idx")),
             0,
             "boot 13500's index plane"
         );
         assert_eq!(
-            differing_bytes(&rendered_rgb(&rig), &reference(13_500, "rgb")),
+            differing_bytes(&rig.rendered_rgb(), &reference("rayscrl", 13_500, "rgb")),
             0,
             "boot 13500's RGB"
         );
@@ -1854,8 +1681,8 @@ mod tests {
         // (see `docs/fidelity/rayscrl.md` §6).
         for (index, expected) in [(14_000u32, 3usize), (14_500, 42)] {
             let (rig, _) = frame(index);
-            let key = rendered_rgb(&rig);
-            let theirs = reference(index, "rgb");
+            let key = rig.rendered_rgb();
+            let theirs = reference("rayscrl", index, "rgb");
             assert_eq!(
                 differing_pixels(&key, &theirs),
                 expected,
@@ -1885,7 +1712,7 @@ mod tests {
                 let (mut rig, mut part) = started_real();
                 run_to(&mut rig, &mut part, neighbour + 1);
                 assert_ne!(
-                    rendered_rgb(&rig),
+                    rig.rendered_rgb(),
                     key,
                     "boot {index}: tick {neighbour} is not distinguishable"
                 );

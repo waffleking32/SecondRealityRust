@@ -965,10 +965,7 @@ impl Glenz {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::Surface;
+    use crate::parts::test_rig::{Rig, ScriptedMusic};
 
     const TEST_ROOT: &str = "../../assets/";
     const PICTURE_PATH: &str = "../../assets/GLENZ/FC.UH";
@@ -982,157 +979,60 @@ mod tests {
     /// With that rate the reset tick is followed by zframe 300 at +404 frames
     /// and 333 at +449 — the measured 1515 and 1560 from 1111
     /// (`reference/music/second2b`; `reference-indices.md` §7.6).
-    struct Player {
-        tick: usize,
-        reset: Option<usize>,
-        rate_num: i64,
-        rate_den: i64,
-        musplus: Vec<i32>,
-        setmframe_calls: Vec<(usize, i32)>,
+    fn player(rate_num: i64, rate_den: i64, musplus: Vec<i32>) -> ScriptedMusic {
+        assert!(!musplus.is_empty());
+        ScriptedMusic::musplus(musplus).mframe_rate(rate_num, rate_den)
     }
 
-    impl Player {
-        fn new(rate_num: i64, rate_den: i64, musplus: Vec<i32>) -> Player {
-            assert!(!musplus.is_empty());
-            Player {
-                tick: 0,
-                reset: None,
-                rate_num,
-                rate_den,
-                musplus,
-                setmframe_calls: Vec::new(),
-            }
-        }
-
-        /// The measured clock and a gate that closes at `reset` (so the first
-        /// `reset` calls see -32 and the call at `reset` sees -19).
-        fn measured(reset: usize) -> Player {
-            let mut schedule = vec![-32; reset];
-            schedule.push(-19);
-            Player::new(52_000, 70_086, schedule)
-        }
-
-        /// A clock that crosses 300 and 333 on its first poll, so the
-        /// intro's waits do not dominate a test that is not about them.
-        fn fast() -> Player {
-            Player::new(1000, 1, vec![-19])
-        }
-
-        /// Set this tick's `musplus`, extending the schedule with the last
-        /// value.
-        fn cue(&mut self, tick: usize, value: i32) {
-            if self.musplus.len() <= tick {
-                let last = *self.musplus.last().expect("a schedule");
-                self.musplus.resize(tick + 1, last);
-            }
-            self.musplus[tick] = value;
-        }
-
-        fn reset_tick(&self) -> Option<usize> {
-            self.reset
-        }
+    /// The measured clock and a gate that closes at `reset` (so the first
+    /// `reset` calls see -32 and the call at `reset` sees -19).
+    fn measured(reset: usize) -> ScriptedMusic {
+        let mut schedule = vec![-32; reset];
+        schedule.push(-19);
+        player(52_000, 70_086, schedule)
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {}
-
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-
-        fn musplus(&mut self) -> i32 {
-            self.musplus
-                .get(self.tick)
-                .copied()
-                .unwrap_or_else(|| *self.musplus.last().expect("a schedule"))
-        }
-
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-
-        fn sync(&mut self) -> i32 {
-            0
-        }
-
-        fn getmframe(&mut self) -> i32 {
-            let Some(reset) = self.reset else {
-                return 0;
-            };
-            let n = (self.tick.saturating_sub(reset)) as i64;
-            ((self.rate_num * n + self.rate_den / 2) / self.rate_den) as i32
-        }
-
-        fn setmframe(&mut self, frame: i32) {
-            self.reset = Some(self.tick);
-            self.setmframe_calls.push((self.tick, frame));
-        }
+    /// A clock that crosses 300 and 333 on its first poll, so the
+    /// intro's waits do not dominate a test that is not about them.
+    fn fast() -> ScriptedMusic {
+        player(1000, 1, vec![-19])
     }
 
-    /// The engine's pieces, so a `PartCtx` can be built for one call at a
-    /// time.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Option<Player>,
+    /// Set this tick's `musplus`, extending the schedule with the last
+    /// value.
+    fn cue(music: &mut ScriptedMusic, tick: usize, value: i32) {
+        if music.script.len() <= tick {
+            let last = *music.script.last().expect("a schedule");
+            music.script.resize(tick + 1, last);
+        }
+        music.script[tick].musplus = value;
     }
 
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(640, 400),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT_200),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player: Some(player),
-            }
-        }
+    /// The tick the last `setmframe` ran on.
+    fn reset_tick(music: &mut ScriptedMusic) -> Option<usize> {
+        music.setmframe_calls.last().map(|&(tick, _)| tick)
+    }
 
-        fn ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false, true)
-        }
+    /// One call of the part at `tick`. The part sets no copper, so a tick is
+    /// its `frame` alone.
+    trait Steps {
+        fn step_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus;
+        fn step_exit_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus;
+    }
 
-        fn ctx_with(&mut self, tick: u32, exit: bool, with_music: bool) -> PartCtx<'_> {
-            if let Some(player) = self.player.as_mut() {
-                player.tick = tick as usize;
-            }
-            let music = if with_music {
-                self.player.as_mut().map(|p| p as &mut dyn Music)
-            } else {
-                None
-            };
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                music,
-                tick,
-                0,
-                1,
-                exit,
-                false,
-            )
-        }
-
-        fn step(&mut self, part: &mut Glenz, tick: u32) -> PartStatus {
+    impl Steps for Rig {
+        fn step_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus {
             part.frame(&mut self.ctx(tick))
         }
 
-        fn step_exit(&mut self, part: &mut Glenz, tick: u32) -> PartStatus {
-            part.frame(&mut self.ctx_with(tick, true, true))
+        fn step_exit_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus {
+            part.frame(&mut self.ctx_exit(tick))
         }
     }
 
     /// The part started on the rig's music, as the shell starts it.
-    fn started(player: Player) -> (Rig, Glenz) {
-        let mut rig = Rig::new(player);
+    fn started(music: ScriptedMusic) -> (Rig, Glenz) {
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT_200).with(music);
         let mut part = Glenz::at(TEST_ROOT);
         part.init(&mut rig.ctx(0))
             .expect("the test music is installed");
@@ -1157,7 +1057,7 @@ mod tests {
             if part.phase == Phase::Main {
                 return tick;
             }
-            assert_eq!(rig.step(part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(part, tick), PartStatus::Continuing);
         }
         panic!("the intro did not reach the main loop in 1,000 ticks");
     }
@@ -1169,7 +1069,7 @@ mod tests {
             if part.phase == Phase::MainWait {
                 return tick;
             }
-            assert_eq!(rig.step(part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(part, tick), PartStatus::Continuing);
         }
         panic!("the intro did not reach the main wait in 1,000 ticks");
     }
@@ -1191,7 +1091,7 @@ mod tests {
                 break;
             }
             let before = part.phase;
-            assert_eq!(rig.step(part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(part, tick), PartStatus::Continuing);
             if part.phase != before {
                 transitions.push((part.phase, tick));
             }
@@ -1209,9 +1109,9 @@ mod tests {
     /// A run without music is refused loudly: the part would wait for ever.
     #[test]
     fn init_refuses_a_run_without_music() {
-        let mut rig = Rig::new(Player::fast());
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT_200).with(fast());
         let mut part = Glenz::at(TEST_ROOT);
-        let error = part.init(&mut rig.ctx_with(0, false, false)).unwrap_err();
+        let error = part.init(&mut rig.ctx_without_music(0)).unwrap_err();
         assert_eq!(error.part, "glenz");
         assert!(error.message.contains("no music"), "{}", error.message);
         assert_eq!(part.phase, Phase::WaitMusic, "nothing has started");
@@ -1221,7 +1121,7 @@ mod tests {
     /// surface's first 320 columns of rows 0..400 into `vram`.
     #[test]
     fn init_takes_the_inherited_400_row_screen() {
-        let mut rig = Rig::new(Player::fast());
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT_200).with(fast());
         for (index, pixel) in rig.surface.pixels_mut().iter_mut().enumerate() {
             *pixel = (index % 251) as u8;
         }
@@ -1244,7 +1144,7 @@ mod tests {
             }
         }
         // The zoomer's first draw fills row 0 white and blits all 400 rows.
-        rig.step(&mut part, 0);
+        rig.step_at(&mut part, 0);
         assert_eq!(&rig.surface.row(0)[..320], &[255u8; 320]);
         assert_eq!(
             rig.surface.row(399)[319],
@@ -1257,18 +1157,18 @@ mod tests {
     /// is `dis_setmframe(0)` in that same call (`MAIN.C:290-293`).
     #[test]
     fn the_music_wait_exits_into_the_zoomers_first_tick() {
-        let (mut rig, mut part) = started(Player::measured(4));
+        let (mut rig, mut part) = started(measured(4));
         let mut tick = 0u32;
         for _ in 0..4 {
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             assert_eq!(part.phase, Phase::WaitMusic);
             tick += 1;
         }
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
         assert_eq!(part.phase, Phase::Zoomer, "the exit call draws");
-        assert_eq!(rig.player.as_ref().unwrap().reset_tick(), Some(4));
+        assert_eq!(reset_tick(rig.player()), Some(4));
         assert_eq!(
-            rig.player.as_ref().unwrap().setmframe_calls,
+            rig.player().setmframe_calls,
             vec![(4, 0)],
             "one reset, at the wait's exit"
         );
@@ -1279,9 +1179,9 @@ mod tests {
     /// `dis_waitb` ticks and the main loop's first wait at +451.
     #[test]
     fn the_intro_is_47_plus_177_ticks_and_the_measured_waits() {
-        let (mut rig, mut part) = started(Player::measured(4));
+        let (mut rig, mut part) = started(measured(4));
         let transitions = measured_intro(&mut rig, &mut part);
-        assert_eq!(rig.player.as_ref().unwrap().reset_tick(), Some(4));
+        assert_eq!(reset_tick(rig.player()), Some(4));
 
         let at = |phase: Phase| {
             transitions
@@ -1313,7 +1213,7 @@ mod tests {
 
         // The main body then draws frame 1 at +452 — the origin the object
         // evidence needs (main frame 44 at reference 1606 = 1562 + 44).
-        assert_eq!(rig.step(&mut part, 4 + 452), PartStatus::Continuing);
+        assert_eq!(rig.step_at(&mut part, 4 + 452), PartStatus::Continuing);
         assert_eq!(part.main.frame, 1);
     }
 
@@ -1321,10 +1221,10 @@ mod tests {
     /// all-black DAC with the picture's entries 0..15.
     #[test]
     fn the_mode_set_installs_mode_13h_and_the_picture_palette() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let mut tick = 0;
         while part.phase != Phase::Bounce {
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             tick += 1;
         }
         assert_eq!((rig.view.width, rig.view.height), (320, 200));
@@ -1344,14 +1244,14 @@ mod tests {
     /// entries 0..15 are `backpal` exactly.
     #[test]
     fn the_wait300_tick_uploads_tmppal() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let mut tick = 0;
         while part.phase != Phase::Wait300Palette {
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             tick += 1;
         }
         // This tick is the palette build.
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
         let backpal = picture_palette();
         for a in 0..256usize {
             let b = if a < 16 { a } else { a & 7 };
@@ -1371,12 +1271,12 @@ mod tests {
     /// After the intro, the main loop draws exactly one frame a tick.
     #[test]
     fn the_main_loop_advances_one_frame_a_tick() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let start = to_main(&mut rig, &mut part);
         for (offset, expected) in (1..=10i16).enumerate() {
             assert_eq!(part.phase, Phase::Main);
             let tick = start + offset as u32;
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             assert_eq!(part.main.frame, expected);
         }
     }
@@ -1386,9 +1286,9 @@ mod tests {
     /// is `bgpic`'s own byte.
     #[test]
     fn the_first_main_frame_is_the_background() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main(&mut rig, &mut part);
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
         assert_eq!(part.main.frame, 1);
         assert_eq!(part.vram[..SCREEN_PIXELS], part.bgpic[..]);
     }
@@ -1407,12 +1307,12 @@ mod tests {
             (149, 179, 0, 5, 111, 166.6, 1.7),
             (146, 180, 0, 6, 137, 165.5, 2.0),
         ];
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let start = to_main(&mut rig, &mut part);
         let mut first = None;
         for (offset, frame) in (1..=49i16).enumerate() {
             assert_eq!(
-                rig.step(&mut part, start + offset as u32),
+                rig.step_at(&mut part, start + offset as u32),
                 PartStatus::Continuing
             );
             assert_eq!(part.main.frame, frame);
@@ -1629,7 +1529,7 @@ mod tests {
             part.main.oyb = 0;
             part.main.ozb = 0;
         }
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main(&mut rig, &mut part);
         force(&mut part, 802, 4);
         {
@@ -1652,13 +1552,13 @@ mod tests {
     /// wait and the body, so that tick draws nothing (`MAIN.C:409-411`).
     #[test]
     fn the_music_cut_at_the_main_wait_draws_nothing() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main_wait(&mut rig, &mut part);
         let before = part.vram.clone();
         let surface_before = rig.surface.pixels().to_vec();
         // -1 is inside (-16, 0): the cue.
-        rig.player.as_mut().unwrap().cue(tick as usize, -1);
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        cue(rig.player(), tick as usize, -1);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.main.frame, 0, "the entry check draws no frame");
         assert_eq!(part.vram, before, "the buffer is untouched");
@@ -1682,16 +1582,16 @@ mod tests {
     /// object's first drawn frame, which makes "drawn" visible.
     #[test]
     fn the_music_cut_on_a_body_tick_draws_then_finishes() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let start = to_main(&mut rig, &mut part);
         for frame in 1..44i16 {
             let tick = start + frame as u32 - 1;
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             assert_eq!(part.main.frame, frame);
         }
         let tick = start + 43;
-        rig.player.as_mut().unwrap().cue(tick as usize, -1);
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        cue(rig.player(), tick as usize, -1);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.main.frame, 44, "the cut tick's frame is drawn");
         assert!(
@@ -1703,11 +1603,11 @@ mod tests {
     /// ESC at the loop's entry draws nothing, and the part asks for no drain.
     #[test]
     fn escape_at_the_main_wait_finishes_without_a_drain() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main_wait(&mut rig, &mut part);
         let before = part.vram.clone();
         assert!(!part.drains_after_exit());
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.main.frame, 0, "ESC at the entry draws no frame");
         assert_eq!(part.vram, before, "ESC draws nothing on its tick");
@@ -1717,16 +1617,16 @@ mod tests {
     /// on the same tick, with no drain.
     #[test]
     fn escape_on_a_body_tick_draws_then_finishes() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let start = to_main(&mut rig, &mut part);
         for frame in 1..44i16 {
             let tick = start + frame as u32 - 1;
-            assert_eq!(rig.step(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_at(&mut part, tick), PartStatus::Continuing);
             assert_eq!(part.main.frame, frame);
         }
         let tick = start + 43;
         assert!(!part.drains_after_exit());
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.main.frame, 44, "the ESC tick's frame is drawn");
         assert!(
@@ -1739,10 +1639,10 @@ mod tests {
     /// body: frame 7000 is drawn and the part retires on that tick.
     #[test]
     fn the_frame_cap_draws_7000_then_finishes() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main(&mut rig, &mut part);
         part.main.frame = 6999;
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.main.frame, 7000, "frame 7000 is drawn before the cap");
     }
@@ -1750,11 +1650,11 @@ mod tests {
     /// The cap already reached at the loop's entry breaks without a body.
     #[test]
     fn the_frame_cap_at_the_main_wait_draws_nothing() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main_wait(&mut rig, &mut part);
         part.main.frame = 7000;
         let before = part.vram.clone();
-        assert_eq!(rig.step(&mut part, tick), PartStatus::Finished);
+        assert_eq!(rig.step_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.main.frame, 7000);
         assert_eq!(part.vram, before, "no body runs");
     }
@@ -1766,26 +1666,26 @@ mod tests {
     /// the waits fall through; the main loop's check retires the part.
     #[test]
     fn escape_during_the_music_wait_continues_into_the_zoomer() {
-        let (mut rig, mut part) = started(Player::measured(4));
-        assert_eq!(rig.step(&mut part, 0), PartStatus::Continuing);
+        let (mut rig, mut part) = started(measured(4));
+        assert_eq!(rig.step_at(&mut part, 0), PartStatus::Continuing);
         // musplus is still -32, but the exit flag ends the gate anyway.
-        assert_eq!(rig.step_exit(&mut part, 1), PartStatus::Continuing);
+        assert_eq!(rig.step_exit_at(&mut part, 1), PartStatus::Continuing);
         assert_eq!(part.phase, Phase::Zoomer, "the source still calls zoomer2");
         assert_eq!(
-            rig.player.as_ref().unwrap().reset_tick(),
+            reset_tick(rig.player()),
             Some(1),
             "dis_setmframe(0) still runs"
         );
 
         let mut tick = 2;
         for _ in 1..47 {
-            assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing);
+            assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Continuing);
             tick += 1;
         }
         assert_eq!(part.zoomer.as_ref().unwrap().zy(), 260);
         // The break tick: epilogue and mode set, then the bounce's loop is
         // skipped and the palette-build tick follows.
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing);
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Continuing);
         tick += 1;
         assert_eq!(part.phase, Phase::Wait300Palette);
         assert_eq!(
@@ -1793,16 +1693,16 @@ mod tests {
             Some(0),
             "no bounce body draws on ESC"
         );
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // palette
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Continuing); // palette
         tick += 1;
         assert_eq!(part.phase, Phase::Wait300Snapshot);
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // bgpic
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Continuing); // bgpic
         tick += 1;
         assert_eq!(part.phase, Phase::Wait333Done);
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Continuing); // part start
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Continuing); // part start
         tick += 1;
         assert_eq!(part.phase, Phase::MainWait);
-        assert_eq!(rig.step_exit(&mut part, tick), PartStatus::Finished);
+        assert_eq!(rig.step_exit_at(&mut part, tick), PartStatus::Finished);
         assert_eq!(part.phase, Phase::Done);
     }
 
@@ -1810,7 +1710,7 @@ mod tests {
     /// 16..255 survive it (`MAIN.C:414-415`'s `16*3`).
     #[test]
     fn the_low_palette_upload_never_touches_the_groups() {
-        let (mut rig, mut part) = started(Player::fast());
+        let (mut rig, mut part) = started(fast());
         let tick = to_main(&mut rig, &mut part);
         // A sentinel in every group entry.
         for index in 16..=255u8 {

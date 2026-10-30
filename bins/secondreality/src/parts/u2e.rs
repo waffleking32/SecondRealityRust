@@ -606,198 +606,44 @@ fn rotated_palette(fpal: &[u8; 768]) -> Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
+    use crate::parts::test_rig::{differing_pixels, rgb_of, Rig, ScriptedMusic};
+    use sr_engine::dac_expand;
 
     const TEST_SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
 
-    /// The music a unit test hands the part: one scripted published position
-    /// a tick, every other call the null reading.
-    struct Player {
-        positions: Vec<MusicPosition>,
-        at: usize,
+    fn constant(order: u8, row: u8) -> ScriptedMusic {
+        ScriptedMusic::positions(vec![(order, row)])
     }
 
-    impl Player {
-        fn scripted(positions: Vec<(u8, u8)>) -> Player {
-            Player {
-                positions: positions
-                    .into_iter()
-                    .map(|(order, row)| MusicPosition {
-                        order,
-                        row,
-                        ..Default::default()
-                    })
-                    .collect(),
-                at: 0,
-            }
-        }
+    /// The gate's closed position (`second4`'s order 18).
+    fn closed() -> ScriptedMusic {
+        constant(GATE_ORDER, 0)
+    }
 
-        fn constant(order: u8, row: u8) -> Player {
-            Player::scripted(vec![(order, row)])
-        }
-
-        /// The gate's closed position (`second4`'s order 18).
-        fn closed() -> Player {
-            Player::constant(GATE_ORDER, 0)
-        }
-
-        /// Closed through tick `open - 1`, order 19 from `open` on. Twenty
-        /// ticks of gate drain the ring's 16-retrace start-up delay, as the
-        /// shipped gate's 181 ticks do.
-        fn opening_at(open: usize) -> Player {
-            let mut positions = vec![(GATE_ORDER, 0); open];
-            positions.push((GATE_ORDER + 1, 0));
-            Player::scripted(positions)
-        }
+    /// Closed through tick `open - 1`, order 19 from `open` on. Twenty
+    /// ticks of gate drain the ring's 16-retrace start-up delay, as the
+    /// shipped gate's 181 ticks do.
+    fn opening_at(open: usize) -> ScriptedMusic {
+        let mut positions = vec![(GATE_ORDER, 0); open];
+        positions.push((GATE_ORDER + 1, 0));
+        ScriptedMusic::positions(positions)
     }
 
     /// The part tick the loop's tests open their gate at: twenty ticks after
     /// the setup, enough to drain the ring's start-up delay.
     const OPEN: usize = 120;
 
-    impl Music for Player {
-        fn poll(&mut self) {}
-        fn position(&self) -> MusicPosition {
-            self.positions
-                .get(self.at)
-                .copied()
-                .unwrap_or_else(|| *self.positions.last().unwrap_or(&MusicPosition::default()))
-        }
-        fn musplus(&mut self) -> i32 {
-            -32
-        }
-        fn musrow(&mut self) -> i32 {
-            self.position().row as i32
-        }
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-        fn sync(&mut self) -> i32 {
-            0
-        }
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-        fn setmframe(&mut self, _frame: i32) {}
+    fn rig(music: ScriptedMusic) -> Rig {
+        Rig::new(VIEW_WIDTH, VIEW_HEIGHT).with(music)
     }
 
-    /// The engine's pieces, so a `PartCtx` can be built for one call at a time.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-        tick: u32,
+    fn page_of(rig: &Rig, page: usize) -> &[u8] {
+        let start = page * PAGE_PIXELS;
+        &rig.surface.pixels()[start..start + PAGE_PIXELS]
     }
 
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(640, 400),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-                tick: 0,
-            }
-        }
-
-        fn ctx_with(&mut self, tick: u32, exit: bool, fresh: bool) -> PartCtx<'_> {
-            self.player.at = tick as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                tick,
-                0,
-                1,
-                exit,
-                fresh,
-            )
-        }
-
-        fn ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false, false)
-        }
-
-        fn ctx_fresh(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false, true)
-        }
-
-        fn run_slot(&mut self, slot: usize) {
-            let Some(mut callback) = self.copper.take(slot) else {
-                return;
-            };
-            {
-                let tick = self.tick;
-                let mut ctx = self.ctx(tick);
-                callback(&mut ctx);
-            }
-            self.copper.set(slot, callback);
-        }
-
-        /// One tick as the engine orders it: slot 0, the part, the compose,
-        /// slots 1 and 2.
-        fn step_render(&mut self, part: &mut U2e) -> (PartStatus, Vec<u8>) {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            let frame = self.rendered_rgb();
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            (status, frame)
-        }
-
-        fn step(&mut self, part: &mut U2e) -> PartStatus {
-            self.step_render(part).0
-        }
-
-        fn step_exit(&mut self, part: &mut U2e) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx_with(tick, true, false));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        /// The frame the engine would compose: the view's window through the
-        /// live palette, widened as the DAC widens.
-        fn rendered_rgb(&self) -> Vec<u8> {
-            let mut out =
-                Vec::with_capacity(usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT) * 3);
-            for y in 0..VIEW_HEIGHT {
-                for x in 0..VIEW_WIDTH {
-                    let at = self.view.source_index(&self.surface, x, y);
-                    let entry = self.palette.entry(self.surface.pixels()[at]);
-                    out.push(dac_expand(entry[0]));
-                    out.push(dac_expand(entry[1]));
-                    out.push(dac_expand(entry[2]));
-                }
-            }
-            out
-        }
-
-        fn page(&self, page: usize) -> &[u8] {
-            let start = page * PAGE_PIXELS;
-            &self.surface.pixels()[start..start + PAGE_PIXELS]
-        }
-    }
-
-    /// The part started in the mid-chain shape (not `music_fresh`), on the
-    /// rig's live palette. U2E captures the DAC in every run shape, so the two
-    /// context shapes differ in nothing the part reads; the block-4 shape is
-    /// covered by `a_block_four_shaped_init_captures_the_live_dac_too`.
-    fn started_with(player: Player) -> (Rig, U2e) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, U2e) {
+        let mut rig = rig(music);
         let mut part = U2e::at(TEST_SCENE_DIR);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -826,7 +672,7 @@ mod tests {
 
     #[test]
     fn a_jelly_boot_captures_the_live_dac() {
-        let mut rig = Rig::new(Player::closed());
+        let mut rig = rig(closed());
         let mut live = Palette::new();
         live.set_entry(0, [1, 2, 3]);
         live.set_entry(7, [5, 6, 7]);
@@ -851,14 +697,14 @@ mod tests {
         // BIOS mode is above 3 here exactly as it is mid-chain and the source
         // takes the capture branch (`U2E.C:281-282`). The palette used is a
         // non-black one, so a capture is visible against a fresh `fpal`.
-        let mut rig = Rig::new(Player::closed());
+        let mut rig = rig(closed());
         let mut live = Palette::new();
         live.set_entry(0, [63, 0, 0]);
         live.set_entry(7, [5, 6, 7]);
         live.set_entry(247, [11, 12, 16]);
         rig.palette = live;
         let mut part = U2e::at(TEST_SCENE_DIR);
-        part.init(&mut rig.ctx_fresh(0)).unwrap();
+        part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!(
             part.fpal,
             capture_palette(&live),
@@ -872,7 +718,7 @@ mod tests {
 
     #[test]
     fn the_fade_in_runs_33_steps_and_saturates_entries_1_to_253() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         // One mutation a tick, uploaded one tick later: after 33 mutations
         // fpal is saturated and the 33rd upload is the 34th tick's palette.
         for _ in 0..FADE_STEPS {
@@ -894,7 +740,7 @@ mod tests {
 
     #[test]
     fn the_fadeset_lands_on_tick_49_and_paints_the_measured_band() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         for tick in 0..49 {
             let (_, frame) = rig.step_render(&mut part);
             assert!(
@@ -969,7 +815,7 @@ mod tests {
 
     #[test]
     fn the_fadeset_reaches_pages_1_to_3_at_tick_51() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         for _ in 0..51 {
             rig.step(&mut part);
         }
@@ -981,16 +827,16 @@ mod tests {
         let (_, _) = rig.step_render(&mut part);
         assert_eq!(part.phase, Phase::FadeRestHold { left: 15 });
         for page in 1..PAGES {
-            assert_eq!(rig.page(page)[0], 0, "page {page} fadeset");
-            assert_eq!(rig.page(page)[25 * 320 + 68], 253, "page {page}");
-            assert_eq!(rig.page(page)[175 * 320 + 68], 252, "page {page}");
+            assert_eq!(page_of(&rig, page)[0], 0, "page {page} fadeset");
+            assert_eq!(page_of(&rig, page)[25 * 320 + 68], 253, "page {page}");
+            assert_eq!(page_of(&rig, page)[175 * 320 + 68], 252, "page {page}");
         }
-        assert_eq!(rig.page(0)[25 * 320 + 68], 253, "page 0 keeps its copy");
+        assert_eq!(page_of(&rig, 0)[25 * 320 + 68], 253, "page 0 keeps its copy");
     }
 
     #[test]
     fn the_fade_out_starts_on_tick_68_and_matches_the_measured_490_and_500() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         for _ in 0..67 {
             rig.step(&mut part);
         }
@@ -1032,7 +878,7 @@ mod tests {
 
     #[test]
     fn the_main_palette_goes_up_at_tick_100_and_holds_the_letterbox() {
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         for _ in 0..=100 {
             rig.step(&mut part);
         }
@@ -1070,7 +916,7 @@ mod tests {
 
     #[test]
     fn the_view_is_the_shipped_320x200_from_the_intro_on() {
-        let (rig, part) = started_with(Player::closed());
+        let (rig, part) = started_with(closed());
         assert_eq!((rig.view.width, rig.view.height), (VIEW_WIDTH, VIEW_HEIGHT));
         assert_eq!(rig.view.start_addr, 0);
         assert_eq!(rig.view.y_line_offset, Some(320), "CRTC 0x13: 320 pixels a row");
@@ -1085,7 +931,7 @@ mod tests {
     fn the_gate_polls_once_a_tick_until_order_19_and_exit_tears_down() {
         // The setup polls at tick 100; ticks 0..100 are closed, and tick 101
         // is the first order 19 poll.
-        let (mut rig, mut part) = started_with(Player::opening_at(101));
+        let (mut rig, mut part) = started_with(opening_at(101));
         for tick in 0..=100 {
             assert_eq!(rig.step(&mut part), PartStatus::Continuing, "tick {tick}");
         }
@@ -1100,7 +946,7 @@ mod tests {
 
         // Exit during the gate: the source's `while(!dis_exit())` falls through
         // to the ring setup and the loop's own exit test, which tears down.
-        let (mut rig, mut part) = started_with(Player::closed());
+        let (mut rig, mut part) = started_with(closed());
         to_gate(&mut rig, &mut part);
         assert_eq!(part.driver.as_ref().unwrap().borrow().ring.displayed(), 0);
         let before = rig.surface.pixels().to_vec();
@@ -1115,13 +961,13 @@ mod tests {
 
     #[test]
     fn the_first_loop_tick_draws_nothing_and_queues_the_fadeset_page() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
+        let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
-        let fadeset_page = rig.page(0).to_vec();
+        let fadeset_page = page_of(&rig, 0).to_vec();
         let origin = rig.view.start_addr;
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(part.phase, Phase::Loop);
-        assert_eq!(rig.page(0), fadeset_page, "no draw on the first loop tick");
+        assert_eq!(page_of(&rig, 0), fadeset_page, "no draw on the first loop tick");
         assert_eq!(rig.view.start_addr, origin, "page 0 stays displayed");
         assert!(!part.driver.as_ref().unwrap().borrow().first_draw);
         assert_eq!(part.scene.as_ref().unwrap().stream, 1);
@@ -1130,7 +976,7 @@ mod tests {
 
     #[test]
     fn the_cadence_over_eight_ticks_advances_four_stream_frames() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
+        let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         // The first loop tick parses frame 0 and queues page 0; the steady
         // state is one stream frame per two ticks (U2E.C:434-444).
@@ -1148,7 +994,7 @@ mod tests {
 
     #[test]
     fn the_scene_is_the_u2e_city_with_the_name_hacks_object() {
-        let (_, part) = started_with(Player::closed());
+        let (_, part) = started_with(closed());
         let scene = part.scene.as_ref().unwrap();
         assert_eq!(scene.master.city, 0, "U2E.00M byte 15 is 0");
         assert_eq!(scene.instances.len(), 58, "conum 58, camera first");
@@ -1180,7 +1026,7 @@ mod tests {
 
     #[test]
     fn the_teardown_fades_sixteen_steps_from_dac_entry_255_and_finishes() {
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
+        let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         // The live DAC is the main palette; the capture is that palette.
         let captured = capture_palette(&part.main_palette);
@@ -1267,7 +1113,7 @@ mod tests {
         // sixteen uploads must still happen: T's tick triggers the teardown and
         // computes step 1, T+1..T+16 upload steps 1..16, and the part returns
         // `Finished` on T+16.
-        let (mut rig, mut part) = started_with(Player::opening_at(OPEN));
+        let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         let captured = capture_palette(&part.main_palette);
 
@@ -1334,9 +1180,9 @@ mod tests {
                 let mut page = Page::new(&mut pixels, usize::from(VIEW_WIDTH));
                 driver.draw_frame(&mut scene, &mut page, Clear::Byte(255));
             }
-            let rendered = plain_rgb(&pixels, &main);
+            let rendered = rgb_of(&pixels, &main);
             for (at, (_, reference)) in references.iter().enumerate() {
-                let differing = differing(&rendered, reference);
+                let differing = differing_pixels(&rendered, reference);
                 counts[at].push(differing);
                 if differing < best[at].0 {
                     best[at] = (differing, state);
@@ -1449,43 +1295,12 @@ mod tests {
         }
     }
 
-    fn plain_rgb(pixels: &[u8], palette: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(pixels.len() * 3);
-        for &index in pixels {
-            let entry = palette.entry(index);
-            out.push(dac_expand(entry[0]));
-            out.push(dac_expand(entry[1]));
-            out.push(dac_expand(entry[2]));
-        }
-        out
-    }
-
-    fn differing(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(rendered.len(), expected.len(), "the frame lengths differ");
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
-    }
-
     #[test]
     fn init_without_music_is_a_part_error() {
-        let mut rig = Rig::new(Player::closed());
+        let mut rig = rig(closed());
         let mut part = U2e::at(TEST_SCENE_DIR);
         let error = {
-            let mut ctx = PartCtx::new(
-                &mut rig.surface,
-                &mut rig.view,
-                &mut rig.palette,
-                &mut rig.copper,
-                None,
-                0,
-                0,
-                1,
-                false,
-                true,
-            );
+            let mut ctx = rig.machine.ctx(None, 0, 0, 1, false, true);
             part.init(&mut ctx).unwrap_err()
         };
         assert_eq!(error.part, NAME);

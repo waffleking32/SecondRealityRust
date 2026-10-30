@@ -503,233 +503,38 @@ impl Part for Pam {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::test_rig::{differing_pixels, reference, rgb_of, trace_position, Rig, ScriptedMusic};
     use crate::shell::{MusicStart, PAM_ANCHOR};
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{sync_from, Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
+    use sr_engine::dac_expand;
+    use sr_engine::music::sync_from;
 
     const TEST_ANI: &str = "../../assets/PAM/OUT.ANI";
     const TEST_PAL: &str = "../../assets/PAM/PAL.PAL";
 
-    /// The music a unit test hands the part: `sync()` answers one scripted
-    /// code a tick, every other call is the null reading.
-    struct Player {
-        codes: Vec<i32>,
-        at: usize,
+    fn rig(music: ScriptedMusic) -> Rig {
+        Rig::new(VIEW_WIDTH, VIEW_HEIGHT).with(music)
     }
 
-    impl Player {
-        fn scripted(codes: Vec<i32>) -> Player {
-            Player { codes, at: 0 }
-        }
-
-        fn constant(code: i32) -> Player {
-            Player { codes: vec![code], at: 0 }
-        }
+    fn page_of(rig: &Rig, page: usize) -> Vec<u8> {
+        let start = PAGE_ORIGIN[page] as usize;
+        rig.surface.pixels()[start..start + PAGE_PIXELS].to_vec()
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {}
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-        fn musplus(&mut self) -> i32 {
-            -32
-        }
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-        fn sync(&mut self) -> i32 {
-            self.codes
-                .get(self.at)
-                .copied()
-                .unwrap_or_else(|| *self.codes.last().unwrap_or(&0))
-        }
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-        fn setmframe(&mut self, _frame: i32) {}
-    }
-
-    /// The engine's pieces, so a `PartCtx` can be built for one call at a time.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-        tick: u32,
-    }
-
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(640, 400),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-                tick: 0,
-            }
-        }
-
-        /// A band's context: never fresh, as the engine's band contexts are.
-        fn ctx_at(&mut self, tick: u32, exit: bool) -> PartCtx<'_> {
-            self.ctx_with(tick, exit, false)
-        }
-
-        /// The init context of an entry-point run — the part the run's music
-        /// was installed for.
-        fn init_ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false, true)
-        }
-
-        /// The init context of a part reached mid-chain, with the player
-        /// already running.
-        fn init_ctx_chain(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_with(tick, false, false)
-        }
-
-        fn ctx_with(&mut self, tick: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
-            self.player.at = tick as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                tick,
-                0,
-                1,
-                exit,
-                music_fresh,
-            )
-        }
-
-        fn ctx(&mut self, tick: u32) -> PartCtx<'_> {
-            self.ctx_at(tick, false)
-        }
-
-        fn run_slot(&mut self, slot: usize) {
-            let Some(mut callback) = self.copper.take(slot) else {
-                return;
-            };
-            {
-                let tick = self.tick;
-                let mut ctx = self.ctx(tick);
-                callback(&mut ctx);
-            }
-            self.copper.set(slot, callback);
-        }
-
-        fn step(&mut self, part: &mut Pam) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        fn step_exit(&mut self, part: &mut Pam) -> PartStatus {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx_at(tick, true));
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            status
-        }
-
-        fn rendered_rgb(&self) -> Vec<u8> {
-            let mut out =
-                Vec::with_capacity(usize::from(VIEW_WIDTH) * usize::from(VIEW_HEIGHT) * 3);
-            for y in 0..VIEW_HEIGHT {
-                for x in 0..VIEW_WIDTH {
-                    let at = self.view.source_index(&self.surface, x, y);
-                    let entry = self.palette.entry(self.surface.pixels()[at]);
-                    out.push(dac_expand(entry[0]));
-                    out.push(dac_expand(entry[1]));
-                    out.push(dac_expand(entry[2]));
-                }
-            }
-            out
-        }
-
-        /// One tick as the engine orders it: slot 0, the part, the compose,
-        /// slots 1 and 2. Returns the frame composed during the tick.
-        fn step_render(&mut self, part: &mut Pam) -> (PartStatus, Vec<u8>) {
-            self.run_slot(0);
-            let tick = self.tick;
-            let status = part.frame(&mut self.ctx(tick));
-            let frame = self.rendered_rgb();
-            self.run_slot(1);
-            self.run_slot(2);
-            self.tick += 1;
-            (status, frame)
-        }
-
-        fn page(&self, page: usize) -> Vec<u8> {
-            let start = PAGE_ORIGIN[page] as usize;
-            self.surface.pixels()[start..start + PAGE_PIXELS].to_vec()
-        }
-    }
-
-    fn started_with(player: Player) -> (Rig, Pam) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, Pam) {
+        let mut rig = rig(music);
         let mut part = Pam::at(TEST_ANI, TEST_PAL);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started() -> (Rig, Pam) {
-        started_with(Player::constant(SYNC_CODE))
-    }
-
-    fn reference(index: u32) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/pam/frame_{index:06}.rgb")).unwrap()
-    }
-
-    /// **The lengths are asserted first**: a short read must not compare a
-    /// prefix and report zero differences as if it had compared the frame.
-    fn differing_pixels(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count()
+        started_with(ScriptedMusic::sync_codes(vec![SYNC_CODE]))
     }
 
     /// The tick a step lands on: the first step at tick 2 (boot 7712), then
     /// one every four ticks.
     fn step_tick(f: u32) -> u32 {
         FRAME_COUNT_AT_ANCHOR as u32 + 4 * (f - 1)
-    }
-
-    /// One 64,000-pixel animation frame through one palette, widened the way
-    /// the engine widens it: what the beam composes when the surface holds
-    /// `frame` and the live DAC is `palette`.
-    fn plain_rgb(frame: &[u8], palette: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(frame.len() * 3);
-        for index in frame {
-            let entry = palette.entry(*index);
-            out.push(dac_expand(entry[0]));
-            out.push(dac_expand(entry[1]));
-            out.push(dac_expand(entry[2]));
-        }
-        out
     }
 
     // --- the brief's four tests ---------------------------------------------
@@ -743,7 +548,7 @@ mod tests {
         // opens. Code 9 is the table's "before order 13"; code 10 is the
         // block-1 answer from order 13 row 1 (`ordersync1`), the trace's row
         // at boot 7710. The wait consumes ticks, never spins.
-        let (mut rig, mut part) = started_with(Player::scripted(vec![9, 9, 9, SYNC_CODE]));
+        let (mut rig, mut part) = started_with(ScriptedMusic::sync_codes(vec![9, 9, 9, SYNC_CODE]));
         // What the predecessor left: the part must not touch it during the
         // gate.
         rig.surface.clear(7);
@@ -772,7 +577,7 @@ mod tests {
         }
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(part.f, 1, "the first step is four ticks after the gate");
-        assert_eq!(rig.page(0), part.frames[0], "the first step drew frame 0");
+        assert_eq!(page_of(&rig, 0), part.frames[0], "the first step drew frame 0");
     }
 
     #[test]
@@ -782,7 +587,7 @@ mod tests {
         // anchored entry whose setup already ran. The source's post-gate
         // setup has not run, so its `frame_count=0` is the counter, not the
         // anchor's 2.
-        let mut rig = Rig::new(Player::constant(SYNC_CODE));
+        let mut rig = rig(ScriptedMusic::sync_codes(vec![SYNC_CODE]));
         let mut part = Pam::at(TEST_ANI, TEST_PAL);
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(part.phase, Phase::Loop, "the open gate starts the loop");
@@ -809,7 +614,7 @@ mod tests {
                 // The step's tick is the formula's.
                 assert_eq!(rig.tick - 1, step_tick(part.f), "step {} landed late", part.f);
                 if part.f <= DRAWN_FRAMES {
-                    last_page = Some(rig.page(((part.f - 1) & 1) as usize));
+                    last_page = Some(page_of(&rig, ((part.f - 1) & 1) as usize));
                 }
             }
             if part.finished() {
@@ -820,7 +625,7 @@ mod tests {
         // The 40 drawn frames are exactly frames 0-39: frames 40 and 41 of
         // the container never reach a page.
         for page in 0..2 {
-            let drawn = rig.page(page);
+            let drawn = page_of(&rig, page);
             assert_ne!(drawn, part.frames[40], "frame 40 was drawn");
             assert_ne!(drawn, part.frames[41], "frame 41 was drawn");
         }
@@ -862,33 +667,33 @@ mod tests {
         // step 3; each page holds the frame two back until the new one is
         // unpacked into it.
         let (mut rig, mut part) = started();
-        assert_eq!(rig.page(0), vec![0u8; PAGE_PIXELS], "the mode set cleared page 0");
-        assert_eq!(rig.page(1), vec![0u8; PAGE_PIXELS], "and page 1");
+        assert_eq!(page_of(&rig, 0), vec![0u8; PAGE_PIXELS], "the mode set cleared page 0");
+        assert_eq!(page_of(&rig, 1), vec![0u8; PAGE_PIXELS], "and page 1");
         // Ticks 0 and 1 wait; tick 2 is step 1 into page 0, displayed.
         for _ in 0..3 {
             rig.step(&mut part);
         }
         assert_eq!(part.f, 1);
         assert_eq!(rig.view.start_addr, PAGE_ORIGIN[0], "the flip shows page 0");
-        assert_eq!(rig.page(0), part.frames[0]);
-        assert!(rig.page(1).iter().all(|pixel| *pixel == 0), "page 1 is untouched");
+        assert_eq!(page_of(&rig, 0), part.frames[0]);
+        assert!(page_of(&rig, 1).iter().all(|pixel| *pixel == 0), "page 1 is untouched");
         // Ticks 3-5 wait; tick 6 is step 2 into the off-screen page 1.
         for _ in 0..4 {
             rig.step(&mut part);
         }
         assert_eq!(part.f, 2);
         assert_eq!(rig.view.start_addr, PAGE_ORIGIN[1], "the flip shows page 1");
-        assert_eq!(rig.page(1), part.frames[1]);
-        assert_eq!(rig.page(0), part.frames[0], "page 0 still holds frame 0");
+        assert_eq!(page_of(&rig, 1), part.frames[1]);
+        assert_eq!(page_of(&rig, 0), part.frames[0], "page 0 still holds frame 0");
         // Ticks 7-9 wait; tick 10 is step 3 into page 0, which held frame 0.
         for _ in 0..4 {
             rig.step(&mut part);
         }
         assert_eq!(part.f, 3);
         assert_eq!(rig.view.start_addr, PAGE_ORIGIN[0]);
-        assert_eq!(rig.page(0), part.frames[2], "frame 2 replaces frame 0");
+        assert_eq!(page_of(&rig, 0), part.frames[2], "frame 2 replaces frame 0");
         assert_ne!(part.frames[2], part.frames[0], "the decode is not a copy of two back");
-        assert_eq!(rig.page(1), part.frames[1], "page 1 still holds frame 1");
+        assert_eq!(page_of(&rig, 1), part.frames[1], "page 1 still holds frame 1");
         // The two pages are the source's two display starts, four pixels a
         // plane byte: 0x4000 plane bytes = 0x10000 pixels.
         assert_eq!(PAGE_ORIGIN[1], 0x1_0000);
@@ -910,7 +715,7 @@ mod tests {
         assert_eq!(part.shared.borrow().frame_count, counter, "the counter stopped");
         assert!(part.shared.borrow().pending.is_some(), "no upload after close_copper");
         // The exit during the gate too.
-        let (mut rig, mut part) = started_with(Player::constant(9));
+        let (mut rig, mut part) = started_with(ScriptedMusic::sync_codes(vec![9]));
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert!(part.finished());
     }
@@ -937,24 +742,6 @@ mod tests {
     // --- the music: the block-1 pre-roll and the trace ----------------------
 
     /// One frame of a filed trace: the published position at a reference index.
-    fn trace_position(name: &str, frame: u32) -> (u8, u8) {
-        let path = format!("../../reference/music/{name}/trace.csv");
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-        for line in text.lines().skip(1) {
-            let mut fields = line.split(',');
-            let number = |fields: &mut std::str::Split<'_, char>| -> u32 {
-                fields.next().unwrap().trim().parse().unwrap()
-            };
-            let index = number(&mut fields);
-            let order = number(&mut fields);
-            let row = number(&mut fields);
-            if index == frame {
-                return (order as u8, row as u8);
-            }
-        }
-        panic!("{name} holds no frame {frame}")
-    }
-
     #[test]
     fn the_block_one_pre_roll_puts_the_player_at_the_traces_7710_position() {
         // `shell::MusicStart::for_part("pam", Some(7710))`: the block-1 clock
@@ -1022,17 +809,17 @@ mod tests {
         // after its drawing.
         assert_eq!(
             frames[&2],
-            plain_rgb(&part.frames[0], &part.palettes[OPENING_COPY]),
+            rgb_of(&part.frames[0], &part.palettes[OPENING_COPY]),
             "the first step's tick still shows the opening copy 63"
         );
         assert_eq!(
             frames[&3],
-            plain_rgb(&part.frames[0], &part.palettes[usize::from(WFADE[1])]),
+            rgb_of(&part.frames[0], &part.palettes[usize::from(WFADE[1])]),
             "the next tick shows wfade[1] = 32"
         );
         assert_ne!(frames[&2], frames[&3], "the palette moves one tick later");
         for (tick, index) in [(0u32, 7710u32), (50, 7760), (120, 7830), (190, 7900)] {
-            let differing = differing_pixels(&frames[&tick], &reference(index));
+            let differing = differing_pixels(&frames[&tick], &reference("pam", index, "rgb"));
             println!(
                 "boot {index} (tick {tick}): {differing}/64000 px differ ({:.4} %)",
                 100.0 * differing as f64 / 64_000.0

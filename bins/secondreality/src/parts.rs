@@ -33,6 +33,9 @@ pub mod u2e;
 pub mod vault;
 pub mod visu;
 
+#[cfg(test)]
+pub(crate) mod test_rig;
+
 use sr_engine::part::Part;
 use sr_engine::testcard::TestCard;
 

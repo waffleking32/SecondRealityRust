@@ -345,57 +345,20 @@ fn setpalarea(dac: &mut Palette, ramp: &Palette, start: u32, count: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::surface::Surface;
-    use sr_engine::view::View;
+    use crate::parts::test_rig::{reference, rgb_of, Rig};
 
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH, VIEW_HEIGHT, VIEW_WIDTH};
+    use crate::shell::{VIEW_HEIGHT, VIEW_WIDTH};
 
     /// An index no path through the part writes, used as a marker for "the part
     /// left the DAC the shell installed alone".
     const UNWRITTEN: u8 = 200;
 
-    /// The engine's own pieces held together, so a `PartCtx` can be built for
-    /// one call at a time — the same disjoint borrows `Engine::tick` makes.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        /// The screen and the DAC the shell hands a run's first part: a 320×200
-        /// surface at the demo's size, and `hardware_default_palette`, whose
-        /// entry 15 is white — which is what makes the reference's 430 white
-        /// before the part has written a single DAC entry.
-        fn new() -> Rig {
-            let mut palette = Palette::new();
-            palette.set_entry(15, [63, 63, 63]);
-            palette.set_entry(UNWRITTEN, [1, 2, 3]);
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette,
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                // no player: this rig draws a band, and none of these parts asks for a cue
-                None,
-                frame,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
+    /// The screen and the DAC the shell hands a run's first part: a 320×200
+    /// view, and `hardware_default_palette`, whose entry 15 is white — which
+    /// is what makes the reference's 430 white before the part has written a
+    /// single DAC entry. No player: none of these tests asks for a cue.
+    fn shell_rig() -> Rig {
+        Rig::new(VIEW_WIDTH, VIEW_HEIGHT).palette_entry(15, [63, 63, 63]).palette_entry(UNWRITTEN, [1, 2, 3])
     }
 
     /// A part whose `init` has run, and the rig it ran against.
@@ -405,7 +368,7 @@ mod tests {
     /// the repository root. `tests/beglogo.rs` runs the real binary, and so the
     /// part's own `assets/BEG/SRTITLE.UP`, from there.
     fn started() -> (Rig, Beglogo) {
-        let mut rig = Rig::new();
+        let mut rig = shell_rig();
         let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -420,7 +383,7 @@ mod tests {
         // would read every second scanline from the picture's right margin — the full
         // run's measurement (`reference-indices.md` §26.8) — so the part reads its own
         // rows, the unset offset.
-        let mut rig = Rig::new();
+        let mut rig = shell_rig();
         rig.view.y_line_offset = Some(320);
         let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
         part.init(&mut rig.ctx(0)).unwrap();
@@ -576,24 +539,7 @@ mod tests {
         dac
     }
 
-    /// What the frame would be: every pixel of the picture through `dac`, with
-    /// the DAC's own 6→8 widening.
-    fn rendered(picture: &[u8], dac: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(picture.len() * 3);
-        for pixel in picture {
-            let entry = dac.entry(*pixel);
-            out.push(sr_engine::dac_expand(entry[0]));
-            out.push(sr_engine::dac_expand(entry[1]));
-            out.push(sr_engine::dac_expand(entry[2]));
-        }
-        out
-    }
-
-    fn reference(name: &str) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/beglogo/{name}")).unwrap()
-    }
-
-    /// **The constant is a derivation, not a fit** (plan Review Focus 5).
+    /// **The constant is a derivation, not a fit**.
     ///
     /// Every `c` in 0…128 is run through the source's own arithmetic and the
     /// whole 320×400 frame compared with the reference's, bit for bit: the two
@@ -607,7 +553,7 @@ mod tests {
         // The decode is the strongest statement available that the decoder and
         // the art agree: the reference's held frame is its indices, byte for
         // byte — 0 of 128,000 pixels different.
-        let held = reference("frame_000900.idx");
+        let held = reference("beglogo", 900, "idx");
         // The lengths first: `zip` stops at the shorter side, so a truncated
         // reference frame would compare a prefix and count zero differences.
         assert_eq!(
@@ -624,18 +570,18 @@ mod tests {
             held.len()
         );
 
-        let (early, late, finished) = (reference("frame_000470.rgb"), reference("frame_000560.rgb"), reference("frame_000900.rgb"));
+        let (early, late, finished) = (reference("beglogo", 470, "rgb"), reference("beglogo", 560, "rgb"), reference("beglogo", 900, "rgb"));
         let mut at_470 = Vec::new();
         let mut at_560 = Vec::new();
         let mut at_900 = Vec::new();
         let mut fixed = [Vec::new(), Vec::new(), Vec::new()];
         for c in 0..=128u32 {
             let dac = dac_after(&image.palette, c);
-            let frame = rendered(image.pixels(), &dac);
+            let frame = rgb_of(image.pixels(), &dac);
             if frame == early { at_470.push(c); }
             if frame == late { at_560.push(c); }
             if frame == finished { at_900.push(c); }
-            let frame = rendered(image.pixels(), &dac_after_a_fixed_upload(&image.palette, c));
+            let frame = rgb_of(image.pixels(), &dac_after_a_fixed_upload(&image.palette, c));
             if frame == early { fixed[0].push(c); }
             if frame == late { fixed[1].push(c); }
             if frame == finished { fixed[2].push(c); }

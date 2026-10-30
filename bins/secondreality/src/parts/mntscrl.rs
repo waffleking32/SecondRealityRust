@@ -831,12 +831,9 @@ impl Mntscrl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{musplus_from, Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::parts::test_rig::{differing_bytes, reference, Reading, Rig, ScriptedMusic};
+    use sr_engine::dac_expand;
+    use sr_engine::music::musplus_from;
 
     /// The paths a unit test reads: this crate's own directory, two levels
     /// below the repository root, so the part's own relative paths do not
@@ -865,142 +862,32 @@ mod tests {
             .collect()
     }
 
-    /// The player a unit test hands the part: the engine's [`Music`] seam,
-    /// scripted one reading a tick.
-    ///
-    /// `init` refuses a run with no player, so every test that starts this
-    /// part hands it one; every method but `poll` and `musplus` is the null
-    /// reading, because those are the only two this part uses (`READ2.PAS`
-    /// calls `dis_waitb` and `dis_musplus` and nothing else).
-    struct Player {
-        /// `(zplus, row)` a tick, indexed by `ctx.frame`; a tick past the end
-        /// reads the object's own no-plus sentinel (`musplus` = -32).
-        script: Vec<(i32, i32)>,
-        /// The tick the rig is on — the rig sets it before each `ctx`.
-        at: usize,
-        /// `dis_waitb`-equivalents made; the pre-roll's 11 are asserted.
-        polls: u32,
+    /// A player answering `musplus_from(zplus, row)` from `script`, one
+    /// `(zplus, row)` a tick; a tick past the end reads the no-plus sentinel.
+    fn scripted(script: Vec<(i32, i32)>) -> ScriptedMusic {
+        ScriptedMusic::musplus(script.into_iter().map(|(zplus, row)| musplus_from(zplus, row)).collect())
+            .past_end(Reading::default())
+            .never_syncs("`READ2.PAS` never syncs: its music call is `dis_musplus()`")
     }
 
-    impl Player {
-        fn scripted(script: Vec<(i32, i32)>) -> Player {
-            Player {
-                script,
-                at: 0,
-                polls: 0,
-            }
-        }
-
-        /// A player with no plus pending: `musplus()` is -32 at every tick.
-        fn sentinel() -> Player {
-            Player::scripted(Vec::new())
-        }
+    /// A player with no plus pending: `musplus()` is -32 at every tick.
+    fn sentinel() -> ScriptedMusic {
+        scripted(Vec::new())
     }
 
-    impl Music for Player {
-        fn poll(&mut self) {
-            self.polls += 1;
-        }
-
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-
-        fn musplus(&mut self) -> i32 {
-            match self.script.get(self.at) {
-                Some(&(zplus, row)) => musplus_from(zplus, row),
-                None => musplus_from(0, 0),
-            }
-        }
-
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-
-        fn muscode(&mut self, wanted: i32) -> i32 {
-            sr_engine::music::muscode_from(MusicPosition::default(), wanted)
-        }
-
-        fn sync(&mut self) -> i32 {
-            unreachable!("`READ2.PAS` never syncs: its music call is `dis_musplus()`")
-        }
-
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-
-        fn setmframe(&mut self, _frame: i32) {}
+    fn rig(music: ScriptedMusic) -> Rig {
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music)
     }
 
-    /// The engine's own pieces held together, so a `PartCtx` can be built for
-    /// one call at a time — the same disjoint borrows `Engine::tick` makes.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        player: Player,
-    }
-
-    impl Rig {
-        fn new(player: Player) -> Rig {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                player,
-            }
-        }
-
-        /// A band's context: never fresh, as the engine's band contexts are.
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, true, false)
-        }
-
-        /// The init context of an entry-point run — the part the run's music
-        /// was installed for.
-        fn init_ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, true)
-        }
-
-        /// The init context of a part reached mid-chain, with the player
-        /// already running.
-        fn init_ctx_chain(&mut self, frame: u32) -> PartCtx<'_> {
-            self.ctx_with(frame, false, false)
-        }
-
-        fn ctx_with(&mut self, frame: u32, exit: bool, music_fresh: bool) -> PartCtx<'_> {
-            self.player.at = frame as usize;
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.player),
-                frame,
-                0,
-                1,
-                exit,
-                music_fresh,
-            )
-        }
-    }
-
-    /// A part whose `init` has run, and the rig it ran against.
-    fn started_with(player: Player) -> (Rig, Mntscrl) {
-        let mut rig = Rig::new(player);
+    fn started_with(music: ScriptedMusic) -> (Rig, Mntscrl) {
+        let mut rig = rig(music);
         let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started() -> (Rig, Mntscrl) {
-        started_with(Player::sentinel())
+        started_with(sentinel())
     }
 
     /// Runs the part for `ticks` further ticks, numbered by its own count.
@@ -1037,47 +924,6 @@ mod tests {
             }
         }
         out
-    }
-
-    /// The port's displayed frame as RGB, through the live palette and the
-    /// engine's own 6→8-bit widening — what `--dump-frames` writes.
-    fn rendered_rgb(rig: &Rig) -> Vec<u8> {
-        let mut out = Vec::with_capacity(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 3);
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                let at = rig.view.source_index(&rig.surface, x, y);
-                let entry = rig.palette.entry(rig.surface.pixels()[at]);
-                out.push(dac_expand(entry[0]));
-                out.push(dac_expand(entry[1]));
-                out.push(dac_expand(entry[2]));
-            }
-        }
-        out
-    }
-
-    /// The reference frame, read from the tree it is committed in.
-    fn reference(index: u32, extension: &str) -> Vec<u8> {
-        std::fs::read(format!(
-            "../../reference/parts/mntscrl/frame_{index:06}.{extension}"
-        ))
-        .unwrap()
-    }
-
-    /// How many bytes differ, with the lengths asserted first: `zip` stops at
-    /// the shorter side, and a short read must not read as a match.
-    fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .iter()
-            .zip(expected)
-            .filter(|(a, b)| a != b)
-            .count()
     }
 
     // --- the assets ---------------------------------------------------------
@@ -1177,7 +1023,7 @@ mod tests {
         let shown = file.to_string_lossy().into_owned();
         let path: &'static str = Box::leak(shown.clone().into_boxed_str());
 
-        let mut rig = Rig::new(Player::sentinel());
+        let mut rig = rig(sentinel());
         let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, [path, TEST_POS[1], TEST_POS[2]]);
         let error = part
             .init(&mut rig.init_ctx(0))
@@ -1276,7 +1122,7 @@ mod tests {
         let (mut rig, mut part) = started();
         // `init` polls the player 11 times and draws nothing; tick 0 is the
         // setup and the background blit.
-        assert_eq!(rig.player.polls, MUSIC_PRE_ROLL, "the music's head start");
+        assert_eq!(rig.player().polls, MUSIC_PRE_ROLL, "the music's head start");
         assert_eq!(MUSIC_PRE_ROLL, 11);
         assert_eq!(part.frame(&mut rig.ctx(0)), PartStatus::Continuing);
 
@@ -1306,10 +1152,10 @@ mod tests {
         // already run through the 11 frames between the music clock's start
         // and this part's tick 0. The head start is the entry run's
         // (`music_fresh`) alone.
-        let mut rig = Rig::new(Player::sentinel());
+        let mut rig = rig(sentinel());
         let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
-        assert_eq!(rig.player.polls, 0, "a mid-chain start polls nothing");
+        assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
 
     #[test]
@@ -1378,7 +1224,7 @@ mod tests {
         // the main loop, and the wait's length is the release's.
         let mut script = quiet_script(200);
         script[70] = (1, 53); // musplus -11
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, 100);
         assert_eq!(part.phase, Phase::Wait { ticks: 35 });
         assert!(!part.fadeout, "the wait does not fade on -11");
@@ -1499,7 +1345,7 @@ mod tests {
 
     #[test]
     fn scr_adds_the_font_column_to_the_background_and_a_zero_count_is_transparent() {
-        let mut rig = Rig::new(Player::sentinel());
+        let mut rig = rig(sentinel());
         let mut part = synthetic();
         part.font[0] = 7;
         part.font[2] = 9;
@@ -1526,7 +1372,7 @@ mod tests {
 
     #[test]
     fn scr_two_shifts_the_font_and_appends_the_next_o2_column() {
-        let mut rig = Rig::new(Player::sentinel());
+        let mut rig = rig(sentinel());
         let mut part = synthetic();
         for row in 0..FONT_ROWS {
             part.font[row * FONT_COLUMNS + 10] = 40 + row as u8;
@@ -1575,7 +1421,7 @@ mod tests {
         let mut script = quiet_script(300);
         script[MAIN_FIRST as usize] = (1, 54); // -10
         script[MAIN_FIRST as usize + 1] = (1, 52); // -12
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, MAIN_FIRST);
         assert_eq!(part.phase, Phase::Main);
         let full = live_palette(&rig);
@@ -1586,7 +1432,7 @@ mod tests {
         // And -11 is: the fade's first upload is still the full palette.
         let mut script = quiet_script(400);
         script[MAIN_FIRST as usize] = (1, 53); // -11
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, MAIN_FIRST);
         // The pre-roll's last upload was its 62nd step; `fpal` itself went one
         // further, and the fade's first upload is `fpal` (`:208-210`) — so the
@@ -1602,7 +1448,7 @@ mod tests {
     fn the_fade_out_is_sixty_five_ticks_and_ends_the_part() {
         let mut script = quiet_script(400);
         script[MAIN_FIRST as usize] = (1, 53);
-        let (mut rig, mut part) = started_with(Player::scripted(script));
+        let (mut rig, mut part) = started_with(scripted(script));
         run_to(&mut rig, &mut part, MAIN_FIRST);
         assert_eq!(part.phase, Phase::Main);
         let full = part.fpal;
@@ -1645,7 +1491,7 @@ mod tests {
         // `frame = veke` therefore never true. The script never reaches -11.
         assert_eq!(VEKE, 2800);
         let (mut rig, mut part) =
-            started_with(Player::scripted(quiet_script(MAIN_FIRST + VEKE + 2)));
+            started_with(scripted(quiet_script(MAIN_FIRST + VEKE + 2)));
         run_to(&mut rig, &mut part, MAIN_FIRST + VEKE + 1);
         assert_eq!(part.phase, Phase::Main);
         assert_eq!(part.frame(&mut rig.ctx(part.tick)), PartStatus::Continuing);
@@ -1663,13 +1509,13 @@ mod tests {
         run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX + 1);
         let indices = rendered_indices(&rig);
         assert_eq!(
-            differing_bytes(&indices, &reference(500, "idx")),
+            differing_bytes(&indices, &reference("mntscrl", 500, "idx")),
             0,
             "500's index plane"
         );
-        let rgb = rendered_rgb(&rig);
+        let rgb = rig.rendered_rgb();
         assert_eq!(
-            differing_bytes(&rgb, &reference(500, "rgb")),
+            differing_bytes(&rgb, &reference("mntscrl", 500, "rgb")),
             0,
             "500's RGB"
         );
@@ -1691,12 +1537,12 @@ mod tests {
             let (mut rig, mut part) = started();
             run_to(&mut rig, &mut part, tick(500) + 1);
             assert_eq!(
-                differing_bytes(&rendered_indices(&rig), &reference(500, "idx")),
+                differing_bytes(&rendered_indices(&rig), &reference("mntscrl", 500, "idx")),
                 0,
                 "500's index plane"
             );
             assert_eq!(
-                differing_bytes(&rendered_rgb(&rig), &reference(500, "rgb")),
+                differing_bytes(&rig.rendered_rgb(), &reference("mntscrl", 500, "rgb")),
                 0,
                 "500's RGB"
             );
@@ -1708,11 +1554,11 @@ mod tests {
             let frame = |at: u32| -> Vec<u8> {
                 let (mut rig, mut part) = started();
                 run_to(&mut rig, &mut part, at + 1);
-                rendered_rgb(&rig)
+                rig.rendered_rgb()
             };
             let key = frame(tick(index));
             assert_eq!(
-                differing_bytes(&key, &reference(index, "rgb")),
+                differing_bytes(&key, &reference("mntscrl", index, "rgb")),
                 0,
                 "boot {index} (tick {})",
                 tick(index)
@@ -1742,13 +1588,13 @@ mod tests {
             let (mut rig, mut part) = started();
             part.scp_bound = bound;
             run_to(&mut rig, &mut part, tick + 1);
-            rendered_rgb(&rig)
+            rig.rendered_rgb()
         };
         for index in [1100u32, 1700] {
             let tree = render(639, index);
             let release = render(640, index);
             assert_eq!(tree, release, "boot {index} is before the bound");
-            assert_eq!(differing_bytes(&release, &reference(index, "rgb")), 0);
+            assert_eq!(differing_bytes(&release, &reference("mntscrl", index, "rgb")), 0);
         }
 
         // The cap's own tick, so the note's number is test-produced: with the
@@ -1764,7 +1610,7 @@ mod tests {
             assert_eq!(part.scp, 640, "the 507th shift");
         }
 
-        let target = reference(2300, "rgb");
+        let target = reference("mntscrl", 2300, "rgb");
         let tree = render(639, 2300);
         let release = render(640, 2300);
         assert_eq!(differing_bytes(&release, &target), 0, "the release's 640");
@@ -1786,10 +1632,10 @@ mod tests {
         // there; the counts are the divergence A17 records, and the part's
         // own behaviour is the release's wait (`RELEASE_WAIT_TICKS`).
         let run = |tick: u32| -> (Phase, Vec<u8>) {
-            let (mut rig, mut part) = started_with(Player::scripted(tree_script(tick + 2)));
+            let (mut rig, mut part) = started_with(scripted(tree_script(tick + 2)));
             part.tree_wait = true;
             run_to(&mut rig, &mut part, tick + 1);
-            (part.phase, rendered_rgb(&rig))
+            (part.phase, rig.rendered_rgb())
         };
         let (phase, held) = run(tick_of(500));
         assert!(matches!(phase, Phase::Wait { .. }));
@@ -1799,7 +1645,7 @@ mod tests {
             let (phase, mine) = run(tick);
             assert!(matches!(phase, Phase::Wait { .. }), "boot {index}");
             assert_eq!(mine, held, "boot {index} is not the held opening");
-            counts.push(differing_bytes(&mine, &reference(index, "rgb")));
+            counts.push(differing_bytes(&mine, &reference("mntscrl", index, "rgb")));
         }
         assert_eq!(counts, [118_843, 118_924, 119_056]);
     }
