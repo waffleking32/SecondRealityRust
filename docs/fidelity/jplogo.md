@@ -29,8 +29,7 @@ hardware, and the port's origin is the one 16-bit display start the pair forms.
 word. The first frames and the settle
 (`the_spring_tables_are_the_sources_own_first_frames`): `framey1 = [500, 885, 1172, 1323, 1317,
 1153, …]`, `framey2 = [6368, 6370, 6354, 6338, 6322, 6306, …]`, `framey1[95:] = 0` and
-`framey2[95:] = 6400` exactly. The test's 200-entry comparison is against a second transliteration,
-a check on transcription; the keyframes (§7) are the external check.
+`framey2[95:] = 6400` exactly; the keyframes (§7) check the rest of the tables.
 
 The fourfold interpolation (`:164-171`) reads `framey1[200]`/`framey2[200]` at `a = 796..799`,
 which in the declaration order `:23-26` are `framey2[0]` and `framey1t[0]`. The four values are
@@ -45,8 +44,7 @@ pins.
 `readp_is_the_sources_row_rle_and_palette` decodes the raw file through a transliteration of
 `READP.C` and matches `sr_assets::load_path` on the palette and all 400 rows. The run opcode's count
 register is 8 bits (`READP.C:44-51`, `dec ah / jnz l4`), so an opcode of exactly `0x80` writes
-**256** copies; the shipped writers never emit it, `sr-assets` refuses it, and
-`a_0x80_run_opcode_wraps_to_256_copies` pins the source's reading.
+**256** copies; the shipped writers never emit it and `sr-assets` refuses it.
 
 The rows are the **184 bytes from x=70** plus byte 184 = **65**, a synthetic white border; entry 64
 is blacked and every source `0` becomes `64`
@@ -106,8 +104,8 @@ the published position is 98:5, so the gate passes without a spent iteration
 - **The palimpsest guard** (`:96-99`): a row whose `(b,a)` repeats is not redrawn
   (`the_doit_guard_is_a_palimpsest`). It is the mechanism behind the session-specific holds (§6).
 - **Scroll Lock** (`:74-76`): with bit 4 of the BIOS flags at 0x0417 set, the border is 0 around
-  the wait and 127 after it. The engine has no keyboard state, so the branch is never taken; the unit
-  test sets the flag (`scroll_lock_paints_the_border_the_source_paints`).
+  the wait and 127 after it. The engine has no keyboard state, so a run never takes the branch and
+  the port does not model it.
 - `b*32/25` reads the sine at 0..510 only.
 
 ### 4.1 The zoom routines
@@ -116,10 +114,9 @@ the published position is 98:5, so the gate passes without a spent iteration
 reachable `a` is **[164, 224]**, so the unsigned 318 clamp and the label fallbacks are unreachable
 here (`the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside`, which also pins
 318/320/-3 → `@zoom244`, 2/141 → `@zoom140`, 0 → `@zoom0`). The generated group stores write exactly
-the zeros the per-pixel model does. `the_zoom_window_is_the_source_bytes_at_each_scale` checks
-scales 140, 141, 142, 144, 184, 200, 244, 318, 320 and -3, margins included (against a second
-transcription of `DOL.C`'s formula); `scale_184_is_the_identity_over_the_185_source_bytes` pins the
-entry's strip: x=68..251 are source bytes 0..183, x=252 the 65 border, x=67/x=253 black.
+the zeros the per-pixel model does, and the same test pins the clear's untouched margins; 17300
+and 17500 at 0 check the model at the part's own scales.
+`scale_184_is_the_identity_over_the_185_source_bytes` pins the entry's strip: x=68..251 are source bytes 0..183, x=252 the 65 border, x=67/x=253 black.
 
 ## 5. The music
 
@@ -127,7 +124,7 @@ entry's strip: x=68..251 are source bytes 0..183, x=252 the 65 border, x=67/x=25
 across the whole window (17000..17100 are rows 50..62 of pattern 71) and steps over the `254` at
 order 97 into order 98 at frame 17109.
 
-`Jplogo::MUSIC_PRE_ROLL` is **483**: seeked to 96:0, the player's row-58 window opens on poll
+`jplogo::MUSIC_PRE_ROLL` is **483**: seeked to 96:0, the player's row-58 window opens on poll
 **479**, and the trace's row 58 starts at boot 17060, five frames before tick 0; tick 0's poll is
 the 484th, so `483 + 1 - 5 = 479`. The published positions
 (`the_entry_pre_roll_reproduces_the_traces_positions` asserts every row against the trace):
@@ -172,8 +169,8 @@ sha256sum out/jplogo/jplogo_000635.rgb   # ec3de2bb823772bf275387ab122e12e17b1d2
 ```
 
 so its residual against the filed picture equals `-sess2`'s. The filed 17700 is outside its own
-census: the residual is the **reference's** (D24), recorded as A27, and `tests/jplogo.rs` asserts it
-rather than tolerating it.
+census: the residual is the **reference's** (D24), recorded as A27 and registered in rediff's `jplogo`
+entry.
 
 ## 7. Verification
 
@@ -185,7 +182,7 @@ rather than tolerating it.
 
 The counts are the `jplogo` rows of `xtask/src/rediff/table.rs`. All three are **RGB only**: the
 part writes CRTC `0x0C`/`0x0D` during the entry and the oracle's indexed read of them is racy, so no
-`.idx` is filed (the test asserts there is none). D19's support from the rendered side: 17300 and
+`.idx` is filed. D19's support from the rendered side: 17300 and
 17500 hold on the next tick and the tick before each differs (as the census's 17299 and 17499 do);
 at 17700 ticks 634, 635 and 636 are identical, as the census's 17699/17700/17701 are in every
 session that holds the state. The manifest says `index_origin: "part"`, `anchor: null`, 320×400,
@@ -196,9 +193,9 @@ MUSIC1 order 96 at frame 0.
 - **One counter step a tick** (A27, §3); the 17700 filing is the reference's caveat (A27, §6).
 - **Dead, not carried**: `doit`'s `halt`, `storea` and `ysb`; `calc` (`:53-65`); `lineblit`
   (`ASM.ASM:76-100`, never called by `JP.C`); the `storea = a` and its commented-out `printf`
-  (`:220-225`).
-- **Carried and unreachable**: the interpolation overrun (§2.1), the zoom clamps (§4.1), the 0x80
-  opcode (§2.2), the unused `c=400` (§4), the Scroll Lock branch (§4).
+  (`:220-225`); the Scroll Lock branch (§4); the 0x80 opcode (§2.2).
+- **Carried and unreachable**: the interpolation overrun (§2.1), the zoom clamps (§4.1), the unused
+  `c=400` (§4).
 - **Carried and visible**: the crop and 65 border, the 0→64 remap, JPLOGO's own sine table (indices
   256 and 768 are ±255; `the_sine_table_is_the_sources_own_1024_words`), the palimpsest guard
   (`bugs.md` §21); the DAC clear and 512-byte upload (`bugs.md` §4).

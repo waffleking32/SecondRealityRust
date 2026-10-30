@@ -759,7 +759,7 @@ path. Where a note holds a counterfactual test, the row names it.
 | JPLOGO | `if(frame>511) c=400;` is never read again | `JPLOGO/JP.C:78` | The freeze is `y1`/`y2` keeping their values (`FREEZE_AFTER`) | `jplogo.md` §4 |
 | JPLOGO | `scrolly` writes CRTC `0x0D` then `0x0C` | `JPLOGO/JP.C:30-45` | The order matters only to hardware | `jplogo.md` §1 |
 | JPLOGO | `doit`'s `halt`, `storea`, `ysb`; `calc` (`:53-65`) and `lineblit` (`ASM.ASM:76-100`) never called; the `storea = a` and its `printf` | `JPLOGO/JP.C:69`, `:109`, `:220-225` | Dead | `jplogo.md` §8 |
-| JPLOGO | The run opcode `0x80` writes 256 copies (`dec ah / jnz l4` wraps) | `JPLOGO/READP.C:44-51` | The shipped writers never emit it; `sr-assets` refuses it (`a_0x80_run_opcode_wraps_to_256_copies`) | `jplogo.md` §2.2 |
+| JPLOGO | The run opcode `0x80` writes 256 copies (`dec ah / jnz l4` wraps) | `JPLOGO/READP.C:44-51` | The shipped writers never emit it; `sr-assets` refuses it | `jplogo.md` §2.2 |
 | GLENZ | The `frame>1400+789` bscale-shrink arm is unreachable: `frame>1220+789` catches every value first | `GLENZ/MAIN.C:483`, `:490` | Kept in source order | `glenz.md` §5 |
 | GLENZ | `NEW.ASM`'s 256-word row table is followed in memory by the edge arena | `GLENZ/NEW.ASM:11-16` | Not shown reachable (worst case near y = 252; the port's list is a `Vec`) | `glenz.md` §8 |
 | GRID | `sin256` and the 64 KB `muldata` are built and read by nothing linked; `_asmloop2`, the unused slot words and `_line` | `GRID/MAIN.C:38-43`, `:130-139`, `ASM.ASM:113-134`, `:247-269` | Dead | `grid.md` §2 |

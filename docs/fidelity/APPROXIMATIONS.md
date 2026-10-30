@@ -760,8 +760,7 @@ once a vblank), so the port keeps the model the pictures pin. `3dsinfld.md` §6 
 per keyframe.
 
 **Measured difference:** **0** at all four keyframes at the measured ticks
-(`cargo test -p secondreality --test coman the_four_keyframes_at_the_measured_ticks`;
-`cargo xtask rediff --only 3dsinfld`). In the full run its two filed frames differ by **4** (31272)
+(`cargo xtask rediff --only 3dsinfld`). In the full run its two filed frames differ by **4** (31272)
 and **33,554** (31901, where the part draws every second frame and the run's phase is A53's):
 `cargo xtask rediff --only fullrun/08-cube-3dsinfld`.
 
@@ -789,8 +788,7 @@ ten distinct images at 17700. No deterministic model can be asked to reproduce t
 **Measured difference:** 17300 (tick 235) and 17500 (tick 435) are **0**. The port's 17700 is the
 census's settled state (its `--dump-frames 635` RGB has sha256
 `ec3de2bb823772bf275387ab122e12e17b1d27a140ec9be8a71faa7d1bd3cb37`), **51,445** of 128,000 pixels
-from the filed picture, max channel delta 255 (`cargo xtask rediff --only jplogo`;
-`tests/jplogo.rs` asserts the count).
+from the filed picture, max channel delta 255 (`cargo xtask rediff --only jplogo`).
 
 **Status:** carried: the iterations' copper-frame counts are in no capture or trace, and the 17700
 filing is outside its own census.
@@ -1739,7 +1737,7 @@ can see them, and two are not on the shipped path.
 | candidate | outcome | evidence |
 |---|---|---|
 | `GLENZ/ZOOMLOOP.INC` | not applicable: linked (`ZOOM.ASM:26`, `GLENZ/MAKEFILE:3`) as the body of `_zoom`, which only the unshipped `zoomer1` calls; the shipped `zoomer2` uses none of it | `glenz.md` §5 |
-| `JPLOGO/ZOOM.INC` | bit-identical: the 160-entry dispatch and the row images are `DOL.C`'s formula | `the_zoom_window_is_the_source_bytes_at_each_scale`, `the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside`; 17300/17500 at 0 (A27) |
+| `JPLOGO/ZOOM.INC` | bit-identical: the 160-entry dispatch and the row images are `DOL.C`'s formula | `the_scale_dispatch_is_the_tables_and_the_reachable_range_stays_inside`; 17300/17500 at 0 (A27) |
 | `TWIST/TWSTLOOP.INC` | bit-identical, consumed as data: its 16,000 texture bytes | `the_texture_table_is_the_shipped_twstloop`; six keyframes at 0 (A42–A45) |
 | `GRID/LINEBLIT.INC` | bit-identical: the generator's XOR Bresenham against all 357 committed routines | `the_line_blit_is_the_committed_generated_code` |
 | `COMAN/THELOOP.INC` | bit-identical: the 5,230-line include parsed and executed against the port's `theloop`, whole 64 KB vbuf, five columns | `the_ray_march_matches_the_shipped_generated_program`; four keyframes at 0 (A26) |
