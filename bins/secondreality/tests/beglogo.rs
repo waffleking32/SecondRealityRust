@@ -1,88 +1,28 @@
-//! BEGLOGO through the real binary: the four reference keyframes, dumped from
-//! the repository root, where the part's own asset path resolves.
-//!
-//! The part's arithmetic is unit-tested beside it in `src/parts/beglogo.rs`.
-//! What is left over here is the wiring only a process can answer: the
-//! registry, the shell's block anchor and numbering, the asset read at the
-//! path a run really uses, and the DAC the shell hands the part.
+//! BEGLOGO through the real binary: the registry, the shell's anchor and the
+//! numbering a run's manifest states. The keyframes are rediff's (`beglogo`,
+//! `beglogo-leadin/*`), held by `tests/reference_frames.rs`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
-/// The part's own asset, by the same path `src/parts/beglogo.rs` reads it by.
-const PICTURE: &str = "assets/BEG/SRTITLE.UP";
-
-/// The keyframes the reference holds for this part (`reference-indices.md` §3).
-const KEYFRAMES: &str = "430,470,560,900";
-
-/// Where a `cargo run` of the acceptance command starts, and where `PICTURE`
-/// resolves: the part reads a path relative to the working directory.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A dump directory of this test's own, and the manifest the run wrote there.
-///
-/// The run must exit 0: every requested index is produced, and the frames are
-/// the part's. A missing keyframe is a failure with a code, because a hole in a
-/// dump reads as a keyframe that matched.
-fn dump(name: &str) -> (PathBuf, serde_json::Value) {
-    let dir = std::env::temp_dir().join(format!("sr-beglogo-{}-{name}", std::process::id()));
+#[test]
+fn the_four_keyframes_dump_in_the_references_own_numbering() {
+    let dir = std::env::temp_dir().join(format!("sr-beglogo-{}-numbering", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
         .current_dir(repository_root())
-        .args(["--headless", "--part", "beglogo", "--dump-frames", KEYFRAMES, "--dump-dir"])
+        .args(["--headless", "--part", "beglogo", "--dump-frames", "430,470,560,900", "--dump-dir"])
         .arg(&dir)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-    let manifest =
+    let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
-    (dir, manifest)
-}
-
-fn frame_file(dir: &Path, index: u32, extension: &str) -> Vec<u8> {
-    std::fs::read(dir.join(format!("beglogo_{index:06}.{extension}"))).unwrap()
-}
-
-/// How many bytes of `rendered` differ from `expected`.
-///
-/// **The lengths are asserted first, and they have to be.** `iter().zip()`
-/// stops at the shorter side, so a *truncated* dump — the one failure a
-/// comparison test exists to catch — would compare a prefix, count zero
-/// differences and pass, while the message printed `expected.len()` as if it
-/// were what had been compared. A check that cannot fail is worth less than no
-/// check, so the length is what makes this count a comparison.
-fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-        rendered.len(),
-        expected.len()
-    );
-    rendered.iter().zip(expected).filter(|(a, b)| a != b).count()
-}
-
-/// The reference's own frame, read from the tree it is committed in.
-///
-/// `reference/` is input-only, and reading it from a test is established
-/// practice here (`xtask`'s verify tests, and the part's own derivation test):
-/// it is what lets the suite, and not only `xtask compare`, say that a frame
-/// is the reference's.
-fn reference_frame(index: u32, extension: &str) -> Vec<u8> {
-    std::fs::read(
-        repository_root().join(format!("reference/parts/beglogo/frame_{index:06}.{extension}")),
-    )
-    .unwrap()
-}
-
-#[test]
-fn the_four_keyframes_dump_in_the_references_own_numbering() {
-    let (dir, manifest) = dump("numbering");
-    // A run that starts at BEGLOGO is anchored at the demo's first graphics
-    // frame, and the manifest has to say its indices are that space: a `part`
-    // numbering would make every index below incomparable with `reference/`.
+    // Anchored at the demo's first graphics frame, in the reference's numbering.
     assert_eq!(manifest["index_origin"], "boot");
     assert_eq!(manifest["anchor"], 404);
     assert_eq!(manifest["part"], "beglogo");
@@ -93,70 +33,5 @@ fn the_four_keyframes_dump_in_the_references_own_numbering() {
         assert_eq!(frame["width"], 320, "{}", frame["idx"]);
         assert_eq!(frame["height"], 400, "{}", frame["idx"]);
     }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_opening_white_is_index_15_through_the_dac_the_shell_installed() {
-    // The reference's 430 is 128,000 bytes of 15 and one palette entry,
-    // (63,63,63) — and the part has written no DAC entry at that tick: `:25-34`
-    // is 32 vertical blanks later. What makes the frame white is entry 15 of
-    // the table a mode set leaves, so a part that cleared the DAC would render
-    // this black and fail a keyframe before doing anything.
-    let (dir, _) = dump("white");
-    let indices = frame_file(&dir, 430, "idx");
-    assert_eq!(indices.len(), 320 * 400);
-    assert!(indices.iter().all(|index| *index == 15), "430 is not the white field");
-    let rgb = frame_file(&dir, 430, "rgb");
-    assert!(rgb.iter().all(|channel| *channel == 255), "430 is not white");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_two_fade_frames_are_the_references_own_bytes() {
-    // 470 and 560 are RGB-only in the reference (`reference-indices.md` §3.1:
-    // the indexed read is late by about twenty fade steps, D15), so this is the
-    // comparison `xtask compare` makes of them — the DAC's 6→8-bit widening
-    // included, which is why the pair is where a widening that differed would
-    // show. The part's own derivation test matches the same two frames against
-    // the same bytes through its arithmetic; what this adds is the whole
-    // binary: the registry, the anchor, the asset read from the repository
-    // root, and the `.rgb` the dump wrote to disk.
-    let (dir, _) = dump("fade");
-    for index in [470, 560] {
-        let dumped = frame_file(&dir, index, "rgb");
-        let expected = reference_frame(index, "rgb");
-        assert_eq!(
-            differing_bytes(&dumped, &expected),
-            0,
-            "frame {index} differs from the reference"
-        );
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// The guard above can fail, which is the whole point of it: a dump cut short
-/// is exactly the case a bare `zip` would report as identical.
-#[test]
-#[should_panic(expected = "a short read is not a comparison")]
-fn a_truncated_frame_is_refused_rather_than_counted() {
-    differing_bytes(&[1, 2, 3], &[1, 2, 3, 4]);
-}
-
-#[test]
-fn the_held_frame_is_the_picture_the_part_read() {
-    // 900 is past the end of the fade, so the run is holding the screen the
-    // part left (§3.5). What is on it is `BEG/SRTITLE.UP` as `sr_assets`
-    // decodes it — the same decoding the acceptance comparison finds
-    // byte-identical to `reference/parts/beglogo/frame_000900.idx`.
-    let (dir, _) = dump("held");
-    let image = sr_assets::load_path(&repository_root().join(PICTURE)).unwrap();
-    let dumped = frame_file(&dir, 900, "idx");
-    let differing = differing_bytes(&dumped, image.pixels());
-    assert_eq!(
-        differing, 0,
-        "the held frame differs from the picture in {differing} of {} indices",
-        dumped.len()
-    );
     let _ = std::fs::remove_dir_all(&dir);
 }

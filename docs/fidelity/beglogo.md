@@ -124,7 +124,7 @@ upload returns the same `c` for all three moving frames. GLENZ inherits entries 
 
 430 and 900 compare as indices, being held screens; 470 and 560 as RGB, because the indexed read
 is late by about twenty fade steps (`reference-indices.md` §1.3, D15), so the DAC widening is
-load-bearing on the middle pair. Pinned by `tests/beglogo.rs` and by `cargo xtask rediff` (entries
+load-bearing on the middle pair. Pinned by `cargo xtask rediff` and `tests/reference_frames.rs` (entries
 `beglogo`, `beglogo-leadin/even`, `/odd`, `/plane-436`; the lead-in window is
 `reference-indices.md` §25.6). In block 1 the ramp is frame-locked, so the port's 7930 is the
 original's 7930 byte for byte (§5); `fullrun/03-beglogo` pairs it at the seam's −37 frames, where
