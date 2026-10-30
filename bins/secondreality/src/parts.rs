@@ -26,6 +26,7 @@ pub mod pam;
 pub mod panicend;
 pub mod plzpart;
 pub mod rayscrl;
+pub mod sin1024;
 pub mod techno;
 pub mod tunneli;
 pub mod u2a;

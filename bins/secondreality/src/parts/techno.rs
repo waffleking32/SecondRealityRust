@@ -74,6 +74,8 @@ use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
+use crate::parts::sin1024::SIN1024;
+
 const NAME: &str = "techno";
 
 // ---------------------------------------------------------------- assets --
@@ -200,80 +202,6 @@ fn bar_palette() -> [u8; 768] {
     }
     pal
 }
-
-// ------------------------------------------------------------- the tables --
-/// `SIN1024.INC`: 1,024 signed words, a full sine scaled to 256 (the
-/// table's max is 256). `KOEA.ASM` keeps two cursors into it: the MOVE keeps
-/// a word index (`and bx,1023; shl bx,1` before `_sin1024[bx]`), while
-/// `interference_draw` keeps a **byte** offset (`add bp,9*2; and bp,2047`)
-/// and therefore reads word `bp/2`. The unit test rebuilds all 1,024 words
-/// from the tree.
-const SIN_TABLE: [i16; 1024] = [
-    0, 1, 3, 4, 6, 7, 9, 10, 12, 14, 15, 17, 18, 20, 21, 23,
-    25, 26, 28, 29, 31, 32, 34, 36, 37, 39, 40, 42, 43, 45, 46, 48,
-    49, 51, 53, 54, 56, 57, 59, 60, 62, 63, 65, 66, 68, 69, 71, 72,
-    74, 75, 77, 78, 80, 81, 83, 84, 86, 87, 89, 90, 92, 93, 95, 96,
-    97, 99, 100, 102, 103, 105, 106, 108, 109, 110, 112, 113, 115, 116, 117, 119,
-    120, 122, 123, 124, 126, 127, 128, 130, 131, 132, 134, 135, 136, 138, 139, 140,
-    142, 143, 144, 146, 147, 148, 149, 151, 152, 153, 155, 156, 157, 158, 159, 161,
-    162, 163, 164, 166, 167, 168, 169, 170, 171, 173, 174, 175, 176, 177, 178, 179,
-    181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196,
-    197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 211,
-    212, 213, 214, 215, 216, 217, 217, 218, 219, 220, 221, 221, 222, 223, 224, 225,
-    225, 226, 227, 227, 228, 229, 230, 230, 231, 232, 232, 233, 234, 234, 235, 235,
-    236, 237, 237, 238, 238, 239, 239, 240, 241, 241, 242, 242, 243, 243, 244, 244,
-    244, 245, 245, 246, 246, 247, 247, 247, 248, 248, 249, 249, 249, 250, 250, 250,
-    251, 251, 251, 251, 252, 252, 252, 252, 253, 253, 253, 253, 254, 254, 254, 254,
-    254, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    256, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 254,
-    254, 254, 254, 254, 254, 253, 253, 253, 253, 252, 252, 252, 252, 251, 251, 251,
-    251, 250, 250, 250, 249, 249, 249, 248, 248, 247, 247, 247, 246, 246, 245, 245,
-    244, 244, 244, 243, 243, 242, 242, 241, 241, 240, 239, 239, 238, 238, 237, 237,
-    236, 235, 235, 234, 234, 233, 232, 232, 231, 230, 230, 229, 228, 227, 227, 226,
-    225, 225, 224, 223, 222, 221, 221, 220, 219, 218, 217, 217, 216, 215, 214, 213,
-    212, 211, 211, 210, 209, 208, 207, 206, 205, 204, 203, 202, 201, 200, 199, 198,
-    197, 196, 195, 194, 193, 192, 191, 190, 189, 188, 187, 186, 185, 184, 183, 182,
-    181, 179, 178, 177, 176, 175, 174, 173, 171, 170, 169, 168, 167, 166, 164, 163,
-    162, 161, 159, 158, 157, 156, 155, 153, 152, 151, 149, 148, 147, 146, 144, 143,
-    142, 140, 139, 138, 136, 135, 134, 132, 131, 130, 128, 127, 126, 124, 123, 122,
-    120, 119, 117, 116, 115, 113, 112, 110, 109, 108, 106, 105, 103, 102, 100, 99,
-    97, 96, 95, 93, 92, 90, 89, 87, 86, 84, 83, 81, 80, 78, 77, 75,
-    74, 72, 71, 69, 68, 66, 65, 63, 62, 60, 59, 57, 56, 54, 53, 51,
-    49, 48, 46, 45, 43, 42, 40, 39, 37, 36, 34, 32, 31, 29, 28, 26,
-    25, 23, 21, 20, 18, 17, 15, 14, 12, 10, 9, 7, 6, 4, 3, 1,
-    0, -1, -3, -4, -6, -7, -9, -10, -12, -14, -15, -17, -18, -20, -21, -23,
-    -25, -26, -28, -29, -31, -32, -34, -36, -37, -39, -40, -42, -43, -45, -46, -48,
-    -49, -51, -53, -54, -56, -57, -59, -60, -62, -63, -65, -66, -68, -69, -71, -72,
-    -74, -75, -77, -78, -80, -81, -83, -84, -86, -87, -89, -90, -92, -93, -95, -96,
-    -97, -99, -100, -102, -103, -105, -106, -108, -109, -110, -112, -113, -115, -116, -117, -119,
-    -120, -122, -123, -124, -126, -127, -128, -130, -131, -132, -134, -135, -136, -138, -139, -140,
-    -142, -143, -144, -146, -147, -148, -149, -151, -152, -153, -155, -156, -157, -158, -159, -161,
-    -162, -163, -164, -166, -167, -168, -169, -170, -171, -173, -174, -175, -176, -177, -178, -179,
-    -181, -182, -183, -184, -185, -186, -187, -188, -189, -190, -191, -192, -193, -194, -195, -196,
-    -197, -198, -199, -200, -201, -202, -203, -204, -205, -206, -207, -208, -209, -210, -211, -211,
-    -212, -213, -214, -215, -216, -217, -217, -218, -219, -220, -221, -221, -222, -223, -224, -225,
-    -225, -226, -227, -227, -228, -229, -230, -230, -231, -232, -232, -233, -234, -234, -235, -235,
-    -236, -237, -237, -238, -238, -239, -239, -240, -241, -241, -242, -242, -243, -243, -244, -244,
-    -244, -245, -245, -246, -246, -247, -247, -247, -248, -248, -249, -249, -249, -250, -250, -250,
-    -251, -251, -251, -251, -252, -252, -252, -252, -253, -253, -253, -253, -254, -254, -254, -254,
-    -254, -254, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255,
-    -256, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -255, -254,
-    -254, -254, -254, -254, -254, -253, -253, -253, -253, -252, -252, -252, -252, -251, -251, -251,
-    -251, -250, -250, -250, -249, -249, -249, -248, -248, -247, -247, -247, -246, -246, -245, -245,
-    -244, -244, -244, -243, -243, -242, -242, -241, -241, -240, -239, -239, -238, -238, -237, -237,
-    -236, -235, -235, -234, -234, -233, -232, -232, -231, -230, -230, -229, -228, -227, -227, -226,
-    -225, -225, -224, -223, -222, -221, -221, -220, -219, -218, -217, -217, -216, -215, -214, -213,
-    -212, -211, -211, -210, -209, -208, -207, -206, -205, -204, -203, -202, -201, -200, -199, -198,
-    -197, -196, -195, -194, -193, -192, -191, -190, -189, -188, -187, -186, -185, -184, -183, -182,
-    -181, -179, -178, -177, -176, -175, -174, -173, -171, -170, -169, -168, -167, -166, -164, -163,
-    -162, -161, -159, -158, -157, -156, -155, -153, -152, -151, -149, -148, -147, -146, -144, -143,
-    -142, -140, -139, -138, -136, -135, -134, -132, -131, -130, -128, -127, -126, -124, -123, -122,
-    -120, -119, -117, -116, -115, -113, -112, -110, -109, -108, -106, -105, -103, -102, -100, -99,
-    -97, -96, -95, -93, -92, -90, -89, -87, -86, -84, -83, -81, -80, -78, -77, -75,
-    -74, -72, -71, -69, -68, -66, -65, -63, -62, -60, -59, -57, -56, -54, -53, -51,
-    -49, -48, -46, -45, -43, -42, -40, -39, -37, -36, -34, -32, -31, -29, -28, -26,
-    -25, -23, -21, -20, -18, -17, -15, -14, -12, -10, -9, -7, -6, -4, -3, -1,
-];
 
 // ---------------------------------------------------------------- the part --
 
@@ -713,9 +641,9 @@ impl Techno {
     /// `KOEB.ASM:502-590`'s MOVE, with the dead `sizefade` multiply kept.
     fn first_pass_move(&mut self) {
         self.p1_scrnrot = (self.p1_scrnrot + 5) & 1023;
-        let sin = SIN_TABLE[self.p1_scrnrot as usize] as i32;
+        let sin = SIN1024[self.p1_scrnrot as usize] as i32;
         let scrnx = ((sin.wrapping_mul(self.p1_sizefade) >> 16) + 160) as i16 as i32;
-        let sin = SIN_TABLE[((self.p1_scrnrot + 256) & 1023) as usize] as i32;
+        let sin = SIN1024[((self.p1_scrnrot + 256) & 1023) as usize] as i32;
         let scrny = ((sin.wrapping_mul(self.p1_sizefade) >> 16) + 100) as i16 as i32;
         self.p1_scrnx = scrnx;
         self.p1_scrny = scrny;
@@ -751,13 +679,13 @@ impl Techno {
             self.p2_patdir = -3;
         }
         self.p2_scrnrot = (self.p2_scrnrot + 5) & 1023;
-        let scrnx = ((SIN_TABLE[self.p2_scrnrot as usize] as i32) >> 2) + 160;
-        let scrny = ((SIN_TABLE[((self.p2_scrnrot + 256) & 1023) as usize] as i32) >> 2) + 100;
+        let scrnx = ((SIN1024[self.p2_scrnrot as usize] as i32) >> 2) + 160;
+        let scrny = ((SIN1024[((self.p2_scrnrot + 256) & 1023) as usize] as i32) >> 2) + 100;
         self.p2_scrnx = scrnx;
         self.p2_scrny = scrny;
         self.p2_overrot = (self.p2_overrot + 7) & 1023;
-        self.p2_overx = ((SIN_TABLE[self.p2_overrot as usize] as i32) >> 2) + 160;
-        let oy = ((SIN_TABLE[((self.p2_overrot + 256) & 1023) as usize] as i32) >> 2) + 100;
+        self.p2_overx = ((SIN1024[self.p2_overrot as usize] as i32) >> 2) + 160;
+        let oy = ((SIN1024[((self.p2_overrot + 256) & 1023) as usize] as i32) >> 2) + 100;
         self.p2_overya = (oy * 80) & 0xFFFF;
         self.p2_scrnposl = scrnx & 7;
         self.p2_scrnpos = 80 * scrny + (scrnx >> 3);
@@ -794,7 +722,7 @@ impl Techno {
             bp = (bp + 18) & 2047;
             // `bp` is a byte offset into the word table (`and bp,2047` is
             // 1,024 words), so the sine's index is half of it.
-            let mut bx = (SIN_TABLE[(bp >> 1) as usize] as i32) >> 3;
+            let mut bx = (SIN1024[(bp >> 1) as usize] as i32) >> 3;
             bx = (bx & 0xFF) | (i32::from(self.p2_sinuspower) << 8);
             let a = self.power0[(bx & 0xFFFF) as usize] as i32;
             let ax = a - self.p2_scrnposl + self.p2_overx;
@@ -1598,10 +1526,10 @@ impl Techno {
     /// doit1's and doit2's boxes (`KOE.C:355-379`, `:414-438`).
     fn doit_boxes(&mut self, which: u8) {
         if which == 1 {
-            let hx = (SIN_TABLE[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
-            let hy = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 16;
-            let vx = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
-            let vy = SIN_TABLE[(self.rot + 512) as usize & 1023] as i32;
+            let hx = (SIN1024[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
+            let hy = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 16;
+            let vx = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
+            let vy = SIN1024[(self.rot + 512) as usize & 1023] as i32;
             let vx = vx * self.vm / 100;
             let vy = vy * self.vm / 100;
             self.boxes(hx, hy, vx, vy, 160, 100);
@@ -1613,10 +1541,10 @@ impl Techno {
             }
             self.vma -= 1;
         } else {
-            let hx = (SIN_TABLE[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
-            let hy = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 16;
-            let vx = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
-            let vy = SIN_TABLE[(self.rot + 512) as usize & 1023] as i32;
+            let hx = (SIN1024[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
+            let hy = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 16;
+            let vx = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
+            let vy = SIN1024[(self.rot + 512) as usize & 1023] as i32;
             let vx = vx * (self.vm / 64) / 100;
             let vy = vy * (self.vm / 64) / 100;
             self.boxes(hx, hy, vx, vy, 160, 100);
@@ -1721,10 +1649,10 @@ impl Techno {
         vbuf.fill(0);
         self.vbuf = vbuf;
         let (wx, wy) = (self.doit_wx, self.doit_wy);
-        let hx = (SIN_TABLE[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
-        let hy = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 16;
-        let vx = (SIN_TABLE[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
-        let vy = SIN_TABLE[(self.rot + 512) as usize & 1023] as i32;
+        let hx = (SIN1024[self.rot as usize & 1023] as i32) * 16 * 6 / 5;
+        let hy = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 16;
+        let vx = (SIN1024[(self.rot + 256) as usize & 1023] as i32) * 6 / 5;
+        let vy = SIN1024[(self.rot + 512) as usize & 1023] as i32;
         let vx = vx * (self.vm / 64) / 100;
         let vy = vy * (self.vm / 64) / 100;
         self.boxes(hx, hy, vx, vy, wx, wy);
@@ -1775,15 +1703,15 @@ impl Techno {
             }
         }
         if self.rot2 < 32 {
-            self.doit_wx = (SIN_TABLE[self.rot2 as usize & 1023] as i32) * self.rot2 / 8 + 160;
+            self.doit_wx = (SIN1024[self.rot2 as usize & 1023] as i32) * self.rot2 / 8 + 160;
             self.doit_wy =
-                (SIN_TABLE[(self.rot2 + 256) as usize & 1023] as i32) * self.rot2 / 8 + 100;
+                (SIN1024[(self.rot2 + 256) as usize & 1023] as i32) * self.rot2 / 8 + 100;
         } else {
             // C's `/4` truncates toward zero; an arithmetic shift would
             // floor the negative half of the sine and move every edge a
             // pixel.
-            self.doit_wx = (SIN_TABLE[self.rot2 as usize & 1023] as i32) / 4 + 160;
-            self.doit_wy = (SIN_TABLE[(self.rot2 + 256) as usize & 1023] as i32) / 4 + 100;
+            self.doit_wx = (SIN1024[self.rot2 as usize & 1023] as i32) / 4 + 160;
+            self.doit_wy = (SIN1024[(self.rot2 + 256) as usize & 1023] as i32) / 4 + 100;
         }
         self.rot2 += 17;
         self.display_start = (self.display_start & 0xFF00) | (self.xpos / 8);
@@ -1888,7 +1816,7 @@ impl Techno {
         } else {
             self.ripplep = self.ripplep * 5 / 4;
         }
-        self.xpos = 320 + (SIN_TABLE[self.ripple as usize & 1023] as i32) / self.ripplep;
+        self.xpos = 320 + (SIN1024[self.ripple as usize & 1023] as i32) / self.ripplep;
         self.ripple += self.ripplep + 100;
         if self.ripple_c < 16 {
             let fade = self.palfade.clone();
@@ -2109,23 +2037,6 @@ mod tests {
             transitions.iter().rfind(|(t, _)| *t <= 3301).unwrap().1,
             Doit3
         );
-    }
-
-    #[test]
-    fn the_sin_table_is_the_incs_1024_words() {
-        // `interference_draw`'s cursor is a byte offset into this word table
-        // (`and bp,2047` = 1,024 words); the MOVE routines use a word index.
-        let inc = std::fs::read_to_string("../../upstream/SecondReality/TECHNO/SIN1024.INC").unwrap();
-        let body = inc.split("_sin1024 LABEL WORD").nth(1).unwrap();
-        let words: Vec<i16> = body
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .filter_map(|token| token.parse::<i16>().ok())
-            .take(1024)
-            .collect();
-        assert_eq!(words.len(), 1024);
-        assert_eq!(SIN_TABLE.as_slice(), words.as_slice());
-        assert_eq!(SIN_TABLE.iter().copied().max(), Some(256), "scaled to 256");
-        assert_eq!(SIN_TABLE[0], 0);
     }
 
     #[test]
@@ -2371,7 +2282,7 @@ mod tests {
             // `sinurot += 14`, then `bp += 18` a row (`KOEA.ASM:785,791`).
             let bp = (14 + 18 * (row + 1)) & 2047;
             // The cursor is a byte offset; the word is `bp/2`.
-            let mut bx = (SIN_TABLE[bp / 2] as i32) >> 3;
+            let mut bx = (SIN1024[bp / 2] as i32) >> 3;
             bx = (bx & 0xFF) | (1 << 8);
             let ax = i32::from(t.power0[bx as usize]);
             let which = (7 - (ax & 7)) as usize;

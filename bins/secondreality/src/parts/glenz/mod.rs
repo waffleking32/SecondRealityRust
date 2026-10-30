@@ -9,8 +9,8 @@
 //! - `math` — `cmatrix_yxz`/`calcmatrix`, `crotlist`, `cprojlist` and
 //!   `ccliplist` (`MATH.ASM`, `VEC.ASM`), with the asm's 16/32/64-bit widths.
 //! - `tables` — the source's `sintable16`/`costable16` (`MATHSIN.INC`) as
-//!   [`tables::SIN`] and [`tables::COS`], and `ZOOM.ASM`'s `_sin1024`
-//!   (`SIN1024.INC`) as [`tables::SIN1024`].
+//!   [`tables::SIN`] and [`tables::COS`]. `ZOOM.ASM`'s `_sin1024` is the
+//!   shared [`SIN1024`].
 //! - `poly` — `ceasypolylist`, the hidden-face cross product and the
 //!   `rolcol`/`rolused` colour allocator (`VEC.ASM:260-553`) with the shipped
 //!   polygon tables (`MAIN.C:176-240`).
@@ -78,7 +78,7 @@ use intro::{Bounce, Zoomer, SCREEN_PIXELS, VRAM_PIXELS};
 use math::{clip_y, matrix_yxz, project, rotate, Matrix, PVert, INIT_320X200};
 use poly::{build, ColourState, DemoMode, EPOLYS, EPOLYSB};
 use span::Compositor;
-use tables::SIN1024;
+use crate::parts::sin1024::SIN1024;
 
 /// The part's name: what `--part` accepts and the registry lists.
 const NAME: &str = "glenz";

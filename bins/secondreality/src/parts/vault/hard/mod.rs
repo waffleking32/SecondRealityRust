@@ -24,8 +24,8 @@
 //!   `bgpic`.
 //!
 //! The tables and the matrix builder are shared with GLENZ because the files
-//! are identical: `glenz::tables::{SIN, COS, SIN1024}` (`VMATHSIN.ASM` is
-//! `MATHSIN.INC`, and `SIN1024.INC` is one of the tree's identical copies) and
+//! are identical: `glenz::tables::{SIN, COS}` (`VMATHSIN.ASM` is
+//! `MATHSIN.INC`; `SIN1024.INC` is the shared [`crate::parts::sin1024`]) and
 //! `glenz::math::matrix_yxz` (`VMATH.ASM` differs from `MATH.ASM` only in its
 //! include/segment wrapper). Nothing else is shared: HARD's colour path is
 //! index-only — `demo_norm` is a no-op and `demo_glz` is dead (`VEC.ASM:486-580`),

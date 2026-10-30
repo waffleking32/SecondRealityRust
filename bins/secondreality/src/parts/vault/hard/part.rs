@@ -49,7 +49,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::glenz::math::{matrix_yxz, Matrix};
-use crate::parts::glenz::tables::SIN1024;
+use crate::parts::sin1024::SIN1024;
 use crate::parts::minvball::MsRand;
 
 use super::dots::{

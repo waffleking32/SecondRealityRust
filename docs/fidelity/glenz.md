@@ -87,7 +87,7 @@ and `oyp -= b*b/2` (`:477`, from frame 1801)
 (`the_sixteen_bit_products_wrap_like_the_source`; `bugs.md` §23).
 
 `sin1024` (`MAIN.C:456-471`) is `ZOOM.ASM:28-29`'s `_sin1024`, a different table from `SIN`/`COS`
-(`tables::SIN1024`). The `frame>1400+789` bscale-shrink arm is unreachable (`frame>1220+789`
+(`parts::sin1024::SIN1024`). The `frame>1400+789` bscale-shrink arm is unreachable (`frame>1220+789`
 catches every value first) and is kept in source order.
 
 **Generated and self-modifying code.** The shipped path calls `ceasypolylist` +
