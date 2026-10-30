@@ -406,6 +406,18 @@ impl<M: RigMusic> Rig<M> {
         self.tick_with(part, false, true)
     }
 
+    /// The view's window as palette indices.
+    pub fn rendered_indices(&self) -> Vec<u8> {
+        let Machine { surface, view, .. } = &self.machine;
+        let mut out = Vec::with_capacity(usize::from(view.width) * usize::from(view.height));
+        for y in 0..view.height {
+            for x in 0..view.width {
+                out.push(surface.pixels()[view.source_index(surface, x, y)]);
+            }
+        }
+        out
+    }
+
     /// The view's window through the live palette, widened as the DAC widens.
     pub fn rendered_rgb(&self) -> Vec<u8> {
         let Machine {

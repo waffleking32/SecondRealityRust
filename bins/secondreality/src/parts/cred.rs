@@ -991,10 +991,9 @@ fn scan_metrics(strip: &[u8], order: &[u8], fonap: &mut [u16; 256], fonaw: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
+    use crate::parts::test_rig::{differing_bytes, reference, Rig};
+    use crate::shell::SURFACE_WIDTH;
     use std::path::Path;
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
 
     /// Read the tree's `FONA.INC` into its raster: the strip as the tree stored it.
     ///
@@ -1170,45 +1169,9 @@ mod tests {
         unpack(&std::fs::read(TEST_EXE).unwrap()).unwrap()
     }
 
-    /// The engine's own pieces held together, so a `PartCtx` can be built for
-    /// one call at a time — the same disjoint borrows `Engine::tick` makes.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                // no player: this rig draws a band, and none of these parts asks for a cue
-                None,
-                frame,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
-    }
-
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Cred) {
-        let mut rig = Rig::new();
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
         let mut part = Cred::at(TEST_EXE);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -1221,48 +1184,9 @@ mod tests {
         }
     }
 
-    /// The frame the reference holds, read from the tree it is committed in.
-    fn reference(name: &str) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/cred/{name}")).unwrap()
-    }
-
-    /// The port's displayed frame as RGB, one pixel per displayed pixel, through
-    /// the live palette and the engine's own 6→8-bit widening.
-    fn rendered(rig: &Rig) -> Vec<u8> {
-        let mut out = Vec::with_capacity(VIEW_WIDTH as usize * VIEW_HEIGHT as usize * 3);
-        for y in 0..VIEW_HEIGHT {
-            for x in 0..VIEW_WIDTH {
-                let at = rig.view.source_index(&rig.surface, x, y);
-                let entry = rig.palette.entry(rig.surface.pixels()[at]);
-                out.push(sr_engine::dac_expand(entry[0]));
-                out.push(sr_engine::dac_expand(entry[1]));
-                out.push(sr_engine::dac_expand(entry[2]));
-            }
-        }
-        out
-    }
-
     /// The width of a caption line, by the source's own arithmetic.
     fn line_width(part: &Cred, line: &[u8]) -> usize {
         line.iter().map(|&ch| usize::from(part.width(ch)) + 2).sum()
-    }
-
-    /// How many bytes of `rendered` differ from `expected`.
-    ///
-    /// **The lengths are asserted first**, because `zip` stops at the shorter
-    /// side: a comparison that counted over whatever the two frames had in
-    /// common would report zero differences for a *truncated* frame and pass,
-    /// which is the failure this phase's reviews found four times over. A short
-    /// read is not a comparison, and it panics as one.
-    fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered.iter().zip(expected).filter(|(a, b)| a != b).count()
     }
 
     #[test]
@@ -1993,8 +1917,8 @@ mod tests {
         let hold_first = SHOW_TICK + OPEN_STEPS + 1;
 
         run_ticks(&mut rig, &mut part, hold_first);
-        let first = rendered(&rig);
-        let at_1440 = reference("frame_001440.rgb");
+        let first = rig.rendered_rgb();
+        let at_1440 = reference("cred", 1440, "rgb");
         let differing = differing_bytes(&first, &at_1440);
         assert_eq!(differing, 0, "screen 1 differs from the reference in {differing} bytes");
 
@@ -2002,7 +1926,7 @@ mod tests {
         // parked origin is a different picture.
         let hold_view = rig.view.clone();
         Cred::set_display(&mut rig.ctx(hold_first), Display::PARKED);
-        let parked = rendered(&rig);
+        let parked = rig.rendered_rgb();
         let parked_differing = differing_bytes(&parked, &at_1440);
         assert_eq!(
             parked_differing, 29_523,
@@ -2017,8 +1941,8 @@ mod tests {
             let ticks = (screen - at) * part.screen_ticks();
             run_ticks(&mut rig, &mut part, ticks);
             at = screen;
-            let frame = rendered(&rig);
-            let expected = reference(&format!("frame_{keyframe:06}.rgb"));
+            let frame = rig.rendered_rgb();
+            let expected = reference("cred", keyframe, "rgb");
             let differing = differing_bytes(&frame, &expected);
             assert_eq!(
                 differing, 0,
@@ -2275,7 +2199,7 @@ mod tests {
     /// on — the content every state of that screen is drawn over — and the rig
     /// it was drawn through.
     fn at_screen(screen: usize) -> (Rig, Cred) {
-        let mut rig = Rig::new();
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
         let mut part = Cred::at(TEST_EXE);
         part.init(&mut rig.ctx(0)).unwrap();
         let target = screen as u32 * part.screen_ticks() + SHOW_TICK;
@@ -2289,7 +2213,7 @@ mod tests {
     /// The frame the part shows at `display` over that screen's surface.
     fn render_at(rig: &mut Rig, display: Display) -> Vec<u8> {
         Cred::set_display(&mut rig.ctx(0), display);
-        rendered(rig)
+        rig.rendered_rgb()
     }
 
     /// How many bytes of `frame` differ from `expected` over displayed rows
@@ -2340,8 +2264,8 @@ mod tests {
         let Some(frames) = record_frames() else {
             panic!(
                 "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
-                 which is not here: there is nothing to check. Produce it with the recipe \
-                 `docs/fidelity/cred.md` §7 names (`cargo xtask reference capture`), or run \
+                 which is not here: there is nothing to check. Produce it with the sweep \
+                 `reference-indices.md` §20 records (`cargo xtask reference capture`), or run \
                  the suite without `--ignored` — a missing capture must fail loudly, not \
                  pass silently"
             )
@@ -2524,8 +2448,8 @@ mod tests {
         let Some(frames) = record_frames() else {
             panic!(
                 "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
-                 which is not here: there is nothing to check. Produce it with the recipe \
-                 `docs/fidelity/cred.md` §7 names (`cargo xtask reference capture`), or run \
+                 which is not here: there is nothing to check. Produce it with the sweep \
+                 `reference-indices.md` §20 records (`cargo xtask reference capture`), or run \
                  the suite without `--ignored` — a missing capture must fail loudly, not \
                  pass silently"
             )

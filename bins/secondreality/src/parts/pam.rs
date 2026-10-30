@@ -537,7 +537,7 @@ mod tests {
         FRAME_COUNT_AT_ANCHOR as u32 + 4 * (f - 1)
     }
 
-    // --- the brief's four tests ---------------------------------------------
+    // --- the gate, the steps and the exit -----------------------------------
 
     #[test]
     fn the_sync_gate_holds_until_code_ten_then_sets_up_and_waits_four_ticks() {

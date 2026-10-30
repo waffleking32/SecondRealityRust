@@ -1666,7 +1666,7 @@ mod tests {
         }
     }
 
-    // --- the brief's four tests ---------------------------------------------
+    // --- the gates and the scroll ------------------------------------------
 
     #[test]
     fn the_stage_gates_follow_the_music_and_a_skipped_code_still_passes_them() {

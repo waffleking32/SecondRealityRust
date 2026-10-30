@@ -908,64 +908,14 @@ impl Part for Ddstars {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::view::View;
-    use sr_engine::{dac_expand, Surface};
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
+    use crate::parts::test_rig::{differing_bytes, reference, Rig};
+    use crate::shell::SURFACE_WIDTH;
+    use sr_engine::dac_expand;
 
     const TEST_TEXT: &str = "../../assets/DDSTARS/TEXTS.16";
 
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                None,
-                frame,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
-
-        fn ctx_exit(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                None,
-                frame,
-                0,
-                1,
-                true,
-                false,
-            )
-        }
-    }
-
     fn started() -> (Rig, Ddstars) {
-        let mut rig = Rig::new();
+        let mut rig = Rig::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16);
         let mut part = Ddstars::at(TEST_TEXT);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -1316,28 +1266,6 @@ mod tests {
         index - REFERENCE_FIRST_INDEX
     }
 
-    fn reference(index: u32) -> Vec<u8> {
-        std::fs::read(format!(
-            "../../reference/parts/ddstars/frame_{index:06}.rgb"
-        ))
-        .unwrap()
-    }
-
-    fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-        assert_eq!(
-            rendered.len(),
-            expected.len(),
-            "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-            rendered.len(),
-            expected.len()
-        );
-        rendered
-            .iter()
-            .zip(expected)
-            .filter(|(a, b)| a != b)
-            .count()
-    }
-
     /// The displayed page composed exactly as [`Ddstars::present`] composes
     /// it, through the live palette — the RGB a dump writes.
     fn page_rgb(part: &Ddstars, page: usize, palette: &Palette) -> Vec<u8> {
@@ -1469,7 +1397,7 @@ mod tests {
         for index in keyframes {
             let tick = tick_of(index);
             let mine = &captured[&tick];
-            let theirs = reference(index);
+            let theirs = reference("ddstars", index, "rgb");
             assert_eq!(
                 differing_bytes(mine, &theirs),
                 0,
@@ -1547,7 +1475,7 @@ mod tests {
         // the whole frame is byte-identical. A port with the clip would
         // lose them.
         let stars = [(65u8, 81, 101), (97, 125, 150), (166, 210, 251)];
-        let theirs = reference(1900);
+        let theirs = reference("ddstars", 1900, "rgb");
         let count = |rgb: &[u8]| -> usize {
             rows.iter()
                 .map(|y| {

@@ -381,7 +381,7 @@ mod tests {
         // the stride this part's own `lineblit(vram+y*80U, ...)` draws at, so the
         // picture is read row by row. On the port's 640-wide surface a kept `Some(320)`
         // would read every second scanline from the picture's right margin — the full
-        // run's measurement (`reference-indices.md` §26.8) — so the part reads its own
+        // run's measurement (`beglogo.md` §5) — so the part reads its own
         // rows, the unset offset.
         let mut rig = shell_rig();
         rig.view.y_line_offset = Some(320);
@@ -402,7 +402,7 @@ mod tests {
         // BEG/BEG.C:20-21 fills A-space with index 15, and `:25-34` writes the
         // DAC only after the 32 waits — so the screen the reference captures at
         // 430 is index 15 through the *inherited* palette, where entry 15 is
-        // (63,63,63) (Task 1 Step 6). The part must not clear the DAC at start.
+        // (63,63,63). The part must not clear the DAC at start.
         let (mut rig, mut part) = started();
         assert_eq!(rig.surface.get(0, 0), Some(15));
         assert_eq!(rig.surface.get(319, 399), Some(15));

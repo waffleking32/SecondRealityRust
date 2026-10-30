@@ -611,12 +611,10 @@ fn words_of(bytes: &[u8]) -> Vec<u16> {
 mod tests {
     use super::*;
 
-    use sr_engine::copper::CopperRegistry;
+    use crate::parts::test_rig::{reference, Rig};
     use sr_engine::surface::Surface;
     use sr_engine::view::View;
     use sr_engine::Palette;
-
-    use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
 
     /// The two tables by the path that resolves from this crate's directory —
     /// a unit test's working directory is not the repository root, which is
@@ -629,52 +627,20 @@ mod tests {
     /// DAC is still there".
     const UNWRITTEN: u8 = 200;
 
-    /// The engine's pieces held together, so a `PartCtx` can be built for one
-    /// call at a time — the same disjoint borrows `Engine::tick` makes.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            let mut palette = Palette::new();
-            // Two entries of the mode set's own table, as markers: 0 (which
-            // `waitr` rewrites) and 14 (which nothing does).
-            palette.set_entry(0, [1, 2, 3]);
-            palette.set_entry(14, [1, 2, 3]);
-            palette.set_entry(15, [63, 63, 63]);
-            palette.set_entry(UNWRITTEN, [1, 2, 3]);
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(320, 200),
-                palette,
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                // no player: this rig draws a band, and none of these parts asks for a cue
-                None,
-                frame,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
+    /// A 320×200 view over the shell's DAC, with markers: entries 0 (which
+    /// `waitr` rewrites), 14 (which nothing does) and [`UNWRITTEN`] of the mode
+    /// set's own table, and white 15. No player: the part asks for no cue.
+    fn shell_rig() -> Rig {
+        Rig::new(320, 200)
+            .palette_entry(0, [1, 2, 3])
+            .palette_entry(14, [1, 2, 3])
+            .palette_entry(15, [63, 63, 63])
+            .palette_entry(UNWRITTEN, [1, 2, 3])
     }
 
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Tunneli) {
-        let mut rig = Rig::new();
+        let mut rig = shell_rig();
         let mut part = Tunneli::at(TUNNEL_LOCAL, SINIT_LOCAL);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -1135,7 +1101,7 @@ mod tests {
         // stride mode 13h addresses with (`x + y*320`), and the cleared
         // memory. The stride is Part B's second convention — the original's own
         // LINE_LEN — not the surface's row stride.
-        let mut rig = Rig::new();
+        let mut rig = shell_rig();
         rig.surface.pixels_mut().fill(0xAA);
         rig.view = View::new(640, 400);
         rig.view.y_line_offset = Some(640);
@@ -1172,8 +1138,7 @@ mod tests {
             let row = y * LINE_LEN as usize;
             picture.extend_from_slice(&memory[row..row + SCREEN_WIDTH as usize]);
         }
-        let expected =
-            std::fs::read(format!("../../reference/parts/tunneli/frame_{name}.rgb")).unwrap();
+        let expected = reference("tunneli", name.parse().unwrap(), "rgb");
         assert_eq!(picture.len() * 3, expected.len(), "{name} is not 320x200");
         (picture, expected)
     }
@@ -1225,8 +1190,7 @@ mod tests {
     }
 
     /// **The shipped build's second ramp is 3/5, and this is the search that
-    /// says so** — the method Task 4 derived BEGLOGO's fade constant with (plan
-    /// Review Focus 5): every candidate is rendered over the four keyframes and
+    /// says so** — the method BEGLOGO's fade constant is derived with: every candidate is rendered over the four keyframes and
     /// compared with the reference bit for bit, and the answer has to be
     /// *unique*, not merely good.
     ///

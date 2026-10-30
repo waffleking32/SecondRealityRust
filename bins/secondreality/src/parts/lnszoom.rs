@@ -1087,7 +1087,9 @@ impl Part for Lnszoom {
 mod tests {
     use super::*;
 
-    use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ScriptedMusic};
+    use crate::parts::test_rig::{
+        differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ROOT, ScriptedMusic,
+    };
     use sr_engine::music::Music;
 
     /// A player scripted one `(order, row, musplus)` reading a tick; a tick
@@ -1120,14 +1122,14 @@ mod tests {
 
     fn started() -> (Rig, Lnszoom) {
         let mut rig = rig(running(4_000));
-        let mut part = Lnszoom::at("../../");
+        let mut part = Lnszoom::at(ROOT);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started_with(music: ScriptedMusic) -> (Rig, Lnszoom) {
         let mut rig = rig(music);
-        let mut part = Lnszoom::at("../../");
+        let mut part = Lnszoom::at(ROOT);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -1142,7 +1144,7 @@ mod tests {
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(45);
         let mut rig = rig(PlayerMusic::new(player, 0));
-        let mut part = Lnszoom::at("../../");
+        let mut part = Lnszoom::at(ROOT);
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -1467,7 +1469,7 @@ mod tests {
     #[test]
     fn a_mid_chain_start_does_not_pre_roll_the_music() {
         let mut rig = rig(running(10));
-        let mut part = Lnszoom::at("../../");
+        let mut part = Lnszoom::at(ROOT);
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
@@ -1475,7 +1477,7 @@ mod tests {
     #[test]
     fn a_run_without_music_is_refused() {
         let mut rig = rig(running(10));
-        let mut part = Lnszoom::at("../../");
+        let mut part = Lnszoom::at(ROOT);
         let mut ctx = rig.machine.ctx(None, 0, 0, 1, false, true);
         let error = part.init(&mut ctx).expect_err("no music, no gates");
         assert!(error.message.contains("music"), "{}", error.message);
@@ -1484,9 +1486,9 @@ mod tests {
     // --- the assets ----------------------------------------------------------
 
     fn assets() -> Lnszoom {
-        let driver = Lnszoom::at("../../");
+        let driver = Lnszoom::at(ROOT);
         let mut part = Lnszoom::new();
-        part.root = "../../";
+        part.root = ROOT;
         part.ex0 = driver.read(EX0_PATH).unwrap();
         let overlays = part.ex0_overlays();
         part.tables = [
@@ -1533,7 +1535,7 @@ mod tests {
             &part.picture(),
             "the picture itself is LENS.EXB's 64,000 pixel bytes at +784"
         );
-        let raw = Lnszoom::at("../../").read(EXB_PATH).unwrap();
+        let raw = Lnszoom::at(ROOT).read(EXB_PATH).unwrap();
         assert_eq!(
             &raw[EXB_PICTURE_AT..EXB_PICTURE_AT + VIDEO_BYTES],
             &part.picture()[..],
@@ -1592,7 +1594,7 @@ mod tests {
     #[test]
     fn the_palette_and_fades_are_the_sources_arithmetic() {
         let part = assets();
-        let image = Lnszoom::at("../../").read_image(EXB_PATH).unwrap();
+        let image = Lnszoom::at(ROOT).read_image(EXB_PATH).unwrap();
         // The overlays add EX0's triples to the base, clamped at 63.
         assert_eq!(part.ex0_overlays(), EXPECTED_OVERLAYS);
         for (i, (r, g, b)) in part.ex0_overlays().iter().enumerate() {
@@ -1630,7 +1632,7 @@ mod tests {
     #[test]
     fn the_path_data_is_the_expected_size_and_starts_where_the_c_prelude_reads() {
         let part = assets();
-        let exp = Lnszoom::at("../../").read(EXP_PATH).unwrap();
+        let exp = Lnszoom::at(ROOT).read(EXP_PATH).unwrap();
         let count = usize::from(u16::from_le_bytes([exp[2], exp[3]]));
         assert_eq!(count, 2 * PATH1_FRAMES);
         assert_eq!(PATH_HEADER + 2 * count + PATH2_FRAMES * 8, exp.len());
@@ -1663,7 +1665,7 @@ mod tests {
     /// modulo 251, and one path frame.
     fn synthetic(path: [i16; 4]) -> Lnszoom {
         let mut part = Lnszoom::new();
-        part.root = "../../";
+        part.root = ROOT;
         part.rotpic = (0..VIDEO_MEMORY).map(|i| (i % 251) as u8).collect();
         part.rotpic90 = Lnszoom::build_rotpic90(&part.rotpic);
         part.path2 = path.to_vec();
@@ -1823,8 +1825,7 @@ mod tests {
     #[test]
     fn the_forehead_asset_difference_is_the_whole_residual() {
         let mut patched = assets();
-        let reference_plane =
-            std::fs::read("../../reference/parts/lnszoom/frame_002700.idx").unwrap();
+        let reference_plane = reference("lnszoom", 2700, "idx");
         let differing: Vec<usize> = (0..VIDEO_BYTES)
             .filter(|i| patched.back[*i] != reference_plane[*i])
             .collect();

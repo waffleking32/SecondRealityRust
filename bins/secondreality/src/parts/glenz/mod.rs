@@ -975,7 +975,7 @@ mod tests {
     ///
     /// The measured rate is MUSIC1's tempo-130 tick clock: 52 music ticks a
     /// second against the reference's 70.086 video frames, i.e.
-    /// 52,000/70,086 ≈ 0.7419 zframes a frame (the brief's 0.7422 rounded).
+    /// 52,000/70,086 ≈ 0.7419 zframes a frame.
     /// With that rate the reset tick is followed by zframe 300 at +404 frames
     /// and 333 at +449 — the measured 1515 and 1560 from 1111
     /// (`reference/music/second2b`; `reference-indices.md` §7.6).
@@ -1293,7 +1293,7 @@ mod tests {
         assert_eq!(part.vram[..SCREEN_PIXELS], part.bgpic[..]);
     }
 
-    /// The Task 1 corpus: the first object pixel is main frame 44, and the
+    /// The measured corpus: the first object pixel is main frame 44, and the
     /// six silhouettes at 1606..1611 are frames 44..49 (`tools/glenz_physics.py
     /// entry`; `reference-indices.md` §7.6). The boxes below are that tool's,
     /// against the frame's own sky; `bgpic`'s rows 0..149 are the same sky.

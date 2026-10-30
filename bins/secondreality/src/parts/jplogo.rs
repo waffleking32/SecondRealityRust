@@ -688,10 +688,11 @@ impl Part for Jplogo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::view::View;
-    use sr_engine::Surface;
+    use crate::audio::PlayerMusic;
+    use crate::parts::test_rig::{
+        differing_pixels, reference, rgb_of, trace_position, Reading, Rig, ROOT, ScriptedMusic,
+    };
+    use sr_engine::music::Music;
 
     // ------------------------------------------------------- the source ----
 
@@ -854,24 +855,6 @@ mod tests {
             };
         }
         row
-    }
-
-    fn rgb_frame(surface: &Surface, palette: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 3);
-        for y in 0..SCREEN_HEIGHT as usize {
-            for x in 0..SCREEN_WIDTH as usize {
-                let index = surface.pixels()[y * SCREEN_WIDTH as usize + x];
-                let entry = palette.entry(index);
-                for channel in entry {
-                    out.push(sr_engine::palette::dac_expand(channel));
-                }
-            }
-        }
-        out
-    }
-
-    fn reference_rgb(index: u32) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/jplogo/frame_{index:06}.rgb")).unwrap()
     }
 
     // ------------------------------------------------------ the tables ----
@@ -1116,10 +1099,10 @@ mod tests {
         // `inittwk`'s `mov cx,768 / out dx,al` (`ASM.ASM:31-38`) zeroes the
         // DAC before the upload, so an inherited palette cannot survive past
         // entry 169 — and entry 170's blue is that zero, not the old DAC's.
-        let mut rig = Rig::new();
+        let mut rig = real_rig();
         rig.palette = patterned_palette();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         let file = asset().palette;
         assert_eq!(
             rig.palette.entry(170),
@@ -1166,85 +1149,21 @@ mod tests {
 
     // -------------------------------------------------------- the part ----
 
-    /// A test rig: one surface, the live palette, the engine's timeline and
-    /// copper, and a real player.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-        music: crate::audio::PlayerMusic,
-        frame: u32,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            use crate::audio::{lock, test_player, PlayerMusic};
-            use crate::shell::ModuleId;
-            let player = test_player(ModuleId::Music1).unwrap();
-            lock(&player).play_song(96);
-            Rig {
-                surface: Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-                music: PlayerMusic::new(player, 0),
-                frame: 0,
-            }
-        }
-
-        fn init(&mut self, part: &mut Jplogo, fresh: bool) -> Result<(), PartError> {
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.music),
-                self.frame,
-                0,
-                1,
-                false,
-                fresh,
-            );
-            part.init(&mut ctx)
-        }
-
-        fn tick(&mut self, part: &mut Jplogo, exit: bool) -> PartStatus {
-            self.music.poll();
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.music),
-                self.frame,
-                0,
-                1,
-                exit,
-                false,
-            );
-            self.frame += 1;
-            part.frame(&mut ctx)
-        }
-    }
-
-    /// The trace's `ord,row` at a boot frame.
-    fn trace_position(frame: u32) -> (u8, u8) {
-        let text = std::fs::read_to_string("../../reference/music/second3d/trace.csv").unwrap();
-        for line in text.lines().skip(1) {
-            let fields: Vec<&str> = line.split(',').collect();
-            if fields[0].parse::<u32>().unwrap() == frame {
-                return (fields[1].parse().unwrap(), fields[2].parse().unwrap());
-            }
-        }
-        panic!("the trace has no sample at {frame}");
+    /// A rig with the real player, `MUSIC1` seeked to order 96. The part sets
+    /// no copper, so a step is the engine's poll and the part's `frame`.
+    fn real_rig() -> Rig<PlayerMusic> {
+        use crate::audio::{lock, test_player};
+        use crate::shell::ModuleId;
+        let player = test_player(ModuleId::Music1).unwrap();
+        lock(&player).play_song(96);
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(PlayerMusic::new(player, 0))
     }
 
     #[test]
     fn the_view_is_320_by_400_at_80_plane_bytes_a_row() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!((rig.view.width, rig.view.height), (SCREEN_WIDTH, SCREEN_HEIGHT));
         assert!(!rig.view.double_scan, "CRTC 0x09 = 0");
         assert_eq!(rig.view.y_line_offset, Some(LINE_LEN));
@@ -1256,15 +1175,15 @@ mod tests {
 
     #[test]
     fn the_entry_ticks_walk_scroll_y_from_399_to_zero() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // Tick 0 shows the start-400 screen `init` left.
-        rig.tick(&mut part, false);
+        rig.step(&mut part);
         assert_eq!(rig.view.start_addr, 400 * 320);
         let scrolls = entry_scrolls();
         for (step, &row) in scrolls.iter().enumerate() {
-            rig.tick(&mut part, false);
+            rig.step(&mut part);
             assert_eq!(
                 rig.view.start_addr,
                 u32::from(row) * 320,
@@ -1273,7 +1192,7 @@ mod tests {
             );
         }
         // The extra `dis_waitb()` before `doit()` holds start 0.
-        rig.tick(&mut part, false);
+        rig.step(&mut part);
         assert_eq!(rig.view.start_addr, 0);
     }
 
@@ -1285,9 +1204,8 @@ mod tests {
         // 17060, five frames before tick 0's 17065, and tick 0's poll is the
         // (pre-roll + 1)th — so 483 + 1 - 5 = 479.
         {
-            use crate::audio::{lock, test_player, PlayerMusic};
+            use crate::audio::{lock, test_player};
             use crate::shell::ModuleId;
-            use sr_engine::music::Music;
             let player = test_player(ModuleId::Music1).unwrap();
             lock(&player).play_song(96);
             let mut music = PlayerMusic::new(player, 0);
@@ -1303,116 +1221,59 @@ mod tests {
             assert_eq!(polls, 479);
             assert_eq!(MUSIC_PRE_ROLL + 1 - 5, polls);
         }
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // The player is fresh from `_zplaysong(96)`; 483 polls leave it at
         // the row-58 window, whose start is five ticks before tick 0.
         let wanted = [(0u32, 96u8, 58u8), (3, 96, 59), (44, 98, 0), (76, 98, 4),
                       (84, 98, 5), (235, 98, 23), (435, 98, 48), (635, 98, 49)];
         for (tick, order, row) in wanted {
-            while rig.frame < tick {
-                rig.tick(&mut part, false);
+            while rig.tick < tick {
+                rig.step(&mut part);
             }
-            if rig.frame == tick {
-                rig.tick(&mut part, false);
+            if rig.tick == tick {
+                rig.step(&mut part);
             }
             assert_eq!(
-                rig.music.position().order,
+                rig.player().position().order,
                 order,
                 "tick {tick}: the trace at {} is {order}:{row}",
                 17065 + tick
             );
-            assert_eq!(rig.music.position().row, row, "tick {tick}");
+            assert_eq!(rig.player().position().row, row, "tick {tick}");
             assert_eq!(
-                (rig.music.position().order, rig.music.position().row),
-                trace_position(17065 + tick),
+                (rig.player().position().order, rig.player().position().row),
+                trace_position("second3d", 17065 + tick),
                 "tick {tick} against the trace"
             );
             if tick == 84 {
                 // By the extra wait before `doit()` the gate reads
                 // `musplus >= 4` (order 98 row 5).
-                assert!(rig.music.musplus() >= 4);
+                assert!(rig.player().musplus() >= 4);
             }
         }
     }
 
     #[test]
     fn a_mid_chain_start_does_not_pre_poll() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, false).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
         // `_zplaysong` publishes nothing until the ring drains: no pre-poll.
-        assert_eq!(rig.music.position().order, 0);
-        assert_eq!(rig.music.position().row, 0);
-    }
-
-    /// A music stand-in that scripts `musplus`.
-    struct GateMusic {
-        plus: i32,
-    }
-
-    impl Music for GateMusic {
-        fn poll(&mut self) {}
-        fn position(&self) -> MusicPosition {
-            MusicPosition::default()
-        }
-        fn musplus(&mut self) -> i32 {
-            self.plus
-        }
-        fn musrow(&mut self) -> i32 {
-            0
-        }
-        fn muscode(&mut self, _wanted: i32) -> i32 {
-            0
-        }
-        fn sync(&mut self) -> i32 {
-            panic!("the gate does not sync")
-        }
-        fn getmframe(&mut self) -> i32 {
-            0
-        }
-        fn setmframe(&mut self, _frame: i32) {}
+        assert_eq!(rig.player().position().order, 0);
+        assert_eq!(rig.player().position().row, 0);
     }
 
     #[test]
     fn the_gate_waits_for_musplus_at_least_four() {
-        let mut surface = Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT);
-        let mut view = View::new(SCREEN_WIDTH, SCREEN_HEIGHT);
-        let mut palette = Palette::new();
-        let mut copper = CopperRegistry::new();
-        let mut music = GateMusic { plus: -6 };
-        let mut part = Jplogo::at("../../");
-        {
-            let mut ctx = PartCtx::new(
-                &mut surface,
-                &mut view,
-                &mut palette,
-                &mut copper,
-                Some(&mut music),
-                0,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.init(&mut ctx).unwrap();
-        }
+        let music = ScriptedMusic::musplus(vec![-6]).never_syncs("the gate does not sync");
+        let mut rig = Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music);
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.ctx(0)).unwrap();
         let mut tick = |part: &mut Jplogo, plus: i32, frame: u32| {
-            music.plus = plus;
-            let mut ctx = PartCtx::new(
-                &mut surface,
-                &mut view,
-                &mut palette,
-                &mut copper,
-                Some(&mut music),
-                frame,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.frame(&mut ctx)
+            rig.player().script = vec![Reading { musplus: plus, ..Reading::default() }];
+            part.frame(&mut rig.ctx(frame))
         };
         // The entry, then the extra wait.
         for frame in 0..=EXTRA_WAIT_TICK {
@@ -1429,9 +1290,9 @@ mod tests {
 
     #[test]
     fn the_doit_guard_is_a_palimpsest() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         part.y1 = 0;
         part.y2 = 400;
         part.lasty[100] = 100;
@@ -1463,22 +1324,22 @@ mod tests {
 
     #[test]
     fn the_counter_freezes_after_511_and_reads_the_table_before_it() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
         // Frame 510 takes the table's 511th entry, which is the settled
         // (0, 400).
-        rig.frame = DOIT_FIRST_TICK;
+        rig.tick = DOIT_FIRST_TICK;
         part.frame = 510;
-        rig.tick(&mut part, false);
+        rig.step(&mut part);
         assert_eq!(part.frame, 511);
         assert_eq!((part.y1, part.y2), (0, 400));
         // The 512th leaves `y1`/`y2` alone: `if(frame>511) c=400;` never
         // assigns them, and `c` is not read anywhere again.
         part.y1 = 7;
         part.y2 = 123;
-        rig.tick(&mut part, false);
+        rig.step(&mut part);
         assert_eq!(part.frame, 512);
         assert_eq!((part.y1, part.y2), (7, 123), "the freeze keeps the values");
     }
@@ -1488,54 +1349,49 @@ mod tests {
         // `JP.C:74-76`: `setborder(0)` around the wait and `setborder(127)`
         // after it. Nothing in a run sets Scroll Lock; the branch exists so
         // the source's structure is present and testable.
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
         part.scroll_lock = true;
-        rig.frame = DOIT_FIRST_TICK;
-        rig.tick(&mut part, false);
+        rig.tick = DOIT_FIRST_TICK;
+        rig.step(&mut part);
         assert_eq!(rig.view.border, Some(127));
     }
 
     #[test]
     fn the_frame_cap_and_exit_end_the_part() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
-        rig.frame = DOIT_FIRST_TICK;
+        rig.tick = DOIT_FIRST_TICK;
         part.frame = FRAME_CAP;
-        let status = rig.tick(&mut part, false);
+        let status = rig.step(&mut part);
         assert_eq!(status, PartStatus::Finished);
         assert!(part.done);
 
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
-        rig.frame = DOIT_FIRST_TICK;
-        assert_eq!(rig.tick(&mut part, true), PartStatus::Finished);
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
+        rig.tick = DOIT_FIRST_TICK;
+        assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert!(part.done);
     }
 
     #[test]
     fn the_rendered_keyframes_are_the_references() {
-        let mut rig = Rig::new();
-        let mut part = Jplogo::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Jplogo::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // The view is at start 0 from the entry's last step on.
         for _ in 0..=235 {
-            rig.tick(&mut part, false);
+            rig.step(&mut part);
         }
-        assert_eq!(rig.frame, 236);
-        let mine = rgb_frame(&rig.surface, &rig.palette);
-        let theirs = reference_rgb(17300);
-        assert_eq!(mine.len(), theirs.len());
-        let differing = mine
-            .chunks_exact(3)
-            .zip(theirs.chunks_exact(3))
-            .filter(|(a, b)| a != b)
-            .count();
+        assert_eq!(rig.tick, 236);
+        let screen = usize::from(SCREEN_WIDTH) * usize::from(SCREEN_HEIGHT);
+        let mine = rgb_of(&rig.surface.pixels()[..screen], &rig.palette);
+        let differing = differing_pixels(&mine, &reference("jplogo", 17300, "rgb"));
         assert_eq!(differing, 0, "17300 at tick 235");
     }
 }

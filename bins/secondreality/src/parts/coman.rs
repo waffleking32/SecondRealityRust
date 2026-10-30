@@ -824,8 +824,9 @@ impl Coman {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::PlayerMusic;
+    use crate::parts::test_rig::{Rig, ROOT};
     use sr_engine::music::Music;
-    use sr_engine::view::View;
 
     #[test]
     fn wflip_swaps_the_halves() {
@@ -1297,97 +1298,43 @@ mod tests {
 
     // ------------------------------------------------------------ the part --
 
-    /// A test rig: one surface, the live palette, the engine's timeline and
-    /// copper, and a real player.
-    struct Rig {
-        surface: sr_engine::Surface,
-        view: View,
-        palette: Palette,
-        copper: sr_engine::copper::CopperRegistry,
-        music: crate::audio::PlayerMusic,
-        frame: u32,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            use crate::audio::{lock, test_player, PlayerMusic};
-            use crate::shell::ModuleId;
-            let player = test_player(ModuleId::Music1).unwrap();
-            lock(&player).play_song(91);
-            Rig {
-                surface: sr_engine::Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT),
-                view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-                palette: Palette::new(),
-                copper: sr_engine::copper::CopperRegistry::new(),
-                music: PlayerMusic::new(player, 0),
-                frame: 0,
-            }
-        }
-
-        fn init(&mut self, part: &mut Coman, fresh: bool) -> Result<(), PartError> {
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.music),
-                self.frame,
-                0,
-                1,
-                false,
-                fresh,
-            );
-            part.init(&mut ctx)
-        }
-
-        fn tick(&mut self, part: &mut Coman, exit: bool) -> PartStatus {
-            use sr_engine::music::Music;
-            self.music.poll();
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.music),
-                self.frame,
-                0,
-                1,
-                exit,
-                false,
-            );
-            self.frame += 1;
-            part.frame(&mut ctx)
-        }
+    /// A rig with the real player, `MUSIC1` seeked to order 91. The part sets
+    /// no copper, so a step is the engine's poll and the part's `frame`.
+    fn real_rig() -> Rig<PlayerMusic> {
+        use crate::audio::{lock, test_player};
+        use crate::shell::ModuleId;
+        let player = test_player(ModuleId::Music1).unwrap();
+        lock(&player).play_song(91);
+        Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(PlayerMusic::new(player, 0))
     }
 
     #[test]
     fn the_entry_pre_roll_lands_the_gate_on_order_93_row_zero() {
-        use sr_engine::music::Music;
-        let mut rig = Rig::new();
+        let mut rig = real_rig();
         // The player is fresh from `_zplaysong(91)`: no poll has advanced it.
-        assert_eq!(rig.music.position().order, 0);
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, true).unwrap();
-        let position = rig.music.position();
+        assert_eq!(rig.player().position().order, 0);
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
+        let position = rig.player().position();
         assert_eq!(position.order, 91);
         assert_eq!(position.row, 63, "527 polls leave the published row at 63");
-        assert_eq!(rig.music.musplus(), -1, "the gate has not opened yet");
+        assert_eq!(rig.player().musplus(), -1, "the gate has not opened yet");
         // The engine's first tick polls once more: the 528th poll is the
         // order-93 row-0 crossing the reference's gate opens on.
-        rig.music.poll();
-        let position = rig.music.position();
+        rig.player().poll();
+        let position = rig.player().position();
         assert_eq!((position.order, position.row), (93, 0));
-        assert_eq!(rig.music.musplus(), 0);
+        assert_eq!(rig.player().musplus(), 0);
         assert_eq!(Coman::MUSIC_PRE_ROLL, 527);
     }
 
     #[test]
     fn a_mid_chain_start_does_not_pre_poll_and_blacks_the_inherited_screen() {
-        let mut rig = Rig::new();
+        let mut rig = real_rig();
         rig.surface.pixels_mut().fill(0xFF);
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, false).unwrap();
-        assert_eq!(rig.music.position().order, 0, "nothing was polled");
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx_chain(0)).unwrap();
+        assert_eq!(rig.player().position().order, 0, "nothing was polled");
         // The mode set and `inittwk` clear the screen the previous part left.
         assert!(rig.surface.pixels()[..SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize]
             .iter()
@@ -1398,7 +1345,7 @@ mod tests {
     fn the_iterations_run_every_second_tick_and_the_frame_four_waits_add_two() {
         // The source's `frame += (frepeat = dis_waitb())`: two vblanks an
         // iteration, and the frame-4 body's two `dis_waitb` calls add two.
-        let mut part = Coman::at("../../");
+        let mut part = Coman::at(ROOT);
         part.wave1 = part.read_wave(W1_PATH).unwrap();
         part.wave2 = part.read_wave(W2_PATH).unwrap();
         part.started = true;
@@ -1421,7 +1368,7 @@ mod tests {
 
     #[test]
     fn the_two_pages_alternate_and_the_display_lags_one_iteration() {
-        let mut part = Coman::at("../../");
+        let mut part = Coman::at(ROOT);
         part.wave1 = part.read_wave(W1_PATH).unwrap();
         part.wave2 = part.read_wave(W2_PATH).unwrap();
         let mut last_copy: Option<u16> = None;
@@ -1442,12 +1389,12 @@ mod tests {
 
     #[test]
     fn the_gate_opens_on_the_first_tick_and_the_first_picture_lags_one_iteration() {
-        let mut rig = Rig::new();
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // The engine's tick 0 is the 528th poll: the gate passes and the
         // first iteration runs, but the page it displays is the cleared one.
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert!(part.started);
         assert_eq!(part.start_page, PAGE_LO);
         assert!(rig.surface.pixels()[..SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize]
@@ -1455,9 +1402,9 @@ mod tests {
             .all(|&pixel| pixel == 0));
         // The wait tick shows the same page; the second iteration selects the
         // page the first copied into.
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(part.start_page, PAGE_LO);
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(part.start_page, PAGE_HI);
         // The picture is still below the screen: `startrise` starts at 160 and
         // falls one a vblank, so the copy's top row 70 + startrise is off the
@@ -1466,7 +1413,7 @@ mod tests {
             .iter()
             .all(|&pixel| pixel == 0));
         for _ in 3..80 {
-            rig.tick(&mut part, false);
+            rig.step(&mut part);
         }
         assert!(
             rig.surface.pixels()[..SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize]
@@ -1478,20 +1425,19 @@ mod tests {
 
     #[test]
     fn the_part_ends_on_the_music_break_not_the_dead_frame_cap() {
-        use sr_engine::music::Music;
-        let mut rig = Rig::new();
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         let mut tick = 0u32;
         loop {
             assert!(tick < FRAME_CAP, "the part outlived the dead frame cap");
-            if rig.tick(&mut part, false) == PartStatus::Finished {
+            if rig.step(&mut part) == PartStatus::Finished {
                 break;
             }
             tick += 1;
         }
-        let musplus = rig.music.musplus();
-        let position = rig.music.position();
+        let musplus = rig.player().musplus();
+        let position = rig.player().position();
         assert_eq!(
             (position.order, position.row),
             (96, 57),
@@ -1508,12 +1454,12 @@ mod tests {
 
     #[test]
     fn the_exit_flag_ends_the_part_where_the_source_checks_it() {
-        let mut rig = Rig::new();
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, true).unwrap();
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
-        assert_eq!(rig.tick(&mut part, true), PartStatus::Finished);
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Finished, "sticky");
+        let mut rig = real_rig();
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
+        assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
+        assert_eq!(rig.step(&mut part), PartStatus::Finished, "sticky");
     }
 
     #[test]
@@ -1523,11 +1469,11 @@ mod tests {
         // below row 200 and the screen is one colour (the reference's 17,000
         // is flat black, `reference-indices.md` §16). The part keeps running
         // off-screen until the break at tick 2,014.
-        let mut rig = Rig::new();
-        let mut part = Coman::at("../../");
-        rig.init(&mut part, true).unwrap();
+        let mut rig = real_rig();
+        let mut part = Coman::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         for tick in 0..=1_964u32 {
-            rig.tick(&mut part, false);
+            rig.step(&mut part);
             let pixels = &rig.surface.pixels()[..SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize];
             if tick == 1_850 {
                 assert!(pixels.iter().any(|&pixel| pixel != 0), "terrain at 1,850");

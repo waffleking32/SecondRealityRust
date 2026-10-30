@@ -376,81 +376,15 @@ impl Part for Panicend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
+    use crate::audio::PlayerMusic;
+    use crate::parts::test_rig::{reference, rgb_of, Rig, ROOT};
     use sr_engine::view::View;
-    use sr_engine::{dac_expand, IndexedFrame};
+    use sr_engine::IndexedFrame;
 
-    /// The engine's pieces, one of each, as a part sees them.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        fn new(surface: Surface, view: View, palette: Palette) -> Rig {
-            Rig {
-                surface,
-                view,
-                palette,
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn blank() -> Rig {
-            Rig::new(
-                Surface::new(LINE_PIXELS, FULL_HEIGHT as usize),
-                View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT),
-                Palette::new(),
-            )
-        }
-
-        fn tick(&mut self, part: &mut Panicend, exit_requested: bool) -> PartStatus {
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                None,
-                0,
-                0,
-                1,
-                exit_requested,
-                false,
-            );
-            part.frame(&mut ctx)
-        }
-
-        fn init(&mut self, part: &mut Panicend) {
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                None,
-                0,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.init(&mut ctx).unwrap();
-        }
-
-        /// The displayed frame as palette indices, through the view as it
-        /// stands after the tick (single band, so one palette).
-        fn displayed(&self) -> Vec<u8> {
-            let mut out = vec![0u8; self.view.width as usize * self.view.height as usize];
-            for y in 0..self.view.height {
-                for x in 0..self.view.width {
-                    let at = self.view.source_index(&self.surface, x, y);
-                    out[y as usize * self.view.width as usize + x as usize] =
-                        self.surface.pixels()[at];
-                }
-            }
-            out
-        }
+    /// A 320×200 view over the part's 640×400 surface. The part sets no
+    /// copper and reads no `ctx.frame`, so a step is its `frame` alone.
+    fn blank_rig() -> Rig {
+        Rig::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT)
     }
 
     fn find(bytes: &[u8], needle: &[u8]) -> bool {
@@ -546,22 +480,15 @@ mod tests {
     #[test]
     fn the_line_walks_in_from_both_edges_and_the_dot_is_at_one_sixty_one_hundred() {
         // A surface with a known non-zero fill makes the zero writes visible.
-        let mut rig = Rig::new(
-            {
-                let mut surface = Surface::new(LINE_PIXELS, FULL_HEIGHT as usize);
-                surface.pixels_mut().fill(7);
-                surface
-            },
-            View::new(SCREEN_WIDTH as u16, FULL_HEIGHT),
-            Palette::new(),
-        );
+        let mut rig = Rig::new(SCREEN_WIDTH as u16, FULL_HEIGHT);
+        rig.surface.pixels_mut().fill(7);
         let mut part = Panicend::new();
-        rig.init(&mut part);
+        part.init(&mut rig.ctx(0)).unwrap();
         // Ticks 0..=13 are the mode change and the eleven collapse passes
         // (the last of which includes the source's two closing copies);
         // tick 14 is the line's first iteration.
         for _ in 0..=14 {
-            assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         }
         let row = 200 * LINE_PIXELS;
         for x in [20, 300, 21, 299, 22, 298, 23, 297] {
@@ -569,18 +496,18 @@ mod tests {
         }
         // The 47 iterations cover x = 20..300 on row 200.
         for _ in 15..=60 {
-            assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+            assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         }
         for x in 20..=300usize {
             assert_eq!(rig.surface.pixels()[row + x], 0, "row 200, x={x}");
         }
         // Tick 61 writes the dot in colour 1; the display maps memory row 200
         // to displayed row 100 with the 1280-pixel line offset.
-        assert_eq!(rig.tick(&mut part, false), PartStatus::Continuing);
+        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(rig.surface.pixels()[row + 160], 1, "the dot at source (160, 200)");
         assert_eq!((rig.view.width, rig.view.height), (320, 200));
         assert_eq!(rig.view.y_line_offset, Some(1280));
-        let displayed = rig.displayed();
+        let displayed = rig.rendered_indices();
         assert_eq!(displayed[100 * 320 + 160], 1, "the dot is at (160, 100)");
         // The line's writes are row 200's x = 20..300; the display's row 100
         // is memory row 200, so x = 0..19 keep the surface's fill.
@@ -588,13 +515,13 @@ mod tests {
 
         // On a blank inherited surface the same run leaves exactly one
         // visible pixel: the whole picture at 9000.
-        let mut blank = Rig::blank();
+        let mut blank = blank_rig();
         let mut part = Panicend::new();
-        blank.init(&mut part);
+        part.init(&mut blank.ctx(0)).unwrap();
         for _ in 0..=61 {
-            assert_eq!(blank.tick(&mut part, false), PartStatus::Continuing);
+            assert_eq!(blank.step(&mut part), PartStatus::Continuing);
         }
-        let displayed = blank.displayed();
+        let displayed = blank.rendered_indices();
         let visible: Vec<usize> = displayed
             .iter()
             .enumerate()
@@ -609,12 +536,12 @@ mod tests {
     fn the_part_ignores_the_exit_flag_and_completes_its_finite_acts() {
         // The source never calls `dis_exit()`: the part's acts are a fixed
         // sequence of waits, and a run with no exit request gets all of them.
-        let mut plain = Rig::blank();
+        let mut plain = blank_rig();
         let mut part = Panicend::new();
-        plain.init(&mut part);
+        part.init(&mut plain.ctx(0)).unwrap();
         let mut finished_at = None;
         for tick in 0..200u32 {
-            if plain.tick(&mut part, false) == PartStatus::Finished {
+            if plain.step(&mut part) == PartStatus::Finished {
                 finished_at = Some(tick);
                 break;
             }
@@ -628,18 +555,18 @@ mod tests {
 
         // Set the flag on every tick, from outside, as the engine hands it
         // to the part: the part does not read it and its acts are identical.
-        let mut flagged = Rig::blank();
+        let mut flagged = blank_rig();
         let mut part = Panicend::new();
-        flagged.init(&mut part);
+        part.init(&mut flagged.ctx(0)).unwrap();
         let mut also_finished_at = None;
         for tick in 0..200u32 {
-            if flagged.tick(&mut part, true) == PartStatus::Finished {
+            if flagged.step_exit(&mut part) == PartStatus::Finished {
                 also_finished_at = Some(tick);
                 break;
             }
         }
         assert_eq!(also_finished_at, Some(FINISHED_STEP));
-        assert_eq!(plain.displayed(), flagged.displayed(), "the flag changes nothing");
+        assert_eq!(plain.rendered_indices(), flagged.rendered_indices(), "the flag changes nothing");
         assert_eq!(plain.palette, flagged.palette);
         // The pulse's last value is `cos(59/120*6π)*31+32` truncated: 1, so
         // the held dot is drawn through DAC entry 1 = (1, 1, 1), and entry 0
@@ -652,8 +579,8 @@ mod tests {
     #[test]
     fn the_reference_frames_are_the_collapse_and_the_line_they_describe() {
         // The numbers the note quotes, produced from the reference files.
-        let collapse = std::fs::read("../../reference/parts/panicend/frame_008792.rgb").unwrap();
-        let line = std::fs::read("../../reference/parts/panicend/frame_008800.rgb").unwrap();
+        let collapse = reference("panicend", 8792, "rgb");
+        let line = reference("panicend", 8800, "rgb");
         let row = |frame: &[u8], y: usize| -> Vec<usize> {
             (0..SCREEN_WIDTH)
                 .filter(|x| {
@@ -682,7 +609,7 @@ mod tests {
                 assert!(visible.is_empty(), "8800 has nothing at row {y}");
             }
         }
-        let idx = std::fs::read("../../reference/parts/panicend/frame_009000.idx").unwrap();
+        let idx = reference("panicend", 9000, "idx");
         assert_eq!(idx.len(), SCREEN_WIDTH * SCREEN_HEIGHT as usize);
         let visible: Vec<(usize, u8)> = idx
             .iter()
@@ -770,148 +697,53 @@ mod tests {
 
     // --- the handoff: TECHNO's end state, then this part ---------------------
 
-    /// Drive TECHNO's port to `Done` on a real player, then return the
-    /// inherited `(surface, view, palette)`.
-    fn techno_handoff() -> (Surface, View, Palette) {
-        use crate::audio::{lock, test_player, PlayerMusic};
+    /// Drive TECHNO's port to `Done` on a real player, then return the rig it
+    /// leaves, without the player: what this part inherits.
+    fn techno_handoff() -> Rig {
+        use crate::audio::{lock, test_player};
         use crate::shell::ModuleId;
-        use sr_engine::music::Music;
 
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(18);
-        let mut surface = Surface::new(LINE_PIXELS, FULL_HEIGHT as usize);
-        let mut view = View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT);
-        let mut palette = Palette::new();
-        let mut copper = CopperRegistry::new();
-        let mut music = PlayerMusic::new(player, 0);
-        let mut techno = crate::parts::techno::Techno::at("../../");
-        {
-            let mut ctx = PartCtx::new(
-                &mut surface,
-                &mut view,
-                &mut palette,
-                &mut copper,
-                Some(&mut music),
-                0,
-                0,
-                1,
-                false,
-                true,
-            );
-            techno.init(&mut ctx).unwrap();
-        }
-        let mut finished = false;
-        for _ in 0..4200u32 {
-            music.poll();
-            let status = {
-                let mut ctx = PartCtx::new(
-                    &mut surface,
-                    &mut view,
-                    &mut palette,
-                    &mut copper,
-                    Some(&mut music),
-                    0,
-                    0,
-                    1,
-                    false,
-                    false,
-                );
-                techno.frame(&mut ctx)
-            };
-            if status == PartStatus::Finished {
-                finished = true;
-                break;
-            }
-        }
+        let mut rig = blank_rig().with(PlayerMusic::new(player, 0));
+        let mut techno = crate::parts::techno::Techno::at(ROOT);
+        techno.init(&mut rig.init_ctx(0)).unwrap();
+        let finished = (0..4200u32).any(|_| rig.step(&mut techno) == PartStatus::Finished);
         assert!(finished, "TECHNO's troll reaches Done");
-        (surface, view, palette)
+        Rig { machine: rig.machine, music: None, tick: 0 }
     }
 
     /// One PANICEND tick in the engine's order: the frame is sized from the
     /// view as the tick starts, the part draws, and the band is composed
     /// through the view as it then stands.
-    fn panicend_tick(
-        surface: &mut Surface,
-        view: &mut View,
-        palette: &mut Palette,
-        copper: &mut CopperRegistry,
-        part: &mut Panicend,
-    ) -> IndexedFrame {
-        let mut frame = IndexedFrame::new(view.width, view.height);
-        {
-            let mut ctx = PartCtx::new(
-                surface,
-                view,
-                palette,
-                copper,
-                None,
-                0,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.frame(&mut ctx);
-        }
+    fn panicend_tick(rig: &mut Rig, part: &mut Panicend) -> IndexedFrame {
+        let mut frame = IndexedFrame::new(rig.view.width, rig.view.height);
+        part.frame(&mut rig.ctx(0));
         let height = frame.height;
-        sr_engine::compose_band(&mut frame, surface, view, 0, height);
+        sr_engine::compose_band(&mut frame, &rig.surface, &rig.view, 0, height);
         frame
-    }
-
-    fn rgb(frame: &IndexedFrame, palette: &Palette) -> Vec<u8> {
-        let mut out = Vec::with_capacity(frame.pixels.len() * 3);
-        for index in &frame.pixels {
-            let entry = palette.entry(*index);
-            out.push(dac_expand(entry[0]));
-            out.push(dac_expand(entry[1]));
-            out.push(dac_expand(entry[2]));
-        }
-        out
     }
 
     #[test]
     fn the_handoff_matches_the_collapse_8792_and_the_line_8800() {
-        let (mut surface, mut view, mut palette) = techno_handoff();
+        let mut rig = techno_handoff();
         // TECHNO leaves the troll: an interleaved 320×400 picture from
         // pixel 320 of a 640-pixel line, displayed at start 320.
-        assert_eq!((view.width, view.height), (320, 400));
-        assert_eq!(view.start_addr, 320);
-        assert_eq!(view.y_line_offset, Some(640));
+        assert_eq!((rig.view.width, rig.view.height), (320, 400));
+        assert_eq!(rig.view.start_addr, 320);
+        assert_eq!(rig.view.y_line_offset, Some(640));
 
-        let mut copper = CopperRegistry::new();
         let mut part = Panicend::new();
-        {
-            let mut ctx = PartCtx::new(
-                &mut surface,
-                &mut view,
-                &mut palette,
-                &mut copper,
-                None,
-                0,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.init(&mut ctx).unwrap();
-        }
+        part.init(&mut rig.ctx(0)).unwrap();
         let mut frames = Vec::new();
         for _ in 0..20 {
-            let frame = panicend_tick(
-                &mut surface,
-                &mut view,
-                &mut palette,
-                &mut copper,
-                &mut part,
-            );
+            let frame = panicend_tick(&mut rig, &mut part);
             // The palette in force at this tick: the collapse uploads a new
             // fade table at the start of each pass.
-            frames.push(rgb(&frame, &palette));
+            frames.push(rgb_of(&frame.pixels, &rig.palette));
         }
 
-        let reference = |name: &str| {
-            std::fs::read(format!("../../reference/parts/panicend/{name}")).unwrap()
-        };
+        let reference = |index: u32| reference("panicend", index, "rgb");
         let compare = |mine: &[u8], theirs: &[u8], which: &str| {
             assert_eq!(mine.len(), theirs.len(), "{which}: the frame's size");
             let mut differing = 0usize;
@@ -935,17 +767,17 @@ mod tests {
         // copies (the source's `SHUTDOWN.C:104-105` segment), which leave
         // only row 200 — the same bytes as 8800; tick 18 is that row plus
         // five line iterations, none of which reaches x = 40.
-        compare(&frames[10], &reference("frame_008792.rgb"), "8792 at tick 10");
+        compare(&frames[10], &reference(8792), "8792 at tick 10");
         compare(
             &frames[13],
-            &reference("frame_008800.rgb"),
+            &reference(8800),
             "8800 at tick 13 (the closing copies)",
         );
-        compare(&frames[18], &reference("frame_008800.rgb"), "8800 at tick 18");
+        compare(&frames[18], &reference(8800), "8800 at tick 18");
         // The mapping is pinned by its neighbours: tick 9 is a different
         // picture and ticks 17..19 are the held line (8799 = 8800 = 8801).
-        assert_ne!(frames[9], reference("frame_008792.rgb"));
-        assert_eq!(frames[17], reference("frame_008800.rgb"));
-        assert_eq!(frames[19], reference("frame_008800.rgb"));
+        assert_ne!(frames[9], reference(8792));
+        assert_eq!(frames[17], reference(8800));
+        assert_eq!(frames[19], reference(8800));
     }
 }

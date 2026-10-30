@@ -914,18 +914,6 @@ mod tests {
         core::array::from_fn(|index| rig.palette.entry(index as u8))
     }
 
-    /// The port's displayed frame through the view, one palette index a pixel.
-    fn rendered_indices(rig: &Rig) -> Vec<u8> {
-        let mut out = Vec::with_capacity(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize);
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                let at = rig.view.source_index(&rig.surface, x, y);
-                out.push(rig.surface.pixels()[at]);
-            }
-        }
-        out
-    }
-
     // --- the assets ---------------------------------------------------------
 
     #[test]
@@ -1507,7 +1495,7 @@ mod tests {
         // background with the two bands' DAC entries black.
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, 500 - REFERENCE_FIRST_INDEX + 1);
-        let indices = rendered_indices(&rig);
+        let indices = rig.rendered_indices();
         assert_eq!(
             differing_bytes(&indices, &reference("mntscrl", 500, "idx")),
             0,
@@ -1537,7 +1525,7 @@ mod tests {
             let (mut rig, mut part) = started();
             run_to(&mut rig, &mut part, tick(500) + 1);
             assert_eq!(
-                differing_bytes(&rendered_indices(&rig), &reference("mntscrl", 500, "idx")),
+                differing_bytes(&rig.rendered_indices(), &reference("mntscrl", 500, "idx")),
                 0,
                 "500's index plane"
             );

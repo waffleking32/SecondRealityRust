@@ -444,7 +444,7 @@ mod tests {
         (rig, part)
     }
 
-    // --- the brief's tests --------------------------------------------------
+    // --- init, the gates and the stream -------------------------------------
 
     #[test]
     fn init_sets_the_shipped_view_and_paints_the_background() {
@@ -761,7 +761,7 @@ mod tests {
         // The silhouette is exact: every pixel the object covers and every
         // background pixel agrees with the reference. The residual is inside
         // the object, on its Gouraud-shaded faces (docs/fidelity/u2a.md §5).
-        let reference_idx = std::fs::read("../../reference/parts/u2a/frame_007300.idx").unwrap();
+        let reference_idx = reference("u2a", 7300, "idx");
         let mut mask_differing = 0;
         let mut deltas = std::collections::BTreeSet::new();
         for (at, (&ours, &theirs)) in best_pixels.iter().zip(&reference_idx).enumerate() {

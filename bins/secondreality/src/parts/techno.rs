@@ -2016,53 +2016,23 @@ impl Techno {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::view::View;
+    use crate::audio::PlayerMusic;
+    use crate::parts::test_rig::{Rig, ROOT};
 
-    /// A real-player run to the end, recording where each phase begins. This
-    /// is the timeline the reference keyframes pin; it is kept as a test so
-    /// the section ticks are reproducible.
-    struct Rig {
-        surface: sr_engine::Surface,
-        view: View,
-        palette: Palette,
-        copper: sr_engine::copper::CopperRegistry,
-        music: crate::audio::PlayerMusic,
+    /// A rig with the real player, `MUSIC1` seeked to order 18. The part sets
+    /// no copper and reads no `ctx.frame`, so a step is the engine's poll and
+    /// the part's `frame`.
+    fn real_rig() -> Rig<PlayerMusic> {
+        use crate::audio::{lock, test_player};
+        use crate::shell::ModuleId;
+        let player = test_player(ModuleId::Music1).unwrap();
+        lock(&player).play_song(18);
+        Rig::new(320, 200).with(PlayerMusic::new(player, 0))
     }
 
-    impl Rig {
-        fn new_real() -> Rig {
-            use crate::audio::{lock, test_player, PlayerMusic};
-            use crate::shell::ModuleId;
-            let player = test_player(ModuleId::Music1).unwrap();
-            lock(&player).play_song(18);
-            Rig {
-                surface: sr_engine::Surface::new(640, 400),
-                view: View::new(320, 200),
-                palette: Palette::new(),
-                copper: sr_engine::copper::CopperRegistry::new(),
-                music: PlayerMusic::new(player, 0),
-            }
-        }
-
-        fn tick(&mut self, part: &mut Techno) -> PartStatus {
-            use sr_engine::music::Music;
-            self.music.poll();
-            let mut ctx = PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                Some(&mut self.music),
-                0,
-                0,
-                1,
-                false,
-                false,
-            );
-            part.frame(&mut ctx)
-        }
-    }
-
+    /// A real-player run to the end, recording where each phase begins: the
+    /// timeline the reference keyframes pin, kept so the section ticks are
+    /// reproducible.
     #[test]
     fn the_sections_land_on_the_reference_ticks() {
         // Every phase change over the part's whole timeline, with the real
@@ -2070,23 +2040,9 @@ mod tests {
         // (`docs/fidelity/techno.md`): 6300 is drawn at 1501 and 8100 at
         // 3301, inside Doit1 (from 1437) and Doit3 (from 2700); the troll's
         // mode change begins at 3401 and the picture holds from 3548.
-        let mut rig = Rig::new_real();
-        let mut part = Techno::at("../../");
-        {
-            let mut ctx = PartCtx::new(
-                &mut rig.surface,
-                &mut rig.view,
-                &mut rig.palette,
-                &mut rig.copper,
-                Some(&mut rig.music),
-                0,
-                0,
-                1,
-                false,
-                true,
-            );
-            part.init(&mut ctx).unwrap();
-        }
+        let mut rig = real_rig();
+        let mut part = Techno::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // A frame's index is the dump's index: `frame` increments `tick`
         // from the value set here, so the first call (tick 0) is the run's
         // frame 0 and the phase it leaves is that frame's.
@@ -2094,7 +2050,7 @@ mod tests {
         let mut last = part.phase;
         for tick in 0..4200u32 {
             part.tick = tick;
-            let status = rig.tick(&mut part);
+            let status = rig.step(&mut part);
             if part.phase != last {
                 transitions.push((tick, part.phase));
                 last = part.phase;
@@ -2174,35 +2130,21 @@ mod tests {
 
     #[test]
     fn the_two_geometries_are_the_parts_two_screens() {
-        let mut rig = Rig::new_real();
-        let mut part = Techno::at("../../");
-        {
-            let mut ctx = PartCtx::new(
-                &mut rig.surface,
-                &mut rig.view,
-                &mut rig.palette,
-                &mut rig.copper,
-                Some(&mut rig.music),
-                0,
-                0,
-                1,
-                false,
-                true,
-            );
-            part.init(&mut ctx).unwrap();
-        }
+        let mut rig = real_rig();
+        let mut part = Techno::at(ROOT);
+        part.init(&mut rig.init_ctx(0)).unwrap();
         // The interference screen is 320×200 from the mode set to the troll.
         // The call with `tick` is engine frame `tick`; the view changes on
         // frame 3396 (the dump's geometry follows at 3397).
         for tick in 0..3396u32 {
             part.tick = tick;
-            rig.tick(&mut part);
+            rig.step(&mut part);
             assert_eq!((rig.view.width, rig.view.height), (320, 200), "tick {tick}");
         }
         // The mode 13h / inittwk transition sets the 320×400 view.
         for tick in 3396..3402u32 {
             part.tick = tick;
-            rig.tick(&mut part);
+            rig.step(&mut part);
         }
         assert_eq!((rig.view.width, rig.view.height), (320, 400));
         assert_eq!(rig.view.y_line_offset, Some(640), "a 160-byte plane row ×4");

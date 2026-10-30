@@ -604,10 +604,7 @@ impl Part for Endscrl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_engine::copper::CopperRegistry;
-    use sr_engine::view::View;
-    use sr_engine::{Palette, Surface};
-
+    use crate::parts::test_rig::{differing_pixels, reference, Rig};
     use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
 
     /// The paths a unit test reads: this crate's own directory, two levels below the
@@ -617,45 +614,9 @@ mod tests {
     /// The file the part must *not* read (`reference-indices.md` §21).
     const DEVELOPERS_TEXT: &str = "../../assets/ENDSCRL/ENDSCROL.TXT";
 
-    /// The engine's own pieces held together, so a `PartCtx` can be built for one call at a
-    /// time — the same disjoint borrows `Engine::tick` makes.
-    struct Rig {
-        surface: Surface,
-        view: View,
-        palette: Palette,
-        copper: CopperRegistry,
-    }
-
-    impl Rig {
-        fn new() -> Rig {
-            Rig {
-                surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
-                view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
-                palette: Palette::new(),
-                copper: CopperRegistry::new(),
-            }
-        }
-
-        fn ctx(&mut self, frame: u32) -> PartCtx<'_> {
-            PartCtx::new(
-                &mut self.surface,
-                &mut self.view,
-                &mut self.palette,
-                &mut self.copper,
-                // no player: this rig draws a band, and none of these parts asks for a cue
-                None,
-                frame,
-                0,
-                1,
-                false,
-                false,
-            )
-        }
-    }
-
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Endscrl) {
-        let mut rig = Rig::new();
+        let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
         let mut part = Endscrl::at(TEST_EXE, TEST_TEXT);
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
@@ -681,34 +642,6 @@ mod tests {
         run_to(rig, part, until);
     }
 
-    /// The port's displayed frame as RGB, one pixel per displayed pixel, through the live
-    /// palette and the engine's own 6→8-bit widening — the same bytes the binary's
-    /// `--dump-frames` writes (`headless::rgb8`).
-    fn rendered_frame(rig: &Rig) -> Vec<u8> {
-        let mut out = vec![0u8; VIEW_WIDTH as usize * VIEW_HEIGHT as usize * 3];
-        for y in 0..VIEW_HEIGHT as usize {
-            let at = rig.view.source_index(&rig.surface, 0, y as u16);
-            for (x, pixel) in rig.surface.pixels()[at..][..LINE_LEN].iter().enumerate() {
-                let entry = rig.palette.entry(*pixel);
-                let at = (y * LINE_LEN + x) * 3;
-                out[at] = sr_engine::dac_expand(entry[0]);
-                out[at + 1] = sr_engine::dac_expand(entry[1]);
-                out[at + 2] = sr_engine::dac_expand(entry[2]);
-            }
-        }
-        out
-    }
-
-    /// How many pixels two RGB frames differ in.
-    fn differing(ours: &[u8], theirs: &[u8]) -> usize {
-        ours.chunks_exact(3).zip(theirs.chunks_exact(3)).filter(|(a, b)| a != b).count()
-    }
-
-    /// The reference's own frame, read from the tree it is committed in.
-    fn reference(index: u32) -> Vec<u8> {
-        std::fs::read(format!("../../reference/parts/endscrl/frame_{index:06}.rgb")).unwrap()
-    }
-
     /// The reference's own CRED→ENDSCRL bracket, measured in the captures: the sweep's log
     /// shows 8840 still CRED's screen and refuses 8940 as `640x400`, and the geometry change
     /// is this part's tick 2, so the start lies in **`[8841, 8938]`** — `reference-indices.md`
@@ -732,7 +665,7 @@ mod tests {
     fn at_release_index(index: u32) -> Vec<u8> {
         let (mut rig, mut part) = started();
         run_to(&mut rig, &mut part, index - RELEASE_FIRST + 1);
-        rendered_frame(&rig)
+        rig.rendered_rgb()
     }
 
     /// The rows of `frame` that hold ink, as (first, last) pairs — one per run of consecutive
@@ -892,8 +825,9 @@ mod tests {
         assert_eq!(
             rig.view.start_addr,
             400 * LINE_LEN as u32,
-            "the last line's origin is the largest there is — 256,000, the number Task 3's \
-             widening is for — and the beam reads it as ring line 0"
+            "the last line's origin is the largest there is — 256,000, past a 16-bit \
+             register, which is why `start_addr` is a `u32` — and the beam reads it as \
+             ring line 0"
         );
         assert_eq!(rig.view.source_index(&rig.surface, 0, 0), 0);
         assert_eq!(RING_LINES * LINE_LEN, rig.surface.pixels().len());
@@ -1142,7 +1076,7 @@ mod tests {
         // chain hands this part its tick 0. The tick whose display puts "Second Reality" on
         // the reference's own rows of frame 9100, inside the chain's bracket, is the tick that
         // answers 9100.
-        let reference_9100 = reference(9100);
+        let reference_9100 = reference("endscrl", 9100, "rgb");
         let (top, bottom, left, right) = header(&reference_9100);
         assert_eq!((top, bottom, left, right), (309, 326, 219, 416));
 
@@ -1153,9 +1087,9 @@ mod tests {
             if !(9100 - REFERENCE_LAST..=9100 - REFERENCE_FIRST).contains(&at) {
                 continue;
             }
-            let frame = rendered_frame(&rig);
+            let frame = rig.rendered_rgb();
             if header(&frame) == (top, bottom, left, right) {
-                matched.push((at, differing(&frame, &reference_9100)));
+                matched.push((at, differing_pixels(&frame, &reference_9100)));
             }
         }
         // A picture is two ticks wide, so the header sits on its rows for a pair of ticks.
@@ -1173,7 +1107,7 @@ mod tests {
         // differing pixels of 256,000 in each — the control lines, the pitch, the order, the
         // raster and the CR-less text all at once.
         for index in KEYFRAMES {
-            assert_eq!(differing(&at_release_index(index), &reference(index)), 0, "frame {index}");
+            assert_eq!(differing_pixels(&at_release_index(index), &reference("endscrl", index, "rgb")), 0, "frame {index}");
         }
         // And where the port's chain puts them, 82 frames (41 ring lines) earlier: what
         // `cargo xtask rediff --only endscrl` measures and A53 carries. The content is the
@@ -1182,7 +1116,7 @@ mod tests {
         for index in KEYFRAMES {
             let (mut rig, mut part) = started();
             run_to(&mut rig, &mut part, index - PORT_FIRST + 1);
-            counts.push(differing(&rendered_frame(&rig), &reference(index)));
+            counts.push(differing_pixels(&rig.rendered_rgb(), &reference("endscrl", index, "rgb")));
         }
         assert_eq!(counts, CHAIN_COUNTS, "the keyframes at the port's own chain");
     }
@@ -1315,7 +1249,7 @@ mod tests {
         // ring on tick 22,350 — the release's 8917 + 22,351 = 31,268, before the black frames
         // the controller's capture holds at 31,500 and 31,750.
         assert_eq!(last_ink, 22_350);
-        assert!(rendered_frame(&rig).iter().all(|b| *b == 0));
+        assert!(rig.rendered_rgb().iter().all(|b| *b == 0));
         assert_eq!(RELEASE_FIRST + END_TICK, 31_884, "the release's `%`, by its own start");
         assert_eq!(PORT_FIRST + END_TICK, 31_802, "the port's, in a block 5 run");
     }

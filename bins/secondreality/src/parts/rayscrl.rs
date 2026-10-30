@@ -1005,18 +1005,6 @@ mod tests {
 
     // --- the reference -------------------------------------------------------
 
-    /// The displayed frame as palette indices.
-    fn rendered_indices<M: RigMusic>(rig: &Rig<M>) -> Vec<u8> {
-        let mut out = Vec::with_capacity(VIDEO_BYTES);
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                let at = rig.view.source_index(&rig.surface, x, y);
-                out.push(rig.surface.pixels()[at]);
-            }
-        }
-        out
-    }
-
     fn sci_byte(path: &str, at: usize) -> u8 {
         std::fs::read(path).unwrap()[at]
     }
@@ -1664,7 +1652,7 @@ mod tests {
             assert!((mean - 27.8114).abs() < 0.0001, "mean {mean}");
         }
         assert_eq!(
-            differing_bytes(&rendered_indices(&rig), &reference("rayscrl", 13_500, "idx")),
+            differing_bytes(&rig.rendered_indices(), &reference("rayscrl", 13_500, "idx")),
             0,
             "boot 13500's index plane"
         );

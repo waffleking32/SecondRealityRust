@@ -640,12 +640,10 @@ mod tests {
 
     // --- the reference's own map, kept as the check --------------------------
     //
-    // These six are **not the part's** any more: the gate's length is the music's, and
-    // the only thing that says where the hold ends is `:107-111`'s own loop
-    // (Task 8). They are what Phase 2 derived from the reference's *frames*, kept so
-    // that the cue's own answer can be compared with it — the check the brief calls the
-    // phase's proof. `docs/fidelity/endlogo.md` §3 is the derivation and §5 the
-    // comparison.
+    // These six are **not the part's**: the gate's length is the music's, and the only
+    // thing that says where the hold ends is `:107-111`'s own loop. They are what the
+    // reference's *frames* derive, kept so that the cue's own answer can be compared
+    // with it. `docs/fidelity/endlogo.md` §3 is the derivation and §5 the comparison.
 
     /// The reference index the fade-out's step `c = 63` is displayed on.
     ///
@@ -805,7 +803,7 @@ mod tests {
         // the stride this part's own `lineblit(vram+y*80U, ...)` draws at, so the
         // picture is read row by row. On the port's 640-wide surface a kept `Some(320)`
         // would read every second scanline from the picture's right margin — the full
-        // run's measurement (`reference-indices.md` §26.8) — so the part reads its own
+        // run's measurement (`endlogo.md` §2) — so the part reads its own
         // rows, the unset offset.
         let mut rig = shell_rig();
         rig.view.y_line_offset = Some(320);
@@ -952,8 +950,8 @@ mod tests {
         // `:114` is (pal*c)/64 — from the picture at c = 64 down to black at
         // c = 0 — while the fade-in comes *from* white. The two ramps share
         // their end points with the picture's palette and nothing else, which
-        // is why the brief's name for this test ("the same ramp reversed")
-        // would be a wrong description of two correct lines of source.
+        // is why "the same ramp reversed" would be a wrong description of two
+        // correct lines of source.
         let mut pal = Palette::new();
         pal.set_entry(0, [63, 40, 1]);
         assert_eq!(fade_out_step(&pal, 0).entry(0), [0, 0, 0], "c = 0 is black");
@@ -1010,7 +1008,7 @@ mod tests {
         // **The phase's proof.** `:107-111` runs its own loop against a player: one
         // iteration a tick, `break` when `dis_musplus()>-16`. What this test drives it with
         // is `reference/music/second5`'s own published words, and what it asserts is that
-        // the gate opens where Phase 2 derived — bit-exactly, from the reference's
+        // the gate opens where the reference derives it — bit-exactly, from its
         // **frames**, which are a different measurement entirely: the picture's own fade
         // constants (`docs/fidelity/endlogo.md` §3). They meet on the tick §3 fixes once
         // the three wires below are in place — two of them this part's, one of them the
@@ -1190,11 +1188,11 @@ mod tests {
 
     #[test]
     fn the_runs_own_player_opens_the_gate_on_the_same_tick() {
-        // **Step 2's check, where the cue is the port's own.** The test above drives the
+        // **The same check, where the cue is the port's own.** The test above drives the
         // gate with the trace's words; this one drives it through a real run — the same
         // entry point `--part endlogo` and `--block 5` begin at, the run's own anchor and
         // numbering, the real asset, and `src/audio.rs`'s player. Together they are the
-        // phase's proof: the port's cue opens the gate on the tick Phase 2 derived from the
+        // proof: the port's cue opens the gate on the tick derived from the
         // reference's *frames* (`docs/fidelity/endlogo.md` §3), and the words it opens it
         // on are the trace's (`src/shell.rs`'s
         // `the_runs_music_is_where_the_trace_holds_it_at_every_frame_the_trace_has`).

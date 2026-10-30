@@ -606,7 +606,7 @@ fn rotated_palette(fpal: &[u8; 768]) -> Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parts::test_rig::{differing_pixels, rgb_of, Rig, ScriptedMusic};
+    use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
     use sr_engine::dac_expand;
 
     const TEST_SCENE_DIR: &str = "../../assets/VISU/C/SCENE";
@@ -750,7 +750,7 @@ mod tests {
         }
         assert_eq!(part.phase, Phase::FadeSetFirst, "the holds are spent");
         // Tick 49 is the fadeset: 185 white at x 68..252 and 135 black in
-        // every row (Task 1's dense scan; `docs/fidelity/u2e.md`).
+        // every row (the dense scan in `docs/fidelity/u2e.md`).
         let (_, frame) = rig.step_render(&mut part);
         assert_eq!(part.phase, Phase::Crtc);
         let mut white = 0;
@@ -1162,10 +1162,7 @@ mod tests {
         main.set_entry(255, [0, 0, 0]);
         let references: Vec<(u32, Vec<u8>)> = [1000u32, 1600, 2600, 3600]
             .into_iter()
-            .map(|index| {
-                let path = format!("../../reference/parts/u2e/frame_{index:06}.rgb");
-                (index, std::fs::read(path).unwrap())
-            })
+            .map(|index| (index, reference("u2e", index, "rgb")))
             .collect();
         let mut driver = Driver::new(Ring::new(2), false);
         let mut pixels = vec![0u8; PAGE_PIXELS];
