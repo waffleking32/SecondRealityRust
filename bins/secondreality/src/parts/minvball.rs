@@ -19,26 +19,11 @@
 //!
 //! # The RNG is Microsoft C's, not Turbo C's
 //!
-//! The brief names Turbo C's `rand()`, but the source is the evidence and it
-//! says otherwise: `DOTS/MAKEFILE:10-16` compiles with `cl /qc /AL` (Microsoft
-//! C 6.0's large model), assembles with `tasm`, links with Microsoft's
-//! `link /E`, and the linked EXE carries the **MS Run-Time Library** string.
-//! Microsoft C 6.0's generator is a 32-bit LCG with **modulus 2³²**:
+//! The generator is Microsoft C 6.0's `rand()` ([`MsRand`]), not Turbo C's;
+//! `docs/fidelity/minvball.md` §2 has the evidence, and the frames decide it
+//! (D24).
 //!
-//! ```text
-//! seed = seed * 214013 + 2531011        (mod 2^32, seed starts at 1)
-//! rand() = (seed >> 16) & 0x7FFF
-//! ```
-//!
-//! Its first values are 41, 18,467, 6,334, 26,500, 19,169, … — the sequence
-//! [`MsRand`] asserts. The frames decide it (D24): with this generator the
-//! reference's dense 12,400 scatter frame differs from the port by **25
-//! pixels** (`tests/minvball.rs`), where a generator with a different high
-//! word places every dot elsewhere. `docs/fidelity/minvball.md` §2 records
-//! the compile evidence and the measurement.
-//!
-//! The source calls `rand()` with no `srand`, so the seed is the library's
-//! initial 1. Every use is integer: `rand()%512` in the two setup shuffles,
+//! The source never calls `srand`. Every use is integer: `rand()%512` in the two setup shuffles,
 //! `rand()-16384`, `8000-rand()/2` and `rand()-16384` in the scatter.
 //!
 //! # The tick map, and the reference's numbers

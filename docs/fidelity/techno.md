@@ -100,7 +100,8 @@ display start is the constant `80*100 + 160/8 = 8020` with pan 0.
 
 The sine cursor in `KOEA.ASM`'s `interference_draw` is a byte offset (`:785-792`), not a word
 index (the MOVE routines' `shl bx,1`, `:837-838`, `:854-855`). The table is therefore exactly
-`SIN1024.INC`'s 1,024 words (`the_sin_table_is_the_incs_1024_words`). The first pass cannot
+`SIN1024.INC`'s 1,024 words: the shared `parts::sin1024::SIN1024`, since `TECHNO/SIN1024.INC` is
+byte-identical to GLENZ's (asset-inventory §B.7; `sin1024::tests::the_table_is_the_sources_1024_words`). The first pass cannot
 show the difference (its power row is zero); 5424, the first second-pass frame with
 `sinuspower == 1`, does (§4.1).
 

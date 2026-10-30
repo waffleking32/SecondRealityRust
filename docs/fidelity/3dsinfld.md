@@ -39,7 +39,8 @@ the last loop overwrites 240..255 from `combg`. The pins
 | 240..255 | — | the `combg` overrun |
 
 The same test's exhaustive `i16` colour sweep reaches 127 and no more, so DAC 240..255 never reaches
-the screen. `SIN1024.INC` is the part's own table (`the_sine_table_is_the_sources_own_1024_words`).
+the screen. `SIN1024.INC` is the tree's common copy, `parts::sin1024::SIN1024`
+(`sin1024::tests::the_table_is_the_sources_1024_words`; asset-inventory §B.7 gives the md5 identity).
 
 **The unlinked background.** `COMAN/MAKEFILE:16-17` links `main.obj asm.obj theloop.obj
 ..\dis\disc.obj` plus the four wave-table objects; `asm.obj` holds `_combguse` (a `90*160 dup(0)`
