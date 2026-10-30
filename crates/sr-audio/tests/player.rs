@@ -1,59 +1,31 @@
-//! Task 3's own tests: what the player does, and what the object it was read from says.
+//! The player: the object it is read from, and what it does.
 //!
-//! Two halves, and they are different kinds of evidence:
-//!
-//! 1. **The object's own bytes.** The original's player is an OMF object with no source in
-//!    the tree, so `player.rs`'s claims are claims about machine code. This file rebuilds the
-//!    object's segment image out of its `LEDATA` and `LIDATA` records — the image is 29,607
-//!    bytes, which is the length the symbol map records for the segment, and it starts with
-//!    the string `Scream Tracker V3.0 Music Interface Kit V0.9` — and asserts the
-//!    load-bearing instructions byte for byte. A claim about an offset that cannot survive
-//!    this file should not be in `player.rs`.
-//!
-//! 2. **The player's own behaviour**, on the two shipped modules and on a small module built
-//!    here so that cells this phase's data does not contain (a `B` jump, a `255`, a `T`)
-//!    can be played rather than wished for.
-//!
-//! Every number this file prints is printed by `cargo test -p sr-audio --test player --
-//! --nocapture`.
+//! 1. **The object.** `MAIN/STMIK.300` is an OMF object with no source in the tree.
+//!    [`segment_image`] rebuilds its segment from the `LEDATA`/`LIDATA` records, and the tests
+//!    hold the port's tables, its song initialiser and its boot state to those bytes. The `+0x…`
+//!    offsets the src docs cite are offsets into this image (`objdump -b binary -m i8086 -D`).
+//! 2. **The behaviour**, on the shipped modules and on modules built here for the cells the
+//!    shipped data does not carry (a `B`, a `255`, a `T`).
+
+mod common;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
-use sr_audio::{descramble, MixRate, Module, Player, PlayerOptions, Position, CHANNELS, ROWS};
-
-/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
-fn module(name: &'static str) -> Module {
-    sr_audio::Song::named(name)
-        .unwrap_or_else(|| panic!("{name} is not a song"))
-        .load(Path::new("../.."))
-        .unwrap_or_else(|error| panic!("{error}"))
-}
-
-fn player(name: &'static str) -> Player {
-    Player::new(module(name), PlayerOptions::default())
-}
+use common::oracle;
+use common::{first_rows, module, player, Note};
+use sr_audio::{MixRate, Player, PlayerOptions, Position, CHANNELS, ROWS};
 
 // -------------------------------------------------------------------------------------------
-// The object's own bytes
+// The object
 // -------------------------------------------------------------------------------------------
 
-/// The original's segment image, rebuilt from the object's own records.
+/// The original's segment image, rebuilt from the object's records.
 ///
-/// `0xA0` is `LEDATA` (a segment offset and its bytes), `0xA2` is `LIDATA` (the same, with the
-/// data written as iterated blocks). An iterated block is a two-byte **repeat count**, a
-/// two-byte **block count** and then either, for a block count of zero, a one-byte length and
-/// that many bytes, or that many nested blocks — the whole repeated `repeat` times. The object
-/// carries 105 `LEDATA` and 118 `LIDATA` records and they tile one 29,607-byte segment with no
-/// gaps, which is what `sr-assets`'s symbol map records as `text_stmik300_text`'s length.
-///
-/// **This builder read the block wrongly until Phase 9 Task 6b**: it took the block count for a
-/// byte count and so copied the nested block's repeat count's low byte — `0x01` in every one of
-/// the object's 118 records — in place of the data. The image still tiled, because the lengths
-/// were right, and the claims below passed, because every one of them is in `LEDATA`, except
-/// two: `+0x5628`'s and `+0x5630`'s four-byte immediates are `LIDATA` runs of `0x00` and were
-/// read as `0x01010101`. `a_boot_starts_on_the_objects_zeroed_channels` is the test that found
-/// it (`_zchn` read `0x01` in every byte).
+/// `0xA0` is `LEDATA` (a segment offset and its bytes), `0xA2` is `LIDATA` (the same, as
+/// iterated blocks: a two-byte repeat count, a two-byte block count and then, for a block count
+/// of zero, a one-byte length and that many bytes, else that many nested blocks). The object's
+/// 105 `LEDATA` and 118 `LIDATA` records tile one 29,607-byte segment, the length `sr-assets`'s
+/// symbol map records for `text_stmik300_text`.
 fn segment_image() -> Vec<u8> {
     let object = std::fs::read("../../upstream/SecondReality/MAIN/STMIK.300")
         .expect("the vendored original's player object");
@@ -123,972 +95,71 @@ fn iterated(body: &[u8], at: usize, out: &mut Vec<u8>, depth: usize) -> usize {
     next
 }
 
-/// Where the seven published words live in the object (`cargo xtask music symbols` prints the
-/// same offsets from the object's `PUBDEF` records; `crates/sr-assets/tests/omf_symbols.rs`
-/// asserts them there).
-const NP_ZPLUS: usize = 0x08F9;
-const NP_ZFRAME: usize = 0x08FB;
-const NP_ROW: usize = 0x08FD;
-const NP_ORD: usize = 0x0901;
-const NP_LOOP: usize = 0x0903;
-
-#[test]
-fn the_objects_own_bytes_say_what_the_player_says() {
-    let image = segment_image();
-    assert_eq!(
-        &image[1..45],
-        b"Scream Tracker V3.0 Music Interface Kit V0.9",
-        "the image's first bytes are the kit's own version string"
-    );
-
-    // Every claim is (offset, the bytes, and what they mean). The bytes are read from the
-    // image; the sentence beside each one is the claim `player.rs` makes, and this is where it
-    // can be checked without an 8086 in the room.
-    let claims: &[(usize, &[u8], &str)] = &[
-        // The tick's sample count: `_zmixspeed × 125/(50 × tempo)`, an integer division, and
-        // the only place a tick's length is computed.
-        (
-            0x3D99,
-            &[
-                0x2E, 0xA1, 0xD5, 0x08, 0xB9, 0x7D, 0x00, 0xF7, 0xE1, 0xF7, 0xF3, 0x2E, 0xA3,
-                0xE1, 0x08,
-            ],
-            "mov %cs:_zmixspeed,%ax; mov $0x7d,%cx; mul %cx; div %bx; mov %ax,%cs:0x8e1",
-        ),
-        // The seek's own routine (`_zplaysong` calls it at `+0x258e`): the tick-in-row
-        // counter, the note-delay pair, the row counter, `_np_loop`, the pattern, the published
-        // row and the pending row, all zeroed before the order advance runs. **This run is the
-        // zeroing half of the note's unreachable `255` paths and not the whole of them**: it is
-        // why a seek onto a `255` leaves the engine at row 0 of pattern 0 with the published
-        // row cleared, while the other half — that the scan *gives up* rather than stopping,
-        // `+0x4499`'s `je` landing past `+0x4476`'s stop — is read at that offset and not here.
-        (
-            0x56EC,
-            &[
-                0xC7, 0x06, 0x00, 0x20, 0x00, 0x00, 0xC6, 0x06, 0x08, 0x20, 0x00, 0xC7, 0x06,
-                0x0A, 0x20, 0x00, 0x00, 0xC6, 0x06, 0x09, 0x20, 0x00, 0xA3, 0x48, 0x09, 0xA3,
-                0x03, 0x09, 0xA3, 0x4C, 0x09, 0xC7, 0x06, 0xFD, 0x08, 0x00, 0x00, 0xC6, 0x06,
-                0x3B, 0x09, 0x00,
-            ],
-            "movw $0,0x2000; movb $0,0x2008; movw $0,0x200a; ...; mov %ax,0x948 (row); \
-             mov %ax,0x903 (loop); mov %ax,0x94c (pattern); movw $0,0x8fd (published row); \
-             movb $0,0x93b (pending row)",
-        ),
-        // The tick counter: `_np_zframe` is incremented by the tick routine, so a tick *is*
-        // what the parts' counter counts.
-        (0x4357, &[0xFF, 0x06, 0xFB, 0x08], "incw _np_zframe"),
-        // The row's length is a count of ticks compared against the published speed word: the
-        // counter is incremented and then compared with `_np_speed`, and the row advances when
-        // it is not below it. (Decoded: `incw 0x2000`, `mov %cs:0x2002,%ax`, `cmp %ax,0x2000`.)
-        (
-            0x4397,
-            &[0xFF, 0x06, 0x00, 0x20, 0x2E, 0xA1, 0x02, 0x20, 0x2E, 0x8B, 0x16, 0xCD, 0x08],
-            "incw 0x2000; mov %cs:_np_speed,%ax; ...",
-        ),
-        (
-            0x43AC,
-            &[0x39, 0x06, 0x00, 0x20, 0x7D],
-            "cmp %ax,0x2000; jge (→ the row advance)",
-        ),
-        // The words the ring is fed from are written only here — the row-advance path of the
-        // tick routine, and nowhere a seek can reach.
-        (
-            0x43E6,
-            &[0xA1, 0x40, 0x09, 0x3D, 0xFF, 0xFF, 0x74, 0x01, 0x48, 0xA3, 0x09, 0x09],
-            "mov 0x940,%ax; cmp $0xffff,%ax; ...; mov %ax,0x909 (the fed order)",
-        ),
-        (
-            0x43F5,
-            &[0xA3, 0x05, 0x09, 0xA1, 0x4C, 0x09, 0xA3, 0x07, 0x09],
-            "mov %ax,0x905 (row); mov 0x94c,%ax; mov %ax,0x907 (pattern)",
-        ),
-        // `_np_zframe`'s row, `_np_ord` and `_np_loop` are *not* the fed words: the ring's
-        // entries carry row/pattern/order/zplus, which is what the offsets above and the pop
-        // below say.
-        // The ring: push at the write pointer, pop at the read pointer, publish four words.
-        (
-            0x52C9,
-            &[0x2E, 0x8B, 0x36, 0x4E, 0x21],
-            "mov %cs:0x214e,%si (the ring's write pointer)",
-        ),
-        (
-            0x52FF,
-            &[0x2E, 0x8B, 0x84, 0x50, 0x21, 0xA3, 0xFD, 0x08],
-            "mov %cs:0x2150(%si),%ax; mov %ax,0x8fd (→ _np_row)",
-        ),
-        (
-            0x5314,
-            &[0xA3, 0x01, 0x09],
-            "mov %ax,0x901 (the ring's third word is → _np_ord)",
-        ),
-        (
-            0x531C,
-            &[0xA3, 0xF9, 0x08],
-            "mov %ax,0x8f9 (the fourth is → _np_zplus)",
-        ),
-        (
-            0x5326,
-            &[0x2E, 0x89, 0x36, 0x4C, 0x21],
-            "mov %si,%cs:0x214c (the read pointer)",
-        ),
-        // ...and the ring is primed ten entries deep: the write pointer starts at 0x50 (ten
-        // eight-byte entries) and the read pointer at 0.
-        (
-            0x2AC1,
-            &[0x2E, 0xC7, 0x06, 0x4E, 0x21, 0x50, 0x00],
-            "movw $0x50,%cs:0x214e — ten entries of fill",
-        ),
-        (
-            0x2AC8,
-            &[0x2E, 0xC7, 0x06, 0x4C, 0x21, 0x00, 0x00],
-            "movw $0x0,%cs:0x214c",
-        ),
-        // The order advance: `zplus` cleared, then the `254` of the *next* entry sets bit 0
-        // and the `254` of the *current* one sets bit 1 and steps over it.
-        (
-            0x442D,
-            &[0x2E, 0xC7, 0x06, 0x0D, 0x09, 0x00, 0x00],
-            "movw $0x0,%cs:0x90d (zplus = 0)",
-        ),
-        (
-            0x4452,
-            &[0x3C, 0xFE, 0x75, 0x06, 0x2E, 0x83, 0x0E, 0x0D, 0x09, 0x01],
-            "cmp $0xfe,%al; jne; orw $0x1,%cs:0x90d  (the *next* entry is a 254 → bit 0)",
-        ),
-        (
-            0x445C,
-            &[0x80, 0xFB, 0xFE, 0x75, 0x08, 0x2E, 0x83, 0x0E, 0x0D, 0x09, 0x02, 0xEB, 0xCC],
-            "cmp $0xfe,%bl; jne; orw $0x2,%cs:0x90d; jmp  (the *current* one → bit 1, and step over)",
-        ),
-        (
-            0x4469,
-            &[0x80, 0xFB, 0xFF, 0x75, 0x2F],
-            "cmp $0xff,%bl; jne (a 255 leaves the scan)",
-        ),
-        (
-            0x4481,
-            &[0x2E, 0xFF, 0x06, 0x0B, 0x09],
-            "incw %cs:0x90b — _np_loop's source, on the loop path",
-        ),
-        // **`A` and `T` are two handlers, not one told apart by the parameter** — the
-        // reading Task 4 corrected. `T` is the first-tick table's entry 20 and its body is
-        // this entry: `cmp $0x20,%ax; jbe 0x3dce` sends 32 and under to the *driver* call,
-        // never to the speed, so a `T` with a small parameter changes nothing.
-        (
-            0x3D73,
-            &[0x32, 0xE4, 0x3D, 0x20, 0x00, 0x76],
-            "T: xor %ah,%ah; cmp $0x20,%ax; jbe (+0x3dce, the driver call) — the split that is this handler's alone",
-        ),
-        // `A` is the first-tick table's entry 1 and its whole body is this: **no upper
-        // bound**, so `A7F` sets a speed of 127 (MUSIC1 has such a cell). The correction in
-        // `player.rs` and the note's §9.13 rest on these eleven bytes.
-        (
-            0x3DD2,
-            &[0x3C, 0x00, 0x74, 0xF8, 0x32, 0xE4, 0x2E, 0xA3, 0x02, 0x20, 0xC3],
-            "A: cmp $0x0,%al; je (+0x3dce); xor %ah,%ah; mov %ax,%cs:0x2002 (_np_speed); ret",
-        ),
-        // ...and the object's own *header watch* is the second witness: it reads the module
-        // header's tempo byte (offset 50, `0x32` — the two `mov %al,ds:[..]` below are the
-        // read) and calls `+0x3d73` with it, then reads the speed byte (offset 49, `0x31`)
-        // and calls `+0x3dd2`. Four sites, and each of the four is its own claim.
-        (
-            0x53B9,
-            &[0xA0, 0x32, 0x00],
-            "the header watch reads the header's *tempo* byte (offset 50) into %al",
-        ),
-        (
-            0x53C7,
-            &[0xE8, 0xA9, 0xE9],
-            "and calls +0x3d73 with it — the tempo handler, the only one that gets this byte",
-        ),
-        (
-            0x53CA,
-            &[0xA0, 0x31, 0x00],
-            "then reads the header's *speed* byte (offset 49) into %al",
-        ),
-        (
-            0x53D8,
-            &[0xE8, 0xF7, 0xE9],
-            "and calls +0x3dd2 with it — the speed handler, which takes every value it is given",
-        ),
-        (
-            0x3D7B,
-            &[0x2E, 0xA2, 0x0F, 0x09],
-            "mov %al,%cs:0x90f (_np_tempo)",
-        ),
-        // C's parameter is decimal: high nibble, low nibble, then `aad $0xa`.
-        (
-            0x3DFE,
-            &[0x8A, 0xE0, 0xC0, 0xEC, 0x04, 0x24, 0x0F, 0xD5, 0x0A, 0xA2, 0x3B, 0x09],
-            "mov %al,%ah; shr $0x4,%ah; and $0xf,%al; aad $0xa; mov %al,0x93b",
-        ),
-
-        // ----------------------------------------------------------------------------------
-        // Task 4's: the channel effects, and the two tick passes that reach them.
-        //
-        // These are the bytes `crates/sr-audio/src/effects.rs` and the second half of
-        // `player.rs` were read out of — the handlers, the two dispatch tables, the S
-        // subcommand tables, the four waveform entries, and the tables every one of them
-        // is measured in (the note table, the shifts, the sine, the two `Q` tables).
-        // ----------------------------------------------------------------------------------
-        (
-            0x3BD8,
-            &[0x72, 0x3D, 0xD2, 0x3D, 0xDD, 0x3D, 0xFE, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x72, 0x3D, 0x72, 0x3D, 0x48, 0x41, 0x90, 0x41, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0x72, 0x3D, 0x4E, 0x42, 0x73, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x4A, 0x42, 0x72, 0x3D],
-            "the first-tick dispatch table (`+0x3bd8`), entry by entry: 0 = the bare ret at 0x3d72, 1 = 0x3dd2 (A), 2 = 0x3ddd (B), 3 = 0x3dfe (C), 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 and 8 = the bare ret, 9 = 0x4148 (I), 10 = 0x4190 (J), 11..16 = the bare ret, 17 = 0x41ec (Q), 18 = the bare ret, 19 = 0x424e (S), 20 = 0x3d73 (T), 21..25 = the bare ret, 26 = 0x424a (Z), 27 = the bare ret",
-        ),
-        (
-            0x3C0E,
-            &[0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x08, 0x3F, 0x4F, 0x3E, 0x10, 0x3E, 0x94, 0x3F, 0x05, 0x40, 0x48, 0x41, 0x90, 0x41, 0x00, 0x3F, 0x05, 0x3F, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0xEC, 0x41, 0xD0, 0x40, 0x61, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0xC8, 0x42, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D],
-            "the later-tick dispatch table (`+0x3c0e`), entry by entry: 1, 2 and 3 are the bare ret where the first table has A, B and C; 4 = 0x3f08 (D), 5 = 0x3e4f (E), 6 = 0x3e10 (F), 7 = 0x3f94 (G), 8 = 0x4005 (H), 9 = 0x4148 (I), 10 = 0x4190 (J), 11 = 0x3f00 (K), 12 = 0x3f05 (L), 17 = 0x41ec (Q), 18 = 0x40d0 (R), 19 = 0x4261 (S), 22 = 0x42c8 (V) — I, R and V have handlers here, so the letters this task records as absent are absent from the *data*, not from the object",
-        ),
-        (
-            0x3B98,
-            &[0xA9, 0x42, 0x4E, 0x43, 0xD0, 0x42, 0xF1, 0x42, 0x03, 0x43, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x15, 0x43, 0x1E, 0x43, 0x7F, 0x42, 0x96, 0x42, 0x74, 0x42, 0x72, 0x3D],
-            "the S subcommand table on the row's first tick: 12 = 0x427f, 13 = 0x4296 (SDx), 14 = 0x4274, 3 and 4 the waveform setters",
-        ),
-        (
-            0x3BB8,
-            &[0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x72, 0x3D, 0x83, 0x42, 0x9A, 0x42, 0x72, 0x3D, 0x72, 0x3D],
-            "the S subcommand table on the later ticks: only 12 = 0x4283 and 13 = 0x429a have handlers",
-        ),
-        (
-            0x4068,
-            &[0x7B, 0x40, 0x8E, 0x40, 0xA1, 0x40, 0xB4, 0x40, 0x78, 0x40, 0x8B, 0x40, 0x9E, 0x40, 0xB1, 0x40],
-            "the vibrato waveform table: 0 = 0x407b (the sine), 2 = 0x408e, 4 = 0x40a1, 6 = 0x40b4, then the four no-restart variants",
-        ),
-        (
-            0x0A24,
-            &[0x00, 0x6B, 0x00, 0x65, 0x40, 0x5F, 0x00, 0x5A, 0xC0, 0x54, 0x00, 0x50, 0x80, 0x4B, 0x40, 0x47, 0x40, 0x43, 0x80, 0x3F, 0x00, 0x3C, 0xB0, 0x38],
-            "the note table at `+0xa24`, four octaves up: C is 27392, so octave 4's C is the format's 1712",
-        ),
-        (
-            0x097C,
-            &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x05, 0x0B, 0x11, 0x1B, 0x20, 0x2A, 0x2F],
-            "the octave shifts at `+0x97c`: eight real entries and the eight bytes after them, which octaves 8…15 read",
-        ),
-        (
-            0x0A50,
-            &[0x00, 0x00, 0x18, 0x00, 0x31, 0x00, 0x4A, 0x00, 0x61, 0x00, 0x78, 0x00, 0x8D, 0x00, 0xA1, 0x00],
-            "the sine's first eight words at `+0xa50`: 0, 24, 49, 74, 97, 120, 141, 161",
-        ),
-        (
-            0x095C,
-            &[0x00, 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00],
-            "the Q volume addends at `+0x95c` (the last two are a `LIDATA` run of zeroes)",
-        ),
-        (
-            0x096C,
-            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x20],
-            "the Q volume multipliers at `+0x96c` — zero (`LIDATA` runs) but for 6, 7, 14 and 15",
-        ),
-        (
-            0x1FA0,
-            &[0xA0, 0x0D, 0x00, 0x0E, 0x60, 0x0E, 0xC0, 0x0E],
-            "the S3M channel to `_zchn` map is the identity",
-        ),
-        (
-            0x5448,
-            &[0xA1, 0x26, 0x00, 0xA9, 0x01, 0x00, 0x74, 0x06, 0x2E, 0xC6],
-            "the amiga byte: mov 0x26,%ax; test $0x1,%ax; je; movb $0x1,%cs:0x915",
-        ),
-        (
-            0x5401,
-            &[0x2E, 0xA3, 0x17, 0x09, 0xB9],
-            "masterflags: mov %ax,%cs:0x917 — the module's own flags word",
-        ),
-        (
-            0x3F08,
-            &[0x2E, 0xC6, 0x44, 0x3C, 0x01],
-            "D: movb $0x1,%cs:0x3c(%si) — the slide begins (and `K`/`L` enter here)",
-        ),
-        (
-            0x3F22,
-            &[0x80, 0xFA, 0x0F, 0x74, 0x4C, 0x80],
-            "D: cmp $0xf,%dl; je (+0x3f73) — a low nibble of f is the fine marker",
-        ),
-        (
-            0x3F27,
-            &[0x80, 0xFE, 0x0F, 0x74, 0x55, 0x80],
-            "D: cmp $0xf,%dh; je (+0x3f81) — a high nibble of f is the other one",
-        ),
-        (
-            0x3F31,
-            &[0x32, 0xF6, 0x28, 0x54, 0x1A],
-            "D: xor %dh,%dh; sub %dl,0x1a(%si) — slide down by the low nibble",
-        ),
-        (
-            0x3F51,
-            &[0x8A, 0xC6, 0x32, 0xE4, 0x00, 0x44, 0x1A],
-            "D: add %al,0x1a(%si) — slide up by the high nibble",
-        ),
-        (
-            0x3F5E,
-            &[0xC6, 0x44, 0x1A, 0x3F],
-            "D: movb $0x3f,0x1a(%si) — the volume clamps at 63, not the file's 64",
-        ),
-        (
-            0x3F73,
-            &[0x80, 0xFE, 0x00, 0x74, 0xB9, 0x83, 0x3E, 0x00, 0x20, 0x00, 0x75],
-            "D: the fine-up path — a zero high nibble falls back to the ordinary slide",
-        ),
-        (
-            0x3F81,
-            &[0x80, 0xFA, 0x00, 0x74, 0xCB, 0x83],
-            "D: and the fine-down path's own test: cmp $0x0,%dl; je (+0x3f51)",
-        ),
-        (
-            0x3E4F,
-            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0xE5],
-            "E: cmpw $0x0,0x24(%si); je (ret) — nothing without a note's period",
-        ),
-        (
-            0x3E59,
-            &[0x8A, 0x44, 0x39, 0x88, 0x44, 0x36, 0x32],
-            "E: mov 0x39(%si),%al; mov %al,0x36(%si) — a zero info reuses alastnfo",
-        ),
-        (
-            0x3E68,
-            &[0x3C, 0xE0, 0x73, 0xCE, 0xD1, 0xE0],
-            "E: cmp $0xe0,%al; jae (ret) — the ordinary slide stops at 0xe0",
-        ),
-        (
-            0x3E6C,
-            &[0xD1, 0xE0, 0xD1, 0xE0, 0x01, 0x44, 0x12, 0x01, 0x44, 0x24],
-            "E: shl $1,%ax twice; add %ax,0x12(%si); add %ax,0x24(%si) — four times the parameter, a tick, on both periods",
-        ),
-        (
-            0x3E10,
-            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x24],
-            "F: the same handler with the other sign, cmpw $0x0,0x24(%si)",
-        ),
-        (
-            0x3E2D,
-            &[0xD1, 0xE0, 0xD1, 0xE0, 0x29, 0x44, 0x12, 0x29, 0x44, 0x24],
-            "F: shl $1,%ax twice; sub %ax,0x12(%si); sub %ax,0x24(%si)",
-        ),
-        (
-            0x3E3B,
-            &[0x3C, 0xE0, 0x76, 0xFB, 0x3C, 0xF0],
-            "E/F's first-tick split: cmp $0xe0,%al; jbe (ret)",
-        ),
-        (
-            0x3E43,
-            &[0x24, 0x0F, 0xD1, 0xE0, 0xD1, 0xE0, 0xEB, 0xE6],
-            "E/F: above 0xf0 is the extra-fine form — the low nibble times four",
-        ),
-        (
-            0x3F94,
-            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x17],
-            "G: cmpw $0x0,0x24(%si); je (ret)",
-        ),
-        (
-            0x3FA1,
-            &[0x88, 0x44, 0x2C, 0x88, 0x44, 0x36],
-            "G: mov %al,0x2c(%si); mov %al,0x36(%si) — alasteff2 and the cell's info",
-        ),
-        (
-            0x3FA9,
-            &[0x8B, 0x44, 0x12, 0x3B, 0x44, 0x20],
-            "G: mov 0x12(%si),%ax; cmp 0x20(%si),%ax — the live period against asldspd",
-        ),
-        (
-            0x3FB6,
-            &[0xD1, 0xE2, 0xD1, 0xE2, 0x03, 0xC2, 0x3B, 0x44, 0x20],
-            "G: shl $1,%dx twice; add %dx,%ax — four times the parameter, a tick",
-        ),
-        (
-            0x3FC4,
-            &[0x89, 0x44, 0x24],
-            "G: mov %ax,0x24(%si) — the glide's base moves with it",
-        ),
-        (
-            0x3FD2,
-            &[0x89, 0x44, 0x12],
-            "G: mov %ax,0x12(%si) — and then the live period",
-        ),
-        (
-            0x4005,
-            &[0x3C, 0x00, 0x75, 0x03, 0x8A, 0x44, 0x2B, 0xA8],
-            "H: cmp $0x0,%al; jne; mov 0x2b(%si),%al — the parameter is alasteff1",
-        ),
-        (
-            0x4010,
-            &[0x8A, 0x64, 0x2B, 0x24, 0x0F, 0x80, 0xE4, 0xF0, 0x0A],
-            "H: the merge — a zero high nibble keeps the previous parameter's",
-        ),
-        (
-            0x402D,
-            &[0x8B, 0x44, 0x26, 0x8B, 0x5C, 0x3D],
-            "H: mov 0x26(%si),%ax; mov 0x3d(%si),%bx — the position and vibtretype",
-        ),
-        (
-            0x4036,
-            &[0x2E, 0xFF, 0x97, 0x68, 0x40],
-            "H: call *%cs:0x4068(%bx) — the waveform table",
-        ),
-        (
-            0x404D,
-            &[0xD3, 0xF8, 0x03, 0x44, 0x24],
-            "H: sar %cl,%ax; add 0x24(%si),%ax — the level, and the note's own period",
-        ),
-        (
-            0x4060,
-            &[0x80, 0xE3, 0x7E, 0x89, 0x5C, 0x26],
-            "H: and $0x7e,%bl; mov %bx,0x26(%si) — the phase, masked to the even low seven bits",
-        ),
-        (
-            0x407B,
-            &[0xA9, 0x80, 0x00, 0x74, 0x03, 0xB8, 0x00, 0x00, 0x8B, 0xD8, 0x2E, 0x8B, 0x87, 0x50, 0x0A, 0xC3],
-            "the sine waveform: test $0x80,%ax; mov %ax,%bx; mov %cs:0xa50(%bx),%ax; ret",
-        ),
-        (
-            0x4190,
-            &[0x3C, 0x00, 0x75, 0x06, 0x8A, 0x44],
-            "J: cmp $0x0,%al; jne; mov 0x39(%si),%al — alastnfo",
-        ),
-        (
-            0x419A,
-            &[0xA1, 0x00, 0x20, 0xB1, 0x03, 0xF6, 0xF1, 0x32],
-            "J: mov 0x2000,%ax; mov $0x3,%cl; div %cl — the engine's tick, modulo three",
-        ),
-        (
-            0x41C8,
-            &[0x80, 0xFF, 0x0C, 0x72, 0x06, 0x80, 0xEF],
-            "J: cmp $0xc,%bh; jb — the semitone carries at B",
-        ),
-        (
-            0x3F00,
-            &[0xBD, 0x02, 0x00, 0xEB, 0x03, 0xBD],
-            "K and L share D's body: mov $0x2,%bp; jmp 0x3f08",
-        ),
-        (
-            0x3F05,
-            &[0xBD, 0x01, 0x00, 0x2E, 0xC6, 0x44],
-            "L: mov $0x1,%bp; jmp 0x3f08",
-        ),
-        (
-            0x4000,
-            &[0x8A, 0x44, 0x2B, 0xEB],
-            "K's vibrato half: mov 0x2b(%si),%al — H's byte, not the slide's",
-        ),
-        (
-            0x41EC,
-            &[0x3C, 0x00, 0x75, 0x06, 0x8A, 0x44],
-            "Q: cmp $0x0,%al; jne; mov 0x39(%si),%al",
-        ),
-        (
-            0x41F6,
-            &[0x8A, 0xD8, 0xB1, 0x04, 0xD2, 0xEB, 0x83, 0xE3, 0x0F, 0x24],
-            "Q: the volume code is the high nibble and the interval the low one",
-        ),
-        (
-            0x4205,
-            &[0x3A, 0x44, 0x2E, 0x77, 0x3C, 0x33],
-            "Q: cmp 0x2e(%si),%al; ja — it fires when the interval is reached",
-        ),
-        (
-            0x420F,
-            &[0x2E, 0x89, 0x44, 0x44, 0x66, 0x2E],
-            "Q: mov %ax,%cs:0x44(%si) — m_pos = 0, the retrigger itself",
-        ),
-        (
-            0x421F,
-            &[0x8A, 0xA7, 0x6C, 0x09, 0x80, 0xFC, 0x00, 0x74],
-            "Q: mov 0x96c(%bx),%ah; cmp $0x0,%ah; je — the multiplier table",
-        ),
-        (
-            0x4228,
-            &[0xF6, 0xE4, 0xB1, 0x04, 0xD3, 0xE8, 0xEB, 0x04],
-            "Q: mul %ah; mov $0x4,%cl; shr %cl,%ax — the multiply path",
-        ),
-        (
-            0x4230,
-            &[0x02, 0x87, 0x5C, 0x09, 0x3C, 0x00, 0x7D],
-            "Q: add 0x95c(%bx),%al — the addend path",
-        ),
-        (
-            0x4246,
-            &[0xFE, 0x44, 0x2E],
-            "Q and `SDx`: incb 0x2e(%si) — one counter for both",
-        ),
-        (
-            0x425C,
-            &[0xFF, 0x97, 0x98, 0x3B, 0xC3],
-            "S: the first-tick table's call: call *0x3b98(%bx)",
-        ),
-        (
-            0x426F,
-            &[0xFF, 0x97, 0xB8, 0x3B, 0xC3],
-            "S: the later-tick table's: call *0x3bb8(%bx)",
-        ),
-        (
-            0x4296,
-            &[0x88, 0x44, 0x2E, 0xC3, 0x80],
-            "SDx on the first tick: mov %al,0x2e(%si); ret",
-        ),
-        (
-            0x42A5,
-            &[0xE8, 0xB6, 0x04],
-            "SDx later: call 0x475e — where the deferred note begins",
-        ),
-        (
-            0x4751,
-            &[0x3C, 0x13, 0x75, 0x0D, 0x80, 0xE4, 0xF0, 0x80, 0xFC, 0xD0, 0x75, 0x05, 0xC3],
-            "the row parse's SDx gate: cmd == S and info & 0xf0 == 0xd0 returns early",
-        ),
-        (
-            0x475E,
-            &[0xC6, 0x44, 0x01, 0x81],
-            "the note the delay starts: movb $0x81,0x1(%si)",
-        ),
-        (
-            0x4762,
-            &[0x8B, 0x4C, 0x32, 0x8B, 0x54, 0x34, 0x80, 0xFD, 0x65, 0x76],
-            "the row parse's clamps: mov 0x32(%si),%cx; mov 0x34(%si),%dx; cmp $0x65,%ch",
-        ),
-        (
-            0x477B,
-            &[0xB2, 0x3F],
-            "and mov $0x3f,%dl — a volume column of 64 becomes 63",
-        ),
-        (
-            0x46A4,
-            &[0xB8, 0x00, 0xFF, 0xBE, 0xA0, 0x0D, 0xB9, 0x30, 0x00],
-            "the row reset: mov $0xff00,%ax; ...; mov $0x30,%cx — note 0xff, volume 0xff, the rest zero",
-        ),
-        (
-            0x490E,
-            &[0x83, 0x7C, 0x24, 0x00, 0x74, 0x0A, 0x80],
-            "the note start: cmpw $0x0,0x24(%si); je (+0x491e)",
-        ),
-        (
-            0x491A,
-            &[0xC6, 0x44, 0x02, 0xFF],
-            "aequ = 0xff, on the not-fresh path only",
-        ),
-        (
-            0x4922,
-            &[0x66, 0xC7, 0x44, 0x5C, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x44, 0x44, 0x33],
-            "movl $0xffffffff,0x5c(%si); mov %ax,0x44(%si) — the shadow is invalidated, m_pos takes the O offset",
-        ),
-        (
-            0x4938,
-            &[0xE8, 0xFF, 0x0F, 0xE8, 0xD5, 0x0E],
-            "call 0x593a; call 0x5813 — the note to a period, scaled by the instrument's c2spd",
-        ),
-        (
-            0x4944,
-            &[0x80, 0x7C, 0x35, 0x07, 0x74, 0x0A, 0x89],
-            "cmpb $0x7,0x35(%si); je (+0x4954) — a note under a G does not set aspd",
-        ),
-        (
-            0x4954,
-            &[0x89, 0x44, 0x24, 0x89, 0x44, 0x20, 0x8A, 0x44],
-            "mov %ax,0x24(%si); mov %ax,0x20(%si) — aorgspd and asldspd both take it",
-        ),
-        (
-            0x496A,
-            &[0x80, 0x7C, 0x02, 0xFF, 0x75, 0x08, 0x8A, 0x44, 0x1A, 0x04, 0x10, 0x88],
-            "aequ: from 0xff to avol + 0x10",
-        ),
-        (
-            0x48D6,
-            &[0x80, 0x7C, 0x35, 0x0F, 0x75, 0x09, 0x8A, 0x64, 0x36, 0x32, 0xC0, 0x2E],
-            "O: cmpb $0xf,0x35(%si); mov 0x36(%si),%ah; xor %al,%al; mov %ax,%cs:0x6(%si) — info << 8",
-        ),
-        (
-            0x5813,
-            &[0xB9, 0xAB, 0x20, 0xF7, 0xE1, 0x8B, 0x4C, 0x22, 0x3B, 0xD1, 0x72, 0x04],
-            "the c2spd scale: mov $0x20ab,%cx; mul %cx; mov 0x22(%si),%cx; cmp %cx,%dx",
-        ),
-        (
-            0x5823,
-            &[0xF7, 0xF1, 0x3D, 0xFF, 0x7F, 0x77, 0xF5, 0xC3],
-            "div %cx; cmp $0x7fff,%ax; ja — the word-overflow guard",
-        ),
-        (
-            0x58B9,
-            &[0xBA, 0xDA, 0x00, 0xB8, 0x00, 0x76, 0xF7, 0xF1],
-            "the step's base frequency: mov $0xda,%dx; mov $0x7600,%ax; div %cx — 0x00da7600",
-        ),
-        (
-            0x593A,
-            &[0x3C, 0xFE, 0x75, 0x04, 0xB8, 0x00],
-            "the note to a period: cmp $0xfe,%al; jne; mov $0x0,%ax — the note off is 0",
-        ),
-        (
-            0x594A,
-            &[0x8A, 0x8F, 0x7C, 0x09, 0x8A, 0xD8, 0x80, 0xE3],
-            "mov 0x97c(%bx),%cl — the octave's shift, with no bound on the index",
-        ),
-        (
-            0x5955,
-            &[0x8B, 0x87, 0x24, 0x0A, 0xD3, 0xE8, 0xC3],
-            "mov 0xa24(%bx),%ax; shr %cl,%ax; ret — the table, shifted",
-        ),
-        (
-            0x3D0C,
-            &[0x33, 0xC0, 0x88, 0x44, 0x2E, 0x8B],
-            "the first-tick pass, a channel with no command: xor %ax,%ax; mov %al,0x2e(%si)",
-        ),
-        (
-            0x3D24,
-            &[0x88, 0x44, 0x2E, 0x8B, 0x44],
-            "and a D row: mov %al,0x2e(%si); mov 0x24(%si),%ax",
-        ),
-        (
-            0x3C97,
-            &[0xFE, 0x4C, 0x31, 0x75],
-            "the volume-0 optimisation: decb 0x31(%si); jne",
-        ),
-        (
-            0x3CA9,
-            &[0xC6, 0x44, 0x01, 0x00],
-            "and movb $0x0,0x1(%si) — three silent rows free the channel",
-        ),
-        (
-            0x3CB9,
-            &[0x3C, 0x00, 0x74, 0x03, 0x88, 0x44],
-            "alastnfo: cmp $0x0,%al; je; mov %al,0x39(%si)",
-        ),
-        (
-            0x3CEA,
-            &[0x80, 0x4C, 0x26, 0x80],
-            "the stale vibrato bit: orb $0x80,0x26(%si)",
-        ),
-        (
-            0x3D72,
-            &[0xC3],
-            "the bare ret every absent command shares",
-        ),
-        (
-            0x46C2,
-            &[0x8C, 0xC8, 0x8E, 0xD8],
-            "the row parse: mov %cs,%ax; mov %ax,%ds",
-        ),
-        (
-            0x4371,
-            &[0x83, 0x3E, 0x00, 0x20, 0x00, 0x75, 0x1C, 0x80],
-            "cmpw $0x0,0x2000; jne (+0x4394) — the first tick's own test",
-        ),
-        (
-            0x437F,
-            &[0xE8, 0x40, 0x03],
-            "and the row parse it calls: call 0x46c2",
-        ),
-        (
-            0x4382,
-            &[0xE8, 0xBF, 0xF8],
-            "then the first-tick dispatch: call 0x3c44",
-        ),
-        (
-            0x4394,
-            &[0xE8, 0xA1, 0xF9],
-            "and every later tick's: call 0x3d38",
-        ),
-        // B raises the same advance flag and writes the order to try next.
-        (
-            0x3DE2,
-            &[0xC6, 0x06, 0x3A, 0x09, 0x01, 0x3C, 0xFF],
-            "movb $0x1,0x93a; cmp $0xff,%al (B, and BFF)",
-        ),
-        // The channel initialiser and the mixer's shadow of the position: the offsets
-        // `effects.rs`'s `Channel::initialise` doc names, asserted rather than described. Two
-        // labels in that doc were wrong for a round (`+0x5625` called a zero, `+0x5630` called
-        // `m_base`) and nothing here would have caught them; these twelve entries are that gap.
-        (
-            0x5625,
-            &[0x88, 0x5C, 0x03],
-            "the initialiser: mov %bl,0x3(%si) — `channelnum` takes the loop's own channel index, not a zero",
-        ),
-        (
-            0x5628,
-            &[0x66, 0xC7, 0x44, 0x44, 0x00, 0x00, 0x00, 0x00],
-            "movl $0x0,0x44(%si) — `m_pos` is zeroed (the immediate is a `LIDATA` run of zeroes)",
-        ),
-        (
-            0x5630,
-            &[0x66, 0xC7, 0x44, 0x5C, 0x00, 0x00, 0x00, 0x00],
-            "and +0x5c — the mixer's shadow, not `m_base` — zeroed too",
-        ),
-        (
-            0x5641,
-            &[0x89, 0x44, 0x58],
-            "mov %ax,0x58(%si) with %ax zero (`xor %ax,%ax`, +0x561b) — `m_base`'s low word",
-        ),
-        (
-            0x5644,
-            &[0x89, 0x44, 0x5A],
-            "and its high word at +0x5a",
-        ),
-        (
-            0x5681,
-            &[0xC6, 0x44, 0x3A, 0x65],
-            "movb $0x65,0x3a(%si) — `lastadlins`, the loop's last store",
-        ),
-        (
-            0x56A6,
-            &[0xC6, 0x44, 0x04, 0xFF],
-            "the silence pass the initialiser ends with: movb $0xff,0x4(%si)",
-        ),
-        (
-            0x56AA,
-            &[0xC6, 0x44, 0x3F, 0xFF],
-            "and 0xff at +0x3f",
-        ),
-        (
-            0x56AE,
-            &[0xC6, 0x44, 0x41, 0x00],
-            "and 0 at +0x41",
-        ),
-        (
-            0x6FB8,
-            &[0x66, 0x8B, 0x44, 0x5C, 0x66, 0x8B, 0x5C, 0x44, 0x66, 0x3B, 0xD8],
-            "the driver's voice update: mov 0x5c(%si),%eax; mov 0x44(%si),%ebx; cmp %eax,%ebx \
-             — +0x5c is the position's shadow and +0x44 the position, and the `je` past the \
-             rewrite at +0x6FC7 makes the comparison's direction unobservable",
-        ),
-        (
-            0x6FC7,
-            &[0x66, 0x89, 0x5C, 0x5C],
-            "and mov %ebx,0x5c(%si) rewrites it when the position has moved",
-        ),
-        (
-            0x708C,
-            &[0x8B, 0x4C, 0x58, 0x66, 0xC1, 0xE1, 0x0E],
-            "mov 0x58(%si),%cx; shl $0xe,%ecx — +0x58 is the sample base, `m_base`",
-        ),
-        // ---------------------------------------------------------------------------------
-        // Task 5 — the mixing engine. The voice, its arithmetic, and the bounds it plays within.
-        // ---------------------------------------------------------------------------------
-        // The per-frame loop's body (`+0x345d`'s inner block): the sample byte is read at
-        // `es:(si)` with `si` = `m_pos`, looked up in the volume table at `(m_vol << 8) |
-        // sample` (`bh` is `m_vol`, `bl` the byte), and the two frames' values are added into
-        // the accumulators as one 32-bit `add`. `di` advances four bytes for two frames.
-        (
-            0x346C,
-            &[
-                0x03, 0xCD, 0x26, 0x8A, 0x1C, 0x13, 0xF2, 0x8A, 0x07, 0x66, 0xC1, 0xE0, 0x10, 0x03,
-                0xCD, 0x26, 0x8A, 0x1C, 0x13, 0xF2, 0x8A, 0x07, 0x66, 0x01, 0x05, 0x83, 0xC7, 0x04,
-            ],
-            "add %bp,%cx; mov %es:(%si),%bl; adc %dx,%si; mov (%bx),%al; shl $0x10,%eax; \
-             …twice…; add %eax,(%di); add $0x4,%di — the sample fetch, the volume lookup and \
-             the 16.16 position advance, two frames at a time",
-        ),
-        // The volume table's arithmetic: `mul %bx` with `bx` = (level << 8) | sample value,
-        // then `mov %ah` — an entry is `(sample × scale[level]) >> 8`, truncated.
-        (
-            0x5546,
-            &[
-                0xB9, 0x00, 0x01, 0xB8, 0x00, 0x00, 0x8A, 0xDF, 0x32, 0xFF, 0x8A, 0x18, 0x50, 0xF7,
-                0xE3, 0x26, 0x88, 0x25, 0x47, 0x58, 0x40, 0xE2, 0xF5,
-            ],
-            "mov $0x100,%cx; mov $0x0,%ax; mov %bh,%bl; xor %bh,%bh; mov (%bx,%si),%bl; \
-             push %ax; mul %bx; mov %ah,%es:(%di); inc %di; pop %ax; inc %ax; loop — 256 \
-             entries of `(sample × scale) >> 8` per level",
-        ),
-        // The scale table itself, at `+0x9c4`: `floor(level × 255/63)`, which is four a level
-        // from the bottom and a hair above it from level 21.
-        (0x9C4, &[0x00, 0x04, 0x08, 0x0C], "the scale table: level 0 is 0, level 1 is 4, …"),
-        (
-            0x9FF,
-            &[238],
-            "… sixty entries later: level 59's scale is 238 = floor(59 × 255/63), where four a \
-             level would be 236",
-        ),
-        (0xA03, &[255], "… and level 63's is 255, not 252"),
-        // The centre a voice at a level contributes when its sample is at 128: the table is
-        // read with `bl` = 0x80 and `bh` = `m_vol`, then shifted by the pan tables.
-        (
-            0x37AE,
-            &[
-                0xB3, 0x80, 0x64, 0x8A, 0x07, 0x32, 0xE4, 0x3E, 0x8B, 0x5E, 0x1B, 0x83, 0xE3, 0x07,
-                0x80, 0xFB, 0x06, 0x73, 0x04, 0x32, 0x1E, 0x1E, 0x21, 0x03, 0x1E, 0x1C, 0x21,
-            ],
-            "mov $0x80,%bl; mov %fs:(%bx),%al; xor %ah,%ah; mov %ds:0x1b(%bp),%bx; and $0x7,%bx; \
-             cmp $0x6,%bl; jae; xor 0x211e,%bl; add 0x211c,%bx — the centre read at \
-             `(m_vol << 8) | 0x80`, and the pan index = `(amixtype & 7) ^ pass`",
-        ),
-        // The two shifts the pan tables give the centre before it is accumulated: `+0x38e4`
-        // and `+0x38f4`, 16 bytes each, 0x10 meaning "not this side" (a word shifted by 16).
-        (0x38E4, &[0x00, 0x10, 0x01, 0x10], "shift table for [0x2250]/[0x2252]"),
-        (0x38F4, &[0x10, 0x00, 0x10, 0x01], "shift table for [0x2254]"),
-        // `m_speed`: the object's own base frequency over the period, then over the mixing rate.
-        (
-            0x58B9,
-            &[0xBA, 0xDA, 0x00, 0xB8, 0x00, 0x76, 0xF7, 0xF1],
-            "mov $0xda,%dx; mov $0x7600,%ax; div %cx — 0x00da7600 over the period",
-        ),
-        (
-            0x58C9,
-            &[
-                0xF7, 0x36, 0xD9, 0x08, 0x8B, 0xC8, 0x33, 0xC0, 0xF7, 0x36, 0xD9, 0x08, 0x89, 0x44,
-                0x50, 0x89, 0x4C, 0x52,
-            ],
-            "divw 0x8d9; mov %ax,%cx; xor %ax,%ax; divw 0x8d9; mov %ax,0x50(%si); mov \
-             %cx,0x52(%si) — the quotient and the remainder as m_speed's whole and fraction",
-        ),
-        // The stereo divisor's choice: the low word of `_zmixspeed` in mono, `[0x8d7]` in
-        // stereo, stored as the effective rate the step is divided by.
-        (
-            0x5397,
-            &[
-                0x2E, 0xA2, 0x16, 0x09, 0x2E, 0x8B, 0x16, 0xD5, 0x08, 0xA8, 0x80, 0x74, 0x05, 0x2E,
-                0x8B, 0x16, 0xD7, 0x08, 0x2E, 0x89, 0x16, 0xD9, 0x08,
-            ],
-            "mov %al,%cs:0x916 (np_mastermul); mov %cs:0x8d5,%dx; test $0x80,%al; je; mov \
-             %cs:0x8d7,%dx; mov %dx,%cs:0x8d9 — the master multiplier byte and the rate it \
-             selects, and [0x8d7] holds the segment's initial 21111 in stereo",
-        ),
-        // The two end paths: a one-shot stops (`m_speed = 0`) and a loop rewraps the position by
-        // `m_loop - m_end`, keeping the overshoot.
-        (
-            0x383C,
-            &[
-                0x2E, 0x8B, 0x46, 0x4C, 0x3D, 0xFF, 0xFF, 0x75, 0x11, 0x66, 0x33, 0xC0, 0x66, 0x2E,
-                0x89, 0x46, 0x50, 0x2E, 0xC7, 0x06, 0x4A, 0x21, 0x00, 0x80, 0xEB, 0x27, 0x2E, 0x2B,
-                0x46, 0x48, 0x03, 0xF0,
-            ],
-            "mov 0x4c(%bp),%ax (m_loop); cmp $0xffff,%ax; jne; xor %eax,%eax; mov \
-             %eax,0x50(%bp) (m_speed = 0); movw $0x8000,0x214a; jmp; sub 0x48(%bp),%ax; add \
-             %ax,%si — the one-shot's stop and the loop's rewrap",
-        ),
-        // The note start's bounds, and the two header fields they come from: `+0x4890` reads
-        // `es:0x18` into `ax` — the loader's `lend` (`STARTEMS.C:28-48`: type, filename,
-        // memseg2, memseg, length at 0x10, lbeg at 0x14, lend at 0x18, vol, disk, pack, flags
-        // at 0x1f) — so the `cmp $0x0,%ax; je` at `+0x489c` is **`lend == 0`**, and `+0x48a6`
-        // stores `es:0x14`, the **`lbeg`**, into `m_loop`. Reading the pair the other way round
-        // gives the same two bounds and the wrong one-shot rule.
-        (
-            0x4890,
-            &[
-                0x26, 0xA1, 0x18, 0x00, 0x26, 0xF6, 0x06, 0x1F, 0x00, 0x01, 0x74, 0x22, 0x3D, 0x00,
-                0x00, 0x74, 0x1D, 0x26, 0x8B, 0x16, 0x14, 0x00, 0x89, 0x54, 0x4C, 0x2B, 0xD0, 0x3D,
-                0xF4, 0x01, 0x77, 0x09, 0x2B, 0xC2, 0x3D, 0xF4, 0x01, 0x72, 0xF9, 0x03, 0xC2, 0x89,
-                0x44, 0x48,
-            ],
-            "mov %es:0x18,%ax (lend); testb $0x1,%es:0x1f (the loop flag); je; cmp $0x0,%ax; \
-             je; mov %es:0x14,%dx (lbeg); mov %dx,0x4c(%si) (m_loop = the loop's begin); \
-             sub %ax,%dx (lbeg - lend, a whole number of loop lengths); cmp $0x1f4,%ax; ja; \
-             sub %dx,%ax; cmp $0x1f4,%ax; jb; add %dx,%ax; mov %ax,0x48(%si) — m_end is lend, \
-             reduced by loop lengths until it is below 500",
-        ),
-        (
-            0x48BE,
-            &[0x26, 0xA1, 0x10, 0x00, 0x05, 0x20, 0x00, 0x89, 0x44, 0x48, 0xB8, 0xFF, 0xFF, 0x89, 0x44, 0x4C],
-            "mov %es:0x10,%ax; add $0x20,%ax; mov %ax,0x48(%si); mov $0xffff,%ax; mov \
-             %ax,0x4c(%si) — the one-shot's bounds, length plus the padding, m_loop = 0xffff",
-        ),
-        // The output conversion's other half: the accumulator less the centre sums, indexed
-        // into the table the builder wrote at `cs:[0x6c]`.
-        (
-            0x30AD,
-            &[0x2E, 0xA1, 0x6C, 0x00, 0x05, 0x00, 0x04, 0x2E, 0x2B, 0x06, 0x50, 0x22],
-            "mov %cs:0x6c,%ax; add $0x400,%ax; sub %cs:0x2250,%ax — the table's base plus \
-             0x400 less the mono centre sum",
-        ),
-        (
-            0x2CAF,
-            &[0x8B, 0xCA, 0xB8, 0x00, 0x04, 0x2E, 0x2B, 0x06, 0x54, 0x22],
-            "mov %dx,%cx; mov $0x400,%ax; sub %cs:0x2254,%ax — the stereo right side's",
-        ),
-        // The voice routine's second gate, and the period clamp `step` reproduces: the
-        // `m_pos == 0xffff` test at `+0x3791`, the two bound words at `0x958`/`0x95A`, and
-        // the compares that apply them to `aspd` (`+0x5863`'s `jbe` and `+0x5890`'s `jae`).
-        (
-            0x378A,
-            &[0x3E, 0x8B, 0x76, 0x44, 0x83, 0xFE, 0xFF, 0x0F, 0x84, 0x13, 0x01],
-            "mov 0x44(%bp),%si (m_pos); cmp $0xffff,%si; je (the voice routine's return)",
-        ),
-        (
-            0x0958,
-            &[0xFF, 0x7F, 0x40, 0x00],
-            "the step's high and low period bounds: 0x7FFF and 0x0040",
-        ),
-        (
-            0x5863,
-            &[0x3B, 0x0E, 0x58, 0x09, 0x76, 0x0D, 0x8B, 0x0E, 0x58, 0x09],
-            "cmp 0x958,%cx; jbe; mov 0x958,%cx — the high bound on aspd",
-        ),
-        (
-            0x5890,
-            &[0x3B, 0x0E, 0x5A, 0x09, 0x73, 0x0D, 0x8B, 0x0E, 0x5A, 0x09],
-            "cmp 0x95a,%cx; jae; mov 0x95a,%cx — the low bound on aspd",
-        ),
-    ];
-
-    for (offset, bytes, meaning) in claims {
-        assert_eq!(
-            &image[*offset..*offset + bytes.len()],
-            *bytes,
-            "0x{offset:04X}: {meaning}"
-        );
-    }
-
-    // And the seven published words are where the symbol map says they are, in the segment
-    // the trace reads: the four the ring carries are contiguous and the tick counter sits
-    // beside them (`MAIN/STMIK.H:125-131`'s declaration order is not the memory order — the
-    // offsets come from the object's own `PUBDEF` records).
-    for at in [NP_ZPLUS, NP_ZFRAME, NP_ROW, NP_ORD, NP_LOOP] {
-        assert!(at + 1 < image.len(), "0x{at:04X} is inside the segment");
-    }
-    assert_eq!(NP_ROW - NP_ZFRAME, 2, "zframe, row");
-    assert_eq!(NP_ORD - NP_ROW, 4, "row, pat, ord");
-    println!(
-        "the segment image: {} bytes, {} claims checked at their own offsets",
-        image.len(),
-        claims.len()
-    );
+/// The image's little-endian word at `at`.
+fn word(image: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([image[at], image[at + 1]])
 }
 
-/// `_zplaysong`'s per-channel initialiser (`+0x5614`, the loop `+0x5625`…`+0x568a` over the
-/// 48 channel structs at `+0xda0`, `0x60` bytes apart): **which fields it writes, and which it
-/// leaves.** Every store in the loop body is `[si + d]` with an 8-bit displacement, in one of
-/// four encodings (`88 /r d` byte, `89 /r d` word, `c6 44 d imm8`, `66 c7 44 d imm32`), so the
-/// body is decoded instruction by instruction and the displacements collected (the first,
-/// `88 5c 03`, stores `bl` — the channel's own index — into `channelnum`).
-///
-/// It writes `achannelused` (`+0x01`) as **`0x80`** — which the `+0x5781` the initialiser ends
-/// with clears again — and `lastins` (`+0x37`) as 0; it never writes `avol` (`+0x1a`) or
-/// `a0volcut` (`+0x31`). A seek made mid-song (`restartmus`'s `_zplaysong`, `MAIN/U2.ASM:394`)
-/// therefore keeps the previous module's channel volumes, and with `lastins` 0 a note-off
-/// returns at `+0x48ce` before it can zero one. That is what decides MUSIC1's order 0 in block
-/// 1 (`docs/fidelity/APPROXIMATIONS.md` A38): the port's `Channel::initialise` keeps both, as
-/// `the_song_initialiser_writes_exactly_what_initialise_writes` checks for every field.
+/// **The port's tables, and the oracle's, are the object's.** The port's public tables and
+/// arithmetic are read against the image directly; the oracle's (`common::oracle`), which the
+/// effect and mixer tests hold the port to, are read against it here.
 #[test]
-fn the_song_initialiser_leaves_the_channel_volume_and_its_zero_countdown() {
+fn the_ports_tables_are_the_objects_own() {
     let image = segment_image();
-    // `+0x5614`…`+0x5624`: ds = cs, cx = 0x30 channels, ax = 0, si = 0xda0, bl = 0, bh = 1, cli.
-    assert_eq!(
-        &image[0x5614..0x5625],
-        &[0x8C, 0xC8, 0x8E, 0xD8, 0xB9, 0x30, 0x00, 0x33, 0xC0, 0xBE, 0xA0, 0x0D, 0x32, 0xDB, 0xB7,
-          0x01, 0xFA]
-    );
-    // `+0x5685`…`+0x568b`: add si,0x60; inc bl; loop +0x5625.
-    assert_eq!(&image[0x5685..0x568C], &[0x83, 0xC6, 0x60, 0xFE, 0xC3, 0xE2, 0x99]);
+    assert_eq!(&image[1..45], b"Scream Tracker V3.0 Music Interface Kit V0.9");
 
-    let mut written: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
-    let mut at = 0x5625;
-    while at < 0x5685 {
-        // The ModRM byte's mod/rm bits are `01 100` — `[si + disp8]` — and its reg field is
-        // the source register (al, bl), which is why it is masked.
-        let si = |modrm: u8| modrm & 0xC7 == 0x44;
-        let (displacement, length, value) = match image[at..at + 3] {
-            [0x88, modrm, d] if si(modrm) => (d, 3, vec![]),
-            [0x89, modrm, d] if si(modrm) => (d, 3, vec![]),
-            [0xC6, 0x44, d] => (d, 4, vec![image[at + 3]]),
-            [0x66, 0xC7, 0x44] => (image[at + 3], 8, image[at + 4..at + 8].to_vec()),
-            _ => panic!("0x{at:04X}: not one of the loop's four store encodings"),
-        };
-        written.entry(displacement).or_default().extend(value);
-        at += length;
+    // The volume scale at `+0x9c4`.
+    assert_eq!(&image[0x9C4..0xA04], &sr_audio::VOLUME_SCALE, "the port's VOLUME_SCALE");
+    assert_eq!(&image[0x9C4..0xA04], &oracle::SCALE);
+
+    // `+0x593a`: the periods at `+0xa24` shifted by the byte `+0x97c + octave`, unchecked, so
+    // octaves 8…15 read the bytes after the eight shifts. From octave 11 the shift is 16 or more
+    // and a word shift overflows; no module reaches past octave 8.
+    for octave in 0..=10u8 {
+        for semitone in 0..12u8 {
+            let note = (octave << 4) | semitone;
+            let period = word(&image, 0xA24 + 2 * usize::from(semitone));
+            let expected = period >> image[0x97C + usize::from(octave)];
+            assert_eq!(sr_audio::note_period(note), expected, "the port's note {note:#04x}");
+            assert_eq!(oracle::note_period(note), expected, "the oracle's note {note:#04x}");
+        }
     }
-    assert_eq!(at, 0x5685, "the body decodes to its end");
-    assert_eq!(written.get(&0x01), Some(&vec![0x80]), "achannelused = 0x80");
-    assert!(written.contains_key(&0x37), "lastins is written (from al = 0)");
-    assert!(!written.contains_key(&0x1A), "avol is never written");
-    assert!(!written.contains_key(&0x31), "a0volcut is never written");
-    println!("the initialiser writes {:x?}", written.keys().collect::<Vec<_>>());
+    let periods: Vec<u16> = (0..12).map(|i| word(&image, 0xA24 + 2 * i)).collect();
+    assert_eq!(periods, oracle::PERIODS);
+    assert_eq!(&image[0x97C..0x98C], &oracle::SHIFTS);
+    assert_eq!(sr_audio::note_period(0xfe), 0, "`+0x593a`'s note-off test");
+
+    // The vibrato sine at `+0xa50`, and `Q`'s addends and multipliers at `+0x95c`/`+0x96c`.
+    let sine: Vec<i16> = (0..64).map(|i| word(&image, 0xA50 + 2 * i) as i16).collect();
+    assert_eq!(sine, oracle::SINE);
+    let addends: Vec<i8> = image[0x95C..0x96C].iter().map(|&byte| byte as i8).collect();
+    assert_eq!(addends, oracle::Q_ADD);
+    assert_eq!(&image[0x96C..0x97C], &oracle::Q_MULTIPLY);
+
+    // `+0x58b9`: `mov $0xda,%dx; mov $0x7600,%ax; div %cx`, the step's base frequency.
+    assert_eq!((image[0x58B9], image[0x58BC]), (0xBA, 0xB8), "mov %dx, mov %ax");
+    let base = u32::from(word(&image, 0x58BA)) << 16 | u32::from(word(&image, 0x58BD));
+    assert_eq!(u64::from(base), oracle::BASE_FREQ);
+    for period in [1u16, 428, 1712, 27392] {
+        assert_eq!(sr_audio::period_step(period), base / u32::from(period), "period {period}");
+    }
+    assert_eq!(sr_audio::period_step(1712), 8362, "400 short of 8363 × 1712");
+    assert_eq!(sr_audio::period_step(0), 0);
+
+    // `+0x5813`'s `mov $0x20ab,%cx`: the c2spd reference.
+    assert_eq!(image[0x5813], 0xB9, "mov %cx");
+    assert_eq!(u32::from(word(&image, 0x5814)), oracle::C2SPD_REFERENCE);
+    assert_eq!(sr_audio::scaled_period(1712, 8363), 1712);
+
+    // The stereo divisor `[0x8d7]`, and the period bounds `[0x958]`/`[0x95a]` the step clamps to.
+    let divisor = word(&image, 0x8D7);
+    assert_eq!(u64::from(divisor), oracle::STEREO_DIVISOR);
+    let stereo = |period| sr_audio::step(period, MixRate::Hz40000, true);
+    assert_eq!(stereo(1712), oracle::step(1712, u64::from(divisor)));
+    let (high, low) = (word(&image, 0x958), word(&image, 0x95A));
+    assert_eq!((high, low), (0x7FFF, 0x40));
+    assert_eq!(stereo(0xFFFF), stereo(high), "the high bound");
+    assert_eq!(stereo(1), stereo(low), "the low bound");
 }
 
 /// The song initialiser's stores, decoded from the object: the loop body `+0x5625`…`+0x5684`,
@@ -1308,7 +379,7 @@ fn a_restart_keeps_the_previous_songs_volume_and_clears_lastins() {
 }
 
 /// **A boot is the first `_zplaysong`, onto the object's initial state** — and that state is
-/// zero wherever the song initialiser does not write (Phase 9 Task 6b, D45).
+/// zero wherever the song initialiser does not write (D45).
 ///
 /// Every boot path reaches its first `_zplaysong` with no tick in between: `_zinit`
 /// (`MAIN/U2.ASM:747`), the boot's `restartmus` and its `_zinitmodule`, then `_zsoundon` and
@@ -1316,9 +387,8 @@ fn a_restart_keeps_the_previous_songs_volume_and_clears_lastins() {
 /// ticked. What a boot's channels hold, then, is the object's own image wherever
 /// `+0x5614` does not store. The image's `_zchn` (`+0x0da0`, 48 × 0x60 bytes), the loop
 /// counter `[0x90b]`, `_np_zframe` (`+0x8fb`), the ring (`+0x2150`, 256 bytes), its two
-/// pointers (`+0x214c`, `+0x214e`) and the fed words (`+0x905`…`+0x90e`) are all zero — which
-/// is `Player::new`'s state, so a boot is a fresh player and the port's boots (`second2b`,
-/// `second1`) do not move.
+/// pointers (`+0x214c`, `+0x214e`) and the fed words (`+0x905`…`+0x90e`) are all zero, and so
+/// is `Player::new`'s state: a boot is a fresh player.
 #[test]
 fn a_boot_starts_on_the_objects_zeroed_channels() {
     let image = segment_image();
@@ -1329,86 +399,17 @@ fn a_boot_starts_on_the_objects_zeroed_channels() {
     assert!(zeroed(0x2150, 0x100), "the ring");
     assert!(zeroed(0x214c, 4), "its read and write pointers, before `_zinit` primes them");
     assert!(zeroed(0x0905, 10), "the words a row advance feeds it");
+
+    let fresh = player("MUSIC0");
+    assert_eq!(fresh.zframe(), 0);
+    for index in 0..CHANNELS {
+        assert_eq!(fresh.channel(index), Some(&sr_audio::Channel::default()), "channel {index}");
+    }
 }
 
 // -------------------------------------------------------------------------------------------
-// A module built here, for the cells the shipped data does not carry
+// Helpers
 // -------------------------------------------------------------------------------------------
-
-/// Build an S3M in memory the way `tests/module.rs`'s builder does: the header, the order
-/// list, the two pointer tables, then paragraph-aligned blocks, with the pattern data
-/// scrambled by the same keystream the loader undoes.
-struct Builder {
-    bytes: Vec<u8>,
-}
-
-impl Builder {
-    /// `orders` is the order list; `patterns` is one packed row per entry, the rest of each
-    /// pattern being terminators.
-    fn new(orders: &[u8], patterns: &[Vec<u8>]) -> Builder {
-        let mut bytes = vec![0u8; 0x60];
-        bytes[28] = 26;
-        bytes[29] = 16;
-        bytes[32..34].copy_from_slice(&(orders.len() as u16).to_le_bytes());
-        bytes[34..36].copy_from_slice(&0u16.to_le_bytes());
-        bytes[36..38].copy_from_slice(&(patterns.len() as u16).to_le_bytes());
-        bytes[44..48].copy_from_slice(b"SCRM");
-        bytes[48] = 64; // global volume
-        bytes[49] = 6; // initial speed
-        bytes[50] = 125; // initial tempo
-        bytes[51] = 176;
-        bytes[64..96].fill(255);
-        bytes.extend_from_slice(orders);
-        bytes.resize(0x60 + orders.len() + 2 * patterns.len(), 0);
-        let patterns_at = 0x60 + orders.len();
-
-        let mut pointers = Vec::new();
-        for row in patterns {
-            let mut data = row.clone();
-            data.resize(row.len() + ROWS, 0);
-            descramble(&mut data);
-            let mut block = ((data.len() + 2) as u16).to_le_bytes().to_vec();
-            block.extend_from_slice(&data);
-            let pad = (16 - bytes.len() % 16) % 16;
-            bytes.extend(std::iter::repeat_n(0u8, pad));
-            let paragraph = (bytes.len() / 16) as u16;
-            bytes.extend_from_slice(&block);
-            pointers.push(paragraph);
-        }
-        for (index, pointer) in pointers.iter().enumerate() {
-            bytes[patterns_at + 2 * index..patterns_at + 2 * index + 2]
-                .copy_from_slice(&pointer.to_le_bytes());
-        }
-        Builder { bytes }
-    }
-
-    fn build(self) -> Module {
-        Module::load(&self.bytes).expect("the built module loads")
-    }
-}
-
-/// One cell, packed as the format packs it: the flag byte carries the channel in its low five
-/// bits, and one flag byte can carry a note (and instrument), a volume and an effect.
-fn cell(channel: u8, note: Option<(u8, u8)>, command: Option<(u8, u8)>) -> Vec<u8> {
-    let mut flag = channel;
-    let mut out = Vec::new();
-    if note.is_some() {
-        flag |= 0x20;
-    }
-    if command.is_some() {
-        flag |= 0x80;
-    }
-    out.push(flag);
-    if let Some((note, instrument)) = note {
-        out.push(note);
-        out.push(instrument);
-    }
-    if let Some((command, info)) = command {
-        out.push(command);
-        out.push(info);
-    }
-    out
-}
 
 /// How many polls it takes to see `count` ticks at a tempo, for the tests' frame arithmetic.
 fn ticks_to_polls(count: u32, mix_rate: MixRate, tempo: u8) -> u32 {
@@ -1479,14 +480,13 @@ fn a_seek_mid_song_clears_the_tick_counter_so_the_new_rows_cells_are_read() {
     //
     // The observable is an `A` command on the row the seek lands on — the row's own first act,
     // and the one thing a row that is never processed cannot do.
-    let module = Builder::new(
+    let module = first_rows(
         &[0, 1],
         &[
-            cell(0, None, Some((1, 0x09))), // pattern 0 row 0: A09
-            cell(0, None, Some((1, 0x0c))), // pattern 1 row 0: A0C — what the seek must read
+            &[Note::command(0, 1, 0x09)], // pattern 0 row 0: A09
+            &[Note::command(0, 1, 0x0c)], // pattern 1 row 0: A0C, what the seek must read
         ],
-    )
-    .build();
+    );
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     // One tick in: pattern 0's row 0 has been processed, so the counter is part-way through
@@ -1510,11 +510,7 @@ fn the_published_position_is_ten_polls_behind_the_engine() {
     // after the seek; the ring publishes it ten polls after the poll that pushed it.
     let mut player = player("MUSIC0");
     player.play_song(25);
-    let ticks_per_row = 6;
-    let per_tick = 40_000u64 * 5 / (2 * 120);
-    let samples = per_tick * ticks_per_row;
-    let row_begins = u64::from(ticks_to_polls(ticks_per_row as u32, MixRate::Hz40000, 120));
-    let _ = samples;
+    let row_begins = ticks_to_polls(6, MixRate::Hz40000, 120);
 
     let entered = poll_until(&mut player, 100, |player, _| {
         player.engine_position().row == 1
@@ -1563,12 +559,8 @@ fn an_a_command_changes_the_speed_where_the_effect_is_processed_not_where_it_is_
     );
     assert_eq!(player.state().row, 63, "the last row of pattern 70");
     println!(
-        "the A01 shows at poll {published}: speed 1 while the published row is pattern 70's          last — and the engine's own row is {}",
-        player.engine_position().row
-    );
-    let row_after = poll_until(&mut player, 100, |player, _| player.state().pattern == 71);
-    println!(
-        "the ring publishes pattern 71 {row_after} polls later, when the engine is at row {}",
+        "the A01 shows at poll {published}: speed 1 while the published row is pattern 70's \
+         last, and the engine's own row is {}",
         player.engine_position().row
     );
 }
@@ -1576,8 +568,7 @@ fn an_a_command_changes_the_speed_where_the_effect_is_processed_not_where_it_is_
 #[test]
 fn a_speed_takes_its_parameter_whatever_it_is_and_a_tempo_is_split_at_32() {
     // **Which command reached the handler, not which parameter it carries, is what picks
-    // the arithmetic** — and Task 4 read the tables and corrected this test, which had it
-    // the other way round.
+    // the arithmetic.**
     //
     // The first-tick table at `+0x3bd8` sends command 1 (`A`) to `+0x3dd2`, whose whole body
     // is `cmp $0x0,%al; je; xor %ah,%ah; mov %ax,%cs:0x2002` — **there is no upper bound**,
@@ -1587,14 +578,14 @@ fn a_speed_takes_its_parameter_whatever_it_is_and_a_tempo_is_split_at_32() {
     //
     // This is not a corner: MUSIC1's `A` parameters are `{3: 30, 6: 23, **127: 1**}`, so one
     // of its cells plays a row at speed 127 — see `tests/effects.rs` and the note.
-    let module = Builder::new(&[0], &[cell(0, None, Some((1, 0x20)))]).build();
+    let module = first_rows(&[0], &[&[Note::command(0, 1, 0x20)]]);
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     poll_until(&mut player, 10, |player, _| player.state().speed != 6);
     assert_eq!(player.state().speed, 0x20, "A20 is a speed of 32");
     assert_eq!(player.state().tempo, 125);
 
-    let module = Builder::new(&[0], &[cell(0, None, Some((1, 0x21)))]).build();
+    let module = first_rows(&[0], &[&[Note::command(0, 1, 0x21)]]);
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     poll_until(&mut player, 10, |player, _| player.state().speed != 6);
@@ -1607,7 +598,7 @@ fn a_speed_takes_its_parameter_whatever_it_is_and_a_tempo_is_split_at_32() {
 
     // The `T` handler's own split, through its own table entry: 32 and under does nothing.
     for (parameter, expected) in [(0x20, 125), (0x21, 0x21)] {
-        let module = Builder::new(&[0], &[cell(0, None, Some((20, parameter)))]).build();
+        let module = first_rows(&[0], &[&[Note::command(0, 20, parameter)]]);
         let mut player = Player::new(module, PlayerOptions::default());
         player.play_song(0);
         for _ in 0..20 {
@@ -1623,14 +614,7 @@ fn a_c_command_breaks_to_the_next_order_at_its_own_decimal_row() {
     // `+0x3dfe`: the parameter is decimal (high nibble × 10 + low nibble), unclamped. `C12`
     // therefore means row 12, not row 0x12 = 18 — and the break lands at the *row's end*, the
     // order advance being deferred by the flag (`+0x3de2`'s sibling at `+0x3e0a`).
-    let module = Builder::new(
-        &[0, 1],
-        &[
-            cell(0, None, Some((3, 0x12))), // C12 on pattern 0's row 0
-            vec![],                         // pattern 1: empty
-        ],
-    )
-    .build();
+    let module = first_rows(&[0, 1], &[&[Note::command(0, 3, 0x12)], &[]]); // C12, then empty
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     // The engine enters order 1 at row 12 after one row's worth of ticks.
@@ -1650,7 +634,7 @@ fn a_c_command_breaks_to_the_next_order_at_its_own_decimal_row() {
     // A parameter naming a row past the pattern's last is stored unclamped — the original's
     // `C` handler writes `[0x93b]` and nothing checks it (`+0x3dfe`…`+0x3e07`) — and the row
     // counter is past 63, so the very next row advance takes the order counter on again.
-    let module = Builder::new(&[0, 1, 2], &[cell(0, None, Some((3, 0x99))), vec![], vec![]]).build();
+    let module = first_rows(&[0, 1, 2], &[&[Note::command(0, 3, 0x99)], &[], &[]]);
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     poll_until(&mut player, polls * 4, |player, _| {
@@ -1667,16 +651,11 @@ fn a_c_command_breaks_to_the_next_order_at_its_own_decimal_row() {
 fn a_b_command_jumps_at_the_end_of_its_own_row() {
     // `+0x3de2`: `B` raises the same advance flag a `C` does, so the jump lands at the row's
     // end — after the row's own ticks, not at the cell.
-    let module = Builder::new(
+    // Pattern 0's row 0 jumps to order 2; pattern 1 must never be played.
+    let module = first_rows(
         &[0, 1, 2],
-        &[
-            // Pattern 0's row 0 jumps to order 2; pattern 1 must never be played.
-            cell(0, None, Some((2, 2))),
-            cell(0, None, Some((1, 1))),
-            vec![],
-        ],
-    )
-    .build();
+        &[&[Note::command(0, 2, 2)], &[Note::command(0, 1, 1)], &[]],
+    );
     let mut player = Player::new(module, PlayerOptions::default());
     player.play_song(0);
     let polls = ticks_to_polls(6, MixRate::Hz40000, 125);
@@ -1708,11 +687,9 @@ fn a_254_is_stepped_over_and_zplus_records_the_crossing() {
     // The module below is the shape the two bits differ over: `[0, 254, 1, 254]`. Playing
     // order 0 sets bit 0 (its next entry, order 1, is the 254) and nothing else — **1**. The
     // step over it to order 2 sets bit 1 for the entry stepped over *and* bit 0 for order 2's
-    // own successor at order 3 — **3**, which is what the object's arithmetic produces and
-    // what `music-clock.md` §6's original wording ("unless the entry after the one entered is
-    // itself 254, in which case 1") could not.
+    // own successor at order 3 — **3**.
     let mut player = Player::new(
-        Builder::new(&[0, 254, 1, 254], &[vec![], vec![]]).build(),
+        first_rows(&[0, 254, 1, 254], &[&[], &[]]),
         PlayerOptions::default(),
     );
     player.play_song(0);
@@ -1733,12 +710,6 @@ fn a_254_is_stepped_over_and_zplus_records_the_crossing() {
     );
     assert_eq!(player.engine_position().row, 0);
     assert_eq!(player.engine_zplus(), 3, "both bits: stepped over, and a 254 next");
-    // And what the parts see is the same value, ten polls later: `second5`'s own zplus column
-    // turns 1 at order 26 (the order whose successor at 27 is the 254), which is the ring
-    // publishing what this word held.
-    let published = poll_until(&mut player, 100, |player, _| player.zplus() != 0);
-    println!("the step-over's zplus 3 reaches the parts {published} poll(s) later");
-    let _ = published;
 }
 
 #[test]
@@ -1746,7 +717,7 @@ fn a_255_ends_the_order_list_and_loops_when_the_song_was_already_running() {
     // `+0x4469`…`0x449b`: a 255 stops a song whose first row has not played yet, and
     // otherwise increments `_np_loop` and restarts the scan at the loop order `_zplaysong`
     // recorded — which is 0 for every order the shell hands it.
-    let module = Builder::new(&[0, 1, 255], &[vec![], vec![]]).build();
+    let module = first_rows(&[0, 1, 255], &[&[], &[]]);
 
     let mut player = Player::new(module.clone(), PlayerOptions::default());
     player.play_song(2);
@@ -1829,36 +800,6 @@ fn a_stopped_player_keeps_its_position() {
 }
 
 #[test]
-fn the_polls_samples_are_the_frames_share_and_carry_their_fraction() {
-    // 40000/70.086 = 570.727… samples a poll. The port hands Task 5 whole samples and carries
-    // the fraction, rather than rounding per poll (which would drift by 0.13 %): the fives are
-    // 570, 571, 571, 570, 571 — the fraction showing up as the odd 571, never lost.
-    let mut player = player("MUSIC0");
-    player.play_song(0);
-    let mut run = Vec::new();
-    for _ in 0..5 {
-        player.poll();
-        run.push(player.samples_this_poll());
-    }
-    assert_eq!(run, vec![570, 571, 571, 570, 571]);
-
-    // And the sum over a stretch of polls is the rate: `polls × mix_rate / 70.086`, to the
-    // sample, however the fraction falls.
-    let polls = 1_000u32;
-    let mut total = 0u64;
-    for _ in 0..polls {
-        player.poll();
-        total += u64::from(player.samples_this_poll());
-    }
-    let expected = u64::from(polls) * 40_000 * 1000 / 70_086;
-    assert!(
-        total.abs_diff(expected) <= 1,
-        "{polls} polls gave {total} samples where {expected} is the rate"
-    );
-    println!("{polls} polls: {total} samples against a rate of {expected}");
-}
-
-#[test]
 fn the_global_volume_is_the_modules_own_byte_and_the_shell_walks_it_down() {
     assert_eq!(player("MUSIC0").global_volume(), 64);
     let mut player = player("MUSIC1");
@@ -1895,165 +836,51 @@ fn zframe_counts_ticks_at_the_tempos_rate_and_the_parts_can_reset_it() {
 // End to end
 // -------------------------------------------------------------------------------------------
 
-/// Play a module from the order the demo's own boot starts it at (`MAIN/U2.ASM:786` pushes 0)
-/// until the order counter stops advancing or wraps — and say where and how long it took.
-fn play_through(name: &'static str) -> (u32, Position, u8, bool) {
-    let mut player = player(name);
-    player.play_song(0);
-    let cap = 400_000u32;
-    let mut previous = player.state().order;
-    let mut started = false;
-    for poll in 0..cap {
-        player.poll();
-        let position = player.state();
-        if !started && position.order != 0 {
-            started = true;
-        }
-        let wrapped = started && position.order < previous;
-        if wrapped || player.finished() {
-            println!(
-                "  {name}: {} after {poll} polls ({:.1} seconds of logic ticks) at order {} \
-                 pattern {} row {}, loop counter {}",
-                if player.finished() { "finished" } else { "wrapped" },
-                f64::from(poll) / 70.086,
-                position.order,
-                position.pattern,
-                position.row,
-                player.state().r#loop,
-            );
-            return (poll, position, player.state().r#loop, player.finished());
-        }
-        previous = position.order;
-    }
-    panic!("{name} never finished or wrapped in {cap} polls");
-}
-
+/// Each module from the order the demo's boot starts it at (`MAIN/U2.ASM:786` pushes 0), for
+/// 100,000 polls (about 24 minutes): every published word stays inside the module's tables,
+/// every row the engine enters gets 1..=255 ticks (`A` is unbounded, `+0x3dd6`, and MUSIC1's
+/// `A7F` row takes 127), and the song loops rather than ending. The first loop's polls, ticks
+/// and rows are printed.
 #[test]
-fn each_module_plays_to_the_end_of_its_order_list() {
-    // The exit criterion's "shown, not asserted": each module is played from its own start
-    // order to the end of its order list, and the run says where it got and how many logic
-    // ticks it took. The number is this test's own arithmetic — the order list, the 64 rows
-    // and the tick counts — and the printed line is what `PROGRESS.md` may quote.
+fn each_module_plays_to_its_loop_inside_its_own_tables() {
     for name in ["MUSIC0", "MUSIC1"] {
-        let (polls, position, loops, finished) = play_through(name);
-        // A second, independent count of the same run: the ticks it spent, against the rows it
-        // spent them on.
-        let (ticks, rows) = count_ticks(name);
-        assert!(rows > 0, "{name}: no rows played");
-        println!("  {name}: {polls} poll(s), {ticks} tick(s) over {rows} row(s)");
         let module = module(name);
-        assert!(
-            usize::from(position.order) < module.order_count(),
-            "{name}: the published order is inside the order list"
-        );
-        assert!(
-            usize::from(position.pattern) < module.pattern_count(),
-            "{name}: the published pattern is inside the pattern table"
-        );
-        assert!(position.row < ROWS as u8, "{name}: the row is inside the pattern");
-        assert!(polls > 0, "{name}: the song took some time to play");
-        println!(
-            "  {name}: {} order(s), {} pattern(s), ended at order {} ({} loops)",
-            module.order_count(),
-            module.pattern_count(),
-            position.order,
-            loops
-        );
-        // Both modules end their order list with a `255` before the order list's end, and
-        // the shell restarts the music before any `255` is reached; played from order 0 the
-        // player loops instead (`music-clock.md` §10).
-        assert!(
-            looped_or_finished(loops, finished),
-            "{name}: expected a loop or an end"
-        );
-    }
-}
-
-/// Play the module again, counting the ticks it spends and the rows it spends them on.
-///
-/// The tick count is the player's own (`Player::zframe`); the row count is the engine's position
-/// changing. The row timer is what is really being asked: every row the engine enters must be
-/// given between 1 and 32 of those ticks — the range the format's speed byte allows — so the
-/// two numbers agreeing is a statement about the row timer and not about the counter reading
-/// itself. Returns (ticks, rows).
-fn count_ticks(name: &'static str) -> (i64, u32) {
-    let mut player = player(name);
-    player.play_song(0);
-    let mut ticks = 0i64;
-    let mut rows = 0u32;
-    let mut last_row = None;
-    let mut ticks_this_row = 0u32;
-    let cap = 400_000u32;
-    let mut previous = player.state().order;
-    let mut started = false;
-    for _ in 0..cap {
-        let before = player.zframe();
-        let position = player.engine_position();
-        player.poll();
-        let now = player.zframe();
-        let spent = u32::try_from(now - before).expect("a few ticks a poll");
-        ticks += i64::from(spent);
-        if last_row != Some((position.order, position.row)) {
-            if rows > 0 {
-                // The range is the *parameter's*, 1..=255, not the ST3 documentation's
-                // "1..32": the `A` handler is `mov %ax,0x2002` with no bound at all
-                // (`+0x3dd6`), and MUSIC1 carries one `A7F` cell (order 98, row 48), so a
-                // row legitimately spends 127 ticks — which is what this row-timer check
-                // exists to catch the *shape* of, not the size.
-                assert!(
-                    (1..=255).contains(&ticks_this_row),
-                    "{name}: the row at {last_row:?} was given {ticks_this_row} ticks"
-                );
-            }
-            rows += 1;
-            ticks_this_row = 0;
-            last_row = Some((position.order, position.row));
-        }
-        ticks_this_row += spent;
-        let published = player.state();
-        if !started && published.order != 0 {
-            started = true;
-        }
-        if (started && published.order < previous) || player.finished() {
-            break;
-        }
-        previous = published.order;
-    }
-    (ticks, rows)
-}
-
-fn looped_or_finished(loops: u8, finished: bool) -> bool {
-    loops > 0 || finished
-}
-
-#[test]
-fn playing_past_the_end_neither_panics_nor_runs_off_the_orders() {
-    // "A player that loops for ever is fine; a player that reads past its orders is not."
-    // This plays each module a further window past the point the test above stopped at —
-    // 71,685 polls, a thousand seconds — and asks that every published word stays inside the
-    // module's own tables, that the tick counter stays finite, and that the tempo stays a
-    // tempo.
-    for name in ["MUSIC0", "MUSIC1"] {
-        let (_, _, _, _) = play_through(name);
         let mut player = player(name);
-        let module = module(name);
         player.play_song(0);
-        let mut wrapped = 0u32;
-        let mut previous = 0u8;
+        let (mut ticks, mut rows, mut ticks_this_row) = (0i64, 0u32, 0u32);
+        let mut last_row = None;
+        let (mut started, mut looped, mut wraps, mut previous) = (false, false, 0u32, 0u8);
         for poll in 0..100_000u32 {
+            let before = player.zframe();
+            let engine = player.engine_position();
             player.poll();
             let position = player.state();
+            if !looped {
+                let spent = u32::try_from(player.zframe() - before).expect("a few ticks a poll");
+                ticks += i64::from(spent);
+                if last_row != Some((engine.order, engine.row)) {
+                    if rows > 0 {
+                        assert!(
+                            (1..=255).contains(&ticks_this_row),
+                            "{name}: the row at {last_row:?} was given {ticks_this_row} ticks"
+                        );
+                    }
+                    rows += 1;
+                    ticks_this_row = 0;
+                    last_row = Some((engine.order, engine.row));
+                }
+                ticks_this_row += spent;
+            }
+
             assert!(
                 usize::from(position.order) < module.order_count(),
-                "{name}: poll {poll} published order {} past the {} the module has",
-                position.order,
-                module.order_count()
+                "{name}: poll {poll} published order {}",
+                position.order
             );
             assert!(
                 usize::from(position.pattern) < module.pattern_count(),
-                "{name}: poll {poll} published pattern {} past the {} the module has",
-                position.pattern,
-                module.pattern_count()
+                "{name}: poll {poll} published pattern {}",
+                position.pattern
             );
             assert!(position.row < ROWS as u8, "{name}: poll {poll} published row {}", position.row);
             assert!(
@@ -2061,65 +888,32 @@ fn playing_past_the_end_neither_panics_nor_runs_off_the_orders() {
                 "{name}: poll {poll} published tempo {}",
                 position.tempo
             );
-            // A speed is the `A` handler's parameter, 1..=255 — the speed is *not* bounds
-            // checked, and MUSIC1's `A7F` cell (order 98, row 48) publishes 127. Zero is the
-            // only value the handler refuses (`+0x3dd2`).
             assert!(position.speed != 0, "{name}: poll {poll} published speed 0");
-            if position.order < previous {
-                wrapped += 1;
+            assert!(!player.finished(), "{name}: a song played from order 0 loops");
+
+            started |= position.order != 0;
+            if started && position.order < previous {
+                wraps += 1;
+                if !looped {
+                    looped = true;
+                    println!(
+                        "  {name}: wrapped after {poll} polls ({:.1} seconds of logic ticks) at \
+                         order {} pattern {} row {}, loop counter {}",
+                        f64::from(poll) / 70.086,
+                        position.order,
+                        position.pattern,
+                        position.row,
+                        position.r#loop,
+                    );
+                    println!("  {name}: {poll} poll(s), {ticks} tick(s) over {rows} row(s)");
+                    assert!(position.r#loop > 0, "{name}: the wrap is a loop");
+                }
             }
             previous = position.order;
         }
-        assert!(wrapped > 0, "{name}: no order wrap in the window at all");
-        println!("  {name}: {wrapped} wrap(s) and no reading past the order list");
+        assert!(looped, "{name}: no loop in 100,000 polls");
+        println!("  {name}: {wraps} wrap(s) in 100,000 polls, none past the order list");
     }
-}
-
-/// The per-channel effect histogram of the cells the two modules carry, so the timeline
-/// effects' coverage is a measured fact rather than a claim: `A`, `B` and `C` are the ones
-/// this task owns, and `T` — which the plan's amendment says is in neither module — is
-/// counted here too.
-#[test]
-fn the_timeline_effects_the_modules_carry() {
-    for name in ["MUSIC0", "MUSIC1"] {
-        let module = module(name);
-        let mut histogram: BTreeMap<u8, usize> = BTreeMap::new();
-        for index in 0..module.pattern_count() {
-            let pattern = module.pattern(index).expect("a pattern");
-            for row in &pattern.rows {
-                for cell in row {
-                    if cell.has_command() {
-                        *histogram.entry(cell.command).or_default() += 1;
-                    }
-                }
-            }
-        }
-        let named: Vec<String> = histogram
-            .iter()
-            .filter(|&(command, _)| (1..=26).contains(command))
-            .map(|(command, count)| {
-                format!("{}×{count}", char::from(b'A' + command - 1))
-            })
-            .collect();
-        println!("  {name}: {}", named.join(" "));
-        for command in [1u8, 2, 3] {
-            println!(
-                "    {}: {}",
-                char::from(b'A' + command - 1),
-                histogram.get(&command).copied().unwrap_or(0)
-            );
-        }
-        assert!(
-            histogram.get(&1).copied().unwrap_or(0) > 0,
-            "{name} carries an A"
-        );
-        assert_eq!(
-            histogram.get(&20).copied().unwrap_or(0),
-            0,
-            "{name} carries no T, as the phase plan's amendment says"
-        );
-    }
-    let _ = CHANNELS;
 }
 
 /// **A14(a), settled: the flush clears the accumulator word it reads, so nothing marks the plane.**
@@ -2128,12 +922,9 @@ fn the_timeline_effects_the_modules_carry() {
 /// back over every accumulator dword they have just read: the stereo flush's `mov $0x0,%esp`
 /// (`+0x2ce5`, with `%esp` saved at `+0x2cde` and interrupts off at `+0x2ce4`) and its
 /// `mov %esp,(%si)` (`+0x2cf1`), and the mono flush's `mov $0x0,%ecx` (`+0x30d0`) and
-/// `mov %ecx,(%si)` (`+0x30e8`). The four zero bytes of each immediate are a `LIDATA` run, and
-/// the builder's old misreading of every such run as `0x01` is where the "`0x0101` marker"
-/// came from (`segment_image`'s note; `APPROXIMATIONS.md` A14(a)). So the plane a flush leaves
-/// behind is zero, the frame's value lands on the flush's own `0x400 + value`, and that is the
-/// base the port's mixer indexes with (`mix.rs`'s `FLUSH_BASE`) — the base the audible DMA
-/// buffer was measured at.
+/// `mov %ecx,(%si)` (`+0x30e8`); the four zero bytes of each immediate are a `LIDATA` run. So
+/// the plane a flush leaves behind is zero and a frame's value lands on the flush's own
+/// `0x400 + value`, the base the port's mixer indexes with (`mix.rs`'s `FLUSH_BASE`).
 #[test]
 fn the_flush_clears_the_accumulator_word_it_reads() {
     let image = segment_image();

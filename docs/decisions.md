@@ -91,7 +91,7 @@ reference. BEGLOGO does not depend on it: the shipped part 4 is
 build). No part the demo runs calls `dis_muscode`, and the vault models its one start key (A40,
 A46, D39).
 
-**Pinned by** `cargo test -p sr-audio --test trace zinfo_is_zero_in_every_filed_trace`. The
+**Pinned by** `cargo test -p sr-audio --test trace the_filed_traces_are_what_the_comparison_assumes`. The
 difference is A56; the word's other values stay unmeasured.
 
 ## D9 — Licence: MIT

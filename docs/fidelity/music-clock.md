@@ -164,9 +164,9 @@ the shell's order-25 restart (`MAIN/U2.ASM:902-905`, `mov bx,25` at `:903`).
 a trace holds (its coverage checked against the manifest, `check_coverage`). It asserts **content**
 (for `order`, `pattern`, `row`, `speed`, `tempo`, `loop` and `zplus`, the port's sequence of values
 is the trace's) and **placement** (within `JITTER_FRAMES`). A window's run is shifted by the offset
-its first row change measures (−16 for `hiddenu2`, −5 for `second2`, +1 for `second1b` and
-`second3b`, +2 for `second3a`, +4 for `second3d`). No player can match exactly: `second5` and
-`second5b` disagree on 8 of their 131 row changes (`the_two_sessions_of_one_recipe_disagree_at_eight_row_changes`). A12 is the residual; A54 and
+its first row change measures (−16 for `hiddenu2`, +1 for `second1b` and
+`second3b`, +2 for `second2` and `second3a`, +4 for `second3d`). No player can match exactly: `second5` and
+`second5b` disagree on 8 of their 131 row changes (`the_filed_traces_are_what_the_comparison_assumes`). A12 is the residual; A54 and
 `KNOWN_DISAGREEMENTS` hold two block-1 traces (§2.3).
 
 ### The order in force at each part's start

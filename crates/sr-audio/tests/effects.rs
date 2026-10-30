@@ -1,32 +1,19 @@
-//! Task 4's tests: the channel effects, driven from the shipped modules' own cells.
+//! The channel effects, driven tick by tick from the shipped modules' own cells and held to
+//! the object's arithmetic ([`common::oracle`]), never to the port's. The traces cannot judge a
+//! channel effect (a wrong `D` does not move the timeline), so this file is their evidence.
 //!
-//! **This is the task's whole evidence.** The per-frame trace comparison (`tests/trace.rs`)
-//! cannot judge a channel effect — a wrong `D` or `H` does not move the timeline — so every
-//! effect here is asserted tick by tick against **the object's arithmetic**, written out in
-//! this file from `MAIN/STMIK.300`'s own bytes: the period table at `+0xa24`, the octave
-//! shifts at `+0x97c`, the vibrato sine at `+0xa50` and the `Q` tables at `+0x95c`/`+0x96c`,
-//! each of them asserted against the object's segment image by `tests/player.rs`'s claims
-//! table. Nothing in this file asks the port what it does.
-//!
-//! Where a test drives a shipped module it **names the order, pattern, row and channel** and
-//! asserts the cell at that position carries the command it means to drive
-//! ([`the_cells_the_tests_drive_are_the_modules_own`]), so a change to the data fails here
-//! rather than silently testing nothing. Where the module's data does not reach a form (the
-//! fine *down* volume slide, the `O` with no instrument, `K`'s shared parameter) the test
-//! builds a module of its own — and the note records the absent form's count.
+//! A test that drives a shipped module names the order, pattern, row and channel, and
+//! [`the_cells_the_tests_drive_are_the_modules_own`] asserts the cell carries the command it
+//! means, so a change to the data fails rather than testing nothing. Forms the data does not
+//! reach are driven on a module built here (`common::Builder`).
+
+mod common;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
-use sr_audio::{descramble, Cell, Module, Player, PlayerOptions, ROWS};
-
-/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
-fn module(name: &str) -> Module {
-    sr_audio::Song::named(name)
-        .unwrap_or_else(|| panic!("{name} is not a song"))
-        .load(Path::new("../.."))
-        .unwrap_or_else(|error| panic!("{error}"))
-}
+use common::oracle::{note_period, retrigger_tick, retrigger_volume, scaled, vibrato_tick};
+use common::{module, Builder, Note};
+use sr_audio::{Cell, Module, Player, PlayerOptions};
 
 // -------------------------------------------------------------------------------------------
 // The tick harness
@@ -77,7 +64,6 @@ fn run_to(player: &mut Player, pattern: u8, row: u8) {
     panic!("pattern {pattern} row {row} was never entered");
 }
 
-/// One channel's state, copied out so the borrow ends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct State {
     period: u16,
@@ -143,147 +129,13 @@ fn cell_c2spd(module: &Module, cell: &Cell) -> u16 {
 }
 
 // -------------------------------------------------------------------------------------------
-// The object's tables and arithmetic, written out from its bytes
+// The cells the tests drive
 // -------------------------------------------------------------------------------------------
 
-/// The periods at the object's `+0xa24`, semitone by semitone, four octaves up.
-const PERIODS: [u16; 12] = [
-    27392, 25856, 24384, 23040, 21696, 20480, 19328, 18240, 17216, 16256, 15360, 14512,
-];
-
-/// The shifts at the object's `+0x97c` — eight real entries and the eight bytes after them,
-/// which octaves 8…15 read because the object does not check the index.
-const SHIFTS: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 5, 11, 17, 27, 32, 42, 47];
-
-/// The vibrato waveform at the object's `+0xa50`: 64 signed words, ±255.
-const SINE: [i16; 64] = [
-    0, 24, 49, 74, 97, 120, 141, 161, 180, 197, 212, 224, 235, 244, 250, 253, 255, 253, 250, 244,
-    235, 224, 212, 197, 180, 161, 141, 120, 97, 74, 49, 24, 0, -24, -49, -74, -97, -120, -141,
-    -161, -180, -197, -212, -224, -235, -244, -250, -253, -255, -253, -250, -244, -235, -224, -212,
-    -197, -180, -161, -141, -120, -97, -74, -49, -24,
-];
-
-/// The object's `+0x593a`: a note byte to a period.
-fn note_period(note: u8) -> u16 {
-    if note == 0xfe {
-        return 0;
-    }
-    PERIODS[usize::from(note & 0x0f)] >> SHIFTS[usize::from(note >> 4)]
-}
-
-/// The object's `+0x5813`: `period × 8363/c2spd`, with the word-overflow guard.
-fn scaled(period: u16, c2spd: u16) -> u16 {
-    let product = u32::from(period) * 8363;
-    if product >> 16 >= u32::from(c2spd) {
-        return 0x7fff;
-    }
-    (product / u32::from(c2spd)).min(0x7fff) as u16
-}
-
-/// The object's `+0x582b`: its own base frequency `0x00da7600` over the period.
-fn period_step(period: u16) -> u32 {
-    if period == 0 {
-        return 0;
-    }
-    0x00da_7600 / u32::from(period)
-}
-
-/// One tick of the object's `+0x4005` vibrato, from the position before it: the position
-/// after it, and the period the tick plays. The level is `value × depth >> 5`, and 5 is the
-/// shift because both modules' flags word is 8, so `[0x915]` is 0 (`+0x4043`).
-fn vibrato_tick(position: u16, info: u8, org_period: u16) -> (u16, u16) {
-    let depth = i32::from(info & 0x0f);
-    let speed = u16::from(info >> 4);
-    let stale = position & 0x80 != 0;
-    let value = if stale {
-        0
-    } else {
-        i32::from(SINE[usize::from(position & 0x7f) / 2])
-    };
-    let level = (value * depth) >> 5;
-    let period = org_period.wrapping_add(level as u16);
-    let from = if stale { 0 } else { position & 0xff };
-    ((from + speed * 2) & 0x7e, period)
-}
-
-/// One tick of the object's `+0x41ec` retrigger, from the counter before it: the counter
-/// after it and whether this tick fired. The interval is the low nibble, the volume code the
-/// high one, and the counter goes to zero on a fire before it is incremented.
-fn retrigger_tick(count: u8, info: u8) -> (u8, bool) {
-    let interval = info & 0x0f;
-    if interval != 0 && interval <= count {
-        return (1, true);
-    }
-    (count + 1, false)
-}
-
-// -------------------------------------------------------------------------------------------
-// The scope, measured: which cells the tests drive, and the letters that are absent
-// -------------------------------------------------------------------------------------------
-
-/// The two modules' effect letters and their counts — this task's scope evidence — and the
-/// cells the tests below name. An effect the tests drive that the histogram shows zero of
-/// would be a test of nothing.
+/// The `S` and `Q` parameters the modules carry, and every shipped cell the tests below name.
+/// (`tests/module.rs`'s `the_effect_histogram_is_the_modules_own` pins the letter counts.)
 #[test]
 fn the_cells_the_tests_drive_are_the_modules_own() {
-    let mut counts: BTreeMap<&str, BTreeMap<u8, usize>> = BTreeMap::new();
-    for name in ["MUSIC0", "MUSIC1"] {
-        let module = module(name);
-        let mut histogram: BTreeMap<u8, usize> = BTreeMap::new();
-        for index in 0..module.pattern_count() {
-            for cells in &module.pattern(index).expect("a pattern").rows {
-                for cell in cells {
-                    if cell.has_command() {
-                        *histogram.entry(cell.command).or_default() += 1;
-                    }
-                }
-            }
-        }
-        let named: Vec<String> = histogram
-            .iter()
-            .map(|(&command, &count)| {
-                let letter = if (1..=26).contains(&command) {
-                    char::from(b'A' + command - 1).to_string()
-                } else {
-                    format!("{command:#04x}")
-                };
-                format!("{letter}:{count}")
-            })
-            .collect();
-        println!("  {name}: {}", named.join(" "));
-        counts.insert(name, histogram);
-    }
-
-    // The letters the scope names, each present in at least one module.
-    for (name, command) in [
-        ("MUSIC0", 4u8),
-        ("MUSIC0", 5),
-        ("MUSIC0", 6),
-        ("MUSIC0", 7),
-        ("MUSIC0", 8),
-        ("MUSIC0", 10),
-        ("MUSIC0", 11),
-        ("MUSIC0", 15),
-        ("MUSIC0", 17),
-        ("MUSIC0", 19),
-    ] {
-        assert!(
-            counts[name].get(&command).copied().unwrap_or(0) > 0,
-            "{name} carries no {}",
-            char::from(b'A' + command - 1)
-        );
-    }
-    // ...and the three the object's tables implement but no cell reaches.
-    for (command, letter) in [(9u8, 'I'), (12, 'L'), (18, 'R')] {
-        for name in ["MUSIC0", "MUSIC1"] {
-            assert_eq!(
-                counts[name].get(&command).copied().unwrap_or(0),
-                0,
-                "{name} carries an {letter} — this task's note records it as absent"
-            );
-        }
-    }
-
     // `S` is `SDx` and nothing else: subcommand `d`, delays 2, 3 and 6.
     let delays = |name: &str| {
         let module = module(name);
@@ -310,10 +162,8 @@ fn the_cells_the_tests_drive_are_the_modules_own() {
     assert_eq!(delays("MUSIC0"), BTreeMap::from([(3u8, 77usize), (6, 63)]));
     assert_eq!(delays("MUSIC1"), BTreeMap::from([(2u8, 48usize)]));
 
-    // `Q`'s nibbles are the object's: the **low** nibble is the interval and the high one the
-    // volume code (`+0x41f6`). These are the code and interval multisets both files carry —
-    // the set the port's tables are tested against, and the set that leaves code 6's row of
-    // the multiplier table (10/16) reached by no shipped cell.
+    // `Q`'s low nibble is the interval, the high one the volume code (`+0x41f6`); no shipped
+    // cell reaches code 6's multiplier (10/16).
     let codes = |name: &str| {
         let module = module(name);
         let mut codes: BTreeMap<u8, usize> = BTreeMap::new();
@@ -550,7 +400,7 @@ fn the_fine_volume_slides_move_once_on_the_first_tick() {
         (0x3fu8, 33u8, "D3F: the high nibble 3, once"),
         (0xf3, 27, "DF3: the low nibble 3, once"),
     ] {
-        let mut song = Song::new();
+        let mut song = Builder::new();
         song.instrument(8363, 64);
         song.row(&[Note::new(0, 0x40, 1, 30)]);
         song.row(&[Note::command(0, 4, info)]);
@@ -866,15 +716,13 @@ fn h_restarts_a_stale_phase() {
     // phase at `speed × 2` — it does not continue from where it was.
     //
     // No shipped `H` run has a non-`H` command on the row before it on the same channel, so
-    // the module is written here: a note, an `F10` row (any command that is not `H`), then
-    // `H82`.
-    let mut song = Song::new();
+    // the module is written here: a note, an `E00` row (a command that moves nothing, but the
+    // first-tick pass still marks the position stale, `+0x3cea`), then `H82`.
+    let mut song = Builder::new();
     song.instrument(8363, 64);
     song.row(&[Note::new(0, 0x40, 1, 40)]);
-    song.row(&[Note::command(0, 5, 0x00)]); // E00 — a command, and one that moves nothing:
-                                            // the parameter is its own zero, so the step is 0, but the first-tick pass still marks
-                                            // the vibrato position stale (`+0x3cea`).
-    song.row(&[Note::command(0, 8, 0x82)]); // H82 — speed 8, depth 2
+    song.row(&[Note::command(0, 5, 0x00)]); // E00
+    song.row(&[Note::command(0, 8, 0x82)]); // H82: speed 8, depth 2
     let mut player = Player::new(song.build(), PlayerOptions::default());
     player.play_song(0);
     let base = scaled(note_period(0x40), 8363);
@@ -884,7 +732,7 @@ fn h_restarts_a_stale_phase() {
     // the bare `ret`), so the period is unchanged and the stale bit is still set.
     run_to(&mut player, 0, 2);
     assert_eq!(state(&player, 0).period, base);
-    assert_eq!(state(&player, 0).vibrato, 0x80, "the bit the F row set");
+    assert_eq!(state(&player, 0).vibrato, 0x80, "the bit the E row set");
 
     // The first vibrato tick: stale, so the value is 0 and the phase restarts at 8 × 2 = 16.
     tick(&mut player);
@@ -966,7 +814,7 @@ fn k_reads_h_s_parameter_for_the_vibrato_and_alastnfo_for_the_slide() {
     // `alasteff1`, a `D10` row overwrites `alastnfo` with 0x10, and the `K01` row then slides
     // the volume down 1 a tick while vibrating with **0x81**. A port that used `alastnfo` for
     // the vibrato would vibrate with 0x10 — depth 0 — and the period would never move.
-    let mut song = Song::new();
+    let mut song = Builder::new();
     song.instrument(8363, 64);
     song.row(&[Note::new(0, 0x40, 1, 40)]);
     song.row(&[Note::command(0, 8, 0x81)]); // H81
@@ -1080,7 +928,7 @@ fn k_leaves_a_depth_zero_period_alone() {
     // module is written here because a *seek* clears every channel (`+0x5614`): MUSIC0's
     // shipped `K` rows sit in patterns whose channel state comes from an earlier order, and
     // this test reaches its order with `play_song`.
-    let mut song = Song::new();
+    let mut song = Builder::new();
     song.instrument(8363, 64);
     song.row(&[Note::new(0, 0x40, 1, 40)]);
     song.row(&[Note::command(0, 11, 0x01)]); // K01, with no H before it
@@ -1147,7 +995,7 @@ fn o_without_an_instrument_leaves_the_last_offset_in_place() {
     // `O` on a cell that names no instrument leaves the previous offset for the next note.
     // Neither module has such a cell — the count below is over every `O` cell of both files —
     // so the module is written here.
-    let mut song = Song::new();
+    let mut song = Builder::new();
     song.instrument(8363, 64);
     song.row(&[Note::new(0, 0x40, 1, 40)]);
     song.row(&[Note::command(0, 15, 0x03)]); // O03 with no instrument: 768
@@ -1230,7 +1078,7 @@ fn q_retriggers_when_its_interval_is_reached() {
         }
         let (next, fired) = retrigger_tick(count, 0xc4);
         if fired {
-            volume += 8;
+            volume = retrigger_volume(volume, 0xc);
         }
         count = next;
         tick(&mut player);
@@ -1259,7 +1107,7 @@ fn q_retriggers_when_its_interval_is_reached() {
         for step in 0..speed {
             let (next, fired) = retrigger_tick(count, 0xc4);
             if fired {
-                volume += 8;
+                volume = retrigger_volume(volume, 0xc);
             }
             count = next;
             tick(&mut player);
@@ -1289,11 +1137,8 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
     // MUSIC0, order 24 (pattern 47), channel 2, row 56: note 0x35, instrument 6, volume 1 and
     // `QF4` — the interval 4 with the volume code 15, whose multiplier is ×32/16.
     //
-    // The multiplier table at `+0x96c` holds real bytes only at 6, 7, 14 and 15 (10, 8, 24
-    // and 32); everywhere else the object image's bytes are zero (`LIDATA` runs, read as
-    // `0x0101` filler before Phase 9 Task 6b fixed the segment builder), which sends those
-    // codes down the *addend* path. So this cell doubles the volume on
-    // every retrigger, and the multiply clamps at 63 the way the addend does.
+    // `+0x96c` is non-zero only at 6, 7, 14 and 15; every other code takes the addend path.
+    // So this cell doubles the volume on every retrigger, clamped at 63.
     let m0 = module("MUSIC0");
     let mut player = Player::new(m0, PlayerOptions::default());
     player.play_song(24);
@@ -1305,14 +1150,9 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
         before.volume, 1,
         "the note's own volume column has not applied yet"
     );
-    // Task 5 removed this test's second row-entry assertion: the position used to be 0 here
-    // and the claim was that the row had not restarted the note. The position is the *mixer's*
-    // now — every poll advances `m_pos` by the voice's step (`mix.rs`, `+0x3471`/`+0x3860`) — so
-    // "greater than zero" holds whichever way the row went, and a test that cannot fail is not a
-    // test. The volume assertion above carries the meaning on its own.
 
     let mut count = before.retrigger;
-    let mut volume = 0i32;
+    let mut volume = 0u8;
     let mut volumes = Vec::new();
     for step in 0..speed {
         if step == 0 {
@@ -1320,12 +1160,12 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
         }
         let (next, fired) = retrigger_tick(count, 0xf4);
         if fired {
-            volume = ((volume * 32) >> 4).min(63);
+            volume = retrigger_volume(volume, 0xf);
         }
         count = next;
         tick(&mut player);
-        assert_eq!(state(&player, 2).volume, volume as u8, "tick {step}");
-        volumes.push(volume as u8);
+        assert_eq!(state(&player, 2).volume, volume, "tick {step}");
+        volumes.push(volume);
     }
     assert_eq!(
         volumes,
@@ -1340,17 +1180,12 @@ fn q_multiplies_when_its_code_has_a_multiplier() {
         for step in 0..speed {
             let (next, fired) = retrigger_tick(count, 0xf4);
             if fired {
-                volume = ((volume * 32) >> 4).min(63);
+                volume = retrigger_volume(volume, 0xf);
             }
             count = next;
             tick(&mut player);
-            assert_eq!(
-                state(&player, 2).volume,
-                volume as u8,
-                "row {} tick {step}",
-                57 + row
-            );
-            volumes.push(volume as u8);
+            assert_eq!(state(&player, 2).volume, volume, "row {} tick {step}", 57 + row);
+            volumes.push(volume);
         }
     }
     assert_eq!(
@@ -1375,11 +1210,8 @@ fn sdx_delays_the_note_to_its_own_tick() {
     // nibble into the channel's `atrigcnt` on the row's first tick (`+0x4296`), counts it down
     // on every later tick (`+0x429a`) and starts the deferred note when it reaches zero — so
     // the note begins on tick `x` of the row, and a row with fewer ticks than `x` has no tick
-    // that fires it. All three of these rows do fire, and the speed each row runs at is *read
-    // from the player* rather than assumed: the first pass over this test assumed MUSIC0's
-    // second row was a 6-tick row whose `SD6` note could never start, and the print below
-    // showed the speed is 12 there and the note fires on tick 6. The `None` branch is the
-    // guard for the case that is not in the data.
+    // that fires it. All three rows fire; the speed is read from the player (MUSIC0's `SD6` row
+    // runs at 12), and the `None` branch guards the case the data does not reach.
     for (name, order, pattern, row, channel, delay) in [
         ("MUSIC0", 45u8, 41usize, 0usize, 5usize, 3u8),
         ("MUSIC0", 44, 40, 1, 5, 6),
@@ -1439,76 +1271,8 @@ fn sdx_delays_the_note_to_its_own_tick() {
 }
 
 // -------------------------------------------------------------------------------------------
-// The periods, one octave at a time
+// The instrument's scaling
 // -------------------------------------------------------------------------------------------
-
-#[test]
-fn every_octave_of_the_note_table_is_the_objects_own() {
-    // The object's table at `+0xa24` is four octaves above the S3M table the format documents
-    // and `+0x594a` shifts it right by one byte per octave from `+0x97c`. This is the whole
-    // table, one octave a line, against the port's own note→period.
-    let octave4: [u16; 12] = [
-        1712, 1616, 1524, 1440, 1356, 1280, 1208, 1140, 1076, 1016, 960, 907,
-    ];
-    for octave in 0..8u8 {
-        let mut row = Vec::new();
-        for semitone in 0..12u8 {
-            let note = (octave << 4) | semitone;
-            let expected = PERIODS[usize::from(semitone)] >> SHIFTS[usize::from(octave)];
-            assert_eq!(
-                note_period(note),
-                expected,
-                "the test's own arithmetic, note {note:#04x}"
-            );
-            assert_eq!(
-                sr_audio::note_period(note),
-                expected,
-                "the port's note {note:#04x}"
-            );
-            // And the S3M table itself, shifted the way the format documents it: octave 4 is
-            // the table, each octave *below* doubles the period and each octave above halves
-            // it (`+0x594a`'s shift).
-            let table = octave4[usize::from(semitone)];
-            assert_eq!(
-                expected,
-                if octave <= 4 {
-                    table << (4 - octave)
-                } else {
-                    table >> (octave - 4)
-                },
-                "note {note:#04x} against the S3M table"
-            );
-            row.push(expected);
-        }
-        println!("  octave {octave}: {row:?}");
-    }
-
-    // The top of the range is not a refusal: octave 8 reads the byte after the shift table,
-    // which is 0, so MUSIC1's note 0x80 plays octave 0's period.
-    assert_eq!(sr_audio::note_period(0x80), 27392);
-    assert_eq!(sr_audio::note_period(0xfe), 0, "ST3's note off");
-}
-
-#[test]
-fn a_period_s_step_is_the_base_frequency_over_it() {
-    // `+0x582b`'s own constant, `0x00da7600` = 14,317,056, over the table's periods — one
-    // value an octave, the step the mixer will divide by its rate (Task 5's).
-    for (octave, period) in [(0u8, 27392u16), (1, 13696), (2, 6848), (3, 3424), (4, 1712)] {
-        assert_eq!(
-            sr_audio::period_step(period),
-            period_step(period),
-            "octave {octave}: {period} to a step"
-        );
-        println!(
-            "  octave {octave}: period {period} steps {}",
-            period_step(period)
-        );
-    }
-    assert_eq!(sr_audio::period_step(0), 0);
-    // C-4 at the 8363 reference steps at 8362: the object's constant is 400 below
-    // 8363 × 1712 = 14,317,456, so the format's two reference numbers do not multiply out.
-    assert_eq!(period_step(1712), 8362);
-}
 
 #[test]
 fn a_notes_period_is_scaled_by_its_instruments_c2spd() {
@@ -1562,160 +1326,12 @@ fn a_notes_period_is_scaled_by_its_instruments_c2spd() {
 }
 
 // -------------------------------------------------------------------------------------------
-// A module of the test's own, for the forms the shipped data does not reach
+// The timeline
 // -------------------------------------------------------------------------------------------
-
-/// One cell of a test module's row.
-#[derive(Clone, Copy)]
-struct Note {
-    channel: u8,
-    note: u8,
-    instrument: u8,
-    volume: u8,
-    command: u8,
-    info: u8,
-    flags: u8,
-}
-
-impl Note {
-    /// A note with an instrument and a volume column.
-    fn new(channel: u8, note: u8, instrument: u8, volume: u8) -> Note {
-        Note {
-            channel,
-            note,
-            instrument,
-            volume,
-            command: 0,
-            info: 0,
-            flags: Cell::NOTE | Cell::VOLUME,
-        }
-    }
-
-    /// A command with no note and no volume column.
-    fn command(channel: u8, command: u8, info: u8) -> Note {
-        Note {
-            channel,
-            note: 0xff,
-            instrument: 0,
-            volume: 0xff,
-            command,
-            info,
-            flags: Cell::COMMAND,
-        }
-    }
-}
-
-/// A one-pattern, one-order module with its own instruments, built the way `tests/player.rs`'s
-/// builder builds one: a header, the tables and paragraph-aligned blocks, with the pattern data
-/// scrambled by the same keystream the loader undoes.
-struct Song {
-    rows: Vec<Vec<Note>>,
-    instruments: Vec<(u32, u8)>,
-}
-
-impl Song {
-    fn new() -> Song {
-        Song {
-            rows: Vec::new(),
-            instruments: Vec::new(),
-        }
-    }
-
-    fn instrument(&mut self, c2spd: u32, volume: u8) {
-        self.instruments.push((c2spd, volume));
-    }
-
-    /// Append a row. The rows are appended in order, so the call order *is* the row order.
-    fn row(&mut self, notes: &[Note]) {
-        self.rows.push(notes.to_vec());
-    }
-
-    fn build(self) -> Module {
-        let mut bytes = vec![0u8; 0x60];
-        bytes[28] = 26;
-        bytes[29] = 16;
-        bytes[32..34].copy_from_slice(&1u16.to_le_bytes()); // one order
-        bytes[34..36].copy_from_slice(&(self.instruments.len() as u16).to_le_bytes());
-        bytes[36..38].copy_from_slice(&1u16.to_le_bytes()); // one pattern
-        bytes[44..48].copy_from_slice(b"SCRM");
-        bytes[48] = 64;
-        bytes[49] = 6;
-        bytes[50] = 125;
-        bytes[51] = 176;
-        bytes[64..96].fill(255);
-        bytes.push(0); // the order list
-
-        let instruments_at = bytes.len();
-        bytes.resize(instruments_at + 2 * self.instruments.len(), 0);
-        let patterns_at = bytes.len();
-        bytes.resize(patterns_at + 2, 0);
-
-        // The instrument headers: PCM, length 0 (no sample bytes to slice), the volume and
-        // c2spd asked for. The player's instrument load is what reads them.
-        let mut placed = Vec::new();
-        for (c2spd, volume) in &self.instruments {
-            let mut header = [0u8; 0x50];
-            header[0] = 1;
-            header[0x1C] = *volume;
-            header[0x20..0x24].copy_from_slice(&c2spd.to_le_bytes());
-            header[0x4C..0x50].copy_from_slice(b"SCRS");
-            let pad = (16 - bytes.len() % 16) % 16;
-            bytes.extend(std::iter::repeat_n(0u8, pad));
-            let pointer = (bytes.len() / 16) as u16;
-            bytes.extend_from_slice(&header);
-            placed.push(pointer);
-        }
-
-        let mut data = Vec::new();
-        for row in &self.rows {
-            for note in row {
-                let mut flag = note.channel;
-                if note.flags & Cell::NOTE != 0 {
-                    flag |= 0x20;
-                }
-                if note.flags & Cell::VOLUME != 0 {
-                    flag |= 0x40;
-                }
-                if note.flags & Cell::COMMAND != 0 {
-                    flag |= 0x80;
-                }
-                data.push(flag);
-                if note.flags & Cell::NOTE != 0 {
-                    data.push(note.note);
-                    data.push(note.instrument);
-                }
-                if note.flags & Cell::VOLUME != 0 {
-                    data.push(note.volume);
-                }
-                if note.flags & Cell::COMMAND != 0 {
-                    data.push(note.command);
-                    data.push(note.info);
-                }
-            }
-            data.push(0); // the row's terminator
-        }
-        data.resize(data.len() + ROWS - self.rows.len(), 0);
-        descramble(&mut data);
-        let mut block = ((data.len() + 2) as u16).to_le_bytes().to_vec();
-        block.extend_from_slice(&data);
-        let pad = (16 - bytes.len() % 16) % 16;
-        bytes.extend(std::iter::repeat_n(0u8, pad));
-        let pattern_pointer = (bytes.len() / 16) as u16;
-        bytes.extend_from_slice(&block);
-
-        for (index, pointer) in placed.iter().enumerate() {
-            bytes[instruments_at + 2 * index..instruments_at + 2 * index + 2]
-                .copy_from_slice(&pointer.to_le_bytes());
-        }
-        bytes[patterns_at..patterns_at + 2].copy_from_slice(&pattern_pointer.to_le_bytes());
-        Module::load(&bytes).expect("the built module loads")
-    }
-}
 
 #[test]
 fn the_volume_zero_optimisation_stops_a_pattern_break_from_running() {
-    // The one place this task's work touches the *timeline*, and it is MUSIC1's own order 0.
-    // Pattern 73's row 0 plays eight note-offs (`0xfe`, which takes the volume to 0 and
+    // On a boot (a fresh player), MUSIC1's order 0 is pattern 73, whose row 0 plays eight note-offs (`0xfe`, which takes the volume to 0 and
     // `aorgspd` to `0xffff`) and sets the speed to 3; its row 3 carries a `C00` on channel 2 —
     // a pattern break to the next order's row 0.
     //
@@ -1723,10 +1339,7 @@ fn the_volume_zero_optimisation_stops_a_pattern_break_from_running() {
     // "volume 0" test (`+0x3c77`...`0x3cad`, on because both modules' flags word is 8) counts
     // it down and **frees the channel on row 3** (`+0x3ca9`, `achannelused = 0`) — before the
     // dispatch table is reached. The `C00` therefore never runs and the pattern plays its 64
-    // rows out. Task 3's player had no such path and dispatched the freed channel's command,
-    // which broke to order 1 at row 3; when this path arrived, MUSIC1's end-to-end play gained
-    // sixty rows and §8's four numbers moved again — by a different amount from the `A`/`T`
-    // correction's, which is why the note separates them.
+    // rows out (`bugs.md` §28).
     let m1 = module("MUSIC1");
     assert_eq!(
         m1.orders()[0],
@@ -1793,7 +1406,7 @@ fn the_volume_zero_optimisation_stops_a_pattern_break_from_running() {
 
 #[test]
 fn music1s_a7f_row_takes_127_ticks_and_takes_its_own_row_with_it() {
-    // Where §8's `A`/`T` correction is spent. MUSIC1 carries one `A` cell above 32 — `A7F`,
+    // MUSIC1 carries one `A` cell above 32 — `A7F`,
     // order 98 (pattern 72) row 48, the only order that names pattern 72 — and the object's
     // handler for `A` (`+0x3dd2`) writes it into the *speed* with no upper bound, so that row
     // plays at speed 127 and so does every row after it until the order list wraps. The speed

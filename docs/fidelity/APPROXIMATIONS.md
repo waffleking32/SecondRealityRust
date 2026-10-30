@@ -356,7 +356,7 @@ same to the frame.
 
 **Why:** it cannot be fixed. Two sessions of one recipe, `second5` and `second5b`, disagree with each
 other about which frame eight of their 131 row changes land on, by one frame each
-(`cargo test -p sr-audio --test trace -- --nocapture the_two_sessions`, `music.md` §8). A clock that
+(`cargo test -p sr-audio --test trace -- --nocapture the_filed_traces_are_what_the_comparison_assumes`, `music-clock.md` §2). A clock that
 matched one session would be a fit to it; the exact clock sits between them.
 
 **Measured difference:** `cargo test -p sr-audio --test trace -- --nocapture the_port_reproduces`
@@ -1548,7 +1548,7 @@ behind the standalone DIS, whose `dis_muscode` is key-driven, and model their on
 be a cue no frame supports. The substitute is one function body.
 
 **Measured difference:** **0** in every compared frame, because no part the demo runs calls it; and
-`cargo test -p sr-audio --test trace zinfo_is_zero_in_every_filed_trace` asserts `zinfo` 0 at every
+`cargo test -p sr-audio --test trace the_filed_traces_are_what_the_comparison_assumes` asserts `zinfo` 0 at every
 sample of every trace under `reference/music/`.
 
 **Status:** carried: `_np_zinfo`'s non-zero values occur in no trace, and its callers are unshipped or

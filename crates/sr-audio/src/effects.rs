@@ -1,8 +1,8 @@
 //! The channel effects: `D`, `E`, `F`, `G`, `H`, `J`, `K`, `O`, `Q` and `S`'s `SDx`.
 //!
 //! Read out of `upstream/SecondReality/MAIN/STMIK.300`'s segment image: every `+0x…` below is
-//! that object's segment offset, and `tests/player.rs`'s claims table asserts the bytes behind
-//! them. Where the object and the usual ST3 reading disagree, the object wins.
+//! that object's segment offset, and `tests/player.rs`'s `the_ports_tables_are_the_objects_own`
+//! holds the tables to the image. Where the object and the usual ST3 reading disagree, the object wins.
 //! `docs/fidelity/music.md` §9 has the readings and what each one is measured against.
 //!
 //! - **Two dispatch tables.** A row's first tick walks the channels at `+0x3c44` (table

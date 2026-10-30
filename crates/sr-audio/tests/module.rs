@@ -1,44 +1,28 @@
-//! Task 2: the two shipped modules, decoded — the container, the keystream, and the data.
+//! The two shipped modules, decoded: `assets/MAIN/MUSIC0.S3M` and `MUSIC1.S3M` in their
+//! scrambled form, against numbers this file computes itself.
 //!
-//! Phase 3's scope is decided by what is *in* these two files (Review Focus 3 of the phase
-//! plan), so this file's job is to measure them rather than to trust a summary of them. It
-//! reads `assets/MAIN/MUSIC0.S3M` and `MUSIC1.S3M` in their shipped, scrambled form and
-//! asserts what the loader makes of them, against numbers this test computes itself.
+//! Two things here are independent of the loader on purpose:
 //!
-//! Two things here are independent of the loader on purpose, because a loader checked
-//! against itself is checked against nothing:
-//!
-//! 1. **Its own keystream and its own walker.** [`Walk`] below re-implements D5's formula
-//!    and the packed-cell stream from the file's own flag bits. Every cell the loader
-//!    produced is compared with the walker's, cell by cell, and the walker — not the loader
-//!    — is what demonstrates that 64 rows consume exactly a block's data.
-//! 2. **Its own pointer arithmetic.** The tiling test reads the pattern pointer table out
-//!    of the raw bytes at `0x60 + ordNum + insNum * 2` and computes the gaps itself, in
-//!    both readings of the block's length word, so the reading the loader uses is the one
-//!    that survives the other's failure count (8 and 11 pairs, measured below).
-//!
-//! Every number this file asserts is printed by a command this file names in its own
-//! output: `cargo test -p sr-audio --test module -- --nocapture`.
+//! 1. **Its own keystream and walker.** [`Walk`] re-implements D5's formula and the packed-cell
+//!    stream from the file's flag bits; every cell the loader produced is compared with the
+//!    walker's, and the walker shows that 64 rows consume exactly a block's data.
+//! 2. **Its own pointer arithmetic.** The tiling test reads the pattern pointer table out of
+//!    the raw bytes and computes the gaps in both readings of the block's length word; the
+//!    other reading fails 8 and 11 pairs.
+
+mod common;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
+use common::shipped;
 use sr_audio::module::SAMPLE_MAGIC;
 use sr_audio::{Cell, Module, CHANNELS, ROWS};
 
-/// The curated originals, at the commit `assets/PROVENANCE.md` records. Read-only.
-const ASSETS: &str = "../../assets/MAIN";
-
-/// MUSIC0's shipped size in bytes — `PROVENANCE.md`'s row for the file.
+/// MUSIC0's shipped size in bytes, `assets/PROVENANCE.md`'s row for the file.
 const MUSIC0_SIZE: usize = 391_312;
 
 /// MUSIC1's shipped size in bytes.
 const MUSIC1_SIZE: usize = 600_860;
-
-fn shipped(name: &str) -> Vec<u8> {
-    let path = Path::new(ASSETS).join(name);
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-}
 
 /// A module's bytes and the loader's reading of them.
 struct Loaded {
@@ -47,8 +31,9 @@ struct Loaded {
     module: Module,
 }
 
+/// `name` is the file's (`MUSIC0.S3M`), which the output and the assertions quote.
 fn load(name: &'static str) -> Loaded {
-    let bytes = shipped(name);
+    let bytes = shipped(name.trim_end_matches(".S3M"));
     let module = Module::load(&bytes).unwrap_or_else(|e| panic!("{name} does not load: {e}"));
     Loaded {
         name,
@@ -307,8 +292,7 @@ fn the_header_is_read_field_by_field() {
 #[test]
 fn the_order_list_is_preserved_byte_for_byte() {
     // The order list as the file wrote it: no normalisation, no filtering, 254 and 255 kept
-    // as the bytes they are. What the player does with them is Task 3's, decided by the
-    // reference's own behaviour, not here.
+    // as the bytes they are (the player's handling is `tests/player.rs`'s).
     let music0_orders: &[u8] = &[
         0, 1, 9, 10, 19, 2, 3, 4, 5, 6, 7, 8, 11, 13, 31, 31, 255, 255, 50, 51, 49, 48, 52, 72, 47,
         70, 71, 254, 14, 15, 16, 17, 28, 21, 24, 30, 23, 20, 20, 35, 35, 29, 36, 39, 40, 41, 42,
@@ -358,8 +342,7 @@ fn the_order_list_is_preserved_byte_for_byte() {
         );
     }
 
-    // The counts and positions the phase plan names, asserted here so a change in the
-    // loader's idea of the order list cannot pass silently.
+    // The 254 and 255 positions.
     let at = |orders: &[u8], byte: u8| -> Vec<usize> {
         orders
             .iter()
@@ -376,41 +359,6 @@ fn the_order_list_is_preserved_byte_for_byte() {
     assert_eq!(at(music0_orders, 254), vec![27], "MUSIC0's one");
     assert_eq!(at(music1_orders, 254).len(), 15, "MUSIC1's fifteen");
     assert_eq!(at(music1_orders, 255), vec![99], "MUSIC1's one, last");
-}
-
-#[test]
-fn the_tempo_patch_is_music0s_alone() {
-    // `MAIN/STARTMUS.C:257`: `module[50]=0x78`, in `case 0` — and `case 0` is MUSIC0
-    // (`:252-265`). 0x78 is 120.
-    let mut music0 = music0();
-    let music1 = music1();
-    assert_eq!(music0.module.initial_tempo(), 125, "MUSIC0's own byte");
-    assert_eq!(music1.module.initial_tempo(), 130, "MUSIC1's own byte");
-
-    music0.module.apply_tempo_patch(0x78);
-    println!(
-        "after the shell's patch: MUSIC0's tempo {} (from 125), MUSIC1's tempo {} (never \
-         patched) — and MUSIC0's speed {}, global volume {} and master volume {} are where \
-         they were",
-        music0.module.initial_tempo(),
-        music1.module.initial_tempo(),
-        music0.module.initial_speed(),
-        music0.module.global_volume(),
-        music0.module.master_volume(),
-    );
-    assert_eq!(music0.module.initial_tempo(), 120, "0x78");
-    assert_eq!(
-        music1.module.initial_tempo(),
-        130,
-        "MUSIC1 is not in case 0"
-    );
-    assert_eq!(
-        music0.module.initial_speed(),
-        6,
-        "the patch moves one byte only"
-    );
-    assert_eq!(music0.module.global_volume(), 64);
-    assert_eq!(music0.module.master_volume(), 176);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -560,6 +508,11 @@ fn every_pattern_decodes_to_exactly_sixty_four_rows() {
                     "{} pattern {index} row {row}: the row names exactly the cells the file does",
                     loaded.name
                 );
+                for (slot, cell) in pattern.rows[row].iter().enumerate() {
+                    if !named.iter().any(|raw| usize::from(raw.channel) == slot) {
+                        assert_eq!(*cell, Cell::EMPTY, "{} pattern {index} row {row}", loaded.name);
+                    }
+                }
             }
             assert_eq!(
                 pattern.channel_count,
@@ -637,7 +590,7 @@ fn every_row_names_each_channel_at_most_once_and_in_order() {
 // 3. The cells: the effect alphabet, the histogram, and the notes
 // ---------------------------------------------------------------------------------------
 
-/// The ST3 numeric alphabet (spec §7.1): 1..=26 is A..Z, 0x30..=0x39 is the digits, 255 is
+/// The ST3 numeric alphabet (design §7.1): 1..=26 is A..Z, 0x30..=0x39 is the digits, 255 is
 /// "none", and 0 is the second spelling of "no command" that D5 records.
 fn alphabet(command: u8) -> String {
     match command {
@@ -679,8 +632,7 @@ fn histogram_of(loaded: &Loaded) -> BTreeMap<u8, usize> {
 
 #[test]
 fn the_effect_histogram_is_the_modules_own() {
-    // The phase's scope evidence (Review Focus 3): an effect the demo never plays has to be
-    // measured absent, not assumed absent. Counted here from the loader's decoded cells and
+    // An effect the demo never plays is measured absent, not assumed absent. Counted here from the loader's decoded cells and
     // cross-checked against this file's own walker.
     for loaded in both() {
         let mut histogram: BTreeMap<u8, usize> = BTreeMap::new();
@@ -749,7 +701,7 @@ fn the_effect_histogram_is_the_modules_own() {
     }
 
     // MUSIC0's own counts, letter by letter. D5's six — D:7348, F:1051, E:827, G:802,
-    // O:755, H:212 — are this module's, and the plan's list is asserted in full.
+    // O:755, H:212 — are this module's; the whole list is asserted.
     let music0 = music0();
     let histogram = histogram_of(&music0);
     let measured: Vec<(&str, usize)> = vec![
@@ -830,8 +782,7 @@ fn the_effect_histogram_is_the_modules_own() {
     );
 
     // The cell itself: a real cell whose command field was carried with a byte of 0, not an
-    // error and not an unnamed slot. Treating it as an error is what made D5's first
-    // verification pass report "76 of 77".
+    // error and not an unnamed slot.
     let cell = music1.module.pattern(13).expect("pattern 13").rows[19][5];
     println!(
         "MUSIC1 pattern 13 row 19 channel 5: present {:#04x} (a command field follows), command \
@@ -867,10 +818,8 @@ fn the_effect_histogram_is_the_modules_own() {
 
 #[test]
 fn the_notes_are_st3_numeric_and_reach_past_ninety_six() {
-    // `(octave << 4) | semitone` (spec §7.1), valid up to 0x9B. A decoder that caps at 96
-    // (0x60) rejects MUSIC1's high material. The two special values are counted with the
-    // notes, because the player's treatment of them (Tasks 3 and 4) has to be decided
-    // against their real frequencies rather than against a guess.
+    // `(octave << 4) | semitone` (design §7.1), valid up to 0x9B. A decoder that caps at 96
+    // (0x60) rejects MUSIC1's high material.
     let mut measured: Vec<(&str, u8, u8, usize, usize, usize)> = Vec::new();
     for loaded in both() {
         let mut lowest = u8::MAX;
@@ -908,8 +857,7 @@ fn the_notes_are_st3_numeric_and_reach_past_ninety_six() {
         measured.push((loaded.name, lowest, highest, played, note_off, no_note));
     }
 
-    // The brief's assertion, in its own terms: the highest note in each module, and a cap
-    // that has to be above it.
+    // The highest note in each module, and the format's ceiling above it.
     let music0 = measured
         .iter()
         .find(|row| row.0 == "MUSIC0.S3M")
@@ -937,8 +885,7 @@ fn the_notes_are_st3_numeric_and_reach_past_ninety_six() {
 #[test]
 fn the_instrument_census_is_the_files_own() {
     // 0 = empty, 1 = PCM, 2..=7 = adlib (`STARTEMS.C:132`, `:175-176`). The adlib count is
-    // this phase's scope evidence: if either module had one, Phase 3 would have to model
-    // OPL, and it does not.
+    // scope evidence: neither module has one, so the port models no OPL.
     for (loaded, pcm, empty) in [(music0(), 22usize, 22usize), (music1(), 41usize, 13usize)] {
         let mut census: BTreeMap<u8, usize> = BTreeMap::new();
         let mut looped = 0usize;
@@ -1207,10 +1154,8 @@ fn the_samples_are_sliced_by_paragraph_pointer() {
 
 #[test]
 fn the_magic_is_where_the_format_puts_it() {
-    // Named checks, not magic numbers in prose: `SCRM` at the file's own offset 44
-    // (`STARTEMS.C:62`), and `SCRS` at +0x4C of `struct ds_smp` (`STARTEMS.C:47`).
+    // `SCRS` at +0x4C of `struct ds_smp` (`STARTEMS.C:47`); `SCRM` is the header test's.
     for loaded in both() {
-        assert_eq!(&loaded.bytes[44..48], b"SCRM");
         let orders = usize::from(word(&loaded.bytes, 32));
         let mut with_magic = 0usize;
         let mut without = 0usize;
@@ -1232,7 +1177,7 @@ fn the_magic_is_where_the_format_puts_it() {
             }
         }
         println!(
-            "{}: SCRM at 44; SCRS at +0x4C of {with_magic} sample headers, and four zero bytes at \
+            "{}: SCRS at +0x4C of {with_magic} sample headers, and four zero bytes at \
              +0x4C of {without}",
             loaded.name
         );
@@ -1327,38 +1272,4 @@ fn the_cell_type_keeps_the_files_own_byte_and_its_own_presence() {
             ("MUSIC1.S3M", 54, 54, 35, 189),
         ]
     );
-}
-
-#[test]
-fn the_cells_a_row_names_are_the_only_ones_that_are_not_empty() {
-    // `is_empty` is a presence test, so it agrees with `Cell::EMPTY` in every unnamed slot
-    // and with the packed stream's own cell count in every named one.
-    for loaded in both() {
-        let mut empty = 0usize;
-        let mut named = 0usize;
-        for index in 0..loaded.module.pattern_count() {
-            for cells in loaded.module.pattern(index).expect("a pattern").rows.iter() {
-                for cell in cells {
-                    if cell.is_empty() {
-                        assert_eq!(*cell, Cell::EMPTY, "an unnamed slot is `Cell::EMPTY`");
-                        assert_eq!(cell.present, 0);
-                        empty += 1;
-                    } else {
-                        assert_ne!(cell.present, 0, "a named cell carries something");
-                        named += 1;
-                    }
-                }
-            }
-        }
-        println!(
-            "{}: {named} named cells and {empty} unnamed slots of {}",
-            loaded.name,
-            ROWS * CHANNELS * loaded.module.pattern_count(),
-        );
-        assert_eq!(named, named_cells(&loaded), "the stream's own cell count");
-        assert_eq!(
-            named + empty,
-            ROWS * CHANNELS * loaded.module.pattern_count()
-        );
-    }
 }

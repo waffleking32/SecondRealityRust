@@ -1,4 +1,4 @@
-//! The enhanced sound option (Phase 9 Task 7): **the port's own, not the original's, and off by
+//! The enhanced sound option: **the port's own, not the original's, and off by
 //! default** (`docs/fidelity/music.md` §13, D43).
 //!
 //! The enhanced path renders the same voices at 48,000 frames a second — 12/5 of the authentic
@@ -12,24 +12,14 @@
 //! - **the pitch**: a sustained note's frequency is the authentic one (the 5.26 %-flat stereo
 //!   divisor included, `music.md` §10.2) — interpolation changes the waveform, not the step;
 //! - **the level**: the RMS over ten seconds is the authentic one.
-//!
-//! Every number this file prints is printed by
-//! `cargo test -p sr-audio --test enhanced -- --nocapture`.
 
-use std::path::Path;
+mod common;
 
+use common::{drain, module};
 use sr_audio::{
     note_period, scaled_period, step, Channel, MixRate, Mixer, Module, Player, PlayerOptions,
     Quality, CHANNELS,
 };
-
-/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
-fn module(name: &'static str) -> Module {
-    sr_audio::Song::named(name)
-        .unwrap_or_else(|| panic!("{name} is not a song"))
-        .load(Path::new("../.."))
-        .unwrap_or_else(|error| panic!("{error}"))
-}
 
 fn options(quality: Quality) -> PlayerOptions {
     PlayerOptions {
@@ -42,14 +32,6 @@ fn player(name: &'static str, quality: Quality, order: u8) -> Player {
     let mut player = Player::new(module(name), options(quality));
     player.play_song(order);
     player
-}
-
-/// Everything the ring holds, as a device would take it.
-fn drain(player: &mut Player) -> Vec<i16> {
-    let mut out = vec![0i16; player.pending_samples()];
-    let taken = player.take_samples(&mut out);
-    assert_eq!(taken, out.len(), "the drain takes what the ring holds");
-    out
 }
 
 const MODULES: [&str; 2] = ["MUSIC0", "MUSIC1"];
@@ -77,7 +59,7 @@ fn schedule(name: &'static str, quality: Quality, polls: usize) -> Vec<Words> {
 
 #[test]
 fn enhanced_keeps_the_authentic_tick_schedule() {
-    // The music clock is the picture (the phase's global constraints): `poll`,
+    // The music clock is the picture: `poll`,
     // `samples_per_tick` and `advance` are the authentic ones, so every word a part reads —
     // `state()`, `engine_position()`, `zplus()`, `zframe()` — is the same at every poll.
     // 30,000 polls is 428 s of the demo's 70.086 Hz timeline. The four runs are independent
@@ -194,14 +176,9 @@ fn one_second_of(
 /// over the same span of the buffer. The period is the **first** local maximum within 90 % of
 /// the highest local maximum, refined by a parabola through it and its two neighbours, and converted to
 /// seconds at the buffer's `rate`. The first such peak rather than the highest is what keeps
-/// both paths on the same multiple of the period.
-///
-/// This replaced the zero-crossing count the brief named. Zero crossings count the waveform's
-/// shape, and the two renderers' shapes differ above the fundamental by design: the authentic
-/// path is a staircase at 20 kHz, one sample byte held a whole frame, and the enhanced path a
-/// line at 48 kHz. The test prints the raw counts beside the estimate (on MUSIC0's order 6,
-/// channel 0, 291 against 277, which is −4.8 %). A period estimate depends on the waveform
-/// repeating, not on its detail.
+/// both paths on the same multiple of the period. Zero crossings would count the waveform's
+/// shape, which differs by design (a 20 kHz staircase against a 48 kHz line); the test prints
+/// them beside the estimate.
 fn fundamental(samples: &[i16], rate: f64) -> f64 {
     let x: Vec<f64> = samples.iter().map(|&sample| f64::from(sample)).collect();
     let (shortest, longest) = ((rate / 2000.0) as usize, (rate / 30.0) as usize);
@@ -352,8 +329,7 @@ fn enhanced_level_is_the_authentic_level() {
 
 #[test]
 fn the_output_rate_is_the_streams_frames_a_second() {
-    // What the device and the WAV dump are opened at (Task 8 reads it for the settings
-    // screen): the authentic stereo stream is 40,000 bytes of two, and the enhanced one 48,000
+    // What the device and the WAV dump are opened at: the authentic stereo stream is 40,000 bytes of two, and the enhanced one 48,000
     // frames.
     assert_eq!(options(Quality::Authentic).output_rate(), 20_000);
     assert_eq!(options(Quality::Enhanced).output_rate(), 48_000);

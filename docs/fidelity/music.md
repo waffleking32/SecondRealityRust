@@ -130,11 +130,9 @@ records.
 
 **The tempo patch is MUSIC0's alone.** `MAIN/STARTMUS.C:257` writes `module[50] = 0x78` inside
 `case 0` (`:252-265`), MUSIC0's load (`loadmodule2(0)`, `:255`); `case 1` (`:259-261`) has none.
-`Module::load` reports the file's 125, and `apply_tempo_patch` makes it 120:
-
-```
-after the shell's patch: MUSIC0's tempo 120 (from 125), MUSIC1's tempo 130 (never patched) — and MUSIC0's speed 6, global volume 64 and master volume 176 are where they were
-```
+`Module::load` reports the file's 125, and `apply_tempo_patch` makes it 120 and moves nothing else
+(`module::tests::the_tempo_patch_changes_the_initial_tempo_and_nothing_else`); `Song::load`
+applies it to MUSIC0 only (`SONGS`).
 
 ## 4. The order list, as data
 
@@ -259,7 +257,7 @@ MUSIC1.S3M: highest instrument byte 54 of 54 instruments; 35 cells name instrume
   By its five fields such a cell is indistinguishable from a slot the row never named, and a
   player that mistook it would leave the volume where it was. So `Cell` carries `present`, the
   flag byte's three "what follows" bits, and `Cell::EMPTY` means "the row never named this
-  channel" (`the_cells_a_row_names_are_the_only_ones_that_are_not_empty`).
+  channel" (`every_pattern_decodes_to_exactly_sixty_four_rows`).
 
 ## 7. Retired: the container's open questions (§8–§10 answer them)
 
@@ -267,9 +265,8 @@ MUSIC1.S3M: highest instrument byte 54 of 54 instruments; 35 cells name instrume
 
 The original's player has no assembly source in the tree: `MAIN/STMIK.300` is an OMF object, and
 everything below is read out of its segment image, the 29,607 bytes of `text_stmik300_text`
-rebuilt from its 105 `LEDATA` and 118 `LIDATA` records. `crates/sr-audio/tests/player.rs`'s
-`the_objects_own_bytes_say_what_the_player_says` rebuilds the image and asserts the load-bearing
-instructions at their offsets. Offsets are segment offsets, the listings are that image through
+rebuilt from its 105 `LEDATA` and 118 `LIDATA` records by `crates/sr-audio/tests/player.rs`'s
+`segment_image`; `the_ports_tables_are_the_objects_own` holds the port's tables to it. Offsets are segment offsets, the listings are that image through
 `objdump -b binary -m i8086 -D`, `(…)` marks an elision, and the `;` comments are this note's.
 Which *frame* a row change lands on is the traces' (`music-clock.md`).
 
@@ -437,7 +434,7 @@ ord 28 over the `254` at 27.
   The object's header watch is the second witness: it calls `+0x3dd2` for the module's initial
   speed byte (offset 49, read at `+0x53ca`, called at `+0x53d8`) and `+0x3d73` for the tempo byte
   (offset 50, read at `+0x53b9`, called at `+0x53c7`). So MUSIC1's one `A7F` sets a speed of 127
-  (§9.13). Neither module carries a `T` (`the_timeline_effects_the_modules_carry`: MUSIC0's A×63,
+  (§9.13). Neither module carries a `T` (`the_effect_histogram_is_the_modules_own`: MUSIC0's A×63,
   B×3, C×8, MUSIC1's A×54, C×4).
 - **The row timer's fractional adjuster** sits between the `_np_speed` load and the compare:
 
@@ -462,16 +459,15 @@ from order 0 (`MAIN/U2.ASM:786`) to its loop:
 ```
   MUSIC0: wrapped after 8732 polls (124.6 seconds of logic ticks) at order 0 pattern 0 row 0, loop counter 1
   MUSIC0: 8732 poll(s), 5983 tick(s) over 998 row(s)
-  MUSIC0: 80 order(s), 77 pattern(s), ended at order 0 (1 loops)
+  MUSIC0: 11 wrap(s) in 100,000 polls, none past the order list
   MUSIC1: wrapped after 28618 polls (408.3 seconds of logic ticks) at order 0 pattern 73 row 0, loop counter 1
   MUSIC1: 28618 poll(s), 21240 tick(s) over 5283 row(s)
-  MUSIC1: 100 order(s), 77 pattern(s), ended at order 0 (1 loops)
+  MUSIC1: 3 wrap(s) in 100,000 polls, none past the order list
 ```
 
 Every row is asserted to have had 1 to 255 ticks. MUSIC1's total includes its `A7F` row and the
 fifteen after it at 127 ticks each (§9.13) and order 0's full 64 rows (the volume-0 free, §9.1).
-`playing_past_the_end_neither_panics_nor_runs_off_the_orders` plays 100,000 polls more and keeps
-every published word inside the module's tables.
+Over the whole 100,000 polls every published word stays inside the module's tables.
 
 ## 9. The channel effects
 
@@ -480,8 +476,8 @@ The handlers are `effects.rs`, the row parse and the tick passes `player.rs`. Th
 `cargo test -p sr-audio --test effects -- --nocapture --test-threads=1`, is one test per effect on
 the modules' own cells (or a module written for the test where no shipped cell reaches a form).
 Where the object and stock ST3 disagree, the object wins. The traces cannot judge any of this (a
-wrong `D` does not move the timeline), so every handler offset and table below is also asserted
-against the object's image by `tests/player.rs`'s claims.
+wrong `D` does not move the timeline), so the tests hold each handler to the object's arithmetic,
+whose tables `tests/player.rs`'s `the_ports_tables_are_the_objects_own` reads from the image.
 
 ### 9.1 Three dispatch paths, not one
 
@@ -541,7 +537,7 @@ format's (its C is 27392, so octave 4's C is 1712). **The shift table is eight b
 object indexes it with `note >> 4` unchecked**, so octave 8 reads the byte after it (0, octave 0's
 shift) and octaves 9…15 read further. MUSIC1's note `0x80` takes that ninth byte and plays octave
 0's period. The port keeps the sixteen bytes the lookup reads
-(`every_octave_of_the_note_table_is_the_objects_own`).
+(`the_ports_tables_are_the_objects_own`).
 
 The period is then scaled by the instrument: `+0x5813` is `period × 8363/c2spd`, one integer
 division with the two guards an 8086 `div` needs (`+0x581f`, `+0x5825`). Over every PCM instrument
@@ -663,7 +659,7 @@ The files carry delays 2, 3 and 6 (MUSIC1's `SD2` 48 cells, MUSIC0's `SD3` 77 an
 `mov $0xda,%dx; mov $0x7600,%ax; div period` (`+0x58b9`), **`0x00da7600` = 14,317,056**, which is
 400 short of `8363 × 1712` = 14,317,456. So C-4 at 8363 (period 1712) steps at **8362** and the
 octave above at **16,725**. The port uses the object's number
-(`a_period_s_step_is_the_base_frequency_over_it`). A period of 0 zeroes the step and returns
+(`the_ports_tables_are_the_objects_own`). A period of 0 zeroes the step and returns
 (`+0x5876`). §10.2 has the rest of the step.
 
 ### 9.12 What the modules do not carry
@@ -855,21 +851,18 @@ The stream's invariants, each its own test:
   for the next call, as a byte-stream DMA does.
 - **The samples-per-tick relation holds**: 64 rows at speed 6 mix 320,178 samples against
   384 × 833 = 319,872, inside one tick (`a_window_of_rows_carries_its_samples`).
-- **A window is deterministic**, and a different order is a different stream
-  (`two_runs_of_a_window_are_byte_identical`).
-- **The window is not silent**: MUSIC0's first 4120 polls put 972,003 of 2,351,396 samples above
-  the silence entry, peak 32512, every byte 0x00…0xFF (`the_window_is_not_silent`).
 - **The drain moves no state** (`the_drain_moves_no_engine_state`), and **the overflow policy drops
   the oldest**: after 15 undrained polls the ring holds 8192 and has dropped 368
   (`a_device_that_stops_draining_loses_the_oldest_samples`).
 - **The authentic stream is pinned whole** (`the_authentic_stream_is_pinned_byte_for_byte`: FNV-1a
-  over 12,000 polls from MUSIC0's orders 0 and 25 and MUSIC1's 0 and 42).
+  over 12,000 polls from MUSIC0's orders 0 and 25 and MUSIC1's 0 and 42), which also pins it
+  deterministic and not silent.
 
 ### 10.5 Why there is no null test against the original
 
 The emulator runs silent by D17 (`SDL_AUDIODRIVER=dummy`, `mixer_nosound=true`), so no sample
 of the original's output exists. What stands in for a null test is construction (the object's
-tables and divisions, `tests/player.rs`'s claims, and samples computed from the file's bytes), the
+tables and divisions, read from its image by `tests/player.rs`, and samples computed from the file's bytes), the
 invariants of §10.4, and a listen to `--audio-dump` (§12). The sound is not claimed to be the 1993
 release's: the curve's index clamp (A13) differs, and the rest is the object's arithmetic, the
 5.26 % flatness and the table the machine holds included.

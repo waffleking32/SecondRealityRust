@@ -2,7 +2,8 @@
 //! device pulls from.
 //!
 //! Read out of `upstream/SecondReality/MAIN/STMIK.300`'s segment image (every `+0x…` is a
-//! segment offset; `tests/player.rs`'s claims table asserts the bytes). `docs/fidelity/music.md`
+//! segment offset; `tests/player.rs`'s `the_ports_tables_are_the_objects_own` holds the tables
+//! to the image). `docs/fidelity/music.md`
 //! §10 has the object's mixer in full and the measurements. In the object's order:
 //!
 //! 1. A voice's level is `m_vol = (avol × master) >> 8` (`+0x5925`), with master
@@ -710,7 +711,7 @@ impl Curve {
     /// so `+0x55a1`'s `rep stosb` writes nothing: the fill is `2 × ⌊(0x800 − K)/4⌋` (the two
     /// `shr $1,%cx`), and `+0x55bd` fills the shortfall after the ramp with `0xFFFF` in
     /// `2 × ⌊rem/2⌋` bytes (an odd last byte is the object's `0x01` filler; the port leaves it
-    /// zero). `tests/mix.rs`'s `curve_with` writes the same arithmetic out independently.
+    /// zero). `tests/common/oracle.rs`'s `curve` writes the same arithmetic out independently.
     pub fn build(mul: u8) -> Curve {
         let mul = mul.max(0x10);
         let ramp = 0x8000 / usize::from(mul);

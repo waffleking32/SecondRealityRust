@@ -1,8 +1,9 @@
 //! The tracker: the tick clock, the position, the order advance and the timeline effects.
 //!
 //! `upstream/SecondReality/MAIN/STMIK.300` ships as an OMF object with no source, so this is
-//! read out of its segment image: every `+0x…` is a segment offset, and `tests/player.rs`'s
-//! `the_objects_own_bytes_say_what_the_player_says` asserts the bytes. Which frame a row change
+//! read out of its segment image: every `+0x…` is a segment offset into the image
+//! `tests/player.rs`'s `segment_image` rebuilds (`objdump -b binary -m i8086 -D` lists it).
+//! Which frame a row change
 //! lands on is measured against the traces under `reference/music/` (`music-clock.md`), and where
 //! the two disagree the trace wins (D12). `docs/fidelity/music.md` §8 has the readings:
 //!
@@ -594,7 +595,8 @@ impl Player {
                 self.pending_row = (info >> 4) * 10 + (info & 0x0f);
                 self.advance_flag = ADVANCE_ORDER;
             }
-            // `T` (`+0x3d73`): no module carries one (`the_timeline_effects_the_modules_carry`).
+            // `T` (`+0x3d73`): no module carries one (`tests/module.rs`'s
+            // `the_effect_histogram_is_the_modules_own`).
             (20, true) => self.set_tempo(info),
             (4, _) => self.channels[index].volume_slide(info, tick),
             (5, _) => self.channels[index].portamento(info, tick, Portamento::Down),
