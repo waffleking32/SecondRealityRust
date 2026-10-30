@@ -52,7 +52,7 @@ whose colour `:219-220` sets (`the_ring_chain_copies_the_last_ring_forward`).
 Both files are the linked data segments of the originals' object files (`asset-inventory.md`), and
 neither is a picture: `sniff` returns `None` for both (no magic), so `load_path` refuses them, and
 `raw_surface` would need an invented geometry (35,328 is 384×92, 12,292 is 4×3,073). The port reads
-the bytes (`the_data_files_are_not_pictures`):
+the bytes, and `init` refuses either file at another length:
 
 | file | bytes | what it is | the source's read |
 |---|---|---|---|

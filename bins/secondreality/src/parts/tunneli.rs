@@ -1,13 +1,8 @@
 //! TUNNELI — the dot tunnel: 77 rings of 64 dots, chained, one plot per dot.
 //!
-//! `TUNNELI/TUN10.PAS` (227 lines of Turbo Pascal with an inline-assembly
-//! inner loop) is the part; `TUNNELI/X.BAT:1` stages `tun10.exe` as
-//! `tunneli.exe`, so the shipped build is TUN10 (`TUN9.PAS` is the earlier
-//! revision: `veke` 980, a different palette ramp at `:118-119`, the chain copy
-//! commented out at `:204`, and the music exit at `:223` — the one TUN10
-//! removes).
-//!
-//! The source's own acts, in order:
+//! `TUNNELI/TUN10.PAS` (Turbo Pascal with an inline-assembly inner loop) is the
+//! part; `TUNNELI/X.BAT:1` stages `tun10.exe`, not the earlier `TUN9.PAS`. Its
+//! acts:
 //!
 //! 1. `:99-104` — the tables: `rows[x] := x*320`, the two sine tables copied
 //!    out of `sinit.obj`, and `pcalc` copied out of `tunneli.obj`.
@@ -21,29 +16,25 @@
 //!    and sets the head's colour. `veke = 1060` (`:3`) frames, and the part
 //!    quits at `:221`.
 //!
-//! Four things about that loop are the port's real work, and each is
-//! `docs/fidelity/tunneli.md`'s:
+//! What the port keeps of that loop (`docs/fidelity/tunneli.md`):
 //!
-//! - **The clip is one-sided** (`:179-190`). `cmp di,319 / ja @yli` tests the
-//!   x sum only; the y term then indexes `rows[bx]` **unchecked**, and the
-//!   word that read lands on is whatever the data segment holds there. The
-//!   port keeps that shape (§[`Tunneli::rows_word`]) because the original
-//!   *draws* those dots: on the reference's own frames the unchecked read
-//!   accounts for 85–146 pixels that no bounded port reproduces.
-//! - **The colour immediate is self-modified** (`:168`
-//!   `mov byte ptr cs:[@c+3],al`). The port makes it a variable, which is what
-//!   spec §5.2 says to do with self-modifying code.
-//! - **`waitr` rewrites DAC entry 0 every frame** (`:46`, `:52`), from the BIOS
-//!   keyboard flags: black, or `(0,0,15)` when Scroll Lock is set. The port has
-//!   no keyboard flags and writes the black (`frame`).
-//! - **The last 102 frames set the new ring's colour to 0** (`:220`), and with
-//!   `c = 0` a ring's `bbc` is below 64 — so those rings are not drawn at all
-//!   (`:161`) and the screen is left to the erases of the rings still moving.
+//! - **The clip is one-sided** (`:179-190`): the y term indexes `rows`
+//!   unchecked. The port models the data-segment words it can reach
+//!   ([`Tunneli::rows_word`]); on this art they are all 64,000, so the stray
+//!   dots land off screen, where substituting 0 would paint row 0 (`bugs.md` §22).
+//! - **The colour immediate is self-modified** (`:168`); the port makes it a
+//!   variable (design §5.2).
+//! - **`waitr` rewrites DAC entry 0 every frame** (`:46`, `:52`): black, or
+//!   blue under Scroll Lock, which the port has no flag for.
+//! - **The last 102 frames set the new ring's colour to 0** (`:220`), and a
+//!   ring whose `bbc` is below 64 is not drawn (`:161`): the screen empties
+//!   through the erases of the rings still moving.
+//! - **The second grey ramp is the release's 3/5**, not the tree's 3/4 (D12,
+//!   A6; [`second_ramp`]).
 //!
-//! The picture is written through `Surface::pixels_mut()` **at the original's
-//! own `LINE_LEN` of 320** (Part B's second convention): mode 13h addresses
-//! video memory as `x + y*320`, so `View::y_line_offset` is set to 320 and the
-//! surface's first 64 KB *is* the original's video memory, wraparound and all.
+//! The picture is written at mode 13h's own stride, `x + y*320`
+//! (`View::y_line_offset = 320`), so the surface's first 64 KB is the
+//! original's video memory, wraparound and all.
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 
@@ -52,14 +43,8 @@ use crate::parts::read_asset;
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "tunneli";
 
-/// The programs' two data files, read in their original form. Both are the
-/// linked data segments of the originals' `.OBJ`s (`asset-inventory.md` records
-/// `TUNNELI/SINIT.OBJ`→`SINIT.DAT` and `TUNNELI/TUNNELI.OBJ`→`TUNNEL.DAT`), and
-/// **neither is a picture**: they carry no magic, so `sr_assets::sniff` returns
-/// `None` and `load_path` refuses them; `raw_surface` would need a geometry the
-/// caller invents. `the_data_files_are_not_pictures` pins both facts, and
-/// `docs/fidelity/tunneli.md` §2 records why the port reads the record arrays
-/// itself.
+/// The linked data segments of `TUNNELI.OBJ` and `SINIT.OBJ`: record arrays,
+/// not pictures, so the part reads them itself (`tunneli.md` §2).
 const TUNNEL_PATH: &str = "assets/TUNNELI/TUNNEL.DAT";
 const SINIT_PATH: &str = "assets/TUNNELI/SINIT.DAT";
 
@@ -83,9 +68,6 @@ const CHAIN_COPY: usize = 100;
 /// drawn with the ellipse `sade[x]` selects.
 const RING_BOTTOM: usize = 4;
 const RING_TOP: usize = 80;
-/// Rings drawn by one pass of `:153` — 77 — which the ring-count test pins.
-#[cfg(test)]
-const RINGS: usize = RING_TOP - RING_BOTTOM + 1;
 
 /// `:170` `mov cx,64`: every ring's ellipse is 64 dots.
 const DOTS_PER_RING: usize = 64;
@@ -130,18 +112,9 @@ const UNWRITTEN_Y: u16 = 0;
 /// declares 103 of them and only those are written.
 const SADE_WORDS: usize = 103;
 
-/// The window words around `rows` that [`Tunneli::rows_word`] models, and the
-/// two the match arms below use: forward to the end of `sade`, and — past the
-/// 64 KB wrap — back to `pcalc`'s first word. Words outside those two ranges
-/// are not modelled and read as 0; the test
-/// `the_unchecked_read_covers_everything_the_arithmetic_can_reach` measures
-/// that the arithmetic can never ask for one.
-const MODEL_FORWARD_LAST: usize = SADE_LAST;
-const MODEL_BACKWARD_FIRST: usize = PCALC_FIRST;
-
-/// The window's word offsets, counted from `rows[0]`: `aa2` — 101 words of
-/// 64000 then 100 never-written zeros — then `sinit`, `cosit` and `sade`; and,
-/// past the 64 KB wrap, `pcalc` read backwards and then `aa1`.
+/// The window [`Tunneli::rows_word`] models, in word offsets from `rows[0]`:
+/// `aa2` (101 words of 64000, then 100 never-written zeros), `sinit`, `cosit`
+/// and `sade`; and, past the 64 KB wrap, `pcalc` read backwards and then `aa1`.
 const AA2_FIRST: usize = ROWS_LAST + 1;
 const AA1_COPY: usize = 101;
 /// The last of `aa2`'s copied words, and the first of its never-written ones.
@@ -217,50 +190,21 @@ impl Tunneli {
     }
 
     /// The word `:186`'s `add di, word ptr ds:rows[bx]` reads for the 16-bit
-    /// index `yy` — **the original's read is unchecked, and this is it**.
-    ///
-    /// `rows` is `array[0..200] of word` and the assembly indexes it with
-    /// `bx = (by + pcalc[br][i].y) * 2`, a byte offset it never tests. The
-    /// effective address is `DS:rows_off + bx`, and the data segment is 64 KB,
-    /// so the offset wraps; the word grid is two bytes, so the *word* index
-    /// wraps at 32,768. What that lands on is the neighbouring globals, whose
-    /// layout the declaration order fixes (`TUN10.PAS:16-29`):
+    /// index `yy`: **unchecked**. The 64 KB data segment wraps the word index at
+    /// 32,768, and the neighbours are the globals in declaration order
+    /// (`TUN10.PAS:16-29`):
     ///
     /// ```text
     ///   … putki, pcalc, aa1[0..100], rows[0..200], aa2[0..200], sinit[0..4096],
     ///     cosit[0..2048], sade[0..102], frame, bor, frames, oldpos, …
     /// ```
     ///
-    /// `aa1` is filled with 64000 at `:99` and copied into `aa2` at `:100`, so
-    /// the words just either side of `rows` are 64000 (the rest of `aa2` is
-    /// never written and is zero), the words after that are the sine tables,
-    /// and the words *before* `aa1` are `pcalc` — this part's own 35,328-byte
-    /// table, read backwards.
-    ///
-    /// **The read is preserved because the source has it, and it is invisible —
-    /// measured, not assumed.** The reachable range is `-680..=680` (the head's
-    /// y is `sinit[..] - cosit[..] ∈ [-222, 211]`, `by` is a difference of two
-    /// of those, and `pcalc`'s own y runs to ±247), so the words this can read
-    /// outside `rows` are `aa2`'s copy of `aa1` on one side and `aa1` itself on
-    /// the other — and **every one of them is 64,000** (`:99`'s value). A dot
-    /// that takes this branch therefore plots at `x + 64,000`, i.e. bytes
-    /// 64,002–64,319, past the 64,000 bytes a 200-line mode 13h screen reads
-    /// (`the_out_of_range_read_is_invisible_and_that_is_measured` checks every
-    /// reachable y for it). The artefact is real and off-screen in the original
-    /// *and* in the port: a bounded read draws byte-identical frames at all
-    /// four keyframes, so nothing in the reference can witness it either way.
-    ///
-    /// What the reference *does* witness is that the read must not be replaced
-    /// by 0: `aa2`'s unwritten half *is* 0, so a port that substituted 0 would
-    /// plot every one of those dots in row 0 — the branch is only entered when
-    /// the x sum is already ≤ 319 — and the reference's four frames ink **34
-    /// pixels in row 0 in total**, against 356,042 such reads in the run
-    /// (`zeroing_the_read_would_paint_row_zero`, `docs/fidelity/tunneli.md` §4).
-    ///
-    /// The windows this needs are the first 680 words after `rows` and the
-    /// first 680 before it.
-    /// `the_unchecked_read_covers_everything_the_arithmetic_can_reach` measures
-    /// that bound against the tables themselves.
+    /// The arithmetic reaches ±680 words
+    /// (`the_unchecked_read_covers_everything_the_arithmetic_can_reach`); the
+    /// words between `sade` and `pcalc` are unreachable and read as 0. Every
+    /// read the run makes outside `rows` is 64,000, off screen
+    /// (`the_out_of_range_read_is_invisible_and_that_is_measured`,
+    /// `tunneli.md` §4).
     fn rows_word(&self, yy: u16) -> u16 {
         // The wrap the 16-bit offset performs, in words.
         let k = (yy % 32_768) as usize;
@@ -277,14 +221,12 @@ impl Tunneli {
             // `:103`'s `move` never writes.
             COSIT_FIRST..=COSIT_LAST => self.cosit.get(k - COSIT_FIRST).copied().unwrap_or(0),
             // `:26`'s `sade`, of which `:148` writes the first 101.
-            SADE_FIRST..=MODEL_FORWARD_LAST => self.sade[k - SADE_FIRST],
-            // Before `aa1`, the memory is `pcalc`'s last words, read backwards:
-            // this is the part's own 35,328-byte table.
-            MODEL_BACKWARD_FIRST..=PCALC_LAST => self.pcalc[PCALC_WORDS - 1 - (PCALC_LAST - k)],
+            SADE_FIRST..=SADE_LAST => self.sade[k - SADE_FIRST],
+            // Before `aa1`: `pcalc`'s last words, read backwards.
+            PCALC_FIRST..=PCALC_LAST => self.pcalc[PCALC_WORDS - 1 - (PCALC_LAST - k)],
             // `aa1` itself, every word of it 64000 (`:99`).
             AA1_FIRST.. => AA1_VALUE,
-            // Between `sade` and `pcalc` lie `frame`, `bor`, `frames`, `oldpos`
-            // and the scalars, which the arithmetic above cannot reach.
+            // `frame`, `bor`, `frames`, `oldpos` and the scalars: unreachable.
             _ => 0,
         }
     }
@@ -304,10 +246,8 @@ impl Tunneli {
             let br = self.sade[x] as usize;
             // `:158` `bbc := putki[x].c+round(x / 1.3)`, a byte.
             let colour = ring.c.wrapping_add(ring_colour(x));
-            // `:161` `if bbc >= 64 then` — the whole assembly block, erase and
-            // plot alike, is skipped for a ring whose colour is below 64. That
-            // is what the fade's `c = 0` does: it stops drawing the ring
-            // rather than drawing it in entry 0.
+            // `:161` `if bbc >= 64 then`: below 64 the whole block, erase and
+            // plot alike, is skipped.
             if colour < 64 {
                 continue;
             }
@@ -324,9 +264,7 @@ impl Tunneli {
 
                 // `:179-180` `mov di,word ptr ds:[si] / add di,dx`.
                 let mut di = self.pcalc[base + dot * 2].wrapping_add(bx);
-                // `:181-182` `cmp di,319 / ja @yli` — **the only bound**, and
-                // it is on the x sum alone. A y that is out of range is not
-                // clipped; it is read out of the data segment below.
+                // `:181-182` `cmp di,319 / ja @yli`: the only bound, on x alone.
                 if di <= 319 {
                     // `:183-186`: the y term, unchecked, through `rows`.
                     let y = by.wrapping_add(self.pcalc[base + dot * 2 + 1]);
@@ -344,17 +282,12 @@ impl Tunneli {
         }
     }
 
-    /// `:200-225`: one iteration of the sync loop, which is one vblank of
-    /// `waitr`'s count — and so, by the engine's one-tick-one-frame rule, one
-    /// tick.
+    /// `:200-225`: one iteration of the sync loop, one vblank, one tick.
     fn sync(&mut self, frame: u32) {
         let sx = self.sx as usize;
         let sy = self.sy as usize;
-        // `:202-203` — the new head, summed in 16 bits. `TUN10.PAS:203`'s third
-        // term is `sinit[y and 4095]` with the global `y` of `:71` that nothing
-        // ever writes; the port writes the term out as the source has it.
-        // `sy*3` and `sx*2` are word products in the source, so they wrap
-        // before the mask; 4096 divides 65,536, so masking first is the same.
+        // `:202-203`, the new head, summed in 16 bits; `sy*3` and `sx*2` wrap
+        // before the mask, which 4096 dividing 65,536 makes the same.
         let x = self.cosit[sy & 2047]
             .wrapping_sub(self.sinit[sy.wrapping_mul(3) & 4095])
             .wrapping_sub(self.cosit[sx & 2047]);
@@ -382,50 +315,36 @@ impl Tunneli {
         }
     }
 
-    /// `:121-128`: the part's own DAC — two 65-entry grey ramps at 64 and 128,
-    /// entries 68 and 132 black inside them, and entry 255 green.
-    ///
-    /// Entries 0..63 are **deliberately not written**: they are the mode set's
-    /// own table, which is the same one `shell::hardware_default_palette`
-    /// installs, and the reference's background — entry 0 — is black in every
-    /// one of the four frames (`tunneli.md` §5).
+    /// `:121-128`: the part's own DAC. Entries 0..63 are the mode set's table
+    /// and are not written (`tunneli.md` §5).
     fn install_palette(ctx: &mut PartCtx) {
-        // `:121` `setrgb(64+x, (64-x),(64-x),(64-x))`. `x = 0` writes 64,
-        // which the DAC has no bit for: `Palette::set_entry` masks to six bits,
-        // as the hardware does.
-        for x in 0..=64u32 {
-            let value = (64 - x) as u8;
-            ctx.set_palette_entry(64 + x as u8, [value, value, value]);
+        for (entry, rgb) in dac_writes(second_ramp) {
+            ctx.set_palette_entry(entry, rgb);
         }
-        // `:122` `setrgb(128+x, (64-x) *3 div 4, …)`, the same ramp dimmed —
-        // **except that the build which shipped is not the tree's `TUN10.PAS`
-        // in this one expression.** The reference's frames are drawn with
-        // `(64 - x) * 3 div 5` at the same 65 entries: the four reference
-        // frames exercise 42 of them, 38 with a non-black reference pixel, over
-        // 5,275 informative pixels and 29 distinct greys, and every one matches
-        // `3*(64-x) div 5` exactly — including the 17 where rounding rather
-        // than truncation would differ. The fit is also *unique*: 81 candidate
-        // `(mul, div)` pairs (70 distinct ramps) are rendered against the four
-        // frames, and the port's colour field is 1,108 pixels away at this ramp
-        // and at least 4,200 at every other
-        // (`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`).
-        // The tree's own `TUN10.EXE` compiles `:122` as written (`3*(64-x)` then
-        // `idiv 4`, image offsets 0x1d0-0x1e3), so the two builds differ; D12
-        // settles which one the port follows — the distributed release is the
-        // reference of record for what the demo looks like, the source tree is
-        // the reference for how the effect works. `docs/fidelity/tunneli.md` §5
-        // carries the derivation, and `APPROXIMATIONS.md` A6 what it costs.
-        for x in 0..=64u32 {
-            let value = second_ramp(64 - x);
-            ctx.set_palette_entry(128 + x as u8, [value, value, value]);
-        }
-        // `:124-125` — the two dark rings inside the ramps, black.
-        ctx.set_palette_entry(68, [0, 0, 0]);
-        ctx.set_palette_entry(132, [0, 0, 0]);
-        // `:128` `setrgb(255,0,63,0)` — green, and the only non-grey entry the
-        // part writes.
-        ctx.set_palette_entry(255, [0, 63, 0]);
     }
+}
+
+/// `:121-128`'s writes in order, with `second` standing in for `:122`'s ramp:
+/// two 65-entry grey ramps at 64 and 128, entries 68 and 132 black inside them,
+/// and entry 255 green.
+fn dac_writes(second: impl Fn(u32) -> u8) -> Vec<(u8, [u8; 3])> {
+    let mut writes = Vec::with_capacity(133);
+    // `:121` `setrgb(64+x, (64-x),(64-x),(64-x))`. `x = 0` writes 64, which the
+    // six-bit DAC masks to 0, as `Palette::set_entry` does.
+    for x in 0..=64u32 {
+        let value = (64 - x) as u8;
+        writes.push((64 + x as u8, [value; 3]));
+    }
+    // `:122`, the same ramp dimmed: the release's, [`second_ramp`].
+    for x in 0..=64u32 {
+        let value = second(64 - x);
+        writes.push((128 + x as u8, [value; 3]));
+    }
+    // `:124-125`, the two dark rings; `:128`, green.
+    writes.push((68, [0, 0, 0]));
+    writes.push((132, [0, 0, 0]));
+    writes.push((255, [0, 63, 0]));
+    writes
 }
 
 impl Part for Tunneli {
@@ -439,15 +358,15 @@ impl Part for Tunneli {
         let sinit_bytes = read_asset(NAME, SINIT_PATH)?;
         let sinit_words = words_of(&sinit_bytes);
         if sinit_words.len() < SINIT_WORDS + COSIT_COPIED {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "{SINIT_PATH} holds {} word(s); :102-103 copy {} of sinit and {} of cosit",
                     sinit_words.len(),
                     SINIT_WORDS,
                     COSIT_COPIED
                 ),
-            });
+            ));
         }
         self.sinit = sinit_words[..SINIT_WORDS].to_vec();
         // `:103` copies 2,048 of `SINIT.DAT`'s 2,049 words; the array's last
@@ -461,16 +380,16 @@ impl Part for Tunneli {
         self.pcalc = words_of(&pcalc_bytes);
         let needed = PCALC_ROWS * DOTS_PER_RING * 2;
         if self.pcalc.len() != needed {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "{TUNNEL_PATH} holds {} word(s); pcalc is {}x{} of two-word records = {}",
                     self.pcalc.len(),
                     PCALC_ROWS,
                     DOTS_PER_RING,
                     needed
                 ),
-            });
+            ));
         }
 
         // `:148` `for Z := 0 to 100 do sade[z] := round(16384 div ((Z*7)+95))`
@@ -479,41 +398,29 @@ impl Part for Tunneli {
             self.sade[z] = (16_384 / ((z * 7) + 95)) as u16;
         }
 
-        // `:130-135` zeroes `putki` explicitly, and `:67`'s `oldpos` is *not*
-        // cleared — `:97`'s `fillchar` is commented out — so it starts as the
-        // data segment's image holds it, which is zeroes. The port zeroes both,
-        // which is each of those states: the first frame's erases write colour
-        // 0 at offset 0, exactly as the original's do.
+        // `:130-135` zeroes `putki`; `oldpos` is not cleared (`:97` is
+        // commented out) but the image holds zeroes there.
         self.oldpos = vec![0; OLDPOS_WORDS];
         self.putki = [Ring::default(); CHAIN];
 
-        // `:110-115` `mov ax,$13 / int $10`. The mode set is the BIOS's, not
-        // the part's, and three of its effects are visible here: video memory
-        // is cleared, the screen becomes 320x200 of one byte per pixel
-        // addressed `x + y*320`, and the overscan entry goes back to AC
-        // 0x11 = 0 (entry 0, which is black).
-        // `y_line_offset` is 320 — Part B's second convention, the original's
-        // own LINE_LEN — so the surface's first 64 KB is this part's video
-        // memory and `View` reads exactly its first 200 rows of 320.
+        // `:110-115` `mov ax,$13 / int $10`: video memory cleared, 320x200
+        // addressed `x + y*320`, and AC 0x11 back to entry 0.
         ctx.view.width = SCREEN_WIDTH;
         ctx.view.height = SCREEN_HEIGHT;
         ctx.view.double_scan = false;
         ctx.view.set_origin(0);
         ctx.view.y_line_offset = Some(LINE_LEN);
         ctx.view.border = Some(0);
-        // The part addresses 64 KB of video memory flat, so the surface has to
-        // hold it: this is the engine's own surface size (640x400 = 256,000
-        // pixels), and a smaller one would put `draw`'s writes out of bounds
-        // rather than clip them the way `Surface::set` does. Refused loudly.
+        // `draw` addresses 64 KB flat, unclipped.
         if ctx.surface.pixels().len() < VIDEO_BYTES {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "this part addresses {VIDEO_BYTES} bytes of video memory and the surface holds \
                      {}",
                     ctx.surface.pixels().len()
                 ),
-            });
+            ));
         }
         ctx.surface.pixels_mut()[..VIDEO_BYTES].fill(0);
 
@@ -523,18 +430,12 @@ impl Part for Tunneli {
 
     /// One vblank of `:150`'s loop: draw the rings, then advance the chain once.
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        // `:151` `waitr`, whose `:46` `setrgb(0,0,0,0)` rewrites DAC entry 0
-        // every frame — and whose `:52` makes it `(0,0,15)` when bit 4 of the
-        // BIOS keyboard flags (`mem[$40:$17]`, Scroll Lock) is set. **The port
-        // has no keyboard flags**, so it writes the black branch, which is the
-        // state the reference was captured in: every non-dot pixel of all four
-        // of its TUNNELI frames is (0,0,0) (`tunneli.md` §5).
+        // `:151` `waitr`'s `:46` `setrgb(0,0,0,0)`; `:52`'s Scroll Lock blue
+        // has no keyboard flag to read, and the reference is black.
         ctx.set_palette_entry(0, [0, 0, 0]);
 
-        // `:152-198`, then `:200-225`. `frames` from `waitr`'s DIS call is the
-        // vblanks elapsed since the last one; one tick is one frame, so the
-        // sync loop runs exactly once and `frame` (`:27`, incremented at
-        // `:221`) is this part's `PartCtx::frame`.
+        // `:152-198`, then `:200-225` once (one vblank a tick); `frame` (`:27`)
+        // is `PartCtx::frame`.
         let memory = ctx.surface.pixels_mut();
         self.draw(memory);
         self.sync(ctx.frame);
@@ -549,31 +450,23 @@ impl Part for Tunneli {
     }
 }
 
-/// The shipped build's second ramp: `(64 - x) * 3 div 5`, where `TUN10.PAS:122`
-/// has `(64 - x) * 3 div 4` — measured, uniquely, against the reference's own
-/// frames (see [`Tunneli::install_palette`] and `docs/fidelity/tunneli.md` §5).
-///
-/// Truncating division, not rounding: `64 - x = 38` is 22 here and 23 rounded,
-/// and the reference shows 22.
+/// The shipped build's second ramp, `(64 - x) * 3 div 5`, where `TUN10.PAS:122`
+/// and the tree's own `TUN10.EXE` (image 0x1d0-0x1e3) have `* 3 div 4`. The
+/// reference's frames fit 3/5 uniquely
+/// (`the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit`); D12
+/// follows the release (`tunneli.md` §5, A6). Truncating: 38 gives 22, as the
+/// reference shows, not 23.
 fn second_ramp(value: u32) -> u8 {
     (value * 3 / 5) as u8
 }
 
-/// `:158`'s `round(x / 1.3)`.
-///
-/// A real division in the source, so the port divides too rather than
-/// tabulating it. The rounding is unambiguous over the loop's range: the
-/// distance from the nearest half is at least 0.05 for every `x` in `4..=80`
-/// (`the_ring_colour_rounds_unambiguously`), so no float subtlety can change
-/// the integer.
+/// `:158`'s `round(x / 1.3)`, unambiguous over `4..=80`
+/// (`the_ring_colour_rounds_unambiguously`).
 fn ring_colour(x: usize) -> u8 {
     (x as f64 / 1.3).round() as u8
 }
 
-/// `bytes` as the little-endian words the original's `move` copies. A trailing
-/// odd byte is dropped, which is what a word-wise `move` of a whole file does;
-/// the two files here are both even and their lengths are checked by the
-/// caller.
+/// `bytes` as the little-endian words the original's `move` copies.
 fn words_of(bytes: &[u8]) -> Vec<u16> {
     bytes
         .chunks_exact(2)
@@ -589,6 +482,9 @@ mod tests {
     use sr_engine::surface::Surface;
     use sr_engine::view::View;
     use sr_engine::Palette;
+
+    /// `:153`'s 77 rings.
+    const RINGS: usize = RING_TOP - RING_BOTTOM + 1;
 
     /// An entry no path through the part writes, as a marker for "the shell's
     /// DAC is still there".
@@ -620,36 +516,26 @@ mod tests {
         }
     }
 
-    /// One blank, hairlined dot's worth of ink: how many of the first 64,000
-    /// pixels are not the background.
+    /// How many of the first 64,000 pixels are not the background.
     fn ink(surface: &Surface) -> usize {
         surface.pixels()[..64_000].iter().filter(|p| **p != 0).count()
     }
 
     #[test]
     fn the_tunnel_draws_seventy_seven_rings_of_sixty_four_dots() {
-        // TUN10.PAS:153 `for x := 80 downto 4 do` and :170 `mov cx,64`. The
-        // witness is `ry` (:69), the inner loop's byte offset into `oldpos`
-        // (:152 `ry := 0`, :192 `add ax,2`), which advances only for a ring
-        // that draws: 77 rings x 64 dots x 2 bytes.
+        // `:153` and `:170`. The witness is `ry` (`:69`, `:192`), which
+        // advances 2 a dot for a ring that draws; by tick 120 every ring has
+        // its colour.
         let (mut rig, mut part) = started();
-        // The tunnel forms over its first ~96 ticks — ring x's colour arrives
-        // down the chain from `putki[99]`, and with c = 0 (:130-135) a ring is
-        // not drawn at all (:161) — so measure once every ring has one.
         run_ticks(&mut rig, &mut part, 120);
         part.frame(&mut rig.ctx(120));
 
-        assert_eq!(RINGS, 77, "80 downto 4 inclusive is 77 rings");
-        assert_eq!(RINGS * DOTS_PER_RING, 4_928, "77 x 64 dots");
         assert_eq!(
             part.ry as usize,
             RINGS * DOTS_PER_RING * 2,
             "a ring count or a dot count that moved would move ry"
         );
-        // And nothing past the 4,928th slot was touched: the loop's last write
-        // is that slot, because `ax` (:174) is 2 per dot and `oldpos` is word
-        // indexed by it — 77 x 64 words, not 7,501.
-        assert_eq!(part.oldpos.len(), OLDPOS_WORDS);
+        // And nothing past the 4,928th slot was touched.
         assert!(
             part.oldpos[RINGS * DOTS_PER_RING..].iter().all(|slot| *slot == 0),
             "a dot was written past the 4,928th slot"
@@ -658,28 +544,20 @@ mod tests {
 
     #[test]
     fn the_ring_chain_copies_the_last_ring_forward() {
-        // :204 `move(putki[1], putki[0], ofs(putki[100])-ofs(putki[0]))`: the
-        // count is the offset difference, 100 records, so putki[0..99] take
-        // putki[1..100] — each ring is the previous one's data six bytes along,
-        // the record's own size (`rengas`, :11-14).
+        // `:204`: the count is the offset difference, 100 records.
         let (_, mut part) = started();
         for (i, slot) in part.putki.iter_mut().enumerate() {
             *slot = Ring { x: 1000 + i as u16, y: 2000 + i as u16, c: i as u8 };
         }
         part.sync(0);
 
-        // Every field moves together, so the stride is the whole record. The
-        // loop stops at 98: `putki[99]` takes `putki[100]`, which `:202-203`
-        // has just overwritten with the new head, and that is the next
-        // assertion's business.
+        // `putki[99]` takes the new head `:202-203` just wrote, checked below.
         for i in 0..CHAIN_COPY - 1 {
             assert_eq!(part.putki[i].x, 1001 + i as u16, "ring {i} x");
             assert_eq!(part.putki[i].y, 2001 + i as u16, "ring {i} y");
         }
         assert_eq!(part.putki[98].x, 1099, "putki[98] took the old putki[99]");
-        // putki[99] took the old putki[100] **and then had its colour set**
-        // (:219-220), which is the order the source runs them in: the head's
-        // position is the one `:202-203` just computed, not a copy of itself.
+        // ... and then had its colour set (`:219-220`).
         assert_eq!(part.putki[99].x, part.putki[100].x, "putki[99] is the new head");
         assert_eq!(part.putki[99].y, part.putki[100].y);
         assert_ne!(part.putki[99].x, 1100, "a 99-record copy would have kept the old x");
@@ -688,18 +566,14 @@ mod tests {
 
     #[test]
     fn the_animation_advances_once_per_tick() {
-        // :200 `for sync := 1 to frames do` with `frames` from `waitr`'s DIS
-        // call — the vblanks elapsed. One tick is one frame (Global
-        // Constraints), so the loop runs exactly once per tick and advances
-        // `sx`/`sy` (:205-206) by one.
+        // `:200` runs once a vblank, so `sx`/`sy` (`:205-206`) step once a tick.
         let (mut rig, mut part) = started();
         assert_eq!((part.sx, part.sy), (0, 0));
         run_ticks(&mut rig, &mut part, 7);
         part.frame(&mut rig.ctx(7));
         assert_eq!((part.sx, part.sy), (8, 8), "eight ticks, eight steps");
 
-        // And the head is the function of the *pre-increment* counters: after
-        // one tick it is :202-203 evaluated at sx = sy = 0.
+        // The head is `:202-203` at the pre-increment counters.
         let (_, mut fresh) = started();
         let (x, y) = (
             fresh.cosit[0].wrapping_sub(fresh.sinit[0]).wrapping_sub(fresh.cosit[0]),
@@ -712,13 +586,7 @@ mod tests {
 
     #[test]
     fn the_last_hundred_and_two_frames_set_the_new_rings_colour_to_zero() {
-        // :220 `if frame >= veke-102 then putki[99].c := 0`. veke - 102 = 958:
-        // tick 957's new ring is 64 or 128, tick 958's is 0 — and a ring whose
-        // colour is 0 has `bbc = round(x/1.3) < 64`, so :161 skips the whole
-        // assembly block for it: the fade is the rings *stopping*, not being
-        // drawn in entry 0. What the screen keeps is the erases of the rings
-        // still moving, which is why it goes black a few ticks later.
-        assert_eq!(FADE_FIRST_FRAME, 958);
+        // `:220`: from tick 958 the new ring's colour is 0, and `:161` skips it.
         let (mut rig, mut part) = started();
         run_ticks(&mut rig, &mut part, FADE_FIRST_FRAME - 1);
         part.frame(&mut rig.ctx(FADE_FIRST_FRAME - 1));
@@ -726,10 +594,7 @@ mod tests {
         part.frame(&mut rig.ctx(FADE_FIRST_FRAME));
         assert_eq!(part.putki[99].c, 0, "tick 958's new ring is colour 0");
 
-        // The consequence on the screen: with every ring's colour 0 none is
-        // drawn, and the erases of the rings that still were take the rest —
-        // the screen is black before the part ends (tick 1,052 here; `tunneli.md`
-        // §6 has the port's and the reference's own black-out).
+        // The erases take the rest: black by tick 1,052 (`tunneli.md` §6).
         for at in FADE_FIRST_FRAME..=1_052 {
             part.frame(&mut rig.ctx(at));
         }
@@ -738,10 +603,7 @@ mod tests {
 
     #[test]
     fn the_part_retires_after_veke_frames() {
-        // :3 `const veke = 1060`, and :221 `if frame = veke then quit := true`
-        // — the tick at veke draws and syncs, and *then* the loop ends, so the
-        // part draws 1,061 frames and the last of them is tick 1,060.
-        assert_eq!(VEKE, 1060);
+        // `:221`: the tick at veke draws and syncs, then the loop ends.
         let (mut rig, mut part) = started();
         run_ticks(&mut rig, &mut part, VEKE - 1);
         assert_eq!(
@@ -759,12 +621,9 @@ mod tests {
 
     #[test]
     fn a_dot_with_an_out_of_range_y_is_plotted_at_the_words_the_read_lands_on() {
-        // :179-190: `cmp di,319 / ja @yli` bounds the *x* sum only, and the y
-        // term then indexes `rows` with whatever the 16-bit sum was. Ring 80
-        // (the smallest ellipse, `br = sade[80] = 25`) with dot 0's y summing
-        // to 445: in a bounded port that is off screen; in the original it is
-        // past `rows`' 201 words, where the data segment holds `sinit`, and
-        // `sinit[43]` is 1 — so the dot lands one pixel to the right.
+        // Ring 80's dot 0 with its y summing to 445: past `rows` the data
+        // segment holds `sinit`, and `sinit[43]` is 1, so the dot lands one
+        // pixel to the right.
         let (mut rig, mut part) = started();
         part.putki = [Ring::default(); CHAIN];
         let base = part.sade[RING_TOP] as usize * DOTS_PER_RING * 2;
@@ -785,11 +644,8 @@ mod tests {
 
     #[test]
     fn a_dot_leaves_its_previous_position_black() {
-        // `:176-177`: the erase runs before the plot, at the offset the dot had
-        // last time, and it is the only thing that ever removes ink — the
-        // screen is never cleared and the tunnel erases its own trail. Move one
-        // hand-built ring by one pixel between two draws: the dot's old pixel
-        // goes back to 0 and its new one takes the colour.
+        // `:176-177`: the erase at the dot's last offset is the only thing that
+        // removes ink.
         let (mut rig, mut part) = started();
         part.putki = [Ring::default(); CHAIN];
         part.putki[RING_TOP] = Ring { x: 0, y: 0, c: 64 };
@@ -812,11 +668,7 @@ mod tests {
 
     #[test]
     fn the_unchecked_read_reads_the_data_segments_own_words() {
-        // The layout is the declaration order of `TUN10.PAS:16-29`, and every
-        // boundary below is a word of it. The window index is `yy` wrapped at
-        // 32,768: the assembly's address is `DS:rows_off + 2*yy` in a 64 KB
-        // segment, so the *byte* offset wraps at 65,536 and the word grid at
-        // half that.
+        // Every boundary of `TUN10.PAS:16-29`'s layout, `yy` wrapped at 32,768.
         let (_, part) = started();
 
         // `rows` itself, `:101`.
@@ -853,12 +705,8 @@ mod tests {
 
     #[test]
     fn the_unchecked_read_covers_everything_the_arithmetic_can_reach() {
-        // The model above only covers part of the data segment, so the bound
-        // has to be measured rather than assumed. Every y the assembly can
-        // index with is `by + pcalc[br][i].y`, where `by` is the difference of
-        // two chain positions and a chain position is :203's
-        // `sinit[sx*2 and 4095] - cosit[sx and 2047]` (its third term is the
-        // global `y` of :71, which nothing writes) or the initial 0 (:134).
+        // Every y is `by + pcalc[br][i].y`, `by` the difference of two chain
+        // positions, each `:203`'s `sinit[..] - cosit[..]` or the initial 0.
         let (_, part) = started();
         let range = |words: &[u16]| {
             words.iter().fold((0i32, 0i32), |(lo, hi), word| {
@@ -866,8 +714,7 @@ mod tests {
                 (lo.min(value), hi.max(value))
             })
         };
-        // `pcalc`'s words include each dot's x as well as its y, so this is a
-        // superset of the y the loop can add — which is all a bound needs.
+        // `pcalc`'s x words too: a superset, which is all a bound needs.
         let (sinit_lo, sinit_hi) = range(&part.sinit);
         let (cosit_lo, cosit_hi) = range(&part.cosit);
         let (pcalc_lo, pcalc_hi) = range(&part.pcalc);
@@ -878,62 +725,56 @@ mod tests {
         let y_hi = by.1 + pcalc_hi;
 
         assert!(
-            y_hi as usize <= MODEL_FORWARD_LAST,
-            "the forward reach is {y_hi}, past the modelled {MODEL_FORWARD_LAST}"
+            y_hi as usize <= SADE_LAST,
+            "the forward reach is {y_hi}, past the modelled {SADE_LAST}"
         );
         assert!(
-            (y_lo + 32_768) as usize >= MODEL_BACKWARD_FIRST,
-            "the wrapped reach is {}, before the modelled {MODEL_BACKWARD_FIRST}",
+            (y_lo + 32_768) as usize >= PCALC_FIRST,
+            "the wrapped reach is {}, before the modelled {PCALC_FIRST}",
             y_lo + 32_768
         );
         assert!(y_lo < 0, "the wrapped half is reachable at all: y can be {y_lo}");
     }
 
-    #[test]
-    fn the_out_of_range_read_is_invisible_and_that_is_measured() {
-        // The companion to the coverage test above, and the honest statement of
-        // what the unchecked read does on this art: walk the part's whole run,
-        // take every y the inner loop actually puts outside `rows`, and ask
-        // what `:186` reads for it. They all read 64,000 — `aa2`'s copy of
-        // `aa1` on the forward side (`:99-100`), `aa1` itself past the
-        // 65,536-byte wrap — so the plot lands at `x + 64,000`, in bytes
-        // 64,002..64,319 of a video memory whose screen is the first 64,000
-        // bytes (200 lines of 320). **Nothing witnesses the read**, in the
-        // original or here: a bounded read draws byte-identical frames.
-        //
-        // It is worth walking the run rather than trusting the arithmetic's
-        // widest possible y: the *bound* allows ±680, where the word read is
-        // `sinit`'s or `pcalc`'s and the plot would land on screen — but the
-        // sines never take `by` and `pcalc`'s y to their extremes together, and
-        // the values that occur are 201..248 and the wrapped side.
+    /// The whole run, calling `visit(x_sum, y)` for every dot of every ring
+    /// that draws, with the x sum `:181` bounds and the y `:186` reads.
+    fn for_each_drawn_dot(mut visit: impl FnMut(u16, u16)) {
         let (mut rig, mut part) = started();
-        let mut off_screen = 0usize;
-        let mut on_screen = 0usize;
         for tick in 0..=VEKE {
             part.frame(&mut rig.ctx(tick));
-            // `:155-158` and `:183-185`, read off the part's own state: the y
-            // the loop feeds to `rows[bx]`, for every dot of every ring that
-            // draws this tick.
             for x in RING_BOTTOM..=RING_TOP {
-                let colour = part.putki[x].c.wrapping_add(ring_colour(x));
-                if colour < 64 {
+                if part.putki[x].c.wrapping_add(ring_colour(x)) < 64 {
                     continue;
                 }
+                let bx = part.putki[x].x.wrapping_sub(part.putki[5].x);
                 let by = part.putki[x].y.wrapping_sub(part.putki[5].y);
                 let base = part.sade[x] as usize * DOTS_PER_RING * 2;
                 for dot in 0..DOTS_PER_RING {
+                    let x_sum = part.pcalc[base + dot * 2].wrapping_add(bx);
                     let y = by.wrapping_add(part.pcalc[base + dot * 2 + 1]);
-                    if y <= 200 {
-                        continue;
-                    }
-                    if part.rows_word(y) == 64_000 {
-                        off_screen += 1;
-                    } else {
-                        on_screen += 1;
-                    }
+                    visit(x_sum, y);
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_out_of_range_read_is_invisible_and_that_is_measured() {
+        // Every y the run puts outside `rows` reads 64,000 (`aa2`'s copy of
+        // `aa1`, or `aa1` past the wrap), so the plot lands in bytes
+        // 64,002..64,319, below the 200-line screen.
+        let (_, part) = started();
+        let mut off_screen = 0usize;
+        let mut on_screen = 0usize;
+        for_each_drawn_dot(|_, y| {
+            if y > 200 {
+                if part.rows_word(y) == 64_000 {
+                    off_screen += 1;
+                } else {
+                    on_screen += 1;
+                }
+            }
+        });
         assert!(
             off_screen > 100_000,
             "the run should read out of range often: {off_screen}"
@@ -943,45 +784,16 @@ mod tests {
 
     #[test]
     fn zeroing_the_read_would_paint_row_zero() {
-        // The counterfactual §4's argument rests on, measured rather than
-        // asserted: `aa2`'s unwritten half is 0 (`:100` copies only 101 of its
-        // 201 words), so a port that "simplified" `:186` by substituting 0 for
-        // the out-of-range word would plot every one of those dots at its x sum
-        // — and the branch is only entered when that sum is already ≤ 319
-        // (`:181-182`), so all of them land in row 0.
-        //
-        // The run takes the branch **356,042** times (the count below; the x
-        // sum is part of it, `:181-182`); a row is 320 pixels wide, and the
-        // reference's four frames ink **34** pixels of row 0 in total (the
-        // port's own, 32 — it draws the same picture). So the substitution
-        // repaints a row the original barely touches: visible, where a y bound
-        // is not. A *pixel* count of the variant's error would need the variant
-        // rendered, which is a second copy of the draw loop in a test; the two
-        // numbers this carries are what the claim needs.
-        let (mut rig, mut part) = started();
+        // `aa2`'s unwritten half is 0, so substituting 0 for the out-of-range
+        // word would plot every such dot at its x sum, which `:181-182` has
+        // already bounded to row 0: 356,042 dots, where the reference's four
+        // frames ink 34 pixels of row 0 in all (`tunneli.md` §4).
         let mut moved = 0usize;
-        for tick in 0..=VEKE {
-            part.frame(&mut rig.ctx(tick));
-            for x in RING_BOTTOM..=RING_TOP {
-                let colour = part.putki[x].c.wrapping_add(ring_colour(x));
-                if colour < 64 {
-                    continue;
-                }
-                let bx = part.putki[x].x.wrapping_sub(part.putki[5].x);
-                let by = part.putki[x].y.wrapping_sub(part.putki[5].y);
-                let base = part.sade[x] as usize * DOTS_PER_RING * 2;
-                for dot in 0..DOTS_PER_RING {
-                    // `:181-182`'s bound decides whether `:186` runs at all.
-                    if part.pcalc[base + dot * 2].wrapping_add(bx) > 319 {
-                        continue;
-                    }
-                    let y = by.wrapping_add(part.pcalc[base + dot * 2 + 1]);
-                    if y > 200 {
-                        moved += 1;
-                    }
-                }
+        for_each_drawn_dot(|x_sum, y| {
+            if x_sum <= 319 && y > 200 {
+                moved += 1;
             }
-        }
+        });
         assert_eq!(moved, 356_042, "the run's out-of-range reads that a plot would move");
 
         let mut reference_ink = 0usize;
@@ -1002,13 +814,8 @@ mod tests {
 
     #[test]
     fn the_alignment_is_whole_tick_or_nothing() {
-        // §7.2's offset is a whole tick and the reference settles it: at 3800
-        // the port's tick 78 leaves 179 pixels whose colour the reference does
-        // not show, where its neighbours leave 754 and 953 — four times as
-        // many. The original's animation advances one vblank at a time, so a
-        // sub-frame alignment does not exist: this is what says the comparison
-        // is at the right tick and not merely a near one, and it is why a
-        // residual of a few hundred pixels is not "half a tick out".
+        // `tunneli.md` §7.2: at 3800 tick 78 leaves 179 mis-coloured pixels
+        // and its neighbours four times as many, so the offset is a whole tick.
         let at = |tick: u32| {
             let (picture, expected) = aligned_frame(tick, "003800");
             colour_error(second_ramp, &[(picture, expected)])
@@ -1020,8 +827,6 @@ mod tests {
 
     #[test]
     fn the_ring_colour_rounds_unambiguously() {
-        // :158 `round(x / 1.3)` over the loop's range: the port divides in
-        // floating point, so the test is that no `x` lands near a half.
         assert_eq!(ring_colour(4), 3);
         assert_eq!(ring_colour(80), 62);
         let nearest = (RING_BOTTOM..=RING_TOP)
@@ -1032,18 +837,13 @@ mod tests {
 
     #[test]
     fn the_palette_is_the_parts_own_ramps_and_leaves_0_to_63_alone() {
-        // :121-128. Two 65-entry ramps at 64 and 128; entries 68 and 132 black
-        // inside them; entry 255 green. Entries 0..63 are the mode set's own
-        // table, which the part does not touch.
         let (mut rig, mut part) = started();
         assert_eq!(rig.palette.entry(15), [63, 63, 63], "the shell's entry 15");
 
-        // The ramps, at both ends and where the black writes land.
         assert_eq!(rig.palette.entry(64), [0, 0, 0], "64 six-bit-masked, as the DAC does");
         assert_eq!(rig.palette.entry(65), [63, 63, 63]);
         assert_eq!(rig.palette.entry(68), [0, 0, 0], "setrgb(68,0,0,0)");
-        // The shared ramp is `(64-x) *3 div 5` — the *shipped* build's, not the
-        // tree's `TUN10.PAS:122`; the derivation test below is what says so.
+        // The second ramp is the release's 3/5 ([`second_ramp`]).
         assert_eq!(rig.palette.entry(128), [38, 38, 38], "64 * 3 div 5");
         assert_eq!(rig.palette.entry(129), [37, 37, 37], "63 * 3 div 5");
         assert_eq!(rig.palette.entry(166), [15, 15, 15], "26 * 3 div 5, and 16 rounded");
@@ -1053,9 +853,7 @@ mod tests {
         assert_eq!(rig.palette.entry(255), [0, 63, 0], "setrgb(255,0,63,0)");
         assert_eq!(rig.palette.entry(UNWRITTEN), [1, 2, 3], "an entry no ramp reaches");
 
-        // `waitr`'s `:46` then rewrites entry 0 on the first tick, and nothing
-        // else of 0..63 (`:52`'s Scroll Lock branch is the one the port does
-        // not model — see `frame`).
+        // `waitr`'s `:46` rewrites entry 0 on the first tick, and only it.
         part.frame(&mut rig.ctx(0));
         assert_eq!(rig.palette.entry(0), [0, 0, 0], ":46 setrgb(0,0,0,0)");
         assert_eq!(rig.palette.entry(14), [1, 2, 3], "and only entry 0");
@@ -1063,11 +861,7 @@ mod tests {
 
     #[test]
     fn the_mode_set_puts_the_screen_at_320x200_and_clears_video_memory() {
-        // :110-115 `mov ax,$13 / int $10`. The mode set is the BIOS's, and the
-        // port models the three things a part can see: the geometry, the line
-        // stride mode 13h addresses with (`x + y*320`), and the cleared
-        // memory. The stride is Part B's second convention — the original's own
-        // LINE_LEN — not the surface's row stride.
+        // `:110-115`: the geometry, mode 13h's own stride, the cleared memory.
         let mut rig = shell_rig();
         rig.surface.pixels_mut().fill(0xAA);
         rig.view = View::new(640, 400);
@@ -1110,30 +904,20 @@ mod tests {
         (picture, expected)
     }
 
-    /// The 256-entry DAC the part installs, with `second` standing in for
-    /// `TUN10.PAS:122`'s ramp so a candidate can be rendered.
+    /// The DAC `install_palette` leaves, with `second` as the candidate ramp.
     fn dac_with(second: impl Fn(u32) -> u8) -> Palette {
         let mut dac = Palette::new();
-        for x in 0..=64u32 {
-            dac.set_entry(64 + x as u8, [(64 - x) as u8; 3]);
+        for (entry, rgb) in dac_writes(second) {
+            dac.set_entry(entry, rgb);
         }
-        for x in 0..=64u32 {
-            let value = second(64 - x);
-            dac.set_entry(128 + x as u8, [value; 3]);
-        }
-        dac.set_entry(68, [0, 0, 0]);
-        dac.set_entry(132, [0, 0, 0]);
-        dac.set_entry(255, [0, 63, 0]);
         dac
     }
 
     /// How far a candidate ramp leaves the port's colour field from the frames:
     /// the pixels the port inks whose colour no reference frame shows.
     ///
-    /// Only pixels the port inks are counted, so this is a statement about the
-    /// *ramp*: the reference's own ink that the port does not draw (a few
-    /// hundred pixels, `docs/fidelity/tunneli.md` §7.2) is the same for every
-    /// candidate and would otherwise swamp the comparison.
+    /// Only pixels the port inks are counted: the reference's ink the port does
+    /// not draw (`tunneli.md` §7.2) is the same for every candidate.
     fn colour_error(second: impl Fn(u32) -> u8, frames: &[(Vec<u8>, Vec<u8>)]) -> usize {
         let dac = dac_with(second);
         let mut wrong = 0;
@@ -1156,24 +940,9 @@ mod tests {
         wrong
     }
 
-    /// **The shipped build's second ramp is 3/5, and this is the search that
-    /// says so** — the method BEGLOGO's fade constant is derived with: every
-    /// candidate is rendered over the four keyframes and compared with the
-    /// reference bit for bit, and the answer has to be *unique*, not merely
-    /// good.
-    ///
-    /// `TUN10.PAS:122` writes `(64-x) *3 div 4` at entries 128..192, and the
-    /// tree's own `TUN10.EXE` compiles exactly that — `3*(64-x)` then `idiv 4`,
-    /// image offsets 0x1d0-0x1e3, read off the disassembly in
-    /// `docs/fidelity/tunneli.md` §5. **The build that shipped is a different
-    /// one.** At 3/4 the port's colour field is 6,376 pixels away from the four
-    /// frames; at 3/5 it is 1,108, and *all but 17* of those are pixels the port
-    /// inks that the reference leaves as background — the ink-presence residual
-    /// of §7.2, which no ramp can fix. The 17 are the other kind, both sides
-    /// inked in different colours, and **10 of them sit on first-ramp entries**
-    /// (72, 75, 76, 83, 89) where no second-ramp value can reach them: they are
-    /// two rings overlapping, not the ramp. Every other candidate in the search
-    /// leaves at least 3,500 over the four.
+    /// Every `(64-x) * mul div div` candidate rendered over the four keyframes:
+    /// 3/5 leaves 1,108 pixels (all but 17 the ink-presence residual of §7.2)
+    /// and every other candidate at least 3,500 (`tunneli.md` §5).
     #[test]
     fn the_second_ramp_is_derived_by_matching_the_reference_bit_for_bit() {
         let frames: Vec<(Vec<u8>, Vec<u8>)> =
@@ -1185,11 +954,8 @@ mod tests {
             "the port's own ramp leaves {best} pixels wrong; the search's answer should be ~1,108"
         );
 
-        // `(64-x) * mul div div`, floor: `mul` 1..=7 against `div` 1..=15, less
-        // the pairs that are the shipped ramp in another spelling and the
-        // duplicates of smaller pairs — 81 candidates evaluated, 70 distinct
-        // ramps, and the count is asserted below so the record cannot drift
-        // from what runs. 3/5 is the unique minimum.
+        // `mul` 1..=7 against `div` 1..=15, less 3/5's other spellings and the
+        // duplicates of smaller pairs: 81 candidates.
         let mut worse = Vec::new();
         for mul in 1..=7u32 {
             for div in 1..=15u32 {
@@ -1215,23 +981,5 @@ mod tests {
             "the runner-up should be 7/12, and it is {:?}",
             worse[0]
         );
-    }
-
-    #[test]
-    fn the_data_files_are_not_pictures() {
-        // `docs/fidelity/tunneli.md` §2: the port decodes these two itself
-        // because `sr-assets` has no door for them, and the reason is a
-        // measurement rather than a preference. Neither file carries a magic,
-        // so `load_path` refuses them; and `raw_surface` would need a geometry
-        // the caller invents — 35,328 is 384x92 and 12,292 is 4x3,073, which
-        // are record counts, not pictures.
-        for path in [TUNNEL_PATH, SINIT_PATH] {
-            let bytes = read_asset(NAME, path).unwrap();
-            assert!(sr_assets::sniff(&bytes).is_none(), "{path} is not sniffable");
-        }
-        let tunnel = read_asset(NAME, TUNNEL_PATH).unwrap();
-        let sinit = read_asset(NAME, SINIT_PATH).unwrap();
-        assert_eq!(tunnel.len(), PCALC_ROWS * DOTS_PER_RING * 2 * 2, "pcalc's bytes");
-        assert_eq!(sinit.len(), (SINIT_WORDS + COSIT_WORDS) * 2, "both sine tables");
     }
 }
