@@ -685,28 +685,28 @@ pub const TABLE: &[Entry] = &[
         ],
     },
     // The fit corpus (reference-indices.md §1.13) at the part's mapping, tick = index −
-    // 5723 (tests/plzpart.rs:93). It is not a keyframe set and no test compares the port's
-    // frames with it; the counts are this command's, and A23 registers them as whole-frame
-    // counts beside its band-mask fit percentages. 8500's count is the cube capture's 8500
-    // count, 11,249.
+    // 5723 (tests/plzpart.rs:93). It is not a keyframe set; the counts are this command's, and
+    // A23 registers them. With the release's camera path and sine table read from its image,
+    // 8500 and 8600 are exact; the four others differ in both-set pixels of one face at a
+    // channel delta of at most 9, where the reference shows one index in two colours.
     Entry {
         capture: "plzpart/band",
         args: &["--part", "plzpart"],
         frames: &[
-            rgb(8400, 2677, 6531, "A23"),
-            rgb(8450, 2727, 6092, "A23"),
-            rgb(8500, 2777, 11249, "A23"),
-            rgb(8600, 2877, 21722, "A23"),
-            rgb(8700, 2977, 11190, "A23"),
-            rgb(8800, 3077, 33457, "A23"),
+            rgb(8400, 2677, 340, "A23"),
+            rgb(8450, 2727, 24, "A23"),
+            rgb0(8500, 2777),
+            rgb0(8600, 2877),
+            rgb(8700, 2977, 148, "A23"),
+            rgb(8800, 3077, 4, "A23"),
         ],
     },
-    // tests/plzpart.rs:333-439: 8500 at 17.577 % — its decomposition 304 + 51 + 10,894
-    // = 11,249 px (:382-384) — and 9500 at 95.570 % (:360), A23.
+    // tests/plzpart.rs `the_cube_keyframes_match_the_reference`: both keyframes are the
+    // reference's byte for byte since the release's camera path is read from its image (A23).
     Entry {
         capture: "plzpart/cube",
         args: &["--part", "plzpart"],
-        frames: &[rgb(8500, 2777, 11249, "A23"), rgb(9500, 3777, 61165, "A23")],
+        frames: &[rgb0(8500, 2777), rgb0(9500, 3777)],
     },
     // tests/plzpart.rs:305-328: 11.209 / 5.848 / 4.052 % of 128,000 to 0.001 points (A24);
     // the counts are this command's — 11.2094 / 5.8484 / 4.0516 % — inside that window.

@@ -1431,7 +1431,7 @@ The lead is `BEG/BEG.C:18-21` and the reference's own
 `reference/parts/pam/manifest.json` palette override; `docs/fidelity/pam.md`
 §6 carries the frame-by-frame reading.
 
-## A22 — PLZPART: the plasma exits at the release's fourth palette table, not the tree's fifth (adopted)
+## A22 — PLZPART: the plasma exits at the release's fourth palette table, not the tree's fifth (adopted; read from the image 2026-10-29)
 
 **Part:** PLZPART (`PLZPART/PLZ.C`), Phase 5.
 
@@ -1461,136 +1461,143 @@ not this divergence.
 own screen boundary; the release's value is adopted. `docs/fidelity/plzpart.md`
 §10 records the reading.
 
-## A23 — PLZPART: the cube is a 134-row screen (CRTC 0x09 = 2), drawn at the tree's 142/66 and shown at row ⌊2y/3⌋ (corrected 2026-10-26); its close-up camera data is absent from the tree (registered)
+**Read from the image (2026-10-29, D49).** The shipped `plz()` holds the 4 the frames
+measured. In the unpacked `MAIN/DATA/PLZPART.EXE`, `curpal` is DGROUP `0192h` (DGROUP is
+segment `2ee0h`, `mov ax,2ee0h` in `getspl` at image `0x14adb`): `cop_fadepal=pals[curpal++]`
+is `mov ax,[0192h]; mov dx,0600h; imul dx` at image `0x1178b` and `inc word [0192h]` at
+`0x117a4`, and the exit is `cmp word [0192h],4; jne; … cmp es:[000eh],40h; jle` at **`0x1181c`**
+— `PLZ.C:94` with 4 for the tree's 5. The timetable at DGROUP `0194h` is the tree's
+`{723, 1491, 1875, 2259, 2778, 0}`. The port's constant does not change;
+`the_release_exit_index_is_the_images` pins the bytes and the timetable. The adoption is now a
+reading: nothing about this exit is left registered.
+
+## A23 — PLZPART: the cube is the release's, read from its image — a 134-row screen (CRTC 0x09 = 2) drawn at 142/66 and shown at row ⌊2y/3⌋, with the release's camera path, sine table and rotation (corrected 2026-10-26, read 2026-10-29); four band frames keep a palette-timing residue (registered)
 
 **Part:** PLZPART (`PLZPART/VECT.C`, `PLZA.ASM`, `SPLINE.ASM`, `TWEAK.ASM`), Phase 5.
 **Original:** a textured cube on a six-page flip whose music gate the reference pins to boot
-8364, on a display the source itself calls "134 y".
+8364, on a display the source itself calls "134 y", turned by a camera spline.
 
-**Correction.** This entry used to record a 200-row extent (`CUBE_DRAWN_ROWS = 200`), a
-`yy*213/zz + 100` projection and a "page-slot wrap" as an unresolved port-side artifact. The
-first two were **a mis-modelled display, not release divergences**, and the third was their
-consequence. `PLZPART/TWEAK.ASM:31-33`, `tw_opengraph`:
+**Read from the image (2026-10-29, D49).** The shipped part is `MAIN/DATA/PLZPART.EXE` (PKLITE
+large over LZEXE 0.91, a 223,376-byte image; `docs/fidelity/release-images.md`). Its cube is not
+the tree's in four places, all of them now read or translated from the image:
 
-```
-mov dx, 3d4h
-mov ax, 0209h
-out dx, ax            ; 134 y
-```
+- **The camera path.** `calculate` calls `getspl` as `call far 1389h:1084h` (image `0x12c8a`), and
+  `getspl` begins `enter 0,0; push ds bp si di; mov si,0004h; push cs; pop ds` (`0x14914`): its
+  `mov si, OFFSET buu` puts `buu` at `cs:0004h`, image **`0x13894`** (`BUU_AT`). The table has
+  `RATA.INC`'s shape (136 rows of `dx, dy, dz, kx, ky, kz, l_kx, l_ky`), with every rotation and
+  light word **8×** the tree's (`kkk` 800 for 100; `l_kx`/`l_ky` in 256-steps for 32-steps; the
+  `REPT 100` tail `…,2048,4096` for `…,256,512`) and `dz` its own in rows 14–31 (325, 300, 300,
+  325, 350 ×11, 325, 300, 325 where the tree has a flat 300). `splinecoef` follows at `cs:0884h`
+  (`0x14114`) and is `SPLINE.INC` word for word; `getspl`'s code is the tree's.
+- **The angle unit.** The 8× is not cancelled by a shift. `calculate` masks the five angles with
+  `and ax,1fffh` (`0x12c93`–`0x12cb7`) and reads `sinit` at segment `28b1h` (`mov ax,28b1h; mov
+  es,ax`, `0x12cc3`), image **`0x28b10`** (`SINIT_AT`), with `kosinit` at `es:[bx+1000h]`: 2,048
+  words on, a quarter of an **8,192-entry turn**, where the tree's table is 1,024 entries with
+  `kosinit = sinit + 512` bytes. The release's angles are 13 bits through an 8× finer table, so
+  the cube turns at the tree's rate with 8× the angular resolution. The table (10,240 words,
+  values `0, 25, 50, …`, 32,759 at the quarter) is read whole.
+- **`count_const`** (`0x12d40`): the tree's expressions with `>>15` for every `>>15+7` and
+  `cxz = -SY` for `-SY>>7` (`mov cl,0fh` into `LXRSH@`; `neg ax`) — a 1.15 matrix.
+- **`rotate`** (`0x1307a`): not the tree's 16-bit sum. Each axis is `(x*cxx + y*cxy + z*cxz) >> 11`
+  in 32 bits (`LXMUL@`, `mov cl,0bh`), plus `tx << 4` — a word in 1/16 units. The point keeps
+  `>> 4` of it (`sar ax,4`, which `sort_faces` reads), and the projection divides the 1/16 words:
+  `xxx = (xx16 << 8) / zz16 + 140h` (`LXLSH@`, `LDIV@`), `yyy = yy16 * 142 / zz16 + 42h`.
 
-sets CRTC 0x09 (maximum scan line) to 2, so **every row is shown on three scanlines of the
-400-line display**: 400/3 = 133.3 rows. The source's comment says 134. Everything else in the
-tree is consistent with a 134-row screen: `PLZA.ASM:77` `cmp [yy], 134d / jge @@end` clips the
-rasteriser at 134 rows; `VECT.OBJ`'s `imul eax,eax,0x8e` / `add ax,0x42` (`yyy = yy*142/zz + 66`)
-centres the cube on row ~67 of 134; and the three draw buffers 0x5500 bytes apart are 136 rows
-of 160 bytes, room for 134 rows and no more.
+`sort_faces` (the `/250000 + 32` shade), `draw`, the vect loop and the projection constants are
+the tree's.
 
-The reference captures are 320x200 frames, each output line y showing scanline 2y of the 400,
-which is row ⌊2y/3⌋ of the 134-row image. So the cube *looked* 1.5x taller and centred
-(213/100 = 142x1.5 / 66x1.5) and drawn to row 199, and the earlier work fitted a 200-row draw
-with a 213/100 projection to it. That draw is 66 rows more than a 136-row slot holds: it
-overflowed into the neighbouring buffer. **That overflow is the "page-slot spill"** (6,333
-port-only pixels at 8500), visible to a viewer as cube pixels in parts of the screen that
-should be black.
+**A port bug, found on the way.** The port read the light's `ls_y` as `kosinit[ls_ky] >> 8`;
+`VECT.C:144` and the release (`0x12cbd`) read `kosinit[ls_kx] >> 8`. With `ls_kx` a quarter turn
+and `ls_ky` 0 — the close-up's light — the port's `ls_y` was 127 where the release's is 0, the
+light vector up to √2 too long, and `shadepal`'s factor left `0..=64`: a face's colours wrapped
+past the 6-bit DAC into hard bands of the wrong colour (green and black on a red/yellow face, yellow
+and black on a blue one, navy on a green one). Restoring the bug alone in the corrected build puts
+those bands back in the full-run close-up (boots 24990/25620/26111 at 37,460/50,183/60,804
+differing pixels, against 108/188/0 without it).
 
-**The shipped release does the same as the tree.** Probed live in the emulator at boot 8500
-(`SECOND 3`, 30,000 cycles) with `tools/crtc_probe.py`, readings kept in
-`out/glitches/cube-crtc-8500.json` (scratch, not committed):
+**The screen model (corrected 2026-10-26, unchanged).** `PLZPART/TWEAK.ASM:31-33`,
+`tw_opengraph`, sets CRTC 0x09 (maximum scan line) to 2 — `mov ax,0209h / out dx,ax ; 134 y` — so
+every row is shown on three scanlines of the 400-line display (400/3 = 133.3 rows); `PLZA.ASM:77`
+clips at 134 rows and the three draw buffers 0x5500 bytes apart are 136 rows of 160 bytes. The
+320×200 reference frames show scanline 2y, row ⌊2y/3⌋ of the image, which once made the cube look
+1.5× taller and was fitted as a 200-row draw at 213/100; that draw overflowed its slot (the
+"page-slot spill"). The shipped release does the same as the tree, probed live in the emulator at
+boot 8500 (`SECOND 3`, 30,000 cycles) with `python3 -I tools/crtc_probe.py 3 8500 30 <outdir>`
+(readings in `out/glitches/cube-crtc-8500.json`, scratch): 26 of 30 frames read CRTC 0x09 = 0x02,
+20 read 0x09 = 2, 0x12 = 143 and 0x07 = 31 together, 16 of them with 0x13 = 80, and the display start
+cycles 0x0028 / 0x5528 / 0xAA28 — the tree's six-page flip.
 
-```bash
-python3 -I tools/crtc_probe.py 3 8500 30 <outdir>
-```
-
-26 of the 30 sampled frames read CRTC 0x09 = 0x02; 20 read 0x09 = 2, 0x12 = 143 and 0x07 = 31
-(400 lines) together, 16 of them with 0x13 = 80 (a 160-byte row), three that caught 0x13 = 0 and
-one 0x13 = 85 mid-write; the rest are the probe racing the demo's own CRTC writes (0x09 = 170 = 0xAA three
-times, among others). The display start cycles 0x0028 / 0x5528 / 0xAA28 (11 / 7 / 10 of the 30
-samples; two frames caught mid-write) — exactly the tree's six-page flip. So this was never a divergence between the
-release and the tree; it was the port's display model.
-
-**Port.** `CUBE_DRAWN_ROWS = 134`, `CLEAR_LINES = 135` (the tree's `ycnt=134`), the projection
-`yyy = yy*142/zz + 66`, and `compose_cube` reading row ⌊2y/3⌋ of the four-plane image for output
-line y (`cube_linear`: 3 scanlines per row over 400 lines; the 200-line frame is every other
-scanline, so line y is scanline 2y). Of the phases ⌊(2y+k)/3⌋, k = 0 was the best on all eight
-measured frames (k = 1 and k = 2 worse on every one). The entry pre-roll stays **8 polls**: the
-`musplus() >= 13` gate passes at manifest 2641 = boot 8364 (the trace's first order-68 row 13),
-the first draw is boot 8365, and at the 8500 keyframe the part is at **frames 136, page 4,
-start 0x0028** (nine polls were one frame early: 32.106 % at 8500 in an earlier build). The
-close-up's camera data is not in the tree (below).
+**Port.** `CUBE_DRAWN_ROWS = 134`, `CLEAR_LINES = 135`, `compose_cube` reading row ⌊2y/3⌋, the
+entry pre-roll of **8 polls** (the `musplus() >= 13` gate at manifest 2641 = boot 8364, the first
+draw at 8365, and at 8500 frames 136, page 4, start 0x0028). `init` unpacks the EXE and
+`release_cube` reads `buu` and `sinit` at the offsets above, refusing an image of another length,
+another `getspl` prologue, or a relocation inside either range. `calculate`, `count_const` and
+`rotate` are the release's code; `ANGLE_MASK = 0x1fff`, `KOSINIT_WORDS = 0x800`.
 
 **Tests** (each fails if its value reverts):
-`the_cube_is_a_134_row_screen` (134 / 135 / 142,66 and the 0x5500 = 136-row slot),
-`the_cube_projection_is_the_trees_142_66`, `the_cube_frame_shows_row_two_y_over_three`,
-`a_134_row_draw_stays_inside_its_slot` (a quad taller than the screen, drawn into each of the
-three buffers, writes nothing outside its own 0x5500-byte slot and stops at row 133 — it fails
-with `CUBE_DRAWN_ROWS = 200`, the bug this entry used to carry), and
-`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` (the gate at 2641).
+`the_release_camera_table_is_read_from_the_image` (the call and `mov si` bytes, rows 0/15/35, the
+`dz` of rows 14–31, every other word against `RATA.INC` and the 8× rule, the tail),
+`the_release_reads_the_trees_spline_coefficients`, `the_release_sine_table_is_an_8192_entry_turn`,
+`an_image_with_another_layout_is_refused`,
+`getspl_interpolates_the_release_camera_spline_at_the_keyframes` (frames 0/136/1136/3000; the
+close-up's `dis` is 349 where the tree's was 299), `count_const_is_the_releases_one_point_fifteen_matrix`,
+`the_cube_projection_is_the_trees_142_66` (through the 1/16 words), and
+`the_light_keeps_every_shade_inside_its_band` (every visible face's shade in `0..=64` over frames
+0–2199; it fails at frames 369 with shade 66 if `ls_y` reads `ls_ky`). The screen model keeps
+`the_cube_is_a_134_row_screen`, `the_cube_frame_shows_row_two_y_over_three`,
+`a_134_row_draw_stays_inside_its_slot` and
+`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`.
 
-**Measured difference.** The numbers are this command's, over the six committed band frames
-(`reference/parts/plzpart/band/`, taken by `cargo xtask reference capture --arg 3 --boot autoexec
---keys "KBD_left KBD_enter" --cycles 30000 --frames 8400,8450,8500,8600,8700,8800 --out
-reference/parts/plzpart/band`) and the filed 8500/9500 cube frames:
+**Measured difference.** `cargo xtask rediff --only plzpart/cube --only plzpart/band` (the six band
+frames are `reference/parts/plzpart/band/`, taken by `cargo xtask reference capture --arg 3 --boot
+autoexec --keys "KBD_left KBD_enter" --cycles 30000 --frames 8400,8450,8500,8600,8700,8800 --out
+reference/parts/plzpart/band`):
 
-```bash
-cargo xtask rediff --only plzpart/cube --only plzpart/band
-```
+| frame | differing pixels now | with the tree's camera (2026-10-26 to 10-29) | before the 2026-10-26 correction |
+|---|---|---|---|
+| band 8400 | 340 | 6,531 | 20,315 |
+| band 8450 | 24 | 6,092 | 21,832 |
+| band 8500 = cube 8500 | **0** | 11,249 | 16,743 |
+| band 8600 | **0** | 21,722 | 32,287 |
+| band 8700 | 148 | 11,190 | 14,979 |
+| band 8800 | 4 | 33,457 | 37,374 |
+| cube 9500 | **0** | 61,165 | 63,669 |
 
-| frame | differing pixels now | registered before the correction |
-|---|---|---|
-| band 8400 | 6,531 | 20,315 |
-| band 8450 | 6,092 | 21,832 |
-| band 8500 = cube 8500 | 11,249 | 16,743 |
-| band 8600 | 21,722 | 32,287 |
-| band 8700 | 11,190 | 14,979 |
-| band 8800 | 33,457 | 37,374 |
-| cube 9500 | 61,165 | 63,669 |
+`the_cube_keyframes_match_the_reference` (`cargo test --release -p secondreality --test plzpart`)
+pins 8500 and 9500 at 0.000 % and max delta 0 (they were 17.577 % and 95.570 %).
+The full run's cube frames in `reference/parts/fullrun` (24540, before the first draw) do not move.
 
-The band corpus is 90,241 of 384,000 whole-frame pixels (23.500 %; was 143,530, 37.378 %). The
-cube silhouettes align with the references at offset (0, 0) on 8400-8800; what remains is inside
-the faces.
+**What the four band frames keep, registered.** All 516 pixels are both-set (painted in port and
+reference), at a channel delta of at most 9 (5/8/9/5 at 8400/8450/8700/8800), in row runs on one
+face (8400: 336 in the second colour block, rows 74–155). Inside those frames the reference shows
+one colour index in two colours — 24 of the port's indices at 8400, 18 at 8700 — so its palette
+changed while the frame was read: `vect()` sets `cop_pal=fpal; do_pal=1` before `calculate`
+rewrites `fpal` (`VECT.C:123-125`), and whether the copper's upload lands before or after that
+rewrite depends on the original's CPU time, not on anything the image holds. The neighbouring
+ticks do not explain them (the port's ±1 frames differ in 15,904–28,246 pixels). The 8500/8600
+band frames and both keyframes show none of it. This residue is the registration.
 
-**The 8500 residual's attribution** (`the_cube_keyframes_are_measured_and_recorded`; `cargo test
---release -p secondreality --test plzpart -- --nocapture`): 11,249 of 64,000 pixels differ
-(**17.577 %**, max channel delta 247). 304 are port-only (0.48 points; was 6,333, the spill),
-51 reference-only (0.08 points; was 105), and 10,894 both-set and differing (17.02 points; was
-10,305). 9,406 of the both-set differences are ≤ 20 (deltas 4/8/12 the most common,
-5,699/1,755/807); none is at delta 247 among the both-set pixels (was 332), and 47 delta-247
-pixels remain in all, all port-only (was 3,137, 2,805 of them port-only). The both-set part is
-the **shade/pose residual, registered, not explained**: the face palette's shading and the cube's
-exact orientation are not matched to the release.
+**The dense close-up.** Over the full run's close-up, the original's `out/dense-orig` frames
+24990–26215 (36 frames, one every 35) against the port's `--block 1 --headless --dump-frames` at
+**+38**, the dense capture's own offset from the port's numbering (the same +35–40 the plasma and
+MINVBALL show in that corpus; the committed `fullrun` capture pairs PLZPART at +1): **3,614**
+differing pixels in all (15 frames at 0, the largest 1,716), where the tree's camera gave
+**2,120,856** (58,913 a frame). Over the whole cube, 24570–26530 (57 frames), every frame is
+within 1,716 pixels. The sheets are `out/glitches/plzcube-sheet-{before,after}.png`
+(scratch).
 
-**The residual that remains is registered, not adopted.** The close-up frames 9100-9600 need
-frame-dependent camera data the tree does not carry: the RATA control points they interpolate
-(15-26; boot 9100 is animation frame 736 and segment 15, boot 9600 frame 1236 and segment 23, and
-the spline at frame 1136 is segment 21) are all `dx = dy = 0, dz = 300`, constant across those
-segments (`the_close_up_segments_carry_no_frame_dependent_translation`). This is **absent release
-camera data**, not a translation the port can apply. The aligned measurement (re-measured at the
-corrected geometry: best shift = minimum mask-XOR fraction over overlaps of at least 10,000
-pixels, shifts within ±100, which is the port by (+53, +9)) over the 267x191 overlap: the
-silhouette masks XOR in 3,812 of 50,997 pixels (7.47 %; IoU 0.923, 45,738 of 49,550), and 99.66 %
-(45,584) of the 45,738 common pixels still differ (max delta 255, mode 61 with 8,062 pixels). The
-9500 keyframe therefore stands at **17.577 %** at 8500 and **95.570 %** at 9500 (61,165 pixels,
-max delta 255), pinned to 0.001 points (percentages) and exactly (max deltas) by
-`the_cube_keyframes_are_measured_and_recorded`, with the 8500 decomposition and the 9500 aligned
-counts beside them. The plasma keyframes are unaffected (11.209/5.848/4.052 %).
+**Why — D24's procedure and D49.** The camera path, sine table and rotation are data and code
+inside the shipped image, so the port reads and translates them rather than registering them
+(D49). What was registered here as "the shade/pose residual, not explained" and "absent release
+camera data" was the release's finer rotation and its own `buu`, plus the port's `ls_y` bug. The
+remaining band residue is CPU timing, which no image or capture records.
 
-**Why — D24's procedure.** The 200-row extent and 213/100 projection were adopted as "single-value
-release divergences" because they fitted the captures; they fitted because the capture geometry
-(a 200-line frame of a 400-line, three-scanlines-a-row display) was unmodelled. Nothing of the
-release differs from the tree here; the correction removes two adopted divergences and a
-registered port-side artifact (`docs/decisions.md` D24's correction of 2026-10-26). The close-up
-camera path is a multi-value data difference the tree cannot supply and stays registered. The
-earlier projection-fit evidence (0.46 % at 213/100 against 9.99 % at 142/66, over a 134-row band)
-compared two different mappings of the same image and is retired with its test-only probe.
-"Verified" for PLZPART means a faithful port with A24's plasma tear, the cube's shade/pose
-residual and the close-up's absent camera data registered — not a matching cube.
+**D24's lead.** Followed: the image is `sr_assets::exe::unpack(assets/MAIN/DATA/PLZPART.EXE)`,
+pack line `dw 02BDCh,0E129h,00006h,0142Eh,0E2EEh,00000h ;PLZPART.EXE` (`MAIN/PACKFINA.INC:55`).
 
-**D24's lead.** The shipped part is `MAIN/DATA/PLZPART.EXE`, 58,094 bytes, PKLITE-packed, its pack
-line `dw 02BDCh,0E129h,00006h,0142Eh,0E2EEh,00000h ;PLZPART.EXE` (`MAIN/PACKFINA.INC:55`).
-
-**Status (Phase 9):** Carried — the close-up's camera data (packed inside `PLZPART.EXE`, D12) and
-the both-set shade/pose residual. The extent, projection and spill were closed on 2026-10-26: the
-display model was the cause, and the release's CRTC registers match the tree's.
+**Status (Phase 9):** Carried — only the four band frames' palette-timing residue (340 / 24 / 148 /
+4 pixels). The extent, projection and spill were closed on 2026-10-26; the camera path, angle unit,
+rotation and the `ls_y` bug on 2026-10-29.
 
 ## A24 — PLZPART: the plasma's per-pass parameter latch is a CPU-timing tear the port does not reproduce (registered)
 

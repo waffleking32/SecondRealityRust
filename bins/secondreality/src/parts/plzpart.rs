@@ -15,12 +15,18 @@
 //! fragments, copied verbatim to `assets/PLZPART/` and parsed here in their own
 //! `db`/`dw` format. `ASMYT.ASM:12-24` includes `PSINI.INC` (16,384 `db`
 //! bytes), `LSINI4.INC` and `LSINI16.INC` (8,192 `dw` words each);
-//! `INCLUDE.ASM:33-36` includes `SINIT.INC` (the 2,048-byte sine table and a
-//! 527-byte repeat) as the word array `sinit[1024]`, with `kosinit=sinit+512`;
-//! `SPLINE.ASM:15-21` includes `RATA.INC` (136 control points, 1,088 `dw`
-//! words — 36 written lines plus `REPT 100`)
-//! and `SPLINE.INC` (1,024 `dw` coefficients); `PLZ.C:41-42` includes
-//! `PTAU.INC` (129 `db` values).
+//! `SPLINE.ASM:19-20` includes `SPLINE.INC` (1,024 `dw` coefficients); `PLZ.C:41-42`
+//! includes `PTAU.INC` (129 `db` values).
+//!
+//! **The cube's camera path and sine table are the release's, read from its image.** The
+//! tree's `RATA.INC` (`SPLINE.ASM:13-14`'s `buu`, 136 control points) and `SINIT.INC`
+//! (`INCLUDE.ASM:33-36`'s `sinit[1024]`, `kosinit = sinit + 512`) are not the shipped
+//! build's: `sr_assets::exe::unpack(assets/MAIN/DATA/PLZPART.EXE)` gives the load image,
+//! whose `buu` (image `0x13894`, [`BUU_AT`]) has every rotation and light word 8× the
+//! tree's and its own `dz` in rows 14-31, and whose sine table (image `0x28b10`,
+//! [`SINIT_AT`]) is an 8,192-entry turn with `kosinit` 2,048 words on. The release's
+//! `calculate` masks the angles to 13 bits, and its `count_const` and `rotate` are not the
+//! tree's either (below). The coefficients after `buu` are `SPLINE.INC`'s word for word.
 //!
 //! **The four displacements in `ASMYT.ASM:46-61` are placeholders** — `0xC100`,
 //! `0xC200`, `0xC300` and `0xC400` sit inside the `plzline` instructions and
@@ -67,6 +73,14 @@
 //! `calculate(1)`, `draw(15)`, `clear()`. The six-page flip (`VECT.C:265-298`)
 //! alternates three 0x5500-byte buffers at 0, 0x5500 and 0xAA00 and moves the
 //! display start to the buffer drawn a frame earlier.
+//!
+//! **The geometry is the release's code** (image `0x12c7d-0x1323d`), which is the tree's
+//! `VECT.C` at a finer scale: `calculate` masks `kx, ky, kz, ls_kx, ls_ky` with `1fffh` and
+//! reads the 8,192-entry table; `ls_y = kosinit[ls_kx]>>8`, as `VECT.C:144` has it;
+//! `count_const` is a 1.15 matrix; and `rotate` sums `x*cxx + y*cxy + z*cxz` in 32 bits,
+//! shifts by 11 and adds `tx << 4`, keeping each coordinate in 1/16 units for the
+//! projection and `>> 4` of it for the face normals. `sort_faces`, `draw` and the vect loop
+//! are the tree's.
 //!
 //! **The cube's beam is composed by the part.** The VGA's four planes are
 //! 4 × 65,536 = 262,144 bytes of linear memory (`vga_memory.cpp`'s unchecked
@@ -131,13 +145,17 @@
 //! - **The 404 split value.** `do_drop`'s `dtau` table reaches 404
 //!   (`COPPER.ASM:175-181`), so the drop walks the split off the bottom of the
 //!   screen; the port writes 405 as `Split::scanline`, which is inert.
-//! - **The double `+160`.** `xxx = (xx*256)/zz + 160 + 160` (`VECT.C:198`).
+//! - **The double `+160`.** `xxx = (xx*256)/zz + 160 + 160` (`VECT.C:198`); the release
+//!   compiles it to one `add ax,140h` (image `0x131f9`).
 //! - **The dead `ttptr` row.** `timetable[4] = 2778` (`PLZ.C:46`) can never be
 //!   reached: the exit fires 65 ticks after the previous switch.
-//! - **The C precedence in `count_const`.** `>>15+7` is `>> (15+7)` = `>>22`
-//!   (`VECT.C:166-176`; `VECT.OBJ` disassembles to `sar $0x16`), and the
-//!   `cyx`/`cyy`/`czx`/`czy` lines subtract before the final shift. The port
-//!   keeps both.
+//! - **`count_const`'s subtraction inside the final shift.** The
+//!   `cyx`/`cyy`/`czx`/`czy` lines subtract before the final shift, in the tree
+//!   (`VECT.C:166-176`) and the release alike. The tree's `>>15+7` (`>>22`,
+//!   `VECT.OBJ`'s `sar $0x16`) is **not** the release's: its `count_const` shifts by
+//!   15 (`mov cl,0fh` into `LXRSH@`, image `0x12d6e` on) and its `cxz` is `-SY`, a 1.15
+//!   matrix that its 32-bit `rotate` consumes with `>> 11`. The port follows the
+//!   release.
 //!
 //! The stale `PLZPART/MAIN.ASM` is not part of the port; `MAIN.C` is the part's
 //! entry point.
@@ -160,20 +178,18 @@ const NAME: &str = "plzpart";
 const PSINI_LEN: usize = 16_384;
 /// `ASMYT.ASM:18-24`: `lsini4` is `dw 8192 dup` — 8,192 words.
 const LSINI_WORDS: usize = 8_192;
-/// `INCLUDE.ASM:33-36` + `SINIT.INC`: the file's 2,575 bytes; the C reads the
-/// first 1,024 words as `sinit` and `kosinit = sinit + 512`.
+/// `INCLUDE.ASM:33-36` + `SINIT.INC`: the tree's file is 2,575 bytes, of which its C reads
+/// the first 1,024 words as `sinit` and `kosinit = sinit + 512`. The part reads the release's
+/// table from its image instead ([`SINIT_AT`]); the tree's stays a test's record.
+#[cfg(test)]
 const SINIT_BYTES: usize = 2_575;
 /// `PLZ.C:41-42`: `char ptau[256]`, of which `PTAU.INC` initialises 129.
 const PTAU_LEN: usize = 129;
 /// `SPLINE.ASM:19-20`: 1,024 `dw` coefficients.
 const SPLINE_WORDS: usize = 1_024;
-/// `SPLINE.ASM:15-16`: `buu`, the camera control points, 136 × 8 words.
+/// `SPLINE.ASM:15-16`: `buu`, the camera control points, 136 × 8 words — the tree's
+/// `RATA.INC` and the release's image ([`BUU_AT`]) alike.
 const RATA_WORDS: usize = 1_088;
-/// The sine segment's size in words. `kosinit = sinit + 512` is 512 **bytes**
-/// (256 words), so the greatest word the cube reads is `1023 + 256 = 1,279`,
-/// inside the file's 1,287 words; the segment is padded to 1,536 words for the
-/// plasma's table-base layout.
-const SINIT_WORDS: usize = 1_536;
 
 /// The table bases, from `PLZPART.MAP`: `_psini 027D:0000`, `_lsini4
 /// 027D:4000`, `_lsini16 027D:8000`, `_plzline 027D:C000`.
@@ -257,6 +273,93 @@ const CLEAR_LINES: i32 = CUBE_DRAWN_ROWS + 1;
 /// `VECT.OBJ`: `imul eax,eax,0x8e; add ax,0x42` — the vertical projection
 /// `yyy = yy*142/zz + 66`, centred on row ~67 of the 134.
 const PROJECTION_Y: (i32, i32) = (142, 66);
+
+// ------------------------------------------- the release's cube, from its image --
+
+/// The shipped part, packed (PKLITE large over LZEXE 0.91, `docs/fidelity/release-images.md`).
+/// [`sr_assets::exe::unpack`] gives its 223,376-byte load image; every offset below is an
+/// offset into that image, and a segment word is relative to its origin.
+const EXE_PATH: &str = "assets/MAIN/DATA/PLZPART.EXE";
+/// The image's length, which [`release_cube`] checks before it reads.
+const IMAGE_BYTES: usize = 223_376;
+/// `getspl`'s code segment: `calculate` calls it `call far 1389h:1084h` (image `0x12c8a`),
+/// so `SPLINE.ASM`'s CODESEG starts at image `0x13890`.
+const SPLINE_SEGMENT: usize = 0x1389 * 16;
+/// `getspl` itself, `cs:1084h`: `enter 0,0; push ds bp si di; mov si,0004h; push cs; pop ds`
+/// (`SPLINE.ASM:26-30`). The `mov si` is `mov si, OFFSET buu` (image `0x1491c`).
+const GETSPL_AT: usize = SPLINE_SEGMENT + 0x1084;
+/// The prologue [`GETSPL_AT`] holds in this build: the `0004h` in it is `buu`'s offset.
+const GETSPL_PROLOGUE: [u8; 13] = [
+    0xc8, 0x00, 0x00, 0x00, 0x1e, 0x55, 0x56, 0x57, 0xbe, 0x04, 0x00, 0x0e, 0x1f,
+];
+/// `LABEL buu WORD` (`SPLINE.ASM:13-14`), found through `getspl`'s `mov si,0004h`:
+/// `cs:0004h`, image **`0x13894`**. 136 rows of `dx, dy, dz, kx, ky, kz, l_kx, l_ky`, the
+/// shape of the tree's `RATA.INC`, with the release's own values (module docs).
+const BUU_AT: usize = SPLINE_SEGMENT + 0x0004;
+/// `LABEL splinecoef WORD` (`SPLINE.ASM:16-17`): `imul cs:[di+0884h]` (image `0x14937`) —
+/// image `0x14114`, right after `buu`'s 1,088 words. The 1,024 coefficients are the tree's
+/// `SPLINE.INC` word for word (`the_release_reads_the_trees_spline_coefficients`), so the
+/// part keeps reading the fragment.
+#[cfg(test)]
+const SPLINECOEF_AT: usize = SPLINE_SEGMENT + 0x0884;
+/// `sinit`: `mov ax,28b1h; mov es,ax; mov ax,es:[bx+1000h]` in `calculate` (image `0x12cc3`)
+/// and in `count_const` — segment `0x28b1`, image `0x28b10`. `kosinit` is the same segment at
+/// `+1000h` bytes, **2,048 words** on: a quarter of an **8,192-entry** turn, where the tree's
+/// is 256 words on a 1,024-entry turn (`INCLUDE.ASM:36`).
+const SINIT_AT: usize = 0x28b1 * 16;
+/// The release's `kosinit = sinit + 1000h` bytes, in words.
+const KOSINIT_WORDS: usize = 0x800;
+/// `and ax,1fffh` on `kx, ky, kz, ls_kx, ls_ky` (image `0x12c93-0x12cb7`, `VECT.C:138-142`'s
+/// `&1023`): the release's angles are 13 bits. The table therefore holds
+/// `8,191 + 2,048 + 1` = 10,240 words; the next segment starts at image `0x2db10`.
+const ANGLE_MASK: i32 = 0x1fff;
+const RELEASE_SINIT_WORDS: usize = ANGLE_MASK as usize + 1 + KOSINIT_WORDS;
+
+/// What the cube reads out of the shipped image.
+#[derive(Debug)]
+struct ReleaseCube {
+    /// `buu`, 1,088 words.
+    buu: Vec<i16>,
+    /// `sinit`, 10,240 words (`kosinit` included).
+    sinit: Vec<i16>,
+}
+
+/// Read [`ReleaseCube`] out of an unpacked image, refusing one whose layout is not this build's.
+fn release_cube(image: &sr_assets::exe::LoadImage) -> Result<ReleaseCube, String> {
+    let bytes = &image.image;
+    if bytes.len() != IMAGE_BYTES {
+        return Err(format!(
+            "the image is {} bytes; this build's is {IMAGE_BYTES}",
+            bytes.len()
+        ));
+    }
+    if bytes[GETSPL_AT..GETSPL_AT + GETSPL_PROLOGUE.len()] != GETSPL_PROLOGUE {
+        return Err(format!("getspl at {GETSPL_AT:#x} is not this build's"));
+    }
+    let buu_end = BUU_AT + RATA_WORDS * 2;
+    let sinit_end = SINIT_AT + RELEASE_SINIT_WORDS * 2;
+    // A relocation inside what is read would be a segment word, not data.
+    let read = [(BUU_AT, buu_end), (SINIT_AT, sinit_end)];
+    if let Some(at) = image
+        .relocations
+        .iter()
+        .map(|&at| at as usize)
+        .find(|at| read.iter().any(|(from, to)| (*from..*to).contains(at)))
+    {
+        return Err(format!("a relocation at {at:#x} lies inside the data read"));
+    }
+    let words = |from: usize, to: usize| -> Vec<i16> {
+        bytes[from..to]
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect()
+    };
+    Ok(ReleaseCube {
+        buu: words(BUU_AT, buu_end),
+        sinit: words(SINIT_AT, sinit_end),
+    })
+}
+
 /// The linear address of output pixel (x, y). `TWEAK.ASM:31-33`: CRTC 0x09 =
 /// 2 shows each image row on three scanlines of the 400-line display. The
 /// 200-line frame is every other scanline (the reference's geometry), so line
@@ -330,15 +433,15 @@ const CUBE_EXIT_LOW: i32 = -4;
 
 // -------------------------------------------------------------- the tables --
 
-/// The seven `.INC` fragments, parsed.
+/// The five `.INC` fragments the part reads, parsed. The cube's camera path and sine table
+/// are the release's, read from its image ([`ReleaseCube`]); the tree's `RATA.INC` and
+/// `SINIT.INC` stay in `assets/PLZPART/` as the tree's record, which the tests compare.
 struct Tables {
     psini: Vec<u8>,
     lsini4: Vec<i16>,
     lsini16: Vec<i16>,
-    sinit: Vec<i16>,
     ptau: Vec<i16>,
     spline: Vec<i16>,
-    rata: Vec<i16>,
     /// The `poro` segment as the assembly addresses it: `psini` at 0x0000,
     /// `lsini4` at 0x4000 and `lsini16` at 0x8000 (`PLZPART.MAP`). A read
     /// below `lsini16` — `setplzparas` can place the lc2 displacement at
@@ -457,23 +560,18 @@ impl Tables {
         let psini_values = parse("PSINI.INC", &read("PSINI.INC")?)?;
         let lsini4_values = parse("LSINI4.INC", &read("LSINI4.INC")?)?;
         let lsini16_values = parse("LSINI16.INC", &read("LSINI16.INC")?)?;
-        let sinit_values = parse("SINIT.INC", &read("SINIT.INC")?)?;
         let ptau_values = parse("PTAU.INC", &read("PTAU.INC")?)?;
         let spline_values = parse("SPLINE.INC", &read("SPLINE.INC")?)?;
-        let rata_values = parse("RATA.INC", &read("RATA.INC")?)?;
         let tables = Tables {
             psini: psini_values.iter().map(|&v| v as u8).collect(),
             lsini4: lsini4_values.iter().map(|&v| v as i16).collect(),
             lsini16: lsini16_values.iter().map(|&v| v as i16).collect(),
-            sinit: Vec::new(),
             ptau: ptau_values.iter().map(|&v| v as i16).collect(),
             spline: spline_values.iter().map(|&v| v as i16).collect(),
-            rata: rata_values.iter().map(|&v| v as i16).collect(),
             segment: Vec::new(),
         };
         tables.check_sizes()?;
         let mut tables = tables;
-        tables.sinit = tables.build_sinit(&sinit_values);
         tables.segment = tables.build_segment();
         Ok(tables)
     }
@@ -485,7 +583,6 @@ impl Tables {
             ("LSINI16.INC", self.lsini16.len(), LSINI_WORDS),
             ("PTAU.INC", self.ptau.len(), PTAU_LEN),
             ("SPLINE.INC", self.spline.len(), SPLINE_WORDS),
-            ("RATA.INC", self.rata.len(), RATA_WORDS),
         ];
         for (name, found, wanted) in checks {
             if found != wanted {
@@ -556,33 +653,6 @@ impl Tables {
                 .wrapping_add(2 * y as u16),
         );
         px.wrapping_add(py)
-    }
-
-    /// The sine segment as the C reads it.
-    ///
-    /// `sinit[0..1024]` is the file's first 2,048 bytes; the file's remaining
-    /// 527 bytes are the stray repeat `INCLUDE.ASM:33-36` also links
-    /// (`KAKKA5` is 0xA0F bytes). `kosinit = sinit + 512` adds 512 **bytes**
-    /// (256 words), so `kosinit[k]` with `k <= 1023` reads at most word
-    /// 1,279 — inside the file's 1,287 words. Past byte 2,575 the linker put
-    /// one padding byte, then `PLZFILL5_DATA`'s `vmem` and `buu`
-    /// (`PLZPART.MAP:25-26`, `:270`); the port keeps that continuation byte
-    /// for byte, though no read of the cube reaches it.
-    fn build_sinit(&self, values: &[i32]) -> Vec<i16> {
-        let mut bytes = Vec::with_capacity(SINIT_WORDS * 2);
-        bytes.extend(values.iter().map(|&v| v as u8));
-        debug_assert_eq!(bytes.len(), SINIT_BYTES);
-        // The padding byte at 2D84F, then `vmem = MK_FP(0xa000,0)`:
-        // offset 0x0000, segment 0xa000.
-        bytes.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0xA0]);
-        for &value in &self.rata {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
-        bytes.resize(SINIT_WORDS * 2, 0);
-        bytes
-            .chunks_exact(2)
-            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
-            .collect()
     }
 }
 
@@ -791,6 +861,8 @@ pub struct Plzpart {
     tables: Option<Tables>,
     /// Directory the `.INC` fragments are read from.
     table_directory: &'static str,
+    /// The shipped part, whose image holds the cube's camera path and sine table.
+    exe_path: &'static str,
     /// Everything the three copper routines own, shared with their closures.
     copper: Rc<RefCell<CopperState>>,
     /// The part's phase.
@@ -803,8 +875,10 @@ pub struct Plzpart {
     music_pre_roll: u32,
 
     // ---- the cube ----
-    /// The sine segment as the C reads it (`sinit[1536]`).
+    /// The release's sine segment (`sinit`, 10,240 words; [`SINIT_AT`]).
     sinit: Vec<i16>,
+    /// The release's camera control points (`buu`, 1,088 words; [`BUU_AT`]).
+    buu: Vec<i16>,
     /// The four-plane linear image.
     video: Vec<u8>,
     /// `PLZA.ASM:13-20`: the two periodic plane masks, flattened.
@@ -879,17 +953,19 @@ enum PalSource {
 }
 
 impl Plzpart {
-    /// A part with nothing loaded: `init` reads the seven fragments.
+    /// A part with nothing loaded: `init` reads the five fragments and the shipped image.
     pub fn new() -> Plzpart {
         Plzpart {
             tables: None,
             table_directory: "assets/PLZPART",
+            exe_path: EXE_PATH,
             copper: Rc::new(RefCell::new(CopperState::new())),
             phase: Phase::PlasmaGate,
             tick: 0,
             fresh: false,
             music_pre_roll: MUSIC_PRE_ROLL,
             sinit: Vec::new(),
+            buu: Vec::new(),
             video: Vec::new(),
             masks: build_masks(),
             sini: Vec::new(),
@@ -1212,7 +1288,17 @@ impl Part for Plzpart {
             let mut state = self.copper.borrow_mut();
             state.pals = pals;
         }
-        self.sinit = tables.sinit.clone();
+        let error = |message: String| PartError {
+            part: NAME,
+            message,
+        };
+        let file =
+            std::fs::read(self.exe_path).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
+        let image =
+            sr_assets::exe::unpack(&file).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
+        let release = release_cube(&image).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
+        self.sinit = release.sinit;
+        self.buu = release.buu;
         self.tables = Some(tables);
         self.initvect();
 
@@ -1618,7 +1704,9 @@ impl Plzpart {
         }
     }
 
-    /// `VECT.C:132-151` `calculate`.
+    /// `VECT.C:132-151` `calculate`, as the release builds it (image `0x12c7d`): `getspl`
+    /// over the release's `buu`, then the five angles masked to 13 bits (`and ax,1fffh`) and
+    /// the light read through the release's 8,192-entry table.
     fn calculate(&mut self) {
         let tables = self.tables.as_ref().expect("init loaded the tables");
         let position = ((4 * 256 + self.frames * 4) & 0xFFFF) as usize;
@@ -1626,110 +1714,125 @@ impl Plzpart {
         let fraction = position & 255;
         let mut out = [0i32; 8];
         for (word, value) in out.iter_mut().enumerate() {
-            let control = |offset: usize| tables.rata[segment * 8 + offset] as i32;
+            let control = |offset: usize| self.buu[segment * 8 + offset] as i32;
             let coefficient = |offset: usize| tables.spline[fraction + offset] as i32;
             let sum = control(24 + word)
                 .wrapping_mul(coefficient(0))
                 .wrapping_add(control(16 + word).wrapping_mul(coefficient(256)))
                 .wrapping_add(control(8 + word).wrapping_mul(coefficient(512)))
                 .wrapping_add(control(word).wrapping_mul(coefficient(768)));
-            *value = sum >> 15;
+            // `shld cx,bx,1; push cx`: bits 15..30 of the 32-bit sum, a word.
+            *value = ((sum >> 15) as i16) as i32;
         }
-        // `SPLINE.ASM:52-75`: the pops are ls_ky, ls_kx, kz, ky, kx, dis, ty, tx.
+        // `SPLINE.ASM:52-75` (image `0x14ae0-0x14b04`): the pops are ls_ky, ls_kx, kz, ky,
+        // kx, dis, ty, tx.
         self.tx = out[0];
         self.ty = out[1];
         self.dis = out[2];
-        self.kx = out[3] & 1023;
-        self.ky = out[4] & 1023;
-        self.kz = out[5] & 1023;
-        self.ls_kx = out[6] & 1023;
-        self.ls_ky = out[7] & 1023;
-        // `VECT.C:144-146`.
-        // `kosinit = sinit + 512` is 512 **bytes** — 256 words, the cosine:
-        // the map puts `_kosinit` at `2CE4:0200` (`PLZPART.MAP:353`).
-        let sx = self.sinit[self.ls_kx as usize] as i32 >> 8;
-        let sy = self.sinit[self.ls_ky as usize] as i32 >> 8;
-        let cy = self.sinit[self.ls_ky as usize + 256] as i32 >> 8;
-        self.ls_y = cy;
-        self.ls_x = (sx.wrapping_mul(sy)) >> 7;
-        self.ls_z = (sx.wrapping_mul(cy)) >> 7;
+        self.kx = out[3] & ANGLE_MASK;
+        self.ky = out[4] & ANGLE_MASK;
+        self.kz = out[5] & ANGLE_MASK;
+        self.ls_kx = out[6] & ANGLE_MASK;
+        self.ls_ky = out[7] & ANGLE_MASK;
+        // `VECT.C:144-146` (image `0x12cbd-0x12d2c`):
+        // `ls_y = kosinit[ls_kx]>>8`, `ls_x = (sinit[ls_kx]>>8)*(sinit[ls_ky]>>8)>>7`,
+        // `ls_z = (sinit[ls_kx]>>8)*(kosinit[ls_ky]>>8)>>7`, each product a 16-bit `imul`.
+        let s_kx = self.sine(self.ls_kx) >> 8;
+        let c_kx = self.cosine(self.ls_kx) >> 8;
+        let s_ky = self.sine(self.ls_ky) >> 8;
+        let c_ky = self.cosine(self.ls_ky) >> 8;
+        self.ls_y = c_kx;
+        self.ls_x = ((s_kx.wrapping_mul(s_ky) as i16) as i32) >> 7;
+        self.ls_z = ((s_kx.wrapping_mul(c_ky) as i16) as i32) >> 7;
         self.count_const();
         self.rotate();
         self.sort_faces();
     }
 
+    /// `sinit[k]`, a 13-bit angle into the release's table.
     fn sine(&self, index: i32) -> i32 {
         self.sinit[index as usize] as i32
     }
 
-    /// `VECT.C:166-176` `count_const`, with the source's precedence:
-    /// `>>15+7` is `>>22`, and the sums are inside the final shift where the
-    /// source puts them (`VECT.OBJ` disassembles to `sar $0x16`).
-    fn count_const(&mut self) {
-        // `kosinit[k]` is the word 256 entries past `sinit[k]`: `kosinit =
-        // sinit + 512` adds 512 bytes to the label, and the array is words
-        // (`PLZPART.MAP:353`, `INCLUDE.ASM:36`).
-        let sx = self.sine(self.kx);
-        let cx = self.sine(self.kx + 256);
-        let sy = self.sine(self.ky);
-        let cy = self.sine(self.ky + 256);
-        let sz = self.sine(self.kz);
-        let cz = self.sine(self.kz + 256);
-        self.cxx = cy.wrapping_mul(cz) >> 22;
-        self.cxy = cy.wrapping_mul(sz) >> 22;
-        self.cxz = (-sy) >> 7;
-        self.cyx = ((sx.wrapping_mul(cz).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(sy)
-            .wrapping_sub(cx.wrapping_mul(sz))
-            >> 22;
-        self.cyy = ((sx.wrapping_mul(sy).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(sz)
-            .wrapping_add(cx.wrapping_mul(cz))
-            >> 22;
-        self.cyz = cy.wrapping_mul(sx) >> 22;
-        self.czx = ((cx.wrapping_mul(cz).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(sy)
-            .wrapping_add(sx.wrapping_mul(sz))
-            >> 22;
-        self.czy = ((cx.wrapping_mul(sy).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(sz)
-            .wrapping_sub(sx.wrapping_mul(cz))
-            >> 22;
-        self.czz = cy.wrapping_mul(cx) >> 22;
+    /// `kosinit[k]`: the word [`KOSINIT_WORDS`] (2,048, a quarter turn) past `sinit[k]`
+    /// (`es:[bx+1000h]`).
+    fn cosine(&self, index: i32) -> i32 {
+        self.sinit[index as usize + KOSINIT_WORDS] as i32
     }
 
-    /// `VECT.C:180-201` `rotate`, in the assembly's 16-bit arithmetic: every
-    /// product is an `imulw`, its low word shifted, the sums 16-bit, and the
-    /// projection `xxx = (xx*256)/zz + 160 + 160`.
+    /// `count_const` as the release builds it (image `0x12d40-0x13079`): the tree's
+    /// expressions (`VECT.C:166-176`) with every `>>15+7` a `>>15` and `cxz = -SY`, not
+    /// `-SY>>7`. Each product is a 32-bit `LXMUL@` (`call far 0000:0e31h`) and each shift a
+    /// signed `LXRSH@` (`0000:0f1ah`, `mov cl,0fh`); the subtractions and additions are inside
+    /// the final shift, as in the tree, and each element is stored as a word. The matrix is
+    /// therefore in 1.15 (32,767 at unity), where the tree's is in 8.8.
+    fn count_const(&mut self) {
+        let sx = self.sine(self.kx);
+        let cx = self.cosine(self.kx);
+        let sy = self.sine(self.ky);
+        let cy = self.cosine(self.ky);
+        let sz = self.sine(self.kz);
+        let cz = self.cosine(self.kz);
+        let word = |value: i32| -> i32 { (value as i16) as i32 };
+        self.cxx = word(cy.wrapping_mul(cz) >> 15);
+        self.cxy = word(cy.wrapping_mul(sz) >> 15);
+        self.cxz = word(sy.wrapping_neg());
+        self.cyx = word(
+            ((sx.wrapping_mul(cz).wrapping_add(0x4000)) >> 15)
+                .wrapping_mul(sy)
+                .wrapping_sub(cx.wrapping_mul(sz))
+                >> 15,
+        );
+        self.cyy = word(
+            ((sx.wrapping_mul(sy).wrapping_add(0x4000)) >> 15)
+                .wrapping_mul(sz)
+                .wrapping_add(cx.wrapping_mul(cz))
+                >> 15,
+        );
+        self.cyz = word(cy.wrapping_mul(sx) >> 15);
+        self.czx = word(
+            ((cx.wrapping_mul(cz).wrapping_add(0x4000)) >> 15)
+                .wrapping_mul(sy)
+                .wrapping_add(sx.wrapping_mul(sz))
+                >> 15,
+        );
+        self.czy = word(
+            ((cx.wrapping_mul(sy).wrapping_add(0x4000)) >> 15)
+                .wrapping_mul(sz)
+                .wrapping_sub(sx.wrapping_mul(cz))
+                >> 15,
+        );
+        self.czz = word(cy.wrapping_mul(cx) >> 15);
+    }
+
+    /// `rotate` as the release builds it (image `0x1307a-0x1323d`), not the tree's 16-bit
+    /// `VECT.C:180-201`. Per point and axis, in 32 bits: `(x*cxx + y*cxy + z*cxz) >> 11`
+    /// (`mov cl,0bh` into `LXRSH@`), its low word plus `tx << 4` — a word in **1/16 units**,
+    /// kept in a local. The point's `xx` is that word `>> 4` (`sar ax,4`); the projection
+    /// divides the 1/16 words: `xxx = (xx16 << 8) / zz16 + 140h` (`LXLSH@`, `LDIV@`) and
+    /// `yyy = yy16 * 142 / zz16 + 42h`.
     fn rotate(&mut self) {
         let (y_scale, y_origin) = PROJECTION_Y;
-        let add16 = |a: i32, b: i32| -> i32 { (a.wrapping_add(b) as i16) as i32 };
-        let term = |value: i32, coefficient: i32| -> i32 {
-            ((value.wrapping_mul(coefficient) as i16) as i32) >> 1
+        let word = |value: i32| -> i32 { (value as i16) as i32 };
+        let fine = |x: i32, y: i32, z: i32, m: [i32; 3], offset: i32| -> i32 {
+            let sum = x
+                .wrapping_mul(m[0])
+                .wrapping_add(y.wrapping_mul(m[1]))
+                .wrapping_add(z.wrapping_mul(m[2]));
+            word((sum >> 11).wrapping_add(offset << 4))
         };
         for index in 0..self.points.len() {
             let [x, y, z] = self.points[index];
-            let xx = add16(
-                add16(term(x, self.cxx), term(y, self.cxy)),
-                term(z, self.cxz),
-            ) >> 7;
-            let xx = (xx.wrapping_add(self.tx) as i16) as i32;
-            let yy = add16(
-                add16(term(x, self.cyx), term(y, self.cyy)),
-                term(z, self.cyz),
-            ) >> 7;
-            let yy = (yy.wrapping_add(self.ty) as i16) as i32;
-            let zz = add16(
-                add16(term(x, self.czx), term(y, self.czy)),
-                term(z, self.czz),
-            ) >> 7;
-            let zz = (zz.wrapping_add(self.dis) as i16) as i32;
-            self.xx[index] = [xx, yy, zz];
-            let xxx = xx.wrapping_mul(256) / zz + 160 + 160;
-            // `VECT.OBJ`'s `yy*142/zz + 66` on the 134-row screen. (A23 once
-            // adopted 213/100 for a 200-row screen; that mis-modelled the
-            // display: 213/100 is 142/66 times 1.5 — see APPROXIMATIONS A23.)
-            let yyy = yy.wrapping_mul(y_scale) / zz + y_origin;
+            let xx = fine(x, y, z, [self.cxx, self.cxy, self.cxz], self.tx);
+            let yy = fine(x, y, z, [self.cyx, self.cyy, self.cyz], self.ty);
+            let zz = fine(x, y, z, [self.czx, self.czy, self.czz], self.dis);
+            self.xx[index] = [xx >> 4, yy >> 4, zz >> 4];
+            // The tree's `+160+160` is the release's one `add ax,140h`.
+            let xxx = word(word((xx << 8) / zz).wrapping_add(160 + 160));
+            // `VECT.OBJ`'s and the release's `yy*142/zz + 66` on the 134-row screen. (A23 once
+            // adopted 213/100 for a 200-row screen; that mis-modelled the display: 213/100 is
+            // 142/66 times 1.5 — see APPROXIMATIONS A23.)
+            let yyy = word(word(yy.wrapping_mul(y_scale) / zz).wrapping_add(y_origin));
             self.xxx[index] = [xxx, yyy];
         }
     }
@@ -2115,7 +2218,29 @@ mod tests {
     }
 
     fn tables() -> Tables {
-        Tables::load_at(&root().join("assets/PLZPART")).expect("the seven fragments load")
+        Tables::load_at(&root().join("assets/PLZPART")).expect("the five fragments load")
+    }
+
+    /// One of the tree's fragments the part no longer reads, parsed as the tests' record.
+    fn tree_fragment(name: &str) -> Vec<i32> {
+        let text = std::fs::read_to_string(root().join("assets/PLZPART").join(name)).unwrap();
+        parse_inc(&text).unwrap()
+    }
+
+    /// The shipped part, unpacked.
+    fn image() -> sr_assets::exe::LoadImage {
+        sr_assets::exe::unpack(&std::fs::read(root().join(EXE_PATH)).unwrap()).unwrap()
+    }
+
+    /// A part holding what `init` reads for the cube — the fragments and the release's
+    /// camera path and sine table — without a run.
+    fn cube_part() -> Plzpart {
+        let release = release_cube(&image()).expect("the shipped image is this build");
+        let mut part = Plzpart::new();
+        part.tables = Some(tables());
+        part.sinit = release.sinit;
+        part.buu = release.buu;
+        part
     }
 
     #[test]
@@ -2130,16 +2255,20 @@ mod tests {
         assert_eq!(t.lsini16.len(), LSINI_WORDS);
         assert_eq!((t.lsini16[0], t.lsini16[1]), (1024, 1027));
         assert_eq!(t.lsini16[LSINI_WORDS - 1], 1020);
-        // SINIT.INC is 2,575 db bytes: the 1,024-word table and the stray
-        // repeat that `INCLUDE.ASM` links.
-        assert_eq!(t.sinit.len(), SINIT_WORDS);
-        assert_eq!((t.sinit[0], t.sinit[1], t.sinit[256]), (0, 201, 32766));
         assert_eq!(t.ptau.len(), PTAU_LEN);
         assert_eq!((t.ptau[0], t.ptau[1], t.ptau[128]), (0, 1, 1));
         assert_eq!(t.spline.len(), SPLINE_WORDS);
         assert_eq!(&t.spline[..4], &[0, 0, 0, 0]);
-        assert_eq!(t.rata.len(), RATA_WORDS);
-        assert_eq!(&t.rata[..8], &[0, 2000, 500, 0, 400, 600, 0, 0]);
+        // The tree's two fragments the cube no longer reads: SINIT.INC is 2,575 db bytes
+        // (the 1,024-word table, quarter turn 256, and the stray repeat `INCLUDE.ASM`
+        // links), RATA.INC 1,088 words with `kkk = 100`.
+        let sinit = tree_fragment("SINIT.INC");
+        assert_eq!(sinit.len(), SINIT_BYTES);
+        let word = |at: usize| i16::from_le_bytes([sinit[2 * at] as u8, sinit[2 * at + 1] as u8]);
+        assert_eq!((word(0), word(1), word(256)), (0, 201, 32766));
+        let rata = tree_fragment("RATA.INC");
+        assert_eq!(rata.len(), RATA_WORDS);
+        assert_eq!(&rata[..8], &[0, 2000, 500, 0, 400, 600, 0, 0]);
     }
 
     /// The hard-coded displacements in `PLZA.ASM` are placeholders inside
@@ -2274,6 +2403,35 @@ mod tests {
         assert_eq!(EXIT_PALETTE_TREE, 5);
     }
 
+    /// The release's own `plz()` holds the 4 the frames measured (A22): `curpal` is DGROUP
+    /// `0192h` — `cop_fadepal = pals[curpal++]` is `mov ax,[0192h]; imul 600h` and
+    /// `inc word [0192h]` (image `0x1178b`, `0x117a4`) — and the exit is
+    /// `cmp word [0192h],4; jne; cmp es:[000eh],40h; jle` (image `0x1181c`), the tree's
+    /// `PLZ.C:94` with 4 for its 5. The timetable it switches on (DGROUP `0194h`) is the
+    /// tree's.
+    #[test]
+    fn the_release_exit_index_is_the_images() {
+        let image = image();
+        assert_eq!(&image.image[0x1178b..0x1178e], &[0xa1, 0x92, 0x01]);
+        assert_eq!(&image.image[0x117a4..0x117a8], &[0xff, 0x06, 0x92, 0x01]);
+        assert_eq!(
+            &image.image[0x1181c..0x11823],
+            &[0x83, 0x3e, 0x92, 0x01, 0x04, 0x75, 0x10]
+        );
+        assert_eq!(
+            &image.image[0x11828..0x1182f],
+            &[0x26, 0x83, 0x3e, 0x0e, 0x00, 0x40, 0x7e]
+        );
+        assert_eq!(i32::from(image.image[0x11820]), EXIT_PALETTE_RELEASE);
+        // DGROUP is `mov ax,2ee0h` in `getspl` (image `0x14adb`).
+        assert_eq!(&image.image[0x14adb..0x14ade], &[0xb8, 0xe0, 0x2e]);
+        let timetable: Vec<i32> = image.image[0x2ee00 + 0x194..][..12]
+            .chunks_exact(2)
+            .map(|pair| i32::from(i16::from_le_bytes([pair[0], pair[1]])))
+            .collect();
+        assert_eq!(timetable, TIMETABLE);
+    }
+
     #[test]
     fn do_drops_table_and_split_walk_are_the_assemblys() {
         let dtau = build_dtau();
@@ -2334,6 +2492,7 @@ mod tests {
         engine.set_music(Box::new(PlayerMusic::new(player, 0)));
         let mut part = Plzpart::new();
         part.table_directory = "../../assets/PLZPART";
+        part.exe_path = "../../assets/MAIN/DATA/PLZPART.EXE";
         engine.start(&mut part).expect("the part starts");
         let mut frame = IndexedFrame::new(engine.view().width, engine.view().height);
         let mut switched = false;
@@ -2410,56 +2569,168 @@ mod tests {
         assert_eq!(last.0 + 1, 61);
     }
 
+    /// `buu` is read at image `0x13894`, the offset `getspl`'s `mov si,0004h` names in the
+    /// segment `calculate` calls it in, and the table has the tree's `RATA.INC` shape with
+    /// the release's values: every rotation and light word is **8x** the tree's (the
+    /// release's angles are 13 bits), and `dz` differs in rows 14-31 alone.
     #[test]
-    fn getspl_interpolates_the_camera_spline_at_the_keyframes() {
-        let t = tables();
-        let spline_at = |frames: i32| -> [i32; 8] {
-            let position = (4 * 256 + frames * 4) & 0xFFFF;
-            let segment = (position >> 8) as usize;
-            let f = (position & 255) as usize;
-            let word = |index: usize| t.spline[index] as i32;
-            let control = |offset: usize| t.rata[segment * 8 + offset] as i32;
-            core::array::from_fn(|word_index| {
-                let sum = control(24 + word_index) * word(f)
-                    + control(16 + word_index) * word(f + 256)
-                    + control(8 + word_index) * word(f + 512)
-                    + control(word_index) * word(f + 768);
-                sum >> 15
-            })
-        };
-        assert_eq!(spline_at(0), [0, 432, 499, 499, 699, 499, 0, 0]);
-        assert_eq!(spline_at(136), [0, 0, 499, 709, 489, 289, 9, 0]);
-        assert_eq!(spline_at(1136), [0, 0, 299, 677, 522, 322, 255, 0]);
-        // The `REPT 100` tail (RATA.INC) holds the camera at dis 500 with all
-        // three angles zero and the light at `ls_kx 255`, `ls_ky 511`; a
-        // parser that dropped the repeat would index past its 37 points here.
-        assert_eq!(spline_at(3000), [0, 0, 499, 0, 0, 0, 255, 511]);
-        assert_eq!(spline_at(6000), [0, 0, 499, 0, 0, 0, 255, 511]);
+    fn the_release_camera_table_is_read_from_the_image() {
+        let image = image();
+        // `calculate`'s `call far 1389h:1084h`, and the `mov si, OFFSET buu` in `getspl`.
+        assert_eq!(
+            &image.image[0x12c8a..0x12c8f],
+            &[0x9a, 0x84, 0x10, 0x89, 0x13]
+        );
+        assert_eq!(
+            (SPLINE_SEGMENT, GETSPL_AT, BUU_AT),
+            (0x13890, 0x14914, 0x13894)
+        );
+        assert_eq!(&image.image[0x1491c..0x1491f], &[0xbe, 0x04, 0x00]);
+        let buu = release_cube(&image).unwrap().buu;
+        let tree = tree_fragment("RATA.INC");
+        assert_eq!(buu.len(), RATA_WORDS);
+        let row = |at: usize| -> [i32; 8] { core::array::from_fn(|w| buu[at * 8 + w] as i32) };
+        assert_eq!(row(0), [0, 2000, 500, 0, 3200, 4800, 0, 0]);
+        assert_eq!(row(15), [0, 0, 300, 800, 2400, 4000, 2048, 0]);
+        assert_eq!(row(35), [0, 0, 500, 800, 800, 800, 1536, 4096]);
+        let dz: Vec<i32> = (14..32).map(|at| row(at)[2]).collect();
+        assert_eq!(
+            dz,
+            [
+                325, 300, 300, 325, 350, 350, 350, 350, 350, 350, 350, 350, 350, 350, 350, 325,
+                300, 325
+            ]
+        );
+        for at in 0..RATA_WORDS / 8 {
+            let tree_row: [i32; 8] = core::array::from_fn(|w| tree[at * 8 + w]);
+            assert_eq!(row(at)[..2], tree_row[..2], "row {at}'s dx, dy");
+            if !(14..32).contains(&at) {
+                assert_eq!(row(at)[2], tree_row[2], "row {at}'s dz");
+            } else {
+                assert_eq!(tree_row[2], 300, "the tree's row {at} is a flat 300");
+            }
+            for (w, (&release, &tree)) in row(at).iter().zip(&tree_row).enumerate().skip(3) {
+                assert_eq!(release, 8 * tree, "row {at}'s word {w} is 8x the tree's");
+            }
+        }
+        // The `REPT 100` tail: the tree's `256,512` light is the release's `2048,4096`.
+        for at in 36..RATA_WORDS / 8 {
+            assert_eq!(row(at), [0, 0, 500, 0, 0, 0, 2048, 4096]);
+        }
     }
 
-    /// The close-up claim, derived from the committed `RATA.INC` rather than
-    /// asserted in prose: the control points the 9100–9600 frames interpolate
-    /// carry **no frame-dependent translation**. Boot 9100 is animation frame
-    /// 736 and boot 9600 frame 1236 (the gate is boot 8364, frames 0), whose
-    /// spline segments are 15 and 23; a segment interpolates its own point
-    /// plus the next three, so points 15..=26 cover the close-up. Every one of
-    /// them is `dx = dy = 0, dz = 300`. The spline's shifted sum reads
-    /// `dis = 299` at frame 1136, segment 21, because the coefficients sum to
-    /// 32,767 — pinned by the keyframe test above.
+    /// `splinecoef` follows `buu` in the image, and its 1,024 words are the tree's
+    /// `SPLINE.INC`: the part reads the fragment and loses nothing.
     #[test]
-    fn the_close_up_segments_carry_no_frame_dependent_translation() {
-        let t = tables();
-        let segment_of = |frames: i32| ((4 * 256 + frames * 4) & 0xFFFF) >> 8;
-        assert_eq!(segment_of(9100 - 8364), 15, "boot 9100's segment");
-        assert_eq!(segment_of(9500 - 8364), 21, "boot 9500's segment");
-        assert_eq!(segment_of(9600 - 8364), 23, "boot 9600's segment");
-        for point in 15..=26usize {
-            assert_eq!(
-                &t.rata[point * 8..point * 8 + 3],
-                &[0, 0, 300],
-                "control point {point}'s dx, dy, dz"
-            );
+    fn the_release_reads_the_trees_spline_coefficients() {
+        let image = image();
+        assert_eq!(SPLINECOEF_AT, BUU_AT + RATA_WORDS * 2);
+        // `imul word cs:[di+0884h]`, the first coefficient read in `getspl`.
+        assert_eq!(
+            &image.image[0x14937..0x1493c],
+            &[0x2e, 0xf7, 0xad, 0x84, 0x08]
+        );
+        let coefficients: Vec<i16> = image.image[SPLINECOEF_AT..SPLINECOEF_AT + SPLINE_WORDS * 2]
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(coefficients, tables().spline);
+    }
+
+    /// The release's sine table: segment `0x28b1` (`mov ax,28b1h; mov es,ax`), an 8,192-entry
+    /// turn whose quarter is 2,048 words — `kosinit` is `es:[bx+1000h]` — read for the
+    /// 13-bit angles `and ax,1fffh` leaves.
+    #[test]
+    fn the_release_sine_table_is_an_8192_entry_turn() {
+        let image = image();
+        assert_eq!(
+            &image.image[0x12cc3..0x12ccd],
+            &[0xb8, 0xb1, 0x28, 0x8e, 0xc0, 0x26, 0x8b, 0x87, 0x00, 0x10]
+        );
+        assert_eq!(&image.image[0x12c93..0x12c96], &[0x25, 0xff, 0x1f]);
+        assert_eq!(
+            (SINIT_AT, ANGLE_MASK, KOSINIT_WORDS * 2),
+            (0x28b10, 0x1fff, 0x1000)
+        );
+        let sinit = release_cube(&image).unwrap().sinit;
+        assert_eq!(sinit.len(), RELEASE_SINIT_WORDS);
+        assert_eq!(RELEASE_SINIT_WORDS, 10_240);
+        assert_eq!(&sinit[..4], &[0, 25, 50, 75]);
+        let at = |k: usize| sinit[k];
+        assert_eq!(
+            (at(2048), at(4096), at(6144), at(8192)),
+            (32759, 50, -32759, -200)
+        );
+        // The greatest word read is `kosinit[8191]`, the table's last.
+        assert_eq!(at(ANGLE_MASK as usize + KOSINIT_WORDS), 32758);
+        // The next segment's first words, which no read reaches.
+        assert_eq!(
+            &image.image[SINIT_AT + 2 * RELEASE_SINIT_WORDS..][..4],
+            &[0, 0, 1, 0]
+        );
+    }
+
+    /// A build whose `getspl` is not this one's is refused rather than read.
+    #[test]
+    fn an_image_with_another_layout_is_refused() {
+        let mut image = image();
+        image.image[GETSPL_AT + 9] = 0x06;
+        assert!(release_cube(&image).unwrap_err().contains("getspl"));
+        let mut image = self::image();
+        image.relocations.push(BUU_AT as u32 + 8);
+        assert!(release_cube(&image).unwrap_err().contains("relocation"));
+        let mut image = self::image();
+        image.image.pop();
+        assert!(release_cube(&image).unwrap_err().contains("bytes"));
+    }
+
+    /// `getspl` over the release's `buu`, then `calculate`'s masks and light, at the frames
+    /// the keyframes draw: boot 8500 is frames 136, boot 9500 frames 1136 (the gate is boot
+    /// 8364), and frames 3000 sits in the `REPT 100` tail.
+    #[test]
+    fn getspl_interpolates_the_release_camera_spline_at_the_keyframes() {
+        let mut part = cube_part();
+        let mut camera_at = |frames: i32| -> [i32; 8] {
+            part.frames = frames;
+            part.calculate();
+            [
+                part.tx, part.ty, part.dis, part.kx, part.ky, part.kz, part.ls_kx, part.ls_ky,
+            ]
+        };
+        assert_eq!(camera_at(0), [0, 432, 499, 3999, 5599, 3999, 0, 0]);
+        assert_eq!(camera_at(136), [0, 0, 499, 5676, 3914, 2314, 79, 0]);
+        // The close-up: the camera at dis 349, where the tree's flat 300 put it at 299.
+        assert_eq!(camera_at(1136), [0, 0, 349, 5416, 4181, 2582, 2047, 0]);
+        assert_eq!(camera_at(3000), [0, 0, 499, 0, 0, 0, 2047, 4095]);
+    }
+
+    /// `ls_y = kosinit[ls_kx]>>8` (`VECT.C:144`; image `0x12cbd-0x12cd0` reads `ls_kx`), not
+    /// `kosinit[ls_ky]`: the light is then a vector of length 127 and every face's shade
+    /// stays inside its 64-entry palette band. Reading `ls_ky` there lengthened the light by
+    /// up to √2 and pushed `shadepal`'s factor past 64 and below 0 — the hard bands of the
+    /// wrong colour the close-up showed. Over the cube's whole run, every visible face's
+    /// shade is in `0..=64`.
+    #[test]
+    fn the_light_keeps_every_shade_inside_its_band() {
+        let mut part = cube_part();
+        part.frames = 1136;
+        part.calculate();
+        // The close-up's light: `ls_kx` a quarter turn, `ls_ky` 0, so `ls_y` is the
+        // quarter turn's cosine, 0 — and `kosinit[ls_ky]` would have been 127.
+        assert_eq!((part.ls_kx, part.ls_ky), (2047, 0));
+        assert_eq!((part.ls_x, part.ls_y, part.ls_z), (0, 0, 126));
+        assert_eq!(part.cosine(part.ls_ky) >> 8, 127);
+        let mut drawn = 0;
+        for frames in 0..2200 {
+            part.frames = frames;
+            part.calculate();
+            for p in 0..part.polys as usize {
+                let shade = part.light_src[p];
+                assert!((0..=64).contains(&shade), "frames {frames}: shade {shade}");
+                drawn += 1;
+            }
         }
+        assert!(drawn > 2200, "the run drew faces ({drawn})");
     }
 
     /// One draw buffer's size in the linear image: 0x5500 plane bytes (136 rows).
@@ -2481,21 +2752,23 @@ mod tests {
     #[test]
     fn the_cube_projection_is_the_trees_142_66() {
         let mut part = Plzpart::new();
-        part.cxx = 256; // an 8.8 identity in x
-        part.cyy = 256;
-        part.czz = 256;
+        part.cxx = 32767; // a 1.15 identity: the release's matrix scale
+        part.cyy = 32767;
+        part.czz = 32767;
         part.dis = 320;
         part.tx = 0;
         part.ty = -50;
         part.rotate();
-        // (125,125,125) with the identity matrix and dis 320:
-        // xx = 125, yy = 125, zz = 125+320 = 445.
-        assert_eq!(part.xx[0], [125, 75, 445]);
-        // x = xx*256/zz + 320 (the tree's literal 160+160), y = yy*142/zz + 66.
-        assert_eq!(part.xxx[0][0], (125 * 256) / 445 + 160 + 160);
-        assert_eq!(part.xxx[0][1], (75 * 142) / 445 + 66);
-        assert_eq!(part.xxx[0][0], 391);
-        assert_eq!(part.xxx[0][1], 89);
+        // (125,125,125) with the identity: (125*32767) >> 11 = 1999 in 1/16 units, plus
+        // tx<<4, ty<<4 = -800 and dis<<4 = 5120 — 1999, 1199 and 7119.
+        assert_eq!((125 * 32767) >> 11, 1999);
+        // The point keeps `>> 4` of each: 124, 74, 444.
+        assert_eq!(part.xx[0], [124, 74, 444]);
+        // The projection divides the 1/16 words: x = xx16*256/zz16 + 320 (the tree's
+        // literal 160+160, the release's `add ax,140h`), y = yy16*142/zz16 + 66.
+        assert_eq!(part.xxx[0][0], (1999 * 256) / 7119 + 160 + 160);
+        assert_eq!(part.xxx[0][1], (1199 * 142) / 7119 + 66);
+        assert_eq!(part.xxx[0], [391, 89]);
     }
 
     /// A draw taller than the screen stays inside its own 0x5500-byte slot:
@@ -2547,41 +2820,48 @@ mod tests {
         assert_eq!(cube_linear(VIDEO_MASK, 0, 1), 0);
     }
 
+    /// The release's `count_const` (image `0x12d40`): the tree's expressions with `>>15`
+    /// where the tree has `>>15+7`, and `cxz = -SY` where it has `-SY>>7` — a 1.15 matrix.
     #[test]
-    fn count_const_keeps_the_c_precedence_shifts() {
+    fn count_const_is_the_releases_one_point_fifteen_matrix() {
+        let image = image();
+        // `cxx`: `call far LXMUL@; mov cl,0fh; call far LXRSH@; mov [7570h],ax`.
+        assert_eq!(
+            &image.image[0x12d69..0x12d78],
+            &[
+                0x9a, 0x31, 0x0e, 0x00, 0x00, 0xb1, 0x0f, 0x9a, 0x1a, 0x0f, 0x00, 0x00, 0xa3, 0x70,
+                0x75
+            ]
+        );
+        // `cxz`: `neg ax; mov [7574h],ax`, no shift.
+        assert_eq!(
+            &image.image[0x12dbd..0x12dc2],
+            &[0xf7, 0xd8, 0xa3, 0x74, 0x75]
+        );
         let mut part = Plzpart::new();
-        part.sinit = vec![0; SINIT_WORDS];
-        part.sinit[256] = 32766; // sinit[256], the quarter turn
-        part.sinit[512] = 32766; // `kosinit[256] = sinit[256+256]`
+        part.sinit = vec![0; RELEASE_SINIT_WORDS];
+        part.sinit[2048] = 32759; // sinit[2048], the quarter turn
+        part.sinit[4096] = 32759; // `kosinit[2048] = sinit[2048 + 2048]`
         part.kx = 0;
-        part.ky = 256;
-        part.kz = 256;
+        part.ky = 2048;
+        part.kz = 2048;
         part.count_const();
-        // SX = sinit[0] = 0, CX = sinit[256] = 32766.
-        // cxx = (CY*CZ) >> (15+7) = 32766^2 >> 22 = 255.
-        assert_eq!(part.cxx, 32766i32.wrapping_mul(32766) >> 22);
-        assert_eq!(part.cxx, 255);
-        // `cxz = -(long)SY >> 7`: -32766 >> 7 = -256.
-        assert_eq!(part.cxz, -256);
-        // cyx subtracts inside the final shift:
-        // ((((SX*CZ+0x4000)>>15)*SY) - (CX*SZ)) >> 22.
-        let expected = ((0i32.wrapping_mul(32766).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(32766)
-            .wrapping_sub(32766i32.wrapping_mul(32766))
-            >> 22;
-        assert_eq!(part.cyx, expected);
-        // A value where the shift's placement matters: SX = 32766, CX = 0,
-        // SZ = 32766, SY = 32766 gives ((32766*32766+0x4000)>>15)*32766 >> 22.
-        part.kx = 256;
-        part.ky = 256;
-        part.kz = 256;
+        // SX = sinit[0] = 0, CX = kosinit[0] = 32759, and SY = CY = SZ = CZ = 32759.
+        assert_eq!(part.cxx, (32759 * 32759) >> 15);
+        assert_eq!(part.cxx, 32750);
+        assert_eq!(part.cxz, -32759);
+        // cyx subtracts inside the final shift: (((SX*CZ+0x4000)>>15)*SY - CX*SZ) >> 15, and
+        // with SX = 0 the rounded inner product is 0x4000 >> 15 = 0.
+        assert_eq!(part.cyx, (-32759 * 32759) >> 15);
+        assert_eq!(part.cyx, -32751);
+        // With kx a quarter turn too, every sine and cosine is 32759 and the rounded inner
+        // product shows: cyx = (((32759*32759 + 0x4000) >> 15) * 32759 - 32759*32759) >> 15.
+        part.kx = 2048;
         part.count_const();
-        let expected = ((32766i32.wrapping_mul(32766).wrapping_add(0x4000)) >> 15)
-            .wrapping_mul(32766)
-            .wrapping_sub(32766i32.wrapping_mul(32766))
-            >> 22;
-        assert_eq!(part.cyx, expected);
-        assert_eq!(part.cyx, -1, "the subtraction is inside the shift");
+        let inner = (32759 * 32759 + 0x4000) >> 15;
+        assert_eq!(inner, 32750);
+        assert_eq!(part.cyx, (inner * 32759 - 32759 * 32759) >> 15);
+        assert_eq!(part.cyx, -9, "the subtraction is inside the shift");
     }
 
     #[test]

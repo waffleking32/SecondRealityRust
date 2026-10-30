@@ -2,10 +2,11 @@
 //! music row, and the five reference keyframes at the derived mapping.
 //!
 //! The part's arithmetic is unit-tested beside it in `src/parts/plzpart.rs`
-//! (the `.INC` sizes and edges, the assembler's index expression, the
-//! timetable, `dtau`, the split/pan walk, the spline, the projection and the
-//! extent/clear pair). What is left over here is the wiring only a process can
-//! answer: the registry, the asset paths as a run resolves them from the
+//! (the `.INC` sizes and edges, the camera path and sine table read from the
+//! shipped image, the assembler's index expression, the timetable, `dtau`, the
+//! split/pan walk, the spline, the projection and the extent/clear pair). What
+//! is left over here is the wiring only a process can answer: the registry,
+//! the asset paths (the `.INC` fragments and the shipped EXE) as a run resolves them from the
 //! repository root, the real player's position, and the frames the shell
 //! actually composes.
 //!
@@ -21,19 +22,13 @@
 //! 6000) the part is drawing the 320×400 plasma; at tick 2777 (boot 8500) it
 //! is drawing the 320×200 cube. The manifest carries each frame's own size.
 //!
-//! **The cube's two keyframes are D24 measurements.** The release's cube
-//! draws the full 200-row screen (the tree clips at 134), its projection is
-//! centred and 3/2 taller (y scale 213, origin 100; the tree compiles
-//! 142/66), and the entry pre-roll is 8 polls (the gate is the trace's boot
-//! 8364). With all three the 8500 keyframe differs in 26.161 % of pixels
-//! (max delta 247); 9500 is a close-up whose camera data the tree does not
-//! carry — the RATA control points those frames interpolate (15–26) are all
-//! `dx = dy = 0, dz = 300`, constant, so there is no frame-dependent
-//! translation to apply (D24,
-//! APPROXIMATIONS A23, registered) — so it stays 99.483 %. The test pins both
-//! percentages to 0.001 points and both max deltas exactly, and pins the
-//! 8500 residual's decomposition and the 9500 aligned measurement beside
-//! them.
+//! **The cube's two keyframes match.** The cube is the release's: its camera path
+//! (`buu`) and its 8,192-entry sine table are read from the shipped
+//! `MAIN/DATA/PLZPART.EXE`'s unpacked image, and its `count_const`/`rotate` are the
+//! release's 1.15 matrix and 1/16-unit projection (`docs/fidelity/plzpart.md` §5,
+//! APPROXIMATIONS A23). With the 134-row screen, the 142/66 projection, the
+//! floor(2y/3) line mapping and the 8-poll entry pre-roll, both keyframes are the
+//! reference's byte for byte, and the test pins them at 0.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -127,140 +122,6 @@ fn compare(rendered: &[u8], expected: &[u8]) -> (f64, u8) {
     (100.0 * differing as f64 / pixels as f64, max_delta)
 }
 
-/// The 8500 keyframe's residual decomposition (`docs/fidelity/plzpart.md` §7,
-/// A23). A pixel is set iff any RGB channel is nonzero — A23's mask rule — so
-/// a port-only pixel is one the port paints and the reference leaves black.
-struct Attribution {
-    port_only: usize,
-    reference_only: usize,
-    both_differing: usize,
-    both_le_20: usize,
-    delta_247: usize,
-    delta_247_port_only: usize,
-    /// The both-set differing pixels' max channel deltas, by delta.
-    both_histogram: [usize; 256],
-}
-
-fn attribution(rendered: &[u8], expected: &[u8]) -> Attribution {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "an attribution is not a comparison of prefixes"
-    );
-    let mut a = Attribution {
-        port_only: 0,
-        reference_only: 0,
-        both_differing: 0,
-        both_le_20: 0,
-        delta_247: 0,
-        delta_247_port_only: 0,
-        both_histogram: [0; 256],
-    };
-    for (port, reference) in rendered.chunks_exact(3).zip(expected.chunks_exact(3)) {
-        let set_port = port.iter().any(|&channel| channel != 0);
-        let set_reference = reference.iter().any(|&channel| channel != 0);
-        let delta = (0..3)
-            .map(|channel| port[channel].abs_diff(reference[channel]))
-            .max()
-            .unwrap();
-        match (set_port, set_reference) {
-            (true, false) => a.port_only += 1,
-            (false, true) => a.reference_only += 1,
-            (true, true) if delta != 0 => {
-                a.both_differing += 1;
-                a.both_histogram[usize::from(delta)] += 1;
-                if delta <= 20 {
-                    a.both_le_20 += 1;
-                }
-            }
-            _ => {}
-        }
-        if delta == 247 {
-            a.delta_247 += 1;
-            if set_port && !set_reference {
-                a.delta_247_port_only += 1;
-            }
-        }
-    }
-    a
-}
-
-/// The close-up's aligned measurement (`docs/fidelity/plzpart.md` §7, A23).
-///
-/// The port's frame is translated by `(dx, dy)` to meet the reference
-/// (equivalently the reference by `(-dx, -dy)`), and only the overlap region —
-/// where both translated images exist — is compared, so the translation's
-/// border does not enter. A pixel is set iff any RGB channel is nonzero.
-struct Alignment {
-    /// Pixels in one mask and not the other (the mask XOR).
-    xor: usize,
-    region: usize,
-    intersection: usize,
-    union: usize,
-    common: usize,
-    common_differing: usize,
-    max_delta: u8,
-    /// The most common max channel delta among the common differing pixels.
-    modal: (u8, usize),
-}
-
-fn aligned_overlap(rendered: &[u8], expected: &[u8], dx: i32, dy: i32) -> Alignment {
-    const W: i32 = 320;
-    const H: i32 = 200;
-    let x0 = dx.max(0);
-    let x1 = W.min(W + dx);
-    let y0 = dy.max(0);
-    let y1 = H.min(H + dy);
-    let mut a = Alignment {
-        xor: 0,
-        region: 0,
-        intersection: 0,
-        union: 0,
-        common: 0,
-        common_differing: 0,
-        max_delta: 0,
-        modal: (0, 0),
-    };
-    let mut histogram = [0usize; 256];
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let i = 3 * (y * W + x);
-            let j = 3 * ((y - dy) * W + (x - dx));
-            let port = &rendered[j as usize..j as usize + 3];
-            let reference = &expected[i as usize..i as usize + 3];
-            let set_port = port.iter().any(|&channel| channel != 0);
-            let set_reference = reference.iter().any(|&channel| channel != 0);
-            a.region += 1;
-            if set_port != set_reference {
-                a.xor += 1;
-            }
-            if set_port && set_reference {
-                a.common += 1;
-                a.intersection += 1;
-                a.union += 1;
-                let delta = (0..3)
-                    .map(|channel| port[channel].abs_diff(reference[channel]))
-                    .max()
-                    .unwrap();
-                if delta != 0 {
-                    a.common_differing += 1;
-                    histogram[usize::from(delta)] += 1;
-                    a.max_delta = a.max_delta.max(delta);
-                }
-            } else if set_port || set_reference {
-                a.union += 1;
-            }
-        }
-    }
-    a.modal = histogram
-        .iter()
-        .enumerate()
-        .max_by_key(|&(_, &count)| count)
-        .map(|(delta, &count)| (delta as u8, count))
-        .unwrap();
-    a
-}
-
 #[test]
 fn the_run_is_numbered_in_its_own_frames_and_declares_both_screens() {
     // No anchor: the manifest says the indices are the run's own, and the
@@ -330,18 +191,13 @@ fn the_plasma_keyframes_are_close_at_the_derived_mapping() {
 }
 
 #[test]
-fn the_cube_keyframes_are_measured_and_recorded() {
-    // boot 8500/9500 are the reference's cube keyframes: ticks 2777/3777.
-    // The cube's gate is pinned to boot 8364 by the music (the published
-    // order-68 row 13; `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`
-    // measures eight pre-polls), so the animation's frame count is the
-    // reference's. With the tree's 134-row screen, 142/66 projection and the
-    // floor(2y/3) line mapping (A23) the 8500 keyframe differs in 17.577 % of
-    // pixels (max delta 247); 9500's close-up needs the release's camera data,
-    // which the tree does not carry, so it stays 95.570 %. The percentages are pinned to 0.001 points and the
-    // max deltas exactly; the 8500 decomposition and the 9500 aligned
-    // measurement are pinned beside them. `docs/fidelity/plzpart.md` §7
-    // carries the evidence.
+fn the_cube_keyframes_match_the_reference() {
+    // boot 8500/9500 are the reference's cube keyframes: ticks 2777/3777. The cube's gate
+    // is pinned to boot 8364 by the music (the published order-68 row 13;
+    // `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick` measures eight
+    // pre-polls), so the animation's frame count is the reference's, and the camera path
+    // and sine table are the release's own (A23). Both frames are byte-identical; until
+    // they were read from the image they differed in 17.577 % and 95.570 % of pixels.
     let (dir, manifest) = dump("cube", "2777,3777");
     // The corrected phase's music row: the trace's published position at
     // boot 8500 is 68:46 (`docs/fidelity/plzpart.md` §8). The nine-poll
@@ -356,90 +212,17 @@ fn the_cube_keyframes_are_measured_and_recorded() {
         frame_2777["music_position"], "68:46",
         "the published music position at boot 8500"
     );
-    let mut verdicts = Vec::new();
-    for (boot, recorded, expected_delta) in [(8500u32, 17.577f64, 247u8), (9500, 95.570f64, 255)] {
+    for boot in [8500u32, 9500] {
         let tick = tick_of(boot);
         let rendered = frame_file(&dir, tick, "rgb");
         let expected = reference_frame("cube", boot);
         let (percent, max_delta) = compare(&rendered, &expected);
         println!("cube {boot} (tick {tick}): {percent:.3}% pixels, max delta {max_delta}");
-        // Pin the measured percentages to 0.001 points and the max deltas
-        // exactly (the run is deterministic): a change must update the record,
-        // not slip inside a tolerance.
-        assert!(
-            (percent - recorded).abs() <= 0.001,
-            "cube boot {boot} differs in {percent:.3}% of pixels, not the recorded \
-             {recorded:.3}%"
-        );
         assert_eq!(
-            max_delta, expected_delta,
-            "cube boot {boot}'s max channel delta"
+            (percent, max_delta),
+            (0.0, 0),
+            "cube boot {boot} differs in {percent:.3}% of pixels (max delta {max_delta})"
         );
-        if boot == 8500 {
-            // The residual's decomposition (note §7): port-only spill,
-            // reference-only, and the both-set shade/pose differences.
-            let a = attribution(&rendered, &expected);
-            assert_eq!(a.port_only, 304, "the 8500 frame's port-only spill");
-            assert_eq!(a.reference_only, 51, "the 8500 reference-only pixels");
-            assert_eq!(a.both_differing, 10894, "the 8500 both-set differences");
-            assert_eq!(
-                a.both_le_20, 9406,
-                "the both-set differences at delta <= 20"
-            );
-            assert_eq!(a.delta_247, 47, "the 8500 delta-247 pixels");
-            assert_eq!(
-                a.delta_247_port_only, 47,
-                "the delta-247 port-only pixels"
-            );
-            assert_eq!(
-                a.both_histogram[4], 5699,
-                "delta 4 among the both-set pixels"
-            );
-            assert_eq!(
-                a.both_histogram[8], 1755,
-                "delta 8 among the both-set pixels"
-            );
-            assert_eq!(
-                a.both_histogram[12], 807,
-                "delta 12 among the both-set pixels"
-            );
-            // The 332 both-set pixels at delta 247, pinned exactly (the note's
-            // "332 more at 247"): the bound below is for every other delta.
-            assert_eq!(
-                a.both_histogram[247], 0,
-                "delta 247 among the both-set pixels"
-            );
-            for delta in 0..256 {
-                if delta != 4 && delta != 8 && delta != 12 {
-                    assert!(
-                        a.both_histogram[delta] <= 807,
-                        "delta {delta} outnumbers the recorded 4/8/12 top three"
-                    );
-                }
-            }
-        } else {
-            // The close-up's aligned measurement (note §7): the best global
-            // shift (minimum mask-XOR fraction over overlaps of at least
-            // 10,000 pixels, shifts within +-100) is the port by (+53, +9)
-            // over the 267x191 overlap. Translation alone cannot rescue the
-            // frame: the faces inside the aligned silhouette still differ.
-            let a = aligned_overlap(&rendered, &expected, 53, 9);
-            assert_eq!(a.region, 50997, "the 267x191 overlap");
-            assert_eq!(a.xor, 3812, "the aligned mask XOR (7.47 % of the overlap)");
-            assert_eq!(a.intersection, 45738);
-            assert_eq!(a.union, 49550);
-            assert!(
-                (a.intersection as f64 / a.union as f64 - 0.923).abs() <= 0.0005,
-                "the aligned IoU is {:.4}, not the recorded 0.923",
-                a.intersection as f64 / a.union as f64
-            );
-            assert_eq!(a.common, 45738);
-            assert_eq!(a.common_differing, 45584, "99.66 % of the common pixels");
-            assert_eq!(a.max_delta, 255);
-            assert_eq!(a.modal, (61, 8062));
-        }
-        verdicts.push((boot, percent, max_delta));
     }
-    assert_eq!(verdicts.len(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }

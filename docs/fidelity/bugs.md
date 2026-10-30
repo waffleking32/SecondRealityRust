@@ -649,11 +649,13 @@ scaled. **Where.** `LENS/ASM.ASM:274-417`. **Port must.** Keep the order; the "o
 different animation. **Frame.** 4200 (the rotazoomer). **Test.**
 `the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps`.
 
-## 17. PLZPART — beyond §1: the clear's mask underflow, the cut-short last fade, the double `+160` and the shift precedence (slot 11)
+## 17. PLZPART — beyond §1: the clear's mask underflow, the cut-short last fade, the double `+160` and the subtraction inside the shift (slot 11)
 
 Tests are in `bins/secondreality/src/parts/plzpart.rs`. Frames: `reference/parts/plzpart/` plasma
-(6000, 7000, 7600), cube (8500, 9500), band (8400-8800) (`reference-indices.md` §13). The cube's
-residuals are registered (A23: 17.577 % at 8500, 95.570 % at 9500), so no cube frame is exact.
+(6000, 7000, 7600), cube (8500, 9500), band (8400-8800) (`reference-indices.md` §13). Since the
+cube's camera path, sine table and rotation are read from the release's image (2026-10-29, A23),
+both cube keyframes and band 8500/8600 are exact; band 8400/8450/8700/8800 keep A23's palette-timing
+residue (340/24/148/4 px).
 
 ### 17.1 `do_clear`'s zero-count mask underflows into the previous table
 
@@ -661,10 +663,12 @@ residuals are registered (A23: 17.577 % at 8500, 95.570 % at 9500), so no cube f
 `0x08`, not the `0x0F` the periodic pattern would give. **Where.** `PLZPART/PLZA.ASM:350-363`.
 **Port must.** Read the same flat table, with the 16-bit displacement wrapping. **Frame.** None
 shows it, measured: replacing the underflowed byte by the `0x0F` the periodic pattern would give
-leaves 8500 and 9500 at exactly 17.577 % and 95.570 % (**an uncommitted mutation**: in
+leaves 8500 and 9500 at exactly 0.000 % (**an uncommitted mutation**: in
 `Plzpart::do_clear` replace the `end_mask` read by `if x == 0xFFFF { 0x0F } else { <the read> }`, run
 `cargo test --release -p secondreality --test plzpart -- --nocapture`, which prints the two
-percentages and passes, then `git checkout` the file), so the keyframes never take the `x = 0` case.
+percentages and passes, then `git checkout` the file; re-measured 2026-10-29 with the release's
+camera — it was 17.577 % / 95.570 % before, unchanged by the mutation too), so the keyframes never
+take the `x = 0` case.
 It is pinned at the table level. **Test.**
 `do_clears_mask_underflow_reads_the_byte_before_end_mask`.
 
@@ -685,15 +689,22 @@ are `cargo test --release -p secondreality --test plzpart -- --nocapture`. **Tes
 
 ### 17.3 The projection adds 160 twice
 
-**Original.** `xxx = (xx*256)/zz + 160 + 160`. **Where.** `PLZPART/VECT.C:198`. **Port must.** Add 320.
-**Frame.** `band/` 8400-8800 (the projection fit, 0.46 % mean mask difference). **Test.**
-`the_cube_projection_is_the_releases_centred_scale` (x = `(125*256)/445 + 160 + 160`).
+**Original.** `xxx = (xx*256)/zz + 160 + 160`. **Where.** `PLZPART/VECT.C:198`; the release compiles
+it to one `add ax,140h` after its `LDIV@` (image `0x131f9`). **Port must.** Add 320. **Frame.** Cube
+8500/9500 and `band/` 8500/8600, exact. **Test.** `the_cube_projection_is_the_trees_142_66`
+(x = `(1999*256)/7119 + 160 + 160` = 391 through the release's 1/16 words).
 
-### 17.4 `count_const` keeps the C precedence
+### 17.4 `count_const` subtracts inside the final shift (the `>>15+7` precedence is the tree's only)
 
-**Original.** `>>15+7` is `>>22`, and `cyx`/`cyy`/`czx`/`czy` subtract inside the final shift.
-**Where.** `PLZPART/VECT.C:166-199`. **Port must.** Shift by 22 and subtract inside. **Frame.** Cube
-8500/9500 (residual registered). **Test.** `count_const_keeps_the_c_precedence_shifts`.
+**Original.** `cyx`/`cyy`/`czx`/`czy` subtract inside the final shift. **Where.**
+`PLZPART/VECT.C:166-176`; the release's `count_const` at image `0x12d40` does the same (each
+`sub`/`sbb` before `mov cl,0fh` and `LXRSH@`). **Port must.** Subtract inside. **Frame.** Cube
+8500/9500, exact. **Test.** `count_const_is_the_releases_one_point_fifteen_matrix`.
+
+*(2026-10-29, retired in part.)* This entry also kept the tree's `>>15+7` = `>>22` (`VECT.OBJ`'s
+`sar $0x16`). The shipped build does not have it: its `count_const` shifts by 15 and its `cxz` is
+`-SY`, not `-SY>>7` — a 1.15 matrix its 32-bit `rotate` consumes with `>> 11` (A23). The `>>22` was
+the tree's, not a bug of the release, and the port follows the release.
 
 ## 18. MINVBALL — beyond §2: the inert `mov ax,ax`, the clobbered offset, the skipped gravity and the uninitialised `j` (slot 12)
 
@@ -1238,8 +1249,8 @@ or a registered approximation), with the reason.
 | `panicend.md:339` | §10: `getpal`; the fade tables; `copyline`; the collapse; nothing beyond row 0 cleared; no exit poll | E, E, E, E, I, I | §13.1-§13.4; index |
 | `part-sequence.md:54` | the spec's part descriptions kept | N (names) | — |
 | `part-sequence.md:111` | the port's `Order` numbers kept | N (names) | — |
-| `plzpart.md:66` | the 84-byte overrun "kept and invisible" | I | index |
-| `plzpart.md:439` | §9: the overrun; the mask underflow; the banding; the cut-short fade; the dead `ttptr`; the 404 split; the double `+160`; `count_const`; the stale `MAIN.ASM` | I, E, E, E, I, I, E, E, I | §1, §17.1-§17.4; index |
+| `plzpart.md:73` | the 84-byte overrun "kept and invisible" | I | index |
+| `plzpart.md:388` | §9: the overrun; the mask underflow; the banding; the cut-short fade; the dead `ttptr`; the 404 split; the double `+160`; `count_const`'s subtraction inside the shift (the tree's `>>22` is not the release's, 2026-10-29); the stale `MAIN.ASM` | I, E, E, E, I, I, E, E, I | §1, §17.1-§17.4; index |
 | `techno.md:129` | `power1`, the dead table | I | index |
 | `techno.md:216` | `flash(-2)` kept as written | I | index |
 | `techno.md:294` | `dis_partstart()` twice | I | index |

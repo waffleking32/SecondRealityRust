@@ -921,7 +921,8 @@ That fit (213/100, **0.46 %** against **9.99 %** at the tree's `142/66`) was ret
 2026-10-26: the 200-line frames show row ⌊2y/3⌋ of a 134-row image (CRTC 0x09 = 2,
 `TWEAK.ASM:31-33`), so the tree's 142/66 is the release's too. The corpus now serves as A23's
 whole-frame counts (`cargo xtask rediff --only plzpart/band`: 6,531 / 6,092 / 11,249 / 21,722 /
-11,190 / 33,457), and the 8500 frame pins the phase state (frames 136, page 4, display start
+11,190 / 33,457; since 2026-10-29, with the release's camera path read from its image, 340 / 24 /
+0 / 0 / 148 / 4), and the 8500 frame pins the phase state (frames 136, page 4, display start
 0x0028, music 68:46). The corpus has a
 manifest whose per-frame `sha256` `reference verify` checks, like any capture (D23).
 

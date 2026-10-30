@@ -1777,6 +1777,10 @@ reference's *geometry* (scanlines per row, line count, page size) is modelled �
 recovers an exact rational factor (3/2) is a hint that the capture, not the build, differs. The
 test-only `FitProbe` and the fit test are removed; `the_cube_is_a_134_row_screen` and
 `a_134_row_draw_stays_inside_its_slot` replace them.
+*(2026-10-29, under D49: what this correction left registered — the 8500 shade/pose residual and
+the close-up's "absent camera data" — was the release's own `buu`, 13-bit angles and 1.15 rotation,
+read from its unpacked image, plus a port bug in `ls_y`. Both cube keyframes now match byte for
+byte; A23.)*
 
 **Corrected 2026-10-26 (`fix-user-glitches`) — U2A's pre-gate palette is a race at the 30,000-cycle
 reference speed, and the port follows the four speeds that agree.** A32 adopted the release's
@@ -3267,3 +3271,14 @@ respect the port models; the three differences it has (a `printf`, a display-ena
 of a delay loop, a flip-flop reset) are recorded and not modelled (`docs/fidelity/cred.md` §9).
 A10 is retired. The image does not settle the CRED→ENDSCRL chain offset: its loops are the tree's,
 and the 3 to 4 frames a screen the release spends past the port's are CPU time (A11).
+
+*(2026-10-29.)* **PLZPART's cube is the third**: its camera path (`buu`, image `0x13894`, located
+through `getspl`'s `mov si,0004h` in the segment `calculate` calls) and its sine table (segment
+`28b1h`, an 8,192-entry turn) are read from the unpacked image, and its `calculate`, `count_const`
+and `rotate` are translated from the image's code, which differs from the tree's: 13-bit angles
+(`and ax,1fffh`), a 1.15 matrix (`>>15` for `>>15+7`) and a 32-bit rotation in 1/16 units. The
+8× rotation words are therefore not a shift the release undoes but a finer angle unit. A port bug
+(`ls_y` read `kosinit[ls_ky]` for `VECT.C:144`'s `kosinit[ls_kx]`) was the close-up's wrong-colour
+bands. Both cube keyframes are now exact (were 17.577 % / 95.570 %), A23 is rewritten around what
+is left (a palette-timing residue on four band frames), and A22's exit index 4 is now read in the
+image (`cmp word [0192h],4` at `0x1181c`) rather than only measured.
