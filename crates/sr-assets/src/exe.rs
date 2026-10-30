@@ -52,18 +52,11 @@ pub enum Packer {
 }
 
 fn truncated(needed: usize, had: usize) -> AssetError {
-    AssetError::Truncated {
-        format: Format::Exe,
-        needed,
-        had,
-    }
+    crate::truncated(Format::Exe, needed, had)
 }
 
 fn unsupported(what: impl Into<String>) -> AssetError {
-    AssetError::Unsupported {
-        format: Format::Exe,
-        what: what.into(),
-    }
+    crate::unsupported(Format::Exe, what)
 }
 
 fn word(b: &[u8], at: usize) -> Result<u16, AssetError> {
@@ -451,7 +444,7 @@ fn exepack(p: &LoadImage) -> Result<LoadImage, AssetError> {
         .checked_sub(1)
         .ok_or_else(|| unsupported("an EXEPACK header at offset 0"))?;
     let mut pad = 0;
-    while img[s] == 0xff && pad < 16 {
+    while s > 0 && img[s] == 0xff && pad < 16 {
         s -= 1;
         pad += 1;
     }
@@ -459,26 +452,28 @@ fn exepack(p: &LoadImage) -> Result<LoadImage, AssetError> {
     let mut t = dest;
     let under = || unsupported("an EXEPACK command stream that runs before the image");
     loop {
-        if s < 2 {
+        // `s` wraps below zero after the last byte is consumed; `s >= img.len()` catches that.
+        if s < 2 || s >= img.len() {
             return Err(under());
         }
         let cmd = img[s];
         let n = u16::from_le_bytes([img[s - 2], img[s - 1]]) as usize;
-        s -= 3;
+        s = s.wrapping_sub(3);
         if n > t {
             return Err(unsupported("an EXEPACK run longer than the output left"));
         }
         match cmd & 0xfe {
             0xb0 => {
-                let v = img[s];
+                let v = *img.get(s).ok_or_else(under)?;
                 s = s.wrapping_sub(1);
                 out[t - n..t].fill(v);
             }
             0xb2 => {
-                if n > s + 1 {
+                let end = s.wrapping_add(1);
+                if n > end {
                     return Err(under());
                 }
-                out[t - n..t].copy_from_slice(&img[s + 1 - n..=s]);
+                out[t - n..t].copy_from_slice(&img[end - n..end]);
                 s = s.wrapping_sub(n);
             }
             other => return Err(unsupported(format!("EXEPACK command {other:#04x}"))),

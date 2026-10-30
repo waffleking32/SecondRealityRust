@@ -274,7 +274,7 @@ mod tests {
 
     fn test_font() -> Font {
         let image = load_path(Path::new("../../assets/ALKU/FONA.UH")).expect("the font strip");
-        Font::from_image(image, (20, 30), 'A').expect("the strip read as ALKU reads it")
+        Font::from_image(image)
     }
 
     fn start() -> Setup {

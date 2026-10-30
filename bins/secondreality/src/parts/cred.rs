@@ -109,11 +109,10 @@
 //! # The three things worth knowing before changing anything here
 //!
 //! - **The font strip is not loaded through [`sr_assets::font`].** The routine
-//!   states a 32-row cell (`MAIN.C:29`) and the image's raster has **40** rows, and it
-//!   states a 32-column cell (`:270`: `fonap[32] = 1500-32`) on a strip 1,500
-//!   columns wide: `1500/32 = 46.875`, so `Font::from_image` refuses it. The
-//!   strip has no cell at all — the routine *scans* for ink runs (`:250-269`)
-//!   and indexes the raster by column — so the part reads the raster itself.
+//!   reads 32 rows (`MAIN.C:29`) of a raster that has **40**, where a `Font`'s
+//!   glyphs are every row of the strip. The routine *scans* for ink runs
+//!   (`:250-269`) and indexes the raster by column, so the part reads the
+//!   raster itself.
 //!   `docs/fidelity/APPROXIMATIONS.md` A8.
 //! - **`tw_setpalette` uploads 768 bytes of the picture's own palette**
 //!   (`TWEAK.ASM:155-176`) into DAC entries 0-255, after `init`'s repair. The

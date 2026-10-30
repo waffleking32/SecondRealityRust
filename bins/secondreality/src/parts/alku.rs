@@ -142,9 +142,9 @@
 //!
 //! `font` is `FONA.UH[783:]`, one byte earlier than the decoder's pixel area
 //! at 784 (`asset-inventory.md` §8, A9). The port builds
-//! `sr_assets::font::Font` from the decoded strip with a 20×30 cell — the
-//! routine reads 32 rows of a 30-row strip, and the two rows past the file
-//! are zero in the release's image (A9). A test shows the one-byte shift
+//! `sr_assets::font::Font` from the decoded 30-row strip — the routine reads
+//! 32 rows, and the two rows past the file are zero in the release's image
+//! (A9). A test shows the one-byte shift
 //! moves no glyph the cards use, and another that the release's font is this
 //! strip but for one glyph the part never draws.
 
@@ -198,9 +198,7 @@ const SHIPPED_PALETTE_ENTRIES: [(u8, [u8; 3]); 3] = [
 
 /// `ALKU/INCLUDE.ASM:17`: `FONA.UH` (1500×30) as the font strip.
 const FONT_PATH: &str = "assets/ALKU/FONA.UH";
-/// `MAIN.C:234`: `fonap[32]=1500-20`, so the blank is the strip's last 20
-/// columns and the strip is a whole number of 20-column cells.
-const FONT_CELL: (u16, u16) = (20, 30);
+/// The first cell's character (`MAIN.C:40`'s order opens with `A`).
 const FONT_FIRST: char = 'A';
 /// The strip's rows. `faddtext`/`addtext` read 32 (`MAIN.C:335`, `:428`; the release's
 /// `cmp word [bp-4],20h`, image `0x24c9`), and rows 30 and 31 are zero in the release's
@@ -1456,9 +1454,7 @@ impl Alku {
                 ),
             });
         }
-        let font = Font::from_image(strip_image, FONT_CELL, FONT_FIRST).map_err(|error| {
-            PartError { part: NAME, message: format!("{}: {error}", self.font_path) }
-        })?;
+        let font = Font::from_image(strip_image);
         self.strip = Some(Strip::scan(font).map_err(|message| PartError {
             part: NAME,
             message: format!("{}: {message}", self.font_path),
@@ -1930,7 +1926,7 @@ mod tests {
     fn the_font_strip_is_the_routines_own_scan_and_the_one_byte_shift_is_invisible() {
         let image = load_path(Path::new(TEST_FONT)).unwrap();
         assert_eq!((image.width(), image.height()), (1500, 30));
-        let font = Font::from_image(image, FONT_CELL, FONT_FIRST).unwrap();
+        let font = Font::from_image(image);
         let strip = Strip::scan(font).unwrap();
         let mut cells = 0;
         for index in 0..FONT_ORDER.len() {

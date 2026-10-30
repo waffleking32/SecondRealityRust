@@ -18,9 +18,7 @@
 //! `scene0[15]` by both parts (`U2A.C:168-169`, `U2E.C:224-225`), and the
 //! palette is copied out at 16 by both (`U2A.C:243-246`, `U2E.C:337`).
 //!
-//! The palette is six-bit and is copied verbatim through
-//! [`Palette::set_entry`]; it is not run through [`crate::six_bit`], which is
-//! the inverse of the engine's display widening (see [`crate::pal`]).
+//! The palette is six-bit and copied verbatim ([`crate::six_bit_palette`]).
 //!
 //! ## The scene list, `.0AA`
 //!
@@ -104,26 +102,14 @@
 
 use sr_engine::Palette;
 
-use crate::{AssetError, Format};
-
-/// A little-endian `u16` at `at`; every caller has bounded the read.
-fn word(bytes: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes([bytes[at], bytes[at + 1]])
-}
+use crate::{le16 as word, six_bit_palette, AssetError, Format};
 
 fn truncated(needed: usize, had: usize) -> AssetError {
-    AssetError::Truncated {
-        format: Format::Visu,
-        needed,
-        had,
-    }
+    crate::truncated(Format::Visu, needed, had)
 }
 
 fn unsupported(what: String) -> AssetError {
-    AssetError::Unsupported {
-        format: Format::Visu,
-        what,
-    }
+    crate::unsupported(Format::Visu, what)
 }
 
 /// `bytes[at..at + len]`, or a [`AssetError::Truncated`] naming the file offset
@@ -186,21 +172,7 @@ pub fn read_master(bytes: &[u8]) -> Result<Master, AssetError> {
     };
 
     let mut palette = Palette::new();
-    for (index, rgb) in take(bytes, MASTER_PALETTE, MASTER_PALETTE_LEN)?
-        .chunks_exact(3)
-        .enumerate()
-    {
-        if let Some(&bad) = rgb.iter().find(|&&component| component > 63) {
-            return Err(AssetError::Palette {
-                what: format!(
-                    "the .00M palette entry {index} has the value {bad}, which is not six bits; \
-                     MAIN.C:234-241 copies the scene tool's .PAL into the .00M and every shipped \
-                     palette holds six-bit values"
-                ),
-            });
-        }
-        palette.set_entry(index as u8, [rgb[0], rgb[1], rgb[2]]);
-    }
+    six_bit_palette(take(bytes, MASTER_PALETTE, MASTER_PALETTE_LEN)?, 0, &mut palette)?;
 
     let objects_at = u32_at(bytes, MASTER_OBJECTS_AT)? as usize;
     let conum = u16_at(bytes, objects_at)? as usize;

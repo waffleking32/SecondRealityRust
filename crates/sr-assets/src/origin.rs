@@ -1,8 +1,7 @@
-//! The Origin PIC family: the container behind `.UH`, `.U`, `.UP`, `.P`, `.16`
-//! and `.X`.
+//! The Origin PIC family: the container behind `.UH`, `.U`, `.UP`, `.P`, `.16` and `.X`.
 //!
-//! Five magic-carrying variants share one 16-byte little-endian header, plus a
-//! sixth case with no header at all ([`crate::raw_surface`]'s door):
+//! Five magic-carrying variants share one 16-byte little-endian header (a sixth, headerless
+//! case is [`crate::raw_surface`]'s):
 //!
 //! | first two bytes | variant | palette | pixels |
 //! |---|---|---|---|
@@ -11,48 +10,26 @@
 //! | `55 48` | `UH` (`GRAB/GLVP.C:961-986`) | none | 16 |
 //! | `55 68` | `Uh` (`GRAB/GLVP.C:988-1014`) | 768 at 16 | 784 |
 //!
-//! Only the first three carry a `para` field and compute the pixel offset from
-//! it — `(16 + colors*3 + 15) / 16` paragraphs (`LBM2U.C:57`), so 784 for a
-//! 256-colour picture and 64 for a 16-colour one. The two GLVP writers hardcode
-//! theirs: 1 paragraph for `UH`, 49 for `Uh`.
+//! `para` is `(16 + colors*3 + 15) / 16` (`LBM2U.C:57`); the GLVP writers hardcode 1 and 49.
+//! The palette is six bits already and copied verbatim (`LBM2U.C:170`). The rules:
 //!
-//! Three things the original art does that a naive decoder gets wrong:
-//!
-//! - **The palette is six bits already** and is copied verbatim. `LBM2U.C:170`
-//!   writes `getc(f1)/4`; GLVP's `pal` is six-bit by construction. A byte above
-//!   63 is out of contract and refused — clamping it would silently change a
-//!   colour.
-//! - **An RLE row may decode wider than the header's width.** `START/HZPIC.P`
-//!   does it on 153 of 400 rows, up to 761 pixels for a 640-pixel row. The
-//!   original writes every pixel into the caller's `char rowbuf[640]`
-//!   (`START/MAIN.C:13`) and overflows it; the port takes the first `w` and drops
-//!   the rest, which is what the visible output shows. Recorded in
-//!   `docs/fidelity/APPROXIMATIONS.md`.
-//! - **A run opcode of `0x80` means a run of zero.** The tree's two readers
-//!   disagree — the assembly in `ENDPIC/READP.C:44-51` copies 256 pixels, the C
-//!   in `START/READP.C:37-38` copies none — and the writer never emits it, so it
-//!   is refused rather than given a meaning of the port's own.
-//!
-//! A row that decodes *shorter* than `w` cannot be produced by the writers (both
-//! clip to the row end, `LBM2P.C:81`), and is zero-filled here: the original
-//! leaves the tail of its row buffer holding the previous row, which is a
-//! different kind of wrong and not something the tree depends on.
-//!
-//! **A short `FC FC` payload is not always a truncation, and cannot be made
-//! one.** The header carries no plane count — `LBM16.C:61` hardcodes
-//! `colors=16` — so a bit-plane payload's count comes from its own length
-//! (`render`, below): a payload cut to a whole smaller number of planes decodes as a
-//! picture of that many planes — real pixels, the wrong ones, and no error
-//! anywhere — because nothing in the bytes tells such a file apart from one
-//! written that way. Only a payload that is no whole number of planes is
-//! refused as truncated, and a refusal of the rest would be the port inventing
-//! a distinction the format does not carry. `tests/origin.rs` cuts every Origin
-//! asset at ~200 offsets and pins exactly this: a cut that decodes is a smaller
-//! picture in the same format, not a lie about the bytes.
+//! - **An RLE row may decode wider than the header's width.** `START/HZPIC.P` does it on 153 of
+//!   400 rows; the original overflows its `char rowbuf[640]` (`START/MAIN.C:13`), the port keeps
+//!   the first `w` pixels. APPROXIMATIONS A2.
+//! - **Run opcode `0x80` is refused.** `ENDPIC/READP.C:44-51` copies 256 pixels for it,
+//!   `START/READP.C:37-38` none, and the writer never emits it.
+//! - A row that decodes *shorter* than `w` is zero-filled; the writers cannot produce one
+//!   (`LBM2P.C:81`).
+//! - **A bit-plane payload's plane count comes from its length** (`LBM16.C:61` hardcodes
+//!   `colors=16`), so a `FC FC` payload cut to a whole smaller number of planes decodes as a
+//!   smaller-depth picture; nothing in the bytes can tell it apart. Only a payload that is no
+//!   whole number of planes is refused.
 
 use sr_engine::{Palette, Surface};
 
-use crate::{check_geometry, AssetError, Format, Image};
+use crate::{check_geometry, le16 as word, six_bit_palette, AssetError, Format, Image};
+
+const FORMAT: Format = Format::Origin;
 
 /// `FC FC`, raw 8-bit or bit-planes (`LBM2U.C:58`, `LBM16.C:63`).
 const MAGIC_RAW: u16 = 0xFCFC;
@@ -65,16 +42,8 @@ const MAGIC_UH_PAL: u16 = 0x6855;
 
 const HEADER: usize = 16;
 
-fn word(bytes: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes([bytes[at], bytes[at + 1]])
-}
-
 fn truncated(needed: usize, had: usize) -> AssetError {
-    AssetError::Truncated {
-        format: Format::Origin,
-        needed,
-        had,
-    }
+    crate::truncated(FORMAT, needed, had)
 }
 
 /// Decode the Origin family, dispatching on the magic and on nothing else.
@@ -85,9 +54,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, AssetError> {
     match word(bytes, 0) {
         MAGIC_RAW | MAGIC_RLE => decode_fcfc(bytes),
         MAGIC_UH | MAGIC_UH_PAL => decode_glvp(bytes),
-        // No fallback to "bare": a file with no magic has no geometry, and the
-        // size alone never identifies a dump (three 64,000-byte assets in this
-        // tree have three different geometries).
+        // No fallback to "bare": a file with no magic has no geometry.
         _ => Err(AssetError::UnknownFormat),
     }
 }
@@ -112,10 +79,7 @@ fn decode_fcfc(bytes: &[u8]) -> Result<Image, AssetError> {
     if HEADER + palette_len > bytes.len() {
         return Err(truncated(HEADER + palette_len, bytes.len()));
     }
-    // The pixels cannot start inside the palette. Every writer's `para` clears
-    // the palette (`LBM2U.C:57` is the formula that guarantees it), so a header
-    // that does not is misread or corrupted, and following it would read palette
-    // bytes as pixels.
+    // Every writer's `para` clears the palette (`LBM2U.C:57`).
     let pixels_at = para * 16;
     if pixels_at < HEADER + palette_len {
         return Err(unsupported(format!(
@@ -125,21 +89,16 @@ fn decode_fcfc(bytes: &[u8]) -> Result<Image, AssetError> {
     }
     let palette = read_palette(&bytes[HEADER..HEADER + palette_len])?;
 
-    // `para` is authoritative for where the pixels are; the writer's own
-    // `(16+colors*3+15)/16` is how it chose the value, and `LBM2U.C:67` pads to
-    // it with 'X'. A `para` that is wrong in the other direction — past the end
-    // of the file — shows up as a payload that is not the geometry's length,
-    // which `render` reports rather than hides.
+    // `para` is authoritative (`LBM2U.C:67` pads to it with 'X'); one past the end of the
+    // file shows up as a payload that is not the geometry's length.
     render(bytes, width, height, pixels_at, palette, rle)
 }
 
 /// `UH` and `Uh`: `w` and `h` in words 2 and 3; the palette, when there is one,
 /// at 16 and the pixels at word 1's paragraph offset.
 ///
-/// Word 1 is written as the constant `1` by `saveunpheader` (`GLVP.C:969`, "number
-/// of pics") and as the constant `49` by `saveunpheaderpal` (`GLVP.C:996`,
-/// "paraoffset to pic"). No other value exists in the tree, so anything else is
-/// refused rather than interpreted.
+/// Word 1 is the constant `1` from `saveunpheader` (`GLVP.C:969`) and `49` from
+/// `saveunpheaderpal` (`GLVP.C:996`); anything else is refused.
 fn decode_glvp(bytes: &[u8]) -> Result<Image, AssetError> {
     let word1 = word(bytes, 2);
     let width = word(bytes, 4) as u32;
@@ -171,32 +130,15 @@ fn decode_glvp(bytes: &[u8]) -> Result<Image, AssetError> {
     render(bytes, width, height, pixels_at, palette, false)
 }
 
-fn unsupported(what: String) -> AssetError {
-    AssetError::Unsupported {
-        format: Format::Origin,
-        what,
-    }
+fn unsupported(what: impl Into<String>) -> AssetError {
+    crate::unsupported(FORMAT, what)
 }
 
-/// RGB triples, entry 0 first, each component already six bits (`LBM2U.C:170-171`).
-///
-/// Copied verbatim — no widening, no re-quantising, no `six_bit`. A file that
-/// carries fewer than 256 entries (`colors*3` is the length; `DDSTARS/TEXTS.16`
-/// carries 16) leaves the rest black, and only indices the file defines are ever
-/// drawn with them.
+/// `colors` six-bit triples (`LBM2U.C:170-171`); entries past them stay black (`DDSTARS/TEXTS.16`
+/// carries 16).
 fn read_palette(bytes: &[u8]) -> Result<Palette, AssetError> {
     let mut palette = Palette::new();
-    for (i, rgb) in bytes.chunks_exact(3).enumerate() {
-        if let Some(&bad) = rgb.iter().find(|&&c| c > 63) {
-            return Err(AssetError::Palette {
-                what: format!(
-                    "entry {i} has the value {bad}, which is not six bits; the Origin writers \
-                     store 6-bit values (LBM2U.C:170) and refuse to guess at anything else"
-                ),
-            });
-        }
-        palette.set_entry(i as u8, [rgb[0], rgb[1], rgb[2]]);
-    }
+    six_bit_palette(bytes, 0, &mut palette)?;
     Ok(palette)
 }
 
@@ -228,13 +170,9 @@ fn render(
         return Ok(Image { surface, palette });
     }
 
-    // `LBM16.C:74-93` is the only writer that emits bit-planes, and it always
-    // writes `FC FC`: at the default four planes, or the two `TEXTS.16` was made
-    // with (`DDSTARS/DOTEXTS.BAT:1`). The count is not in the header — `colors`
-    // is forced to 16 regardless — so it comes from the payload, which must be a
-    // whole number of planes. Only the `FCFC` variant gets this fallback: a GLVP
-    // file is raw by construction, and letting a short one masquerade as planes
-    // would turn a truncation into a picture.
+    // `LBM16.C:74-93` is the only writer of bit-planes, always as `FC FC` (four planes, or
+    // the two of `TEXTS.16`, `DDSTARS/DOTEXTS.BAT:1`). A GLVP file is raw by construction,
+    // so a short one is a truncation, not planes.
     if word(bytes, 0) == MAGIC_RAW {
         let plane_row = w.div_ceil(8);
         let per_row = h * plane_row;
@@ -281,11 +219,7 @@ fn decode_planes(bytes: &[u8], pixels_at: usize, surface: &mut Surface, planes: 
 /// bytes that follow, then that many bytes of opcode stream. An opcode below
 /// `0x80` is one literal pixel; `0x80` and above are a run, the next byte
 /// repeated `opcode & 0x7F` times.
-///
-/// The row-length prefix is authoritative and the header's width is not a bound
-/// on it: a row that decodes wider than `w` is clipped to `w` pixels (see the
-/// module docs). Pixels past `w` are still *counted*, so that the clip takes the
-/// same prefix of the row the original's overflow left visible.
+/// The row-length prefix is authoritative; pixels past `w` are counted and dropped (A2).
 fn decode_rows(bytes: &[u8], pixels_at: usize, surface: &mut Surface) -> Result<(), AssetError> {
     let w = surface.width();
     let mut p = pixels_at;
@@ -313,10 +247,8 @@ fn decode_rows(bytes: &[u8], pixels_at: usize, surface: &mut Surface) -> Result<
                 let run = (op & 0x7F) as usize;
                 if run == 0 {
                     return Err(unsupported(
-                        "RLE run opcode 0x80 asks for a run of zero pixels: ENDPIC/READP.C:44-51 \
-                         copies 256 of them and START/READP.C:37-38 copies none, and LBM2P.C never \
-                         writes one, so there is no behaviour to translate"
-                            .to_string(),
+                        "RLE run opcode 0x80: ENDPIC/READP.C:44-51 copies 256 pixels, \
+                         START/READP.C:37-38 none, and LBM2P.C never writes one",
                     ));
                 }
                 if p >= end {

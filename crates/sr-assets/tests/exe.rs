@@ -7,17 +7,14 @@
 //! picture in place before it checks). `python3 -I tools/release_images.py` repeats that
 //! check (`docs/fidelity/release-images.md`).
 
+mod common;
+
+use common::fnv1a;
 use sr_assets::exe::{unpack, Packer};
 use sr_assets::AssetError;
 
-fn fnv1a(b: &[u8]) -> u64 {
-    b.iter().fold(0xcbf2_9ce4_8422_2325, |h, &x| {
-        (h ^ x as u64).wrapping_mul(0x100_0000_01b3)
-    })
-}
-
 fn exe(name: &str) -> Vec<u8> {
-    std::fs::read(format!("../../assets/MAIN/DATA/{name}.EXE")).unwrap()
+    common::asset(&format!("MAIN/DATA/{name}.EXE"))
 }
 
 const PINS: &[(&str, usize, usize, u64)] = &[
@@ -94,6 +91,42 @@ fn a_file_that_is_not_mz_is_unknown() {
         unpack(b"not a program"),
         Err(AssetError::UnknownFormat)
     ));
+}
+
+/// An MZ file whose entry segment holds an EXEPACK `RB` header at image offset 16, with `head`
+/// as the 16 image bytes before it: the command stream is read backwards from `head`'s end.
+fn exepack_file(head: [u8; 16]) -> Vec<u8> {
+    let mut image = head.to_vec();
+    let mut rb = [0u8; 16];
+    rb[12] = 1; // dest_len: one paragraph
+    rb[14..16].copy_from_slice(b"RB");
+    image.extend_from_slice(&rb);
+    let size = 32 + image.len();
+    let mut file = vec![0u8; 32];
+    file[0..2].copy_from_slice(b"MZ");
+    file[2..4].copy_from_slice(&(size as u16 % 512).to_le_bytes());
+    file[4..6].copy_from_slice(&1u16.to_le_bytes()); // pages
+    file[8..10].copy_from_slice(&2u16.to_le_bytes()); // header paragraphs
+    file[0x16..0x18].copy_from_slice(&1u16.to_le_bytes()); // cs
+    file[0x18..0x1a].copy_from_slice(&0x1cu16.to_le_bytes()); // relocation table
+    file.extend_from_slice(&image);
+    file
+}
+
+/// A command stream that runs off the front of the image is refused, not an index panic: all
+/// sixteen bytes `0xFF` padding, and a stream whose second command sits at byte 2.
+#[test]
+fn an_exepack_stream_that_runs_before_the_image_is_refused() {
+    let mut runs_off = [0u8; 16];
+    runs_off[2] = 0xb0; // a fill, with no byte left for its value
+    runs_off[13..15].copy_from_slice(&10u16.to_le_bytes());
+    runs_off[15] = 0xb2; // copy ten bytes, then the command at 2
+    for head in [[0xFF; 16], runs_off] {
+        assert!(
+            matches!(unpack(&exepack_file(head)), Err(AssetError::Unsupported { .. })),
+            "{head:02x?}"
+        );
+    }
 }
 
 /// Writes every unpacked image to `out/release-images/NAME.img` with its relocation offsets in

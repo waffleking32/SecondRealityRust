@@ -271,12 +271,12 @@ copied as a set).
 
 ## Recovered assets
 
-Task A5 walked every `.OBK`/`.OBJ` in the original with `sr_assets::omf::extract_ledata` and
-found **one** asset whose bytes existed only inside a build artifact: `TECHNO/CIRCLE2.EGA`,
+A walk of every `.OBK`/`.OBJ` in the original with `sr_assets::omf::extract_ledata`
+finds **one** asset whose bytes existed only inside a build artifact: `TECHNO/CIRCLE2.EGA`,
 the one-bit mask the shipped TECHNO.EXE reads as its `_circle2` data. It was written out with
-the same reader — `cargo test -p sr-assets --test omf -- --ignored write_the_recovered_asset`
-regenerates it — and `tests/omf.rs` pins it against its blob. Every other payload either
-reproduces a standalone file byte for byte (35 of them, most already in the table above;
+the same reader — `cargo test -p sr-assets --test provenance -- --ignored write_the_recovered_asset`
+regenerates it — and `crates/sr-assets/tests/provenance.rs` pins it against its blob. Every
+other payload either reproduces a standalone file byte for byte (35 of them, most already in the table above;
 `docs/fidelity/asset-inventory.md` §D) or is named there as one of the tree's three exceptions
 — `ALKU/INCLUDE.OBJ` (§E.18), whose picture bytes differ from `ALKU/HOI.U` in three palette
 entries, `WATER/MIEK.OBJ` (§E.19), an unlinked intermediate one byte from `MIEKKA.SCI`, and
@@ -308,7 +308,7 @@ at on one contact sheet per part (`cargo xtask assets verify --sheet`), and an a
   what a `DDSTARS/DOIT*.C` tool writes), but it differs from the shipped mask in **7,162 of
   8,000 bytes**. The recovered bytes are byte-identical to what the generator at
   `DDSTARS/DOIT2.C:21-52` produces, which is what identifies them; §D of the inventory and
-  `tests/omf.rs` carry the measurement.
+  `crates/sr-assets/tests/provenance.rs` carry the measurement.
 - The upstream blob itself is **not** copied. `.OBK` is a build container, not an asset format:
   nothing in `sr-parts` or the binary ever sees one (spec §4.4), and §9's recovery clause is
   what turned its payload into the standalone file above.

@@ -281,8 +281,8 @@ the unpacked `CRED.EXE`, is `FONA.INC` byte for byte, 40 rows, and its scan and 
 (`cred.md` §9).
 
 **Port:** the part reads the raster and `fonaorder` out of the release's image and translates
-`:250-269`'s scan. It does not load the strip through `sr_assets::font::Font`, which refuses a cell
-that does not divide the raster.
+`:250-269`'s scan. It does not load the strip through `sr_assets::font::Font`, whose glyphs are
+every row of the strip.
 
 **Why:** both mismatches are the shipped art's. Reading the first 32 rows is what the original
 draws and what the reference shows.

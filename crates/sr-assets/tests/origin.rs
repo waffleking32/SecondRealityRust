@@ -1,57 +1,26 @@
-//! The Origin PIC family — the container behind `.UH`, `.U`, `.UP`, `.P`, `.16`
-//! and `.X` — pinned against the files the demo shipped.
-//!
-//! Every file these tests read is a curated copy under `assets/`, verified
-//! byte-for-byte against `upstream/SecondReality/` at commit `071a82e` by task
-//! A1. The expectations (magic, geometry, colour count, paragraph field) were
-//! read off the files, and the format itself off the writers: `GRAB/LBM2U.C`,
-//! `GRAB/LBM16.C`, `GRAB/LBM2P.C` and `GRAB/GLVP.C`'s `saveunp` /
-//! `saveunpheader` / `saveunpheaderpal`. `ENDPIC/READP.C` is the runtime reader
-//! the RLE rows have to satisfy.
-//!
-//! Two paths the brief names are not in the curated tree, and are substituted
-//! where they are used rather than silently dropped: `ENDPIC/PIC.UH` has no
-//! consumer in the original and was not copied (`docs/fidelity/asset-inventory.md`
-//! §D), so `GLENZ/FC.UH` — the same `Uh` variant, geometry, size and palette
-//! shape — stands in for it. And `origin_assets_in` finds **15** files carrying
-//! an Origin magic, not the 20 the brief's guard names: 20 is the count over the
-//! whole upstream tree (§8 of `.superpowers/sdd/01-assets/a2-format-research-report.md`),
-//! while `assets/` is A1's curated subset. The guard below asserts the measured
-//! count so that a loop which matches nothing still fails.
+//! The Origin PIC family (`.UH`, `.U`, `.UP`, `.P`, `.16`, `.X`) against the files the demo
+//! ships, and against hand-built files for the writers' rules (`GRAB/LBM2U.C`, `GRAB/LBM16.C`,
+//! `GRAB/LBM2P.C`, `GRAB/GLVP.C`).
 
-use std::path::{Path, PathBuf};
+mod common;
 
+use std::path::PathBuf;
+
+use common::{asset, asset_path, assets_with};
 use rstest::rstest;
-use sr_assets::{load, load_frames, load_path, raw_surface, six_bit, sniff, AssetError, Format};
-use sr_engine::dac_expand;
+use sr_assets::{load, load_frames, load_path, raw_surface, sniff, AssetError, Format};
 
-/// Every file in the curated tree shipped under an extension this family uses.
-/// The extension is a *hint* — the sniff in each caller decides whether the file
-/// is really one of them, which is the point of
-/// `the_extension_never_decides_the_format`. `EXB` and `1BM` are here because
-/// A1's tree keeps the two renamed saves the report names (§8): `LENS/LENS.EXB`
-/// is `Uh` data under `LENS/MAKEFILE`'s rename, and `GRAB/BLOWFNT.1BM` is a bare
-/// dump.
-fn origin_assets_in(root: &str) -> Vec<PathBuf> {
-    const EXTENSIONS: [&str; 9] = ["UH", "U", "UP", "P", "16", "X", "UX", "EXB", "1BM"];
-
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
-            let path = entry.expect("directory entry").path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if EXTENSIONS.iter().any(|k| ext.eq_ignore_ascii_case(k)) {
-                    out.push(path);
-                }
-            }
-        }
-    }
-
-    let mut out = Vec::new();
-    walk(Path::new(root), &mut out);
-    out.sort();
-    out
+/// Every curated file under an extension this family uses. The extension is only a hint:
+/// callers sniff (`LENS/LENS.EXB` is `Uh` data, `GRAB/BLOWFNT.1BM` a bare dump).
+fn origin_assets() -> Vec<(PathBuf, Vec<u8>)> {
+    assets_with(&["UH", "U", "UP", "P", "16", "X", "UX", "EXB", "1BM"])
+        .into_iter()
+        .map(|path| {
+            let raw = std::fs::read(&path).unwrap();
+            (path, raw)
+        })
+        .filter(|(_, raw)| sniff(raw) == Some(Format::Origin))
+        .collect()
 }
 
 /// A hand-built `FCFC` raw file: the 16-byte header, `colors` RGB triples at 16,
@@ -76,10 +45,7 @@ fn fc_fc_raw(width: u16, height: u16, palette: &[[u8; 3]], pixels: &[u8]) -> Vec
     out
 }
 
-/// One row of an RLE file, expanded from the file's own opcode stream — the
-/// writer's rule (`LBM2P.C:74-94`), applied to one row so a test can say what that
-/// row's pixels are without guessing at them. The palette, the header arithmetic
-/// and every other row stay out of it.
+/// One row of an RLE file, expanded here by the writer's rule (`LBM2P.C:74-94`).
 fn expand_row(file: &[u8], pixels_at: usize, row: usize) -> Vec<u8> {
     let mut p = pixels_at;
     for _ in 0..row {
@@ -126,88 +92,56 @@ fn fc_fd_rle(width: u16, height: u16, colors: u16, row_ops: &[u8]) -> Vec<u8> {
     out
 }
 
-#[test]
-fn a_thirty_pixel_tall_font_strip_reads_as_one() {
-    // ALKU/FONA.UH, read off the file: magic FC FC, 1500 x 30, colours 256,
-    // para 0x31 (= 784), so 16 + 768 palette bytes then 45,000 raw pixels.
-    let img = load_path(Path::new("../../assets/ALKU/FONA.UH")).unwrap();
-    assert_eq!((img.width(), img.height()), (1500, 30));
-    assert_eq!(img.pixels().len(), 45_000);
-}
-
-/// The variant table of the research report §1, one shipped file per variant.
-/// Only the magic decides which row a file is in; the extension, the geometry
-/// and the size all fail to separate them.
+/// One shipped file per variant. Only the magic separates them: `END/PIC.UH` is RLE under the
+/// `.UH` extension, and `.X` is `saveunpheader` output renamed. Each decodes to more than one
+/// value, which a misread stride or an empty palette lookup would not.
 #[rstest]
-#[case("../../assets/ALKU/FONA.UH", 1500, 30, "FCFC raw")]
-#[case("../../assets/DDSTARS/TEXTS.16", 320, 200, "FCFC two bit-planes")]
-#[case("../../assets/BEG/SRTITLE.UP", 320, 400, "FCFD RLE")]
-#[case("../../assets/COMAN/COMBG.X", 320, 200, "UH, no palette")]
-#[case("../../assets/GLENZ/FC.UH", 320, 200, "Uh, 768-byte palette")]
-fn each_variant_in_the_family_decodes(
-    #[case] path: &str,
-    #[case] w: u16,
-    #[case] h: u16,
-    #[case] what: &str,
-) {
-    let raw = std::fs::read(path).unwrap();
-    assert_eq!(sniff(&raw), Some(Format::Origin), "{what}");
-    let img = load_path(Path::new(path)).unwrap_or_else(|e| panic!("{what}: {e}"));
+#[case("ALKU/FONA.UH", 1500, 30, "FCFC raw")]
+#[case("DDSTARS/TEXTS.16", 320, 200, "FCFC two bit-planes")]
+#[case("BEG/SRTITLE.UP", 320, 400, "FCFD RLE")]
+#[case("END/PIC.UH", 320, 400, "FCFD RLE under .UH")]
+#[case("COMAN/COMBG.X", 320, 200, "UH, no palette")]
+#[case("GLENZ/FC.UH", 320, 200, "Uh, 768-byte palette")]
+fn each_variant_in_the_family_decodes(#[case] file: &str, #[case] w: u16, #[case] h: u16, #[case] what: &str) {
+    assert_eq!(sniff(&asset(file)), Some(Format::Origin), "{what}");
+    let img = load_path(&asset_path(file)).unwrap_or_else(|e| panic!("{what}: {e}"));
     assert_eq!((img.width(), img.height()), (w, h), "{what}");
     assert_eq!(img.pixels().len(), w as usize * h as usize, "{what}");
-    // More than geometry: a variant that decoded to one flat value — an empty
-    // palette lookup, a row walker that never wrote, a header field misread into
-    // a stride — satisfies every assertion above. Measured: these five decode to
-    // 4, 4, 57, 32 and 11 distinct values.
     let mut values = img.pixels().to_vec();
     values.sort_unstable();
     values.dedup();
     assert!(values.len() > 1, "{what}: decoded to a single value");
 }
 
-/// The point of this family, in one test: the extension says nothing. `END/PIC.UH`
-/// is RLE, `GLENZ/FC.UH` is `Uh` with a palette, and `COMAN/COMBG.X` is `UH`
-/// without one — and `.X` is not a format at all, it is `saveunpheader` output
-/// renamed. All of them are `.UH`/`.X`.
+/// Every Origin file in the tree decodes to the geometry its header claims, but one:
+/// `COMAN/COMBG.UH`, the first 32,768 bytes of `COMAN/COMBG.X` (`asset-inventory.md` §D), is
+/// refused — 16 header bytes plus 64,000 pixels wanted, 32,768 present.
 #[test]
-fn the_extension_never_decides_the_format() {
-    let rle = load_path(Path::new("../../assets/END/PIC.UH")).unwrap();
-    assert_eq!((rle.width(), rle.height()), (320, 400));
-
-    let uh_pal = load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap();
-    assert_eq!((uh_pal.width(), uh_pal.height()), (320, 200));
-
-    let uh = load_path(Path::new("../../assets/COMAN/COMBG.X")).unwrap();
-    assert_eq!((uh.width(), uh.height()), (320, 200));
-
-    assert_eq!(
-        sniff(&std::fs::read("../../assets/BEG/SRTITLE.LBM").unwrap()),
-        Some(Format::Iff)
-    );
+fn every_origin_asset_decodes_but_the_one_truncated_copy() {
+    let mut decoded = 0;
+    for (path, raw) in origin_assets() {
+        if path.ends_with("COMAN/COMBG.UH") {
+            let err = load(&raw, Format::Origin).unwrap_err();
+            assert!(
+                matches!(err, AssetError::Truncated { format: Format::Origin, needed: 64_016, had: 32_768 }),
+                "{err}"
+            );
+            continue;
+        }
+        let img = load(&raw, Format::Origin).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(img.pixels().len(), img.width() as usize * img.height() as usize);
+        decoded += 1;
+    }
+    assert_eq!(decoded, 14, "the curated Origin family");
 }
 
-/// The `Uh` variant's palette is the one place a 768-byte palette is guaranteed,
-/// and it is already 6-bit — so this pins that no re-quantising happens.
-///
-/// Being 6-bit is not the assertion that matters: every entry would still be
-/// `<= 63` after a needless `six_bit`, which is why the second half compares the
-/// palette with the file's own 768 bytes at offset 16 (`GLVP.C:1003`). 255 of the
-/// 256 entries change under that mistake and only entry 0 survives it, so the
-/// equality is the assertion with teeth.
+/// The `Uh` palette is the file's own 768 bytes at 16 (`GLVP.C:1003`), copied verbatim.
 #[test]
 fn a_uh_file_carries_its_own_six_bit_palette() {
-    let bytes = std::fs::read("../../assets/GLENZ/FC.UH").unwrap();
+    let bytes = asset("GLENZ/FC.UH");
     let img = load(&bytes, Format::Origin).unwrap();
-    for i in 0..=255u8 {
-        assert!(img.palette.entry(i).iter().all(|&c| c <= 63), "entry {i} is not 6-bit");
-    }
-    for i in 0..256usize {
-        let stored = [
-            bytes[16 + i * 3],
-            bytes[16 + i * 3 + 1],
-            bytes[16 + i * 3 + 2],
-        ];
-        assert_eq!(img.palette.entry(i as u8), stored, "entry {i} is not the file's own value");
+    for (i, rgb) in bytes[16..16 + 768].chunks_exact(3).enumerate() {
+        assert_eq!(img.palette.entry(i as u8), [rgb[0], rgb[1], rgb[2]], "entry {i}");
     }
     assert_ne!(img.palette.entry(0), img.palette.entry(255), "palette was not read");
 }
@@ -216,22 +150,18 @@ fn a_uh_file_carries_its_own_six_bit_palette() {
 /// made with it at two planes (`DOTEXTS.BAT:1`).
 #[test]
 fn a_bit_plane_file_decodes_to_the_geometry_in_its_header() {
-    let bytes = std::fs::read("../../assets/DDSTARS/TEXTS.16").unwrap();
+    let bytes = asset("DDSTARS/TEXTS.16");
     let img = load(&bytes, Format::Origin).unwrap();
     assert_eq!((img.width(), img.height()), (320, 200));
     assert_eq!(img.pixels().len(), 64_000);
 
-    // Two planes, so no pixel can carry a bit above 3: a plane count read as 4
-    // would put values up to 15 in the same 16,000-byte payload.
     assert!(
         img.pixels().iter().all(|&p| p < 4),
         "a plane count above 2 would show here"
     );
 
-    // And the pixels themselves, from the file's own plane bytes: row 11 is the
-    // first row of the strip that is not one flat value. Plane 0 (the low colour
-    // bit) is the first `w/8` bytes of the row, plane 1 the next, and within a
-    // byte the most significant bit is the leftmost pixel (`LBM16.C:76-92`).
+    // Row 11, the first that is not flat, from the file's own plane bytes: plane 0 first, the
+    // most significant bit leftmost (`LBM16.C:76-92`).
     let pixels_at = 4 * 16; // `para` = 4, as `LBM16.C:61-67` computes it for colors=16
     let planes = &bytes[pixels_at..];
     let plane_row = 320 / 8;
@@ -248,116 +178,38 @@ fn a_bit_plane_file_decodes_to_the_geometry_in_its_header() {
     }
 }
 
-/// A bare dump has no header, so `sniff` cannot see it and the geometry is the
-/// caller's to supply. `PANIC/MONSTER.U` is exactly 320 x 200 bytes of pixels.
+/// A bare dump has no magic and no geometry: the caller supplies it, `bytes.len()` must be
+/// `w * h`, and nothing sniffs it from its size (`PANIC/MONSTER.U`, `LENS/LENS.U` and
+/// `HARD/FCKOE3.U` are all 64,000 bytes).
 #[test]
-fn a_headerless_dump_needs_its_geometry_from_the_caller() {
-    let raw = std::fs::read("../../assets/PANIC/MONSTER.U").unwrap();
-    assert_eq!(sniff(&raw), None, "a bare dump has no magic to sniff");
+fn a_headerless_dump_takes_its_geometry_from_the_caller() {
+    let raw = asset("PANIC/MONSTER.U");
+    assert_eq!(sniff(&raw), None);
+    assert!(matches!(load_path(&asset_path("PANIC/MONSTER.U")), Err(AssetError::UnknownFormat)));
     let img = raw_surface(&raw, 320, 200).unwrap();
     assert_eq!((img.width(), img.height()), (320, 200));
     assert!(matches!(raw_surface(&raw, 320, 199), Err(AssetError::Truncated { .. })));
-}
-
-/// Every Origin file in the curated tree decodes, and what it decodes to fills the
-/// geometry its header claimed. The decoder refuses any payload that is neither
-/// `w*h` nor a whole number of bit-planes, so a misread header field cannot pass.
-/// `decoded` guards the other failure mode: a loop that matches nothing also
-/// passes. The one exception is the tree's one genuinely corrupt asset, which is
-/// counted separately and must be refused with a `Truncated` — never loaded.
-#[test]
-fn every_origin_asset_decodes_and_fills_the_geometry_its_header_claims() {
-    let mut decoded = 0;
-    let mut refused = 0;
-    for path in origin_assets_in("../../assets") {
-        let raw = std::fs::read(&path).unwrap();
-        if sniff(&raw) != Some(Format::Origin) {
-            continue; // bare dumps are the caller's geometry, tested above
-        }
-        match load(&raw, Format::Origin) {
-            Ok(img) => {
-                assert_eq!(
-                    img.pixels().len(),
-                    img.width() as usize * img.height() as usize,
-                    "{}: decoded pixels vs header geometry",
-                    path.display()
-                );
-                decoded += 1;
-            }
-            Err(e) => {
-                // Only one file in the tree is expected here, and it is the
-                // 32,768-byte truncation of COMAN/COMBG.X — `asset-inventory.md`
-                // §D records it. Anything else failing is a decoder bug.
-                assert!(
-                    path.to_string_lossy().ends_with("COMAN/COMBG.UH"),
-                    "{}: {e}",
-                    path.display()
-                );
-                assert!(
-                    matches!(e, AssetError::Truncated { .. }),
-                    "{}: expected a Truncated, got {e}",
-                    path.display()
-                );
-                refused += 1;
-            }
-        }
-    }
-    assert_eq!(refused, 1, "the tree carries exactly one corrupt Origin asset");
-    assert!(decoded >= 14, "expected the whole Origin family, saw {decoded}");
-}
-
-#[test]
-fn a_truncated_pixel_run_is_refused_not_panicked_on() {
-    // Half of an RLE file: the row length word at the cut promises more bytes than
-    // remain, which is a truncation the decoder must detect, not a panic.
-    let mut bytes = std::fs::read("../../assets/BEG/SRTITLE.UP").unwrap();
-    bytes.truncate(bytes.len() / 2);
-    assert!(matches!(load(&bytes, Format::Origin), Err(AssetError::Truncated { .. })));
-}
-
-/// A file that is genuinely short in the tree. `COMAN/COMBG.UH` is the first
-/// 32,768 bytes of `COMAN/COMBG.X`; its `UH` header claims 320 x 200 and its
-/// payload is 32,752 of the 64,000 pixels. It is a corrupt asset, and the decoder
-/// refusing it is the correct outcome — see the finding in `asset-inventory.md`.
-#[test]
-fn the_truncated_asset_in_the_tree_is_refused() {
-    let bytes = std::fs::read("../../assets/COMAN/COMBG.UH").unwrap();
-    // `needed` and `had` are file offsets: 16 header bytes plus the 64,000
-    // pixels the header promises, against the 32,768 bytes that exist.
-    let err = load(&bytes, Format::Origin).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            AssetError::Truncated { format: Format::Origin, needed: 64_016, had: 32_768 }
-        ),
-        "the shortfall must name the length it wanted: {err}"
-    );
+    assert!(matches!(load(&raw, Format::Origin), Err(AssetError::UnknownFormat)));
+    assert!(matches!(load(&raw, Format::OriginBare), Err(AssetError::Unsupported { .. })));
 }
 
 #[test]
 fn an_oversized_header_is_refused_rather_than_clipped() {
-    let mut bytes = std::fs::read("../../assets/BEG/SRTITLE.UP").unwrap();
+    let mut bytes = asset("BEG/SRTITLE.UP");
     bytes[2..4].copy_from_slice(&1024u16.to_le_bytes());
     assert!(matches!(load(&bytes, Format::Origin), Err(AssetError::TooLarge { .. })));
 }
 
-/// `START/HZPIC.P` has 153 of its 400 rows decoding wider than the 640 its header
-/// claims, up to 761 pixels, and a shipped file relying on it means this is not a
-/// malformed file. The original writes every pixel into a 640-byte row buffer and
-/// overflows it; the port takes the first `w` and drops the rest, which is what the
-/// visible output shows. That substitution is recorded in APPROXIMATIONS.md.
+/// `START/HZPIC.P` has 153 of its 400 rows decoding wider than its 640; the port keeps the
+/// first 640 pixels of each (APPROXIMATIONS A2).
 #[test]
 fn a_run_row_wider_than_the_header_is_clipped_not_refused() {
-    let bytes = std::fs::read("../../assets/START/HZPIC.P").unwrap();
+    let bytes = asset("START/HZPIC.P");
     let img = load(&bytes, Format::Origin).unwrap();
     assert_eq!((img.width(), img.height()), (640, 400));
     assert_eq!(img.pixels().len(), 640 * 400);
 
-    // Which 640 pixels the clip keeps, which geometry alone cannot say. Row 302 is
-    // one of the 153 over-wide rows (757 pixels) and its head differs from its
-    // tail, so these four assertions separate "the first 640" from "the last 640",
-    // from a zero-filled row, and from a row that was refused. The expectation is
-    // the file's own row, read by `expand_row`.
+    // Row 302 is 757 pixels wide and its head differs from its tail.
     let full = expand_row(&bytes, 0x31 * 16, 302);
     assert!(full.len() > 640, "row 302 must be over-wide for this test to mean anything");
     let row = img.surface.row(302);
@@ -366,22 +218,7 @@ fn a_run_row_wider_than_the_header_is_clipped_not_refused() {
     assert!(row.iter().any(|&p| p != 0), "nor is the row zero-filled");
 }
 
-#[test]
-fn six_bit_is_the_exact_inverse_of_the_engines_widening() {
-    for c in 0u8..=63 {
-        assert_eq!(six_bit(dac_expand(c)), c, "6-bit value {c}");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Beyond the brief's list: the rulings and the error paths they name.
-// ---------------------------------------------------------------------------
-
-/// The Origin family stores six-bit values already, so a byte above 63 is out of
-/// contract: the writer divides an 8-bit `CMAP` by four (`LBM2U.C:170`) and GLVP
-/// copies a palette that is six-bit by construction (`GLVP.C:1003`). Nothing in
-/// the tree produces one, and clamping would silently change a colour, so it is
-/// refused.
+/// The family's palettes are six bits (`LBM2U.C:170`, `GLVP.C:1003`), so 64 is refused.
 #[test]
 fn a_palette_byte_above_six_bits_is_refused_not_clamped() {
     let bytes = fc_fc_raw(2, 1, &[[0, 0, 0], [64, 0, 0]], &[0, 1]);
@@ -391,10 +228,7 @@ fn a_palette_byte_above_six_bits_is_refused_not_clamped() {
     );
 }
 
-/// `0x80` is a run of zero. The two readers in the tree disagree about it — the
-/// assembly in `ENDPIC/READP.C:44-51` copies 256 pixels, the C in
-/// `START/READP.C:37-38` copies none — and the writer never emits it, so refusing
-/// it is the only reading that does not invent behaviour.
+/// `0x80`, on which `ENDPIC/READP.C:44-51` and `START/READP.C:37-38` disagree, is refused.
 #[test]
 fn a_run_opcode_of_zerox80_is_refused() {
     let bytes = fc_fd_rle(1, 1, 1, &[0x80]);
@@ -404,14 +238,11 @@ fn a_run_opcode_of_zerox80_is_refused() {
     ));
 }
 
-/// The other half of the same rule: every run length the file format can express
-/// is decoded, including the 2 that only the earlier `LBM2P` revision emitted
-/// (2,726 runs of it are in `START/HZPIC.P`) and the 127 that the checked-in
-/// writer caps at.
+/// Every run length the format can express is decoded, including the 2 an earlier `LBM2P`
+/// emitted (`START/HZPIC.P` has such runs) and the 127 the checked-in writer caps at.
 #[test]
 fn every_run_length_from_one_to_127_is_decoded() {
-    // A run of 1, a literal, a run of 2 and a run of 127: the whole range the
-    // format can express, not just the 3..127 the checked-in writer emits.
+    // A run of 1, a literal, a run of 2 and a run of 127.
     let bytes = fc_fd_rle(1 + 1 + 2 + 127, 1, 1, &[0x81, 7, 0x40, 0x82, 9, 0xFF, 11]);
     let img = load(&bytes, Format::Origin).unwrap();
     let mut want = vec![7u8];
@@ -421,35 +252,7 @@ fn every_run_length_from_one_to_127_is_decoded() {
     assert_eq!(img.pixels(), &want[..]);
 }
 
-/// A bare dump is loaded by construction, never guessed: `PANIC/MONSTER.U`,
-/// `LENS/LENS.U` and `HARD/FCKOE3.U` are all exactly 64,000 bytes, so a size match
-/// proves nothing. `sniff` returns `None` and `load` has no geometry to use.
-#[test]
-fn a_headerless_dump_is_not_sniffed_from_its_size() {
-    let raw = vec![0u8; 64_000];
-    assert_eq!(sniff(&raw), None);
-    assert!(matches!(load(&raw, Format::Origin), Err(AssetError::UnknownFormat)));
-    assert!(matches!(
-        load(&raw, Format::OriginBare),
-        Err(AssetError::Unsupported { .. })
-    ));
-}
-
-/// The FLI magic is a little-endian `u16` at offset 4, after the file size, so the
-/// bytes read `11 AF` — `assets/PAM/PRAX4.FLI` begins `74 1e 05 00 11 af`
-/// (`asset-inventory.md` finding 5). A test that only ever sniffed an IFF would not
-/// notice the two bytes being the wrong way round, and `load_path` would report
-/// `UnknownFormat` for the demo's only FLI file.
-#[test]
-fn the_fli_magic_is_read_in_the_byte_order_it_is_stored_in() {
-    let bytes = std::fs::read("../../assets/PAM/PRAX4.FLI").unwrap();
-    assert_eq!(&bytes[4..6], &[0x11, 0xAF], "the file's own bytes");
-    assert_eq!(sniff(&bytes), Some(Format::Fli));
-}
-
-/// `para` always points past the palette: every writer computes it as
-/// `(16 + colors*3 + 15)/16` (`LBM2U.C:57`), so no shipped file puts its pixels
-/// inside its own palette — the rule cannot reject a real file.
+/// Every writer's `para` points past the palette (`LBM2U.C:57`), so one inside it is refused.
 #[test]
 fn a_pixel_offset_inside_the_palette_is_refused() {
     let mut bytes = fc_fc_raw(2, 1, &[[0, 0, 0], [1, 2, 3]], &[0, 1]);
@@ -460,68 +263,38 @@ fn a_pixel_offset_inside_the_palette_is_refused() {
     ));
 }
 
-#[test]
-fn load_path_refuses_a_file_it_cannot_identify() {
-    assert!(matches!(
-        load_path(Path::new("../../assets/PANIC/MONSTER.U")),
-        Err(AssetError::UnknownFormat)
-    ));
-}
-
-/// The plan's Review Focus #1, on the Origin family: every loader returns an
-/// `AssetError`, never panics and never reads past its input. A compiler cannot
-/// prove the indexing in the row walker safe, so this cuts each real file at a
-/// spread of offsets — ~200 cuts a file, stepped evenly through it, so most land
-/// in the payload and the first falls inside the 16-byte header — and requires
-/// an error rather than a panic.
-///
-/// The cut files are also the sharpest test of the length checks: a row whose
-/// length word survives the cut while its data does not is exactly the case the
-/// original's `readp` would walk off the end of. The offsets are *not* chosen to
-/// land on every row's length word — the step is what chooses them, below — so
-/// this is a sample of the truncation space, not an enumeration of it.
+/// Every loader returns an `AssetError` rather than panicking or reading past its input: each
+/// real file is cut at ~200 evenly spread offsets. A cut may decode only as a bit-plane file
+/// with fewer whole planes, a smaller picture in the same format.
 #[test]
 fn no_prefix_of_an_origin_asset_panics_or_decodes_silently() {
-    let mut checked = 0;
-    let mut refused = 0;
-    for path in origin_assets_in("../../assets") {
-        let raw = std::fs::read(&path).unwrap();
-        if sniff(&raw) != Some(Format::Origin) {
-            continue;
-        }
-        // ~200 cuts a file, spread evenly through it: most land in the payload,
-        // where the row walker indexes without the compiler's help, and the first
-        // is the only one inside the 16-byte header.
+    let (mut checked, mut refused) = (0, 0);
+    for (path, raw) in origin_assets() {
         let step = (raw.len() / 200).max(1);
         for cut in (0..raw.len()).step_by(step) {
             match load(&raw[..cut], Format::Origin) {
-                Ok(img) => {
-                    // The one legal case: a cut of a bit-plane file that happens
-                    // to leave a whole number of planes, which is a smaller
-                    // image in the same format, not a lie about the bytes.
-                    assert_eq!(
-                        img.pixels().len(),
-                        img.width() as usize * img.height() as usize,
-                        "{} cut to {cut}: decoded pixels vs header geometry",
-                        path.display()
-                    );
-                }
+                Ok(img) => assert_eq!(
+                    img.pixels().len(),
+                    img.width() as usize * img.height() as usize,
+                    "{} cut to {cut}",
+                    path.display()
+                ),
                 Err(_) => refused += 1,
             }
             checked += 1;
         }
     }
-    assert!(checked > 1_000, "expected a lot of cuts, made {checked}");
-    // The checks are what refuse them, not an early bail on byte 0.
+    assert!(checked > 1_000, "made {checked} cuts");
     assert!(refused * 10 > checked * 9, "only {refused} of {checked} cuts refused");
 }
 
-/// A still container is one frame, which is what `load_frames` is for: A6 adds the
-/// two formats that carry more than one.
-#[test]
-fn a_still_image_loads_as_one_frame() {
-    let bytes = std::fs::read("../../assets/GLENZ/FC.UH").unwrap();
-    let frames = load_frames(&bytes, Format::Origin).unwrap();
+/// A still container is one frame.
+#[rstest]
+#[case("GLENZ/FC.UH", Format::Origin, (320, 200))]
+#[case("BEG/SRTITLE.LBM", Format::Iff, (320, 400))]
+#[case("WATER/BKG.CLX", Format::Rix3, (320, 200))]
+fn a_still_image_loads_as_one_frame(#[case] file: &str, #[case] format: Format, #[case] size: (u16, u16)) {
+    let frames = load_frames(&asset(file), format).unwrap();
     assert_eq!(frames.len(), 1);
-    assert_eq!((frames[0].width(), frames[0].height()), (320, 200));
+    assert_eq!((frames[0].width(), frames[0].height()), size);
 }

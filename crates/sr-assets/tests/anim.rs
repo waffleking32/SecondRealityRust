@@ -1,84 +1,29 @@
-//! PAM's animation, in both the formats the tree shows: the FLI the part was
-//! authored in (`PAM/PRAX4.FLI`) and the `.ANI` record scheme the part's own
-//! packer made from it (`PAM/OUT.ANI`).
-//!
-//! Every file these tests read is a curated copy under `assets/`, verified
-//! byte-for-byte against `upstream/SecondReality/` at commit `071a82e` by task
-//! A1. The two decoders are pinned against the tree's own reader and writer, and
-//! against each other — the `.ANI` was packed from the frames the FLI player
-//! dumped (`PAM/ANIM.C:24-33` reads `out.u`, the 64,000-byte frames
-//! `PAM/VFLI.C:111` writes), so the 42 `.ANI` frames and the 42 FLI frames must
-//! come out byte-identical, and a decoder that got the delta base, the record
-//! forms or the canvas wrong would show it here rather than in a rendering
-//! comparison four phases later.
-//!
-//! The measurements the tests pin, all taken from the shipped bytes:
-//!
-//! - `PRAX4.FLI`'s header says 41 frames at offset 6 and the record walk finds
-//!   42 — one `0x0F` byte-run key frame and 41 `0x0C` line-compressed deltas —
-//!   and the last of the 42 is the first again, pixel for pixel.
-//! - Its only colour chunk is a `0x000B` in frame 0, and its 768 bytes are
-//!   `PAM/PAL.PAL` exactly. `VFLI.C` has both conversions — `:158` writes
-//!   `0x000B`'s bytes to the DAC untouched and `:170` shifts `0x0004`'s down two
-//!   — so the two rules the crate documents are both in the authority, and this
-//!   file takes the verbatim one.
-//! - `OUT.ANI`'s five `db` fragments in the assembly source split it at 65,535
-//!   bytes and add one trailing `0xFF` (`PAM/OUT.IN4`'s `db 0,-1`), which is
-//!   source-file padding, not a byte of the animation.
+//! PAM's animation: the FLI the part was authored in (`PAM/PRAX4.FLI`) and the `.ANI` record
+//! stream its packer made from it (`PAM/OUT.ANI`), each against the tree's reader and against
+//! the other.
 
+mod common;
+
+use common::{asset, fnv1a};
 use sr_assets::{load, load_frames, pal, sniff, AssetError, Format, Image};
 
-fn asset(rel: &str) -> Vec<u8> {
-    let path = format!("../../assets/{rel}");
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
-}
-
 fn fli_frames() -> Vec<Image> {
-    let fli = asset("PAM/PRAX4.FLI");
-    load_frames(&fli, Format::Fli).unwrap_or_else(|e| panic!("PRAX4.FLI: {e}"))
+    load_frames(&asset("PAM/PRAX4.FLI"), Format::Fli).unwrap_or_else(|e| panic!("PRAX4.FLI: {e}"))
 }
 
 fn ani_frames() -> Vec<Image> {
-    let ani = asset("PAM/OUT.ANI");
-    load_frames(&ani, Format::Ani).unwrap_or_else(|e| panic!("OUT.ANI: {e}"))
+    load_frames(&asset("PAM/OUT.ANI"), Format::Ani).unwrap_or_else(|e| panic!("OUT.ANI: {e}"))
 }
 
 fn word(bytes: &[u8], at: usize) -> u16 {
     u16::from_le_bytes([bytes[at], bytes[at + 1]])
 }
 
-/// FNV-1a over a frame's 64,000 pixels: one number that pins the whole picture,
-/// so "the first frame is stable" is checked against all of it and not against
-/// the corners.
-///
-/// **A regression pin, not evidence.** The digest, the pixel sum and the non-zero
-/// count in the test below move if the decode changes, which is what they are
-/// for; they cannot show the decode is *right*, because they came from the same
-/// decode. The evidence is elsewhere: the `.ANI` cross-check (two readers sharing
-/// no code agreeing on all 42 frames) and the comparisons against the files' own
-/// bytes (the palette against `PAL.PAL`, the fragments against `OUT.ANI`).
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
-        (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
-    })
-}
-
-// -------------------------------------------------------------------------------------------
 // The FLI
-// -------------------------------------------------------------------------------------------
 
-/// The frame count is the record walk's, not the header word's. `VFLI.C:66`
-/// reads offset 6 into `pics` and nothing in the tree ever reads `pics` again
-/// (the player walks records until `feof` at `VFLI.C:71-77`); the word says 41,
-/// the walk finds 42, and the last frame repeats the first, which is what a
-/// looping animation's writer would leave behind. Both numbers are pinned here
-/// so that "41" and "42" can never quietly swap.
-///
-/// The magic is pinned to the byte for the same reason: `sniff` accepts `0xAF11`
-/// and `0xAF12`, so this file drifting from one to the other would change nothing
-/// anywhere — and which one it carries is a measurement this task had to make
-/// (`docs/fidelity/asset-inventory.md` §E.5; the brief's step 3 said `0xAF12`),
-/// so it gets an assertion rather than a sentence.
+/// The stored magic is `0xAF11` (`asset-inventory.md` §E.5); the header's frame word says 41
+/// (`VFLI.C:66` reads it and nothing uses it) and the record walk finds 42, the last the first
+/// again. The key frame's pixel sum and digest are regression pins.
 #[test]
 fn the_fli_decodes_to_the_frames_its_own_record_walk_finds() {
     let fli = asset("PAM/PRAX4.FLI");
@@ -113,10 +58,7 @@ fn the_fli_decodes_to_the_frames_its_own_record_walk_finds() {
         "the key frame is a byte-run chunk (VFLI.C:247-272) that writes the whole screen"
     );
     assert_eq!(first.iter().map(|&b| b as u64).sum::<u64>(), 1_378_265);
-    assert_eq!(fnv1a64(first), 0xd527_b14f_0319_fd6a);
-    // The three numbers above are regression pins (see `fnv1a64`): they came from
-    // this decode, so they catch a change, and the cross-checks below are what
-    // says the decode is the file's.
+    assert_eq!(fnv1a(first), 0xd527_b14f_0319_fd6a);
 
     assert_eq!(
         frames[41].pixels(),
@@ -125,12 +67,8 @@ fn the_fli_decodes_to_the_frames_its_own_record_walk_finds() {
     );
 }
 
-/// The property that separates a delta decoder from a per-frame renderer. Each
-/// of these frames is one `0x000C` chunk covering a band of lines (frame 1's
-/// body opens `lb=96, count=8`, `VFLI.C:178-179`), so everything outside the band
-/// has to hold the previous frame's value — and pixel 8000 (row 25, column 0) is
-/// a non-zero one, so a decoder that rendered each frame on a fresh canvas would
-/// put black there and fail rather than merely differ.
+/// A `0x000C` delta covers a band of lines (frame 1's opens `lb=96, count=8`, `VFLI.C:178-179`);
+/// pixel 8000, outside every band here and not black, keeps the previous frame's value.
 #[rstest::rstest]
 #[case(1, 67)]
 #[case(2, 134)]
@@ -164,53 +102,19 @@ fn a_delta_frame_leaves_the_pixels_it_does_not_touch_alone(
     );
 }
 
-/// The ruling that has bitten this crate five times: which palette rule a format
-/// needs is measured, not assumed, and the test has to fail under the wrong one.
-///
-/// `VFLI.C` holds both rules: `0x000B` goes to the DAC untouched (`:158`) and
-/// `0x0004` is shifted down two (`:170`). This file's only colour chunk is a
-/// `0x000B` (`VFLI.C:149-160`), and its payload is `PAM/PAL.PAL` byte for byte —
-/// the palette `pal.rs` already rules on as six-bit verbatim, the one
-/// `PAM/ANIM.C:17-21` reads and hands to `tw_setpalette` (`PAM/TWEAK.ASM:151-156`
-/// writes it to ports 0x3C8/0x3C9). So the frames' palette is that file's, entry
-/// for entry.
-///
-/// The counts make the failure mode explicit: 743 of the palette's 768 bytes
-/// change under `six_bit` (the 6→8 display rule run backwards) and 743 under the
-/// IFF's `/4`, and entry 3's `(6, 6, 7)` becomes `(1, 1, 2)` and `(1, 1, 1)`
-/// respectively. A `<= 63` assertion would pass under all three rules.
+/// The only colour chunk is a `0x000B`, copied verbatim: every frame's palette is
+/// `PAM/PAL.PAL` (`PAM/ANIM.C:17-21`), entry for entry.
 #[test]
 fn the_fli_colour_chunk_is_six_bit_and_comes_out_verbatim() {
-    let raw = asset("PAM/PAL.PAL");
-    let pal_pal = pal::decode(&raw).unwrap();
-
+    let pal_pal = pal::decode(&asset("PAM/PAL.PAL")).unwrap();
+    assert_eq!(pal_pal.entry(3), [6, 6, 7]);
     for (i, frame) in fli_frames().iter().enumerate() {
         assert_eq!(frame.palette, pal_pal, "frame {i}'s palette");
     }
-
-    assert_eq!(pal_pal.entry(3), [6, 6, 7]);
-    assert_eq!(
-        [
-            sr_assets::six_bit(6),
-            sr_assets::six_bit(6),
-            sr_assets::six_bit(7)
-        ],
-        [1, 1, 2],
-        "six_bit run over an already-six-bit palette darkens it"
-    );
-    assert_eq!([6 / 4, 6 / 4, 7 / 4], [1, 1, 1], "and so does the 8→6 /4");
-    assert_eq!(
-        raw.iter().filter(|&&v| sr_assets::six_bit(v) != v).count(),
-        743
-    );
-    assert_eq!(raw.iter().filter(|&&v| v / 4 != v).count(), 743);
 }
 
-/// Truncation is refused at the byte the decoder stopped, and the two fields are
-/// file offsets (`sr_assets::AssetError`). Three shapes: a file shorter than the
-/// 128-byte header; a file that stops inside a frame record's own 16-byte header
-/// (`VFLI.C:74-82`); and one that stops inside a frame, whose size word
-/// (`VFLI.C:73-76`) promises the rest.
+/// A FLI cut short of its header, inside a frame record's header (`VFLI.C:74-82`), or inside a
+/// frame its size word promises (`VFLI.C:73-76`) is refused with the byte it wanted.
 #[rstest::rstest]
 #[case(0, 128)]
 #[case(100, 128)]
@@ -234,14 +138,8 @@ fn a_short_fli_is_refused_at_the_byte_it_stops(#[case] cut: usize, #[case] neede
     }
 }
 
-/// No input panics, and a truncated one never invents a frame: every cut either
-/// fails or decodes a prefix of the whole file's frames, each identical to its
-/// counterpart. The stride is prime so the cuts land all over the record
-/// structure rather than on its boundaries.
-///
-/// A 128-byte file is the header alone: no records, no frames, and `Ok` of an
-/// empty list rather than a refusal — there is nothing short about it. One byte
-/// less is short of the header, and one byte more is short of the first record.
+/// Every cut fails or decodes a prefix of the whole file's frames. The header alone (128 bytes)
+/// is `Ok` of no frames.
 #[test]
 fn no_fli_prefix_panics_or_produces_a_frame_the_whole_file_does_not() {
     let fli = asset("PAM/PRAX4.FLI");
@@ -264,15 +162,10 @@ fn no_fli_prefix_panics_or_produces_a_frame_the_whole_file_does_not() {
     }
 }
 
-// -------------------------------------------------------------------------------------------
 // The ANI
-// -------------------------------------------------------------------------------------------
 
-/// The cross-check that makes both decoders evidence for each other: the `.ANI`
-/// was packed from the very frames the FLI player dumped, so all 42 have to come
-/// out identical, byte for byte, from two readers that share no code. A wrong
-/// delta base, a misread run form or an off-by-one in the alignment would break
-/// the pair long before frame 42.
+/// The `.ANI` was packed from the frames the FLI player dumped (`PAM/ANIM.C:24-33` reads what
+/// `PAM/VFLI.C:111` writes), so two readers that share no code must agree on all 42.
 #[test]
 fn the_ani_decodes_to_the_fli_frames() {
     let fli = fli_frames();
@@ -285,113 +178,13 @@ fn the_ani_decodes_to_the_fli_frames() {
     }
 }
 
-/// A test-local walk of `ANIM.C`'s record stream — an independent decoder, so if
-/// the crate's own walk were wrong this one would have to be wrong the same way
-/// to hide it. `base` returns the canvas a frame starts from, which is the one
-/// thing the file itself cannot say.
-fn walk_records(ani: &[u8], base: impl Fn(&[Vec<u8>]) -> Vec<u8>) -> Vec<Vec<u8>> {
-    const CANVAS: usize = 64_000;
-    let mut frames: Vec<Vec<u8>> = Vec::new();
-    let mut pos = 0;
-    while pos < ani.len() {
-        let mut canvas = base(&frames);
-        assert_eq!(canvas.len(), CANVAS);
-        let mut cursor = 0;
-        let mut p = pos;
-        loop {
-            let run = ani[p] as i8;
-            p += 1;
-            if run == 0 {
-                break;
-            }
-            if run > 0 {
-                canvas[cursor..cursor + run as usize].fill(ani[p]);
-                cursor += run as usize;
-                p += 1;
-            } else {
-                cursor += run.unsigned_abs() as usize;
-            }
-        }
-        frames.push(canvas);
-        pos = p + (16 - p % 16) % 16; // ANIM.C:42 pads, ASMYT.ASM:191-198 rounds up
-    }
-    frames
-}
-
-/// The record scheme `ANIM.C` writes and `ASMYT.ASM` reads, plus the base that
-/// makes it work. The shipped decoder and this walk agree frame for frame, and
-/// both agree with the FLI — so the scheme is pinned from three directions.
-///
-/// The base is the frame *two* back (`PAM/OUTTAA.C:51-60` alternates two screen
-/// pages with `tw_setstart`, decoding each frame into the page the frame two
-/// back is still on), which is why `PAM/ANIM.C:28-30` copies the previous frame
-/// into `VRAM` while `mpage1` still holds the one before, and why frames 0 and 1
-/// come off a cleared screen (`PAM/TWEAK.ASM:20-33` clears it).
-#[test]
-fn the_ani_record_scheme_is_the_one_anim_c_writes_and_asmy_reads() {
-    let ani = asset("PAM/OUT.ANI");
-    let walked = walk_records(&ani, |out| match out.len() {
-        0 | 1 => vec![0u8; 64_000],
-        n => out[n - 2].clone(),
-    });
-    let decoded = ani_frames();
-    let fli = fli_frames();
-    assert_eq!(walked.len(), 42);
-    for (i, (w, d)) in walked.iter().zip(&decoded).enumerate() {
-        assert_eq!(
-            w,
-            d.pixels(),
-            "the test-local walk and the decoder, frame {i}"
-        );
-        assert_eq!(w, fli[i].pixels(), "and the FLI, frame {i}");
-    }
-}
-
-/// The base, measured rather than asserted by construction: with a
-/// one-frame-back base — the obvious reading of "a delta from the previous
-/// frame" — only 4 of the 42 frames come out right, because the page the frame
-/// lands in still shows the frame two back. If the shipped decoder ever
-/// regressed to a one-frame-back base, `the_ani_decodes_to_the_fli_frames` would
-/// catch it; this test says why that base is wrong.
-#[test]
-fn a_one_frame_back_base_reproduces_only_four_of_the_frames() {
-    let ani = asset("PAM/OUT.ANI");
-    let fli = fli_frames();
-    let wrong = walk_records(&ani, |out| {
-        out.last().cloned().unwrap_or_else(|| vec![0u8; 64_000])
-    });
-    let matching = (0..fli.len())
-        .filter(|&i| wrong[i] == fli[i].pixels())
-        .count();
-    assert_eq!(
-        matching, 4,
-        "the frames whose delta happens to rewrite every pixel"
-    );
-}
-
-/// `ANIM.C:42` pads the output to a 16-byte boundary before every frame and
-/// `ASMYT.ASM:191-198` computes the next frame's segment the same way, so a
-/// frame start is a fact about the file the decoder and the reader must agree
-/// on. Frame 0 opens `0x88` — a 120-pixel skip, the encoder's own cap
-/// (`ANIM.C:48,54`, `a<120`) — and the last frame's `0x00` terminator is the
-/// file's last byte: the padding comes before a frame, so there is none after
-/// the last one.
+/// Every frame starts on a 16-byte boundary (`ANIM.C:42`, `ASMYT.ASM:191-198`) and the padding
+/// is zeros, 303 bytes in all; the last frame's terminator ends the file.
 #[test]
 fn the_ani_starts_every_frame_on_a_sixteen_byte_boundary_and_pads_with_zeros() {
     let ani = asset("PAM/OUT.ANI");
-    assert_eq!(ani[0], 0x88, "frame 0 opens with a skip of 120");
-    assert_eq!(
-        *ani.last().unwrap(),
-        0x00,
-        "the last frame's terminator ends the file"
-    );
-
-    // Walk the records to find each frame's start and the terminator after it.
-    let mut starts = Vec::new();
-    let mut pos = 0;
-    let mut padding = 0;
+    let (mut frames, mut padding, mut pos) = (0, 0, 0);
     while pos < ani.len() {
-        starts.push(pos);
         let mut p = pos;
         loop {
             let run = ani[p] as i8;
@@ -401,70 +194,40 @@ fn the_ani_starts_every_frame_on_a_sixteen_byte_boundary_and_pads_with_zeros() {
             }
             p += usize::from(run > 0); // a positive run carries one colour byte
         }
-        let next = p + (16 - p % 16) % 16;
-        if next <= ani.len() {
-            padding += next - p;
-            assert!(
-                ani[p..next].iter().all(|&b| b == 0),
-                "the {} pad bytes after frame {} are zeros (ANIM.C:42 writes fputc(0))",
-                next - p,
-                starts.len() - 1
-            );
-        }
+        let next = (p + (16 - p % 16) % 16).min(ani.len());
+        assert!(ani[p..next].iter().all(|&b| b == 0), "the pad after frame {frames}");
+        padding += next - p;
+        frames += 1;
         pos = next;
     }
-    assert_eq!(starts.len(), 42);
-    assert!(
-        starts.iter().all(|s| s % 16 == 0),
-        "every frame start is 16-byte aligned"
-    );
-    assert_eq!(
-        padding, 303,
-        "the file's total padding between its 42 frames; the padding comes before a frame, \
-         so the last one has none and the file ends on its terminator"
-    );
+    assert_eq!((frames, padding), (42, 303));
+    assert_eq!(*ani.last().unwrap(), 0x00);
 }
 
-/// `PAM/INCLUDE.ASM:9-26` includes the five fragments into five para-aligned
-/// segments so TASM could carry the animation inside the part's own executable
-/// (`PAM/PAM.PRJ`'s `memblock` is the first), which is the same trick
-/// `PAM/PAL.INC` plays with the palette. They are TASM `db` source, not raw
-/// bytes: values above 127 are written unsigned (`136` for `0x88`), and the one
-/// negative is `OUT.IN4`'s trailing `db 0,-1`, which is `0x00 0xFF` — the last
-/// frame's terminator and then a byte that is not part of any frame
-/// (`ALKU/HOI.IN1` shows the same `db 0,-1`). So the five join to `OUT.ANI`
-/// exactly, plus that one `0xFF`.
+/// `PAM/INCLUDE.ASM:9-26` includes `OUT.ANI` as five TASM `db` fragments of at most 65,535
+/// bytes. They join to the file exactly, plus `OUT.IN4`'s trailing `db 0,-1`: the last
+/// terminator and one `0xFF` that is no part of any frame.
 #[test]
 fn the_five_in_fragments_are_the_ani_as_tasm_db_source() {
-    fn parse_db(path: &str) -> Vec<u8> {
-        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    fn parse_db(text: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
-        for line in text.lines() {
+        for line in String::from_utf8_lossy(text).lines() {
             let Some(rest) = line.trim().strip_prefix("db") else {
                 continue;
             };
             for value in rest.split(',') {
-                let value: i32 = value
-                    .trim()
-                    .parse()
-                    .unwrap_or_else(|e| panic!("{path}: {e}"));
-                assert!(
-                    (-128..=255).contains(&value),
-                    "{path}: {value} is not a byte"
-                );
+                let value: i32 = value.trim().parse().unwrap();
+                assert!((-128..=255).contains(&value), "{value} is not a byte");
                 out.push(value as u8);
             }
         }
         out
     }
 
-    let parts: Vec<Vec<u8>> = (0..5)
-        .map(|i| parse_db(&format!("../../assets/PAM/OUT.IN{i}")))
-        .collect();
+    let parts: Vec<Vec<u8>> = (0..5).map(|i| parse_db(&asset(&format!("PAM/OUT.IN{i}")))).collect();
     assert_eq!(
         parts.iter().map(|p| p.len()).collect::<Vec<_>>(),
         vec![65_535, 65_535, 65_535, 65_535, 62_486],
-        "65,535 bytes is what TASM's INCLUDE took at a time; the fifth is the remainder"
     );
     let joined: Vec<u8> = parts.concat();
     let ani = asset("PAM/OUT.ANI");
@@ -480,24 +243,15 @@ fn the_five_in_fragments_are_the_ani_as_tasm_db_source() {
         "and the one byte past it is the db 0,-1 artefact"
     );
 
-    let in4 = std::fs::read_to_string("../../assets/PAM/OUT.IN4").unwrap();
+    let in4 = String::from_utf8(asset("PAM/OUT.IN4")).unwrap();
     assert!(
         in4.trim_end().ends_with("db\t136,136,136,241,0,-1"),
         "the 0xFF is OUT.IN4's last db line, not a byte of the animation"
     );
 }
 
-/// A short `.ANI` is refused at the byte it stops, in the same shape as the FLI:
-/// a run with no colour byte, a skip whose frame runs out before its terminator,
-/// and a frame with no terminator. A frame's records end where `ANIM.C:59` wrote
-/// the `0x00`; nothing else bounds them.
-///
-/// `0x80` is the one run byte whose sign is a trap: as an `i8` it is `-128`, the
-/// minimum, so negating it overflows where every other byte does not. It cannot
-/// come out of `ANIM.C` — runs are capped at 120 either way (`:48`, `:54`), so
-/// `0x80` is 48 past any byte that encoder writes — which is exactly why it needs
-/// the assertion rather than an argument. Here it is a skip of 128 pixels with no
-/// terminator after it, so the refusal must be an `AssetError` and not a panic.
+/// A run with no colour byte, a skip with no terminator after it (`0x80`, `i8::MIN`, which
+/// `ANIM.C`'s 120 cap never writes), and a frame with no terminator are refused where they stop.
 #[rstest::rstest]
 #[case(&[0x7F], 2, 1)]
 #[case(&[0x80], 2, 1)]
@@ -520,11 +274,7 @@ fn a_short_ani_is_refused_at_the_byte_it_stops(
     }
 }
 
-/// Runs are bounded by the canvas the record stream describes, 64,000 pixels
-/// (`ANIM.C:44`) — and the encoder cannot overrun it (`cnt+a<64000` caps the
-/// last run), so a stream that does is malformed and is refused rather than
-/// wrapped (`ASMYT.ASM:64-105` would write past the screen, into the planar
-/// words the pixels do not own).
+/// Runs are bounded by the 64,000-pixel canvas (`ANIM.C:44`); skips alone within it are a frame.
 #[test]
 fn an_ani_run_past_the_canvas_is_refused() {
     let over = [0x7Fu8, 0x09].repeat(505); // 505 x 127 = 64,135 pixels
@@ -541,9 +291,7 @@ fn an_ani_run_past_the_canvas_is_refused() {
     assert_eq!(load_frames(&skips, Format::Ani).unwrap().len(), 1);
 }
 
-/// No input panics, and a truncated `.ANI` never invents a frame either: every
-/// cut fails or decodes a prefix of the whole file's frames. The stride is prime
-/// so the cuts land inside records, on terminators and in the padding.
+/// Every cut fails or decodes a prefix of the whole file's frames.
 #[test]
 fn no_ani_prefix_panics_or_produces_a_frame_the_whole_file_does_not() {
     let ani = asset("PAM/OUT.ANI");
@@ -562,17 +310,9 @@ fn no_ani_prefix_panics_or_produces_a_frame_the_whole_file_does_not() {
     );
 }
 
-/// Byte strings no file ever produced, through both decoders, asserting only that
-/// they come back at all: the crate's promise is that malformed input is an
-/// `AssetError`, and "an `AssetError`, never a panic" is a claim about *all*
-/// input, not about the input the tree happens to hold.
-///
-/// This is the test the run byte `0x80` needed. As an `i8` it is `-128`, the
-/// minimum, so the one obvious way to write "skip this many" — `-run` — overflows
-/// exactly there and nowhere else; the real file cannot carry it (runs are capped
-/// at 120) and the prefix sweeps only walk real bytes, so nothing else here would
-/// have found it. `0x80` is also not rare in random input, which is why a fuzz
-/// case of a few hundred strings is the cheap way to keep that class covered.
+/// Malformed input is an `AssetError`, never a panic, for any bytes: 512 seeded strings through
+/// both decoders, some drawn from the extreme length and run bytes (`0x80` overflows a naive
+/// `-run`). Chunk dispatch is `synthetic_fli`'s job, below.
 #[test]
 fn random_byte_strings_are_refused_rather_than_panicked_on() {
     // xorshift64, fixed seed: reproducible, and no dependency for a test helper.
@@ -592,16 +332,6 @@ fn random_byte_strings_are_refused_rather_than_panicked_on() {
         }
         bytes.truncate(len);
         if case % 8 == 0 {
-            // Bias some cases towards the bytes a length or a run takes at its
-            // extremes (`0x00`/`0x01`/`0x7F`/`0x80`/`0x88`/`0xFF`).
-            //
-            // These are deliberately *not* the bytes this format dispatches on:
-            // the FLI header is checked at `bytes[4]`/`bytes[5]` (`0x11`/`0x12`
-            // and `0xAF`, anim.rs:220) and its frame records at `0xF1FA`
-            // (`FRAME_MAGIC`), and none of those is in the alphabet — so no case
-            // here reaches the chunk dispatch. That path is `synthetic_fli`'s,
-            // below, which hands the real header to the decoder on purpose; this
-            // test's job is the length arithmetic on input no file produced.
             for byte in bytes.iter_mut() {
                 *byte = [0x00u8, 0x01, 0x7F, 0x80, 0x88, 0xFF][(*byte as usize) % 6];
             }
@@ -611,15 +341,9 @@ fn random_byte_strings_are_refused_rather_than_panicked_on() {
     }
 }
 
-// -------------------------------------------------------------------------------------------
-// The doors, and synthetic input
-// -------------------------------------------------------------------------------------------
+// Synthetic input and the doors
 
-/// One frame record carrying one chunk, on the real header, so a chunk the tree
-/// never uses can be handed to the decoder. `VFLI.C:74-87` fixes both headers'
-/// shape: a frame record is a `u32` size, the `0xF1FA` type, a chunk count and
-/// eight ignored bytes (`:82`), and a chunk is a `u32` size, its type, and a body
-/// that the size includes.
+/// One frame record (`VFLI.C:74-87`) carrying one chunk, on the real header.
 fn synthetic_fli(chunk_type: u16, body: &[u8]) -> Vec<u8> {
     let mut file = asset("PAM/PRAX4.FLI");
     file.truncate(128);
@@ -634,28 +358,7 @@ fn synthetic_fli(chunk_type: u16, body: &[u8]) -> Vec<u8> {
     file
 }
 
-/// A colour chunk counts and indexes big-endian — the one place in either format
-/// that does. `VFLI.C:152-156` builds both fields as `getc()*256 + getc()`, and
-/// the file agrees: `01 00` is 256 colours, and 4 + 256*3 is the chunk's 778
-/// bytes less its six-byte header exactly. Reading them little-endian would give
-/// one colour and leave 765 bytes unread; the tests above, which compare the
-/// palette with `PAM/PAL.PAL` entry for entry, are what catches that.
-#[test]
-fn the_colour_chunk_counts_and_indexes_are_big_endian() {
-    let fli = asset("PAM/PRAX4.FLI");
-    let body = &fli[150..922]; // frame 0's 0x000B chunk: 144 + 6 header, size 778
-    assert_eq!(word(&fli, 148), 0x000B, "the chunk type");
-    assert_eq!([body[0], body[1]], [0x01, 0x00], "count, big-endian");
-    assert_eq!([body[2], body[3]], [0x00, 0x00], "first entry, big-endian");
-    assert_eq!(4 + 256 * 3, 778 - 6, "the payload fills the chunk exactly");
-}
-
-/// The forms `VFLI.C` does not implement are refused, not skipped: `:275-277`
-/// prints the type and `getch()`s, and the caller then seeks past the chunk
-/// (`:88`), which would leave a frame with missing pixels — a picture no file in
-/// the tree asks for. `0x0011` is `FLI_COPY` and `0x0012` the postage stamp;
-/// neither appears in `PRAX4.FLI`, whose chunks are one `0x000B`, one `0x000F`
-/// and 41 `0x000C`s (measured).
+/// A chunk type `VFLI.C` does not implement (`:275-277` prints it and skips it) is refused.
 #[rstest::rstest]
 #[case(0x0011)]
 #[case(0x0012)]
@@ -674,9 +377,7 @@ fn a_chunk_type_vfli_does_not_implement_is_refused(#[case] chunk_type: u16) {
     }
 }
 
-/// A chunk that outruns its own frame is refused at the frame's end, not read
-/// into the next frame's bytes the way `VFLI.C:87-88` would (it decodes the body
-/// with no bound at all and only re-seeks afterwards).
+/// A chunk that outruns its frame is refused at the frame's end (`VFLI.C:87-88` has no bound).
 #[test]
 fn a_chunk_that_outruns_its_frame_is_refused() {
     let mut file = asset("PAM/PRAX4.FLI");
@@ -702,11 +403,7 @@ fn a_chunk_that_outruns_its_frame_is_refused() {
     }
 }
 
-/// The colour chunk's own contract: a range that leaves the palette, a byte that
-/// is not six bits, and a body shorter than the count it declares. `VFLI.C`
-/// would write past its 768-byte array, hand a nine-bit value to a six-bit DAC
-/// and read the next chunk's bytes; `Palette::set_entry` would mask, and `Pal`
-/// is the variant the crate already uses for a palette outside its contract.
+/// A colour range past 256, a byte above 63, and a body shorter than its count are refused.
 #[test]
 fn a_colour_chunk_outside_its_contract_is_refused() {
     // 256 entries from entry 1: one past the end.
@@ -737,10 +434,8 @@ fn a_colour_chunk_outside_its_contract_is_refused() {
     }
 }
 
-/// `load_frames` is the door for both formats, and `load` — which returns one
-/// picture — refuses them by naming it. `sniff` still answers from magic alone,
-/// so the `.ANI`, which has none, is never sniffed; and a FLI with no magic is
-/// `UnknownFormat` rather than a zero-frame answer.
+/// `load` refuses both animations and names `load_frames`; the `.ANI` has no magic; a FLI without
+/// one is `UnknownFormat`; and the formats with their own readers refuse `load_frames`.
 #[test]
 fn load_frames_is_the_door_and_load_says_so() {
     for (rel, format) in [("PAM/PRAX4.FLI", Format::Fli), ("PAM/OUT.ANI", Format::Ani)] {
@@ -761,7 +456,6 @@ fn load_frames_is_the_door_and_load_says_so() {
         load_frames(&vec![0u8; 500], Format::Fli),
         Err(AssetError::UnknownFormat)
     ));
-    // The three formats with their own door keep refusing `load_frames`.
     for (bytes, format) in [
         (asset("PAM/PAL.PAL"), Format::Pal),
         (asset("PAM/OUT.ANI"), Format::Omf),

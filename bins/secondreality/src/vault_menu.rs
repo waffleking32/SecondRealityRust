@@ -149,13 +149,11 @@ mod tests {
     use sr_assets::load_path;
     use std::path::Path;
 
-    /// `ALKU/FONA.UH` read the way the demo's own text routine reads it:
-    /// `ALKU/MAIN.C:40`'s order starts at `A`, and its blank cell is the
-    /// strip's last twenty columns, which is the `(20, 30)` cell
-    /// `sr_assets::font` documents. Unit tests run in the binary's directory.
+    /// `ALKU/FONA.UH`, scanned the way the demo's own text routine scans it.
+    /// Unit tests run in the binary's directory.
     fn test_font() -> Font {
         let image = load_path(Path::new("../../assets/ALKU/FONA.UH")).expect("the font strip");
-        Font::from_image(image, (20, 30), 'A').expect("the strip read as ALKU reads it")
+        Font::from_image(image)
     }
 
     fn menu_frame(menu: &Menu, font: &Font) -> IndexedFrame {

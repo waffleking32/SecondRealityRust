@@ -713,8 +713,8 @@ table is A53 and `reference-indices.md` §26.8; **pinned by**
 `draw.rs`), shared by U2A and U2E, which keep their own scene drivers and gates. The scene and
 object readers are `crates/sr-assets/src/visu.rs`, plain format code. No new crate.
 
-**Why.** Demo-specific 3D maths sits above the engine (D3, D16), and the parts share it the way
-`parts/poslist.rs` shares the POS/WAT column decoder. `sr-assets` owns the format readers. The
+**Why.** Demo-specific 3D maths sits above the engine (D3, D16), shared by the two parts that use
+it; `sr-assets` owns the format readers. The
 readers parse all 45 shipped objects and both scene streams (`U2A.0AB` 522 frames, `U2E.0AB` 1,802).
 
 **Pinned by** `cargo test -p sr-assets --test visu

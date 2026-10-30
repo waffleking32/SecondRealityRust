@@ -124,7 +124,7 @@ are palette entries 1-3 (`MAIN.C:194-208`), so the two palettes give visibly dif
 
 **The font.** `ALKU/INCLUDE.ASM:17` includes `fona.inc`, which is `FONA.UH[783:]`, one byte before
 the decoder's pixel area at 784 (`asset-inventory.md` §8). The port builds `sr_assets::font::Font`
-from the decoded 1500×30 strip with a 20×30 cell. The shift is invisible: both `[783:]` and
+from the decoded 1500×30 strip. The shift is invisible: both `[783:]` and
 `[784:]` hold the same glyph bytes in all 76 runs (byte 783 is zero). `MAIN.C` reads 32 rows
 (`:218`, `:225`) of the 30-row strip; the release reads 29 (§12), and its two padding rows are zero
 in the image (A9, closed).

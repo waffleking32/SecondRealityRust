@@ -120,8 +120,8 @@ the offset it leaves is §7's chain residual (A11, A53).
 ## 4. Decisions
 
 - **The shipped image is the data** (D49, §9); A10 (the nine changed screens) is retired.
-- **The font strip is read raw, 32 of its 40 rows** (A8): its 32-column cell does not divide the
-  1,500-column strip, so `sr_assets::font::Font` refuses it.
+- **The font strip is read raw, 32 of its 40 rows** (A8): a `sr_assets::font::Font` glyph is every
+  row of its strip.
 - **Not modelled:** the `for(a=0;a<10000;a++)` delays (`MAIN.C:182`, `:202`), which keep the writes
   inside the retrace the port's tick already is, and the image's three differences (§9).
 

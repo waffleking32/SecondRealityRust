@@ -252,7 +252,8 @@ past its input (the crate doc has the rules).
 
 The modules: `origin` (the Origin PIC family behind `.UH`, `.U`, `.UP`, `.P`, `.16`, `.X`), `iff`
 (ILBM and PBM), `rix` (RIX3, `.CLX`/`.SCI`), `pal` (headerless `.PAL`), `anim` (PAM's FLI and
-`.ANI`), `font` (the text strips), `visu` (VISU's packed scenes `.00M`/`.0AA`/`.0AB`/`.00N`), `omf`
+`.ANI`), `font` (the text strips), `visu` (VISU's packed scenes `.00M`/`.0AA`/`.0AB`/`.00N`),
+`poslist` (FOREST's and WATER's `.DAT` column lists), `omf`
 (the `.OBK`/`.OBJ` container, to recover assets compiled into an object) and `exe` (the shipped
 part EXEs, unpacked; D49).
 

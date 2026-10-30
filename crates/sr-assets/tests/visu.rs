@@ -1,65 +1,18 @@
-//! VISU's packed scene formats: the master `.00M`, the scene list `.0AA`, the
-//! animation stream `.0AB`, and the object files `.00N`.
-//!
-//! Every file these tests read is a curated copy under `assets/`, verified
-//! byte-for-byte against `upstream/SecondReality/` by task A1. The formats are
-//! the original's own writer's:
-//!
-//! - `VISU/C/SAVE.C:40-90` — `saveobject` writes `VERS`, `NAME`, `VERT`,
-//!   `NORM`, `POLY`, one `ORD0` and any number of `ORDE` blocks, each with a
-//!   four-byte tag and a little-endian `u32` length, and pads each block to a
-//!   four-byte boundary (`endblock`, `:16-32`).
-//! - `VISU/VISU.C:25-96` — `vis_loadobject` walks those blocks: `VERS` is read
-//!   and only *printed* if it is not 1.00, `NAME` is a C string used as is,
-//!   `VERT` holds a `u16` count and a `u16` spare then that many 16-byte
-//!   `vlist`s, `NORM` a `u16` count and a `u16` basic-normal count then that
-//!   many 8-byte `nlist`s, `POLY` is the polygon data block, and `ORD0`/`ORDE`
-//!   become `o->pl[0]`/`o->pl[plnum++]`.
-//! - `VISU/C/MAIN.C:252-321` — the tool writes the `.00M`: eight zero words, a
-//!   768-byte palette at offset 16, then the object count and the object
-//!   numbers at the offset stored in the header's bytes 4..8; byte 15 is the
-//!   city flag (`'C'` or `'R'`, `MAIN.C:317-320`). `MAIN.C` also writes the
-//!   `.0AA` and its two `0xFFFF` words (`MAIN.C:286-295`), and
-//!   `READVUE.C:149-255` writes
-//!   the `.0AB` command stream and its closing `0xFF 0xFF` (`:253-254`).
-//! - `VISU/C/U2A.C:148-219` and `U2E.C:208-263` — the parts read it all back:
-//!   `scene0[15]` picks the city, `LONGAT(scene0+4)` locates the object list,
-//!   each `.0AA` entry names a `.0AB`, and the `.0AB` stream is decoded one
-//!   frame at a time (`U2A.C:336-430`, `U2E.C:445-539`).
-//!
-//! **The list base is measured, not guessed.** `C.H`'s `polylist` comment calls
-//! each word after the first two a "pointer to polygon N inside polydata", and
-//! the runtime adds the list word to the `polydata` base `vis_drawobject` hands
-//! `draw_polylist` (`VISU.C:124`). The shipped files settle where that base is:
-//! every `ORD0`/`ORDE` in every object begins with the offset 2, and every
-//! object's `POLY` content begins with the one zero word the decoder skips, so
-//! the first record sits at byte 2 of the block's content. The U2A.001 first
-//! record is an 8-gon — 4 bytes of header, 2 of normal index, 16 of vertices —
-//! and the next list word is 24, exactly 2 + 22. Read relative to the first
-//! record instead, the 2 would point inside that record and the 24 would miss
-//! every record start; there is no base other than the block's content start
-//! under which all 405 shipped lists resolve, which
-//! [`every_shipped_object_resolves_its_lists_and_matches_its_own_vertex_count`]
-//! asserts file by file.
-//!
-//! The record layout is the one the data shows, not `CD.H`'s comment: the
-//! comment says "4+2*n", but the files are 6+2*n — `sides`, `flags`, a
-//! 16-bit `color`, a 16-bit normal index, then `n` 16-bit vertex indices.
-//! U2A.001's first two records are 22 and 14 bytes long, and only 6+2*n puts
-//! the second record where the list's second offset (24) names it.
+//! VISU's packed scene formats (`.00M`, `.0AA`, `.0AB`, `.00N`) against the shipped scenes and
+//! their writers (`VISU/C/SAVE.C:40-90`, `VISU/C/MAIN.C:252-321`, `READVUE.C:149-255`). The list
+//! base and the `6+2*n` face record are the data's, not `C.H`'s or `CD.H`'s comments, and
+//! `every_shipped_object_resolves_its_lists_and_matches_its_own_vertex_count` is what settles
+//! them: no other base resolves all 405 shipped lists.
 
-use std::path::Path;
+mod common;
 
 use sr_assets::visu::{read_animation, read_master, read_object, read_scene_list};
 use sr_assets::AssetError;
 
-/// The scene directory, read the way the other `sr-assets` integration tests
-/// read `assets/`: relative to the crate directory `cargo test` runs in.
 const SCENE: &str = "../../assets/VISU/C/SCENE";
 
 fn asset(name: &str) -> Vec<u8> {
-    let path = Path::new(SCENE).join(name);
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+    common::asset(&format!("VISU/C/SCENE/{name}"))
 }
 
 /// Every shipped object file: `<scene>.NNN` for U2A's 001-003 and U2E's

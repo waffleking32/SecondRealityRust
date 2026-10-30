@@ -75,11 +75,9 @@ const VAULT_TITLE: &str = "Second Reality — vault";
 /// The settings screen's title bar, until the run replaces it with its status line.
 const SETUP_TITLE: &str = "Second Reality — setup";
 
-/// The menu's font: `ALKU/FONA.UH` read as `ALKU/MAIN.C`'s text routine reads
-/// it — 20-column cells, 30 rows, first cell `A` (`sr_assets::font` documents
-/// the geometry). Every part reads its own media by the same relative path.
+/// The menu's font: `ALKU/FONA.UH`, scanned as `ALKU/MAIN.C`'s text routine scans it
+/// (`sr_assets::font`). Every part reads its own media by the same relative path.
 const MENU_FONT: &str = "assets/ALKU/FONA.UH";
-const MENU_CELL: (u16, u16) = (20, 30);
 
 /// How long the menu blocks waiting for an event. The menu is static, so this
 /// is a wait and not a poll: nothing happens until a key or the close button
@@ -601,7 +599,7 @@ fn vault_loop(
 /// Load the menu's font strip.
 fn menu_font() -> Result<Font, Box<dyn Error>> {
     let image = load_path(Path::new(MENU_FONT)).map_err(|error| format!("{MENU_FONT}: {error}"))?;
-    Ok(Font::from_image(image, MENU_CELL, 'A').map_err(|error| format!("{MENU_FONT}: {error}"))?)
+    Ok(Font::from_image(image))
 }
 
 /// Open what the command line asked the run to play through: a sound card, a WAV file, or
@@ -1057,7 +1055,7 @@ mod tests {
     /// The font strip as unit tests find it: they run in the binary's directory.
     fn settings_font() -> Font {
         let image = load_path(Path::new("../../assets/ALKU/FONA.UH")).expect("the font strip");
-        Font::from_image(image, MENU_CELL, 'A').expect("the strip read as ALKU reads it")
+        Font::from_image(image)
     }
 
     #[test]

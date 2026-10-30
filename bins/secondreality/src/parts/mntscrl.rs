@@ -130,11 +130,10 @@
 
 use std::path::Path;
 
+use sr_assets::poslist::PosList;
 use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
-
-use crate::parts::poslist::PosList;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "mntscrl";

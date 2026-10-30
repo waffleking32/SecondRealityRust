@@ -97,7 +97,7 @@ pub fn text_width(font: &Font, text: &str) -> i32 {
     let mut glyphs: i32 = 0;
     for ch in text.chars() {
         if let Some(glyph) = glyph_of(font, ch) {
-            width += (glyph.len() / font.cell().1 as usize) as i32;
+            width += (glyph.len() / font.rows() as usize) as i32;
             glyphs += 1;
         } else {
             // A space — the strip's blank is not a cell the scan finds — and
@@ -111,7 +111,7 @@ pub fn text_width(font: &Font, text: &str) -> i32 {
 
 /// Draw `text` with its first glyph's cell at `(x, y)`, in `base`'s ink group.
 pub fn draw_text(frame: &mut IndexedFrame, font: &Font, x: i32, y: i32, text: &str, base: u8) {
-    let rows = font.cell().1 as usize;
+    let rows = font.rows() as usize;
     let mut pen = x;
     for ch in text.chars() {
         let Some(glyph) = glyph_of(font, ch) else {
@@ -168,7 +168,7 @@ mod tests {
     /// `vault_menu`'s tests, which read it the same way).
     fn test_font() -> Font {
         let image = load_path(Path::new("../../assets/ALKU/FONA.UH")).expect("the font strip");
-        Font::from_image(image, (20, 30), 'A').expect("the strip read as ALKU reads it")
+        Font::from_image(image)
     }
 
     #[test]
@@ -198,7 +198,7 @@ mod tests {
         let mut seen = Vec::new();
         for mark in "()+-*='".chars() {
             let glyph = glyph_of(&font, mark).unwrap_or_else(|| panic!("{mark:?} has no cell"));
-            let width = glyph.len() / font.cell().1 as usize;
+            let width = glyph.len() / font.rows() as usize;
             assert!((3..=25).contains(&width), "{mark:?} is {width} columns");
             assert!(glyph.iter().any(|&v| v != 0), "{mark:?} is blank");
             assert!(

@@ -25,7 +25,6 @@ pub mod mntscrl;
 pub mod pam;
 pub mod panicend;
 pub mod plzpart;
-pub mod poslist;
 pub mod rayscrl;
 pub mod techno;
 pub mod tunneli;

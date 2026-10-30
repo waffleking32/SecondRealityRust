@@ -222,12 +222,6 @@ impl From<sr_assets::AssetError> for MusicError {
     }
 }
 
-impl From<symbols::OmfError> for MusicError {
-    fn from(error: symbols::OmfError) -> MusicError {
-        MusicError::Symbols(error.to_string())
-    }
-}
-
 /// Why the STMIK segment could not be located in the running guest.
 #[derive(Debug)]
 pub enum LocateError {
@@ -550,7 +544,17 @@ pub fn symbol_map(object_path: &Path, object: &[u8]) -> Result<SymbolMap, MusicE
         .chain(MACHINE_WORDS)
         .copied()
         .collect();
-    let chosen = walk.select(&wanted)?;
+    let chosen: Vec<Symbol> = wanted
+        .iter()
+        .map(|name| {
+            walk.symbol(name).cloned().ok_or_else(|| {
+                MusicError::Symbols(format!(
+                    "the object publishes no symbol named {name:?}; it publishes {}",
+                    walk.symbols.len()
+                ))
+            })
+        })
+        .collect::<Result<_, _>>()?;
 
     let mut slots: Vec<u32> = POSITION_WORDS
         .iter()
@@ -558,7 +562,7 @@ pub fn symbol_map(object_path: &Path, object: &[u8]) -> Result<SymbolMap, MusicE
             chosen
                 .iter()
                 .find(|symbol| symbol.name == *name)
-                .expect("select returned every name")
+                .expect("every wanted name was found")
                 .offset
         })
         .collect();
@@ -591,7 +595,7 @@ pub fn symbol_map(object_path: &Path, object: &[u8]) -> Result<SymbolMap, MusicE
             )));
         }
     }
-    check_one_segment(&walk, chosen.first().expect("select returned every name"))?;
+    check_one_segment(&walk, chosen.first().expect("every wanted name was found"))?;
 
     let words: BTreeMap<String, u32> = chosen
         .into_iter()

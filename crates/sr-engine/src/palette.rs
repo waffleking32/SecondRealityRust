@@ -49,7 +49,7 @@ impl Palette {
     /// of the picture beside them, and the parts' own reads say it for all five —
     /// so they are six-bit DAC values already and shifting them down
     /// again darkens every colour by four. `sr_assets::pal::decode` reads them as
-    /// they are; `sr_assets::pal`'s docs carry the measurements that settle it.
+    /// they are; `crates/sr-assets/tests/pal.rs` carries the measurements.
     pub fn from_vga(bytes: &[u8]) -> Palette {
         let mut p = Palette::new();
         for (entry, rgb) in p.entries.iter_mut().zip(bytes.chunks_exact(3)) {
