@@ -134,9 +134,7 @@
 //!
 //! `:191-195` breaks the loop when `dis_musplus()` is in `(-4, 0)`, inside an
 //! `if(dis_indemo())`. The port has no demo flag: the run is always "in
-//! demo" and the cue applies to standalone runs too. The part's `standalone`
-//! flag decides nothing here, which is the controller's ruling for the phase
-//! and the note records it. The player publishes -3 from boot 10,368
+//! demo" and the cue applies to standalone runs too. The player publishes -3 from boot 10,368
 //! (`reference/music/second3b/trace.csv`, order 75 row 61) — during the fade,
 //! which does not check the cue — and the first -3 the main loop's own check
 //! would see is boot **12,950**, three frames after the frame cap (12,947)
@@ -667,7 +665,7 @@ impl Minvball {
         }
         // `:191-195`. There is no `dis_indemo` in the port: the run is always
         // in demo, and a standalone run keeps the cue (module docs).
-        let reading = ctx.music().map_or(-32, |music| music.musplus());
+        let reading = ctx.musplus();
         if reading > CUE_LOW && reading < CUE_HIGH {
             self.phase = Phase::Done;
             return PartStatus::Finished;
@@ -971,7 +969,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -1043,7 +1040,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
     }
@@ -1054,7 +1050,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
             }
@@ -1087,13 +1082,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 frame,
                 0,
                 1,
-                true,
                 exit,
                 music_fresh,
             )

@@ -1395,14 +1395,11 @@ impl Alku {
 
     /// Read the assets and prepare the screen; see the module docs.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music's start codes (ALKU/MAIN.C:59, :66, :72, \
-                          :79, :138) and the run has no music to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music's start codes (ALKU/MAIN.C:59, :66, :72, \
+             :79, :138) and the run has no music to wait on",
+        )?;
         let picture = self.read_image(self.hzpic_path)?;
         if (picture.width() as usize, picture.height() as usize)
             != (HZPIC_WIDTH, HZPIC_HEIGHT)
@@ -1603,7 +1600,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::{dac_expand, Surface};
 
     const TEST_HZPIC: &str = "../../assets/ALKU/HOI.U";
@@ -1650,7 +1646,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
         tick: u32,
@@ -1662,7 +1657,6 @@ mod tests {
                 surface: Surface::new(640, 400),
                 view: View::new(320, 200),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
                 tick: 0,
@@ -1675,13 +1669,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 tick,
                 0,
                 1,
-                true,
                 exit,
                 false,
             )
@@ -1702,7 +1694,7 @@ mod tests {
                 let mut ctx = self.ctx(tick);
                 callback(&mut ctx);
             }
-            self.copper.restore(slot, callback);
+            self.copper.set(slot, callback);
         }
 
         /// One tick in the engine's order: slot 0, the part, slot 1, slot 2.

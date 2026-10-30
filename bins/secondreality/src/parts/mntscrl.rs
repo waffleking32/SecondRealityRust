@@ -467,7 +467,7 @@ impl Mntscrl {
     /// `:193-224`: one pass of the main loop.
     fn main_tick(&mut self, ctx: &mut PartCtx) -> PartStatus {
         // `:196-203`: the cue is `== -11` exactly.
-        let reading = ctx.music().map_or(-32, |music| music.musplus());
+        let reading = ctx.musplus();
         if reading == CUE {
             self.fadeout = true;
         }
@@ -558,14 +558,11 @@ impl Part for Mntscrl {
         // `:153-159` is a music wait; a run with no player could never leave
         // it. The shell refuses to start such a run (Task 7), and this is the
         // same refusal where the part can see it.
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position \
-                          (FOREST/READ2.PAS:153-159, :196-203) and the run has no music to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (FOREST/READ2.PAS:153-159, :196-203) and the run has no music to wait on",
+        )?;
 
         // The reference's player was 11 polls old when this part's tick 0 ran
         // (`REFERENCE_FIRST_INDEX` - `MUSIC_START_FRAME`); an unanchored entry
@@ -734,7 +731,7 @@ impl Part for Mntscrl {
                 }
                 if self.tree_wait {
                     // The development snapshot's `:156-158` `cmp dx,0 / jl`.
-                    let reading = ctx.music().map_or(-32, |music| music.musplus());
+                    let reading = ctx.musplus();
                     if reading >= 0 {
                         self.phase = Phase::PreRoll { y: 0 };
                         return PartStatus::Continuing;
@@ -837,7 +834,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{musplus_from, Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -943,7 +939,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
     }
@@ -954,7 +949,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
             }
@@ -987,13 +981,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 frame,
                 0,
                 1,
-                true,
                 exit,
                 music_fresh,
             )

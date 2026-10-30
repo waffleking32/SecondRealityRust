@@ -909,8 +909,7 @@ all read the **published** words (§8): `musplus_from` and `sync_from` take `Pla
 keeps it; 1 takes `@@1b`, `row - 64` clamped up at `-32` by a **signed** `jge` (`:270`); 2 takes
 `@@1e`, the row while it is below 32 and the sentinel from 32; any other value (3, §8) dispatches
 on `row > 32` with an **unsigned** `ja` (`:260`), so row 32 reads the sentinel and row 33 reads
-`-31`. `musplus_is_the_objects_own_two_phase_rule` tables every boundary and
-`musplus_over_every_row_matches_the_objects_decision_tree` checks all 1,024 pairs. The parts read
+`-31`. `musplus_is_the_objects_own_two_phase_rule` tables every boundary. The parts read
 it as a countdown: `GLENZ/MAIN.C:290` waits for `-19`, `TECHNO/KOE.C:213` and `:275` for `-4` and
 `-3`, `PLZPART/PLZ.C:68` for 0, `PLZPART/VECT.C:116` for 13, `JPLOGO/JP.C:71` for 4, and
 `GLENZ/MAIN.C:411` breaks between `-16` and 0.
@@ -924,9 +923,7 @@ that wait on other values (`GRID/MAIN.C:72` for 2, `:160` for 3, `HARD/B.C:138` 
 
 `ordersync1` (`DIS/DISINT.ASM:428-446`, fifteen entries, keys `(order << 8) | row`, codes 0…10 then
 1…4) is carried verbatim. `the_table_is_the_shipped_shells_own_bytes` finds its sixty bytes exactly
-once in each shell build the tree holds (`MAIN/U2.EXE`, `MAIN/2NDFIX.EXE`, `U2.EXE`);
-`MAIN/PROT/TEST.OLD` (`MAIN/MAKEFILE:39`, `:43-44`) carries `0x030b` where they carry `0x0300`
-(`an_older_build_carries_a_different_table`).
+once in each shell build the tree holds (`MAIN/U2.EXE`, `MAIN/2NDFIX.EXE`, `U2.EXE`).
 
 Two things about the loop (`:454-460`) decide the behaviour:
 
@@ -947,13 +944,12 @@ What the port does at each end:
 - **Before the table it answers.** At `(0, 0)` the read is the word before `ordersync1`, `07 c3`
   (`pop es` at `:420`, `ret` at `:424`, the end of `musframe_9`), in all three builds: **-15609** as
   the parts' 16-bit Turbo C `int` (`PAM/PAM.PRJ` is a Turbo C project;
-  `sync_answers_the_position_before_the_table_with_its_own_word`).
+  `sync_reads_the_table_the_object_reads`).
   `second5` holds `ord 0 row 0` until 426, so a `dis_sync() < N` there (`PAM/OUTTAA.C:39`'s `< 10`,
   `ALKU/MAIN.C:59`'s `< 1`) keeps waiting, as against the reference.
 - **Above the table it answers 4 and panics above `0x8E2E`** rather than answer a build-dependent
-  number (`sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code`,
-  `sync_refuses_the_first_key_past_the_sixteenth_compare`,
-  `the_answerable_bands_upper_edge_is_the_word_past_the_table`; A15). `hiddenu` holds keys above
+  number (`sync_reads_the_table_the_object_reads`,
+  `sync_refuses_the_first_key_past_the_sixteenth_compare`; A15). `hiddenu` holds keys above
   `0x4200` for 5,148 of its 6,351 frames (81.1 %).
 
 ### `zframe`, and what a part sees with no player

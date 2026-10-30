@@ -1,10 +1,8 @@
 //! The copper: the original's three per-frame callbacks, preserved.
 //!
 //! `dis_setcopper()` registers a routine the Demo Interrupt Server calls at a
-//! fixed point of every vertical blank — at the top of the screen, just before
-//! retrace, and during retrace. Two existing C++ ports stubbed the whole thing
-//! out and lost every effect that depended on it; here all three slots are
-//! first-class and their ordering is fixed (see [`crate::engine::Engine::tick`]).
+//! fixed point of every frame: at the top of the screen, just before retrace,
+//! and during retrace. The order is [`Engine::tick`](crate::engine::Engine::tick)'s.
 
 use crate::part::PartCtx;
 
@@ -25,7 +23,6 @@ pub struct CopperRegistry {
 }
 
 impl Default for CopperRegistry {
-    /// All three slots empty — what [`CopperRegistry::new`] produces.
     fn default() -> Self {
         CopperRegistry::new()
     }
@@ -54,14 +51,9 @@ impl CopperRegistry {
         self.slots[slot].is_some()
     }
 
-    /// Remove the slot's function so it can be called while the rest of the
-    /// engine is borrowed. Always paired with `restore`.
+    /// Remove the slot's function, so it can run while the registry is
+    /// borrowed by its context; [`set`](CopperRegistry::set) puts it back.
     pub fn take(&mut self, slot: usize) -> Option<CopperFn> {
         self.slots[slot].take()
-    }
-
-    /// Put back a function from [`take`](CopperRegistry::take).
-    pub fn restore(&mut self, slot: usize, f: CopperFn) {
-        self.slots[slot] = Some(f);
     }
 }

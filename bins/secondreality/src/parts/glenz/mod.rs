@@ -618,11 +618,11 @@ impl Glenz {
     }
 
     fn music_frame(ctx: &mut PartCtx) -> i32 {
-        ctx.music().map_or(0, |music| music.getmframe())
+        ctx.getmframe()
     }
 
     fn music_plus(ctx: &mut PartCtx) -> i32 {
-        ctx.music().map_or(-32, |music| music.musplus())
+        ctx.musplus()
     }
 
     /// `if(a<0 && a>-16) break;` (`MAIN.C:411`): MUSIC1's exit cue.
@@ -850,12 +850,10 @@ impl Part for Glenz {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "GLENZ waits on MUSIC1's musplus and the run has no music".into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "GLENZ waits on MUSIC1's musplus and the run has no music",
+        )?;
         // The inherited screen is BEGLOGO's 320x400 Mode X. A run that starts
         // at GLENZ enters at whatever the shell's start view is; the part
         // installs the 400-row view itself, and the note records the
@@ -969,7 +967,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::Surface;
 
@@ -1082,7 +1079,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Option<Player>,
     }
@@ -1093,7 +1089,6 @@ mod tests {
                 surface: Surface::new(640, 400),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT_200),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player: Some(player),
             }
@@ -1116,13 +1111,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 music,
                 tick,
                 0,
                 1,
-                true,
                 exit,
                 false,
             )

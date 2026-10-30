@@ -96,10 +96,8 @@ returns `BEFORE_THE_TABLE` below it.
 (`reference/parts/pam/` 7710-7900, §6; `dis_sync()<10` opens at `(13, 1)` on boot 7710,
 `reference/music/second1b`).
 
-**Tests.** `sync_reads_the_table_the_object_reads` (23 `(order, row)` cases),
-`sync_answers_the_position_before_the_table_with_its_own_word` (-15609, `0xC307`),
-`sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code`,
-`sync_refuses_the_first_key_past_the_sixteenth_compare`, `the_table_is_the_shipped_shells_own_bytes`
+**Tests.** `sync_reads_the_table_the_object_reads` (26 `(order, row)` cases, among them `(0, 0)`'s
+-15609 and the band above the last key), `sync_refuses_the_first_key_past_the_sixteenth_compare`, `the_table_is_the_shipped_shells_own_bytes`
 (found once in each of the three shell builds), `the_picture_fade_hands_over_to_a_batch_gated_on_code_five`.
 
 ## 4. `setpalarea` uploads `2*count + start` bytes — the ranged DAC write (BEGLOGO, ENDLOGO, JPLOGO and TECHNO)

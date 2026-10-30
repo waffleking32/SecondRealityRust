@@ -399,7 +399,7 @@ impl Rayscrl {
                 self.cue_armed = false;
             } else {
                 // `:162` `cmp dx,-11 / jnz @a`.
-                let reading = ctx.music().map_or(-32, |music| music.musplus());
+                let reading = ctx.musplus();
                 if self.confirm(reading == CUE) {
                     self.cue_armed = true;
                 }
@@ -487,15 +487,12 @@ impl Part for Rayscrl {
         // Every gate this part has is music: the init wait (`:98-104`), stage 2
         // (`:135-143`) and the cue (`:158-166`). A run with no player could
         // never leave any of them.
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position \
-                          (WATER/DEMO.PAS:98-104, :135-143, :158-166) and the run has no music \
-                          to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (WATER/DEMO.PAS:98-104, :135-143, :158-166) and the run has no music \
+             to wait on",
+        )?;
 
         // The reference's player was already at order 88 row 0 on the tick this
         // part's tick 0 stands at (`MUSIC_PRE_ROLL`); an unanchored entry run
@@ -652,7 +649,7 @@ impl Part for Rayscrl {
                     self.phase = Phase::Done;
                     return PartStatus::Finished;
                 }
-                let reading = ctx.music().map_or(-32, |music| music.musplus());
+                let reading = ctx.musplus();
                 if self.confirm(reading >= 0) {
                     self.phase = Phase::Setup;
                 }
@@ -763,7 +760,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -887,7 +883,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: M,
     }
@@ -898,7 +893,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
             }
@@ -931,13 +925,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 frame,
                 0,
                 1,
-                true,
                 exit,
                 music_fresh,
             )

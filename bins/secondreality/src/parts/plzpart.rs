@@ -1274,14 +1274,11 @@ impl Part for Plzpart {
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // The part gates on the music (`PLZ.C:68`, `VECT.C:116,119`); a run
         // with no player could never leave the gate.
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position \
-                          (PLZPART/PLZ.C:68, VECT.C:116) and the run has no music to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (PLZPART/PLZ.C:68, VECT.C:116) and the run has no music to wait on",
+        )?;
         let tables = Tables::load_at(Path::new(self.table_directory))?;
         let pals = build_pals(&tables);
         {
@@ -1390,7 +1387,7 @@ impl Part for Plzpart {
                 }
                 Phase::CubeGate => {
                     // `VECT.C:116`: `while(dis_musplus()<13 ...)`.
-                    let reading = ctx.music().map_or(-32, |music| music.musplus());
+                    let reading = ctx.musplus();
                     if reading < CUBE_GATE {
                         return PartStatus::Continuing;
                     }
@@ -1494,7 +1491,7 @@ impl Plzpart {
 
     /// `PLZ.C:76-118`: one pass of the plasma's loop. `true` when it breaks.
     fn plasma_tick(&mut self, ctx: &mut PartCtx) -> bool {
-        let published = ctx.music().map_or(0, |music| music.getmframe());
+        let published = ctx.getmframe();
         let mut state = self.copper.borrow_mut();
         // `tim+=frame_count; frame_count=0; count++;`
         state.frame_count = 0;
@@ -1669,7 +1666,7 @@ impl Plzpart {
         self.compose_cube(ctx);
         // The loop repeats within the same frame boundary: check the music,
         // then swap for the next iteration and wait for the next vblank.
-        let reading = ctx.music().map_or(-32, |music| music.musplus());
+        let reading = ctx.musplus();
         if (CUBE_EXIT_LOW..0).contains(&reading) {
             self.phase = Phase::Done;
             return PartStatus::Finished;

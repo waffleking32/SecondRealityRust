@@ -145,13 +145,11 @@ impl U2a {
     /// here: `U2A.C:249` installs `copper2` after the gate, so no retrace
     /// advances the ring during the hold.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(self.error(
-                "this part waits on the music's order and row (U2A.C:229-238) and the run \
-                 has no music to wait on"
-                    .into(),
-            ));
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music's order and row (U2A.C:229-238) and the run \
+             has no music to wait on",
+        )?;
 
         let scene = load_scene(Path::new(self.scene_dir), SCENE_NAME)
             .map_err(|message| self.error(message))?;
@@ -402,7 +400,6 @@ mod tests {
     use crate::parts::visu::math::Matrix;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -491,7 +488,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
         tick: u32,
@@ -503,7 +499,6 @@ mod tests {
                 surface: Surface::new(640, 400),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
                 tick: 0,
@@ -516,13 +511,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 tick,
                 0,
                 1,
-                true,
                 exit,
                 false,
             )
@@ -538,13 +531,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 None,
                 tick,
                 0,
                 1,
-                true,
                 false,
                 false,
             )
@@ -559,7 +550,7 @@ mod tests {
                 let mut ctx = self.ctx(tick);
                 callback(&mut ctx);
             }
-            self.copper.restore(slot, callback);
+            self.copper.set(slot, callback);
         }
 
         /// One tick as the engine orders it: slot 0, the part, the compose,

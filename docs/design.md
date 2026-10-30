@@ -222,25 +222,27 @@ pub trait Part {
 ```
 
 `PartCtx` is the DIS surface, minimised. Its public fields are `surface`, `view`, `palette`,
-`frame`, `band`, `bands`, `standalone` and `exit_requested`.
+`frame`, `band`, `bands` and `exit_requested`. `Machine` (surface, view, palette, copper) builds one
+with `Machine::ctx`; the engine owns one `Machine`.
 
 | DIS service (original) | Port equivalent |
 |---|---|
 | `dis_version`, `dis_partstart` | gone: construction and `init` |
 | `dis_waitb()` | the engine tick: `frame()` runs once a tick, so the value is always 1 (§6.2) |
 | `dis_exit()` | `ctx.exit_requested`; a part asks for its own exit with `ctx.request_exit()` |
-| `dis_indemo()` | `ctx.standalone`, its inverse; the engine always sets it and no part reads it |
+| `dis_indemo()` | not modelled: no part reads it |
 | `dis_msgarea(n)` | not needed: only `STARTMUS` uses it, and the shell owns the music restarts |
 | `dis_sync()` | `music.sync()`, the shipped table verbatim, off-by-one included (bugs.md) |
-| `dis_musplus()`, `dis_musrow()` | `music.musplus()`, `music.musrow()` |
+| `dis_musplus()`, `dis_musrow()` | `music.musplus()`, `music.musrow()`; `ctx.musplus()`, `ctx.musrow()` answer `-32` and 0 with no music |
 | `dis_muscode(n)` | `music.muscode(n)`, which returns 0 (§7.4, A56) |
 | `dis_setmframe`, `dis_getmframe` | `music.setmframe(n)`, `music.getmframe()` |
 | `dis_setcopper` | `ctx.set_copper(slot, f)` |
 
-`ctx.music()` returns `Option<MusicRef>`: `None` in a run with no music. `ctx.music_fresh()` is true
+`ctx.music()` returns `Option<MusicRef>`: `None` in a run with no music, which a part that waits on
+a cue refuses with `ctx.require_music`. `ctx.music_fresh()` is true
 only in the `init` of the part the music was just installed for, which is when a part catches the
-player up to its boot frame (D31). The palette is written through `set_palette`,
-`set_palette_entry` and `set_palette_at`.
+player up to its boot frame (D31). The palette is written through `set_palette` and
+`set_palette_entry`.
 
 ### 4.4 `sr-assets`
 

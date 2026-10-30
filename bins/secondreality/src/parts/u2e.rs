@@ -167,13 +167,11 @@ impl U2e {
     /// saturates every byte it touches either way. Recorded in
     /// `docs/fidelity/u2e.md` §4.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(self.error(
-                "this part waits on the music's published order (U2E.C:357-366) and the run \
-                 has no music to wait on"
-                    .into(),
-            ));
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music's published order (U2E.C:357-366) and the run \
+             has no music to wait on",
+        )?;
 
         if ctx.surface.pixels().len() < SURFACE_PIXELS {
             return Err(self.error(format!(
@@ -620,7 +618,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -702,7 +699,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
         tick: u32,
@@ -714,7 +710,6 @@ mod tests {
                 surface: Surface::new(640, 400),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
                 tick: 0,
@@ -727,13 +722,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 tick,
                 0,
                 1,
-                true,
                 exit,
                 fresh,
             )
@@ -756,7 +749,7 @@ mod tests {
                 let mut ctx = self.ctx(tick);
                 callback(&mut ctx);
             }
-            self.copper.restore(slot, callback);
+            self.copper.set(slot, callback);
         }
 
         /// One tick as the engine orders it: slot 0, the part, the compose,
@@ -1495,13 +1488,11 @@ mod tests {
                 &mut rig.surface,
                 &mut rig.view,
                 &mut rig.palette,
-                &mut rig.timeline,
                 &mut rig.copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 false,
                 true,
             );

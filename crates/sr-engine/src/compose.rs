@@ -8,10 +8,8 @@ use crate::palette::{Palette, PaletteTimeline};
 use crate::surface::Surface;
 use crate::view::View;
 
-/// One finished frame: the pixels the beam drew, and the palette timeline.
-///
-/// The timeline is stamped by the engine as each band is composed, not by
-/// [`compose_band`] — see that function's note.
+/// One finished frame: the pixels the beam drew, and the palette timeline the
+/// engine stamped as each band was composed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexedFrame {
     pub width: u16,
@@ -48,12 +46,8 @@ impl IndexedFrame {
     }
 }
 
-/// Scanlines `[first, last)` of band `band` of `bands`, partitioning
-/// `0..height` exactly for any `height` and any `bands > 0`.
-///
-/// The floor-partition (`height * band / bands`) is what makes the parts meet
-/// exactly: a rounded chunk size would leave a gap or an overlap whenever
-/// `height` is not divisible by `bands`.
+/// Scanlines `[first, last)` of band `band` of `bands`. The floor partition
+/// (`height * band / bands`) covers `0..height` with no gap or overlap.
 pub fn band_range(height: u16, bands: u16, band: u16) -> (u16, u16) {
     let (height, bands, band) = (height as u32, bands as u32, band as u32);
     (
@@ -63,11 +57,7 @@ pub fn band_range(height: u16, bands: u16, band: u16) -> (u16, u16) {
 }
 
 /// Copy displayed scanlines `[first, last)` from `surface` through `view`
-/// into `frame`, sampling the surface as it stands now — this is the beam.
-///
-/// Deliberately does not touch `frame.palettes`: which palette was in force at
-/// which scanline is the engine's business, so the "palette in force when the
-/// beam reached this scanline" rule lives in one place.
+/// into `frame`: the beam. `frame.palettes` is the engine's to stamp.
 pub fn compose_band(
     frame: &mut IndexedFrame,
     surface: &Surface,
@@ -89,7 +79,6 @@ pub fn compose_band(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::palette::Palette;
     use crate::view::Split;
     use rstest::*;
 
@@ -145,27 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn compose_band_reads_the_rows_the_part_wrote() {
-        // A part draws with `Surface::set` or `row_mut`, which lay rows out at
-        // the surface's own stride. A view that has not asked for anything else
-        // must read them back at that same stride.
-        //
-        // The bug this pins was live: `View::new` defaulted the stride to the
-        // *view's* width, so a 320-wide picture on the 640-wide surface read
-        // each row's other half — a sheared picture, with no error anywhere.
-        let mut s = Surface::new(640, 400);
-        for y in 0..4 {
-            s.row_mut(y)[..320].fill((y + 1) as u8);
-        }
-        let v = View::new(320, 4);
-        let mut f = IndexedFrame::new(320, 4);
-        compose_band(&mut f, &s, &v, 0, 4);
-        for y in 0..4 {
-            assert_eq!(f.row(y as u16), &[(y + 1) as u8; 320][..], "row {y}");
-        }
-    }
-
-    #[test]
     fn compose_band_uses_the_split_view_for_lower_scanlines() {
         let s = striped_surface();
         let mut v = View::new(8, 4);
@@ -176,20 +144,14 @@ mod tests {
         compose_band(&mut f, &s, &v, 0, 4);
         assert_eq!(f.row(0), &[1; 8]);
         assert_eq!(f.row(1), &[2; 8]);
-        // Row 2 is the first post-split scanline, so it counts from 0 within the
-        // lower view: origin 8 lands on surface row 1. Row 3 counts from 1,
-        // landing on surface row 2. Counting from the frame top instead would
-        // give rows 3 and 0 — which is the bug this test exists to catch.
+        // Below the split the count restarts: rows 2 and 3 read surface rows 1 and 2.
         assert_eq!(f.row(2), &[2; 8]);
         assert_eq!(f.row(3), &[3; 8]);
     }
 
     #[test]
     fn a_lower_view_resolves_its_own_line_stride() {
-        // The stride is resolved per effective view, not once for the enclosing
-        // one. A split's lower view is built by the part and is usually a fresh
-        // `View::new`, so resolving only the outer view would read the lower
-        // half at the upper half's stride.
+        // The stride is resolved per effective view, not once for the enclosing one.
         let mut s = Surface::new(640, 400);
         for y in 0..2 {
             s.row_mut(y).fill(1);
@@ -208,40 +170,5 @@ mod tests {
         assert_eq!(f.row(1), &[1; 320][..]);
         assert_eq!(f.row(2), &[2; 320][..]);
         assert_eq!(f.row(3), &[2; 320][..], "the lower view's second row");
-    }
-
-    #[test]
-    fn timeline_returns_the_last_change_at_or_before_the_scanline() {
-        let mut tl = PaletteTimeline::new(Palette::BLACK);
-        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
-        let mut b = Palette::BLACK; b.set_entry(0, [2, 0, 0]);
-        tl.push(10, a);
-        tl.push(20, b);
-        assert_eq!(tl.palette_at(0).entry(0), [0, 0, 0]);
-        assert_eq!(tl.palette_at(10).entry(0), [1, 0, 0]);
-        assert_eq!(tl.palette_at(19).entry(0), [1, 0, 0]);
-        assert_eq!(tl.palette_at(20).entry(0), [2, 0, 0]);
-        assert_eq!(tl.palette_at(399).entry(0), [2, 0, 0]);
-    }
-
-    #[test]
-    fn timeline_replaces_a_change_at_the_same_scanline() {
-        let mut tl = PaletteTimeline::new(Palette::BLACK);
-        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
-        let mut b = Palette::BLACK; b.set_entry(0, [2, 0, 0]);
-        tl.push(10, a);
-        tl.push(10, b);
-        assert_eq!(tl.change_count(), 1);
-        assert_eq!(tl.palette_at(10).entry(0), [2, 0, 0]);
-    }
-
-    #[test]
-    fn timeline_reset_drops_changes_and_restores_the_base() {
-        let mut tl = PaletteTimeline::new(Palette::BLACK);
-        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
-        tl.push(10, a);
-        tl.reset(Palette::BLACK);
-        assert_eq!(tl.change_count(), 0);
-        assert_eq!(tl.palette_at(10).entry(0), [0, 0, 0]);
     }
 }

@@ -751,14 +751,11 @@ impl Part for Coman {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part opens with a music gate (`COMAN/MAIN.C:56` \
-                          `while(!dis_exit() && dis_musplus()<0)`) and the run has no music"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part opens with a music gate (`COMAN/MAIN.C:56` \
+             `while(!dis_exit() && dis_musplus()<0)`) and the run has no music",
+        )?;
         self.wave1 = self.read_wave(W1_PATH)?;
         self.wave2 = self.read_wave(W2_PATH)?;
         self.palette = palette();
@@ -793,7 +790,7 @@ impl Part for Coman {
             self.done = true;
             return PartStatus::Finished;
         }
-        let a = ctx.music().map_or(-32, |music| music.musplus());
+        let a = ctx.musplus();
         if !self.started {
             if a < 0 {
                 return PartStatus::Continuing;
@@ -1306,7 +1303,6 @@ mod tests {
         surface: sr_engine::Surface,
         view: View,
         palette: Palette,
-        timeline: sr_engine::palette::PaletteTimeline,
         copper: sr_engine::copper::CopperRegistry,
         music: crate::audio::PlayerMusic,
         frame: u32,
@@ -1322,7 +1318,6 @@ mod tests {
                 surface: sr_engine::Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: sr_engine::palette::PaletteTimeline::new(Palette::new()),
                 copper: sr_engine::copper::CopperRegistry::new(),
                 music: PlayerMusic::new(player, 0),
                 frame: 0,
@@ -1334,13 +1329,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.music),
                 self.frame,
                 0,
                 1,
-                true,
                 false,
                 fresh,
             );
@@ -1354,13 +1347,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.music),
                 self.frame,
                 0,
                 1,
-                true,
                 exit,
                 false,
             );

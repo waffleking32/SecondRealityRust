@@ -1,24 +1,16 @@
 //! The synthetic test card: the engine exercised with no demo asset at all.
 //!
-//! Five phases, one per visually-significant hardware behaviour of spec §2.4 —
+//! Five phases, one per visually significant hardware behaviour of design §2.4:
 //! raster bars with a per-scanline palette, CRTC start-address scrolling, a
 //! line-compare split, double-scan, and beam compose inside the overscan
 //! border. Each phase lasts [`TestCard::PHASE_TICKS`] logic ticks and the card
-//! runs forever, so it can be left on screen.
-//!
-//! The card is also the engine's end-to-end test: every phase has a property
-//! test at the bottom of this file that drives a [`Runner`](crate::Runner), so
-//! a behaviour that stops reaching the composed frame fails a test rather than
-//! quietly regressing.
+//! runs forever. The tests below drive every phase through
+//! [`Engine`](crate::Engine), so the card is also the engine's end-to-end test.
 
 use crate::compose::band_range;
 use crate::part::{Part, PartCtx, PartError, PartStatus};
 use crate::surface::{Surface, MAX_WIDTH};
 use crate::view::{Split, View};
-
-// Named by the test helper and the test bodies at the bottom of this file.
-#[cfg(test)]
-use crate::{engine::Runner, surface::MAX_HEIGHT};
 
 /// The card's picture width, in pixels: the geometry most parts use.
 const WIDTH: u16 = 320;
@@ -27,19 +19,8 @@ const HEIGHT: u16 = 200;
 /// The scanline the split picture starts on, and the surface row its lower half
 /// starts at.
 const SPLIT_ROW: u16 = 100;
-/// How many rows the split window walks down before the phase restarts, and so
-/// how many rows below the picture the phase fills.
-///
-/// The walk *was* bounded by the view's origin being `u16`: 64,000 (row 100) +
-/// 2 × 640 = 65,280 was the last origin that fitted, which is why the constant
-/// used to derive itself from `u16::MAX`. The origin is `u32` now (Phase 2,
-/// `docs/decisions.md` D16) and no longer bounds it — following that derivation
-/// through would ask for a walk of some 6.7 million rows, one surface row per
-/// step, which is a hang rather than a test. What bounds the walk is the
-/// surface: it only has to stay inside one, and three rows do — the window
-/// reads rows 100..=201 of a 400-row surface. Three is also all the card wants
-/// to exercise: a window that is demonstrably live, stepping a row per tick,
-/// over rows the tests can name.
+/// Rows the split window walks down before restarting; three keep it inside a
+/// 400-row surface (rows 100..=201).
 const SPLIT_WALK_ROWS: u16 = 3;
 /// Bars across the picture; one palette entry each.
 const BAR_COUNT: u8 = 16;
@@ -73,37 +54,24 @@ const BAR_PALETTE: [[u8; 3]; 16] = [
     [63, 63, 63], // white
 ];
 
-/// A part that cycles through the five visually-significant hardware
-/// behaviours of spec §2.4, one phase at a time, so the engine can be
-/// exercised end to end with no demo assets.
-pub struct TestCard {
-    /// The logic tick the current call belongs to, copied out of `ctx.frame` so
-    /// [`phase`](TestCard::phase) can be asked without a context.
-    tick: u32,
-}
-
-impl Default for TestCard {
-    /// Starts at phase 0, tick 0 — what [`TestCard::new`] produces.
-    fn default() -> Self {
-        TestCard::new()
-    }
-}
+/// The test card part. Stateless: the phase is derived from `ctx.frame`.
+#[derive(Default)]
+pub struct TestCard;
 
 impl TestCard {
     /// How many logic ticks each phase lasts.
     pub const PHASE_TICKS: u32 = 32;
-    /// How many phases there are: the five behaviours of spec §2.4.
+    /// How many phases there are.
     pub const PHASE_COUNT: u32 = 5;
 
-    /// Starts at phase 0, tick 0.
     pub fn new() -> TestCard {
-        TestCard { tick: 0 }
+        TestCard
     }
 
-    /// 0 bars+per-scanline palette, 1 scroll, 2 split, 3 double-scan,
-    /// 4 beam compose + border. Derived from the tick counter.
-    pub fn phase(&self) -> u32 {
-        (self.tick / Self::PHASE_TICKS) % Self::PHASE_COUNT
+    /// 0 bars + per-scanline palette, 1 scroll, 2 split, 3 double-scan,
+    /// 4 beam compose + border.
+    fn phase(frame: u32) -> u32 {
+        (frame / Self::PHASE_TICKS) % Self::PHASE_COUNT
     }
 }
 
@@ -112,14 +80,9 @@ impl Part for TestCard {
         "testcard"
     }
 
-    /// A 320×200 picture with the 16-colour bar palette loaded.
+    /// A 320×200 picture with the 16-colour bar palette loaded. The line stride
+    /// stays unset, so the card tests the default (the surface's row stride).
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        // The phases change how the picture is scanned out, never how big it
-        // is, so the view starts from a plain 320×200 again. The line stride is
-        // deliberately left unset: the card draws through `Surface`, which lays
-        // rows out at `MAX_WIDTH`, so that is the stride the beam must read —
-        // and leaving it unset is what makes the card a live test of the
-        // default rather than of an explicit value.
         *ctx.view = View::new(WIDTH, HEIGHT);
         for (entry, rgb) in BAR_PALETTE.iter().enumerate() {
             ctx.set_palette_entry(entry as u8, *rgb);
@@ -128,22 +91,14 @@ impl Part for TestCard {
     }
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        self.tick = ctx.frame;
-
-        // The view lives in the `Engine` and outlives this call, this tick and
-        // this phase, so every phase clears the fields it does not own before
-        // setting its own. A phase that left `split` or `double_scan` set would
-        // make the next phase's test fail for the wrong reason.
+        // The view outlives the phase, so clear what the other phases set.
         ctx.view.split = None;
         ctx.view.double_scan = false;
         ctx.view.border = None;
-        // `x_offset` is phase 1's pan. The split phase's origin needs no
-        // clearing here: it is set on the lower view, which `split` builds
-        // afresh every tick, so it is discarded with the view that held it.
         ctx.view.x_offset = 0;
         ctx.view.height = HEIGHT;
 
-        match self.phase() {
+        match Self::phase(ctx.frame) {
             0 => self.bars(ctx),
             1 => self.scroll(ctx),
             2 => self.split(ctx),
@@ -153,11 +108,8 @@ impl Part for TestCard {
         PartStatus::Continuing
     }
 
-    /// Eight bands, so the card always runs in beam-compose mode: the engine
-    /// composes after each band, and a palette write made for band `n` is
-    /// stamped at that band's first scanline. That is what makes the raster
-    /// bars and the beam-compose staircase visible, and what gives the per-band
-    /// palette assertion below something to read.
+    /// Eight bands, so a palette write made for band `n` is stamped at that
+    /// band's first scanline: the raster bars and the staircase.
     fn band_count(&self) -> u16 {
         8
     }
@@ -175,13 +127,7 @@ impl TestCard {
     }
 
     /// Phase 1 — CRTC start address: a fixed 1-in-8 stripe pattern, panned one
-    /// pixel per tick.
-    ///
-    /// The pan is the scrolling, and at one pixel per tick it stays inside one
-    /// 640-pixel line — so it rides in `x_offset`, which 16 bits are room
-    /// enough for, rather than in `start_addr`. Phase 2's window is what
-    /// exercises `start_addr`, and the card covering both fields is why this
-    /// one did not move when the origin widened.
+    /// pixel per tick through `x_offset` (phase 2 exercises `start_addr`).
     fn scroll(&self, ctx: &mut PartCtx) {
         if ctx.band == 0 {
             fill_surface(ctx.surface, |x, _| stripe_index(x));
@@ -195,8 +141,7 @@ impl TestCard {
     fn split(&self, ctx: &mut PartCtx) {
         if ctx.band == 0 {
             fill_rows(ctx.surface, 0, SPLIT_ROW as usize, |x, _| bar_index(x));
-            // The lower half of the picture, plus the rows the window's walk
-            // reaches below it.
+            // The lower half, plus the rows the window's walk reaches below it.
             fill_rows(
                 ctx.surface,
                 SPLIT_ROW as usize,
@@ -204,8 +149,7 @@ impl TestCard {
                 |x, _| BAR_COUNT - 1 - bar_index(x),
             );
         }
-        // One row per tick, so the window is live while its scanline stays at
-        // 100 and the tests can name exact pixels.
+        // One row per tick, while the split scanline stays at 100.
         let row = SPLIT_ROW + (ctx.frame % SPLIT_WALK_ROWS as u32) as u16;
         let mut lower = View::new(WIDTH, HEIGHT);
         lower.set_origin(MAX_WIDTH as u32 * row as u32);
@@ -231,19 +175,14 @@ impl TestCard {
     /// own palette entry 0, so the frame becomes a staircase of eight bands
     /// inside the overscan border.
     fn beam_compose(&self, ctx: &mut PartCtx) {
-        // The band's own scanlines, computed the way the engine partitions the
-        // frame for this band — drawn now, so the beam composes exactly what
-        // this call wrote.
+        // This band's own scanlines, as the engine partitions the frame.
         let (first, last) = band_range(HEIGHT, ctx.bands, ctx.band);
         fill_rows(ctx.surface, first as usize, last as usize, |_, _| 0);
         if ctx.band == 0 {
-            // The lines below the picture too: for the one tick after phase 3
-            // the frame is still 400 lines tall while this phase's view says
-            // 200, and the tail would otherwise show what phase 3 left there.
+            // Below the picture too: the tick after phase 3 still composes 400 lines.
             fill_rows(ctx.surface, HEIGHT as usize, ctx.surface.height(), |_, _| 0);
         }
-        // 6-bit DAC values, so the ramp must stay inside 0..=63 to be monotonic
-        // (band * 24 would wrap bands 3..7 back down).
+        // Six-bit DAC values: the ramp stays inside 0..=63.
         ctx.set_palette_entry(0, [8 + (ctx.band as u8) * 7, 0, 0]);
         ctx.set_palette_entry(BORDER_ENTRY, BORDER_RGB);
         ctx.view.border = Some(BORDER_ENTRY);
@@ -277,12 +216,8 @@ fn fill_surface(surface: &mut Surface, index: impl FnMut(usize, usize) -> u8) {
     fill_rows(surface, 0, rows, index);
 }
 
-/// Write `index(x, y)` into surface rows `[first, last)`, clamped to the
-/// surface. Every column of each row is written, so a horizontally panned view
-/// never runs off the end of the pattern.
-///
-/// Rows are addressed through the flat pixel run rather than `Surface::row_mut`,
-/// which panics on an out-of-range row.
+/// Write `index(x, y)` into every column of surface rows `[first, last)`,
+/// clamped to the surface.
 fn fill_rows(
     surface: &mut Surface,
     first: usize,
@@ -306,29 +241,21 @@ fn fill_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compose::IndexedFrame;
+    use crate::engine::Engine;
+    use crate::surface::MAX_HEIGHT;
     use rstest::*;
 
-    fn runner() -> Runner {
-        // The view leaves its line stride unset, exactly as the card's own
-        // `init` does: a 320-wide picture in a `MAX_WIDTH`-wide surface.
-        Runner::new(
-            MAX_WIDTH,
-            MAX_HEIGHT,
-            View::new(320, 200),
-            Box::new(TestCard::new()),
-        )
-        .unwrap()
-    }
-
-    /// Runs until the part's frame counter reads `phase * PHASE_TICKS + n`.
-    /// The counter is read at the *start* of a tick, so reaching tick `target`
-    /// takes `target + 1` steps, and `part_frame()` then reads `target + 1`.
-    fn frames(phase: u32, n: u32) -> Runner {
-        let mut r = runner();
-        let target = phase * TestCard::PHASE_TICKS + n;
-        for _ in 0..=target { r.step(); }
-        assert_eq!(r.part_frame(), target + 1);
-        r
+    /// The frame of tick `phase * PHASE_TICKS + n`.
+    fn frames(phase: u32, n: u32) -> IndexedFrame {
+        let mut card = TestCard::new();
+        let mut engine = Engine::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200));
+        engine.start(&mut card).unwrap();
+        let mut frame = IndexedFrame::new(320, 200);
+        for _ in 0..=phase * TestCard::PHASE_TICKS + n {
+            assert_eq!(engine.tick(&mut card, &mut frame), PartStatus::Continuing);
+        }
+        frame
     }
 
     #[rstest]
@@ -338,20 +265,12 @@ mod tests {
     #[case(3, 1)]
     #[case(4, 9)]
     fn the_test_card_is_deterministic(#[case] phase: u32, #[case] n: u32) {
-        let a = frames(phase, n).frame().clone();
-        let b = frames(phase, n).frame().clone();
-        assert_eq!(a, b, "phase {phase} tick {n} is not reproducible");
-    }
-
-    #[test]
-    fn phase_bars_writes_more_than_one_palette_per_frame() {
-        assert!(frames(0, 2).frame().palettes.change_count() > 1);
+        assert_eq!(frames(phase, n), frames(phase, n), "phase {phase} tick {n} is not reproducible");
     }
 
     #[test]
     fn phase_bars_leaves_every_band_a_distinct_palette() {
-        let r = frames(0, 2);
-        let f = r.frame();
+        let f = frames(0, 2);
         let mut seen = std::collections::HashSet::new();
         for y in (0..200).step_by(25) { seen.insert(f.palette_for(y).entry(0)); }
         assert_eq!(seen.len(), 8, "expected one distinct palette per band");
@@ -359,25 +278,21 @@ mod tests {
 
     #[test]
     fn phase_scroll_moves_the_view_between_ticks() {
-        let a = frames(1, 0).frame().clone();
-        let b = frames(1, 1).frame().clone();
-        assert_ne!(a, b, "scrolling should change the composed frame");
+        assert_ne!(frames(1, 0), frames(1, 1), "scrolling should change the composed frame");
     }
 
+    /// Surface rows 0..100 hold bars and rows 100..200 the inverse; the split
+    /// view starts at surface row 100.
     #[test]
     fn phase_split_reads_a_different_source_below_the_split_line() {
-        let f = frames(2, 8).frame().clone();
-        // Surface rows 0..100 hold bars, rows 100..200 hold the inverse. The
-        // split view's origin is surface row 100, so displayed row 100 must
-        // jump to the inverse pattern.
+        let f = frames(2, 8);
         assert_eq!(f.pixel(0, 99), 0);
         assert_eq!(f.pixel(0, 100), 15);
     }
 
     #[test]
     fn phase_double_scan_duplicates_every_source_row() {
-        let r = frames(3, 1);
-        let f = r.frame();
+        let f = frames(3, 1);
         for y in 0..200u16 {
             assert_eq!(f.row(2 * y), f.row(2 * y + 1), "row {y} not duplicated");
         }
@@ -385,47 +300,26 @@ mod tests {
 
     #[test]
     fn phase_beam_compose_staircases_the_palette_down_the_frame() {
-        let r = frames(4, 2);
-        let f = r.frame();
+        let f = frames(4, 2);
         let top = f.palette_for(0).entry(0);
         let bottom = f.palette_for(199).entry(0);
-        assert_ne!(top, bottom, "beam compose should stamp a different palette per band");
         assert!(bottom[0] > top[0], "the staircase should brighten downward");
+        assert!(f.border.is_some());
     }
 
-    #[test]
-    fn phase_beam_compose_sets_the_overscan_border() {
-        assert!(frames(4, 2).frame().border.is_some());
-    }
-
+    /// The card never finishes: `frames` asserts `Continuing` on every tick.
     #[test]
     fn the_test_card_never_reports_finished() {
-        let mut r = runner();
-        for _ in 0..(TestCard::PHASE_TICKS * TestCard::PHASE_COUNT + 4) {
-            assert_eq!(r.step(), PartStatus::Continuing);
-        }
+        frames(TestCard::PHASE_COUNT, 4);
     }
 
-    /// The beam reads the picture at the surface's row stride, so one picture
-    /// row is one surface row and not half of one.
-    ///
-    /// None of the tests above pin that: every other phase's pattern is
-    /// constant down a column, and phase 3's row pairs come from one source row
-    /// whatever the stride, so a view that set `y_line_offset = Some(320)` —
-    /// the view's own width rather than the surface's — passes them all. This
-    /// one does not: with the wrong stride, two picture rows share a surface
-    /// row, one as its left half and one as its right half, and land on the
-    /// same values.
+    /// One picture row is one surface row: a view whose stride were the view's
+    /// own width (320) would put two picture rows into one surface row.
     #[test]
     fn every_source_row_reaches_its_own_pair_of_frame_rows() {
-        let f = frames(3, 1).frame().clone();
+        let f = frames(3, 1);
         for y in 0..199u16 {
-            assert_ne!(
-                f.row(2 * y),
-                f.row(2 * y + 2),
-                "source rows {y} and {} landed on the same picture row",
-                y + 1
-            );
+            assert_ne!(f.row(2 * y), f.row(2 * y + 2), "source rows {y} and {} coincide", y + 1);
         }
     }
 }

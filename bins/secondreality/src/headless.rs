@@ -502,7 +502,7 @@ mod tests {
     impl Part for Fails {
         fn name(&self) -> &'static str { "fails" }
         fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
-            Err(PartError { part: "fails", message: "no".to_string() })
+            Err(PartError::new("fails", "no"))
         }
         fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus { PartStatus::Continuing }
     }

@@ -1,16 +1,15 @@
-//! The `Part` trait: what a demo part implements, replacing the Demo
-//! Interrupt Server.
+//! The `Part` trait: what a demo part implements, in place of the Demo
+//! Interrupt Server (`DIS/DIS.H`).
 //!
-//! A part sees one [`PartCtx`] per call, holding everything DIS used to hand
-//! out through globals: the surface, the view, the live palette, the frame
-//! counter, the copper slots, and the music — which is a global in the
-//! original too (`DIS/DISINT.ASM`'s music entries read the player's segment).
+//! A part sees one [`PartCtx`] per call, holding what DIS handed out through
+//! globals: the surface, the view, the live palette, the frame counter, the
+//! copper slots and the music.
 
 use std::fmt;
 
 use crate::copper::{CopperFn, CopperRegistry};
-use crate::music::MusicRef;
-use crate::palette::{Palette, PaletteTimeline};
+use crate::music::{MusicRef, NO_PLUS};
+use crate::palette::Palette;
 use crate::surface::Surface;
 use crate::view::View;
 
@@ -20,6 +19,12 @@ pub struct PartError {
     /// The part's `name()`.
     pub part: &'static str,
     pub message: String,
+}
+
+impl PartError {
+    pub fn new(part: &'static str, message: impl Into<String>) -> PartError {
+        PartError { part, message: message.into() }
+    }
 }
 
 impl fmt::Display for PartError {
@@ -55,20 +60,11 @@ pub trait Part {
     /// Whether the part keeps running after the exit flag is set, to finish a
     /// teardown of its own.
     ///
-    /// The original's `dis_exit()` ends a part's loop; it does not skip the
-    /// code after it. A part whose source runs a **timed teardown** after the
-    /// loop — U2E's sixteen-retrace DAC fade (`U2E.C:541-555`) — is still
-    /// working when it returns, so retiring it on the exit tick would cut the
-    /// teardown short: `Sequence::tick` and `Runner::stopped` keep ticking a
-    /// part that reports `true` here until it returns
-    /// [`PartStatus::Finished`](PartStatus::Finished) itself.
-    ///
-    /// The default is `false`, and it is right for every part but U2E: U2A's
-    /// teardown is synchronous within the tick its gate or loop sees the flag
-    /// (`U2A.C:239`, `:259`), and the rest simply return.
-    ///
-    /// [`Engine::start`](crate::engine::Engine::start) clears the sticky exit
-    /// flag, so a drain cannot leak into the part that follows.
+    /// `dis_exit()` ends a part's loop, not the code after it. U2E runs a
+    /// sixteen-retrace DAC fade after its loop (`U2E.C:541-555`), so the shell's
+    /// `Sequence::tick` keeps ticking a part that reports `true` until it
+    /// returns [`PartStatus::Finished`] itself. Every other part returns at once
+    /// (U2A's teardown is synchronous, `U2A.C:239`, `:259`).
     fn drains_after_exit(&self) -> bool {
         false
     }
@@ -78,52 +74,35 @@ pub trait Part {
 pub struct PartCtx<'a> {
     pub surface: &'a mut Surface,
     pub view: &'a mut View,
-    pub palette: &'a mut Palette, // the live palette; the engine stamps it per band
+    /// The live palette; the engine stamps it at each band's first scanline.
+    pub palette: &'a mut Palette,
     /// Logic ticks since this part started.
     pub frame: u32,
     /// Which band of this tick's `bands` this call is drawing.
     pub band: u16,
     /// How many bands this tick draws.
     pub bands: u16,
-    /// Running outside the demo shell (`dis_indemo()`).
-    pub standalone: bool,
+    /// The sticky exit flag (`dis_exit()`): set by [`request_exit`](PartCtx::request_exit)
+    /// or from outside by [`Engine::request_exit`](crate::engine::Engine::request_exit).
     pub exit_requested: bool,
-    // timeline, copper and music are private; reach them through the methods
-    // below
-    timeline: &'a mut PaletteTimeline,
     copper: &'a mut CopperRegistry,
     music: Option<MusicRef<'a>>,
-    /// True only for the init context of the first part started after the
-    /// run's music was installed; see [`music_fresh`](PartCtx::music_fresh).
     music_fresh: bool,
 }
 
 impl PartCtx<'_> {
-    /// Construct from disjoint borrows of the engine's fields.
-    ///
-    /// Deliberately takes the fields one by one rather than `&mut Engine`:
-    /// the engine builds one of these inside its band loop while its other
-    /// fields are still in use, which only compiles for a disjoint borrow.
-    ///
-    /// The arity is the point, so clippy's `too_many_arguments` is allowed
-    /// rather than worked around: bundling these into a struct would have to
-    /// hold the same `&mut` fields and be built at the same call site, which
-    /// changes nothing about the borrow (and a `&mut Engine` parameter — the
-    /// shape the lint is steering towards — is exactly what does not compile
-    /// here). Six of the twelve are the engine's own fields in the order
-    /// `Engine::tick` splits them.
+    /// Construct from disjoint borrows; [`Machine::ctx`](crate::machine::Machine::ctx)
+    /// is the usual way to build one.
     #[allow(clippy::too_many_arguments)]
     pub fn new<'a>(
         surface: &'a mut Surface,
         view: &'a mut View,
         palette: &'a mut Palette,
-        timeline: &'a mut PaletteTimeline,
         copper: &'a mut CopperRegistry,
         music: Option<MusicRef<'a>>,
         frame: u32,
         band: u16,
         bands: u16,
-        standalone: bool,
         exit_requested: bool,
         music_fresh: bool,
     ) -> PartCtx<'a> {
@@ -134,9 +113,7 @@ impl PartCtx<'_> {
             frame,
             band,
             bands,
-            standalone,
             exit_requested,
-            timeline,
             copper,
             music,
             music_fresh,
@@ -146,23 +123,13 @@ impl PartCtx<'_> {
     /// Replace the live palette. The engine stamps it at the next band's first
     /// scanline, so a change made while drawing band `n` shows from band `n`.
     pub fn set_palette(&mut self, pal: Palette) {
-        self.palette.copy_from(&pal);
+        *self.palette = pal;
     }
 
-    /// Change one entry of the live palette, for the same stamping as
+    /// Change one entry of the live palette, stamped like
     /// [`set_palette`](PartCtx::set_palette).
     pub fn set_palette_entry(&mut self, index: u8, rgb: [u8; 3]) {
         self.palette.set_entry(index, rgb);
-    }
-
-    /// Register a palette change at an explicit scanline (raster bars).
-    ///
-    /// The timeline is rebuilt every tick, so this lasts for the rest of the
-    /// tick it was made in — register it in copper slot 0 or in the band it
-    /// applies to. Each band then stamps the live palette at that band's first
-    /// scanline, replacing an explicit change made at exactly that scanline.
-    pub fn set_palette_at(&mut self, scanline: u16, pal: Palette) {
-        self.timeline.push(scanline, pal);
     }
 
     /// Install `f` in copper slot `slot`, one of [`COPPER_SLOTS`].
@@ -177,51 +144,72 @@ impl PartCtx<'_> {
         self.copper.is_set(slot)
     }
 
-    /// The music, when the run has any — `None` when it does not.
-    ///
-    /// This is the whole of a part's access to the player, the way `DIS/DIS.H:37-59` is the whole
-    /// of the original's: the six calls on [`Music`], the position, and nothing else. A part that
-    /// ignores music never calls this and is unaffected by a run having none; a part that needs a
-    /// cue is written against `Some` and says so, and the shell refuses to start it when the run
-    /// has no music (Task 7) rather than letting it wait for ever.
-    ///
-    /// [`Music`]: crate::music::Music
+    /// The music, or `None` when the run has none. This and the readers below
+    /// are a part's whole access to the player, as `DIS/DIS.H:37-59` is the
+    /// original's.
     pub fn music(&mut self) -> Option<MusicRef<'_>> {
         self.music.as_deref_mut()
     }
 
-    /// Whether the run's music was installed for this part alone — true only
-    /// for the init context of the part the **last `set_music` was for**, false
-    /// for every later part in the chain.
-    ///
-    /// [`Engine::set_music`](crate::engine::Engine::set_music) marks the
-    /// player fresh; the next [`Engine::start`](crate::engine::Engine::start)
-    /// hands `true` to that part's init context and clears it. So the first
-    /// part a `--part` or block run starts — the one the shell starts after
-    /// installing the music — is fresh, and every part the chain reaches
-    /// afterwards is not: its stretch of the player's timeline has already
-    /// run. A **mid-run restart** (`MAIN/U2.ASM:880-885`, at U2E's boundary)
-    /// loads a new player and re-arms the flag, so the part the restart
-    /// precedes is fresh too; the part after it is not.
-    ///
-    /// A part that makes the player catch up to a boot frame (MINVBALL's
-    /// 256 polls, RAYSCRL's 268, MNTSCRL's 11) or anchors a counter to one
-    /// (PAM's `frame_count = 2`) does so only when this is `true`; a part
-    /// reached mid-chain polls nothing and starts its counter at zero.
-    ///
-    /// Band and copper contexts are never fresh: the flag belongs to the
-    /// `init` that follows `set_music` and to nothing else.
+    /// `Err` naming `why` when the run has no music. A part that waits on a cue
+    /// refuses to start without one rather than wait for ever.
+    pub fn require_music(&self, part: &'static str, why: &str) -> Result<(), PartError> {
+        match self.music {
+            Some(_) => Ok(()),
+            None => Err(PartError::new(part, why)),
+        }
+    }
+
+    /// `dis_musplus()`, or the no-plus sentinel `-32` (`DIS/DISINT.ASM:252`)
+    /// when the run has no music.
+    pub fn musplus(&mut self) -> i32 {
+        self.music().map_or(NO_PLUS, |music| music.musplus())
+    }
+
+    /// `dis_musrow()`, or 0 when the run has no music.
+    pub fn musrow(&mut self) -> i32 {
+        self.music().map_or(0, |music| music.musrow())
+    }
+
+    /// `dis_getmframe()`, or 0 when the run has no music.
+    pub fn getmframe(&mut self) -> i32 {
+        self.music().map_or(0, |music| music.getmframe())
+    }
+
+    /// True only in the `init` of the first part started after
+    /// [`Engine::set_music`](crate::engine::Engine::set_music): the run's entry
+    /// part, or the part a mid-run restart installs a new player for
+    /// (`MAIN/U2.ASM:880-885`). A part catches the player up to its boot frame
+    /// only then; reached mid-chain, the player is already there. Band and
+    /// copper contexts are never fresh.
     pub fn music_fresh(&self) -> bool {
         self.music_fresh
     }
 
-    /// Ask the engine to quit (`dis_exit()`).
-    ///
-    /// The request outlives this call: the engine reads it back out of the
-    /// context when the call returns, reports it through
-    /// [`Engine::exit_requested`](crate::engine::Engine::exit_requested), and
-    /// stops ticking this part.
+    /// Ask the engine to quit (`dis_exit()`). The flag stays set for the rest
+    /// of the part's run, in every later context.
     pub fn request_exit(&mut self) {
         self.exit_requested = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::Machine;
+    use crate::music::{Music, NoMusic};
+
+    #[test]
+    fn the_music_readers_answer_the_null_readings_without_a_player() {
+        let mut machine = Machine::new(8, 4, View::new(8, 4));
+        let mut ctx = machine.ctx(None, 0, 0, 1, false, false);
+        assert_eq!((ctx.musplus(), ctx.musrow(), ctx.getmframe()), (-32, 0, 0));
+        assert_eq!(ctx.require_music("p", "why"), Err(PartError::new("p", "why")));
+
+        let mut music = NoMusic;
+        let expected = (music.musplus(), music.musrow(), music.getmframe());
+        let mut ctx = machine.ctx(Some(&mut music), 0, 0, 1, false, false);
+        assert_eq!((ctx.musplus(), ctx.musrow(), ctx.getmframe()), expected);
+        assert_eq!(ctx.require_music("p", "why"), Ok(()));
     }
 }

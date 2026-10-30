@@ -282,14 +282,11 @@ impl Pam {
 
     /// Read the animation and the palette, set the mode and the copper.
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on dis_sync() (PAM/OUTTAA.C:39) and the run has \
-                          no music to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on dis_sync() (PAM/OUTTAA.C:39) and the run has \
+             no music to wait on",
+        )?;
         let ani = std::fs::read(Path::new(self.ani_path)).map_err(|error| PartError {
             part: NAME,
             message: format!("{}: {error}", self.ani_path),
@@ -509,7 +506,6 @@ mod tests {
     use crate::shell::{MusicStart, PAM_ANCHOR};
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{sync_from, Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -564,7 +560,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
         tick: u32,
@@ -576,7 +571,6 @@ mod tests {
                 surface: Surface::new(640, 400),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
                 tick: 0,
@@ -606,13 +600,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 tick,
                 0,
                 1,
-                true,
                 exit,
                 music_fresh,
             )
@@ -631,7 +623,7 @@ mod tests {
                 let mut ctx = self.ctx(tick);
                 callback(&mut ctx);
             }
-            self.copper.restore(slot, callback);
+            self.copper.set(slot, callback);
         }
 
         fn step(&mut self, part: &mut Pam) -> PartStatus {

@@ -377,7 +377,6 @@ impl Part for Panicend {
 mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, IndexedFrame};
 
@@ -386,7 +385,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
     }
 
@@ -396,7 +394,6 @@ mod tests {
                 surface,
                 view,
                 palette,
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
             }
         }
@@ -414,13 +411,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 exit_requested,
                 false,
             );
@@ -432,13 +427,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -789,7 +782,6 @@ mod tests {
         let mut surface = Surface::new(LINE_PIXELS, FULL_HEIGHT as usize);
         let mut view = View::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT);
         let mut palette = Palette::new();
-        let mut timeline = PaletteTimeline::new(Palette::new());
         let mut copper = CopperRegistry::new();
         let mut music = PlayerMusic::new(player, 0);
         let mut techno = crate::parts::techno::Techno::at("../../");
@@ -798,13 +790,11 @@ mod tests {
                 &mut surface,
                 &mut view,
                 &mut palette,
-                &mut timeline,
                 &mut copper,
                 Some(&mut music),
                 0,
                 0,
                 1,
-                true,
                 false,
                 true,
             );
@@ -818,13 +808,11 @@ mod tests {
                     &mut surface,
                     &mut view,
                     &mut palette,
-                    &mut timeline,
                     &mut copper,
                     Some(&mut music),
                     0,
                     0,
                     1,
-                    true,
                     false,
                     false,
                 );
@@ -846,7 +834,6 @@ mod tests {
         surface: &mut Surface,
         view: &mut View,
         palette: &mut Palette,
-        timeline: &mut PaletteTimeline,
         copper: &mut CopperRegistry,
         part: &mut Panicend,
     ) -> IndexedFrame {
@@ -856,13 +843,11 @@ mod tests {
                 surface,
                 view,
                 palette,
-                timeline,
                 copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -893,7 +878,6 @@ mod tests {
         assert_eq!(view.start_addr, 320);
         assert_eq!(view.y_line_offset, Some(640));
 
-        let mut timeline = PaletteTimeline::new(Palette::new());
         let mut copper = CopperRegistry::new();
         let mut part = Panicend::new();
         {
@@ -901,13 +885,11 @@ mod tests {
                 &mut surface,
                 &mut view,
                 &mut palette,
-                &mut timeline,
                 &mut copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -919,7 +901,6 @@ mod tests {
                 &mut surface,
                 &mut view,
                 &mut palette,
-                &mut timeline,
                 &mut copper,
                 &mut part,
             );

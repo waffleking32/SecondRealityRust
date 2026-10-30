@@ -1248,15 +1248,12 @@ impl Part for Techno {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position \
-                          (TECHNO/KOE.C:213, :275, KOEA.ASM:900) and the run has no music \
-                          to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (TECHNO/KOE.C:213, :275, KOEA.ASM:900) and the run has no music \
+             to wait on",
+        )?;
         let read = |path: &str| -> Result<Vec<u8>, PartError> {
             let path = format!("{}{path}", self.root);
             std::fs::read(&path).map_err(|error| PartError {
@@ -1330,7 +1327,7 @@ impl Part for Techno {
         }
         match self.phase {
             Phase::Gate => {
-                let musplus = ctx.music().map_or(-32, |music| music.musplus());
+                let musplus = ctx.musplus();
                 if musplus < GATE_ONE {
                     return PartStatus::Continuing;
                 }
@@ -1359,7 +1356,7 @@ impl Part for Techno {
                 self.phase = Phase::FirstPass;
             }
             Phase::FirstPass => {
-                let row = ctx.music().map_or(0, |music| music.musrow());
+                let row = ctx.musrow();
                 self.first_pass_iteration(row);
                 if self.p1_framecount >= 256 {
                     self.init_interference();
@@ -1368,9 +1365,9 @@ impl Part for Techno {
                 }
             }
             Phase::SecondPass => {
-                let row = ctx.music().map_or(0, |music| music.musrow());
+                let row = ctx.musrow();
                 self.second_pass_iteration(row);
-                let mframe = ctx.music().map_or(0, |music| music.getmframe());
+                let mframe = ctx.getmframe();
                 if mframe >= INTERFERENCE_END {
                     self.flash_capture();
                     self.phase = Phase::Flash32;
@@ -1394,7 +1391,7 @@ impl Part for Techno {
                 self.phase = Phase::MusplusMinus3;
             }
             Phase::MusplusMinus3 => {
-                let musplus = ctx.music().map_or(-32, |music| music.musplus());
+                let musplus = ctx.musplus();
                 if musplus < GATE_TWO {
                     return PartStatus::Continuing;
                 }
@@ -1416,7 +1413,7 @@ impl Part for Techno {
                 if let Some(flash) = self.wipe_pending.take() {
                     self.flash_apply(flash);
                 }
-                let row = ctx.music().map_or(0, |music| music.musrow());
+                let row = ctx.musrow();
                 if row & 7 != 7 {
                     return PartStatus::Continuing;
                 }
@@ -1439,7 +1436,7 @@ impl Part for Techno {
                     if self.wipe_band >= 4 {
                         // `doit1`'s first `waitborder` reads the row now and
                         // waits; the loop's next frame uploads it.
-                        let row = ctx.music().map_or(0, |music| music.musrow());
+                        let row = ctx.musrow();
                         self.bar_read(row);
                         self.phase = Phase::Doit1;
                         self.doit_first = true;
@@ -1509,7 +1506,7 @@ impl Techno {
         if let Some(flash) = self.wipe_pending.take() {
             self.flash_apply(flash);
         }
-        let row = ctx.music().map_or(0, |music| music.musrow());
+        let row = ctx.musrow();
         if row & 7 != 7 {
             return PartStatus::Continuing;
         }
@@ -1659,7 +1656,7 @@ impl Techno {
     /// `waitborder`, split: the upload of the block the previous read armed.
     fn bar_upload_and_read(&mut self, ctx: &mut PartCtx) {
         self.upload_bar();
-        let row = ctx.music().map_or(0, |music| music.musrow());
+        let row = ctx.musrow();
         self.bar_read(row);
     }
 
@@ -1667,7 +1664,7 @@ impl Techno {
     /// first pre-wait part.
     fn doit3_prologue(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.upload_bar();
-        let row = ctx.music().map_or(0, |music| music.musrow());
+        let row = ctx.musrow();
         self.bar_read(row);
         // `doit3`'s prologue.
         self.dac[..48].fill(0);
@@ -1755,7 +1752,7 @@ impl Techno {
 
     /// The pre-wait half of a doit3 iteration. `true` when the loop breaks.
     fn doit3_pre(&mut self, ctx: &mut PartCtx) -> bool {
-        let mframe = ctx.music().map_or(0, |music| music.getmframe());
+        let mframe = ctx.getmframe();
         if mframe > DOIT3_MFRAME {
             if self.xpos != 0 {
                 self.xpos = 0;
@@ -1790,7 +1787,7 @@ impl Techno {
         }
         self.rot2 += 17;
         self.display_start = (self.display_start & 0xFF00) | (self.xpos / 8);
-        let row = ctx.music().map_or(0, |music| music.musrow());
+        let row = ctx.musrow();
         self.bar_read(row);
         false
     }
@@ -1915,7 +1912,7 @@ impl Techno {
 
     /// `KOE.C:705-726`: the final music wait at the picture's held position.
     fn troll_final_wait(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        let musplus = ctx.music().map_or(-32, |music| music.musplus());
+        let musplus = ctx.musplus();
         if musplus > -6 && musplus < 16 {
             self.phase = Phase::Done;
             self.troll_compose(ctx);
@@ -2028,7 +2025,6 @@ mod tests {
         surface: sr_engine::Surface,
         view: View,
         palette: Palette,
-        timeline: sr_engine::palette::PaletteTimeline,
         copper: sr_engine::copper::CopperRegistry,
         music: crate::audio::PlayerMusic,
     }
@@ -2043,7 +2039,6 @@ mod tests {
                 surface: sr_engine::Surface::new(640, 400),
                 view: View::new(320, 200),
                 palette: Palette::new(),
-                timeline: sr_engine::palette::PaletteTimeline::new(Palette::new()),
                 copper: sr_engine::copper::CopperRegistry::new(),
                 music: PlayerMusic::new(player, 0),
             }
@@ -2056,13 +2051,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.music),
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -2084,13 +2077,11 @@ mod tests {
                 &mut rig.surface,
                 &mut rig.view,
                 &mut rig.palette,
-                &mut rig.timeline,
                 &mut rig.copper,
                 Some(&mut rig.music),
                 0,
                 0,
                 1,
-                true,
                 false,
                 true,
             );
@@ -2190,13 +2181,11 @@ mod tests {
                 &mut rig.surface,
                 &mut rig.view,
                 &mut rig.palette,
-                &mut rig.timeline,
                 &mut rig.copper,
                 Some(&mut rig.music),
                 0,
                 0,
                 1,
-                true,
                 false,
                 true,
             );

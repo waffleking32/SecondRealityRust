@@ -541,14 +541,11 @@ impl Part for Jplogo {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part opens with a music gate (`JP.C:71` \
-                          `while(!dis_exit() && dis_musplus()<4)`) and the run has no music"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part opens with a music gate (`JP.C:71` \
+             `while(!dis_exit() && dis_musplus()<4)`) and the run has no music",
+        )?;
 
         let path = self.asset(PICTURE_PATH);
         let image = load_path(Path::new(&path)).map_err(|error| PartError {
@@ -652,7 +649,7 @@ impl Part for Jplogo {
         // `doit`'s gate (`JP.C:71`): wait for `musplus >= 4`. The wait is a
         // spin in the source; here it costs ticks, not `doit` frames.
         if !self.gate_open {
-            let musplus = ctx.music().map_or(-32, |music| music.musplus());
+            let musplus = ctx.musplus();
             if musplus < 4 {
                 return PartStatus::Continuing;
             }
@@ -693,7 +690,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::Surface;
 
@@ -1176,7 +1172,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         music: crate::audio::PlayerMusic,
         frame: u32,
@@ -1192,7 +1187,6 @@ mod tests {
                 surface: Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 music: PlayerMusic::new(player, 0),
                 frame: 0,
@@ -1204,13 +1198,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.music),
                 self.frame,
                 0,
                 1,
-                true,
                 false,
                 fresh,
             );
@@ -1223,13 +1215,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.music),
                 self.frame,
                 0,
                 1,
-                true,
                 exit,
                 false,
             );
@@ -1390,7 +1380,6 @@ mod tests {
         let mut surface = Surface::new(sr_engine::MAX_WIDTH, sr_engine::MAX_HEIGHT);
         let mut view = View::new(SCREEN_WIDTH, SCREEN_HEIGHT);
         let mut palette = Palette::new();
-        let mut timeline = PaletteTimeline::new(Palette::new());
         let mut copper = CopperRegistry::new();
         let mut music = GateMusic { plus: -6 };
         let mut part = Jplogo::at("../../");
@@ -1399,13 +1388,11 @@ mod tests {
                 &mut surface,
                 &mut view,
                 &mut palette,
-                &mut timeline,
                 &mut copper,
                 Some(&mut music),
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -1417,13 +1404,11 @@ mod tests {
                 &mut surface,
                 &mut view,
                 &mut palette,
-                &mut timeline,
                 &mut copper,
                 Some(&mut music),
                 frame,
                 0,
                 1,
-                true,
                 false,
                 false,
             );

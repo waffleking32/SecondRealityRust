@@ -299,15 +299,12 @@ impl Part for Endlogo {
         // is a part that looks like it works. `PartCtx::music()` is `Some` for every run
         // the shell can build that reaches this part (`shell::music_for_part`), and the
         // refusal is the port's way of saying so where a hand-built run does not
-        // (`crates/sr-engine/src/part.rs:154-165`).
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position (`END/END.C:107-111`) \
-                          and the run has no music to wait on"
-                    .to_string(),
-            });
-        }
+        // (`PartCtx::require_music`).
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position (`END/END.C:107-111`) \
+             and the run has no music to wait on",
+        )?;
 
         // `:51-60`'s attribute-controller unlock ends in `outp(0x3c0,0x20)` —
         // the index register set to 0 with bit 5, the palette address source —
@@ -459,7 +456,7 @@ impl Endlogo {
     /// published.
     ///
     /// The port's engine polls between copper slot 0 and the first band
-    /// (`crates/sr-engine/src/engine.rs:206-219`), so a part's `musplus()` at tick `T`
+    /// (`sr_engine::Engine::tick`), so a part's `musplus()` at tick `T`
     /// answers with the words tick `T`'s poll published, which is what the source's check at
     /// the boundary into the *next* frame reads. That is where this part keeps the reading:
     /// it tests `previous`, the answer [`Endlogo::frame`] took on the tick before, and the
@@ -634,7 +631,6 @@ mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{muscode_from, musplus_from, Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::surface::Surface;
     use sr_engine::view::View;
 
@@ -831,7 +827,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: Player,
     }
@@ -851,7 +846,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
                 palette,
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player: Player::sentinel(),
             }
@@ -869,13 +863,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 frame,
                 0,
                 1,
-                true,
                 false,
                 false,
             )
@@ -887,13 +879,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 None,
                 frame,
                 0,
                 1,
-                true,
                 false,
                 false,
             )

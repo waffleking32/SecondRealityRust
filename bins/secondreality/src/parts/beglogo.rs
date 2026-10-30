@@ -346,7 +346,6 @@ fn setpalarea(dac: &mut Palette, ramp: &Palette, start: u32, count: u32) {
 mod tests {
     use super::*;
     use sr_engine::copper::CopperRegistry;
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::surface::Surface;
     use sr_engine::view::View;
 
@@ -362,7 +361,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
     }
 
@@ -379,7 +377,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(VIEW_WIDTH, VIEW_HEIGHT),
                 palette,
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
             }
         }
@@ -389,14 +386,12 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 // no player: this rig draws a band, and none of these parts asks for a cue
                 None,
                 frame,
                 0,
                 1,
-                true,
                 false,
                 false,
             )

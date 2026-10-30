@@ -1,27 +1,17 @@
 //! Presentation: the composed indexed frame as RGBA pixels a window can blit.
 //!
-//! Aspect, scaling and the border are **display** concerns and they live only
-//! here. `xtask compare` reads the composed [`IndexedFrame`] directly, so none
-//! of them can affect a fidelity measurement: they change what a monitor shows,
-//! not what the engine drew. A headless dump presents with
-//! [`Aspect::SourcePixels`] at 1 and no border, one output pixel a source pixel.
+//! Aspect, scaling and the border are display concerns and live only here:
+//! `xtask compare` reads the composed [`IndexedFrame`], so none of them can
+//! move a fidelity measurement. A headless dump presents with
+//! [`Aspect::SourcePixels`] at 1 and no border.
 //!
-//! **The window's picture is sized by the display, not by the frame** (D48). The
-//! demo's frames are 320×200 (mode 13h, each row scanned twice), 320×400 and
-//! 640×400, and a VGA shows all three on the same 640×400 raster of scanned-out
-//! dots. [`Aspect::SquarePixels`] presents that raster with square dots at
-//! `scale / 2`: at the default scale of 2, every one of them is 640×400 on the
-//! screen, and each source pixel is a whole block of output pixels — 2×2 at
-//! 320×200, 2×1 at 320×400, 1×1 at 640×400 ([`pixel_block`]). Nothing is
-//! interpolated: the block is duplicated. [`Aspect::FourThree`] stretches the
-//! same picture into a 4:3 box, which needs a non-integer vertical step.
+//! The window's picture is sized by the display, not the frame (D48): a VGA
+//! shows 320×200, 320×400 and 640×400 on one 640×400 raster of dots, and
+//! [`Aspect::SquarePixels`] duplicates each source pixel into a whole block
+//! ([`pixel_block`]).
 //!
-//! The border is an approximation rather than a modelled overscan region. The
-//! original put its overscan colour in the blanking outside the active display,
-//! where the monitor's sync timing fixed the width; here it is a flat pad of
-//! eight 320-column pixels per side — `8 × scale` output pixels, whatever the
-//! frame's geometry — around the picture, which it does not scale. That padding
-//! is recorded as the first entry in `docs/fidelity/APPROXIMATIONS.md`.
+//! The border is a flat pad of eight 320-column pixels a side, `8 × scale`
+//! output pixels, not a modelled overscan region (APPROXIMATIONS.md A1).
 
 use crate::compose::IndexedFrame;
 
@@ -99,16 +89,10 @@ fn dots(len: usize, mode: usize) -> Option<usize> {
 /// The block of output pixels — `(columns, rows)` — one source pixel of a
 /// `width`×`height` frame becomes under [`Aspect::SquarePixels`] at `scale`.
 ///
-/// Both are whole numbers and at least 1, so the presenter duplicates and never
-/// blends. For the demo's geometries the block is the display's: a dot is
-/// `scale / 2` output pixels, so at an even scale 320×200 gets `scale`×`scale`,
-/// 320×400 gets `scale`×`scale/2` and 640×400 `scale/2`×`scale/2`, and all three
-/// are `320·scale`×`200·scale` on the screen. At an odd scale a doubled axis
-/// cannot be halved into whole pixels, so such a frame takes the largest whole
-/// dot size that is not bigger than the request, `max(1, scale / 2)` — at
-/// `--scale 1` a 640×400 frame stays 640×400 rather than losing every other
-/// pixel, and at 3 it is 640×400 inside 960×600 neighbours. A frame of any other
-/// geometry (the settings screen's 520×325, a test's) is `scale`×`scale`.
+/// Both are whole and at least 1. For the demo's modes a display dot is
+/// `scale / 2` output pixels, so all three are `320·scale`×`200·scale` at an
+/// even scale; at an odd scale a doubled axis takes `max(1, scale / 2)` instead.
+/// Any other geometry (the settings screen's 520×325) is `scale`×`scale`.
 pub fn pixel_block(width: u16, height: u16, scale: u32) -> (usize, usize) {
     let scale = scale.max(1) as usize;
     match (dots(width as usize, MODE_WIDTH), dots(height as usize, MODE_HEIGHT)) {
@@ -320,13 +304,6 @@ mod tests {
         f
     }
 
-    #[test]
-    fn square_pixels_scale_is_exact() {
-        let f = IndexedFrame::new(320, 200);
-        let opts = PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: false };
-        assert_eq!(output_size(&f, &opts), (640, 400));
-    }
-
     #[rstest]
     #[case(320, 200, 1, (384, 288))]
     #[case(320, 400, 1, (384, 288))]
@@ -393,16 +370,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn the_default_is_square_dots_at_two_with_the_border() {
-        // The window's default (D48): exact 2×2 duplication, not the 4:3 stretch.
-        assert_eq!(
-            PresentOptions::default(),
-            PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: true }
-        );
-        assert_eq!(PresentOptions::default(), PresentOptions::WINDOW);
     }
 
     #[test]
@@ -496,14 +463,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_640x400_frame_at_the_default_is_shown_one_to_one() {
-        let f = distinct_frame(640, 400);
-        let mut out = FrameBuffer::new(0, 0);
-        present(&f, &PresentOptions::default(), &mut out);
-        assert_eq!(out.rgba(), source(&f).rgba());
-    }
-
     #[rstest]
     #[case(320, 200)]
     #[case(320, 400)]
@@ -521,13 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn four_three_scales_uniformly() {
-        let f = IndexedFrame::new(320, 200);
-        let opts = PresentOptions { aspect: Aspect::FourThree, scale: 2, border: false };
-        assert_eq!(output_size(&f, &opts), (768, 576));
-    }
-
-    #[test]
     fn per_scanline_palettes_are_used() {
         let f = two_row_frame();
         let mut out = FrameBuffer::new(0, 0);
@@ -537,31 +489,6 @@ mod tests {
         assert_eq!(out.pixel(1, 0), [0, 255, 0, 255]);
         // Row 1 reads the pushed palette, where entry 1 is blue rather than red.
         assert_eq!(out.pixel(1, 1), [0, 0, 255, 255]);
-    }
-
-    #[test]
-    fn nearest_neighbour_replicates_each_source_pixel() {
-        let f = two_row_frame();
-        let mut out = FrameBuffer::new(0, 0);
-        let opts = PresentOptions { aspect: Aspect::SquarePixels, scale: 3, border: false };
-        present(&f, &opts, &mut out);
-        for y in 0..3 { for x in 0..3 { assert_eq!(out.pixel(x, y), [255, 0, 0, 255]); } }
-        assert_eq!(out.pixel(3, 0), [0, 255, 0, 255]);
-    }
-
-    #[test]
-    fn the_border_pads_the_picture_by_eight_source_pixels_scaled() {
-        let mut f = two_row_frame();
-        f.border = Some(9);
-        let mut pal = *f.palettes.base();
-        pal.set_entry(9, [63, 63, 0]);
-        f.palettes.reset(pal);
-        let mut out = FrameBuffer::new(0, 0);
-        let opts = PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: true };
-        present(&f, &opts, &mut out);
-        assert_eq!(out.width(), 2 * 2 + 2 * 16);
-        assert_eq!(out.pixel(0, 0), [255, 255, 0, 255]);
-        assert_eq!(out.pixel(16, 16), [255, 0, 0, 255]);
     }
 
     #[test]

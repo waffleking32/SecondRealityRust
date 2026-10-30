@@ -24,7 +24,6 @@ pub struct Palette {
 }
 
 impl Default for Palette {
-    /// Every entry black — what [`Palette::new`] produces.
     fn default() -> Self {
         Palette::BLACK
     }
@@ -78,11 +77,6 @@ impl Palette {
     /// Components above 63 are masked with `& 0x3F`.
     pub fn set_entry(&mut self, index: u8, rgb: [u8; 3]) {
         self.entries[index as usize] = [rgb[0] & 0x3F, rgb[1] & 0x3F, rgb[2] & 0x3F];
-    }
-
-    /// Replaces every entry with `other`'s.
-    pub fn copy_from(&mut self, other: &Palette) {
-        self.entries = other.entries;
     }
 
     /// 256 RGBA quads, 1024 bytes, through `dac_expand`.
@@ -216,5 +210,40 @@ mod tests {
         // dac_expand(32) = (32 * 259 + 33) >> 6 = 8321 >> 6 = 130.
         assert_eq!(&out[0..4], &[255, 0, 130, 255]);
         assert_eq!(&out[1020..1024], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn timeline_returns_the_last_change_at_or_before_the_scanline() {
+        let mut tl = PaletteTimeline::new(Palette::BLACK);
+        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
+        let mut b = Palette::BLACK; b.set_entry(0, [2, 0, 0]);
+        tl.push(10, a);
+        tl.push(20, b);
+        assert_eq!(tl.palette_at(0).entry(0), [0, 0, 0]);
+        assert_eq!(tl.palette_at(10).entry(0), [1, 0, 0]);
+        assert_eq!(tl.palette_at(19).entry(0), [1, 0, 0]);
+        assert_eq!(tl.palette_at(20).entry(0), [2, 0, 0]);
+        assert_eq!(tl.palette_at(399).entry(0), [2, 0, 0]);
+    }
+
+    #[test]
+    fn timeline_replaces_a_change_at_the_same_scanline() {
+        let mut tl = PaletteTimeline::new(Palette::BLACK);
+        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
+        let mut b = Palette::BLACK; b.set_entry(0, [2, 0, 0]);
+        tl.push(10, a);
+        tl.push(10, b);
+        assert_eq!(tl.change_count(), 1);
+        assert_eq!(tl.palette_at(10).entry(0), [2, 0, 0]);
+    }
+
+    #[test]
+    fn timeline_reset_drops_changes_and_restores_the_base() {
+        let mut tl = PaletteTimeline::new(Palette::BLACK);
+        let mut a = Palette::BLACK; a.set_entry(0, [1, 0, 0]);
+        tl.push(10, a);
+        tl.reset(Palette::BLACK);
+        assert_eq!(tl.change_count(), 0);
+        assert_eq!(tl.palette_at(10).entry(0), [0, 0, 0]);
     }
 }

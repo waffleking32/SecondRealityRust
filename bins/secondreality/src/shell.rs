@@ -26,7 +26,7 @@ use std::time::Duration;
 use sr_engine::music::MusicPosition;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
-use sr_engine::{Engine, EngineError, IndexedFrame, Palette, Tick};
+use sr_engine::{Engine, IndexedFrame, Palette, Tick};
 
 use crate::parts;
 
@@ -2030,7 +2030,7 @@ pub enum ShellError {
     /// told it had named no parts.
     EmptyPlan,
     /// A part failed to start.
-    Engine(EngineError),
+    Engine(PartError),
     /// The run's music could not be built: the module's file is missing or is not an S3M.
     ///
     /// **A failure, not a silent run.** The demo is music-counted — a part that begins at
@@ -2055,8 +2055,8 @@ impl fmt::Display for ShellError {
 
 impl Error for ShellError {}
 
-impl From<EngineError> for ShellError {
-    fn from(e: EngineError) -> ShellError {
+impl From<PartError> for ShellError {
+    fn from(e: PartError) -> ShellError {
         ShellError::Engine(e)
     }
 }
@@ -2113,7 +2113,6 @@ mod tests {
     use sr_audio::{PlayerOptions, Quality};
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::Music;
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::surface::Surface;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -4446,7 +4445,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
     }
 
@@ -4456,7 +4454,6 @@ mod tests {
                 surface: Surface::new(TEST_SURFACE, TEST_SURFACE),
                 view: View::new(TEST_SURFACE as u16, TEST_SURFACE as u16),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
             }
         }
@@ -4466,13 +4463,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(music),
                 0,
                 0,
                 1,
-                true,
                 exit,
                 false,
             );
@@ -4484,13 +4479,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 None,
                 0,
                 0,
                 1,
-                true,
                 false,
                 false,
             );
@@ -4947,7 +4940,7 @@ mod tests {
     impl Part for Fails {
         fn name(&self) -> &'static str { "fails" }
         fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
-            Err(PartError { part: "fails", message: "no".to_string() })
+            Err(PartError::new("fails", "no"))
         }
         fn frame(&mut self, _ctx: &mut PartCtx) -> PartStatus { PartStatus::Continuing }
     }

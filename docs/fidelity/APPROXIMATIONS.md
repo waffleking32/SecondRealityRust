@@ -433,11 +433,8 @@ at `(0, 0)`. Above `0x8E2E` it panics.
 refused. The rest is the source's own bytes in every build, and it is reached: `hiddenu` sits above
 `0x4200` for 5,148 of its 6,351 frames, and `second5` at `(0, 0)` for 278 samples.
 
-**Measured difference:** none for the answered domain
-(`sync_answers_the_band_above_the_tables_last_key_with_the_tables_last_code`,
-`sync_refuses_the_first_key_past_the_sixteenth_compare`,
-`the_answerable_bands_upper_edge_is_the_word_past_the_table`,
-`sync_answers_the_position_before_the_table_with_its_own_word`). Neither caller reaches the refused
+**Measured difference:** none for the answered domain (`sync_reads_the_table_the_object_reads`,
+`sync_refuses_the_first_key_past_the_sixteenth_compare`). Neither caller reaches the refused
 region: the highest key ALKU's or PAM's gates ask about is `0x0D01`.
 
 **Status:** carried as an unreachable path: no caller in the tree syncs above `0x8E2E`, and the answer

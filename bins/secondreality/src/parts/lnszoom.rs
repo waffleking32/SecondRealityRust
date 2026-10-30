@@ -737,14 +737,11 @@ impl Part for Lnszoom {
     /// the initial palette; the mode set's clear is the zeroed video memory.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // All three acts wait on the music: `:104`, `:380`, `:213`.
-        if ctx.music().is_none() {
-            return Err(PartError {
-                part: NAME,
-                message: "this part waits on the music player's position \
-                          (LENS/MAIN.C:104, :380, :213) and the run has no music to wait on"
-                    .into(),
-            });
-        }
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (LENS/MAIN.C:104, :380, :213) and the run has no music to wait on",
+        )?;
 
         // The reference's player is already at order 45 row 59 on the tick this
         // part's tick 0 stands at; an entry run starts the player at the seek's
@@ -930,7 +927,7 @@ impl Part for Lnszoom {
                 }
                 // The missing `()` in `if(dis_musplus>-30)` makes the guard the
                 // function pointer, which is non-zero: the wait always runs.
-                let musplus = ctx.music().map_or(-32, |music| music.musplus());
+                let musplus = ctx.musplus();
                 if musplus < PART1_GATE {
                     self.compose_linear(ctx);
                     return PartStatus::Continuing;
@@ -965,7 +962,7 @@ impl Part for Lnszoom {
                     self.phase = Phase::Done;
                     return PartStatus::Finished;
                 }
-                let musplus = ctx.music().map_or(-32, |music| music.musplus());
+                let musplus = ctx.musplus();
                 if musplus < LENS_GATE {
                     self.compose_linear(ctx);
                     return PartStatus::Continuing;
@@ -1060,7 +1057,7 @@ impl Part for Lnszoom {
                     self.phase = Phase::Done;
                     return PartStatus::Finished;
                 }
-                let musplus = ctx.music().map_or(-32, |music| music.musplus());
+                let musplus = ctx.musplus();
                 if musplus > ROT_BREAK {
                     self.set_white(ctx);
                     self.phase = Phase::Done;
@@ -1100,7 +1097,6 @@ mod tests {
 
     use sr_engine::copper::CopperRegistry;
     use sr_engine::music::{Music, MusicPosition};
-    use sr_engine::palette::PaletteTimeline;
     use sr_engine::view::View;
     use sr_engine::{dac_expand, Surface};
 
@@ -1203,7 +1199,6 @@ mod tests {
         surface: Surface,
         view: View,
         palette: Palette,
-        timeline: PaletteTimeline,
         copper: CopperRegistry,
         player: M,
     }
@@ -1214,7 +1209,6 @@ mod tests {
                 surface: Surface::new(SURFACE_WIDTH, SURFACE_HEIGHT),
                 view: View::new(SCREEN_WIDTH, SCREEN_HEIGHT),
                 palette: Palette::new(),
-                timeline: PaletteTimeline::new(Palette::new()),
                 copper: CopperRegistry::new(),
                 player,
             }
@@ -1226,13 +1220,11 @@ mod tests {
                 &mut self.surface,
                 &mut self.view,
                 &mut self.palette,
-                &mut self.timeline,
                 &mut self.copper,
                 Some(&mut self.player),
                 frame,
                 0,
                 1,
-                true,
                 exit,
                 music_fresh,
             )
@@ -1618,13 +1610,11 @@ mod tests {
             &mut rig.surface,
             &mut rig.view,
             &mut rig.palette,
-            &mut rig.timeline,
             &mut rig.copper,
             None,
             0,
             0,
             1,
-            true,
             false,
             true,
         );
@@ -2034,7 +2024,7 @@ mod tests {
         lens.video[..VIDEO_BYTES].copy_from_slice(&patched.back[..VIDEO_BYTES]);
         lens.phase = Phase::Lens { uframe: 474, frame: 474 };
         let mut rig = Rig::new(Player::running(1_000));
-        rig.palette.copy_from(&lens.live_palette());
+        rig.palette = lens.live_palette();
         assert_eq!(lens.frame(&mut rig.ctx(474)), PartStatus::Continuing);
         assert_eq!(
             differing_pixels(&rendered_rgb(&rig), &reference(3_400)),
@@ -2048,7 +2038,7 @@ mod tests {
             part.palette = patched.palette.clone();
             part.phase = Phase::Rot { frame: frame as u32 };
             let mut rig = Rig::new(Player::running(2_000));
-            rig.palette.copy_from(&part.live_palette());
+            rig.palette = part.live_palette();
             assert_eq!(
                 part.frame(&mut rig.ctx(frame as u32)),
                 PartStatus::Continuing
