@@ -420,7 +420,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // index — including at the gate frame 6,988 and at PAM's measured first
     // drawn frame 7,710 — and a part boundary that moves is recorded as
     // measured, not absorbed into an offset.
-    // The first twelve frames are the PAM stretch Task 6 inherits; the last
+    // The first twelve frames run to PAM's first drawn frame; the last
     // thirteen cross PAM's end into BEGLOGO, BEGLOGO's 172 ticks into GLENZ, the
     // restarted MUSIC1's first order change and GLENZ's music wait to the first
     // zoomer body. 8,523..8,528 is the measured hold→zoom transition (the first
@@ -502,8 +502,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     assert_eq!(block1_trace_position(6_988), (11, 47), "U2A's first gate");
     assert_eq!(block1_trace_position(7_618), (12, 55), "U2A's second gate");
 
-    // **The GLENZ boundary's music, measured** (Task 6 Step 5; D38; re-measured by
-    // Task 6b after the restart carry-over, D45).
+    // **The GLENZ boundary's music, measured** (D38, D45).
     //
     // The restart seeks MUSIC1 to order 0 row 0 at 8,057, and the new player
     // continues from MUSIC0's channel state: channel 2 is still at 63, so order
@@ -525,8 +524,7 @@ fn a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering() {
     // change: D34's four-tick wait from a boundary one frame after the trace's
     // restart, 8,056), and 1 is D17's: 8,521 is the trace's `2:45` sample and
     // the reference's picture first differs at 8,522 (A38), so against the
-    // picture the port is +5 — `FULLRUN_SEAMS`' GLENZ row, 8,522 → 8,527. Task 6
-    // measured 8,770 and 249 here, before the carry-over.
+    // picture the port is +5 — `FULLRUN_SEAMS`' GLENZ row, 8,522 → 8,527.
     let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
     let hold = rgb(8_057);
     for index in [8_523u32, 8_524, 8_525, 8_526] {
@@ -613,14 +611,14 @@ fn a_block_two_run_reaches_glenz_without_reloading_music_one() {
         assert_eq!(frame["height"], *height, "chain frame {index}'s height");
     }
 
-    // **The wait's measured exit, recorded for Task 7.** The reference's
+    // **The wait's measured exit.** The reference's
     // `second2b` holds order 2 row 44 at 1,110 and exits at 1,111 (`2:45`, the
     // `musplus` −19 the wait ends on); the port's position is `2:44` through
     // 1,116 and `2:45` at **1,117**, the first frame whose picture differs from
     // the hold. The six-tick difference is a session-phase difference of A12's
     // class — larger than A12's measured 5-frame worst for `second2b` itself
-    // (the table's overall worst is 7, on `second1`), so Task 7 registers it
-    // rather than absorbing it, and aligns GLENZ's moving keyframes by this
+    // (the table's overall worst is 7, on `second1`), so it is registered
+    // rather than absorbed, and GLENZ's moving keyframes are aligned by this
     // measured offset (`L_p − L_r`), never by a fitted one.
     let rgb = |index: u32| std::fs::read(dir.join(format!("glenz_{index:06}.rgb"))).unwrap();
     let hold = rgb(576);
