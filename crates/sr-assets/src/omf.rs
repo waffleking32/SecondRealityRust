@@ -2,7 +2,8 @@
 //!
 //! Not a runtime loader: it proves that every asset a part links has a standalone file in the
 //! tree (`asset-inventory.md` §D, `tests/omf.rs`), recovers the one that has none
-//! (`assets/TECHNO/CIRCLE2.EGA`), and gives `xtask music` the player's symbols ([`symbols`]).
+//! (`assets/TECHNO/CIRCLE2.EGA`, `tests/provenance.rs`), and gives `xtask music` the
+//! player's symbols ([`symbols`]).
 //!
 //! An object is a flat sequence of records, `[type: u8][length: u16 LE][body]`, with no
 //! alignment, so records are found only by walking them. `LEDATA` is **`0xA0`**,
@@ -32,6 +33,8 @@ pub(crate) struct Record<'a> {
 /// Every record of `bytes`, in order. A record header or body that runs past the end of the
 /// object is [`AssetError::Truncated`]: a walk that mis-stepped would still find records further
 /// on, so nothing is returned from a walk that does not land exactly on the object's last byte.
+/// Framing is checked over the whole object before any record is decoded, so a torn record
+/// anywhere wins over a refused record type earlier on.
 pub(crate) fn records(bytes: &[u8]) -> Result<Vec<Record<'_>>, AssetError> {
     let mut out = Vec::new();
     let mut pos = 0;

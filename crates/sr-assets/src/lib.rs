@@ -64,8 +64,8 @@ impl std::fmt::Debug for Image {
     }
 }
 
-/// The container a file is in. [`sniff`] returns only the first five magic-carrying ones
-/// (`Origin` covers all five magic variants of the family); the rest name a format in errors.
+/// The container a file is in. [`sniff`] returns only the first four, the magic-carrying ones
+/// (`Origin` covers all five magic variants of its family); the rest name a format in errors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Origin,
@@ -239,7 +239,10 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
             format,
             "an animation, not a picture: load_frames(bytes, format) reads it",
         )),
-        _ => Err(unsupported(format, "not a picture")),
+        Format::Omf => Err(unsupported(format, "a linker object: omf::extract_ledata reads it")),
+        Format::Visu => Err(unsupported(format, "vector data: the visu::read_* functions read it")),
+        Format::PosList => Err(unsupported(format, "column lists: PosList::parse reads it")),
+        Format::Exe => Err(unsupported(format, "an executable: exe::unpack reads it")),
     }
 }
 

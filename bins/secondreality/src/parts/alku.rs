@@ -198,8 +198,6 @@ const SHIPPED_PALETTE_ENTRIES: [(u8, [u8; 3]); 3] = [
 
 /// `ALKU/INCLUDE.ASM:17`: `FONA.UH` (1500×30) as the font strip.
 const FONT_PATH: &str = "assets/ALKU/FONA.UH";
-/// The first cell's character (`MAIN.C:40`'s order opens with `A`).
-const FONT_FIRST: char = 'A';
 /// The strip's rows. `faddtext`/`addtext` read 32 (`MAIN.C:335`, `:428`; the release's
 /// `cmp word [bp-4],20h`, image `0x24c9`), and rows 30 and 31 are zero in the release's
 /// image (A9), so the 30 the file holds are everything those loops can ink.
@@ -389,9 +387,10 @@ impl Strip {
 }
 
 /// `MAIN.C:259`'s mapping from an order position to a cell: the first cell's
-/// character plus the index — the form `Font::glyph` takes.
+/// character ([`sr_assets::font::FIRST`]; `MAIN.C:40`'s order opens with `A`) plus the
+/// index — the form `Font::glyph` takes.
 fn cell_char(index: usize) -> char {
-    char::from_u32(FONT_FIRST as u32 + index as u32).expect("a cell index is a character")
+    char::from_u32(sr_assets::font::FIRST as u32 + index as u32).expect("a cell index is a character")
 }
 
 /// `COPPER.ASM:67-72`: the CRTC start address, in plane bytes.

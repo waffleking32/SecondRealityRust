@@ -23,8 +23,8 @@
 
 use crate::Image;
 
-/// The first cell's character.
-const FIRST: char = 'A';
+/// The first cell's character: [`Font::glyph`] maps `FIRST + i` to cell `i`.
+pub const FIRST: char = 'A';
 
 /// A font strip: the ink runs of a decoded strip, repacked so each glyph is contiguous.
 pub struct Font {
