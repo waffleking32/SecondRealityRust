@@ -49,8 +49,9 @@ use std::time::{Duration, Instant};
 
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::{Texture, TextureCreator, WindowCanvas};
+use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::rect::Rect;
+use sdl2::render::{BlendMode, Canvas, RenderTarget, ScaleMode, Texture, TextureCreator, WindowCanvas};
 use sdl2::video::WindowContext;
 use sdl2::{EventPump, VideoSubsystem};
 use sr_assets::font::Font;
@@ -110,11 +111,7 @@ const TICK_PERIOD: Duration = Duration::from_nanos(1_000_000_000_000 / Tick::HZ_
 /// Run what the command line named in a window, until the window is closed or
 /// the run is over and ESC says so.
 pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
-    let opts = PresentOptions {
-        aspect: cli.aspect,
-        scale: cli.scale,
-        border: cli.border,
-    };
+    let opts = cli.present_options();
 
     // The vault menu. It builds its own one-part runs as it plays them, so the
     // command line cannot name one (the CLI refuses it); nothing below the
@@ -823,8 +820,15 @@ fn status_line(run: &Sequence, block: Option<char>) -> String {
 }
 
 /// Present `frame` into `buffer` and upload it.
-fn blit(
-    canvas: &mut WindowCanvas,
+///
+/// **SDL never scales the picture.** `present` has already magnified it — whole
+/// blocks of duplicated pixels (D48) — and the texture is exactly that raster,
+/// so it is copied into a destination rectangle of its own size
+/// ([`placement`]): one texel to one output pixel, with nothing for a filter to
+/// interpolate. A window the window manager made another size than the one
+/// asked for gets the picture centred at 1:1, not stretched to fit.
+fn blit<T: RenderTarget>(
+    canvas: &mut Canvas<T>,
     texture: &mut Texture,
     buffer: &mut FrameBuffer,
     frame: &IndexedFrame,
@@ -832,20 +836,43 @@ fn blit(
 ) -> Result<(), Box<dyn Error>> {
     present(frame, opts, buffer);
     // A streaming texture is write-only: updating it is what gets the frame to
-    // the renderer, and `canvas` then paints the whole window with it.
+    // the renderer, and `canvas` then paints it at its own size.
     texture.update(None, buffer.rgba(), buffer.width() * 4)?;
+    let target = placement(canvas.output_size()?, (buffer.width(), buffer.height()));
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
     canvas.clear();
-    canvas.copy(texture, None, None)?;
+    canvas.copy(texture, None, Some(target))?;
     canvas.present();
     Ok(())
 }
 
+/// Where a `raster` texture goes in an `output`-sized renderer: centred, at its
+/// own size — never stretched, so the renderer has no scaling to do and no
+/// chance to filter. When the output is the raster (the window was given the
+/// size it asked for) the rectangle is the whole output.
+fn placement(output: (u32, u32), raster: (usize, usize)) -> Rect {
+    let (w, h) = (raster.0 as u32, raster.1 as u32);
+    let x = (output.0 as i64 - w as i64) / 2;
+    let y = (output.1 as i64 - h as i64) / 2;
+    Rect::new(x as i32, y as i32, w, h)
+}
+
 /// A streaming RGBA texture of `raster`, to upload presented frames into.
-fn streaming_texture(
-    creator: &TextureCreator<WindowContext>,
+///
+/// Its scale mode is set to **nearest** and its blend mode to **none**, on the
+/// texture itself rather than through `SDL_HINT_RENDER_SCALE_QUALITY`, so no
+/// environment variable or earlier hint can turn linear filtering on: if
+/// anything ever did scale it, it would duplicate texels, and the copy is a
+/// straight overwrite of the frame's opaque pixels.
+fn streaming_texture<C>(
+    creator: &TextureCreator<C>,
     raster: (usize, usize),
 ) -> Result<Texture<'_>, Box<dyn Error>> {
-    Ok(creator.create_texture_streaming(TEXTURE_FORMAT, raster.0 as u32, raster.1 as u32)?)
+    let mut texture =
+        creator.create_texture_streaming(TEXTURE_FORMAT, raster.0 as u32, raster.1 as u32)?;
+    texture.set_scale_mode(ScaleMode::Nearest);
+    texture.set_blend_mode(BlendMode::None);
+    Ok(texture)
 }
 
 #[cfg(test)]
@@ -856,6 +883,7 @@ mod tests {
         EXIT_FADE_TICKS, LOOP_RELOAD_TICKS, SURFACE_HEIGHT, SURFACE_WIDTH,
     };
     use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
+    use sr_engine::present::Aspect;
 
     /// A part that draws nothing. `retires` is the first `ctx.frame` it reports
     /// `Finished` from, or `None` to run for the whole run.
@@ -1042,12 +1070,14 @@ mod tests {
         let mut setup = Setup::new(Settings::from_cli(&Cli::default()));
         settings::draw(&setup.settings, setup.selected, &mut frame, &font);
         let size = |setup: &Setup| output_size(&frame, &setup.settings.present_options(1));
-        let four_three = size(&setup);
+        assert_eq!(setup.settings.aspect, Aspect::SquarePixels, "the default is square (D48)");
+        let square = size(&setup);
 
         setup.selected = 3; // Aspect
         assert_eq!(setup.key(SettingsKey::Right), SettingsAction::Redraw);
-        let square = size(&setup);
-        assert_ne!(four_three, square, "square pixels is another raster, so the window resizes");
+        assert_eq!(setup.settings.aspect, Aspect::FourThree, "the row wraps to 4:3");
+        let four_three = size(&setup);
+        assert_ne!(four_three, square, "4:3 is another raster, so the window resizes");
         // 4:3 stretches 520x325 by 6/5 into a 4:3 box (624x468); square keeps 520x325. The
         // border pads both by the same amount.
         let pad = (four_three.0 - 624) / 2;
@@ -1055,7 +1085,10 @@ mod tests {
         assert_eq!(four_three, (624 + 2 * pad, 468 + 2 * pad));
         assert_eq!(square, (520 + 2 * pad, 325 + 2 * pad));
         assert_eq!(setup.key(SettingsKey::Left), SettingsAction::Redraw);
-        assert_eq!(size(&setup), four_three, "and back");
+        assert_eq!(size(&setup), square, "and back");
+        // At the window's own scale the screen is exactly doubled: 1040x650 inside the pad.
+        let doubled = output_size(&frame, &setup.settings.present_options(Cli::default().scale));
+        assert_eq!(doubled, (1040 + 4 * pad, 650 + 4 * pad));
     }
 
     #[test]
@@ -1070,8 +1103,109 @@ mod tests {
         setup.key(SettingsKey::Right);
         assert!(!setup.settings.border);
         let without = output_size(&frame, &setup.settings.present_options(1));
-        assert_eq!(without, (624, 468));
+        assert_eq!(without, (520, 325), "square, unpadded");
         assert!(with.0 > without.0 && with.1 > without.1, "{with:?} vs {without:?}");
+    }
+
+    /// A 320×200 frame whose every pixel differs from its neighbours, under a
+    /// palette of 256 distinct colours, so a blended output pixel cannot match.
+    fn distinct_frame() -> IndexedFrame {
+        let mut frame = IndexedFrame::new(320, 200);
+        for y in 0..200usize {
+            for x in 0..320usize {
+                frame.pixels[y * 320 + x] = ((x + 3 * y) % 256) as u8;
+            }
+        }
+        let mut palette = sr_engine::Palette::BLACK;
+        for i in 0..=255u8 {
+            palette.set_entry(i, [i & 63, (i >> 6) * 21, 63 - (i & 63)]);
+        }
+        frame.palettes.reset(palette);
+        frame
+    }
+
+    /// The RGBA colour index `index` widens to under `frame`'s palette.
+    fn colour(frame: &IndexedFrame, index: u8) -> [u8; 4] {
+        let mut table = [0u8; 1024];
+        frame.palettes.base().write_rgba(&mut table);
+        let at = index as usize * 4;
+        [table[at], table[at + 1], table[at + 2], table[at + 3]]
+    }
+
+    /// Run `frame` through the window's own upload path — `streaming_texture` and
+    /// `blit` — into a software renderer of `output`, and read back what it drew.
+    /// No display is needed: SDL's software renderer draws into a surface.
+    fn through_sdl(frame: &IndexedFrame, opts: &PresentOptions, output: (u32, u32)) -> Vec<u8> {
+        let surface = sdl2::surface::Surface::new(output.0, output.1, TEXTURE_FORMAT)
+            .expect("a surface to render into");
+        let mut canvas = surface.into_canvas().expect("SDL's software renderer");
+        let creator = canvas.texture_creator();
+        let mut texture = streaming_texture(&creator, output_size(frame, opts)).expect("a texture");
+        assert!(
+            matches!(texture.scale_mode(), ScaleMode::Nearest),
+            "the texture is never filtered"
+        );
+        let mut buffer = FrameBuffer::new(0, 0);
+        blit(&mut canvas, &mut texture, &mut buffer, frame, opts).expect("the blit");
+        canvas.read_pixels(None, TEXTURE_FORMAT).expect("the rendered pixels")
+    }
+
+    #[test]
+    fn the_window_shows_a_320x200_frame_as_640x400_of_duplicated_pixels() {
+        // The default options, through SDL: every source pixel is exactly a 2×2 block on
+        // the screen, its colour the palette's, and no output pixel is a blend.
+        let frame = distinct_frame();
+        let opts = Cli::default().present_options();
+        assert_eq!(opts, PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: true });
+        assert_eq!(output_size(&frame, &opts), (640, 400), "no border colour, no pad");
+        let drawn = through_sdl(&frame, &opts, (640, 400));
+        for y in 0..400usize {
+            for x in 0..640usize {
+                let at = (y * 640 + x) * 4;
+                let source = frame.pixels[(y / 2) * 320 + x / 2];
+                assert_eq!(
+                    drawn[at..at + 4],
+                    colour(&frame, source),
+                    "screen ({x}, {y}) is not source ({}, {})",
+                    x / 2,
+                    y / 2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_of_another_size_shows_the_picture_centred_and_unscaled() {
+        // A window manager that does not give the size asked for: SDL is still not asked
+        // to stretch, so the picture keeps its 2×2 blocks and the rest is black.
+        let frame = distinct_frame();
+        let opts = PresentOptions::default();
+        assert_eq!(placement((640, 400), (640, 400)), Rect::new(0, 0, 640, 400));
+        assert_eq!(placement((700, 450), (640, 400)), Rect::new(30, 25, 640, 400));
+        assert_eq!(placement((600, 380), (640, 400)), Rect::new(-20, -10, 640, 400));
+        let drawn = through_sdl(&frame, &opts, (700, 450));
+        for y in 0..450usize {
+            for x in 0..700usize {
+                let at = (y * 700 + x) * 4;
+                let expected = if (30..670).contains(&x) && (25..425).contains(&y) {
+                    colour(&frame, frame.pixels[((y - 25) / 2) * 320 + (x - 30) / 2])
+                } else {
+                    [0, 0, 0, 255]
+                };
+                assert_eq!(drawn[at..at + 4], expected, "screen ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_640x400_part_is_the_size_of_its_320x200_neighbours_in_the_window() {
+        // ENDSCRL's 640×400 and ALKU's 320×400 are the size U2A's 320×200 is, so the
+        // window keeps its size across the seams, and each is duplicated, not resampled.
+        let opts = Cli::default().present_options();
+        for (w, h, block) in [(320, 200, (2, 2)), (320, 400, (2, 1)), (640, 400, (1, 1))] {
+            assert_eq!(output_size(&IndexedFrame::new(w, h), &opts), (640, 400), "{w}x{h}");
+            assert_eq!(sr_engine::present::pixel_block(w, h, opts.scale), block, "{w}x{h}");
+        }
     }
 
     #[test]

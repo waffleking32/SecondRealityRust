@@ -30,7 +30,7 @@ questions. It offers:
 | Sound | On / Off | `--no-audio` for Off |
 | Sound quality | Authentic / Enhanced | `--sound-quality` |
 | Demo looping | Disabled / Enabled | `--loop` |
-| Aspect | 4:3 / Square | `--aspect 4:3` / `--aspect square` |
+| Aspect | Square / 4:3 | `--aspect square` / `--aspect 4:3` |
 | Border | On / Off | `--no-border` for Off |
 
 Up and Down choose a row, Left and Right change it, and Enter starts the demo. ESC leaves without
@@ -116,10 +116,15 @@ needs only one ESC. The effects are silent, so `--vault` and `--part grid|hard|t
 
 ## Display
 
-- `--scale <N>` magnifies the window N times.
-- `--aspect 4:3` (the default) shows the picture as a 1993 monitor did; `--aspect square` shows
-  square pixels.
-- `--no-border` leaves out the overscan border colour.
+The window shows the picture at **2×, by duplicating pixels** — no smoothing or interpolation:
+each pixel of a 320×200 part is a 2×2 block, so the picture is 640×400, and the 320×400 and
+640×400 parts are the same 640×400 on the screen.
+
+- `--scale <N>` magnifies by any whole number instead: each 320×200 pixel becomes N×N.
+- `--aspect square` (the default) keeps that exact duplication; `--aspect 4:3` stretches the
+  picture into a 4:3 box as a 1993 monitor did, which resamples 200 lines into 288 and so is not
+  pure duplication.
+- `--no-border` leaves out the overscan border colour, a flat pad around the picture.
 
 ## How faithful it is
 

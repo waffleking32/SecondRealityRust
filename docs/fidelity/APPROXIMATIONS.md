@@ -39,8 +39,9 @@ done
 **Part:** all; used deliberately by PANIC and the 320×400 parts.
 **Original:** the border is the region of the display outside the active area, set by
 AC 0x11 and scanned out by the CRTC.
-**Port:** `View::border` is a colour; `present()` draws it as a frame of 8 source pixels
-per side, scaled with the picture.
+**Port:** `View::border` is a colour; `present()` draws it as a flat frame of 8 320-column
+pixels per side — `8 × scale` output pixels, at every geometry — around the picture, which it
+does not rescale (D48: the picture inside stays whole duplicated blocks).
 **Why:** the engine composes the active display only (spec §4.2, plan decision 8). The
 border must still appear, but its exact thickness depends on CRTC timings the port does
 not model.

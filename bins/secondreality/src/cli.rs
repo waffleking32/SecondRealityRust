@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use sr_audio::{PlayerOptions, Quality};
-use sr_engine::present::Aspect;
+use sr_engine::present::{Aspect, PresentOptions};
 
 use crate::parts;
 use crate::shell;
@@ -52,9 +52,11 @@ pub struct Cli {
     pub dump_frames: Option<Vec<u32>>,
     /// Drive from real elapsed time for this long, dumping only the last frame.
     pub run_seconds: Option<f64>,
-    /// Display magnification; 1 or more.
+    /// The window's integer, nearest-neighbour magnification of a 320×200
+    /// picture; 1 or more, 2 by default. Window-only: a dump is always 1:1.
     pub scale: u32,
-    /// How the picture is fitted to the output raster.
+    /// How the picture is fitted to the window: square dots (the default, pure
+    /// pixel duplication) or the 4:3 stretch. Window-only, like `scale`.
     pub aspect: Aspect,
     /// Whether to draw the frame's overscan colour as a border.
     pub border: bool,
@@ -95,7 +97,8 @@ pub struct Cli {
 }
 
 impl Default for Cli {
-    /// Nothing named yet, in a window, 1:1 in a 4:3 box with its border.
+    /// Nothing named yet, in a window, at 2× with square dots and its border
+    /// ([`PresentOptions::WINDOW`], D48).
     /// [`Cli::parse`] turns "nothing named" into the demo ([`DEFAULT_BLOCK`]).
     fn default() -> Cli {
         Cli {
@@ -106,9 +109,9 @@ impl Default for Cli {
             frames: None,
             dump_frames: None,
             run_seconds: None,
-            scale: 1,
-            aspect: Aspect::FourThree,
-            border: true,
+            scale: PresentOptions::WINDOW.scale,
+            aspect: PresentOptions::WINDOW.aspect,
+            border: PresentOptions::WINDOW.border,
             audio_dump: None,
             no_audio: false,
             vault: false,
@@ -239,6 +242,12 @@ impl Cli {
     /// no key.
     pub fn shows_setup(&self) -> bool {
         self.setup && !self.headless && !self.vault && self.block.is_some()
+    }
+
+    /// How the window presents: `--scale`, `--aspect` and `--no-border`. A headless dump
+    /// never reads this — it is one output pixel a source pixel whatever they say.
+    pub fn present_options(&self) -> PresentOptions {
+        PresentOptions { aspect: self.aspect, scale: self.scale, border: self.border }
     }
 
     /// The part a one-part run names, whether `--part` gave it or not.
@@ -521,15 +530,18 @@ mod tests {
     fn a_run_with_no_arguments_is_the_demo() {
         // `SECOND` with no argument is `SECOND 1` (`part-sequence.md` §4: the
         // default `whattorun` 7fh and `partsmask[1]` 1fh run the same parts), so
-        // the port's no-argument run is block 1 — in a window, 1:1 in a 4:3 box
-        // with its border, as the default run has always been presented.
+        // the port's no-argument run is block 1 — in a window, at 2× with square
+        // dots (every 320×200 pixel a 2×2 block, D48) and its border.
         let c = parse(&[]).unwrap();
         assert_eq!(c.block, Some('1'));
         assert_eq!(c.part, None);
         assert!(!c.headless);
-        assert_eq!(c.scale, 1);
-        assert_eq!(c.aspect, Aspect::FourThree);
+        assert_eq!(c.scale, 2);
+        assert_eq!(c.aspect, Aspect::SquarePixels);
         assert!(c.border);
+        // `--aspect 4:3` is still there, and `--scale` still overrides the 2.
+        let c = parse(&["--aspect", "4:3", "--scale", "1"]).unwrap();
+        assert_eq!((c.aspect, c.scale), (Aspect::FourThree, 1));
     }
 
     #[test]

@@ -33,9 +33,10 @@ use crate::shell::{first_unreachable, Sequence, SequenceStatus};
 const MANIFEST_VERSION: u32 = 1;
 
 /// The presentation a dump uses. Deliberately not the window's: display
-/// scaling, aspect and border never reach a fidelity measurement.
+/// scaling, aspect and border never reach a fidelity measurement, so a dump is
+/// one output pixel a source pixel, whatever the frame's mode.
 const DUMP_OPTIONS: PresentOptions = PresentOptions {
-    aspect: Aspect::SquarePixels,
+    aspect: Aspect::SourcePixels,
     scale: 1,
     border: false,
 };

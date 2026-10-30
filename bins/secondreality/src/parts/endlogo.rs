@@ -1399,7 +1399,7 @@ mod tests {
     /// options — one output pixel a source pixel, no border, no scaling.
     fn render(frame: &sr_engine::IndexedFrame) -> Vec<u8> {
         use sr_engine::present::{present, Aspect, FrameBuffer, PresentOptions};
-        let options = PresentOptions { aspect: Aspect::SquarePixels, scale: 1, border: false };
+        let options = PresentOptions { aspect: Aspect::SourcePixels, scale: 1, border: false };
         let mut buffer = FrameBuffer::new(0, 0);
         present(frame, &options, &mut buffer);
         let mut rgb = Vec::with_capacity(buffer.width() * buffer.height() * 3);
