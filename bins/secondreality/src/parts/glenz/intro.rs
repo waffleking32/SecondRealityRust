@@ -252,6 +252,7 @@ impl Bounce {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::test_rig::reference;
     use sr_assets::Image;
     use std::path::Path;
 
@@ -277,7 +278,7 @@ mod tests {
     /// The reference's held opening: the indexed plane the bounce's last frame
     /// must reproduce.
     fn held_reference() -> Vec<u8> {
-        std::fs::read("../../reference/parts/glenz/frame_001499.idx").unwrap()
+        reference("glenz", 1499, "idx")
     }
 
     /// The 47 drawn ticks and the break on the 48th (`ZOOMER.C:38-44`), with
