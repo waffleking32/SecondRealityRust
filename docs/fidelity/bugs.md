@@ -60,8 +60,7 @@ restores the shadow's previous pixel and writes `87+87*256`; `:120-179` draws th
 the picture.
 
 **Frame.** `reference/parts/minvball/` 10900, 11200, 11800, 12400 (§14), all moving at 3/3 support;
-the port is byte-identical at all four (`the_four_keyframes_match_the_reference_at_the_mapping`,
-`cargo xtask rediff`). Coincident dots resolve by draw order with the fitted `j` (§18.4, A19).
+the port is byte-identical at all four (`cargo xtask rediff`). Coincident dots resolve by draw order with the fitted `j` (§18.4, A19).
 
 **Test.** `shadows_are_drawn_over_balls_without_a_depth_test`: a near dot (bp 8000) and a far dot
 (bp 9000) in both orders. Near first, the far shadow covers the near ball's first two pixels

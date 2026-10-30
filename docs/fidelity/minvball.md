@@ -42,7 +42,7 @@ the scatter's stream where the reference has it, so the port runs it.
 
 The part's first frame is in the measured window `(10,300, 10,400]` (`reference-indices.md`
 §14.5). The four keyframes are reproduced at ticks 532, 832, 1,432 and 2,032, which is the fit's
-own evidence (`the_four_keyframes_match_the_reference_at_the_mapping`).
+own evidence (rediff's `minvball` entry).
 
 **The independent pin is the survey's 12,900 flat-grey frame.** Its sessions record
 `(239,239,239)` and `(231,231,231)`, the `c = 59` and `c = 57` uploads (`reference-indices.md`
@@ -126,12 +126,10 @@ jump could not (`part-sequence.md` §10.2).
 | 11,800 | 1,432 | 1,303 | RGB | 0 | exact |
 | 12,400 | 2,032 | 1,903 | RGB | 0 | exact |
 
-The rows are the `minvball` entry of the rediff table (`xtask/src/rediff/table.rs`), and
-`the_four_keyframes_match_the_reference_at_the_mapping` asserts them. The dots move every frame,
-so no frame carries `.idx`; the test holds `K-1, K, K+1` for each (D19), and each keyframe is
-reproduced at exactly one frame counter. The shadow layer (colour 87: 11 in the six-bit palette,
-45 widened) is at the same pixels in both frames at every keyframe: 1,860, 2,159, 2,187 and 2,170
-shared of as many (the same test).
+The rows are the `minvball` entry of the rediff table (`xtask/src/rediff/table.rs`). The dots
+move every frame, so no frame carries `.idx`; `each_keyframes_neighbours_differ_from_it`
+(`tests/minvball.rs`) holds `K-1, K, K+1` for each (D19), so each keyframe is reproduced at
+exactly one frame counter.
 
 The release's `MAIN/DATA/MINVBALL.EXE` (7,395 bytes) is PKLITE-packed; the tree's
 `DOTS/DOTS.EXE` (10,372 bytes) is the development build of the source ported here. The tree's
@@ -141,7 +139,7 @@ Reproduce:
 
 ```bash
 cargo xtask rediff --only minvball
-cargo test --release -p secondreality --test minvball the_four_keyframes -- --nocapture
+cargo test -p secondreality --test minvball
 cargo test -p secondreality --bin secondreality parts::minvball
 ```
 
