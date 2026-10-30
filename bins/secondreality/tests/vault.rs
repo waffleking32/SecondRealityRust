@@ -1,42 +1,11 @@
-//! GRID and TWIST through the real binary: the silent, unanchored runs, and
-//! each part's filed reference keyframes at its measured `K0`.
+//! GRID, HARD and TWIST through the real binary: the silent, unanchored runs,
+//! the ends the parts reach by themselves, and GRID's residual rows. The
+//! keyframe counts are rediff's (`grid`, `hard`, `twist`), held by
+//! `tests/reference_frames.rs`.
 //!
-//! The parts' arithmetic is unit-tested beside them (`parts::vault::{grid,
-//! twist}`): the sine tables and the measured `d0`, the eye shift bound, the
-//! three palettes and the generated line blit for GRID; the 16-bit row phase,
-//! the shipped texture, the two pages, the masked palette and the 4,444-frame
-//! cap for TWIST. What is left for a process is the wiring only a run can
-//! answer: the registry, the numbering, silence, and the frames the shell
-//! actually composes.
-//!
-//! **GRID's `K0` = 353** (`docs/fidelity/reference-indices.md` §24.5): the
-//! filed capture is route A, whose 353 is byte-identical to route B's 704 — the
-//! first byte-reproducible loop frame. The port's composed frame 0 is source
-//! iteration 1 (iteration 0 is the start-up transition frame, reference 352,
-//! and is drawn in `init`), so **port frame `j` = reference `353 + j`**.
-//!
-//! **TWIST's `K0` = 3 ±1** (`reference-indices.md` §24.6): the two-band
-//! fingerprint (rows 0..63 = generated row 0, rows 64..199 = row 199) is boot
-//! frame 3, matched from the phase at boot 4/5/6 (effect frames 1/2/3). The
-//! six filed keyframes 103..603 are effect frames 100..600.
-//!
-//! **HARD's `K0` = 356** (`reference-indices.md` §24.7): the first wipe frame,
-//! 16 black pixels at row 100. The pre-roll is 119 port ticks — 20 wipe steps,
-//! 28 fill iterations, 70 waits and the letterbox — so **port frame `j` =
-//! reference `356 + j`**; the letterbox is port 118 (reference 474), the first
-//! drawn dots port 156 (reference 512), and mode 4's count 0 port 495
-//! (reference 851, a picture identical to mode 3's hold). The two measured
-//! boundary displays put part 2's `part2init` at port 599 (reference 955), the
-//! first grid frame at 600 (956) and `part3init` at 1100 (1456; A48).
-//!
-//! The candidate for a reference `R` is port `R − K0`, with the ±1 search
-//! reproduced here so the test reports the same three counts the comparison
-//! workflow would. Every filed frame of the three parts is RGB-only except
-//! HARD's held 840: the screen moves during the indexed read (D15/D19), and
-//! for TWIST an odd frame's page is not at plane offset 0 at all. The shared
-//! comparison therefore compares the `.rgb` at every candidate, and a
-//! reference `.idx` — HARD files one at its held frame 840 — only at the
-//! offset the RGB search chose.
+//! **GRID's `K0` = 353** (`reference-indices.md` §24.5): port frame `j` is
+//! reference `353 + j` (source iteration 0, reference 352, is drawn in
+//! `init`). **HARD's** is 356 (§24.7) and **TWIST's** 3 (§24.6).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -53,55 +22,12 @@ const GRID_K0: u32 = 353;
 /// candidate cause.
 const GRID_RESIDUALS: [(u32, usize); 5] = [(400, 6), (500, 2), (600, 36), (700, 33), (800, 14)];
 
-/// The reference index of TWIST's composed frame 0 (`reference-indices.md`
-/// §24.6): the frame-0 two-band picture is boot index 3, measured from the
-/// boundary phase at boot 4/5/6.
-const TWIST_K0: u32 = 3;
-
-/// The six filed TWIST keyframes: effect frames 100..600, ~100 apart.
-const TWIST_KEYFRAMES: [u32; 6] = [103, 203, 303, 403, 503, 603];
-
-/// TWIST is exact: the six keyframes are effect frames 100..600 under
-/// `effect = index − 3`, and the port's model reproduces every filed byte.
-const TWIST_RESIDUALS: [(u32, usize); 6] =
-    [(103, 0), (203, 0), (303, 0), (403, 0), (503, 0), (603, 0)];
-
-/// The reference index of HARD's composed frame 0 (`reference-indices.md`
-/// §24.7): the first wipe frame, 16 black pixels at row 100, reference 356.
-const HARD_K0: u32 = 356;
-
-/// The nine filed HARD keyframes, one per mode stage: mode 0's letterbox, the
-/// four logo phases, mode 3's hold, mode 4's band, part 2's grid and part 3's
-/// cube.
-const HARD_KEYFRAMES: [u32; 9] = [480, 560, 630, 700, 770, 840, 910, 1050, 1600];
-
-/// All nine are exact at offset 0: every filed pixel reproduces, and 840's
-/// `.idx` reproduces byte for byte (`hard_matches_the_reference_at_its_keyframes`
-/// prints the three candidates).
-const HARD_RESIDUALS: [(u32, usize, i32); 9] = [
-    (480, 0, 0),
-    (560, 0, 0),
-    (630, 0, 0),
-    (700, 0, 0),
-    (770, 0, 0),
-    (840, 0, 0),
-    (910, 0, 0),
-    (1050, 0, 0),
-    (1600, 0, 0),
-];
-
-/// Where a `cargo run` of the acceptance command starts, and where the part's
-/// own `assets/...` paths resolve.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A run of one part alone, dumping the frames asked for.
-///
-/// The run must exit 0: every requested index is produced, and a hole in a
-/// dump reads as a keyframe that matched. The directory carries the part's
-/// name as well as the test's, so two parts' runs of the same test name cannot
-/// share a dump.
+/// A `--part` run dumping `indices`, which must exit 0, and its manifest. The
+/// caller removes the directory.
 fn dump(part: &str, name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
     let dir = std::env::temp_dir().join(format!("sr-vault-{}-{part}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -156,12 +82,7 @@ fn reference_frame(part: &str, index: u32, suffix: &str) -> Vec<u8> {
 }
 
 /// How many pixels of `rendered` differ from `expected`, and the largest
-/// channel delta among them.
-///
-/// **The lengths are asserted first**: `zip` stops at the shorter side, so a
-/// truncated dump — the one failure a comparison test exists to catch — would
-/// compare a prefix and report zero differences as if it had compared the
-/// frame.
+/// channel delta among them; a short read is refused, not compared.
 fn differing_pixels(rendered: &[u8], expected: &[u8]) -> (usize, u8) {
     assert_eq!(
         rendered.len(),
@@ -199,13 +120,8 @@ struct KeyframeReport {
 /// Compare every `keyframe` against `part`'s filed reference at `K0`, over the
 /// port-side candidates `R − K0 − 1, R − K0, R − K0 + 1`.
 ///
-/// The minimum is chosen by `(pixels, |offset|, rendered index)`: D18's rule
-/// (fewest differing pixels, then the smaller offset), so a held or exactly
-/// repeated frame reports offset 0 rather than a coin flip. **The indexed
-/// comparison follows the RGB choice** — a reference that carries an `.idx`
-/// (HARD's held 840) is compared only at the offset whose RGB picture won; a
-/// `±1` loop that compared every candidate's `.idx` would fail on the wrong
-/// picture.
+/// The minimum is chosen by `(pixels, |offset|, rendered index)`, D18's rule,
+/// so a held frame reports offset 0.
 fn compare_keyframes(part: &str, k0: u32, keyframes: &[u32]) -> Vec<KeyframeReport> {
     let mut indices = Vec::new();
     for &reference in keyframes {
@@ -247,18 +163,6 @@ fn compare_keyframes(part: &str, k0: u32, keyframes: &[u32]) -> Vec<KeyframeRepo
         }
         let (pixels, offset, max, port_index) = best.unwrap();
 
-        // Indexed is the stricter side, where the reference files one. It is
-        // compared at the winner only.
-        let reference_idx =
-            repository_root().join(format!("reference/parts/{part}/frame_{reference:06}.idx"));
-        if reference_idx.is_file() {
-            let idx = std::fs::read(&reference_idx).unwrap();
-            let rendered_idx = dumped_file(&dir, &manifest, port_index, "idx");
-            assert_eq!(
-                rendered_idx, idx,
-                "reference {reference} at offset {offset:+}: indexed plane"
-            );
-        }
 
         // The residual's own rows, so a note's claim about where the pixels
         // differ is printed by the command that measures it (D25).
@@ -284,6 +188,7 @@ fn compare_keyframes(part: &str, k0: u32, keyframes: &[u32]) -> Vec<KeyframeRepo
             rows,
         });
     }
+    let _ = std::fs::remove_dir_all(&dir);
     reports
 }
 
@@ -305,55 +210,25 @@ fn print_report(report: &KeyframeReport) {
 }
 
 #[test]
-fn a_part_run_of_grid_numbers_itself_from_zero_and_is_silent() {
-    let (dir, manifest) = dump("grid", "silent", "0,1,10");
-
-    assert_eq!(manifest["part"], "grid");
-    // The vault is not in the demo's sequence and carries no measured boot
-    // anchor: a `--part grid` run numbers its own frames from zero.
-    assert_eq!(manifest["index_origin"], "part");
-    assert!(manifest["anchor"].is_null(), "{}", manifest["anchor"]);
-    // Silent: no player is installed and `music_for_part("grid")` is `None`.
-    assert!(manifest["music"].is_null(), "{}", manifest["music"]);
-
-    let frames = manifest["frames"].as_array().unwrap();
-    assert_eq!(frames.len(), 3);
-    for (frame, index) in frames.iter().zip([0u32, 1, 10]) {
-        assert_eq!(frame["index"].as_u64(), Some(u64::from(index)));
-        assert_eq!(frame["part"], "grid");
-        assert_eq!(frame["width"], 320);
-        assert_eq!(frame["height"], 200);
-        let rgb = std::fs::read(dir.join(frame["rgb"].as_str().unwrap())).unwrap();
-        assert_eq!(rgb.len(), 320 * 200 * 3);
-        let idx = std::fs::read(dir.join(frame["idx"].as_str().unwrap())).unwrap();
-        assert_eq!(idx.len(), 64_000);
-    }
-}
-
-#[test]
-fn a_part_run_of_twist_is_silent_and_numbers_itself_from_zero() {
-    let (dir, manifest) = dump("twist", "silent", "0,1,10");
-
-    assert_eq!(manifest["part"], "twist");
-    // The vault is not in the demo's sequence and carries no measured boot
-    // anchor: a `--part twist` run numbers its own frames from zero.
-    assert_eq!(manifest["index_origin"], "part");
-    assert!(manifest["anchor"].is_null(), "{}", manifest["anchor"]);
-    // Silent: TWIST calls no music service and `music_for_part("twist")` is
-    // `None`; a stray key would have ended the original, and none is sent.
-    assert!(manifest["music"].is_null(), "{}", manifest["music"]);
-
-    let frames = manifest["frames"].as_array().unwrap();
-    assert_eq!(frames.len(), 3);
-    for (frame, index) in frames.iter().zip([0u32, 1, 10]) {
-        assert_eq!(frame["index"].as_u64(), Some(u64::from(index)));
-        assert_eq!(frame["part"], "twist");
-        assert_eq!(frame["width"], 320);
-        assert_eq!(frame["height"], 200);
-        let rgb = std::fs::read(dir.join(frame["rgb"].as_str().unwrap())).unwrap();
-        assert_eq!(rgb.len(), 320 * 200 * 3);
-        let idx = std::fs::read(dir.join(frame["idx"].as_str().unwrap())).unwrap();
-        assert_eq!(idx.len(), 64_000);
+fn a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent() {
+    // The vault is not in the demo's sequence and has no boot anchor, and no
+    // player is installed (`music_for_part` is `None`).
+    for part in ["grid", "hard", "twist"] {
+        let (dir, manifest) = dump(part, "silent", "0,1,10");
+        assert_eq!(manifest["part"], part);
+        assert_eq!(manifest["index_origin"], "part", "{part}");
+        assert!(manifest["anchor"].is_null(), "{part}: {}", manifest["anchor"]);
+        assert!(manifest["music"].is_null(), "{part}: {}", manifest["music"]);
+        let frames = manifest["frames"].as_array().unwrap();
+        let listed: Vec<(u64, &str, u64, u64)> = frames
+            .iter()
+            .map(|f| {
+                let field = |name: &str| f[name].as_u64().unwrap();
+                (field("index"), f["part"].as_str().unwrap(), field("width"), field("height"))
+            })
+            .collect();
+        assert_eq!(listed, [0, 1, 10].map(|index| (index, part, 320, 200)), "{part}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -386,75 +261,14 @@ fn grid_matches_the_reference_at_its_measured_start() {
     }
 }
 
+/// TWIST's six keyframes, effect frames 100..600 at `K0` = 3: exact at offset
+/// 0. The run prints the ±1 neighbours `twist.md`'s table quotes.
 #[test]
 fn twist_matches_the_reference_at_its_measured_start() {
-    // All six filed frames are RGB-only: the moving screen fails the indexed
-    // read's coherence check, and an odd TWIST frame draws page 2, which the
-    // oracle's plane read (always from plane offset 0) would see as page 1.
-    for reference in TWIST_KEYFRAMES {
-        let idx = repository_root().join(format!("reference/parts/twist/frame_{reference:06}.idx"));
-        assert!(
-            !idx.is_file(),
-            "TWIST's filed capture is RGB-only (reference {reference})"
-        );
-    }
-
-    let reports = compare_keyframes("twist", TWIST_K0, &TWIST_KEYFRAMES);
-    for (report, (reference, residual)) in reports.iter().zip(TWIST_RESIDUALS) {
-        assert_eq!(report.reference, reference);
-        print_report(report);
-        assert_eq!(
-            (report.pixels, report.offset),
-            (residual, 0),
-            "reference {reference}: {:?}; effect frame {} must match at the K0 mapping",
-            report.counts,
-            reference - TWIST_K0
-        );
-    }
-}
-
-#[test]
-fn a_part_run_of_hard_is_silent_and_numbers_itself_from_zero() {
-    let (dir, manifest) = dump("hard", "silent", "0,1,10");
-
-    assert_eq!(manifest["part"], "hard");
-    // The vault is not in the demo's sequence and carries no measured boot
-    // anchor: a `--part hard` run numbers its own frames from zero.
-    assert_eq!(manifest["index_origin"], "part");
-    assert!(manifest["anchor"].is_null(), "{}", manifest["anchor"]);
-    // Silent: HARD's only music call is the start gate and the 0xff cut; no
-    // player is installed and `music_for_part("hard")` is `None`.
-    assert!(manifest["music"].is_null(), "{}", manifest["music"]);
-
-    let frames = manifest["frames"].as_array().unwrap();
-    assert_eq!(frames.len(), 3);
-    for (frame, index) in frames.iter().zip([0u32, 1, 10]) {
-        assert_eq!(frame["index"].as_u64(), Some(u64::from(index)));
-        assert_eq!(frame["part"], "hard");
-        assert_eq!(frame["width"], 320);
-        assert_eq!(frame["height"], 200);
-        let rgb = std::fs::read(dir.join(frame["rgb"].as_str().unwrap())).unwrap();
-        assert_eq!(rgb.len(), 320 * 200 * 3);
-        let idx = std::fs::read(dir.join(frame["idx"].as_str().unwrap())).unwrap();
-        assert_eq!(idx.len(), 64_000);
-    }
-}
-
-#[test]
-fn hard_matches_the_reference_at_its_keyframes() {
-    let reports = compare_keyframes("hard", HARD_K0, &HARD_KEYFRAMES);
+    let reports = compare_keyframes("twist", 3, &[103, 203, 303, 403, 503, 603]);
     for report in &reports {
         print_report(report);
-    }
-    for (report, (reference, residual, offset)) in reports.iter().zip(HARD_RESIDUALS) {
-        assert_eq!(report.reference, reference);
-        assert_eq!(
-            (report.pixels, report.offset),
-            (residual, offset),
-            "reference {reference}: {:?}; the minimum must be the measured residual at the K0 \
-             mapping",
-            report.counts
-        );
+        assert_eq!((report.pixels, report.offset), (0, 0), "reference {}: {:?}", report.reference, report.counts);
     }
 }
 
@@ -487,6 +301,7 @@ fn hard_draws_the_whole_effect_and_holds() {
             "frame {hold} holds the indexed frame too"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -521,4 +336,5 @@ fn twist_draws_exactly_4444_frames_and_holds() {
             "frame {hold} holds the indexed frame too"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
 }

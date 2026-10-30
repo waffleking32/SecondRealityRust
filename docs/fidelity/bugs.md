@@ -766,7 +766,7 @@ path. Where a note holds a counterfactual test, the row names it.
 | HARD | `depthcol[bp]` with a negative low word reads a code byte (0x07), modelled as zero | `HARD/BA.ASM:232-234` | The low word is always positive over part 2 (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`) | `hard.md` |
 | HARD | `do3dots`'s shadow store to `[si+12]` is behind `jmp @@4`; the word clear before it (`:229-231`) runs every iteration | `HARD/BA.ASM:229-235` | `[si+12]` stays 0; the port's one-byte-per-row clear differs only in bytes 1/321 at offset 0, which no reached frame reads | `hard.md` |
 | HARD | `_GRID1.TMP`'s last byte is `0x4F` in the linked copy and `0x00` in the file | `HARD/B.C:112-121` | No filed keyframe depends on the 100th pair's y (`the_grid_table_is_the_shipped_grid1`) | `hard.md` |
-| HARD | The `count>400` branch and the `0xff` cut; `setborder` | `HARD/B.C:243-246`, `:26`, `:196`, `:201` | Dead / inert (`the_0xff_cut_is_unreachable_with_one_start`) | `hard.md` |
+| HARD | The `count>400` branch and the `0xff` cut; `setborder` | `HARD/B.C:243-246`, `:26`, `:196`, `:201` | Dead / inert (`the_full_mode_sequence_is_the_sources`) | `hard.md` |
 | TWIST | `line()`/`leftline`/`rightline` are never called; the `memset` and `vram[a]=a` are overwritten before display; the record's last six bytes are never read | `TWIST/MAIN.C:30-42`, `ASM.ASM:97-218` | None is observable | `twist.md` §2 |
 | CRED | `tw_setsplit(400)` | `CREDITS/MAIN.C:165` | A line compare of 400 below a 200-row display is inert | `cred.md` §1 |
 | ENDSCRL | The line read runs past `text[64000]` if the text has no `%` line | `ENDSCRL/MAIN.C:66-74`; image `0x1351-0x13a3` | The shipped text's `%` line (537 of 542) ends the part (`0x169a`) | `endscrl.md` §5 |

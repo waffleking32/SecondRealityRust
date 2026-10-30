@@ -1228,8 +1228,7 @@ The source polls `dis_exit` at two places only: the 70-wait loop (`B.C:162`) and
 condition (`B.C:203`).
 
 **Port:** the part starts at `init` with the gate passed and never models the echo; the `0xff` cut
-cannot fire (`the_0xff_cut_is_unreachable_with_one_start`, on the full run, where part 3 ends at its
-own count 800). The exit flag is polled at the source's two points, and the letterbox still runs
+is not ported, and part 3 ends at its own count 800 (`the_full_mode_sequence_is_the_sources`). The exit flag is polled at the source's two points, and the letterbox still runs
 after a flag set during the wipe or the fill
 (`the_exit_flag_is_polled_where_the_source_polls_it`).
 
@@ -1237,8 +1236,7 @@ after a flag set during the wipe or the fill
 against the reference's. The key is a start event before `K0`, so no compared frame sees it.
 
 **Measured difference:** **0**: the nine keyframes 480…1600 are exact and 840's `.idx` is byte for
-byte (`cargo test -p secondreality --test vault -- --nocapture
-hard_matches_the_reference_at_its_keyframes`).
+byte (`cargo xtask rediff --only hard`).
 
 ## A47 — HARD: one 70.086 Hz tick stands for one waitb, with the display phase measured
 
@@ -1260,8 +1258,7 @@ shows is A48's.
 (`design.md` §6).
 
 **Measured difference:** **0** at all nine keyframes 480 / 560 / 630 / 700 / 770 / 840 / 910 / 1050 /
-1600, offset 0, and 840's index plane (`hard_matches_the_reference_at_its_keyframes`;
-`cargo xtask rediff --only hard`). The tick counts are pinned by
+1600, offset 0, and 840's index plane (`cargo xtask rediff --only hard`). The tick counts are pinned by
 `parts::vault::hard::part::tests::the_pre_roll_is_the_sources_tick_counts`,
 `the_first_half_mode_sequence_is_the_sources` and `the_full_mode_sequence_is_the_sources`.
 
@@ -1374,8 +1371,8 @@ A43), and the later key cuts are unreachable. A `--part` run numbers its frames 
 
 **Measured difference:** **0** in all twenty compared frames (GRID 5, TWIST 6, HARD 9), and the
 manifests carry `music: null`, `anchor: null` and `index_origin: "part"` (`cargo test -p secondreality
---test vault -- --nocapture`; `a_part_run_of_grid_numbers_itself_from_zero_and_is_silent` and its two
-siblings for TWIST and HARD).
+--test vault`'s `a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent`; the
+frames are `cargo xtask rediff --only grid --only twist --only hard`).
 
 ## A53 — The full run's seams: every part is handed over in one tick, and the loader's frames are not modelled
 

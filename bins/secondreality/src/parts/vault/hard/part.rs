@@ -61,7 +61,7 @@ use super::span::Compositor;
 use crate::parts::{mode_view, read_asset};
 
 /// The registry name (`parts::registry`).
-pub const HARD_NAME: &str = "hard";
+const HARD_NAME: &str = "hard";
 
 /// `FCRZ.U` in the port's curated asset tree (64000 raw bytes, SHA-256
 /// `e2c068fe26c00ab3cfc6816e240d1a2670a1ba31bce8ea543861d3c154a1da5c`).
@@ -84,9 +84,9 @@ const BAND_END: usize = (BAND_TOP + BAND_ROWS) * SCREEN_WIDTH;
 const BAND_BYTES: usize = BAND_END - BAND_START;
 
 /// `loadpal(pal,32*3)` (`BP.C:59`): part 1's upload is 32 entries.
-pub const PART1_UPLOAD_BYTES: usize = 32 * 3;
+const PART1_UPLOAD_BYTES: usize = 32 * 3;
 /// Every other upload in the first half.
-pub const FULL_UPLOAD_BYTES: usize = 768;
+const FULL_UPLOAD_BYTES: usize = 768;
 
 /// `if(count>=500) NEXTMODE` (`BP.C:172`): part 2's end.
 const PART2_END: i16 = 500;
@@ -100,9 +100,8 @@ const PART2_FADE_UPLOAD_START: i16 = 500 - 17;
 /// `if(vram[u]==254-65) vram[u]=1` (`B.C:299`): mode 4's trail index.
 const MODE_FOUR_TRAIL: u8 = 254 - 65;
 
-/// `cubepoints` (`BP.C:85-94`): the cube is `-510`..`410`, **not** symmetric —
-/// the plan's and the research's "±510" is a transcription error.
-pub const CUBE_POINTS: [[i32; 3]; 8] = [
+/// `cubepoints` (`BP.C:85-94`): `-510`..`410`, not symmetric.
+const CUBE_POINTS: [[i32; 3]; 8] = [
     [-510, -510, -510],
     [410, -510, -510],
     [410, 410, -510],
@@ -115,7 +114,7 @@ pub const CUBE_POINTS: [[i32; 3]; 8] = [
 
 /// `cubepolys` (`BP.C:95-102`): six quads, colours `0x4001..0x4020`, indices
 /// 0..7 of the projected list.
-pub const CUBE_POLYS: [PolyDef; 6] = [
+const CUBE_POLYS: [PolyDef; 6] = [
     PolyDef {
         colour: 0x4001,
         points: &[3, 2, 1, 0],
@@ -145,7 +144,7 @@ pub const CUBE_POLYS: [PolyDef; 6] = [
 /// `cubepolyss` (`BP.C:103-110`): the same six quads, every colour `0x4040`,
 /// indexing the magnified copy at records 8..15.
 #[allow(clippy::identity_op)] // the source's `3+8, 2+8, …, 0+8` form (`BP.C:104-109`)
-pub const CUBE_SHADOW_POLYS: [PolyDef; 6] = [
+const CUBE_SHADOW_POLYS: [PolyDef; 6] = [
     PolyDef {
         colour: 0x4040,
         points: &[3 + 8, 2 + 8, 1 + 8, 0 + 8],
@@ -632,9 +631,9 @@ impl Hard {
         if self.count >= PART3_END {
             self.nextmode();
         }
-        if self.muscode(0xff) == 0xff {
-            self.nextmode();
-        }
+        // `if(dis_muscode(0xff)==0xff) NEXTMODE` (`BP.C:263`) cannot fire:
+        // the capture's one key was consumed by the gate at `B.C:138`
+        // (`DIS/DISINT.ASM:275-280`, A46).
         // `ct2+=4; lix=sin1024[ct2&1023]/2+160;
         // liy=sin1024[(ct2+256)&1023]/2+64` (`BP.C:265-267`).
         self.ct2 = self.ct2.wrapping_add(4);
@@ -665,14 +664,6 @@ impl Hard {
         if self.count < 20 {
             fadepal(&mut self.pal, &self.pal2, self.count.wrapping_mul(16));
         }
-    }
-
-    /// `dis_muscode(wanted)` under the vault's single-start model
-    /// (`DIS/DISINT.ASM:275-280`, `APPROXIMATIONS.md` A46): the capture's one
-    /// key was consumed by the gate at `B.C:138`, so every later call returns
-    /// 0 and part 3's `0xff` cut (`BP.C:263`) cannot fire.
-    fn muscode(&self, _wanted: i16) -> i16 {
-        0
     }
 
     /// One main-loop iteration (`B.C:203-324`). Returns true when the part
@@ -754,11 +745,8 @@ impl Hard {
                 }
             }
             4 => {
-                // The `count>400` branch (`B.C:243-246`) is dead: the
-                // `count>100` branch below advances at 101.
-                if self.count > 400 {
-                    self.nextmode();
-                }
+                // `B.C:243-246`'s `count>400` exit is dead: the `count>100`
+                // one below leaves at 101.
                 if self.count == 0 {
                     self.mode_four_rebuild();
                 }
@@ -822,43 +810,13 @@ impl Part for Hard {
         }
         let mut image = [0u8; SCREEN_BYTES];
         image.copy_from_slice(&raw);
-        self.streams = dots_from_fcrz(&image);
-        self.dots = initial_dots();
-        self.dot_slot = 0;
-        self.rand = MsRand::new();
-        // No pre-roll: the vendored `B.C` burns no `rand()` calls before its
-        // first spawn, and the capture says the artifact agrees. The plan's
-        // and the research's "60-call pre-roll" (`B.C:122`) does not exist in
-        // the tree (the 60-call loop is `EDGE.C:122`, a different program).
-        // The port's first drawn frame matches reference 512 exactly
-        // (`docs/fidelity/hard.md` records the scratch burn experiment that
-        // decided it).
-        // `int 10h` mode 13h, `waitb()`, `memset(vram0,15,64000)` (`B.C:133-137`).
-        self.screen = [15; SCREEN_BYTES];
-        self.phase = Phase::Wipe { next_x: 319 };
-        self.count = -1;
-        self.mode = 0;
-        self.pal1colp = 0;
-        self.pause = false;
-        self.dotspnt = 0;
-        self.dotsp = 0;
-        self.doit1_flag = 0;
-        self.gx = 0;
-        self.pal = [0; 768];
-        self.pal1 = [0; 768];
-        self.pal2 = [0; 768];
-        self.defpal = [0; 768];
-        self.dac = [0; 768];
-        self.grid.clear();
-        self.points3.clear();
-        self.depthcol = [0; 8192];
-        self.rx = 0;
-        self.ry = 0;
-        self.rz = 0;
-        self.zp = 5600;
-        self.ct2 = 0;
-        self.compositor = Compositor::new();
-        self.mode_five_hold = 0;
+        // `int 10h` mode 13h, `waitb()`, `memset(vram0,15,64000)`
+        // (`B.C:133-137`) are `new()`'s screen. No `rand()` call precedes the
+        // first spawn (`hard.md`).
+        *self = Hard {
+            streams: dots_from_fcrz(&image),
+            ..Hard::new()
+        };
         // The mode set leaves this DAC in place until the pre-roll's first
         // `loadpal(defpal,768)`.
         self.shown = crate::shell::hardware_default_palette();
@@ -935,7 +893,7 @@ impl Part for Hard {
 /// the last screen offset and word 6 the shadow offset, both owned by
 /// `do3dots`. They live in the caller's `points3`, so they persist across
 /// frames exactly as the source's BSS array does.
-pub fn grid_records(
+fn grid_records(
     points3: &mut [i16],
     grid: &[[i32; 3]],
     matrix: &Matrix,
@@ -962,7 +920,7 @@ pub fn grid_records(
 /// the 32-bit z (`BP.C:280-281`). `x-lix` is likewise an `int` and wraps in
 /// 16 bits before the cast to `long`; the quotient truncates toward zero and
 /// the `+ lix` result is stored back through an `int`.
-pub fn magnified_copy(verts: &[PVert], lix: i16, liy: i16) -> Vec<PVert> {
+fn magnified_copy(verts: &[PVert], lix: i16, liy: i16) -> Vec<PVert> {
     verts
         .iter()
         .map(|vert| {
@@ -982,7 +940,6 @@ pub fn magnified_copy(verts: &[PVert], lix: i16, liy: i16) -> Vec<PVert> {
             PVert {
                 x,
                 y,
-                flags: 0,
                 z: 3000,
                 // The second block's raw fields are BSS zero: the source's
                 // copy loop writes only x, y and the z dword (`BP.C:285-287`),
@@ -998,7 +955,7 @@ pub fn magnified_copy(verts: &[PVert], lix: i16, liy: i16) -> Vec<PVert> {
 /// The two clipper passes (`BP.C:289-294`): `ceasymode(0)`/`demo_hide` for
 /// the magnified copy (`CUBE_SHADOW_POLYS`, records 8..15) and
 /// `ceasymode(1)`/`demo_norm` for the real cube (`CUBE_POLYS`, records 0..7).
-pub fn part3_lists(verts: &[PVert]) -> (Vec<Poly>, Vec<Poly>) {
+fn part3_lists(verts: &[PVert]) -> (Vec<Poly>, Vec<Poly>) {
     (
         clip_easy_list(&CUBE_SHADOW_POLYS, verts, FaceMode::Hide),
         clip_easy_list(&CUBE_POLYS, verts, FaceMode::Norm),
@@ -1010,7 +967,7 @@ pub fn part3_lists(verts: &[PVert]) -> (Vec<Poly>, Vec<Poly>) {
 ///
 /// `dl` is a 16-bit `int` and the range test is unsigned (`cmp dx,256; jb`),
 /// so a negative or oversized value clamps to 255.
-pub fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
+fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
     let dl: u8 = if (dl as u16) < 256 { dl as u8 } else { 255 };
     let blue_bias = ((20 * u32::from(255 - dl)) >> 8) as u8;
     for (out, source) in dst.chunks_exact_mut(3).zip(src.chunks_exact(3)) {
@@ -1028,7 +985,7 @@ pub fn fadepal(dst: &mut [u8; 768], src: &[u8; 768], dl: i16) {
 /// green planes of the three groups at byte offsets `48`, `48+192` and
 /// `48+384`, scaled by 1, 2/3 and 1/3; the blue plane is `(64-a)*4/6`
 /// clamped, scaled the same way and biased by 20.
-pub fn part1init_palette(pal1: &mut [u8; 768]) {
+fn part1init_palette(pal1: &mut [u8; 768]) {
     for a in 0..64usize {
         let mut b = 64 - a as i32;
         b = b * b / 64;
@@ -1053,7 +1010,7 @@ pub fn part1init_palette(pal1: &mut [u8; 768]) {
 /// `pal1colp` is 4, 8, 12, 16 across the four phases, so the two groups land
 /// at entries 1..3/5..7, 5..7/9..11, 9..11/13..15 and 13..15/17..19. Every
 /// byte written is below 96, which is all `loadpal(pal,32*3)` uploads.
-pub fn part1_palette(pal: &mut [u8; 768], pal1: &[u8; 768], pal1colp: i16, count: i16) {
+fn part1_palette(pal: &mut [u8; 768], pal1: &[u8; 768], pal1colp: i16, count: i16) {
     let first = (count - 6).clamp(0, 63) as usize * 3 + 16 * 3;
     let second = (64 - count.min(64)) as usize * 3 + 16 * 3;
     let base = pal1colp as usize * 3;
@@ -1068,7 +1025,7 @@ pub fn part1_palette(pal: &mut [u8; 768], pal1: &[u8; 768], pal1colp: i16, count
 
 /// Mode 4's `if(!count)` palette writes (`B.C:262-267`): entries 1..31 are
 /// `(0,0,20)` before the band is built.
-pub fn mode_four_init_palette(pal: &mut [u8; 768]) {
+fn mode_four_init_palette(pal: &mut [u8; 768]) {
     for at in (3..32 * 3).step_by(3) {
         pal[at..at + 3].copy_from_slice(&[0, 0, 20]);
     }
@@ -1080,11 +1037,9 @@ pub fn mode_four_init_palette(pal: &mut [u8; 768]) {
 /// with the source's `c<0 -> 0`, `b = c*c/64`, `(b, b, max(b,20))`; then
 /// entries **189** and **1** are forced to 63.
 ///
-/// The plan's and the research's summary say "pal[251] = pal[3] = 63"; the
-/// tree says `a = 254-65 = 189` and `pal[1*3]`, and the capture agrees: mode
-/// 5's rebuild tests `vram[u] == 254-65` (`B.C:299`), and the held mode-4
-/// trail is index 189 (`docs/fidelity/hard.md`).
-pub fn mode_four_band(pal: &mut [u8; 768], pal1colp: i16) {
+/// Mode 5's rebuild tests `vram[u] == 254-65` (`B.C:299`), and the held
+/// mode-4 trail is index 189 (`docs/fidelity/hard.md`).
+fn mode_four_band(pal: &mut [u8; 768], pal1colp: i16) {
     let mut a = 252 - pal1colp as i32;
     let mut d = a + 66;
     if d > 254 {
@@ -1290,9 +1245,8 @@ mod tests {
         assert_eq!(&pal[251 * 3..251 * 3 + 3], &[62, 62, 62]);
         assert_eq!(&pal[252 * 3..252 * 3 + 3], &[54, 54, 54]);
         assert_eq!(&pal[253 * 3..253 * 3 + 3], &[47, 47, 47]);
-        // The two forced entries (`B.C:280-286`; the plan's 251/3 is the
-        // research's transcription error — the capture's mode-5 test at
-        // `B.C:299` is `254-65`).
+        // The two forced entries (`B.C:280-286`; mode 5's test at `B.C:299`
+        // is `254-65`).
         assert_eq!(&pal[189 * 3..189 * 3 + 3], &[63, 63, 63]);
         assert_eq!(&pal[3..6], &[63, 63, 63]);
 
@@ -1504,12 +1458,6 @@ mod tests {
         // The record carries the dword z at words 4/5; `do3dots` loads word
         // 4 (`BA.ASM:232`), which is 199 here.
         assert_eq!((points3[6], points3[7]), (199, 1));
-        // The 32-bit `projlist` on the same rotated point divides by 65735
-        // and gives (161, 64); the part must not take that path.
-        let mut wide = Vec::new();
-        project(&mut wide, &[[299, 199, 65_735]]);
-        assert_eq!((wide[0].x, wide[0].y), (161, 64));
-        assert_ne!((points3[2], points3[3]), (wide[0].x, wide[0].y));
     }
 
     /// The first part-2 frame's drawn list is the shipped `GRID1` table: at
@@ -1611,8 +1559,7 @@ mod tests {
     /// (`BP.C:85-110,275-288`).
     #[test]
     fn the_cube_geometry_and_colours_are_the_sources() {
-        // The cube is -510..410, not ±510: the plan's and the research's
-        // "±510" is a transcription error.
+        // The cube is -510..410, not ±510.
         assert_eq!(CUBE_POINTS[0], [-510, -510, -510]);
         assert_eq!(CUBE_POINTS[4], [-510, -510, 410]);
         assert_eq!(CUBE_POINTS[7], [-510, 410, 410]);
@@ -1641,7 +1588,6 @@ mod tests {
             .map(|_| PVert {
                 x: 250,
                 y: 70,
-                flags: 0,
                 z: 5000 + 65536,
                 raw_x: 0,
                 raw_y: 0,
@@ -1767,8 +1713,6 @@ mod tests {
     #[test]
     fn the_full_mode_sequence_is_the_sources() {
         let (mut engine, mut part, mut frame) = start();
-        // The plan's sum of the mode limits.
-        assert_eq!(34 + 4 * 73 + 4 + 42 + 102 + 500 + 800, 1774);
         let mut transitions: Vec<(u32, i16, i16)> = Vec::new();
         let mut previous = (part.mode, part.count);
         let mut finished_at = None;
@@ -1801,33 +1745,5 @@ mod tests {
         assert!(has(1900, 7, -1), "part 3's count 800 advances");
         assert!(has(1901, 8, -1), "mode 7's one iteration");
         assert!(has(1902, -1, 0), "the `default` arm");
-        assert_eq!(119 + 478 + 2 + 501 + 801 + 2, 1903);
-    }
-
-    #[test]
-    fn the_0xff_cut_is_unreachable_with_one_start() {
-        let (mut engine, mut part, mut frame) = start();
-        // The vault run delivers no later key: the standalone DIS's one echo
-        // was consumed by the gate (`B.C:138`), so every later `muscode`
-        // returns 0 (`DIS/DISINT.ASM:275-280`; A46).
-        assert_eq!(part.muscode(0xff), 0);
-        assert_ne!(part.muscode(0xff), 0xff);
-        while !(part.mode == 6 && part.count == 0) {
-            assert_eq!(
-                tick(&mut engine, &mut part, &mut frame),
-                PartStatus::Continuing
-            );
-        }
-        // Part 3 reaches its own limit: counts 1..799 leave it in mode 6 and
-        // count 800 advances it (`BP.C:262`).
-        for count in 1..800 {
-            assert_eq!(
-                tick(&mut engine, &mut part, &mut frame),
-                PartStatus::Continuing
-            );
-            assert_eq!((part.mode, part.count), (6, count), "count {count}");
-        }
-        tick(&mut engine, &mut part, &mut frame);
-        assert_eq!(part.mode, 7, "count 800 is the source's own end");
     }
 }

@@ -859,7 +859,8 @@ the copper service is a bare `ret` (`:294-316`). So the captures are silent, one
 **The port.** The three parts have no `boot_anchor` and no player (`music_for_part` → `None`), and
 number their frames from zero. The start key is modelled at `init` (GRID A40, HARD A46; TWIST takes
 none, A43). `K0` is 353 / 356 / 3 for GRID / HARD / TWIST (`reference-indices.md` §24). **Pinned
-by** the three `a_part_run_of_{grid,hard,twist}_…` tests in `bins/secondreality/tests/vault.rs`.
+by** `a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent` in
+`bins/secondreality/tests/vault.rs`.
 
 ## D40 — The vault menu is window-only; `--part` is the headless surface
 

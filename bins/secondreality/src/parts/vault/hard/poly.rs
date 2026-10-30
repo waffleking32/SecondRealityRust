@@ -1,7 +1,7 @@
-//! HARD's hidden-face test and polygon lists: `checkhiddenbx`
-//! (`VEC.ASM:369-400`), `ceasypolylist` (`:583-622`), `cclipeasypolylist`
-//! (`:834-902`) and their two colour rules `demo_norm`/`demo_hide`
-//! (`:486-507`).
+//! HARD's hidden-face test and clipped polygon list: `checkhiddenbx`
+//! (`VEC.ASM:369-400`), `cclipeasypolylist` (`:834-902`) and its two colour
+//! rules `demo_norm`/`demo_hide` (`:486-507`). The non-clipping
+//! `ceasypolylist` (`:583-622`) has no live caller and is not ported.
 //!
 //! HARD's hidden-face test is the **full shoelace**: for every edge
 //! `(x_i - x_{i+1}) * (y_i + y_{i+1})` with the difference and the sum taken
@@ -27,7 +27,7 @@
 //! (`cmc`, `:895`) before calling the colour rule, so `demo_hide` still
 //! zeroes the negative-shoelace faces.
 
-use super::math::{PVert, HARD_PROJECTION};
+use super::math::{PVert, ADD_X, ADD_Y, MUL_X, MUL_Y};
 
 /// `clipz dd 4000` (`VEC.ASM:673`): the clipper's plane.
 pub const CLIP_Z: i32 = 4000;
@@ -120,49 +120,6 @@ fn face_colour(def: &PolyDef, points: &[(i16, i16)], mode: FaceMode) -> u16 {
     }
 }
 
-/// `ceasypolylist` (`VEC.ASM:583-622`): build each polygon's point list.
-///
-/// A point whose index equals the one last copied is skipped (`adddot`'s
-/// `cmp ax,bp`); the tracker starts at -1 per call and is carried across
-/// polygons. After the polygon, the last stored pair is dropped when it
-/// equals the first (the closing duplicate). The full [`shoelace`] then picks
-/// the colour: [`FaceMode::Norm`] keeps the colour word's low byte, and
-/// [`FaceMode::Hide`] sets a hidden face's colour word to 0.
-///
-/// No live path calls this non-clipping builder — part 3's lists go through
-/// [`clip_easy_list`] — so it carries an item-level allow and is kept as the
-/// source's `ceasypolylist` port with its test.
-#[allow(dead_code)]
-pub fn easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly> {
-    let mut polys = Vec::with_capacity(defs.len());
-    // `mov bp,-1` (`VEC.ASM:593`): adddot's index tracker, per call and
-    // carried across polygons.
-    let mut last_index: i32 = -1;
-    for def in defs {
-        let mut points = Vec::with_capacity(def.points.len());
-        for &index in def.points {
-            // `cmp ax,bp; je @@3` (`VEC.ASM:353`): a repeated neighbour
-            // is not stored.
-            if i32::from(index) == last_index {
-                continue;
-            }
-            last_index = i32::from(index);
-            let vertex = verts[usize::from(index)];
-            points.push((vertex.x, vertex.y));
-        }
-        // `mov eax,es:[bx]; cmp eax,es:[di-4]; jne @@4; sub di,4`
-        // (`VEC.ASM:607-611`): the closing duplicate is dropped.
-        if points.len() > 1 && points.first() == points.last() {
-            points.pop();
-        }
-        polys.push(Poly {
-            colour: face_colour(def, &points, mode),
-            points,
-        });
-    }
-    polys
-}
-
 /// `xclipsidi` (`VEC.ASM:743-810`): clip one end of an edge against
 /// `clipz`, keeping the near half (z < 4000).
 ///
@@ -209,8 +166,8 @@ fn clip_end(si: &PVert, di: &PVert) -> (i16, i16) {
         (quotient as i16).wrapping_add(add)
     };
     (
-        project(x, HARD_PROJECTION.mul_x, HARD_PROJECTION.add_x),
-        project(y, HARD_PROJECTION.mul_y, HARD_PROJECTION.add_y),
+        project(x, MUL_X, ADD_X),
+        project(y, MUL_Y, ADD_Y),
     )
 }
 
@@ -232,7 +189,7 @@ fn clipped_edge(prev: &PVert, cur: &PVert) -> ((i16, i16), (i16, i16)) {
 /// but the list keeps the closing duplicate (the source's drop is commented
 /// out). A polygon that stores no points is dropped. The full [`shoelace`]
 /// runs, the source's `cmc` inverts the carry, and the [`FaceMode`] colour
-/// rule runs — so, as in [`easy_list`], negative is hidden.
+/// rule runs, so negative is hidden.
 pub fn clip_easy_list(defs: &[PolyDef], verts: &[PVert], mode: FaceMode) -> Vec<Poly> {
     let mut polys = Vec::with_capacity(defs.len());
     for def in defs {
@@ -283,7 +240,6 @@ mod tests {
         PVert {
             x,
             y,
-            flags: 0,
             z,
             raw_x,
             raw_y,
@@ -320,52 +276,6 @@ mod tests {
     /// `ceasypolylist`: the repeated-neighbour and closing-duplicate drops,
     /// the tracker carried across polygons, the low-byte colour and the
     /// hidden branch.
-    #[test]
-    fn the_easy_list_is_index_only_and_drops_duplicates() {
-        let verts = [
-            vert(0, 0, 1000, 0, 0),
-            vert(10, 0, 1000, 10, 0),
-            vert(0, 10, 1000, 0, 10),
-            vert(20, 20, 1000, 20, 20),
-        ];
-        let defs = [
-            PolyDef {
-                colour: 0x4001,
-                points: &[0, 1, 1, 2, 0],
-            },
-            PolyDef {
-                colour: 0x4002,
-                points: &[2, 1, 0],
-            },
-            PolyDef {
-                colour: 0x4003,
-                points: &[0, 3, 2],
-            },
-        ];
-
-        let norm = easy_list(&defs, &verts, FaceMode::Norm);
-        assert_eq!(norm.len(), 3);
-        // The repeated neighbour 1 and the closing 0 are dropped.
-        assert_eq!(norm[0].points, [(0, 0), (10, 0), (0, 10)]);
-        // Index-only: the low colour byte, not the 0x40 word.
-        assert_eq!(norm[0].colour, 0x01);
-        // A reversed winding is hidden; Norm keeps the colour anyway.
-        assert_eq!(norm[1].points, [(0, 10), (10, 0), (0, 0)]);
-        assert_eq!(norm[1].colour, 0x02);
-        // The tracker carries across polygons: this polygon starts with 0,
-        // the index the previous one ended on, so its first point is lost.
-        assert_eq!(norm[2].points, [(20, 20), (0, 10)]);
-        assert_eq!(norm[2].colour, 0x03);
-
-        let hide = easy_list(&defs, &verts, FaceMode::Hide);
-        assert_eq!(hide[0].colour, 0x01); // shoelace 100: visible
-        assert_eq!(hide[1].colour, 0); // shoelace -100: hidden, zeroed
-        assert_eq!(hide[2].colour, 0x03); // shoelace 0: visible
-    }
-
-    /// `cclipeasypolylist`: the z = 4000 clip, the raw-x/y intersection, the
-    /// adjacent dedupe, the kept closing duplicate, the empty-polygon drop
-    /// and the inverted carry.
     #[test]
     fn the_clipper_clips_at_4000_and_projects_the_intersection() {
         let verts = [

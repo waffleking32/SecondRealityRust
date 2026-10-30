@@ -2,8 +2,7 @@
 //! runs (`HARD/VEC.ASM`, which includes `VNEW.ASM`, `VMATH.ASM` and
 //! `VDATA.ASM`).
 //!
-//! The engine is a fork, not a wrapper (`docs/fidelity/hard.md`; the research
-//! study's §4.8):
+//! The engine is a fork, not a wrapper (`docs/fidelity/hard.md`):
 //!
 //! - [`math::rotate`] uses the source's own axis stores: x is the third sum
 //!   (matrix words 12/14/16), y the second (6/8/10), z the first (0/2/4)
@@ -30,11 +29,6 @@
 //! include/segment wrapper). Nothing else is shared: HARD's colour path is
 //! index-only — `demo_norm` is a no-op and `demo_glz` is dead (`VEC.ASM:486-580`),
 //! so there is no slot allocator and no DAC shading.
-//!
-//! This layer is consumed by the HARD part. [`poly::easy_list`] is the
-//! source's non-clipping `ceasypolylist`; no live path calls it (part 3 clips
-//! through `clip_easy_list`), so it carries its own `dead_code` allow and is
-//! kept for its test.
 
 pub mod dots;
 pub mod math;

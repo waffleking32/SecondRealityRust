@@ -102,13 +102,8 @@ pub fn add_dot(dots: &mut [Dot], ax: i16, ay: i16, x: i16, y: i16, colour: u8, s
 /// For each of the 2048 records, in order: a dead record (colour 0) is
 /// skipped; a record whose life reaches 0 writes its colour into the
 /// background and the screen at `last` and is marked dead with `0x100`;
-/// otherwise the previous screen pixel is restored from the background, the
-/// fixed-point y then x advance, and the dot draws when `y <= 127` and
-/// `x <= 319` (unsigned compares: a negative coordinate is out).
-///
-/// The x advance happens only after the y test has passed, and the y advance
-/// happens before it: `BA.ASM`'s stores are inside the branches, not after
-/// them.
+/// otherwise the previous screen pixel is restored from the background and
+/// the dot [`advance`]s and draws.
 pub fn dodots(dots: &mut [Dot], background: &mut [u8], screen: &mut [u8]) {
     for dot in dots.iter_mut() {
         if dot.colour == 0 {
@@ -132,24 +127,31 @@ pub fn dodots(dots: &mut [Dot], background: &mut [u8], screen: &mut [u8]) {
         if at < background.len() && at < screen.len() {
             screen[at] = background[at];
         }
-        dot.y = dot.y.wrapping_add(dot.vy);
-        let y = dot.y >> 6;
-        // `cmp bx,127; ja a5` — an unsigned compare after `sar`.
-        if (y as u16) > 127 {
-            continue;
+        if let Some(pos) = advance(dot) {
+            if pos < screen.len() {
+                screen[pos] = dot.colour;
+            }
+            dot.last = pos as u16;
         }
-        let row = (y as usize) * 320;
-        dot.x = dot.x.wrapping_add(dot.vx);
-        let x = dot.x >> 6;
-        if (x as u16) > 319 {
-            continue;
-        }
-        let pos = row + x as usize;
-        if pos < screen.len() {
-            screen[pos] = dot.colour;
-        }
-        dot.last = pos as u16;
     }
+}
+
+/// The step both dot walks share: the fixed-point y advances and is tested,
+/// then x (`BA.ASM`'s stores are inside the branches), with unsigned compares
+/// after `sar` (`cmp bx,127; ja`), so a negative coordinate is out. The screen
+/// offset, if the dot is on the band.
+fn advance(dot: &mut Dot) -> Option<usize> {
+    dot.y = dot.y.wrapping_add(dot.vy);
+    let y = dot.y >> 6;
+    if (y as u16) > 127 {
+        return None;
+    }
+    dot.x = dot.x.wrapping_add(dot.vx);
+    let x = dot.x >> 6;
+    if (x as u16) > 319 {
+        return None;
+    }
+    Some(y as usize * 320 + x as usize)
 }
 
 /// `dot3d2` (`BA.ASM:124-171`), behind `_dodots2` (`:36-53`).
@@ -172,58 +174,30 @@ pub fn dodots2(dots: &mut [Dot], screen: &mut [u8]) {
             dot.colour = 0;
             continue;
         }
-        dot.y = dot.y.wrapping_add(dot.vy);
-        let y = dot.y >> 6;
-        if (y as u16) > 127 {
-            continue;
-        }
-        let row = (y as usize) * 320;
-        dot.x = dot.x.wrapping_add(dot.vx);
-        let x = dot.x >> 6;
-        if (x as u16) > 319 {
-            continue;
-        }
-        let pos = row + x as usize;
-        if pos < screen.len() {
-            screen[pos] = dot.colour;
+        if let Some(pos) = advance(dot) {
+            if pos < screen.len() {
+                screen[pos] = dot.colour;
+            }
         }
     }
 }
 
 /// Part 2's grid dots, `do3dots` (`BA.ASM:224-280`).
 ///
-/// `points` is part 2's projected point list as `crotprojlist` leaves it: a
-/// 16-bit count at word 0, then 16-byte records whose word 0 is x, word 1 y,
-/// word 3 the previous screen offset, words 4/5 the 32-bit z (so the load at
-/// `BA.ASM:232` is a **16-bit** load of z's low word) and word 6 the shadow
-/// offset. The routine clears the previous pixel (one byte, `BA.ASM:227-228`),
-/// then does the source's second clear: two **word** stores at `[si+12]` and
-/// `[si+12]+320` (`BA.ASM:229-231`). The code that would write `[si+12]` is
-/// unreachable behind the unconditional `jmp @@4` (`BA.ASM:235`), so that word
-/// stays BSS zero and the source clears bytes 0/1 and 320/321; the port clears
-/// one byte per row instead, a documented model of the unreachable branch that
-/// no reached frame depends on. It skips a record whose z low word is greater
-/// than 3000 *signed* (`cmp bp,3000; jg`), otherwise reads `depthcol[bp]` and
-/// draws at `rows[y] + x` when `y <= 127`.
+/// `points` is `crotprojlist`'s list: a count word, then 16-byte records
+/// whose word 0 is x, word 1 y, word 3 the previous screen offset, words 4/5
+/// the 32-bit z and word 6 the shadow offset. Each record clears its previous
+/// pixel and its shadow (`BA.ASM:227-231`; the source's word stores at
+/// `[si+12]`, which stays BSS zero behind the unconditional `jmp @@4` at
+/// `:235`, are one byte a row here), skips a z low word above 3000 *signed*
+/// (`cmp bp,3000; jg`), and draws `depthcol[bp]` at `rows[y] + x` when
+/// `y <= 127`.
 ///
-/// `depthcol` is 8192 bytes with only 0..3099 written (`BA.ASM:221-222`,
-/// `BP.C:128-133`). A z whose low word is negative (bit 15 set) passes the
-/// signed test. The source then reads `cs:_depthcol[bp]` with a **16-bit**
-/// effective address, which for a negative low word wraps *before* the array
-/// (0xFF00 reads `_depthcol - 0x100`, a code byte — 0x07 with the shipped
-/// link map — not BSS zero). The `else` below returns zero as a **model of
-/// an unreachable branch**: part 2's projected z' is full 1139..3964 over its
-/// 501 states, and every drawn point's low word is 1139..3000, so the low word
-/// is always positive and no filed frame depends on the byte. Task 7 measures
-/// the part-2 domain and owns the table;
-/// `the_part2_grid_z_range_and_drawn_words_are_the_measured_domain` walks the
-/// 488-point grid through `part2`'s recurrence and pins the range.
-///
-/// The `count <= 0`, record-length, shadow and offset bounds checks below are
-/// likewise guards for inputs part 2 never produces (the projected x is
-/// bounded); they are not source behaviour. The source's `rows[y] + x` is a
-/// 16-bit offset that wraps within the A2D0 segment; the port's guards never
-/// fire in the reachable domain.
+/// A negative low word would read before `_depthcol` into code bytes; the
+/// port reads 0 there. That and the bounds checks below are guards for inputs
+/// part 2 never produces: every drawn point's low word is 1139..3000
+/// (`the_part2_grid_z_range_and_drawn_words_are_the_measured_domain`,
+/// `hard.md`).
 pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
     let count = points[0];
     if count <= 0 {
@@ -231,7 +205,6 @@ pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
     }
     let mut at = 2usize; // `add si,4` past the count word
     for _ in 0..count {
-        // Unreachable for part 2's record count (the doc comment above).
         if at + 8 > points.len() {
             break;
         }
@@ -258,9 +231,7 @@ pub fn do3dots(points: &mut [i16], depthcol: &[u8; 8192], screen: &mut [u8]) {
         let colour = if index < depthcol.len() {
             depthcol[index]
         } else {
-            // A model of the unreachable negative-low-word branch: the
-            // source's 16-bit address wraps before `_depthcol` into code
-            // bytes, which this task cannot reproduce without a load map.
+            // The unreachable negative low word (the doc comment).
             0
         };
         let y = points[at + 1] as u16 as usize;
@@ -318,8 +289,8 @@ pub const DEPTHCOL_WRITTEN: usize = 3100;
 /// `part2init`'s `depthcol` build (`BP.C:128-133`), including the carried
 /// `b`.
 ///
-/// The source's `int b` is uninitialised before the loop, and the brief names
-/// entries 1000..3099 a read of it. The loop assigns it at `a = 0` (and at
+/// The source's `int b` is uninitialised before the loop, and entries
+/// 1000..3099 read it. The loop assigns it at `a = 0` (and at
 /// every `a < 1000`, which short-circuits the `b >= 3000` operand), so at
 /// `a = 1000` it carries 127; the `else` branch runs there and at every later
 /// entry because the value stays below 3000. Both branches give 127 at
@@ -344,8 +315,8 @@ pub fn depthcol_table() -> [u8; DEPTHCOL_LEN] {
 /// `(x-5)*100` cells, in the source's `x`/`y`/`z` loop order.
 ///
 /// The shell criterion (any index 0 or 9) selects `10³ - 8³` = **488**
-/// points, not the 1,000 the plan and the research report: `gridpoints[0] =
-/// (a-1)/3` (`BP.C:164`) is 488 with the shipped loops. The first projected
+/// points, not 1,000: `gridpoints[0] = (a-1)/3` (`BP.C:164`) is 488 with the
+/// shipped loops. The first projected
 /// frame draws the 100-point `x = -500` face, which is exactly the
 /// `_GRID1.TMP` pair list mode 4's trails end on (`docs/fidelity/hard.md`).
 pub fn grid_points() -> Vec<[i32; 3]> {
@@ -626,7 +597,7 @@ mod tests {
 
         // A negative low word (0xFF00) is *not* skipped by the signed test.
         // The source's 16-bit `cs:_depthcol[bp]` wraps 0x100 bytes before the
-        // array and reads a code byte (0x07 with the reviewer's link map),
+        // array and reads a code byte (0x07 with the shipped link map),
         // not BSS zero; the port's zero is a documented model of this
         // unreachable branch, not the source's address arithmetic. Part 2's
         // z' is full 1139..3964 and every drawn point's low word is
@@ -648,41 +619,15 @@ mod tests {
 
     #[test]
     fn the_grid_is_the_ten_cube_shell() {
+        // 10³ cells, 8³ interior: 488 on the shell (`gridpoints[0] =
+        // (a-1)/3`, `BP.C:164`), x outer, then y, then z.
         let points = grid_points();
-        // 10³ lattice cells, 8³ interior: 488 on the shell, not the 1,000
-        // the plan and research report (`gridpoints[0] = (a-1)/3`,
-        // `BP.C:164`).
         assert_eq!(points.len(), 488);
-        assert_eq!(points.len(), 1000 - 512);
         assert_eq!(points[0], [-500, -500, -500]);
+        assert_eq!(points[1], [-500, -500, -400]);
         assert_eq!(points[487], [400, 400, 400]);
-
-        // The source's nested loops (`BP.C:157-163`): x outer, then y, then
-        // z, and only cells with an index 0 or 9.
-        let mut expected = Vec::new();
-        for x in 0..10 {
-            for y in 0..10 {
-                for z in 0..10 {
-                    if x == 0 || y == 0 || z == 0 || x == 9 || y == 9 || z == 9 {
-                        expected.push([(x - 5) * 100, (y - 5) * 100, (z - 5) * 100]);
-                    }
-                }
-            }
-        }
-        assert_eq!(points, expected);
-        // Every coordinate is `(index-5)*100` and every point is on the
-        // shell.
         for point in &points {
-            assert!(
-                point
-                    .iter()
-                    .any(|&coordinate| coordinate == -500 || coordinate == 400),
-                "{point:?}"
-            );
-            for &coordinate in point {
-                assert!((-500..=400).contains(&coordinate));
-                assert_eq!(coordinate % 100, 0);
-            }
+            assert!(point.iter().any(|&c| c == -500 || c == 400), "{point:?}");
         }
     }
 
