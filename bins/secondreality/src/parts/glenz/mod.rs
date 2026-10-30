@@ -982,12 +982,7 @@ mod tests {
 
     /// One call of the part at `tick`. The part sets no copper, so a tick is
     /// its `frame` alone.
-    trait Steps {
-        fn step_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus;
-        fn step_exit_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus;
-    }
-
-    impl Steps for Rig {
+    impl Rig {
         fn step_at(&mut self, part: &mut Glenz, tick: u32) -> PartStatus {
             part.frame(&mut self.ctx(tick))
         }

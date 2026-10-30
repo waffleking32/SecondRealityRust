@@ -594,9 +594,9 @@ mod tests {
     /// DAC is still there".
     const UNWRITTEN: u8 = 200;
 
-    /// A 320×200 view over the shell's DAC, with markers: entries 0 (which
-    /// `waitr` rewrites), 14 (which nothing does) and [`UNWRITTEN`] of the mode
-    /// set's own table, and white 15. No player: the part asks for no cue.
+    /// A 320×200 view over the shell's DAC. Entries 0 (which `waitr` rewrites)
+    /// and 14 (which nothing does) of the mode set's table are markers, as is
+    /// [`UNWRITTEN`]; 15 is white. No player: the part asks for no cue.
     fn shell_rig() -> Rig {
         Rig::new(320, 200)
             .palette_entry(0, [1, 2, 3])
@@ -1157,9 +1157,10 @@ mod tests {
     }
 
     /// **The shipped build's second ramp is 3/5, and this is the search that
-    /// says so** — the method BEGLOGO's fade constant is derived with: every candidate is rendered over the four keyframes and
-    /// compared with the reference bit for bit, and the answer has to be
-    /// *unique*, not merely good.
+    /// says so** — the method BEGLOGO's fade constant is derived with: every
+    /// candidate is rendered over the four keyframes and compared with the
+    /// reference bit for bit, and the answer has to be *unique*, not merely
+    /// good.
     ///
     /// `TUN10.PAS:122` writes `(64-x) *3 div 4` at entries 128..192, and the
     /// tree's own `TUN10.EXE` compiles exactly that — `3*(64-x)` then `idiv 4`,

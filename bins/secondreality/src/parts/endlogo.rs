@@ -814,7 +814,7 @@ mod tests {
 
     #[test]
     fn the_gate_opens_on_the_tick_the_reference_frames_derived() {
-        // **The phase's proof.** `:107-111` runs its own loop against a player: one
+        // **The proof.** `:107-111` runs its own loop against a player: one
         // iteration a tick, `break` when `dis_musplus()>-16`. What this test drives it with
         // is `reference/music/second5`'s own published words, and what it asserts is that
         // the gate opens where the reference derives it — bit-exactly, from its
@@ -1265,8 +1265,8 @@ mod tests {
         }
         assert_eq!(at_900, [126, 127, 128], "900 is converged, and only bounds the hold");
 
-        // The two independent facts the plan asks the constants to be checked
-        // against, in the tree: the hold is real and 567 ticks long, and the
+        // The two independent facts the constants are checked against, in
+        // the tree: the hold is real and 567 ticks long, and the
         // 64-step fade-out ends inside (1200, 1240] — the window in which
         // §20's geometry change to CRED's mode 13h screen sits.
         assert_eq!(HOLD_FIRST_INDEX, fade_in_first + FADE_IN_STEPS);

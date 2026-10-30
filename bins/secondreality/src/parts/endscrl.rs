@@ -1230,7 +1230,8 @@ mod tests {
         assert_eq!(part.frame(&mut rig.ctx(END_TICK + 1)), PartStatus::Finished);
         // The screen it ends on is black: the text has scrolled off, the last ink leaving the
         // ring on tick 22,350 — the release's 8917 + 22,351 = 31,268, before the black frames
-        // the controller's capture holds at 31,500 and 31,750.
+        // an unfiled capture of the original holds at 31,500 and 31,750
+        // (`endscrl.md` §5).
         assert_eq!(last_ink, 22_350);
         assert!(rig.rendered_rgb().iter().all(|b| *b == 0));
         assert_eq!(RELEASE_FIRST + END_TICK, 31_884, "the release's `%`, by its own start");

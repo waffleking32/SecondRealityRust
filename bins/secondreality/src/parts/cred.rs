@@ -2245,8 +2245,8 @@ mod tests {
         let Some(frames) = record_frames() else {
             panic!(
                 "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
-                 which is not here: there is nothing to check. Produce it with the sweep \
-                 `reference-indices.md` §20 records (`cargo xtask reference capture`), or run \
+                 which is not here: there is nothing to check. It is scratch with no filed \
+                 recipe and cannot be reproduced; run \
                  the suite without `--ignored` — a missing capture must fail loudly, not \
                  pass silently"
             )
@@ -2429,8 +2429,8 @@ mod tests {
         let Some(frames) = record_frames() else {
             panic!(
                 "this ignored test's input is the scratch capture `out/b5-s5-cred-map`, \
-                 which is not here: there is nothing to check. Produce it with the sweep \
-                 `reference-indices.md` §20 records (`cargo xtask reference capture`), or run \
+                 which is not here: there is nothing to check. It is scratch with no filed \
+                 recipe and cannot be reproduced; run \
                  the suite without `--ignored` — a missing capture must fail loudly, not \
                  pass silently"
             )

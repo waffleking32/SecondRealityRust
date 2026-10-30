@@ -717,7 +717,6 @@ mod tests {
 
     // --- the music: the block-1 pre-roll and the trace ----------------------
 
-    /// One frame of a filed trace: the published position at a reference index.
     #[test]
     fn the_block_one_pre_roll_puts_the_player_at_the_traces_7710_position() {
         // `shell::MusicStart::for_part("pam", Some(7710))`: the block-1 clock

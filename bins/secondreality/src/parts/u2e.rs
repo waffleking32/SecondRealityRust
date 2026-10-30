@@ -572,6 +572,9 @@ mod tests {
         &rig.surface.pixels()[start..start + PAGE_PIXELS]
     }
 
+    /// Started in the mid-chain shape (not `music_fresh`): U2E captures the
+    /// DAC in every run shape; the block-4 shape is
+    /// `a_block_four_shaped_init_captures_the_live_dac_too`.
     fn started_with(music: ScriptedMusic) -> (Rig, U2e) {
         let mut rig = rig(music);
         let mut part = U2e::new();
@@ -620,8 +623,8 @@ mod tests {
 
     #[test]
     fn a_block_four_shaped_init_captures_the_live_dac_too() {
-        // **The entry shape**, where the old `music_fresh` proxy used to take
-        // `vid_init(1)`'s text-mode palette. The port's block-4 run starts in
+        // **The entry shape**, where `vid_init(1)` would leave a text-mode
+        // palette. The port's block-4 run starts in
         // its graphics surface with the shell's boot DAC installed
         // (`hardware_default_palette`, the emulator's mode-set table), so the
         // BIOS mode is above 3 here exactly as it is mid-chain and the source
