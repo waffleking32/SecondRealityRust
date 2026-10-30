@@ -193,7 +193,10 @@ MUSIC1 order 96 at frame 0.
 - **One counter step a tick** (A27, §3); the 17700 filing is the reference's caveat (A27, §6).
 - **Dead, not carried**: `doit`'s `halt`, `storea` and `ysb`; `calc` (`:53-65`); `lineblit`
   (`ASM.ASM:76-100`, never called by `JP.C`); the `storea = a` and its commented-out `printf`
-  (`:220-225`); the Scroll Lock branch (§4); the 0x80 opcode (§2.2).
+  (`:220-225`).
+- **Not modelled**: the Scroll Lock border (`:74-76`, §4; the engine has no keyboard state); the
+  0x80 run opcode's 256-copy wrap (`READP.C:44-51`, §2.2; the shipped writers never emit it and
+  `sr-assets` refuses it).
 - **Carried and unreachable**: the interpolation overrun (§2.1), the zoom clamps (§4.1), the unused
   `c=400` (§4).
 - **Carried and visible**: the crop and 65 border, the 0→64 remap, JPLOGO's own sine table (indices
