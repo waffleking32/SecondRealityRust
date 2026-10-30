@@ -116,10 +116,11 @@ does not depend on the ring. A block-1 chain applies no catch-up.
 | 7900 | RGB | **0** | exact |
 | 7900 | indices | **60,375** (max delta 194) | A21 |
 
-Pinned by `tests/pam.rs` (with D19's support frames) and `cargo xtask rediff` (entry `pam`;
+Pinned by `cargo xtask rediff` (entry `pam`;
 `fullrun/02-u2a-pam` for the block-1 run's 7707 and 7880, A53). The record's relations hold:
 7711 = 7710 (7709 is unreachable from the anchor); 7759 ≠ 7760 and 7761 = 7760; 7829 = 7830 = 7831;
-and the port's own 7899 and 7901 are the same white as 7900. The port's hashes match
+and the port's own 7899 and 7901 are the same white as 7900
+(`tests/pam.rs`, `the_support_frames_move_and_hold_as_the_references_do`). The port's hashes match
 `reference-indices.md` §6.3's entry for entry: 7759 `23fa5096…`, 7761 `5d558081…`, 7829/7831
 `e1967ed2…`; the keyframes are `1fef46de…`, `5d558081…`, `e1967ed2…`, `1fef46de…`.
 
@@ -137,7 +138,8 @@ frame 39; `cargo xtask compare` reports it as `94.3359 %`, max delta 194 (the fr
 ## 7. Preserved behaviours
 
 - **The FLI header counts 41, the container holds 42, the loop draws 40** (`VFLI.C:66`;
-  `asset-inventory.md` §E.5; `the_fli_header_counts_forty_one_and_the_container_forty_two`).
+  `asset-inventory.md` §E.5; sr-assets' `the_fli_decodes_to_the_frames_its_own_record_walk_finds`
+  and `four_ticks_a_step_and_forty_of_the_containers_frames_drawn`).
 - **`ruudulle` is dead** (`ASMYT.ASM:207-320`): not ported.
 - **Steps 41-45 draw nothing** and only re-queue copy 63: the closing white hold (`bugs.md` §11).
 

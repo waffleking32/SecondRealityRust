@@ -636,8 +636,8 @@ palette widens to one colour, so the coherence check cannot tell (`reference-ind
 is not this part's screen. The comparison at 7900 is RGB. `pam.md` §6 has the frame-by-frame
 reading.
 
-**Measured difference:** RGB **0** at 7710, 7760, 7830 and 7900 (`cargo test -p secondreality --test
-pam -- --nocapture`). Index plane at 7900: **60,375 of 64,000**, max delta 194 (the frame's highest
+**Measured difference:** RGB **0** at 7710, 7760, 7830 and 7900 (`cargo xtask rediff --only
+pam`). Index plane at 7900: **60,375 of 64,000**, max delta 194 (the frame's highest
 index 209 less 15): `cargo xtask rediff --only pam`. The port's plane is `OUT.ANI`'s frame 39
 (`the_7900_index_plane_is_the_next_parts_white_field_not_pams_frame`).
 

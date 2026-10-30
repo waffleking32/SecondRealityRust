@@ -250,7 +250,8 @@ See §3. **Frame.** None (a music position, `reference/music/second1`). **Test.*
 white copy. **Where.** `PAM/OUTTAA.C:46`, `:49` (`VFLI.C:66` reads the header word, unused).
 **Port.** Draw 40. **Frame.** `reference/parts/pam/` 7760 and 7830 are exact
 (`reference-indices.md` §6.2); no filed frame stands on frames 40 or 41 (7900 is A21's white
-field). **Test.** `the_fli_header_counts_forty_one_and_the_container_forty_two`.
+field). **Test.** `four_ticks_a_step_and_forty_of_the_containers_frames_drawn` (the 40), and
+sr-assets' `the_fli_decodes_to_the_frames_its_own_record_walk_finds` (41 and 42).
 
 ## 12. U2A and U2E — the page ring's escape, the first draw U2E skips, and U2E's one-tick-late palette rotation (slots 2 and 16)
 
