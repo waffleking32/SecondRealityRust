@@ -916,7 +916,7 @@ fn each_module_plays_to_its_loop_inside_its_own_tables() {
     }
 }
 
-/// **A14(a), settled: the flush clears the accumulator word it reads, so nothing marks the plane.**
+/// **A14(a): the flush clears the accumulator word it reads, so nothing marks the plane.**
 ///
 /// Both flushes load a zero into a 32-bit register before the loop and store that register
 /// back over every accumulator dword they have just read: the stereo flush's `mov $0x0,%esp`

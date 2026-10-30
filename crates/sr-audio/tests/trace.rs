@@ -933,6 +933,10 @@ fn the_port_reproduces_every_filed_trace() {
             known.trace
         );
     }
+    let mut names: Vec<&str> = KNOWN_DISAGREEMENTS.iter().map(|k| k.trace).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), KNOWN_DISAGREEMENTS.len(), "a trace is pinned twice");
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
