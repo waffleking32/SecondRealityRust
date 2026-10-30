@@ -112,8 +112,7 @@ unreachable and not implemented. **This is not an approximation**, so it is not 
 reachable branch is the source's own. It changes no measured frame: the fade-in saturates every byte
 it touches (3..761) from either start, and the untouched entry 0 and 254/255 are black in the boot
 DAC (its table is 248 entries, the last eight unset), as the text-mode branch leaves them.
-`a_jelly_boot_captures_the_live_dac` and `a_block_four_shaped_init_captures_the_live_dac_too` pin
-it. The flag is the BIOS mode, not `PartCtx::music_fresh`, because `set_music` re-arms that flag at
+`a_jelly_boot_captures_the_live_dac` pins it in both entry shapes. The flag is the BIOS mode, not `PartCtx::music_fresh`, because `set_music` re-arms that flag at
 the U2E restart.
 
 **The main palette.** `cp = scenem+16` is the `.00M`'s 768 bytes; entries 252 and 255 are set black

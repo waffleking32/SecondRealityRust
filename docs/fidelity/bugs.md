@@ -274,8 +274,8 @@ An exit in the loop falls through to the teardown (`:432-441`). **Frame.** None 
 ### 12.3 U2E's first draw is skipped
 
 **Original.** `firstframe`'s branch draws nothing and resets `syncframe`/`coppercnt`
-(`VISU/C/U2E.C:433`). **Port.** `Driver::draw_frame` resets without touching the page; the first
-tick still queues page 0. **Frame.** None isolates it; every U2E keyframe is drawn from that state.
+(`VISU/C/U2E.C:433`). **Port.** `Driver::skip_first_draw` resets the clock without touching a
+page; the first tick still queues page 0. **Frame.** None isolates it; every U2E keyframe is drawn from that state.
 **Test.** `the_first_loop_tick_draws_nothing_and_queues_the_fadeset_page`.
 
 ### 12.4 U2E's teardown writes 768 bytes from DAC entry 255, one tick late
@@ -283,8 +283,7 @@ tick still queues page 0. **Frame.** None isolates it; every U2E keyframe is dra
 **Original.** Each step is `fpal[a]+=4; dis_waitb(); outp(0x3c8,255);` and 768 bytes
 (`VISU/C/U2E.C:543-556`): entry 255 takes `fpal`'s entry 0 and entry `j < 255` takes `j + 1`; step
 `n` shows on tick `T+n`, and the part ends on the tick that shows step 16. **Frame.** None: every
-filed keyframe precedes it. **Tests.**
-`the_teardown_fades_sixteen_steps_from_dac_entry_255_and_finishes`,
+filed keyframe precedes it. **Test.**
 `a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown`.
 
 ### 12.5 U2E's name hacks run

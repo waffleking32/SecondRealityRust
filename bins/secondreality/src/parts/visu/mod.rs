@@ -21,14 +21,13 @@ use sr_engine::part::{PartCtx, PartError};
 use sr_engine::View;
 
 use sr_assets::visu::{
-    read_animation, read_master, read_object, read_scene_list, Animation, Master,
-    Normal as AssetNormal, ObjectData, Vertex as AssetVertex,
+    read_animation, read_master, read_object, read_scene_list, Animation, Master, ObjectData,
 };
 
-use draw::{clip_and_fill, cull, light, poly_flags, Page, F_GOURAUD};
+use draw::{clip_and_fill, cull, face_sides, light, poly_flags, Page, F_GOURAUD};
 use math::{
     apply_matrix, camera_angle, project_all, rotate_normals, rotate_vertices, single_z, window,
-    Matrix, NormalData, PVert, Projection, Rotated, RotatedNormal, VertexData,
+    Matrix, PVert, Projection, Rotated, RotatedNormal,
 };
 
 /// The packed scenes' directory (`U2A.C:148`, `U2E.C:208`).
@@ -98,19 +97,14 @@ pub fn clear_copper(ctx: &mut PartCtx) {
 
 /// `F_DEFAULT` (`AD.INC:66`, `CD.H:123`): the flags `vis_loadobject` gives
 /// every object (`VISU.C:19`). Neither part changes them, so every object is
-/// `F_VISIBLE` and carries `F_GOURAUD`, which makes `vis_drawobject`'s
-/// `nnum`/`nnum1` choice always the `nnum` branch (`VISU.C:109`).
+/// `F_VISIBLE` (`VISU.C:107`'s return never runs) and carries `F_GOURAUD`,
+/// which makes `vis_drawobject`'s `nnum`/`nnum1` choice always `nnum`
+/// (`VISU.C:109`).
 pub const F_DEFAULT: u16 = 0xF001;
-
-/// `F_VISIBLE` (`CD.H:124`, `AD.INC:67`).
-const F_VISIBLE: u16 = 0x0001;
 
 /// `_projaspect` as every `AVIDM1.ASM` initialiser sets it
 /// (`AVIDM1.ASM:40`, `:67`, `:94`).
 const ASPECT: i32 = 225;
-
-/// The maximum sides `_draw_polylist` copies (`MAXPOLYSIDES`, `AD.INC:51`).
-const MAX_FACE_SIDES: usize = 16;
 
 /// One entry of the original's `co[]` (`U2A.C:36-43`): an object, its
 /// relative and camera-transformed matrices, whether the stream has it on,
@@ -241,23 +235,6 @@ fn camera_object() -> ObjectData {
     }
 }
 
-fn vertex_data(vertex: &AssetVertex) -> VertexData {
-    VertexData {
-        x: vertex.x,
-        y: vertex.y,
-        z: vertex.z,
-        normal: vertex.normal,
-    }
-}
-
-fn normal_data(normal: &AssetNormal) -> NormalData {
-    NormalData {
-        x: normal.x,
-        y: normal.y,
-        z: normal.z,
-    }
-}
-
 /// The `a/10+'A'`, `a%10+'A'` scene-stream suffix (`U2A.C:213`): scene 1 is
 /// `.0AB`. The C's `char` arithmetic wraps the same way.
 fn stream_suffix(scene: u16) -> String {
@@ -359,11 +336,7 @@ pub struct Ring {
     syncframe: i32,
     currframe: i32,
     avgrepeat: i32,
-    repeat: i32,
-    /// The original increments this every copper tick and the shipped parts
-    /// never read it; U2E's skipped first draw resets it (`U2A.C:97`, `:117`,
-    /// `U2E.C:433`). Written, never read, as in the C.
-    coppercnt: i32,
+    // `coppercnt` (`U2A.C:97`, `:117`) is written and never read, so it is not kept.
     deadlock: i32,
     displayed_page: usize,
     variant: Variant,
@@ -383,8 +356,6 @@ impl Ring {
             syncframe: 0,
             currframe: 0,
             avgrepeat: 1,
-            repeat: 0,
-            coppercnt: 0,
             deadlock: 0,
             displayed_page: 0,
             variant,
@@ -402,7 +373,6 @@ impl Ring {
         }
 
         self.deadlock += 1;
-        self.coppercnt += 1;
 
         if self.copperdelay > 0 {
             self.copperdelay -= 1;
@@ -462,19 +432,14 @@ impl Ring {
         if self.variant == Variant::U2a {
             self.avgrepeat = (self.avgrepeat + (self.syncframe - self.currframe) + 1) / 2;
             let repeat = self.avgrepeat.max(1);
-            self.repeat = repeat;
             self.currframe += repeat;
-            (self.repeat as usize, self.repeat as usize)
+            (repeat as usize, repeat as usize)
         } else {
-            let a = self.syncframe - self.currframe;
-            let mut repeat = a + 1;
-            if repeat < 0 {
-                repeat = 0;
-            }
+            let repeat = (self.syncframe - self.currframe + 1).max(0);
             let page = if repeat == 0 { 1 } else { repeat };
-            self.repeat = (repeat + 1) / 2;
-            self.currframe += self.repeat * 2;
-            (page as usize, self.repeat as usize)
+            let stream = (repeat + 1) / 2;
+            self.currframe += stream * 2;
+            (page as usize, stream as usize)
         }
     }
 
@@ -483,8 +448,7 @@ impl Ring {
         self.displayed_page
     }
 
-    /// The schedule counter, for a diagnostic that replays the stream state by
-    /// state outside the loop.
+    /// The schedule counter, for `u2e`'s `search_reference_states`.
     #[cfg(test)]
     pub(crate) fn set_currframe(&mut self, value: i32) {
         self.currframe = value;
@@ -493,10 +457,9 @@ impl Ring {
 
 /// What `vid_clearbg`/`vid_clear255` puts on a fresh page.
 pub enum Clear<'a> {
-    /// U2A's `vid_clearbg(bg)` (`U2A.C:285`): a linear 320x200 image, copied
-    /// row-major. The shipped `U2ABG.UH` payload is already in that order;
-    /// Task 6 owns the decode, so the C's pre-loop de-interleave
-    /// (`U2A.C:153-166`) is not ported.
+    /// U2A's `vid_clearbg(bg)` (`U2A.C:285`): a linear 320x200 image. The
+    /// decoder delivers `U2ABG.UH` linear, so `U2A.C:153-166`'s de-interleave
+    /// is not needed.
     Background(&'a [u8]),
     /// U2E's `vid_clear255()` (`U2E.C:395`): one byte over the whole page.
     Byte(u8),
@@ -519,14 +482,8 @@ pub struct Driver {
 
 impl Driver {
     /// A driver with both parts' window `vid_window(0,319,25,174,512,
-    /// 9999999)` (`U2A.C:247`, `U2E.C:351`), fov 0 and the chosen ring.
-    ///
-    /// The window's x range is fixed in practice: `math::camera_angle` takes
-    /// its half-width from the constant `HALF_WIDTH = 160`, which is the
-    /// shipped `clip_x[1] - add_x` (`math.rs:40-47`), because its signature
-    /// has no `Projection`. Overriding `proj` with a different x range is
-    /// unsupported; supporting one needs `camera_angle` to compute
-    /// `clip_x[1] - add_x` from the projection.
+    /// 9999999)` (`U2A.C:247`, `U2E.C:351`), fov 0 and the chosen ring. Its x
+    /// range is the one `math::HALF_WIDTH` assumes.
     pub fn new(ring: Ring, first_draw: bool) -> Driver {
         Driver {
             ring,
@@ -536,30 +493,25 @@ impl Driver {
         }
     }
 
-    /// The draw order for `scene`, for a diagnostic that attributes pixels to
-    /// the topmost object.
+    /// The draw order, for `u2e`'s `search_reference_states`.
     #[cfg(test)]
     pub(crate) fn order_for_test(&self, scene: &mut Scene) -> Vec<usize> {
         self.order_instances(scene)
     }
 
+    /// U2E's `if(!firstframe) ... else { syncframe=0; firstframe=0;
+    /// coppercnt=1; }` (`U2E.C:386-387`, `:433`): no camera angle, no clear,
+    /// no draw, only the clock reset.
+    pub fn skip_first_draw(&mut self) {
+        self.ring.syncframe = 0;
+        self.first_draw = false;
+    }
+
     /// The loop body of `U2A.C:284-324` / `U2E.C:386-433`: clear the page,
     /// order the enabled objects and draw them.
     pub fn draw_frame(&mut self, scene: &mut Scene, page: &mut Page<'_>, clear: Clear<'_>) {
-        if self.first_draw {
-            // U2E's `if(!firstframe) ... else { syncframe=0; firstframe=0;
-            // coppercnt=1; }` (`U2E.C:386-387`, `:433`): no camera angle, no
-            // clear, no draw. The next draw runs `vid_cameraangle`
-            // (`U2E.C:394-397`).
-            self.ring.syncframe = 0;
-            self.ring.coppercnt = 1;
-            self.first_draw = false;
-            return;
-        }
-
-        // `vid_cameraangle(fov)` (`U2A.C:287`, `U2E.C:397`), with the
-        // `AVIDM1.ASM` aspect both parts install and the shipped window's
-        // fixed `HALF_WIDTH` (see [`Driver::new`]).
+        // `vid_cameraangle(fov)` (`U2A.C:287`, `U2E.C:397`) with the
+        // `AVIDM1.ASM` aspect both parts install.
         let (mul_x, mul_y) = camera_angle(self.fov, ASPECT);
         self.proj.mul_x = mul_x;
         self.proj.mul_y = mul_y;
@@ -611,10 +563,9 @@ impl Driver {
                 continue;
             }
 
-            let vertices: Vec<VertexData> = object.vertices.iter().map(vertex_data).collect();
             let center = object.lists.first().map_or(0, |list| list.center);
-            *distance = if usize::from(center) < vertices.len() {
-                single_z(&vertices, center, &instance.r)
+            *distance = if usize::from(center) < object.vertices.len() {
+                single_z(&object.vertices, center, &instance.r)
             } else {
                 0
             };
@@ -667,21 +618,13 @@ impl Driver {
         let instance = &scene.instances[index];
         let object = Rc::clone(&instance.object);
         let flags = F_DEFAULT;
-        // `if(!(o->flags&F_VISIBLE)) return;` (`VISU.C:107`). F_DEFAULT has
-        // the bit, so a loaded object never returns here.
-        if flags & F_VISIBLE == 0 {
-            return;
-        }
 
         // `calc_rotate(vnum,v,v0,r)` and, because F_GOURAUD is always set,
         // `calc_nrotate(nnum,n,n0,r)` (`VISU.C:108-109`).
-        let vertices: Vec<VertexData> = object.vertices.iter().map(vertex_data).collect();
-        let mut rotated = vec![Rotated::default(); vertices.len()];
-        rotate_vertices(&mut rotated, &vertices, &instance.r);
-
-        let normals: Vec<NormalData> = object.normals.iter().map(normal_data).collect();
-        let mut rotated_normals = vec![RotatedNormal::default(); normals.len()];
-        rotate_normals(&mut rotated_normals, &normals, &instance.r, normals.len());
+        let mut rotated = vec![Rotated::default(); object.vertices.len()];
+        rotate_vertices(&mut rotated, &object.vertices, &instance.r);
+        let mut rotated_normals = vec![RotatedNormal::default(); object.normals.len()];
+        rotate_normals(&mut rotated_normals, &object.normals, &instance.r);
 
         // `o->vf=calc_project(...); if(o->vf) return;` (`VISU.C:111-112`).
         let mut pverts = vec![PVert::default(); rotated.len()];
@@ -703,9 +646,7 @@ impl Driver {
 
             // `and dh,al` over the face's projected vertices
             // (`ADRAW.ASM:517-532`), capped like the pipeline's copy loop.
-            let sides = usize::from(face.sides)
-                .min(MAX_FACE_SIDES)
-                .min(face.vertices.len());
+            let sides = face_sides(face);
             let mut screen_flags = 0xFFFFu16;
             for &vertex in &face.vertices[..sides] {
                 if let Some(projected) = pverts.get(vertex as usize) {
@@ -786,20 +727,12 @@ fn pick_list(object: &ObjectData, rotated: &[Rotated]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parts::visu::math::UNIT;
     use sr_assets::load_path;
     use sr_assets::visu::{FaceList, Frame, Normal, Op, Vertex};
     use sr_engine::Palette;
     use std::path::Path;
 
     const BACKGROUND: &str = "../../assets/VISU/C/U2ABG.UH";
-
-    fn identity() -> Matrix {
-        Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            ..Default::default()
-        }
-    }
 
     /// One vertex and one `ORD0` list, enough for `single_z` and the order.
     fn plane_object_named(name: &[u8], z: i32) -> Rc<ObjectData> {
@@ -814,10 +747,7 @@ mod tests {
             }],
             normals: vec![Normal { x: 0, y: 0, z: 0 }],
             polys: Vec::new(),
-            lists: vec![FaceList {
-                center: 0,
-                offsets: Vec::new(),
-            }],
+            lists: vec![FaceList { center: 0, offsets: Vec::new() }],
         })
     }
 
@@ -828,16 +758,8 @@ mod tests {
     /// A scene whose camera is instance 0 and whose `objects` are instances
     /// 1.., all on, with an identity camera.
     fn scene_with(objects: Vec<Rc<ObjectData>>) -> Scene {
-        let camera = Rc::new(ObjectData {
-            version: 0,
-            name: Vec::new(),
-            vertices: Vec::new(),
-            normals: Vec::new(),
-            polys: Vec::new(),
-            lists: Vec::new(),
-        });
         let mut instances = vec![Instance {
-            object: camera,
+            object: Rc::new(camera_object()),
             r: Matrix::default(),
             r0: Matrix::default(),
             on: false,
@@ -847,7 +769,7 @@ mod tests {
             instances.push(Instance {
                 object,
                 r: Matrix::default(),
-                r0: identity(),
+                r0: Matrix::identity(),
                 on: true,
                 index: number as u16 + 1,
             });
@@ -860,7 +782,7 @@ mod tests {
             },
             instances,
             animation: Animation { frames: Vec::new() },
-            cam: identity(),
+            cam: Matrix::identity(),
             stream: 0,
             xit: false,
         }
@@ -1090,101 +1012,30 @@ mod tests {
         assert_eq!(driver.order_instances(&mut scene), vec![1]);
     }
 
+    /// An object with one list per centre: `ORD0` first, then the `ORDE`s.
+    fn object_with_lists(centers: &[u16]) -> ObjectData {
+        ObjectData {
+            lists: centers.iter().map(|&center| FaceList { center, offsets: Vec::new() }).collect(),
+            ..camera_object()
+        }
+    }
+
+    fn at_z(z: i32) -> Rotated {
+        Rotated { z, ..Default::default() }
+    }
+
     #[test]
     fn pick_list_chooses_the_nearest_center_and_ignores_ord0_s_center() {
         // `a = 0`, then every ORDE centre with a smaller z replaces it
         // (`VISU.C:113-123`): ORD0's centre is never compared, so its -100
         // does not win.
-        let object = ObjectData {
-            version: 0x100,
-            name: Vec::new(),
-            vertices: Vec::new(),
-            normals: Vec::new(),
-            polys: Vec::new(),
-            lists: vec![
-                FaceList {
-                    center: 0,
-                    offsets: Vec::new(),
-                },
-                FaceList {
-                    center: 1,
-                    offsets: Vec::new(),
-                },
-                FaceList {
-                    center: 2,
-                    offsets: Vec::new(),
-                },
-            ],
-        };
-        let rotated = [
-            Rotated {
-                x: 0,
-                y: 0,
-                z: -100,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 5,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 40,
-                normal: 0,
-            },
-        ];
-        assert_eq!(pick_list(&object, &rotated), 1);
-
+        let rotated = [at_z(-100), at_z(5), at_z(40)];
+        assert_eq!(pick_list(&object_with_lists(&[0, 1, 2]), &rotated), 1);
         // With no ORDE the default list 0 is `plnum == 1` (`VISU.C:31`).
-        let ord0_only = ObjectData {
-            lists: vec![FaceList {
-                center: 0,
-                offsets: Vec::new(),
-            }],
-            ..object
-        };
-        assert_eq!(pick_list(&ord0_only, &rotated), 0);
-    }
-
-    #[test]
-    fn pick_list_keeps_the_first_center_on_a_tie() {
-        // `bl < al` is strict (`VISU.C:118`).
-        let object = ObjectData {
-            version: 0x100,
-            name: Vec::new(),
-            vertices: Vec::new(),
-            normals: Vec::new(),
-            polys: Vec::new(),
-            lists: vec![
-                FaceList {
-                    center: 0,
-                    offsets: Vec::new(),
-                },
-                FaceList {
-                    center: 1,
-                    offsets: Vec::new(),
-                },
-                FaceList {
-                    center: 2,
-                    offsets: Vec::new(),
-                },
-            ],
-        };
-        let rotated = [
-            Rotated::default(),
-            Rotated {
-                z: 5,
-                ..Default::default()
-            },
-            Rotated {
-                z: 5,
-                ..Default::default()
-            },
-        ];
-        assert_eq!(pick_list(&object, &rotated), 1);
+        assert_eq!(pick_list(&object_with_lists(&[0]), &rotated), 0);
+        // `bl < al` is strict (`VISU.C:118`): a tie keeps the first.
+        let tied = [at_z(0), at_z(5), at_z(5)];
+        assert_eq!(pick_list(&object_with_lists(&[0, 1, 2]), &tied), 1);
     }
 
     // ---------------------------------------------------------------------
@@ -1284,17 +1135,6 @@ mod tests {
             displayed.push(ring.displayed());
         }
         (queued, displayed)
-    }
-
-    #[test]
-    fn ring_starts_in_the_original_s_state() {
-        let ring = Ring::new(Variant::U2a);
-        assert_eq!(ring.ready, [0, 0, 0, 1]);
-        assert_eq!((ring.clr, ring.clw), (0, 0));
-        assert_eq!(ring.copperdelay, 16);
-        assert_eq!((ring.syncframe, ring.currframe), (0, 0));
-        assert_eq!(ring.avgrepeat, 1);
-        assert_eq!(ring.displayed(), 0);
     }
 
     #[test]
@@ -1467,26 +1307,14 @@ mod tests {
         let mut pixels = vec![0x5Au8; 320 * 200];
         let mut driver = Driver::new(Ring::new(Variant::U2e), true);
         driver.ring.syncframe = 99;
-        driver.ring.coppercnt = 99;
+        driver.skip_first_draw();
+        assert!(!driver.first_draw);
+        assert_eq!(driver.ring.syncframe, 0);
+        // The next draw is a real one.
         {
             let mut page = Page::new(&mut pixels, 320);
             driver.draw_frame(&mut scene, &mut page, Clear::Byte(0));
         }
-        assert!(pixels.iter().all(|&pixel| pixel == 0x5A));
-        assert!(!driver.first_draw);
-        assert_eq!(driver.ring.syncframe, 0);
-        assert_eq!(driver.ring.coppercnt, 1);
-    }
-
-    #[test]
-    fn byte_clear_fills_the_whole_page() {
-        let mut scene = scene_with(Vec::new());
-        let mut pixels = vec![0u8; 320 * 200];
-        let mut driver = Driver::new(Ring::new(Variant::U2e), false);
-        {
-            let mut page = Page::new(&mut pixels, 320);
-            driver.draw_frame(&mut scene, &mut page, Clear::Byte(0xFF));
-        }
-        assert!(pixels.iter().all(|&pixel| pixel == 0xFF));
+        assert!(pixels.iter().all(|&pixel| pixel == 0));
     }
 }

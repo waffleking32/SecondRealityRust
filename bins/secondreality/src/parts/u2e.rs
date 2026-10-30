@@ -3,11 +3,7 @@
 //! `VISU/C/U2E.C` is the vector engine's second part. Its acts:
 //!
 //! 1. `:185-283` — the mode check (`jellywas`), the packed-scene load, and the
-//!    intro palette: the live DAC is captured. The port's runs always start in
-//!    its graphics surface, so the BIOS mode is always above 3 and
-//!    `jellywas == 1`; a block-4/`--part` entry captures the shell's boot DAC
-//!    and a mid-chain entry the predecessor's. The text-mode `vid_init(1)`
-//!    initialisation is unreachable here.
+//!    intro palette: the live DAC is captured (see [`U2e::prepare`]).
 //! 2. `:285-335` — the 100-wait intro: 33 fade-in steps, 16 waits, the
 //!    `fadeset` border/letterbox into page 0, a CRTC 9 write, the `fadeset` into
 //!    pages 1..3, 16 waits, and 33 fade-out steps.
@@ -20,8 +16,10 @@
 //! 6. `:541-559` — the teardown: copper removed, the captured DAC faded over 16
 //!    retraces from entry 255, then the part ends.
 //!
-//! The port's tick map, the measured intro frames and the preserved bugs are in
-//! `docs/fidelity/u2e.md`.
+//! Each act's wait is one tick ([`Phase`]); the engine is `parts/visu`, shared
+//! with U2A. The tick map and the measured intro frames are in
+//! `docs/fidelity/u2e.md`; the preserved bugs are `bugs.md` §12, the keyframe
+//! residuals A30 and A31.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -65,7 +63,8 @@ enum Phase {
     FadeInHold { left: u8 },
     /// `fadeset` into page 0 (`U2E.C:303`), at part tick 49.
     FadeSetFirst,
-    /// CRTC 9 `(old & 0xf0) | 0x80` (`U2E.C:305-308`): state only.
+    /// CRTC 9 `(old & 0xf0) | 0x80` (`U2E.C:305-308`): display state only, so
+    /// the tick does nothing.
     Crtc,
     /// `fadeset` into pages 1..3 (`U2E.C:310-312`), then the first of the 16 waits.
     FadeSetRest,
@@ -95,17 +94,12 @@ pub struct U2e {
     driver: Option<Rc<RefCell<Driver>>>,
     /// `fpal[768]`: the intro's and the teardown's working DAC.
     fpal: [u8; 768],
-    /// Whether `fpal` has an intro mutation waiting for the next tick's upload.
-    /// The source mutates, waits and then uploads, so a fade's step shows one
-    /// tick after it is computed; this flag is that one-tick delay.
+    /// An intro mutation waits for the next tick's upload: the source mutates,
+    /// `dis_waitb()`s, then uploads.
     palette_dirty: bool,
-    /// The same one-tick delay for the teardown, whose upload is the rotated
-    /// DAC write rather than the intro's straight 768-byte copy.
+    /// The same delay for the teardown's rotated write.
     teardown_dirty: bool,
     phase: Phase,
-    /// CRTC register 9's scan-doubling bit (`U2E.C:305-308`): display hardware
-    /// state only, kept for the record and the tests.
-    crtc_scan_doubled: bool,
 }
 
 impl U2e {
@@ -119,25 +113,17 @@ impl U2e {
             palette_dirty: false,
             teardown_dirty: false,
             phase: Phase::FadeIn { step: 0 },
-            crtc_scan_doubled: false,
         }
     }
 
-    /// Read the scene, choose the intro palette and set the view.
+    /// Read the scene, capture the intro palette and set the view.
     ///
-    /// The source's `jellywas` is the BIOS video mode at `:198-205`: `a > 3`
-    /// is mode 13h and above, and `jellywas == 1` captures the live DAC
-    /// (`:281-282`) instead of running `vid_init(1)`'s text-mode palette
-    /// initialisation (`:274-277`).
-    ///
-    /// **The port's runs always take the capture.** Every run shape begins in
-    /// the shell's graphics surface — `--block 4` and `--part u2e` from the
-    /// boot DAC `hardware_default_palette` installs, a chain from whatever its
-    /// predecessor left — so the mode the source reads is always above 3. The
-    /// `vid_init(1)` branch is unreachable and is not implemented; the
-    /// substitution changes no measured intro frame, because the fade-in
-    /// saturates every byte it touches either way. Recorded in
-    /// `docs/fidelity/u2e.md` §4.
+    /// `jellywas` is the BIOS mode above 3 (`:198-205`), which captures the
+    /// live DAC (`:281-282`) instead of `vid_init(1)`'s text-mode palette
+    /// (`:274-277`). Every port run starts in the graphics surface (a block-4
+    /// or `--part` run under the shell's boot DAC, a chain under its
+    /// predecessor's), so the capture is the only reachable branch
+    /// (`docs/fidelity/u2e.md` §4).
     fn prepare(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         ctx.require_music(
             NAME,
@@ -149,37 +135,25 @@ impl U2e {
         let mut scene = load_scene(SCENE_NAME).map_err(|message| PartError::new(NAME, message))?;
         scene.reset();
 
-        let mut main_palette = scene.master.palette;
-        main_palette.set_entry(252, [0, 0, 0]);
-        main_palette.set_entry(253, [63, 63, 63]);
-        main_palette.set_entry(254, [63, 63, 63]);
-        main_palette.set_entry(255, [0, 0, 0]);
+        let main_palette = patched_palette(&scene.master.palette);
 
-        // `outp(0x3c7,0); for(a=0;a<768;a++) fpal[a]=inp(0x3c9);`
-        // (`U2E.C:281-282`): the live DAC, six bits a component. Every run
-        // shape reaches this branch — see the doc comment above — including a
-        // block-4 entry, which captures the shell's boot DAC.
+        // `for(a=0;a<768;a++) fpal[a]=inp(0x3c9);` (`U2E.C:281-282`).
         self.fpal = ctx.palette.to_six_bit();
         self.palette_dirty = false;
         self.teardown_dirty = false;
 
-        // `vid_init(1)`/`vid_init(11)` are state only for the port: both modes
-        // are the shipped 320x200 tweak (`AVIDM1.ASM:17-42`, `:44-69`), and
-        // the window is `Driver::new`'s `vid_window(0,319,25,174,512,
-        // 9999999)` (`U2E.C:352`). Page 0 is the intro's picture; the display
-        // start stays 0 until the ring's copper moves it.
+        // `vid_init(1)`/`vid_init(11)` are the same shipped 320x200 tweak
+        // (`AVIDM1.ASM:17-69`): state only. The display start stays on page 0
+        // until the ring's copper moves it.
         *ctx.view = view();
 
         self.scene = Some(scene);
         self.main_palette = main_palette;
         self.driver = None;
-        self.crtc_scan_doubled = false;
         self.phase = Phase::FadeIn { step: 0 };
         Ok(())
     }
-}
 
-impl U2e {
     /// Upload a fade mutation that the previous tick computed: the source's
     /// `dis_waitb(); outp(0x3c8,0); outp(0x3c9,...)` (`U2E.C:292-295`), whose
     /// upload is one retrace after the mutation.
@@ -288,14 +262,9 @@ impl U2e {
                 .as_mut()
                 .expect("the scene is loaded before the loop");
             if driver.first_draw {
-                // `} else { syncframe=0; firstframe=0; coppercnt=1; }`
-                // (`U2E.C:433`): no page is taken, nothing is cleared and
-                // nothing is drawn; the fadeset page (the writer page, 0) is
-                // scheduled and queued below. The driver's `first_draw` branch
-                // performs the clock reset.
-                let mut empty: [u8; 0] = [];
-                let mut page = Page::new(&mut empty, usize::from(VIEW_WIDTH));
-                driver.draw_frame(scene, &mut page, Clear::Byte(0));
+                // `firstframe` (`U2E.C:386-387`, `:433`): no page is taken or
+                // drawn, and the fadeset page (the writer page, 0) is queued.
+                driver.skip_first_draw();
                 let (frames, parse) = driver.ring.schedule();
                 driver.ring.queue(0, frames);
                 parse
@@ -409,7 +378,6 @@ impl Part for U2e {
                 PartStatus::Continuing
             }
             Phase::Crtc => {
-                self.crtc_scan_doubled = true;
                 self.phase = Phase::FadeSetRest;
                 PartStatus::Continuing
             }
@@ -469,38 +437,41 @@ impl Part for U2e {
     }
 }
 
+/// `U2E.00M`'s palette with entries 252 and 255 black and 253, 254 white
+/// (`U2E.C:337-350`).
+fn patched_palette(master: &Palette) -> Palette {
+    let mut palette = *master;
+    palette.set_entry(252, [0, 0, 0]);
+    palette.set_entry(253, [63, 63, 63]);
+    palette.set_entry(254, [63, 63, 63]);
+    palette.set_entry(255, [0, 0, 0]);
+    palette
+}
+
 /// `fadeset` (`U2E.C:145-183`) into one packed page.
 ///
-/// The source writes VGA plane bytes: `outp(0x3c5,15)` makes a `memset` address
-/// write all four planes, and the `3c5=2+4+8` write at byte 63 sets only planes
-/// 1..3. The port expands every address to `4*A+p` in a linear 320x200 page.
-/// The top block's last `memset` is at `vram+y*80+252` — 172 addresses past the
-/// row it just wrote, which lands in rows `y+3..`; every one of those addresses
-/// is written again by a later row pass, so the stray has no visible effect.
-/// Every write the shipped pattern makes is inside its page (the largest is the
-/// bottom row's byte 15,999), so the `pixel < PAGE_PIXELS` guard never fires
-/// for it; it is a bound against a malformed pattern, and the unit test's
-/// sentinel proves a page's writes never cross into the next page.
+/// A `memset` address under map mask 15 writes all four planes, pixels `4A..`;
+/// the `3c5=2+4+8` byte at 63 writes planes 1..3. The top block's last write is
+/// at `y*80+252`, 172 addresses past its row; later rows overwrite it. Every
+/// shipped write is in-page (the largest is 15,999), so the bound in
+/// [`planar_fill`] never fires.
 fn fadeset(pixels: &mut [u8], page: usize) {
     let start = page * PAGE_PIXELS;
     let page = &mut pixels[start..start + PAGE_PIXELS];
-    for y in 0..25 {
-        planar_fill(page, y * PLANE_BYTES_PER_ROW, 17, 0x0F, 0);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 17, 47, 0x0F, 252);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 63, 1, 0x0E, 0);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 252, 16, 0x0F, 0);
-    }
-    for y in 25..175 {
-        planar_fill(page, y * PLANE_BYTES_PER_ROW, 17, 0x0F, 254);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 17, 47, 0x0F, 253);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 63, 1, 0x0E, 254);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 64, 16, 0x0F, 254);
-    }
-    for y in 175..200 {
-        planar_fill(page, y * PLANE_BYTES_PER_ROW, 17, 0x0F, 0);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 17, 47, 0x0F, 252);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 63, 1, 0x0E, 0);
-        planar_fill(page, y * PLANE_BYTES_PER_ROW + 64, 16, 0x0F, 0);
+    // (rows, the four colours, the last write's offset)
+    let blocks = [
+        (0..25, [0, 252, 0, 0], 252),
+        (25..175, [254, 253, 254, 254], 64),
+        (175..200, [0, 252, 0, 0], 64),
+    ];
+    for (rows, [a, b, c, d], last) in blocks {
+        for y in rows {
+            let row = y * PLANE_BYTES_PER_ROW;
+            planar_fill(page, row, 17, 0x0F, a);
+            planar_fill(page, row + 17, 47, 0x0F, b);
+            planar_fill(page, row + 63, 1, 0x0E, c);
+            planar_fill(page, row + last, 16, 0x0F, d);
+        }
     }
 }
 
@@ -572,9 +543,7 @@ mod tests {
         &rig.surface.pixels()[start..start + PAGE_PIXELS]
     }
 
-    /// Started in the mid-chain shape (not `music_fresh`): U2E captures the
-    /// DAC in every run shape; the block-4 shape is
-    /// `a_block_four_shaped_init_captures_the_live_dac_too`.
+    /// Started in the mid-chain shape (not `music_fresh`).
     fn started_with(music: ScriptedMusic) -> (Rig, U2e) {
         let mut rig = rig(music);
         let mut part = U2e::new();
@@ -605,48 +574,22 @@ mod tests {
 
     #[test]
     fn a_jelly_boot_captures_the_live_dac() {
-        let mut rig = rig(closed());
-        let mut live = Palette::new();
-        live.set_entry(0, [1, 2, 3]);
-        live.set_entry(7, [5, 6, 7]);
-        live.set_entry(255, [63, 1, 2]);
-        rig.palette = live;
-        let mut part = U2e::new();
-        part.init(&mut rig.ctx(0)).unwrap();
-        assert_eq!(part.fpal, live.to_six_bit());
-        assert_eq!(&part.fpal[0..3], &[1, 2, 3]);
-        assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
-        assert_eq!(&part.fpal[3 * 255..], &[63, 1, 2]);
-        assert_eq!(rig.palette, live, "the capture reads, it does not write");
-        assert_eq!(part.phase, Phase::FadeIn { step: 0 });
-    }
-
-    #[test]
-    fn a_block_four_shaped_init_captures_the_live_dac_too() {
-        // **The entry shape**, where `vid_init(1)` would leave a text-mode
-        // palette. The port's block-4 run starts in
-        // its graphics surface with the shell's boot DAC installed
-        // (`hardware_default_palette`, the emulator's mode-set table), so the
-        // BIOS mode is above 3 here exactly as it is mid-chain and the source
-        // takes the capture branch (`U2E.C:281-282`). The palette used is a
-        // non-black one, so a capture is visible against a fresh `fpal`.
-        let mut rig = rig(closed());
-        let mut live = Palette::new();
-        live.set_entry(0, [63, 0, 0]);
-        live.set_entry(7, [5, 6, 7]);
-        live.set_entry(247, [11, 12, 16]);
-        rig.palette = live;
-        let mut part = U2e::new();
-        part.init(&mut rig.init_ctx(0)).unwrap();
-        assert_eq!(
-            part.fpal,
-            live.to_six_bit(),
-            "the block-4 shape captures the shell's DAC, not vid_init(1)'s"
-        );
-        assert_eq!(&part.fpal[3 * 7..3 * 7 + 3], &[5, 6, 7]);
-        assert_eq!(&part.fpal[3 * 247..3 * 247 + 3], &[11, 12, 16]);
-        assert_eq!(rig.palette, live, "init uploads no palette (U2E.C:273-283)");
-        assert_eq!(part.phase, Phase::FadeIn { step: 0 });
+        // Mid-chain and in the block-4/`--part` shape alike (`U2E.C:281-282`).
+        for fresh in [false, true] {
+            let mut rig = rig(closed());
+            let mut live = Palette::new();
+            live.set_entry(0, [1, 2, 3]);
+            live.set_entry(7, [5, 6, 7]);
+            live.set_entry(255, [63, 1, 2]);
+            rig.palette = live;
+            let mut part = U2e::new();
+            let mut ctx = if fresh { rig.init_ctx(0) } else { rig.ctx(0) };
+            part.init(&mut ctx).unwrap();
+            assert_eq!(part.fpal, live.to_six_bit(), "fresh {fresh}");
+            assert_eq!(&part.fpal[3 * 255..], &[63, 1, 2]);
+            assert_eq!(rig.palette, live, "the capture reads, it does not write");
+            assert_eq!(part.phase, Phase::FadeIn { step: 0 });
+        }
     }
 
     #[test]
@@ -753,9 +696,7 @@ mod tests {
             rig.step(&mut part);
         }
         assert_eq!(part.phase, Phase::FadeSetRest);
-        // The CRTC 9 write on tick 50 is state only: the port's view is the
-        // same 320x200 geometry (the ruling's display-hardware detail).
-        assert!(part.crtc_scan_doubled);
+        // The CRTC 9 write on tick 50 is state only: the view is unchanged.
         assert_eq!((rig.view.width, rig.view.height), (VIEW_WIDTH, VIEW_HEIGHT));
         let (_, _) = rig.step_render(&mut part);
         assert_eq!(part.phase, Phase::FadeRestHold { left: 15 });
@@ -789,7 +730,7 @@ mod tests {
             rig.step(&mut part);
         }
         let (_, frame) = rig.step_render(&mut part);
-        // The capture out/u2e-start/frame_000490.rgb: 215 in the top/bottom
+        // The `u2e-start` capture (`docs/fidelity/u2e.md` §3): 215 in the top/bottom
         // band (entry 252 = 53) and 40 at the middle block's sides (entry
         // 254 = 10).
         assert_eq!(&frame[68 * 3..68 * 3 + 3], &[215, 215, 215], "top band");
@@ -958,100 +899,17 @@ mod tests {
     // --- the teardown -------------------------------------------------------
 
     #[test]
-    fn the_teardown_fades_sixteen_steps_from_dac_entry_255_and_finishes() {
-        let (mut rig, mut part) = started_with(opening_at(OPEN));
-        to_loop(&mut rig, &mut part);
-        // The live DAC is the main palette; the capture is that palette.
-        let captured = part.main_palette.to_six_bit();
-        // Tick T: the capture and the first +4 are computed, but the upload is
-        // the next tick's (`fpal[a]+=4; dis_waitb(); outp(...)`,
-        // `U2E.C:545-554`).
-        let status = rig.step_exit(&mut part);
-        assert_eq!(status, PartStatus::Continuing);
-        assert_eq!(part.phase, Phase::Teardown { left: TEARDOWN_STEPS - 1 });
-        let mut step1 = captured;
-        for byte in &mut step1 {
-            *byte = (*byte + 4).min(63);
-        }
-        assert_eq!(part.fpal, step1, "the live DAC captured, then stepped");
-        assert_eq!(rig.palette, part.main_palette, "no upload on the trigger tick");
-
-        // Tick T+1: step 1 is the live DAC, written from entry 255 with the
-        // wrap (255 gets fpal[0..3], entry j gets fpal[3(j+1)..3(j+2)]).
-        assert_eq!(rig.step(&mut part), PartStatus::Continuing);
-        for index in 0..=255u8 {
-            let at = if index == 255 {
-                0
-            } else {
-                3 * (usize::from(index) + 1)
-            };
-            assert_eq!(
-                rig.palette.entry(index),
-                [step1[at], step1[at + 1], step1[at + 2]],
-                "DAC entry {index}"
-            );
-        }
-        let mut step2 = step1;
-        for byte in &mut step2 {
-            *byte = (*byte + 4).min(63);
-        }
-        assert_eq!(part.fpal, step2, "step 2 is computed one tick ahead");
-
-        // Ticks T+2..T+16: each shows the previous step; the sixteenth upload
-        // is the one the part ends on. No page is cleared.
-        let before = rig.surface.pixels().to_vec();
-        for step in 2..=TEARDOWN_STEPS {
-            let status = rig.step(&mut part);
-            if step < TEARDOWN_STEPS {
-                assert_eq!(status, PartStatus::Continuing, "step {step}");
-            } else {
-                assert_eq!(status, PartStatus::Finished, "the sixteenth upload ends the part");
-            }
-        }
-        assert_eq!(part.phase, Phase::Done);
-        assert_eq!(rig.surface.pixels(), before, "no page is cleared");
-        let mut last = captured;
-        for _ in 0..TEARDOWN_STEPS {
-            for byte in &mut last {
-                *byte = (*byte + 4).min(63);
-            }
-        }
-        assert_eq!(part.fpal, last, "sixteen mutations");
-        for index in 0..=255u8 {
-            let at = if index == 255 {
-                0
-            } else {
-                3 * (usize::from(index) + 1)
-            };
-            assert_eq!(
-                rig.palette.entry(index),
-                [last[at], last[at + 1], last[at + 2]],
-                "the last upload is visible: DAC entry {index}"
-            );
-        }
-        assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
-        assert_eq!(
-            rig.surface.pixels(),
-            before,
-            "the no-op copper and the finished part touch nothing"
-        );
-    }
-
-    #[test]
     fn a_sticky_exit_flag_runs_the_whole_sixteen_step_teardown() {
-        // **The shell's exit flag is sticky** (`Engine::exit_requested`), so a
-        // part that opted into draining sees it in every `PartCtx` of its
-        // teardown. The source's fade is not guarded by `dis_exit` at all
-        // (`U2E.C:541-555` runs after either loop exit), and every one of the
-        // sixteen uploads must still happen: T's tick triggers the teardown and
-        // computes step 1, T+1..T+16 upload steps 1..16, and the part returns
-        // `Finished` on T+16.
+        // The shell's exit flag is sticky, so a draining part sees it on every
+        // tick of its teardown, which `dis_exit` does not guard
+        // (`U2E.C:541-555`). Tick T captures the live DAC (the main palette)
+        // and computes step 1; T+n uploads step n (`fpal[a]+=4; dis_waitb();
+        // outp(0x3c8,255)`), and T+16 ends the part.
         let (mut rig, mut part) = started_with(opening_at(OPEN));
         to_loop(&mut rig, &mut part);
         let captured = part.main_palette.to_six_bit();
+        let before = rig.surface.pixels().to_vec();
 
-        // Every tick from here carries the exit flag, exactly as the engine
-        // hands it to a draining part's bands.
         assert_eq!(rig.step_exit(&mut part), PartStatus::Continuing, "T: teardown triggered");
         assert_eq!(part.phase, Phase::Teardown { left: TEARDOWN_STEPS - 1 });
         assert_eq!(rig.palette, part.main_palette, "T uploads nothing");
@@ -1077,22 +935,20 @@ mod tests {
         }
         assert_eq!(part.phase, Phase::Done);
         assert_eq!(part.fpal, step, "sixteen mutations, with the flag set throughout");
+        assert_eq!(rig.step(&mut part), PartStatus::Finished, "a finished part stays finished");
+        assert_eq!(rig.surface.pixels(), before, "no page is cleared");
     }
 
-    /// A diagnostic, not a commitment: render every stream state through the
-    /// part's own driver and window and report which state each filed keyframe
-    /// is. Run with `cargo test --release -p secondreality --bin secondreality
-    /// search_reference_states -- --ignored --nocapture`.
+    /// The generator behind A30's state search, attribution and index deltas
+    /// (`docs/fidelity/u2e.md` §5): render every stream state through the
+    /// part's driver, report each keyframe's nearest state, and attribute its
+    /// differing pixels to the topmost object. It prints and asserts nothing.
     #[test]
-    #[ignore]
+    #[ignore = "measurement; run with --ignored --nocapture"]
     fn search_reference_states() {
         let mut scene = load_scene(SCENE_NAME).unwrap();
         scene.reset();
-        let mut main = scene.master.palette;
-        main.set_entry(252, [0, 0, 0]);
-        main.set_entry(253, [63, 63, 63]);
-        main.set_entry(254, [63, 63, 63]);
-        main.set_entry(255, [0, 0, 0]);
+        let main = patched_palette(&scene.master.palette);
         let references: Vec<(u32, Vec<u8>)> = [1000u32, 1600, 2600, 3600]
             .into_iter()
             .map(|index| (index, reference("u2e", index, "rgb")))
@@ -1172,11 +1028,7 @@ mod tests {
             }
             let mut differing = Vec::new();
             for (at, &pixel) in full.iter().enumerate() {
-                let theirs = &reference[3 * at..3 * at + 3];
-                let full_entry = main.entry(pixel);
-                if [dac_expand(full_entry[0]), dac_expand(full_entry[1]), dac_expand(full_entry[2])]
-                    != [theirs[0], theirs[1], theirs[2]]
-                {
+                if main.entry(pixel).map(dac_expand) != reference[3 * at..3 * at + 3] {
                     differing.push(at);
                 }
             }
@@ -1202,12 +1054,9 @@ mod tests {
                 .collect();
             let mut deltas = std::collections::BTreeMap::new();
             for &at in &differing {
-                let theirs = &reference[3 * at..3 * at + 3];
                 let matches: Vec<u8> = (0..=255u8)
                     .filter(|&candidate| {
-                        let entry = main.entry(candidate);
-                        [dac_expand(entry[0]), dac_expand(entry[1]), dac_expand(entry[2])]
-                            == [theirs[0], theirs[1], theirs[2]]
+                        main.entry(candidate).map(dac_expand) == reference[3 * at..3 * at + 3]
                     })
                     .collect();
                 if matches.len() != 1 {

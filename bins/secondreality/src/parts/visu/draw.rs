@@ -2,29 +2,14 @@
 //! two fillers, transliterated from `VISU/ADRAW.ASM`, `VISU/ADRAWCLP.ASM`,
 //! `VISU/AVIDFILL.ASM`, `VISU/ADATA.ASM` and `VISU/AFILLDIV.INC`.
 //!
-//! # The fill stream
-//!
-//! The original writes a `{FILL-DATA}` stream into `_polydrw` and consumes it
-//! with a VGA-planar filler: `poly_nrm`/`poly_grd` emit `(flag, colour, X,
-//! X-add, Y-count)` bands and `drawfill_nrm`/`drawfill_grd` walk them in the
-//! unchained 320x200 mode, where one page row is 80 addresses and one address
-//! holds four pixels (one per plane, `x >> 2`, plane `x & 3`). The stream and
-//! the plane masks are a VGA implementation detail; this port generates the
-//! bands and fills a linear 320-wide page directly. What is preserved is the
-//! emitted pixel set and its colours: every planar byte write is expanded to
-//! `x = 4 * address + plane` for each plane the map mask selects, so the tiers'
-//! 1-, 2- and 4-pixel colour quantisation and every off-by-one they carry
-//! come through unchanged. `AFILLDIV.INC`'s `65536/len` slope, the `0x8000`
-//! X bias, the increment-before-use row loop and the right-exclusive stop are
-//! transliterated literally.
-//!
-//! The original's `poly1`/`poly2` working buffers hold `MAXPOLYSIDES` = 16
-//! vertices each (`AD.INC:51`, `POLYSIZE` at `AD.INC:64`). A 12-sided shipped
-//! face (U2E.039) through the near clip and the four 2-D passes can produce
-//! more than 16 vertices, and the original writes past the buffer. The port
-//! widens the cap to `MAX_POLY_SIDES` and notes the overflow at the guard;
-//! every shipped face's clipped list stays inside the widened cap, so shipped
-//! output is unchanged.
+//! The original's `poly_nrm`/`poly_grd` write a `{FILL-DATA}` band stream that
+//! `drawfill_nrm`/`drawfill_grd` walk in the unchained 320x200 mode (80
+//! addresses a row, four pixels an address). The port fills a linear page
+//! directly, expanding every planar byte write to `x = 4 * address + plane`
+//! for each plane the map mask selects, so the tiers' 1-, 2- and 4-pixel
+//! quantisation and their off-by-ones come through unchanged. The
+//! `65536/len` slope (`AFILLDIV.INC`), the `0x8000` X bias, the
+//! increment-before-use row loop and the right-exclusive stop are literal.
 
 use sr_assets::visu::Face;
 
@@ -33,49 +18,28 @@ use super::math::{
     VF_RIGHT, VF_UP,
 };
 
-/// `F_FLIP` (`AD.INC:68`).
-///
-/// No shipped face carries it and neither part's loop reads it; it is kept
-/// with the flag word's other bits because the word is read as a whole.
-#[allow(dead_code)]
-pub const F_FLIP: u16 = 0x0100;
 /// `F_2SIDE` (`AD.INC:69`).
 pub const F_2SIDE: u16 = 0x0200;
-/// `F_SHADE8` (`AD.INC:70`).
-///
-/// The three shade constants name the bits `calclight` masks with
-/// `F_SHADE32`; U2A's shipped faces use the 16- and 32-colour tiers.
-#[allow(dead_code)]
+/// `F_SHADE8` and `F_SHADE16` (`AD.INC:70-71`); the pipeline reads only
+/// their union, `F_SHADE32`.
+#[cfg(test)]
 pub const F_SHADE8: u16 = 0x0400;
-/// `F_SHADE16` (`AD.INC:71`).
-#[allow(dead_code)]
+#[cfg(test)]
 pub const F_SHADE16: u16 = 0x0800;
-/// `F_SHADE32` (`AD.INC:72`); the shade bits are `F_SHADE8 | F_SHADE16`.
+/// `F_SHADE32` (`AD.INC:72`): the bits `calclight` masks.
 pub const F_SHADE32: u16 = 0x0C00;
 /// `F_GOURAUD` (`AD.INC:73`).
 pub const F_GOURAUD: u16 = 0x1000;
-/// `F_TEXTURE` (`AD.INC:74`).
-///
-/// No shipped face sets it and the pipeline has no texture path; kept with
-/// the flag word's other bits.
-#[allow(dead_code)]
-pub const F_TEXTURE: u16 = 0x2000;
-
-/// The mask `calclight` tests (`and ax,F_SHADE32`).
-const SHADE_MASK: u16 = F_SHADE32;
 
 /// `MAXPOLYSIDES` (`AD.INC:51`): the original's fixed vertex buffers.
 const MAX_FACE_SIDES: usize = 16;
 
-/// The port's widened working-list cap. The original's `poly1`/`poly2` hold
-/// exactly `MAXPOLYSIDES` = 16 vertices (`POLYSIZE` = 208 bytes,
-/// `AD.INC:64`); a 12-sided shipped face can leave 16 after the near clip
-/// alone, and each of the five clipping passes (near plus four 2-D) can at
-/// most double an arbitrary list, so the mechanical bound is 12 * 2^5 = 384
-/// and 16 * 2^5 = 512. The original writes past the end of `poly2` into the
-/// code segment and corrupts the list; 512 keeps the 16-sided worst case in
-/// bounds. Shipped faces produce the same vertices as the original and
-/// therefore the same pixels.
+/// The port's widened working-list cap. `poly1`/`poly2` hold 16 vertices
+/// (`POLYSIZE`, `AD.INC:64`), but a 12-sided shipped face (U2E.039) can leave
+/// 16 after the near clip alone and each 2-D pass can add more, so the
+/// original writes past `poly2`. Each of the five passes at most doubles a
+/// list, so 16 * 2^5 = 512 holds any case; shipped faces stay inside it and
+/// produce the original's vertices.
 const MAX_POLY_SIDES: usize = 512;
 
 /// `MAXCOLS` (`A.INC:150`), the Gouraud colour buffer's length.
@@ -192,7 +156,7 @@ pub fn cull(
 /// normal (`nlist`, 16-bit components, `UNIT` = 16384 for 1.0): `normallight`
 /// reads all three components, so a single word cannot carry the parameter.
 pub fn light(normal: &RotatedNormal, face_flags: u16) -> u8 {
-    let shade = face_flags & SHADE_MASK;
+    let shade = face_flags & F_SHADE32;
     if shade == 0 {
         // `and ax,F_SHADE32 ; jz @@nc` (`ADRAW.ASM:25-26`) then `xor ax,ax`
         // falls into the 1..=30 clamp, so "no shade" is one, not zero.
@@ -241,13 +205,7 @@ pub fn clip_and_fill(
     gouraud_colors: Option<&[u16]>,
     color: u8,
 ) {
-    // `_draw_polylist` copies exactly `sides` vertices (`REPT MAXPOLYSIDES`,
-    // `ADRAW.ASM:517-532`); a record with more than 16 would make the
-    // original overwrite `poly1`'s colour array, so the port takes 16. The
-    // shipped maximum is 12 (U2E.039).
-    let sides = usize::from(face.sides)
-        .min(MAX_FACE_SIDES)
-        .min(face.vertices.len());
+    let sides = face_sides(face);
     if sides == 0 {
         return;
     }
@@ -341,6 +299,13 @@ pub fn clip_and_fill(
     }
 }
 
+/// The vertices `_draw_polylist` copies (`REPT MAXPOLYSIDES`,
+/// `ADRAW.ASM:517-532`): a record with more than 16 would overwrite `poly1`'s
+/// colour array, so the port takes 16. The shipped maximum is 12 (U2E.039).
+pub fn face_sides(face: &Face) -> usize {
+    usize::from(face.sides).min(MAX_FACE_SIDES).min(face.vertices.len())
+}
+
 // ---------------------------------------------------------------------------
 // The working polygon
 // ---------------------------------------------------------------------------
@@ -357,15 +322,8 @@ struct PolyVert {
     vx: usize,
 }
 
-/// Append a vertex unless the widened cap is reached.
-///
-/// The original's `poly2` is `POLYSIZE` = 208 bytes: room for 16 vertices.
-/// The near clip alone can leave 16 out of a 12-gon, and each of the four
-/// 2-D passes can add another, so a shipped 12-sided face (U2E.039) can
-/// overflow it; the original then writes over the statics that follow. The
-/// widened cap keeps the five-pass worst case (16 * 2^5 = 512) representable;
-/// a face that somehow exceeds it is truncated rather than allowed to
-/// corrupt memory.
+/// Append a vertex unless [`MAX_POLY_SIDES`] is reached, where the original
+/// would overflow `poly2`.
 fn push_vert(out: &mut Vec<PolyVert>, vertex: PolyVert) {
     if out.len() < MAX_POLY_SIDES {
         out.push(vertex);
@@ -724,6 +682,16 @@ fn top_vertex(verts: &[PolyVert]) -> (usize, i32, i32) {
     (top, min, max)
 }
 
+/// One chain's current edge, as the fillers step it.
+trait Side: Copy + Default {
+    /// The edge from `from` to `to`, `height` rows tall (`POLYSIDECALC`).
+    fn new(from: &PolyVert, to: &PolyVert, height: i32) -> Self;
+    /// One row's increments, added before the row uses them.
+    fn step(&mut self);
+    /// The integer X.
+    fn x(&self) -> i16;
+}
+
 /// One flat side segment: the 16.16 X and its per-row add.
 #[derive(Clone, Copy, Default)]
 struct FlatSide {
@@ -731,8 +699,23 @@ struct FlatSide {
     add: i32,
 }
 
-/// One Gouraud side segment: the 8.8 colour word and its per-row add, plus
-/// the 16.16 X and its add.
+impl Side for FlatSide {
+    fn new(from: &PolyVert, to: &PolyVert, height: i32) -> Self {
+        let (x, add) = side_x(from, to, height);
+        FlatSide { x, add }
+    }
+
+    fn step(&mut self) {
+        self.x = self.x.wrapping_add(self.add);
+    }
+
+    fn x(&self) -> i16 {
+        (self.x >> 16) as i16
+    }
+}
+
+/// One Gouraud side segment (`POLYSIDECALC_GRD`): the 8.8 colour word and its
+/// per-row add, plus the 16.16 X and its add.
 #[derive(Clone, Copy, Default)]
 struct GrSide {
     color: u16,
@@ -741,14 +724,28 @@ struct GrSide {
     x_add: i32,
 }
 
-/// `poly_nrm` (`ADRAW.ASM:150-259`) followed by `drawfill_nrm`
-/// (`AVIDFILL.ASM:76-184`): walk the two chains from the top vertex and fill
-/// each band's rows between them.
-///
-/// Each row adds the X increments *before* using them (the filler's loop
-/// starts with `add vdf_leftx,eax`), and the span stops before the larger X:
-/// `dec dx ; don't fill the rightmost pixel`.
-fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
+impl Side for GrSide {
+    fn new(from: &PolyVert, to: &PolyVert, height: i32) -> Self {
+        let (x, x_add) = side_x(from, to, height);
+        GrSide { color: from.gr, color_add: side_gr(from, to, height), x, x_add }
+    }
+
+    /// `add vdfg_leftc,leftca` and the X add.
+    fn step(&mut self) {
+        self.color = self.color.wrapping_add(self.color_add as u16);
+        self.x = self.x.wrapping_add(self.x_add);
+    }
+
+    fn x(&self) -> i16 {
+        (self.x >> 16) as i16
+    }
+}
+
+/// The two chains' walk shared by `poly_nrm` (`ADRAW.ASM:150-259`) and
+/// `poly_grd` (`:301-410`), with their fillers' row loops: from the top
+/// vertex, the left chain backwards and the right forwards, each band's rows
+/// stepped before use and handed to `row(y, left, right)`.
+fn walk_chains<S: Side>(verts: &[PolyVert], mut row: impl FnMut(i32, &S, &S)) {
     let n = verts.len();
     if n == 0 {
         return;
@@ -756,9 +753,7 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
     let (top, min_y, max_y) = top_vertex(verts);
     if min_y == max_y {
         // Height zero: `cmp dx,cx ; je @@d0` overwrites the first band's flag
-        // with 0xFFFF (not StartY, which is written earlier at stream offset
-        // 2), and the filler returns on the flag's sign bit without drawing a
-        // row. Nothing is emitted, as here.
+        // with 0xFFFF, and the filler returns on its sign bit without a row.
         return;
     }
 
@@ -767,8 +762,8 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
     let mut left_height = 0i32;
     let mut right_height = 0i32;
     let mut current_y = min_y;
-    let mut left_side = FlatSide::default();
-    let mut right_side = FlatSide::default();
+    let mut left_side = S::default();
+    let mut right_side = S::default();
     let mut y = min_y;
 
     loop {
@@ -787,10 +782,7 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
                     continue;
                 }
                 left_height = diff;
-                left_side = {
-                    let (x, add) = side_x(&verts[left], &verts[previous], diff);
-                    FlatSide { x, add }
-                };
+                left_side = S::new(&verts[left], &verts[previous], diff);
                 left = previous;
                 break;
             }
@@ -808,10 +800,7 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
                     continue;
                 }
                 right_height = diff;
-                right_side = {
-                    let (x, add) = side_x(&verts[right], &verts[next], diff);
-                    FlatSide { x, add }
-                };
+                right_side = S::new(&verts[right], &verts[next], diff);
                 right = next;
                 break;
             }
@@ -822,23 +811,9 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
             return;
         }
         for _ in 0..shorter {
-            left_side.x = left_side.x.wrapping_add(left_side.add);
-            right_side.x = right_side.x.wrapping_add(right_side.add);
-            let left_x = (left_side.x >> 16) as i16;
-            let right_x = (right_side.x >> 16) as i16;
-            if left_x != right_x {
-                // The original swaps when the right X is the smaller one and
-                // then decrements the larger: the span runs from the smaller
-                // X up to, but not including, the larger.
-                let (low, high) = if right_x > left_x {
-                    (left_x, right_x)
-                } else {
-                    (right_x, left_x)
-                };
-                for x in i32::from(low)..i32::from(high) {
-                    page.set(x, y, color);
-                }
-            }
+            left_side.step();
+            right_side.step();
+            row(y, &left_side, &right_side);
             y += 1;
         }
         left_height -= shorter;
@@ -847,110 +822,37 @@ fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
     }
 }
 
-/// `poly_grd` (`ADRAW.ASM:301-410`) followed by `drawfill_grd`
-/// (`AVIDFILL.ASM:189-523`): the Gouraud equivalent of [`fill_flat`],
-/// including the three accuracy tiers.
+/// `poly_nrm` followed by `drawfill_nrm` (`AVIDFILL.ASM:76-184`). The span
+/// runs from the smaller X up to, not including, the larger: `dec dx ; don't
+/// fill the rightmost pixel`.
+fn fill_flat(page: &mut Page<'_>, verts: &[PolyVert], color: u8) {
+    walk_chains(verts, |y, left: &FlatSide, right: &FlatSide| {
+        let (left_x, right_x) = (left.x(), right.x());
+        if left_x != right_x {
+            let (low, high) = if right_x > left_x { (left_x, right_x) } else { (right_x, left_x) };
+            for x in i32::from(low)..i32::from(high) {
+                page.set(x, y, color);
+            }
+        }
+    });
+}
+
+/// `poly_grd` followed by `drawfill_grd` (`AVIDFILL.ASM:189-523`), including
+/// the three accuracy tiers.
 fn fill_gouraud(page: &mut Page<'_>, verts: &[PolyVert]) {
-    let n = verts.len();
-    if n == 0 {
-        return;
-    }
-    let (top, min_y, max_y) = top_vertex(verts);
-    if min_y == max_y {
-        return;
-    }
-
-    let mut left = top;
-    let mut right = top;
-    let mut left_height = 0i32;
-    let mut right_height = 0i32;
-    let mut current_y = min_y;
-    let mut left_side = GrSide::default();
-    let mut right_side = GrSide::default();
-    let mut y = min_y;
-
-    loop {
-        if i32::from(verts[left].y) == current_y {
-            loop {
-                let previous = if left == 0 { n - 1 } else { left - 1 };
-                let diff = i32::from(verts[previous].y) - i32::from(verts[left].y);
-                if diff < 0 {
-                    return;
-                }
-                if diff == 0 {
-                    left = previous;
-                    continue;
-                }
-                left_height = diff;
-                left_side = {
-                    let (x, x_add) = side_x(&verts[left], &verts[previous], diff);
-                    GrSide {
-                        color: verts[left].gr,
-                        color_add: side_gr(&verts[left], &verts[previous], diff),
-                        x,
-                        x_add,
-                    }
-                };
-                left = previous;
-                break;
-            }
+    walk_chains(verts, |y, left: &GrSide, right: &GrSide| {
+        let (left_x, right_x) = (left.x(), right.x());
+        if left_x != right_x {
+            // After the sort, colour1 belongs to the smaller X and colour2 to
+            // the larger.
+            let (low, high, color1, color2) = if right_x > left_x {
+                (left_x, right_x, left.color, right.color)
+            } else {
+                (right_x, left_x, right.color, left.color)
+            };
+            gouraud_row(page, y, low, high, color1, color2);
         }
-        if i32::from(verts[right].y) == current_y {
-            loop {
-                let next = (right + 1) % n;
-                let diff = i32::from(verts[next].y) - i32::from(verts[right].y);
-                if diff < 0 {
-                    return;
-                }
-                if diff == 0 {
-                    right = next;
-                    continue;
-                }
-                right_height = diff;
-                right_side = {
-                    let (x, x_add) = side_x(&verts[right], &verts[next], diff);
-                    GrSide {
-                        color: verts[right].gr,
-                        color_add: side_gr(&verts[right], &verts[next], diff),
-                        x,
-                        x_add,
-                    }
-                };
-                right = next;
-                break;
-            }
-        }
-
-        let shorter = left_height.min(right_height);
-        if shorter <= 0 {
-            return;
-        }
-        for _ in 0..shorter {
-            // `add vdfg_leftc,leftca` and the X adds, before the row's span.
-            left_side.color = left_side.color.wrapping_add(left_side.color_add as u16);
-            right_side.color = right_side.color.wrapping_add(right_side.color_add as u16);
-            left_side.x = left_side.x.wrapping_add(left_side.x_add);
-            right_side.x = right_side.x.wrapping_add(right_side.x_add);
-
-            let left_x = (left_side.x >> 16) as i16;
-            let right_x = (right_side.x >> 16) as i16;
-            if left_x != right_x {
-                // After the sort, colour1 belongs to the smaller X and
-                // colour2 to the larger; the right address is one before the
-                // larger X (right-exclusive).
-                let (low, high, color1, color2) = if right_x > left_x {
-                    (left_x, right_x, left_side.color, right_side.color)
-                } else {
-                    (right_x, left_x, right_side.color, left_side.color)
-                };
-                gouraud_row(page, y, low, high, color1, color2);
-            }
-            y += 1;
-        }
-        left_height -= shorter;
-        right_height -= shorter;
-        current_y += shorter;
-    }
+    });
 }
 
 /// One Gouraud scanline: `drawfill_grd`'s endpoint writes and the tier
@@ -979,11 +881,8 @@ fn gouraud_row(page: &mut Page<'_>, y: i32, low: i16, high: i16, color1: u16, co
         return;
     }
     let n = n as u16;
-    // After clipping every vertex is inside the 320-pixel window, so a span
-    // is at most 320 pixels wide and n <= 160; the original's colour buffers
-    // hold MAXCOLS = 640 entries. This guard is therefore unreachable from
-    // clipped shipped data, but an unclipped caller must not index past the
-    // buffers (the original would run off them).
+    // A clipped span is at most 320 pixels (n <= 160), inside the MAXCOLS
+    // buffers; the guard only stops an unclipped caller running off them.
     if n > (MAXCOLS / 2) as u16 {
         return;
     }
@@ -1036,7 +935,6 @@ fn write_address(page: &mut Page<'_>, y: i32, address: i32, mask: u8, color: u8)
 
 /// `gouraud1` (`AVIDFILL.ASM:333-389`): one pixel of accuracy, one buffer
 /// byte per pixel, four single-plane passes.
-#[allow(clippy::too_many_arguments)]
 fn gouraud_one_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, slope: i16) {
     let dx = slope >> 1; // `sar dx,1`
     let count = 2 * usize::from(n);
@@ -1075,7 +973,6 @@ fn gouraud_one_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, s
 
 /// `gouraud2` (`AVIDFILL.ASM:393-446`): two pixels of accuracy, one buffer
 /// byte per two-pixel block, two two-plane passes.
-#[allow(clippy::too_many_arguments)]
 fn gouraud_two_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, slope: i16) {
     let count = usize::from(n);
     let mut buffer = [0u8; MAXCOLS];
@@ -1114,7 +1011,6 @@ fn gouraud_two_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, s
 
 /// `gouraud4` (`AVIDFILL.ASM:450-512`): four pixels of accuracy, one buffer
 /// byte per four-pixel address, one all-plane pass.
-#[allow(clippy::too_many_arguments)]
 fn gouraud_four_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, slope: i16) {
     let dx = (slope as u16) << 1; // `sal dx,1`
     let q = usize::from(n >> 1);
@@ -1164,7 +1060,6 @@ fn gouraud_four_pixel(page: &mut Page<'_>, y: i32, a: u16, n: u16, color2: u16, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parts::visu::math;
 
     const W: usize = 320;
     const H: usize = 200;
@@ -1352,18 +1247,8 @@ mod tests {
         assert_eq!(row(&pixels, 1, 5), &[9, 0, 0, 0, 0]);
         assert_eq!(row(&pixels, 2, 5), &[0; 5]);
         // The truncating division itself, not just the rows it produced.
-        let from = PolyVert {
-            x: 4,
-            y: 0,
-            gr: 0,
-            vx: 0,
-        };
-        let to = PolyVert {
-            x: 0,
-            y: 3,
-            gr: 0,
-            vx: 0,
-        };
+        let from = PolyVert { x: 4, y: 0, gr: 0, vx: 0 };
+        let to = PolyVert { x: 0, y: 3, gr: 0, vx: 0 };
         assert_eq!(side_x(&from, &to, 3).1, -87381);
     }
 
@@ -1572,44 +1457,16 @@ mod tests {
         };
         let f = face(&[0, 1, 2, 3], F_GOURAUD | F_SHADE32);
         let rotated = [
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
-            Rotated {
-                x: 4,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 2,
-                z: 0,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 2,
-                z: 0,
-                normal: 0,
-            },
+            Rotated { x: 0, y: 0, z: 1024, normal: 0 },
+            Rotated { x: 4, y: 0, z: 1024, normal: 0 },
+            Rotated { x: 0, y: 2, z: 0, normal: 0 },
+            Rotated { x: 0, y: 2, z: 0, normal: 0 },
         ];
         let pverts = [
             pv(0, 0),
             pv(4, 0),
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_NEAR,
-            },
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_NEAR,
-            },
+            PVert { x: 0, y: 0, vf: VF_NEAR },
+            PVert { x: 0, y: 0, vf: VF_NEAR },
         ];
         let colors = [0x1000, 0x2000, 0x4000, 0x6000];
         let pixels = run_gouraud(&f, &rotated, &pverts, &colors, &projection);
@@ -1641,42 +1498,14 @@ mod tests {
         };
         let f = face(&[0, 1, 2, 3], F_GOURAUD | F_SHADE32);
         let rotated = [
-            Rotated {
-                x: 0,
-                y: 2,
-                z: 0,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 2,
-                z: 0,
-                normal: 0,
-            },
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
-            Rotated {
-                x: 4,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
+            Rotated { x: 0, y: 2, z: 0, normal: 0 },
+            Rotated { x: 0, y: 2, z: 0, normal: 0 },
+            Rotated { x: 0, y: 0, z: 1024, normal: 0 },
+            Rotated { x: 4, y: 0, z: 1024, normal: 0 },
         ];
         let pverts = [
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_NEAR,
-            },
-            PVert {
-                x: 0,
-                y: 0,
-                vf: VF_NEAR,
-            },
+            PVert { x: 0, y: 0, vf: VF_NEAR },
+            PVert { x: 0, y: 0, vf: VF_NEAR },
             pv(0, 0),
             pv(4, 0),
         ];
@@ -1785,53 +1614,18 @@ mod tests {
         // reversed (the bug) the crossing is at 9. The closing edge crosses
         // at x = -25 + (25*9830 >> 14) = -11.
         let src = [
-            PolyVert {
-                x: 0,
-                y: 10,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: 25,
-                y: -15,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: -25,
-                y: -15,
-                gr: 0,
-                vx: 0,
-            },
+            PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
+            PolyVert { x: 25, y: -15, gr: 0, vx: 0 },
+            PolyVert { x: -25, y: -15, gr: 0, vx: 0 },
         ];
         let out = clip_2d(&src, 0, Axis::Y, true, false);
         assert_eq!(
             out,
             vec![
-                PolyVert {
-                    x: 0,
-                    y: 10,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 10,
-                    y: 0,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: -11,
-                    y: 0,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 0,
-                    y: 10,
-                    gr: 0,
-                    vx: 0
-                },
+                PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
+                PolyVert { x: 10, y: 0, gr: 0, vx: 0 },
+                PolyVert { x: -11, y: 0, gr: 0, vx: 0 },
+                PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
             ]
         );
     }
@@ -1845,18 +1639,8 @@ mod tests {
         // -0x3000, so delta = -0x3000*8192 >> 14 = -0x1800 and the crossing
         // colour is 0x4000 - 0x1800 = 0x2800. A zero-extended difference gives
         // 0xA800. The other coordinate is 0 + (20*8192 >> 14) = 10.
-        let last = PolyVert {
-            x: 0,
-            y: 0,
-            gr: 0x4000,
-            vx: 0,
-        };
-        let current = PolyVert {
-            x: 20,
-            y: 20,
-            gr: 0x1000,
-            vx: 0,
-        };
+        let last = PolyVert { x: 0, y: 0, gr: 0x4000, vx: 0 };
+        let current = PolyVert { x: 20, y: 20, gr: 0x1000, vx: 0 };
         let crossing = clip_2d_crossing(&last, &current, 10, Axis::X, true);
         assert_eq!((crossing.x, crossing.y, crossing.gr), (10, 10, 0x2800));
     }
@@ -1870,71 +1654,21 @@ mod tests {
         // hidden loop would end the run at (10,0) and insert it as an extra
         // vertex.
         let src = [
-            PolyVert {
-                x: 0,
-                y: 10,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: 5,
-                y: -15,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: 10,
-                y: 0,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: 15,
-                y: -10,
-                gr: 0,
-                vx: 0,
-            },
-            PolyVert {
-                x: 20,
-                y: 10,
-                gr: 0,
-                vx: 0,
-            },
+            PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
+            PolyVert { x: 5, y: -15, gr: 0, vx: 0 },
+            PolyVert { x: 10, y: 0, gr: 0, vx: 0 },
+            PolyVert { x: 15, y: -10, gr: 0, vx: 0 },
+            PolyVert { x: 20, y: 10, gr: 0, vx: 0 },
         ];
         let out = clip_2d(&src, 0, Axis::Y, true, false);
         assert_eq!(
             out,
             vec![
-                PolyVert {
-                    x: 0,
-                    y: 10,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 2,
-                    y: 0,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 17,
-                    y: 0,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 20,
-                    y: 10,
-                    gr: 0,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 0,
-                    y: 10,
-                    gr: 0,
-                    vx: 0
-                },
+                PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
+                PolyVert { x: 2, y: 0, gr: 0, vx: 0 },
+                PolyVert { x: 17, y: 0, gr: 0, vx: 0 },
+                PolyVert { x: 20, y: 10, gr: 0, vx: 0 },
+                PolyVert { x: 0, y: 10, gr: 0, vx: 0 },
             ]
         );
     }
@@ -1959,36 +1693,11 @@ mod tests {
             clip_z: [512, 1_000_000_000],
         };
         let rotated = [
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
-            Rotated {
-                x: 10,
-                y: 0,
-                z: 0,
-                normal: 0,
-            },
-            Rotated {
-                x: 20,
-                y: 0,
-                z: 512,
-                normal: 0,
-            },
-            Rotated {
-                x: 30,
-                y: 0,
-                z: 0,
-                normal: 0,
-            },
-            Rotated {
-                x: 40,
-                y: 0,
-                z: 1024,
-                normal: 0,
-            },
+            Rotated { x: 0, y: 0, z: 1024, normal: 0 },
+            Rotated { x: 10, y: 0, z: 0, normal: 0 },
+            Rotated { x: 20, y: 0, z: 512, normal: 0 },
+            Rotated { x: 30, y: 0, z: 0, normal: 0 },
+            Rotated { x: 40, y: 0, z: 1024, normal: 0 },
         ];
         // The list's projected x: v0 (0,0); v4 (40,0); the hidden vertices'
         // x/y are undefined and only matter if one is copied, which the
@@ -2005,38 +1714,13 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                PolyVert {
-                    x: 0,
-                    y: 0,
-                    gr: 0x1000,
-                    vx: 0
-                },
+                PolyVert { x: 0, y: 0, gr: 0x1000, vx: 0 },
                 // The two crossings take the previous output's word: v0's
                 // 0x1000 for both.
-                PolyVert {
-                    x: 10,
-                    y: 0,
-                    gr: 0x1000,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 70,
-                    y: 0,
-                    gr: 0x1000,
-                    vx: 0
-                },
-                PolyVert {
-                    x: 40,
-                    y: 0,
-                    gr: 0x2000,
-                    vx: 4
-                },
-                PolyVert {
-                    x: 0,
-                    y: 0,
-                    gr: 0x1000,
-                    vx: 0
-                },
+                PolyVert { x: 10, y: 0, gr: 0x1000, vx: 0 },
+                PolyVert { x: 70, y: 0, gr: 0x1000, vx: 0 },
+                PolyVert { x: 40, y: 0, gr: 0x2000, vx: 4 },
+                PolyVert { x: 0, y: 0, gr: 0x1000, vx: 0 },
             ]
         );
     }
@@ -2122,17 +1806,8 @@ mod tests {
 
     #[test]
     fn cull_rejects_a_colour_minus_one_face() {
-        let normals = [RotatedNormal {
-            x: 0,
-            y: 0,
-            z: 16384,
-        }];
-        let vertices = [Rotated {
-            x: 0,
-            y: 0,
-            z: -1,
-            normal: 0,
-        }];
+        let normals = [RotatedNormal { x: 0, y: 0, z: 16384 }];
+        let vertices = [Rotated { x: 0, y: 0, z: -1, normal: 0 }];
         let mut f = face(&[0], 0);
         f.color = -1;
         assert!(cull(&f, 0xF001, &normals, &vertices, 0));
@@ -2143,23 +1818,9 @@ mod tests {
         // A normal (0,0,UNIT) and a first rotated vertex (0,0,-1): the dot
         // is negative, so the face is visible (`checkculling` returns
         // carry=1=visible when the 64-bit sum is negative).
-        let normals = [RotatedNormal {
-            x: 0,
-            y: 0,
-            z: 16384,
-        }];
-        let front = [Rotated {
-            x: 0,
-            y: 0,
-            z: -1,
-            normal: 0,
-        }];
-        let back = [Rotated {
-            x: 0,
-            y: 0,
-            z: 1,
-            normal: 0,
-        }];
+        let normals = [RotatedNormal { x: 0, y: 0, z: 16384 }];
+        let front = [Rotated { x: 0, y: 0, z: -1, normal: 0 }];
+        let back = [Rotated { x: 0, y: 0, z: 1, normal: 0 }];
         let f = face(&[0], 0);
         assert!(!cull(&f, 0xF001, &normals, &front, 0));
         assert!(cull(&f, 0xF001, &normals, &back, 0));
@@ -2168,17 +1829,8 @@ mod tests {
     #[test]
     fn cull_keeps_a_two_sided_face_with_a_positive_dot() {
         // `test cs:poly1[POLYFLAGS],F_2SIDE; jnz @@2side` skips the dot test.
-        let normals = [RotatedNormal {
-            x: 0,
-            y: 0,
-            z: 16384,
-        }];
-        let back = [Rotated {
-            x: 0,
-            y: 0,
-            z: 1,
-            normal: 0,
-        }];
+        let normals = [RotatedNormal { x: 0, y: 0, z: 16384 }];
+        let back = [Rotated { x: 0, y: 0, z: 1, normal: 0 }];
         let f = face(&[0], F_2SIDE);
         assert!(!cull(&f, 0xF001, &normals, &back, 0));
     }
@@ -2187,17 +1839,8 @@ mod tests {
     fn cull_skips_a_face_all_of_whose_vertices_share_an_out_flag() {
         // The caller's AND of the projected flags is nonzero: every vertex
         // is right of the window, so no pixel survives the right clip.
-        let normals = [RotatedNormal {
-            x: 0,
-            y: 0,
-            z: 16384,
-        }];
-        let front = [Rotated {
-            x: 0,
-            y: 0,
-            z: -1,
-            normal: 0,
-        }];
+        let normals = [RotatedNormal { x: 0, y: 0, z: 16384 }];
+        let front = [Rotated { x: 0, y: 0, z: -1, normal: 0 }];
         let f = face(&[0], 0);
         assert!(cull(&f, 0xF001, &normals, &front, VF_RIGHT));
         assert!(!cull(&f, 0xF001, &normals, &front, 0));
@@ -2227,51 +1870,27 @@ mod tests {
         // -z 13, and the eight cube corners follow.
         let principal = [
             (
-                RotatedNormal {
-                    x: 16384,
-                    y: 0,
-                    z: 0,
-                },
+                RotatedNormal { x: 16384, y: 0, z: 0 },
                 27,
             ),
             (
-                RotatedNormal {
-                    x: -16384,
-                    y: 0,
-                    z: 0,
-                },
+                RotatedNormal { x: -16384, y: 0, z: 0 },
                 4,
             ),
             (
-                RotatedNormal {
-                    x: 0,
-                    y: 16384,
-                    z: 0,
-                },
+                RotatedNormal { x: 0, y: 16384, z: 0 },
                 26,
             ),
             (
-                RotatedNormal {
-                    x: 0,
-                    y: -16384,
-                    z: 0,
-                },
+                RotatedNormal { x: 0, y: -16384, z: 0 },
                 5,
             ),
             (
-                RotatedNormal {
-                    x: 0,
-                    y: 0,
-                    z: 16384,
-                },
+                RotatedNormal { x: 0, y: 0, z: 16384 },
                 18,
             ),
             (
-                RotatedNormal {
-                    x: 0,
-                    y: 0,
-                    z: -16384,
-                },
+                RotatedNormal { x: 0, y: 0, z: -16384 },
                 13,
             ),
         ];
@@ -2292,11 +1911,7 @@ mod tests {
             (-1, -1, -1, 1),
         ];
         for (x, y, z, expected) in corners {
-            let normal = RotatedNormal {
-                x: x * 16384,
-                y: y * 16384,
-                z: z * 16384,
-            };
+            let normal = RotatedNormal { x: x * 16384, y: y * 16384, z: z * 16384 };
             assert_eq!(light(&normal, F_SHADE32), expected, "{normal:?}");
         }
     }
@@ -2306,11 +1921,7 @@ mod tests {
         // `shr ax,cl` with cl = 6 - (flags >> 10): the 8-colour band shifts
         // by 5, the 16-colour by 4 and the 32-colour by 3. +x's brightness is
         // 222: 222>>5 = 6, 222>>4 = 13, 222>>3 = 27.
-        let n = RotatedNormal {
-            x: 16384,
-            y: 0,
-            z: 0,
-        };
+        let n = RotatedNormal { x: 16384, y: 0, z: 0 };
         assert_eq!(light(&n, F_SHADE8), 6);
         assert_eq!(light(&n, F_SHADE16), 13);
         assert_eq!(light(&n, F_SHADE32), 27);
@@ -2323,19 +1934,11 @@ mod tests {
     fn light_clamps_at_one_and_thirty() {
         // A normal opposite every light component: normallight is 0, so the
         // shifted value is 0 and the low clamp returns 1.
-        let dark = RotatedNormal {
-            x: -16384,
-            y: -16384,
-            z: -16384,
-        };
+        let dark = RotatedNormal { x: -16384, y: -16384, z: -16384 };
         assert_eq!(light(&dark, F_SHADE32), 1);
         // The light vector itself: dot = 268,450,433, high word 4096,
         // normallight = 256 -> 255; 255>>3 = 31 -> the high clamp returns 30.
-        let lit = RotatedNormal {
-            x: 12118,
-            y: 10603,
-            z: 3030,
-        };
+        let lit = RotatedNormal { x: 12118, y: 10603, z: 3030 };
         assert_eq!(light(&lit, F_SHADE32), 30);
     }
 
@@ -2351,19 +1954,5 @@ mod tests {
         page.set(0, 2, 1);
         page.set(1, 1, 9);
         assert_eq!(pixels, [0, 0, 0, 0, 0, 9, 0, 0]);
-    }
-
-    // The maths module is otherwise only used through these tests; keep the
-    // import exercised so the module link is explicit.
-    #[test]
-    fn page_projection_matches_the_maths_window() {
-        // The test helper supplies its own projected vertices, so the
-        // multipliers and centre are zero, but the three clips must be the
-        // maths window's.
-        let window = math::window(0, 319, 0, 199, 512, 1_000_000_000);
-        let p = page_projection();
-        assert_eq!(p.clip_x, window.clip_x);
-        assert_eq!(p.clip_y, window.clip_y);
-        assert_eq!(p.clip_z, window.clip_z);
     }
 }

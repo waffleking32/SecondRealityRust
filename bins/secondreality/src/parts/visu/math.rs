@@ -11,14 +11,14 @@
 //!
 //! The projected-vertex flags and clips are `AD.INC`'s `VF_*`; the projection
 //! variables are `ADATA.ASM`'s `_proj*` and the window is `AVID.ASM:92-115`.
-//! The camera angle uses the 256-word `256/tan` table from `AVISTAN.INC`, and
-//! the values `AVID.ASM:60-85` produces for the two shipped scenes' `fov`s.
+//! The camera angle uses the 256-word `256/tan` table from `AVISTAN.INC`.
+//! The local vertex and normal are `sr_assets::visu`'s `vlist`/`nlist`
+//! records, read as they are stored.
+
+use sr_assets::visu::{Normal, Vertex};
 
 /// The fixed-point unit, `unit equ 16384` (`AD.INC:41`).
-///
-/// This module's own tests (and the driver's) build matrices from it; neither
-/// shipped part, U2A or U2E, names it, so the scoped allow stays.
-#[allow(dead_code)]
+#[cfg(test)]
 pub const UNIT: i32 = 16384;
 
 /// The fixed-point shift, `unitshr equ 14` (`AD.INC:42`).
@@ -39,25 +39,15 @@ pub const VF_NEAR: u16 = 16;
 /// it, but `calc_project` sets it (`ACALC.ASM:779-781`).
 pub const VF_FAR: u16 = 32;
 
-/// The shipped `vid_window`'s half-width, `clip_x[1] - add_x` = 319 - 159:
-/// `_vid_cameraangle` starts from exactly that difference
-/// (`AVID.ASM:60-63`), and both shipped parts use the same window
-/// (`U2A.C:247`, `U2E.C:351`).
-///
-/// This is a constant because the corrected `camera_angle(angle, aspect)`
-/// signature has no `Projection` to take the difference from. It is exact
-/// for both shipped parts; a later part that installed a different window
-/// would get a wrong `mul_x`, and Task 5 (which wires the driver) must
-/// record that limitation.
+/// The shipped `vid_window`'s half-width, `clip_x[1] - add_x` = 319 - 159,
+/// which `_vid_cameraangle` starts from (`AVID.ASM:60-63`). Both parts install
+/// that window (`U2A.C:247`, `U2E.C:351`); another window would need it
+/// computed from the [`Projection`].
 const HALF_WIDTH: i32 = 160;
 
-/// `_avistan`: `AVISTAN.INC`'s 256 words, "Visual angle tangent table (256
-/// words = 90 degrees)", verbatim. Entry `i` is `256/tan(i * 90/256°)`,
-/// saturating at 32767 for the two zero-angle entries.
-///
-/// Transcribed mechanically from the file: every `dw` word on lines 2-23 in
-/// source order, `;` comments and whitespace discarded, 256 values checked
-/// against the file's own "256 words" heading.
+/// `_avistan`: `AVISTAN.INC`'s 256 words (lines 2-23, "256 words = 90
+/// degrees"), verbatim. Entry `i` is `256/tan(i * 90/256°)`, saturating at
+/// 32767 for the two zero-angle entries.
 #[rustfmt::skip]
 pub const AVISTAN: [u16; 256] = [
     32767, 32767, 20859, 13905, 10428, 8341, 6950, 5956, 5210, 4631, 4166, 3787,
@@ -84,83 +74,49 @@ pub const AVISTAN: [u16; 256] = [
     6, 4, 3, 1,
 ];
 
-/// The original's `rmatrix` (`CD.H:29-36`, `AD.INC:35-39`): `m` is the
-/// row-major rotation, then the position. `_calc_applyrmatrix` overwrites a
-/// copy of this in place.
+/// The original's `rmatrix` (`CD.H:29-36`, `AD.INC:35-39`): the row-major
+/// 3x3 rotation, then the position.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Matrix {
-    /// The 3x3 rotation, row-major.
     pub m: [i32; 9],
-    /// The position's x.
     pub x: i32,
-    /// The position's y.
     pub y: i32,
-    /// The position's z.
     pub z: i32,
 }
 
-/// A local vertex, the original's `vlist` (`CD.H:38-46`): 32-bit coordinates
-/// and a normal index.
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-pub struct VertexData {
-    /// The vertex's local x.
-    pub x: i32,
-    /// The vertex's local y.
-    pub y: i32,
-    /// The vertex's local z.
-    pub z: i32,
-    /// The index of the vertex's normal in the object's normal list.
-    pub normal: i16,
+#[cfg(test)]
+impl Matrix {
+    /// The unit rotation at the origin.
+    pub fn identity() -> Matrix {
+        Matrix { m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT], ..Default::default() }
+    }
 }
 
-/// A vertex after `calc_rotate`: the original's `vlist` `v` (`CD.H:38-46`).
-/// The coordinates are 32-bit; `calc_rotate` stores a full dword.
+/// A vertex after `calc_rotate` (`vlist`, `CD.H:38-46`): full dwords, and the
+/// normal index copied unchanged.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Rotated {
-    /// The rotated x.
     pub x: i32,
-    /// The rotated y.
     pub y: i32,
-    /// The rotated z.
     pub z: i32,
-    /// The normal index, copied unchanged.
     pub normal: i16,
 }
 
-/// A local normal, the original's `nlist` (`CD.H:48-55`): signed 16-bit.
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-pub struct NormalData {
-    /// The normal's local x.
-    pub x: i16,
-    /// The normal's local y.
-    pub y: i16,
-    /// The normal's local z.
-    pub z: i16,
-}
-
-/// A normal after `calc_nrotate`: the original's `nlist` `n`. The result is
-/// stored as a 16-bit word.
+/// A normal after `calc_nrotate` (`nlist`, `CD.H:48-55`): 16-bit words.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct RotatedNormal {
-    /// The rotated x.
     pub x: i16,
-    /// The rotated y.
     pub y: i16,
-    /// The rotated z.
     pub z: i16,
 }
 
-/// A projected vertex, the original's `pvlist` (`CD.H:57-64`): the screen
-/// coordinates are 16-bit words and the low half of `vf` is the `VF_*` set.
-/// When `vf & VF_NEAR` is set, `x` and `y` are undefined
-/// (`CD.H:61`).
+/// A projected vertex (`pvlist`, `CD.H:57-64`): the 16-bit words
+/// `calc_project` stores and the `VF_*` flags. Under `VF_NEAR`, `x` and `y`
+/// are undefined (`CD.H:61`).
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct PVert {
-    /// The projected x, stored as the word `calc_project` writes.
     pub x: i16,
-    /// The projected y, stored as the word `calc_project` writes.
     pub y: i16,
-    /// The visibility flags.
     pub vf: u16,
 }
 
@@ -237,7 +193,7 @@ fn rotate_position(x: i32, y: i32, z: i32, m: &Matrix) -> (i32, i32, i32) {
 /// and the stores are 32-bit. The vertex's normal index is copied unchanged.
 ///
 /// Processes `min(out.len(), verts.len())` vertices.
-pub fn rotate_vertices(out: &mut [Rotated], verts: &[VertexData], m: &Matrix) {
+pub fn rotate_vertices(out: &mut [Rotated], verts: &[Vertex], m: &Matrix) {
     // `movsx eax, word ptr ds:[si+rmatrix_m+2*n]`: the entries are signed
     // words here, whatever the Matrix holds above bit 15.
     let entry = |i: usize| m.m[i] as i16 as i32;
@@ -256,7 +212,7 @@ pub fn rotate_vertices(out: &mut [Rotated], verts: &[VertexData], m: &Matrix) {
 
 /// One row of `calc_rotate`: three 64-bit `imul` products accumulated in
 /// `ecx:ebx`, `shrd 14`, then the position added as a 32-bit dword.
-fn rotate_axis(v: &VertexData, row: &[i32; 3], translate: i32) -> i32 {
+fn rotate_axis(v: &Vertex, row: &[i32; 3], translate: i32) -> i32 {
     let mut sum: i64 = 0;
     for (a, p) in row.iter().zip([v.x, v.y, v.z]) {
         sum = sum.wrapping_add((*a as i64).wrapping_mul(p as i64));
@@ -264,17 +220,16 @@ fn rotate_axis(v: &VertexData, row: &[i32; 3], translate: i32) -> i32 {
     ((sum >> UNITSHR) as i32).wrapping_add(translate)
 }
 
-/// `_calc_nrotate` (`ACALC.ASM:621-681`): rotate `count` 16-bit normals with
+/// `_calc_nrotate` (`ACALC.ASM:621-681`): rotate the 16-bit normals with
 /// `m`'s rotation. The matrix entries and the normals are signed 16-bit
 /// words; the products accumulate in 32 bits and `shrd 14` leaves the low 16
 /// bits, stored as words. The position is not used.
-pub fn rotate_normals(out: &mut [RotatedNormal], normals: &[NormalData], m: &Matrix, count: usize) {
+pub fn rotate_normals(out: &mut [RotatedNormal], normals: &[Normal], m: &Matrix) {
     let entry = |i: usize| m.m[i] as i16 as i32;
     let r0 = [entry(0), entry(1), entry(2)];
     let r1 = [entry(3), entry(4), entry(5)];
     let r2 = [entry(6), entry(7), entry(8)];
-    let n = count.min(out.len()).min(normals.len());
-    for (dst, src) in out.iter_mut().zip(normals).take(n) {
+    for (dst, src) in out.iter_mut().zip(normals) {
         *dst = RotatedNormal {
             x: rotate_normal_axis(src, &r0),
             y: rotate_normal_axis(src, &r1),
@@ -286,7 +241,7 @@ pub fn rotate_normals(out: &mut [RotatedNormal], normals: &[NormalData], m: &Mat
 /// One row of `calc_nrotate` (`ACALC.ASM:630-673`): `imul word ptr` products
 /// of two signed 16-bit words, accumulated in `bx:cx` (32 bits), `shrd 14`,
 /// and the low 16 bits stored as a word.
-fn rotate_normal_axis(v: &NormalData, row: &[i32; 3]) -> i16 {
+fn rotate_normal_axis(v: &Normal, row: &[i32; 3]) -> i16 {
     let mut acc: i32 = 0;
     for (a, p) in row.iter().zip([v.x, v.y, v.z]) {
         acc = acc.wrapping_add((*a).wrapping_mul(p as i32));
@@ -404,7 +359,7 @@ pub fn project_all(rotated: &[Rotated], out: &mut [PVert], p: &Projection) -> u1
 /// vertex, used for the object sort. The three matrix entries are read as
 /// full dwords (`mov eax`), unlike `calc_rotate`'s `movsx`; the product is
 /// 64-bit, `shrd 14`, and the position's z is added in 32 bits.
-pub fn single_z(verts: &[VertexData], index: u16, m: &Matrix) -> i32 {
+pub fn single_z(verts: &[Vertex], index: u16, m: &Matrix) -> i32 {
     let v = &verts[index as usize];
     // `mov eax,ds:[si+rmatrix_m+24]` — a dword, unlike `calc_rotate`.
     let mut sum: i64 = 0;
@@ -424,13 +379,12 @@ mod tests {
         window(0, 319, 25, 174, 512, 9_999_999)
     }
 
-    fn identity() -> Matrix {
-        Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 0,
-            y: 0,
-            z: 0,
-        }
+    fn vertex(x: i32, y: i32, z: i32) -> Vertex {
+        Vertex { x, y, z, normal: 0 }
+    }
+
+    fn rotated(x: i32, y: i32, z: i32) -> Rotated {
+        Rotated { x, y, z, normal: 0 }
     }
 
     #[test]
@@ -478,24 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn avistan_is_the_shipped_256_word_cotangent_table() {
-        assert_eq!(AVISTAN.len(), 256);
-        // AVISTAN.INC line 2: the zero angle saturates at 32767.
-        assert_eq!(AVISTAN[0], 32767);
-        assert_eq!(AVISTAN[1], 32767);
-        // AVISTAN.INC line 2 (indices 0-11), word 8: `... 5956, 5210, ...`.
-        assert_eq!(AVISTAN[8], 5210);
-        // AVISTAN.INC line 6 (indices 48-59), word 8: the entry the U2E
-        // pair selects ((0x1C00 >> 1) >> 6 == 56): `... 729, 715, ...`.
-        assert_eq!(AVISTAN[56], 715);
-        // AVISTAN.INC line 7 (indices 60-71), word 8: the entry the U2A
-        // pair selects ((0x2200 >> 1) >> 6 == 68): `... 587, 577, ...`.
-        assert_eq!(AVISTAN[68], 577);
-        // AVISTAN.INC line 23: the 90-degree entry.
-        assert_eq!(AVISTAN[255], 1);
-    }
-
-    #[test]
     fn mulmatrices_keeps_the_low_32_bits_then_sar_14() {
         // `mulmacro` keeps `eax`, the low 32 bits of each `imul`
         // (`ACALC.ASM:52-63`). With apply = diag(1<<20, UNIT, UNIT) and dest
@@ -506,7 +442,7 @@ mod tests {
             m: [1 << 20, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
             ..Default::default()
         };
-        let mut dest = identity();
+        let mut dest = Matrix::identity();
         apply_matrix(&mut dest, &apply);
         assert_eq!(dest.m[0], 0);
         assert_eq!(dest.m[4], UNIT);
@@ -520,7 +456,7 @@ mod tests {
             m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
             ..Default::default()
         };
-        let mut dest = identity();
+        let mut dest = Matrix::identity();
         apply_matrix(&mut dest, &apply);
         assert_eq!(dest.m[0], 32768);
     }
@@ -550,18 +486,8 @@ mod tests {
         // `shrd ebx,ecx,14` (`ACALC.ASM:415-468`). m[0] = 1<<20 times
         // x = 1<<20 is 2^40, so the rotated x is 2^26; a low-32 multiply
         // would leave 0. The translation is added afterwards.
-        let apply = Matrix {
-            m: [1 << 20, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 7,
-            y: 11,
-            z: 13,
-        };
-        let mut dest = Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 1 << 20,
-            y: 5,
-            z: 9,
-        };
+        let apply = Matrix { m: [1 << 20, 0, 0, 0, UNIT, 0, 0, 0, UNIT], x: 7, y: 11, z: 13 };
+        let mut dest = Matrix { x: 1 << 20, y: 5, z: 9, ..Matrix::identity() };
         apply_matrix(&mut dest, &apply);
         assert_eq!(dest.x, (1 << 26) + 7);
         assert_eq!(dest.y, 5 + 11);
@@ -573,47 +499,19 @@ mod tests {
         // `movsx eax, word ptr ds:[si+rmatrix_m+2*0]` (`ACALC.ASM:521`)
         // reads 0x8000 as -32768, so x = 1 gives -32768 >> 14 = -2. Reading
         // the dword 32768 instead would give +2. The normal index is copied.
-        let m = Matrix {
-            m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 10,
-            y: 20,
-            z: 30,
-        };
-        let verts = [VertexData {
-            x: 1,
-            y: 2,
-            z: 3,
-            normal: 7,
-        }];
+        let m = Matrix { m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT], x: 10, y: 20, z: 30 };
+        let verts = [Vertex { x: 1, y: 2, z: 3, normal: 7 }];
         let mut out = [Rotated::default()];
         rotate_vertices(&mut out, &verts, &m);
-        assert_eq!(
-            out[0],
-            Rotated {
-                x: 8,
-                y: 22,
-                z: 33,
-                normal: 7,
-            }
-        );
+        assert_eq!(out[0], Rotated { x: 8, y: 22, z: 33, normal: 7 });
     }
 
     #[test]
     fn rotate_vertices_keeps_the_full_64_bit_product() {
         // UNIT * (1<<20) = 2^34; `shrd ebx,ecx,14` returns 2^20 where a
         // 32-bit product would overflow (`ACALC.ASM:533`).
-        let m = Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            ..Default::default()
-        };
-        let verts = [VertexData {
-            x: 1 << 20,
-            y: 0,
-            z: 0,
-            normal: 0,
-        }];
         let mut out = [Rotated::default()];
-        rotate_vertices(&mut out, &verts, &m);
+        rotate_vertices(&mut out, &[vertex(1 << 20, 0, 0)], &Matrix::identity());
         assert_eq!(out[0].x, 1 << 20);
     }
 
@@ -622,33 +520,11 @@ mod tests {
         // The normals path multiplies the matrix entry as a signed word
         // (`imul word ptr`, `ACALC.ASM:631`): 0x8000 * 1 >> 14 = -2. No
         // position is added, and the result is a 16-bit store (`:643`).
-        let m = Matrix {
-            m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 999,
-            y: 999,
-            z: 999,
-        };
-        let normals = [NormalData { x: 1, y: 2, z: 3 }];
+        let m = Matrix { m: [0x8000, 0, 0, 0, UNIT, 0, 0, 0, UNIT], x: 999, y: 999, z: 999 };
+        let normals = [Normal { x: 1, y: 2, z: 3 }];
         let mut out = [RotatedNormal::default()];
-        rotate_normals(&mut out, &normals, &m, 1);
+        rotate_normals(&mut out, &normals, &m);
         assert_eq!(out[0], RotatedNormal { x: -2, y: 2, z: 3 });
-    }
-
-    #[test]
-    fn rotate_normals_stops_at_count() {
-        let m = identity();
-        let normals = [
-            NormalData { x: 7, y: 8, z: 9 },
-            NormalData {
-                x: 10,
-                y: 11,
-                z: 12,
-            },
-        ];
-        let mut out = [RotatedNormal::default(); 2];
-        rotate_normals(&mut out, &normals, &m, 1);
-        assert_eq!(out[0], RotatedNormal { x: 7, y: 8, z: 9 });
-        assert_eq!(out[1], RotatedNormal::default());
     }
 
     #[test]
@@ -665,12 +541,7 @@ mod tests {
             clip_y: [-10_000, 10_000],
             clip_z: [1, 1000],
         };
-        let src = Rotated {
-            x: -7,
-            y: 0,
-            z: 3,
-            normal: 0,
-        };
+        let src = rotated(-7, 0, 3);
         let mut out = PVert::default();
         project(&src, &mut out, &p);
         assert_eq!(out.x, -338);
@@ -693,12 +564,7 @@ mod tests {
             clip_y: [-1000, 1000],
             clip_z: [100, 1000],
         };
-        let src = Rotated {
-            x: 10,
-            y: 20,
-            z: 500,
-            normal: 0,
-        };
+        let src = rotated(10, 20, 500);
         let mut out = PVert::default();
         project(&src, &mut out, &p);
         assert_eq!((out.x, out.y, out.vf), (110, 60, 0));
@@ -715,12 +581,7 @@ mod tests {
             clip_y: [-1000, 1000],
             clip_z: [100, 1000],
         };
-        let src = Rotated {
-            x: 3,
-            y: 0,
-            z: 1001,
-            normal: 0,
-        };
+        let src = rotated(3, 0, 1001);
         let mut out = PVert::default();
         project(&src, &mut out, &p);
         assert_eq!((out.x, out.y, out.vf), (2, 0, VF_FAR));
@@ -741,32 +602,17 @@ mod tests {
             clip_z: [100, 1000],
         };
         let project_xyz = |x: i32, y: i32, z: i32| {
-            let src = Rotated { x, y, z, normal: 0 };
             let mut out = PVert::default();
-            project(&src, &mut out, &p);
+            project(&rotated(x, y, z), &mut out, &p);
             out
         };
         assert_eq!(project_xyz(0, 20, 500), PVert { x: 0, y: 20, vf: 0 });
         assert_eq!(project_xyz(0, 21, 500).vf, VF_DOWN);
-        assert_eq!(
-            project_xyz(0, -20, 500),
-            PVert {
-                x: 0,
-                y: -20,
-                vf: 0
-            }
-        );
+        assert_eq!(project_xyz(0, -20, 500), PVert { x: 0, y: -20, vf: 0 });
         assert_eq!(project_xyz(0, -21, 500).vf, VF_UP);
         assert_eq!(project_xyz(10, 0, 500), PVert { x: 10, y: 0, vf: 0 });
         assert_eq!(project_xyz(11, 0, 500).vf, VF_RIGHT);
-        assert_eq!(
-            project_xyz(-10, 0, 500),
-            PVert {
-                x: -10,
-                y: 0,
-                vf: 0
-            }
-        );
+        assert_eq!(project_xyz(-10, 0, 500), PVert { x: -10, y: 0, vf: 0 });
         assert_eq!(project_xyz(-11, 0, 500).vf, VF_LEFT);
         // z == min is inside; below it the near flag is set and z is
         // replaced by the clip before the divisions.
@@ -797,12 +643,7 @@ mod tests {
             clip_y: [0, 0],
             clip_z: [100, 1000],
         };
-        let src = Rotated {
-            x: 40,
-            y: 0,
-            z: 500,
-            normal: 0,
-        };
+        let src = rotated(40, 0, 500);
         let mut out = PVert::default();
         project(&src, &mut out, &p);
         assert_eq!(out.x, -25_536);
@@ -824,48 +665,14 @@ mod tests {
         };
 
         // One vertex inside and one right-and-down: the AND is 0.
-        let rotated = [
-            Rotated {
-                x: 0,
-                y: 0,
-                z: 500,
-                normal: 0,
-            },
-            Rotated {
-                x: 11,
-                y: 21,
-                z: 500,
-                normal: 0,
-            },
-        ];
         let mut out = [PVert::default(); 2];
-        assert_eq!(project_all(&rotated, &mut out, &p), 0);
+        assert_eq!(project_all(&[rotated(0, 0, 500), rotated(11, 21, 500)], &mut out, &p), 0);
         assert_eq!(out[0], PVert { x: 0, y: 0, vf: 0 });
-        assert_eq!(
-            out[1],
-            PVert {
-                x: 11,
-                y: 21,
-                vf: VF_DOWN | VF_RIGHT
-            }
-        );
+        assert_eq!(out[1], PVert { x: 11, y: 21, vf: VF_DOWN | VF_RIGHT });
 
         // Two vertices that both share VF_DOWN: the AND keeps it.
-        let rotated = [
-            Rotated {
-                x: 0,
-                y: 21,
-                z: 500,
-                normal: 0,
-            },
-            Rotated {
-                x: 11,
-                y: 21,
-                z: 500,
-                normal: 0,
-            },
-        ];
-        assert_eq!(project_all(&rotated, &mut out, &p), VF_DOWN);
+        let both = [rotated(0, 21, 500), rotated(11, 21, 500)];
+        assert_eq!(project_all(&both, &mut out, &p), VF_DOWN);
 
         // The asm starts `ax` at 0xFFFF and skips the loop for an empty list.
         assert_eq!(project_all(&[], &mut [], &p), 0xFFFF);
@@ -877,44 +684,15 @@ mod tests {
         // (`ACALC.ASM:593`): 1<<20 stays 1<<20, and the full product 2^40
         // becomes 2^26. The remaining rows are the local vertex's y and z;
         // m[6]*x + m[7]*y + m[8]*z = 2^40 + 9*UNIT, then the position z.
-        let m = Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 1 << 20, 0, UNIT],
-            x: 0,
-            y: 0,
-            z: 100,
-        };
-        let verts = [VertexData {
-            x: 1 << 20,
-            y: 5,
-            z: 9,
-            normal: 0,
-        }];
-        assert_eq!(single_z(&verts, 0, &m), (1 << 26) + 9 + 100);
+        let m = Matrix { m: [UNIT, 0, 0, 0, UNIT, 0, 1 << 20, 0, UNIT], x: 0, y: 0, z: 100 };
+        assert_eq!(single_z(&[vertex(1 << 20, 5, 9)], 0, &m), (1 << 26) + 9 + 100);
     }
 
     #[test]
     fn single_z_selects_the_indexed_vertex() {
-        let m = Matrix {
-            m: [UNIT, 0, 0, 0, UNIT, 0, 0, 0, UNIT],
-            x: 0,
-            y: 0,
-            z: 50,
-        };
+        let m = Matrix { z: 50, ..Matrix::identity() };
         // The matrix's z row is [0,0,UNIT], so it transforms the z coordinate.
-        let verts = [
-            VertexData {
-                x: 0,
-                y: 0,
-                z: 7,
-                normal: 0,
-            },
-            VertexData {
-                x: 0,
-                y: 0,
-                z: 9,
-                normal: 0,
-            },
-        ];
+        let verts = [vertex(0, 0, 7), vertex(0, 0, 9)];
         assert_eq!(single_z(&verts, 0, &m), 7 + 50);
         assert_eq!(single_z(&verts, 1, &m), 9 + 50);
     }

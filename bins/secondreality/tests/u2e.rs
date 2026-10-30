@@ -1,36 +1,11 @@
-//! U2E through the real binary: block 4's numbering, its intro anchor, and the
-//! four filed keyframes.
+//! U2E through the real binary: block 4's numbering from the derived 418
+//! anchor, its music against the `second4` trace, and the keyframes' session
+//! phase and silhouettes.
 //!
-//! The part's arithmetic is unit-tested beside it in `src/parts/u2e.rs`: the
-//! 100-wait intro, the fadeset's pixels, the measured fade-out at boot 490 and
-//! 500, the main palette and its letterbox hold, the gate, the first-draw skip,
-//! the two-tick cadence and the teardown's rotated DAC write. What is left over
-//! here is the wiring only a process can answer: the registry name, the asset
-//! paths as a run resolves them from the repository root, the shell's **418
-//! anchor** and its block-4 music clock, and the frames the shell composes.
-//!
-//! **The intro is byte-exact.** A `--block 4` run's 460, 467, 470, 480, 490,
-//! 500, 530, 590 and 660 compare at **0 differing** against the reference
-//! sessions' captures (`out/u2e-dense-a`, `out/u2e-start`,
-//! `out/b4b-u2e-sweep2`); the commands are in `docs/fidelity/u2e.md` §3. That
-//! pins the anchor: the fadeset's white band is boot 467 (two independent dense
-//! scans, `reference-indices.md` §18.7) and the source draws it after 49
-//! pre-visible waits, so the part's tick 0 is 418.
-//!
-//! **The keyframes diverge, and the divergence is measured rather than
-//! fitted.** The port's displayed stream state at boot `t` is `(t - 698)/2`;
-//! the filed keyframes are `(t - 702)/2` — the same slope to the frame, a
-//! four-tick intercept (two stream states). The port's music clock reaches
-//! order 19 at 698 where the filed `second4` trace reads it at 699, and the
-//! keyframe capture is another session: the offset is D17's session phase, the
-//! same class A29 registers for U2A's 7300. At the reference's **own** state
-//! (the port's `K - 4`) the silhouettes are exact — **0** pixels differ between
-//! "background" and "object" — and the remaining colour residual is **189,
-//! 7118, 231 and 1177** pixels on the Gouraud faces of `s01`, `Tree01g` and
-//! `Car02`, the release-vs-tree Gouraud difference A28 registers. The ignored
-//! unit test `search_reference_states` reproduces both the states and the
-//! attribution. No constant, anchor or timing was adjusted to chase a number
-//! (D24/D17).
+//! The `K - 4` residuals are rediff's `u2e` entry (A30). The filed keyframes
+//! show the stream state the port shows four ticks earlier (A31), so at `K` the
+//! port differs by a whole state; at `K - 4` the silhouettes are exact and only
+//! the Gouraud shading differs (`docs/fidelity/u2e.md` §5).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,11 +16,8 @@ fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A headless block-4 run dumping the frames asked for, and the manifest it
-/// wrote.
-///
-/// The run must exit 0: every requested index is produced, and a hole in a
-/// dump reads as a keyframe that matched.
+/// A headless block-4 run dumping the frames asked for. It must exit 0: a hole
+/// in a dump would read as a frame that matched.
 fn dump(name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
     let dir = std::env::temp_dir().join(format!("sr-u2e-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -98,11 +70,8 @@ fn reference_frame(index: u32) -> Vec<u8> {
     .unwrap()
 }
 
-/// How many RGB pixels of `rendered` differ from `expected`.
-///
-/// **The lengths are asserted first**: a truncated dump — the one failure a
-/// comparison test exists to catch — would otherwise compare a prefix and
-/// report zero differences as if it had compared the frame.
+/// How many RGB pixels of `rendered` differ from `expected`; a short read is
+/// refused rather than compared as a prefix.
 fn differing(rendered: &[u8], expected: &[u8]) -> usize {
     assert_eq!(
         rendered.len(),
@@ -154,18 +123,9 @@ fn trace_position(frame: u32) -> (u8, u8) {
     panic!("second4 holds no frame {frame}")
 }
 
-/// The keyframes and the port's aligned state with its supports: for each
-/// filed index `K`, the port's frame at `K - 4` (the reference's own stream
-/// state), its two-tick hold `K - 3`, and the keyframe's `K - 1`, `K`, `K + 1`.
-/// Every index here is read by an assertion below.
-const FRAMES: &str = "996,997,999,1000,1001,\
-                      1596,1597,1599,1600,1601,\
-                      2596,2597,2599,2600,2601,\
-                      3596,3597,3599,3600,3601";
-
 #[test]
 fn the_run_is_numbered_from_the_intro_anchor_and_plays_the_block_four_music() {
-    let (dir, manifest) = dump("numbering", FRAMES);
+    let (dir, manifest) = dump("numbering", "1000,1600,2600,3600");
     assert_eq!(manifest["part"], "u2e");
     assert_eq!(manifest["index_origin"], "boot");
     assert_eq!(manifest["anchor"], 418, "the fadeset at 467 minus 49 waits");
@@ -176,30 +136,11 @@ fn the_run_is_numbered_from_the_intro_anchor_and_plays_the_block_four_music() {
     assert_eq!(manifest["music"]["module"], "MUSIC0");
     assert_eq!(manifest["music"]["start_order"], 18);
     assert_eq!(manifest["music"]["start_frame"], 418);
-    // The block's plan is U2E first; every dumped frame is its screen.
     for index in [1000u32, 1600, 2600, 3600] {
         assert_eq!(entry(&manifest, index)["part"], "u2e");
     }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_block_four_clock_reaches_order_19_at_698() {
-    // The port's player is one frame ahead of `second4` at the gate: order 19
-    // is published at 698, where the trace reads 18:31 (699 is 19:0 in both).
-    // This is the fact docs/fidelity/u2e.md §5's session-phase intercept
-    // rests on.
-    let (dir, manifest) = dump("gate", "698,699");
-    assert_eq!(entry(&manifest, 698)["music_position"], "19:0");
-    assert_eq!(entry(&manifest, 699)["music_position"], "19:0");
-    assert_eq!(trace_position(698), (18, 31));
-    assert_eq!(trace_position(699), (19, 0));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_keyframe_music_is_the_second4_trace_at_three_of_four_indices() {
-    let (dir, manifest) = dump("music", FRAMES);
+    // The keyframes' music is the trace's, except at 1600, where the row's
+    // 8.76-frame boundary falls within a frame of the index (D17's class).
     for index in [1000u32, 2600, 3600] {
         let (order, row) = trace_position(index);
         assert_eq!(
@@ -208,67 +149,50 @@ fn the_keyframe_music_is_the_second4_trace_at_three_of_four_indices() {
             "the trace's own position at {index}"
         );
     }
-    // 1600 is one row boundary away from `second4`: the port publishes 20:39
-    // and the trace 20:38. The row's 8.76-frame cadence puts the boundary
-    // within a frame of 1600, so this is the same session-phase class as the
-    // keyframes themselves (D17), not a different clock.
     assert_eq!(entry(&manifest, 1600)["music_position"], "20:39");
     assert_eq!(trace_position(1600), (20, 38));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
+fn the_block_four_clock_reaches_order_19_at_698() {
+    // One frame ahead of `second4` at the gate: the trace reads 18:31 at 698.
+    let (dir, manifest) = dump("gate", "698,699");
+    assert_eq!(entry(&manifest, 698)["music_position"], "19:0");
+    assert_eq!(entry(&manifest, 699)["music_position"], "19:0");
+    assert_eq!(trace_position(698), (18, 31));
+    assert_eq!(trace_position(699), (19, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// For each filed index `K`: the port's `K - 4` (the reference's own stream
+/// state) and its hold `K - 3`, and the keyframe's `K - 1`, `K`, `K + 1`.
+const FRAMES: &str = "996,997,999,1000,1001,\
+                      1596,1597,1599,1600,1601,\
+                      2596,2597,2599,2600,2601,\
+                      3596,3597,3599,3600,3601";
+
+#[test]
 fn the_keyframes_record_the_measured_session_phase_and_gouraud_residual() {
     let (dir, manifest) = dump("keyframes", FRAMES);
-    // The port's displayed state at boot `t` is `(t - 698)/2`; the filed
-    // keyframes are `(t - 702)/2`. The exact-keyframe counts are the
-    // consequence — two stream states of D17 session phase — and the aligned
-    // counts are the release's Gouraud difference (A28) at the reference's own
-    // state.
-    let measured: &[(u32, usize, usize)] = &[
-        (1000, 11006, 189),
-        (1600, 11805, 7118),
-        (2600, 17278, 231),
-        (3600, 16234, 1177),
-    ];
-    for &(index, exact, aligned) in measured {
+    // The divergence at `K` itself: the previous stream state (A31).
+    let exact: &[(u32, usize)] = &[(1000, 11006), (1600, 11805), (2600, 17278), (3600, 16234)];
+    for &(index, exact) in exact {
         let reference = reference_frame(index);
-        let at_key = dumped_file(&dir, &manifest, index, "rgb");
-        let count = differing(&at_key, &reference);
-        println!("boot {index}: {count}/64000 px differ at K, {aligned} at K-4");
-        assert_eq!(count, exact, "the measured exact-keyframe divergence at {index}");
-        let at_state = dumped_file(&dir, &manifest, index - 4, "rgb");
+        let rgb = |index: u32| dumped_file(&dir, &manifest, index, "rgb");
+        assert_eq!(differing(&rgb(index), &reference), exact, "boot {index} at K");
+        // At the reference's own state the pose is exact: only colours inside
+        // the objects differ.
         assert_eq!(
-            differing(&at_state, &reference),
-            aligned,
-            "the measured residual at the reference's own state, boot {index}"
-        );
-        // The pose is exact: only colours inside the objects differ.
-        assert_eq!(
-            silhouette_differing(&at_state, &reference),
+            silhouette_differing(&rgb(index - 4), &reference),
             0,
             "boot {index}: the aligned silhouette is the reference's"
         );
-        // The aligned state is held for two ticks too, which is what `K - 3`
-        // is dumped for.
-        assert_eq!(
-            dumped_file(&dir, &manifest, index - 4, "rgb"),
-            dumped_file(&dir, &manifest, index - 3, "rgb"),
-            "boot {index}: the aligned state holds through K-3"
-        );
-        // The supports move: the port holds each state for two ticks, so K and
-        // K+1 are the same page and K-1 is the previous stream state. D19's
-        // neighbour capture is what makes that visible.
-        assert_eq!(
-            dumped_file(&dir, &manifest, index, "rgb"),
-            dumped_file(&dir, &manifest, index + 1, "rgb"),
-            "boot {index}: the two-retrace page holds through K+1"
-        );
-        assert_ne!(
-            dumped_file(&dir, &manifest, index - 1, "rgb"),
-            dumped_file(&dir, &manifest, index, "rgb"),
-            "boot {index}: K-1 is the previous stream state"
-        );
+        // Each state holds two ticks: K-4 through K-3 and K through K+1, while
+        // K-1 is the previous state (D19's neighbours make that visible).
+        assert_eq!(rgb(index - 4), rgb(index - 3), "boot {index}: K-4 holds through K-3");
+        assert_eq!(rgb(index), rgb(index + 1), "boot {index}: K holds through K+1");
+        assert_ne!(rgb(index - 1), rgb(index), "boot {index}: K-1 is the previous state");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
