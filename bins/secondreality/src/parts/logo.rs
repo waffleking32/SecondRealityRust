@@ -44,8 +44,7 @@ pub fn load_picture(part: &'static str, rel: &str) -> Result<(Vec<u8>, Palette),
 /// the stride `lineblit(vram+y*80U,rowbuf)` writes, so the original reads its
 /// picture row by row. The port draws at the surface's own 640-pixel rows,
 /// which the unset offset reads; the inherited `Some(320)` would read every
-/// second scanline from the picture's right margin (`reference-indices.md`
-/// §26.8).
+/// second scanline from the picture's right margin (`beglogo.md` §5).
 pub fn set_400_line_view(ctx: &mut PartCtx, border: u8) {
     ctx.view.y_line_offset = None;
     ctx.view.set_origin(0);

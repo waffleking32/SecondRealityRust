@@ -68,7 +68,6 @@
 //!   `jmp cap35` makes its result the first edge, skipping the first
 //!   iteration's clipping; the first edge is not a pseudo-point.
 
-
 use sr_assets::Image;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;

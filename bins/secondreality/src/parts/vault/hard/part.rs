@@ -43,7 +43,6 @@
 //! before the switch rebuilds it — which is the measured phase of reference
 //! 852's band (`a = 252 - pal1colp` at count 0, not count 1).
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 

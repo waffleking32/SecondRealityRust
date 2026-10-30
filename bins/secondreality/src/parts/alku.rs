@@ -141,7 +141,7 @@
 //! test in this file.
 //!
 //! `font` is `FONA.UH[783:]`, one byte earlier than the decoder's pixel area
-//! at 784 (`asset-inventory.md` §8, A9). The port builds
+//! at 784 (`asset-inventory.md` §E.8, A9). The port builds
 //! `sr_assets::font::Font` from the decoded 30-row strip — the routine reads
 //! 32 rows, and the two rows past the file are zero in the release's image
 //! (A9). A test shows the one-byte shift
@@ -1558,7 +1558,6 @@ mod tests {
     use super::*;
     use crate::parts::test_rig::{differing_pixels, reference, Rig, ScriptedMusic};
     use sr_engine::{dac_expand, Surface};
-
 
     /// A rig whose player answers `sync()` from `codes`, one a tick.
     fn rig(codes: Vec<i32>) -> Rig {

@@ -270,8 +270,8 @@ impl Part for Endlogo {
     /// no frame — `:61`'s blank is what separates them from `main()`'s start,
     /// and the port pays that blank as [`FIRST_WAIT_TICK`] — and because the
     /// port's view is a description of the display rather than a register
-    /// write, which is where BEGLOGO's CRTC block lives too (`src/parts/
-    /// beglogo.rs`, `docs/fidelity/beglogo.md` §4).
+    /// write, which is where BEGLOGO's CRTC block lives too
+    /// ([`set_400_line_view`]).
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // `:107-111` waits on the music player's position and has nothing else to go on:
         // a run with no player has no cue this part could ever be handed, and holding

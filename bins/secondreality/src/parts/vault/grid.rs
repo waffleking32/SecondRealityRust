@@ -17,7 +17,6 @@
 //! `docs/fidelity/grid.md` is the full note: the capture, the substitutions
 //! and the residuals.
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 

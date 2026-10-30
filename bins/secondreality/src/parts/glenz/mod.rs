@@ -68,7 +68,6 @@ pub mod poly;
 pub mod span;
 pub mod tables;
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
@@ -142,7 +141,7 @@ pub(crate) const POINTSB: [[i32; 3]; 14] = [
 /// The low word of two signed 16-bit words' product: the source's `int`
 /// arithmetic truncates every product at 16 bits (`imul`'s `DX:AX`, with only
 /// `AX` kept when the C result is an `int` — `disassembly` in
-/// `docs/fidelity/glenz.md` §"The physics").
+/// `docs/fidelity/glenz.md` §5).
 fn mul16(a: i16, b: i16) -> i16 {
     a.wrapping_mul(b)
 }
@@ -937,7 +936,6 @@ impl Glenz {
 mod tests {
     use super::*;
     use crate::parts::test_rig::{Rig, ScriptedMusic};
-
 
     /// The scripted player: a `musplus` schedule by tick and a `getmframe`
     /// that advances at a fixed rate from the tick `setmframe(0)` ran on.

@@ -88,7 +88,6 @@
 //!
 //! [`View::set_origin`]: sr_engine::view::View::set_origin
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 

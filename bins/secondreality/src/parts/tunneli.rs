@@ -45,7 +45,6 @@
 //! video memory as `x + y*320`, so `View::y_line_offset` is set to 320 and the
 //! surface's first 64 KB *is* the original's video memory, wraparound and all.
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 
 use crate::parts::read_asset;

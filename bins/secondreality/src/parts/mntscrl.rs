@@ -128,7 +128,6 @@
 //! the rebased memory leaves them, so an offset in the list's 64 KB range
 //! reads what the original's segment held ([`BACKGROUND_LEN`]).
 
-
 use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;

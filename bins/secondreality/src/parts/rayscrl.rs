@@ -123,7 +123,6 @@
 //! A RIX3 file's palette is six bits; the part's fade is a byte ramp over it,
 //! and the engine widens to eight only at upload.
 
-
 use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;

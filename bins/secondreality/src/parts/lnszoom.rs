@@ -115,7 +115,6 @@
 //!
 //! No copper callbacks: the source registers none.
 
-
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 

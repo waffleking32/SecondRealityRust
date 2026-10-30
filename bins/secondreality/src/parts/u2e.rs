@@ -551,7 +551,6 @@ mod tests {
     use crate::parts::test_rig::{differing_pixels, reference, rgb_of, Rig, ScriptedMusic};
     use sr_engine::dac_expand;
 
-
     fn constant(order: u8, row: u8) -> ScriptedMusic {
         ScriptedMusic::positions(vec![(order, row)])
     }
