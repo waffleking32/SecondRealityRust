@@ -467,7 +467,7 @@ impl Part for Mntscrl {
         Ok(())
     }
 
-    /// One tick of `READ2.PAS:132-224`. See the module docs' tick map.
+    /// One tick of `READ2.PAS:132-224`: the module doc's tick map.
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.tick += 1;
         match self.phase {
@@ -696,7 +696,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(positions, 15_592, "POS1-3's positions, the survey's count");
+        assert_eq!(positions, 15_592, "POS1-3's positions");
         assert_eq!(max_offset, 63_870, "the largest destination offset");
         assert!((max_offset as usize) < VIDEO_BYTES);
     }
