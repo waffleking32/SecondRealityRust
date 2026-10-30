@@ -1,21 +1,15 @@
-//! The music engine for the Second Reality port.
-//!
-//! Deliberately dependency-free, like `sr-engine` and for the same reason: the port's
-//! player is a deterministic function of the engine's ticks, and a crate added for
-//! convenience is how that stops being true (spec §4.2, the phase plan's Global
-//! Constraints).
-//!
-//! The pieces, and which task of Phase 3 owns each:
+//! The music engine for the Second Reality port: STMIK's S3M player and mixer, read out of
+//! `MAIN/STMIK.300` (`docs/fidelity/music.md`). Dependency-free, like `sr-engine` (design §4.2).
 //!
 //! | module | what it holds |
 //! |---|---|
 //! | [`module`] | the S3M container: patterns, cells, sample headers, the order list, D5's descrambling |
-//! | [`player`] | the tracker: the tick clock, the position, the order advance and `A`/`B`/`C` (Task 3) |
-//! | [`effects`] | one channel's state and the channel effects that move it: `D`, `E`, `F`, `G`, `H`, `J`, `K`, `O`, `Q`, `SDx` (Task 4) |
-//! | [`mix`] | the mixing engine and its output, and the drain the device pulls from (Task 5) |
+//! | [`player`] | the tracker: the tick clock, the position, the order advance and `A`/`B`/`C` |
+//! | [`effects`] | one channel's state and its effects: `D`, `E`, `F`, `G`, `H`, `J`, `K`, `O`, `Q`, `SDx` |
+//! | [`mix`] | the mixing engine, its output curve, and the drain the device pulls from |
 //!
-//! Nothing here reads the clock, sleeps, or looks at how fast the machine is; the player
-//! advances because the engine ticked — [`Player::poll`] is one video frame and nothing else.
+//! Nothing here reads the clock: the player advances because the engine ticked, one
+//! [`Player::poll`] a video frame.
 
 pub mod effects;
 pub mod mix;
@@ -32,20 +26,10 @@ pub use player::{MixRate, Player, PlayerOptions, Position, Quality, ENHANCED_RAT
 
 #[cfg(test)]
 mod tests {
-    /// The audio crate keeps zero runtime dependencies, the same rule `sr-engine` is held
-    /// to (`crates/sr-engine/src/lib.rs`): an S3M player needs no crate, and a dependency
-    /// added for convenience is how a player stops being reproducible.
-    ///
-    /// The manifest is read as text, not through a TOML crate, because the guard must not
-    /// itself be the first dependency it forbids.
-    ///
-    /// **Any table whose name mentions `dependencies` is an offender** except
-    /// `[dev-dependencies]` and `[build-dependencies]`. The earlier shape — `[dependencies]`
-    /// plus `[dependencies.x]` — let two spellings through: `[target.'cfg(unix)'.dependencies]`
-    /// (a target-specific dependency, which is still a runtime dependency) and
-    /// `[ dependencies ]` (whitespace inside the brackets, which TOML allows and the old
-    /// equality test missed). Both are now caught, and both were seen to fail — see the
-    /// review notes in `.superpowers/sdd/03-music/task-2-report.md`.
+    /// The audio crate keeps zero runtime dependencies (design §4.2), as `sr-engine` does. Any
+    /// table whose name mentions `dependencies` is an offender except `[dev-…]` and
+    /// `[build-dependencies]`; the manifest is read as text so the guard is not itself a
+    /// dependency.
     #[test]
     fn the_player_has_no_runtime_dependencies() {
         const MANIFEST: &str = include_str!("../Cargo.toml");
@@ -58,8 +42,7 @@ mod tests {
             let line_number = index + 1;
             let trimmed = line.trim();
             if trimmed.starts_with('[') {
-                // A table header. TOML allows whitespace inside the brackets, so the name is
-                // what is between them, trimmed.
+                // A table header; TOML allows whitespace inside the brackets.
                 let name = trimmed.trim_start_matches('[').trim_end_matches(']').trim();
                 in_dependencies = name == "dependencies";
                 found_the_section |= in_dependencies;
@@ -80,13 +63,11 @@ mod tests {
         assert!(
             found_the_section,
             "`[dependencies]` is missing from the audio crate's manifest. This test reads that \
-             section, so removing it removes the guard: put it back, empty (the phase plan's \
-             Global Constraints)"
+             section, so removing it removes the guard: put it back, empty (design §4.2)"
         );
         assert!(
             offenders.is_empty(),
-            "sr-audio must keep zero runtime dependencies (the phase plan's Global \
-             Constraints); the manifest has {}",
+            "sr-audio must keep zero runtime dependencies (design §4.2); the manifest has {}",
             offenders.join(", ")
         );
     }

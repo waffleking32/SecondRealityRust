@@ -32,16 +32,12 @@ fn shipped(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-/// A module with the shell's patch applied where the shell applies it: MUSIC0 plays at
-/// tempo 120 (`MAIN/STARTMUS.C:252-265`), MUSIC1 at its file's own 130 — as `tests/player.rs`
-/// and `tests/effects.rs` load them.
+/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
 fn module(name: &'static str) -> Module {
-    let mut module = Module::load(&shipped(&format!("{name}.S3M")))
-        .unwrap_or_else(|e| panic!("{name} does not load: {e}"));
-    if name == "MUSIC0" {
-        module.apply_tempo_patch(0x78);
-    }
-    module
+    sr_audio::Song::named(name)
+        .unwrap_or_else(|| panic!("{name} is not a song"))
+        .load(Path::new("../.."))
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 // -------------------------------------------------------------------------------------------

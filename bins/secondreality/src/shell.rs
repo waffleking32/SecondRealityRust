@@ -199,8 +199,9 @@ pub enum ModuleId {
 }
 
 impl ModuleId {
-    /// The shared song row: the module's name, its file and the tempo the shell patches.
-    fn song(self) -> &'static sr_audio::Song {
+    /// The shared song row: the module's name, its file and the tempo the shell patches
+    /// (`MAIN/STARTMUS.C:252-265`, `music-clock.md` §3).
+    pub fn song(self) -> &'static sr_audio::Song {
         match self {
             ModuleId::Music0 => &sr_audio::SONGS[0],
             ModuleId::Music1 => &sr_audio::SONGS[1],
@@ -213,12 +214,6 @@ impl ModuleId {
         self.song().name
     }
 
-    /// The module's own file, at the path a run reads its media from (the working
-    /// directory, which for this repository's commands is its root).
-    pub fn path(self) -> &'static str {
-        self.song().file
-    }
-
     /// The number `restartmus`'s `ax` carries for this module (`MAIN/U2.ASM:767`,
     /// `:772`) — the value the restart table's `mov ax,N` carries, which is what the test
     /// beside that table checks it against.
@@ -228,18 +223,6 @@ impl ModuleId {
             ModuleId::Music0 => 0,
             ModuleId::Music1 => 1,
         }
-    }
-
-    /// The initial tempo byte the shell patches into this module's header, or `None`
-    /// where it patches nothing.
-    ///
-    /// `MAIN/STARTMUS.C:252-265`'s `switch(a)`: case 0 loads MUSIC0 and then sets
-    /// `module[50] = 0x78` — the S3M header's `initialTempo` byte at offset 50, 125 →
-    /// 120 — and case 1 loads MUSIC1 and patches nothing, so MUSIC1 plays at its file's
-    /// own 130. `measure`'s `music-clock.md` §3 has the two headers. The value is the
-    /// shared [`sr_audio::Song`] row's, so `xtask music analyse` reads the same copy.
-    pub fn tempo_patch(self) -> Option<u8> {
-        self.song().tempo_patch
     }
 }
 

@@ -23,20 +23,12 @@ use sr_audio::{
     Quality, CHANNELS,
 };
 
-const ASSETS: &str = "../../assets/MAIN";
-
-/// A module with the shell's patch applied where the shell applies it: MUSIC0 plays at tempo
-/// 120 (`MAIN/STARTMUS.C:252-265`), MUSIC1 at its file's own 130 — as `tests/mix.rs`,
-/// `tests/player.rs` and `tests/effects.rs` load them.
+/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
 fn module(name: &'static str) -> Module {
-    let path = Path::new(ASSETS).join(format!("{name}.S3M"));
-    let bytes =
-        std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-    let mut module = Module::load(&bytes).unwrap_or_else(|e| panic!("{name} does not load: {e}"));
-    if name == "MUSIC0" {
-        module.apply_tempo_patch(0x78);
-    }
-    module
+    sr_audio::Song::named(name)
+        .unwrap_or_else(|| panic!("{name} is not a song"))
+        .load(Path::new("../.."))
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn options(quality: Quality) -> PlayerOptions {

@@ -418,17 +418,12 @@ fn parse_coverage(manifest: &str, name: &str) -> ([i64; 2], Vec<(i64, i64)>) {
     ([window[0], window[1]], missing)
 }
 
-/// Load a module, with the shell's tempo patch applied where the shell applies it:
-/// `MAIN/STARTMUS.C:252-265` writes the initial-tempo byte to `0x78` = 120 in `case 0` only,
-/// which is MUSIC0; MUSIC1 plays at its file's own 130 (`music-clock.md` §3).
+/// Load a module as the shell does, with MUSIC0's tempo patch (`sr_audio::Song::load`).
 fn load(name: &str) -> Module {
-    let path = workspace().join("assets/MAIN").join(format!("{name}.S3M"));
-    let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-    let mut module = Module::load(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
-    if name == "MUSIC0" {
-        module.apply_tempo_patch(0x78);
-    }
-    module
+    sr_audio::Song::named(name)
+        .unwrap_or_else(|| panic!("{name} is not a song"))
+        .load(&workspace())
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// The manifest's `arguments`, read as text for the same reason `parse_coverage` is: a trace's

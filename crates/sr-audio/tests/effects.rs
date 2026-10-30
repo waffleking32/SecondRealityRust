@@ -20,18 +20,12 @@ use std::path::Path;
 
 use sr_audio::{descramble, Cell, Module, Player, PlayerOptions, ROWS};
 
-const ASSETS: &str = "../../assets/MAIN";
-
-/// The module with the shell's patch applied where the shell applies it: MUSIC0 plays at
-/// tempo 120 (`MAIN/STARTMUS.C:252-265`), MUSIC1 at its file's own 130.
+/// The module as the shell loads it: `Song::load`, MUSIC0 patched to tempo 120.
 fn module(name: &str) -> Module {
-    let path = Path::new(ASSETS).join(format!("{name}.S3M"));
-    let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-    let mut module = Module::load(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
-    if name == "MUSIC0" {
-        module.apply_tempo_patch(0x78);
-    }
-    module
+    sr_audio::Song::named(name)
+        .unwrap_or_else(|| panic!("{name} is not a song"))
+        .load(Path::new("../.."))
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 // -------------------------------------------------------------------------------------------

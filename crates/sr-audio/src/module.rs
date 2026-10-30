@@ -1,34 +1,18 @@
-//! The S3M container, as Second Reality ships it: `assets/MAIN/MUSIC0.S3M` and
-//! `MUSIC1.S3M`, read in their original scrambled form.
+//! The S3M container, as Second Reality ships it: `assets/MAIN/MUSIC0.S3M` and `MUSIC1.S3M`,
+//! read in their original scrambled form.
 //!
-//! The loader is a translation of the original's own — `MAIN/STARTEMS.C`'s `loads3mems`,
-//! which is the code that read these very files in 1993 — so the structure below is that
-//! function's, not the generic S3M documentation's. Three of its readings are worth
-//! stating before the code, because each is a place where a plausible-looking decoder
-//! still "decodes" plausible-looking garbage:
+//! The loader translates the original's own, `MAIN/STARTEMS.C`'s `loads3mems`, not the generic
+//! S3M documentation (`docs/fidelity/music.md` §1–§6 has the measurements):
 //!
-//! 1. **A pattern block is `ln` bytes from `ptr * 16`, and its packed data is the `ln - 2`
-//!    bytes from `ptr * 16 + 2`.** `ln` includes its own two-byte length word
-//!    (`STARTEMS.C:348-351`: `read(h,&u,2)`, then `read(h,p+2,u-2)`, and the player's copy
-//!    keeps the length at `p` and the data after it). Read the other way round — `ln` as
-//!    the data length — and 8 of MUSIC0's 76 consecutive pattern pairs and 11 of MUSIC1's
-//!    stop tiling contiguously, which is how the mistake announces itself
-//!    (`crates/sr-audio/tests/module.rs` measures both readings).
-//! 2. **The packed cell's flag byte carries its channel in the low five bits, and a row
-//!    ends on a byte that is zero.** Testing for "low five bits are zero" instead would
-//!    read 1,990 of MUSIC0's 14,980 cells and 2,835 of MUSIC1's 17,746 — every cell on
-//!    channel 0 — as the end of their row, and take the bytes after them as the next row's
-//!    cells.
-//! 3. **The pattern data is XOR-scrambled** (D5). Stock S3M decoders fail on these files.
-//!    [`descramble`] undoes it with the recovered keystream, starting at index 0 of each
-//!    pattern's own data.
+//! 1. A pattern block is `ln` bytes from `ptr * 16`, and `ln` includes its own two-byte length
+//!    word (`STARTEMS.C:348-351`), so the packed data is the `ln - 2` bytes after it.
+//! 2. A packed cell's flag byte carries its channel in the low five bits, and a row ends on a
+//!    zero byte (not on "low five bits zero", which is every channel-0 cell).
+//! 3. The pattern data is XOR-scrambled (D5): [`descramble`] undoes it, from index 0 of each
+//!    pattern's data.
 //!
-//! Nothing here interprets what a cell *means*: the order list keeps 254 and 255 as the
-//! bytes they are, `Cell::instrument` keeps the file's own 1-based number, and a cell's
-//! `volume = 0` is kept as a volume, not folded into "no cell" (189 of MUSIC1's cells
-//! carry nothing but a zero volume — see [`Cell::present`]). That is deliberate: what the
-//! player does with them is decided by the reference's own behaviour (Phase 3's Task 1
-//! trace) and implemented in `player.rs`, not guessed at by the container.
+//! Nothing here interprets a cell: the order list keeps 254 and 255, the instrument byte stays
+//! 1-based, and a volume of 0 is a volume ([`Cell::present`]). The player decides what they mean.
 
 /// The S3M channel count: the file always has a 32-byte channel table and a packed cell
 /// may name any of 32 channels (`STARTEMS.C:67`, `:505-511`'s `zchn[32]`).
@@ -51,29 +35,23 @@ const SIGNATURE_OFFSET: usize = 44;
 /// The `SCRM` field's value in these modules: the S3M magic.
 const SIGNATURE: &[u8; 4] = b"SCRM";
 
-/// The sample headers' own signature, at `ds_smp._magic` (`STARTEMS.C:47`).
-///
-/// `checkins` *writes* it at load time (`:134`) rather than checking it, so the loader does
-/// not require it — but both shipped modules already carry it, which is a measured fact
-/// about the files and is asserted as one in the tests.
+/// The sample headers' own signature, at `ds_smp._magic` (`STARTEMS.C:47`). `checkins` writes
+/// it (`:134`) rather than checking it, so the loader does not require it; both modules carry it.
 pub const SAMPLE_MAGIC: &[u8; 4] = b"SCRS";
 
 // ---------------------------------------------------------------------------------------
 // The keystream
 // ---------------------------------------------------------------------------------------
 
-/// XOR D5's keystream over one pattern's packed data.
-///
-/// `pattern` is the data *after* the block's two-byte length word — the bytes at
-/// `ptr * 16 + 2 .. ptr * 16 + ln` (`STARTEMS.C:348-351`) — because the keystream restarts
-/// at index 0 for every pattern (D5; spec §7.1).
+/// XOR D5's keystream over one pattern's packed data: the bytes after the block's length word
+/// (`STARTEMS.C:348-351`), from index 0 for every pattern (D5; design §7.1).
 pub fn descramble(pattern: &mut [u8]) {
     for (i, byte) in pattern.iter_mut().enumerate() {
         *byte ^= key(i);
     }
 }
 
-/// The keystream byte for the packed data's `i`th byte (D5, spec §7.1):
+/// The keystream byte for the packed data's `i`th byte (D5, design §7.1):
 ///
 /// ```text
 /// n      = (i >> 1) + 1
@@ -89,49 +67,31 @@ fn key(i: usize) -> u8 {
 // ---------------------------------------------------------------------------------------
 
 /// One cell of a pattern: one channel's note, instrument, volume and effect for one row.
-///
-/// The file stores these in a packed form whose flag byte says which field groups follow
-/// (see [`Cell::present`]); a cell that carries none of them cannot exist in the packed
-/// stream, so [`Cell::EMPTY`] is the loader's own representation of an *absent* cell — a
-/// channel slot the file's row never named.
+/// [`Cell::EMPTY`] is a channel slot the row never named.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Cell {
-    /// The note byte, `(octave << 4) | semitone` (spec §7.1). ST3's two special values are
-    /// 0xFE (note off) and 0xFF (no note), and both occur in these modules; 0 is the lowest
-    /// real note, not "none". The player decides what they mean.
+    /// The note byte, `(octave << 4) | semitone` (design §7.1): 0xFE is note off, 0xFF no note,
+    /// and 0 the lowest real note.
     pub note: u8,
-    /// The instrument, **1-based as the file stores it** (0 = "no instrument change").
-    ///
-    /// Measured: MUSIC1 carries instrument byte 54 while `insNum` is 54 (and byte 0 on its
-    /// 35 note-off cells). A 0-based reading would index a 55th instrument the file does
-    /// not have.
+    /// The instrument, 1-based as the file stores it (0 = no change; MUSIC1 names its 54th of
+    /// 54, `music.md` §6).
     pub instrument: u8,
     /// The volume column, 0..64. Zero is a real value, not "absent" — see [`Cell::present`].
     pub volume: u8,
-    /// The effect, in ST3's numeric alphabet (1..=26 = `A`..`Z`, 0x30..=0x39 = digits, 255 =
-    /// none, spec §7.1). 0 is the second spelling of "no command": D5 records that MUSIC1 has
-    /// one cell whose command byte is 0, and that 0 means *no command* — and **this crate's
-    /// tests** are what locate it (MUSIC1's pattern 13, row 19, channel 5, flag byte 0x85,
-    /// info 0x40; D5 records the cell, not where it is).
+    /// The effect, in ST3's alphabet (1..=26 = `A`..`Z`, 255 = none, design §7.1). 0 is a second
+    /// "no command": MUSIC1 has one such cell (D5; `music.md` §6 locates it).
     pub command: u8,
     /// The effect's parameter byte.
     pub info: u8,
-    /// Which field groups the packed flag byte carried: a mask of [`Cell::NOTE`],
-    /// [`Cell::VOLUME`] and [`Cell::COMMAND`].
-    ///
-    /// This is not in the plan's field list and it is here because the distinction is
-    /// measurable in these modules: a cell whose only content is a volume of zero is
-    /// indistinguishable from an absent cell by its five fields alone, and both modules
-    /// contain such cells (3 in MUSIC0, 189 in MUSIC1 — the test prints them). A player
-    /// that treated them as absent would leave the channel's volume where it was instead of
-    /// taking it to zero.
+    /// Which field groups the flag byte carried ([`Cell::NOTE`], [`Cell::VOLUME`],
+    /// [`Cell::COMMAND`]). A cell whose only content is a volume of zero looks absent by its
+    /// five fields, and both modules carry such cells; they take the volume to zero.
     pub present: u8,
 }
 
 impl Cell {
-    /// The flag byte's bit 5: a note **and** an instrument follow, two bytes
-    /// (`STARTEMS.C:505-511`'s unpacker; the two are one field group, which is the trap that
-    /// desynchronises a decoder that reads bit 5 as "note" alone).
+    /// The flag byte's bit 5: a note and an instrument follow, one two-byte group
+    /// (`STARTEMS.C:505-511`).
     pub const NOTE: u8 = 0x20;
 
     /// The flag byte's bit 6: a volume byte follows.
@@ -177,9 +137,8 @@ pub struct Pattern {
     /// 64 rows (`[ROWS]`), each holding one cell per channel, indexed by the channel number
     /// the file's own flag byte carried.
     pub rows: Vec<[Cell; CHANNELS]>,
-    /// How many channel slots this pattern addresses: one past the highest channel its cells
-    /// name, or 0 for a pattern with no cells at all. Derived from the cells, not declared
-    /// by the file (the S3M container has no per-pattern channel count).
+    /// One past the highest channel the pattern's cells name, or 0 for none (derived; the file
+    /// has no per-pattern count).
     pub channel_count: u8,
 }
 
@@ -187,13 +146,8 @@ pub struct Pattern {
 // Instruments
 // ---------------------------------------------------------------------------------------
 
-/// One sample header, `struct ds_smp` (`STARTEMS.C:28-48`), field for field.
-///
-/// The loader stores the header as the file wrote it. `STARTEMS.C:129-177`'s `checkins`
-/// clamps three of these fields (volume to 64, `c2spd` to 65535, length to 64000) and pads
-/// every sample with 512 bytes after its end for the mixer's benefit; none of that is done
-/// here, because it is what the *player* did to its copy in memory and Task 5 reproduces it
-/// against the same numbers.
+/// One sample header, `struct ds_smp` (`STARTEMS.C:28-48`), as the file wrote it. `checkins`'s
+/// clamps and padding (`STARTEMS.C:129-177`) are the player's, applied where it reads them.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Instrument {
     /// The type byte: 0 = empty, 1 = PCM, 2..=7 = adlib (`STARTEMS.C:132`, `:175-176`).
@@ -231,13 +185,12 @@ impl Instrument {
     /// The type byte of a PCM instrument.
     pub const PCM: u8 = 1;
 
-    /// True for the 22-of-44 and 41-of-54 instruments that carry a PCM sample.
+    /// True for an instrument that carries a PCM sample.
     pub fn is_pcm(&self) -> bool {
         self.sample_type == Self::PCM
     }
 
-    /// True for the type-0 instruments. These are a normal case (`checkins` treats a
-    /// length-0 sample the same way, `STARTEMS.C:135-139`), not a malformed file.
+    /// True for a type-0 instrument, a normal case (`STARTEMS.C:135-139`).
     pub fn is_empty(&self) -> bool {
         self.sample_type == Self::EMPTY
     }
@@ -275,15 +228,10 @@ pub struct Module {
 }
 
 impl Module {
-    /// Decode a module from the bytes of an S3M file, exactly as
-    /// `upstream/SecondReality/MAIN/STARTEMS.C`'s `loads3mems` reads it.
-    ///
-    /// The bytes are the *shipped* file: the pattern data is scrambled and is descrambled
-    /// here (D5), and no copy of the modules is converted on disk.
+    /// Decode a module from the bytes of a shipped (scrambled) S3M file, as `STARTEMS.C`'s
+    /// `loads3mems` reads it.
     pub fn load(bytes: &[u8]) -> Result<Module, ModuleError> {
-        // The header, and the signature that says these bytes are an S3M at all. The magic
-        // is at offset 44 rather than 0 (`STARTEMS.C:62`'s `_magic_signature`); the bytes
-        // before it are the module's title.
+        // The signature is at offset 44, after the title (`STARTEMS.C:62`).
         let header = bytes.get(..HEADER_SIZE).ok_or(ModuleError::Truncated {
             what: "the file header",
             at: bytes.len(),
@@ -317,27 +265,20 @@ impl Module {
 
         let orders = bytes[orders_at..instruments_at].to_vec();
 
-        // The file's 32-byte channel table, the last field of `ds_fileheader`
-        // (`STARTEMS.C:67`, at offset 64: 28 title, 1 marker, 1 type, 2 unused, six words to
-        // offset 44, the signature, four bytes, then the 13 reserved ones).
+        // The 32-byte channel table at offset 64, the header's last field (`STARTEMS.C:67`).
         let mut channel_pan = [0u8; CHANNELS];
         channel_pan.copy_from_slice(&header[64..64 + CHANNELS]);
 
-        // The header's own values (`STARTEMS.C:56-66`'s `ds_fileheader` order): global
-        // volume, initial speed, initial tempo, then the byte the S3M format calls the
-        // master volume — which is where the stereo bit lives for `cwtv` 0x1300 files.
+        // `STARTEMS.C:56-66`: global volume, initial speed, initial tempo, master volume.
         let global_volume = header[48];
         let initial_speed = header[49];
         let initial_tempo = header[50];
         let master_volume = header[51];
 
-        // `ds_fileheader.flags` (`STARTEMS.C:59`), the file's offset 38 — the word the
-        // player watches as `_np_masterflags` (`+0x53ef`…`+0x5401`) and whose bit 0 becomes
-        // its amiga-compatibility byte (`+0x5424`). Both modules carry 8.
+        // `ds_fileheader.flags` (`STARTEMS.C:59`), offset 38.
         let flags = u16_at(bytes, 38);
 
-        // The instruments' sample bytes are sliced here, by paragraph pointer; the loader
-        // does not pad or loop-extend them (`checkins`, `STARTEMS.C:129-177`).
+        // The sample bytes are sliced by paragraph pointer, unpadded.
         let mut instruments = Vec::with_capacity(usize::from(instrument_count));
         let mut samples = Vec::with_capacity(usize::from(instrument_count));
         for index in 0..usize::from(instrument_count) {
@@ -366,15 +307,8 @@ impl Module {
                 name: block[0x30..0x4C].try_into().expect("twenty-eight bytes"),
             };
 
-            // The port's condition here is `is_pcm() && length != 0`; the original's is
-            // `type == 1 && memseg` (`STARTEMS.C:367`, the guard on its sample-loading loop).
-            // The two differ only for a type-1 header with `memseg == 0` and a non-zero
-            // length, and neither module has one — the test counts every PCM instrument's
-            // `memseg` and asserts none is zero — so nothing here is built on the
-            // difference. This is the condition the port wants: the bytes a sample has are
-            // the file's `length` of them at the header's paragraph pointer, and a header
-            // whose length is zero has none (`checkins`'s no-sample case, `:135-139`),
-            // whatever its pointer says.
+            // The original's guard is `type == 1 && memseg` (`STARTEMS.C:367`); no PCM header
+            // in either module has `memseg` 0, and a length of 0 is no sample (`:135-139`).
             let sample = if instrument.is_pcm() && instrument.length != 0 {
                 let at = instrument.sample_offset();
                 let end = at + instrument.length as usize;
@@ -394,9 +328,7 @@ impl Module {
             samples.push(sample);
         }
 
-        // The patterns, in pointer-table order. A pointer of zero is not an error and not a
-        // block: the original skips it and leaves an empty pattern for the player
-        // (`STARTEMS.C:346`, `if(!b) continue;`).
+        // A pointer of zero is an empty pattern (`STARTEMS.C:346`, `if(!b) continue;`).
         let mut patterns = Vec::with_capacity(usize::from(pattern_count));
         for index in 0..usize::from(pattern_count) {
             let pointer = usize::from(u16_at(bytes, patterns_at + 2 * index));
@@ -407,27 +339,17 @@ impl Module {
                 }
             } else {
                 let at = pointer * 16;
-                // `ln` includes its own two bytes (`STARTEMS.C:348-351`), so the block's
-                // data is `ln - 2` bytes from `at + 2`.
-                let Some(length_word) = bytes.get(at..at + 2) else {
-                    return Err(ModuleError::Pattern {
+                // `ln` includes its own two bytes (`STARTEMS.C:348-351`).
+                let length = bytes
+                    .get(at..at + 2)
+                    .map(|word| usize::from(u16::from_le_bytes([word[0], word[1]])))
+                    .filter(|&length| length >= 2 && at + length <= bytes.len())
+                    .ok_or(ModuleError::Pattern {
                         index,
                         row: 0,
                         fault: PatternFault::BlockRuns { at },
-                    });
-                };
-                let length = usize::from(u16::from_le_bytes(
-                    length_word.try_into().expect("two bytes"),
-                ));
-                let data_end = at + length;
-                if length < 2 || data_end > bytes.len() {
-                    return Err(ModuleError::Pattern {
-                        index,
-                        row: 0,
-                        fault: PatternFault::BlockRuns { at },
-                    });
-                }
-                let mut data = bytes[at + 2..data_end].to_vec();
+                    })?;
+                let mut data = bytes[at + 2..at + length].to_vec();
                 descramble(&mut data);
                 decode_pattern(index, &data)?
             });
@@ -447,12 +369,7 @@ impl Module {
         })
     }
 
-    /// The order list, **as the file wrote it**: 254 and 255 are kept, not normalised and
-    /// not filtered. What the player does with them is the player's business, decided by the
-    /// reference's own order counter (`docs/fidelity/music-clock.md` §10) and implemented in
-    /// `player.rs` — not by this loader and not by a reading of ST3 semantics. The shell is
-    /// what hands the list over: `_zplaysong(order)` (`MAIN/U2.ASM:786` for the initial
-    /// start, and `restartmus`'s call at `:393-394`).
+    /// The order list as the file wrote it, 254 and 255 included (`music-clock.md` §10).
     pub fn orders(&self) -> &[u8] {
         &self.orders
     }
@@ -472,27 +389,23 @@ impl Module {
         self.instruments.len()
     }
 
-    /// The header's initial speed byte (`STARTEMS.C:64`, offset 49). The player's *speed*
-    /// starts here; a pattern's `A` command changes it.
+    /// The header's initial speed byte (`STARTEMS.C:64`, offset 49).
     pub fn initial_speed(&self) -> u8 {
         self.initial_speed
     }
 
-    /// The header's initial tempo byte (`STARTEMS.C:65`, offset 50), **before** the shell's
-    /// patch — see [`Module::apply_tempo_patch`].
+    /// The header's initial tempo byte (`STARTEMS.C:65`, offset 50), or the shell's patch once
+    /// [`Module::apply_tempo_patch`] has run.
     pub fn initial_tempo(&self) -> u8 {
         self.initial_tempo
     }
 
-    /// The header's global volume byte (`STARTEMS.C:63`, offset 48). MUSIC0 and MUSIC1 both
-    /// carry 64.
+    /// The header's global volume byte (`STARTEMS.C:63`, offset 48).
     pub fn global_volume(&self) -> u8 {
         self.global_volume
     }
 
-    /// The byte after the initial tempo (offset 51). The 1993 S3M format calls it the master
-    /// volume; for `cwtv` >= 0x1300 its bit 7 is the stereo flag (spec §7.2, `MENU.C`'s
-    /// output-mode menu). Both modules carry 176 = `0xB0`.
+    /// The master volume byte (offset 51); bit 7 is the stereo flag (design §7.2).
     pub fn master_volume(&self) -> u8 {
         self.master_volume
     }
@@ -502,21 +415,14 @@ impl Module {
         self.master_volume & 0x80 != 0
     }
 
-    /// The header's `flags` word (`STARTEMS.C:59`'s `unsigned flags`, the file's offset 38).
-    ///
-    /// The player reads it as `_np_masterflags` — the word the STMIK documentation's flag
-    /// list belongs to (`MAIN/STMIK.H:104-107`: bit 3 "vol 0 optimizations", bit 4 "full
-    /// amiga compatibility") — through the header watch at `+0x53ef`/`+0x5401`, and takes
-    /// its **bit 0** as `[0x915]`, the byte that picks the vibrato's level shift
-    /// (`+0x5424`, `+0x5448`…`+0x5450`). Both modules carry **8**, so the shift is 5 and the
-    /// "volume 0" optimisation is on.
+    /// The header's `flags` word (`STARTEMS.C:59`, offset 38): the player's `_np_masterflags`
+    /// (`MAIN/STMIK.H:104-107`; bit 3 "vol 0 optimizations"), whose bit 0 picks the vibrato's
+    /// shift (`+0x5448`). Both modules carry 8.
     pub fn flags(&self) -> u16 {
         self.flags
     }
 
-    /// The file's 32-byte channel table (`STARTEMS.C:67`), as bytes. Both modules carry
-    /// `0, 8, 1, 9, 2, 10, 3, 11` and then 24 bytes of `255`; what the numbers mean is the
-    /// mixer's business, so the loader keeps them as the file wrote them.
+    /// The file's 32-byte channel table (`STARTEMS.C:67`), as bytes.
     pub fn channel_pan(&self) -> &[u8; CHANNELS] {
         &self.channel_pan
     }
@@ -531,12 +437,8 @@ impl Module {
         self.patterns.get(index)
     }
 
-    /// The `index`th instrument's sample bytes, exactly the `length` bytes the header
-    /// names, sliced from `memseg << 4 | memseg2 << 20` (`STARTEMS.C:385-388`).
-    ///
-    /// `None` when there is no sample to slice: an out-of-range index, an instrument that
-    /// is not PCM, or one whose length is zero (`checkins`'s no-sample case,
-    /// `STARTEMS.C:135-139`).
+    /// The `index`th instrument's `length` sample bytes (`STARTEMS.C:385-388`), or `None` for no
+    /// sample: out of range, not PCM, or of length zero (`STARTEMS.C:135-139`).
     pub fn sample_bytes(&self, index: usize) -> Option<&[u8]> {
         let sample = self.samples.get(index)?;
         if sample.is_empty() {
@@ -546,12 +448,8 @@ impl Module {
         }
     }
 
-    /// The shell's tempo patch: `MAIN/STARTMUS.C:257` writes `module[50] = 0x78` — the
-    /// initial-tempo byte — but **only** in `case 0`, which is MUSIC0 (`:252-265`). MUSIC1
-    /// is played at its file's own 130.
-    ///
-    /// The patch belongs to the caller, not to [`Module::load`]: the module does not know
-    /// which file it came from, and the decision is the shell's.
+    /// Overwrite the initial-tempo byte, as `MAIN/STARTMUS.C:257` does for MUSIC0 only
+    /// ([`Song::load`] applies it).
     pub fn apply_tempo_patch(&mut self, tempo: u8) {
         self.initial_tempo = tempo;
     }
@@ -564,79 +462,45 @@ fn decode_pattern(index: usize, data: &[u8]) -> Result<Pattern, ModuleError> {
     let mut position = 0usize;
 
     for (row, cells) in rows.iter_mut().enumerate() {
+        let ran_out = ModuleError::Pattern {
+            index,
+            row,
+            fault: PatternFault::RanOut,
+        };
+        let mut take = |count: usize| {
+            let bytes = data.get(position..position + count).ok_or(ran_out)?;
+            position += count;
+            Ok::<_, ModuleError>(bytes)
+        };
         let mut named = 0u32;
         loop {
-            let Some(&flag) = data.get(position) else {
-                return Err(ModuleError::Pattern {
-                    index,
-                    row,
-                    fault: PatternFault::RanOut,
-                });
-            };
-            position += 1;
-            // A row ends on a byte that is zero. The low five bits are the *channel*, so
-            // `flag & 0x1f == 0` would end the row at every channel-0 cell instead — and
-            // 1,990 of MUSIC0's cells and 2,835 of MUSIC1's sit on channel 0.
+            let flag = take(1)?[0];
+            // A row ends on a zero byte; the low five bits are the channel.
             if flag == 0 {
                 break;
             }
             let channel = usize::from(flag & 0x1F);
 
             let mut cell = Cell::EMPTY;
-            // Bit 5 is a note **and** an instrument, two bytes, in that order. Reading it
-            // as a note alone desynchronises the whole remainder of the pattern while still
-            // decoding "cells".
+            // Bit 5 is a note and an instrument, two bytes in that order.
             if flag & Cell::NOTE != 0 {
-                let (note, instrument) = match (data.get(position), data.get(position + 1)) {
-                    (Some(&note), Some(&instrument)) => (note, instrument),
-                    _ => {
-                        return Err(ModuleError::Pattern {
-                            index,
-                            row,
-                            fault: PatternFault::RanOut,
-                        })
-                    }
-                };
-                position += 2;
-                cell.note = note;
-                cell.instrument = instrument;
+                let pair = take(2)?;
+                cell.note = pair[0];
+                cell.instrument = pair[1];
                 cell.present |= Cell::NOTE;
             }
             if flag & Cell::VOLUME != 0 {
-                match data.get(position) {
-                    Some(&volume) => {
-                        position += 1;
-                        cell.volume = volume;
-                        cell.present |= Cell::VOLUME;
-                    }
-                    None => {
-                        return Err(ModuleError::Pattern {
-                            index,
-                            row,
-                            fault: PatternFault::RanOut,
-                        })
-                    }
-                }
+                cell.volume = take(1)?[0];
+                cell.present |= Cell::VOLUME;
             }
             if flag & Cell::COMMAND != 0 {
-                let (command, info) = match (data.get(position), data.get(position + 1)) {
-                    (Some(&command), Some(&info)) => (command, info),
-                    _ => {
-                        return Err(ModuleError::Pattern {
-                            index,
-                            row,
-                            fault: PatternFault::RanOut,
-                        })
-                    }
-                };
-                position += 2;
-                cell.command = command;
-                cell.info = info;
+                let pair = take(2)?;
+                cell.command = pair[0];
+                cell.info = pair[1];
                 cell.present |= Cell::COMMAND;
             }
 
-            // One cell per channel per row is what ST3 wrote, and a 32-slot row cannot hold
-            // two: the second would silently replace the first.
+            // A 32-slot row cannot hold two cells on one channel.
             if named & (1 << channel) != 0 {
                 return Err(ModuleError::Pattern {
                     index,
@@ -650,9 +514,7 @@ fn decode_pattern(index: usize, data: &[u8]) -> Result<Pattern, ModuleError> {
         }
     }
 
-    // Every byte of the packed data belongs to a cell: 64 rows of cells and terminators is
-    // exactly what the block holds. A decoder that stopped early, or one whose cell sizes
-    // are wrong, lands somewhere other than the last byte.
+    // 64 rows of cells and terminators are exactly what the block holds.
     if position != data.len() {
         return Err(ModuleError::Pattern {
             index,
@@ -667,10 +529,7 @@ fn decode_pattern(index: usize, data: &[u8]) -> Result<Pattern, ModuleError> {
     })
 }
 
-/// The little-endian word at `at`. Every caller in `load` has checked the file holds the
-/// field it is about to read, so a short file is a caller bug and not a data error; the
-/// out-of-range panic is the loud version of that bug, and it cannot fire on a file the
-/// length checks passed.
+/// The little-endian word at `at`; every caller has checked the file holds it.
 fn u16_at(bytes: &[u8], at: usize) -> u16 {
     u16::from_le_bytes(bytes[at..at + 2].try_into().expect("two bytes"))
 }
@@ -761,30 +620,41 @@ impl std::fmt::Display for PatternFault {
 
 impl std::error::Error for ModuleError {}
 
-/// One of the two songs the demo plays: the shell's name for it, the file a run reads, and
-/// the initial-tempo byte `MAIN/STARTMUS.C:252-265` patches into its header before the player
-/// loads it.
-///
-/// **One copy of the fact for both readers.** The shell decides which module a run installs
-/// and applies [`Module::apply_tempo_patch`]; `xtask music analyse` predicts the tick rate
-/// from the same module's header. The paths and the patch therefore live here, beside the
-/// loader whose method applies it, rather than in either caller — a tool and a run that
-/// disagreed about the patch would disagree about the tick rate with nothing to catch it.
+/// One of the two songs the demo plays: its name, its file and the initial-tempo byte
+/// `MAIN/STARTMUS.C:252-265` patches into its header. The shell and `xtask music analyse` both
+/// read this one copy, so they cannot disagree about the tick rate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Song {
-    /// The demo's own name for the module — `MUSIC0`/`MUSIC1`, as the status line and the
-    /// manifests spell it.
+    /// `MUSIC0`/`MUSIC1`, as the status line and the manifests spell it.
     pub name: &'static str,
-    /// The module's file at the path a run reads its media from (the working directory,
-    /// which for this repository's commands is its root).
+    /// The module's file, relative to the directory a run reads its media from.
     pub file: &'static str,
-    /// The tempo byte the shell patches into the header, or `None` where it patches nothing.
+    /// The tempo byte the shell patches into the header, if any.
     pub tempo_patch: Option<u8>,
 }
 
-/// The two songs the demo plays, in the order `restartmus`'s module number names them
-/// (`MAIN/U2.ASM:766-775`): `0` is MUSIC0 — patched to tempo 120 (`0x78`) — and `1` is
-/// MUSIC1, played at its file's own 130.
+impl Song {
+    /// The song called `name`, if the demo plays one.
+    pub fn named(name: &str) -> Option<&'static Song> {
+        SONGS.iter().find(|song| song.name == name)
+    }
+
+    /// Read [`Song::file`] under `root`, decode it and apply the shell's tempo patch: the
+    /// module as the player receives it. Errors name the path.
+    pub fn load(&self, root: &std::path::Path) -> Result<Module, String> {
+        let path = root.join(self.file);
+        let error = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+        let bytes = std::fs::read(&path).map_err(|e| error(&e))?;
+        let mut module = Module::load(&bytes).map_err(|e| error(&e))?;
+        if let Some(tempo) = self.tempo_patch {
+            module.apply_tempo_patch(tempo);
+        }
+        Ok(module)
+    }
+}
+
+/// The two songs, in `restartmus`'s module numbering (`MAIN/U2.ASM:766-775`): MUSIC0 patched to
+/// tempo 120 (`0x78`), MUSIC1 at its file's own 130.
 pub const SONGS: [Song; 2] = [
     Song {
         name: "MUSIC0",
@@ -802,13 +672,7 @@ pub const SONGS: [Song; 2] = [
 mod tests {
     use super::*;
 
-    // -----------------------------------------------------------------------------------
-    // The keystream, written out here rather than called
-    // -----------------------------------------------------------------------------------
-
-    /// D5's keystream, written out in the test from the formula as D5 states it — the same
-    /// arithmetic [`key`] performs, but not the same code, so a transcription slip in
-    /// either one shows up as a disagreement.
+    /// D5's keystream, written out again from D5's formula so a slip in [`key`] disagrees.
     fn keystream(len: usize) -> Vec<u8> {
         (0..len)
             .map(|i| {
@@ -820,10 +684,7 @@ mod tests {
 
     #[test]
     fn the_keystream_is_d5s() {
-        // The formula's first sixteen bytes, evaluated from D5's text when this test was
-        // written. `keystream` recomputes them with this file's own arithmetic, and the two
-        // endpoints are `key`'s — the crate's own — so a transcription slip in either `key`
-        // or the rewritten formula shows up here, and a failure message carries both values.
+        // The formula's first sixteen bytes, evaluated from D5's text.
         let expected = [
             10, 15, 20, 17, 30, 27, 40, 45, 34, 39, 60, 57, 54, 51, 80, 85,
         ];
@@ -848,18 +709,13 @@ mod tests {
             .collect();
         assert_eq!(scrambled, want, "the scrambled bytes are the plain ^ key");
 
-        // Applying it twice is the identity — the keystream has no state between calls, so
-        // a second pattern's descrambling starts again at index 0.
+        // Twice is the identity: each call starts again at index 0.
         descramble(&mut scrambled);
         assert_eq!(scrambled, plain);
     }
 
-    // -----------------------------------------------------------------------------------
-    // A synthetic module, so the awkward cases can be built instead of waited for
-    // -----------------------------------------------------------------------------------
-
-    /// Build a module the way the files are built: a header, an order list, the two pointer
-    /// tables, then blocks on paragraph boundaries. What goes *in* the blocks is the test's.
+    /// A synthetic module laid out as the files are: header, order list, the two pointer
+    /// tables, then blocks on paragraph boundaries.
     struct Builder {
         bytes: Vec<u8>,
         instruments_at: usize,
@@ -933,9 +789,7 @@ mod tests {
         }
     }
 
-    /// One row's worth of packed data, then 63 terminators: a whole pattern of 64 rows. The
-    /// cells' row needs a terminator of its own, so the data is the cells plus one byte per
-    /// row.
+    /// One row of packed cells, then a terminator for each of the 64 rows.
     fn one_row(cells: &[u8]) -> Vec<u8> {
         let mut data = cells.to_vec();
         data.resize(cells.len() + ROWS, 0);
@@ -944,9 +798,8 @@ mod tests {
 
     #[test]
     fn a_cell_carries_exactly_what_its_flag_says() {
-        // Channel 3, every field group at once: note and instrument, volume, command, info.
-        // One flag byte carries all three groups (bit 5 | bit 6 | bit 7) and the channel is
-        // its low five bits — 0xE3.
+        // Channel 3 with every field group (0xE3), stored note, instrument, volume, command,
+        // info: reading them in another order shifts every later byte.
         let data = one_row(&[0xE3, 0x31, 0x05, 0x40, 0x0F, 0x21]);
         let pattern = decode_pattern(0, &data).expect("decodes");
         let cell = pattern.rows[0][3];
@@ -966,29 +819,8 @@ mod tests {
     }
 
     #[test]
-    fn a_cells_groups_are_read_in_the_files_own_order() {
-        // The groups are stored note, instrument, volume, command, info — the order the flag
-        // bits say. Reading the volume before the note's two bytes shifts every later byte.
-        let data = one_row(&[0xE1, 0x2A, 0x07, 0x20, 0x0C, 0x11]);
-        let pattern = decode_pattern(0, &data).expect("decodes");
-        let cell = pattern.rows[0][1];
-        assert_eq!(
-            (
-                cell.note,
-                cell.instrument,
-                cell.volume,
-                cell.command,
-                cell.info
-            ),
-            (0x2A, 0x07, 0x20, 0x0C, 0x11)
-        );
-    }
-
-    #[test]
     fn a_channel_zero_cell_is_not_a_row_terminator() {
-        // The flag byte's low five bits are the channel, so 0x20 is channel 0 with a note
-        // and an instrument — not "end of row". A decoder testing `flag & 0x1f == 0` would
-        // drop this cell and read the two bytes after it as a new row's flag bytes.
+        // 0x20 is channel 0 with a note, not the end of the row.
         let data = one_row(&[0x20, 0x10, 0x02]);
         let pattern = decode_pattern(0, &data).expect("decodes");
         assert_eq!(pattern.rows[0][0].note, 0x10);
@@ -1006,15 +838,7 @@ mod tests {
         assert_eq!(pattern.channel_count, 3);
         assert_eq!(cell.volume, 0);
         assert!(cell.has_volume(), "the file carried a volume column");
-        assert!(
-            !cell.is_empty(),
-            "and it is a named channel slot, not an unnamed one"
-        );
-        assert_eq!(
-            Cell::EMPTY.volume,
-            0,
-            "which its five values alone cannot say"
-        );
+        assert!(!cell.is_empty(), "and it is a named channel slot");
     }
 
     #[test]
@@ -1026,8 +850,7 @@ mod tests {
 
     #[test]
     fn a_cell_that_carries_no_bytes_at_all_is_rejected() {
-        // Bit 5 promises two bytes; the row's terminator is read as them, and the stream
-        // then ends inside a later row. The fault is the point: the packed data ran out.
+        // Bit 5 promises two bytes; the terminators are read as them and the data runs out.
         let data = one_row(&[0x20]);
         match decode_pattern(0, &data) {
             Err(ModuleError::Pattern {
@@ -1140,8 +963,7 @@ mod tests {
 
     #[test]
     fn a_sample_headers_fields_are_read_at_their_own_offsets() {
-        // Distinguishable bytes in every field the census reads, so a reader four bytes off
-        // — the `flags`/`c2spd` trap — cannot pass. None of these is a filed module's value.
+        // Distinct bytes in every field, so a reader four bytes off cannot pass.
         let mut header = [0u8; INSTRUMENT_SIZE];
         header[0x00] = 1; // type
         header[0x01..0x0D].copy_from_slice(b"FILE.11\0\0\0\0\0");
@@ -1191,9 +1013,7 @@ mod tests {
         assert_eq!(sample[0], 0);
         assert_eq!(sample[0x3F], 0x3F, "sliced from the pointer, not from 0");
 
-        // The paragraph pointer's high byte is the file's own second word
-        // (`STARTEMS.C:385-386`), so it is part of the offset even where both modules
-        // happen to carry zero.
+        // The pointer's high byte counts too (`STARTEMS.C:385-386`).
         let mut high = instrument.clone();
         high.memseg = 0x0002;
         high.memseg2 = 0x03;
@@ -1227,8 +1047,7 @@ mod tests {
 
     #[test]
     fn a_pattern_pointer_of_zero_is_an_empty_pattern() {
-        // `STARTEMS.C:346`, `if(!b) continue;` — the original leaves such a pattern's
-        // paragraph entry at zero and its player sees an empty pattern, not an error.
+        // `STARTEMS.C:346`, `if(!b) continue;`.
         let mut builder = Builder::new(&[0], 0, 2);
         let real = builder.pattern(&one_row(&[0x21, 0x40, 0x00]));
         let bytes = builder.finish(&[], &[0, real]);

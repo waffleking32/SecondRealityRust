@@ -260,7 +260,7 @@ fn looping_leaves_pass_one_alone() {
 /// sync 10, which leaves at once).
 #[test]
 fn a_carried_ring_would_hand_pass_two_the_old_songs_position() {
-    use sr_audio::{Module, Player, PlayerOptions};
+    use sr_audio::{Player, PlayerOptions};
     use sr_engine::music::sync_from;
 
     // The run: `--block 5 --loop`, its timeline to just past the new song's first published row.
@@ -301,8 +301,7 @@ fn a_carried_ring_would_hand_pass_two_the_old_songs_position() {
     // Pass 1's music, played here: block 5's MUSIC0 at order 25 with the shell's tempo patch,
     // its clock waiting the restart recipes' four frames from the run's 404 (polled from 408),
     // one poll a frame through the restart's own tick. It must be the run's, frame for frame.
-    let mut module = Module::load(&std::fs::read(repository_root().join("assets/MAIN/MUSIC0.S3M")).unwrap()).unwrap();
-    module.apply_tempo_patch(0x78);
+    let module = sr_audio::SONGS[0].load(&repository_root()).unwrap();
     let mut old = Player::new(module, PlayerOptions::default());
     old.play_song(25);
     for frame in 404..RESTART {

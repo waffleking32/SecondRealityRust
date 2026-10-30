@@ -31,7 +31,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
-use sr_audio::{Module, Player, PlayerOptions};
+use sr_audio::{Player, PlayerOptions};
 use sr_engine::music::{muscode_from, musplus_from, sync_from, Music, MusicPosition};
 
 use crate::shell::ModuleId;
@@ -154,14 +154,8 @@ impl Music for PlayerMusic {
 // -------------------------------------------------------------------------------------------
 
 /// The real [`MusicSource`](crate::shell::MusicSource): the demo's own module, read from
-/// `assets/` and left the way the shell leaves it.
-///
-/// Read at the path this repository's commands run from — the working directory is the
-/// repository root (`CLAUDE.md`'s "Running it"), which is where `assets/` is, and every
-/// part reads its own media the same way — and with `MAIN/STARTMUS.C:257`'s patch applied
-/// where the shell applies it: `module[50] = 0x78` sets **MUSIC0's** initial tempo byte
-/// from 125 to 120 before it plays, and MUSIC1 keeps its file's own 130
-/// ([`ModuleId::tempo_patch`]).
+/// `assets/` under the working directory and patched as the shell patches it
+/// ([`sr_audio::Song::load`]).
 ///
 /// The player is built with the run's `options`
 /// ([`RunSettings::player`](crate::shell::RunSettings::player)): authentic by default, the
@@ -181,13 +175,7 @@ pub(crate) fn player_at(
     root: &Path,
     options: PlayerOptions,
 ) -> Result<Shared, String> {
-    let path = root.join(id.path());
-    let display = path.display().to_string();
-    let bytes = std::fs::read(&path).map_err(|error| format!("{display}: {error}"))?;
-    let mut module = Module::load(&bytes).map_err(|error| format!("{display}: {error}"))?;
-    if let Some(tempo) = id.tempo_patch() {
-        module.apply_tempo_patch(tempo);
-    }
+    let module = id.song().load(root)?;
     Ok(Arc::new(Mutex::new(Player::new(module, options))))
 }
 
@@ -498,21 +486,17 @@ impl AudioCallback for Drain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_audio::Quality;
+    use sr_audio::{Module, Quality};
     use std::path::PathBuf;
 
     /// The module this binary plays, at the path a *unit test* reads it by: the crate's
     /// own directory, not the repository root a run starts in (the same `../../` the
     /// parts' tests use).
     fn module(name: &str) -> Module {
-        let path = Path::new("../../assets/MAIN").join(format!("{name}.S3M"));
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let mut module = Module::load(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
-        if name == "MUSIC0" {
-            module.apply_tempo_patch(0x78);
-        }
-        module
+        sr_audio::Song::named(name)
+            .unwrap_or_else(|| panic!("{name} is not a song"))
+            .load(Path::new("../.."))
+            .unwrap_or_else(|error| panic!("{error}"))
     }
 
     fn player(name: &str) -> Player {
