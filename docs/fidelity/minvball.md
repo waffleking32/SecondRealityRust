@@ -28,7 +28,7 @@ by the integration test (`the_run_reaches_the_frame_cap_and_retires`).
 `tasm` and links with Microsoft's `link /E`; the linked `DOTS.EXE` carries the "MS Run-Time
 Library - Copyright (c) 1990, Microsoft Corp" string (`strings -a DOTS/DOTS.EXE`). Its generator's
 first ten values are 41, 18,467, 6,334, 26,500, 19,169, 15,724, 11,478, 29,358, 26,962, 24,464
-(`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences`). Borland's generator (seed
+(`msrand::tests::the_first_values_are_microsoft_cs_sequence`). Borland's generator (seed
 1, multiplier `0x015A4E35`) is a different stream. With Microsoft's, all four keyframes match
 (§6), so the frames decide it (D24, A19).
 

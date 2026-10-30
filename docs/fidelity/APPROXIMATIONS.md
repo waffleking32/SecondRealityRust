@@ -536,7 +536,7 @@ permutation cursor `j` behind `dottaul[j]`, which picks the dot that draws a coi
 never assigned (`MAIN.C:87`, `:200`): its value is whatever the stack held.
 
 **Port:** Microsoft C's generator (`MsRand`;
-`the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences` pins its first ten values) and
+`msrand::tests::the_first_values_are_microsoft_cs_sequence` pins its first ten values) and
 `INITIAL_J = 88`, fitted to the reference. Everything else is the tree's.
 
 **Why:** the generator is the compiler's own. `j` is the one value the source leaves free, and the

@@ -22,6 +22,7 @@ pub mod jplogo;
 pub mod lnszoom;
 pub mod minvball;
 pub mod mntscrl;
+pub mod msrand;
 pub mod pam;
 pub mod panicend;
 pub mod plzpart;

@@ -50,7 +50,7 @@ use sr_engine::Palette;
 
 use crate::parts::glenz::math::{matrix_yxz, Matrix};
 use crate::parts::sin1024::SIN1024;
-use crate::parts::minvball::MsRand;
+use crate::parts::msrand::MsRand;
 
 use super::dots::{
     add_dot, depthcol_table, do3dots, dodots, dodots2, dots_from_fcrz, grid_points, initial_dots,

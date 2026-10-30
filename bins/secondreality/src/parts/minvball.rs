@@ -146,6 +146,7 @@
 use sr_engine::part::{Part, PartCtx, PartStatus};
 use sr_engine::Palette;
 
+use crate::parts::msrand::MsRand;
 use crate::parts::sin1024::SIN1024;
 
 /// The part's name: what `--part` accepts and what the registry lists.
@@ -239,38 +240,6 @@ const CUE_HIGH: i32 = 0;
 /// 10,498), and order 75's cue rows (61-63, `musplus` -3..-1) fall inside the
 /// fade, where the source does not check the cue.
 const MUSIC_PRE_ROLL: u32 = 256;
-
-// -------------------------------------------------------------- the RNG ---
-
-/// Microsoft C 6.0's `rand()`: a 32-bit LCG, modulus 2³², seed 1, returning
-/// `(seed >> 16) & 0x7FFF`. See the module docs for the evidence that this,
-/// not Turbo C's generator, is the source's.
-pub(crate) struct MsRand {
-    seed: u32,
-}
-
-impl MsRand {
-    /// The multiplier and increment of Microsoft's generator.
-    const MULTIPLIER: u32 = 214_013;
-    const INCREMENT: u32 = 2_531_011;
-    /// The modulus, `2^32`; the state is a `u32`, so the multiply wraps.
-    #[cfg(test)]
-    const MODULUS: u64 = 1 << 32;
-
-    /// `holdrand = 1L` — the library's initial seed; the source never seeds.
-    pub(crate) fn new() -> MsRand {
-        MsRand { seed: 1 }
-    }
-
-    /// One `rand()`: 0 through 32,767.
-    pub(crate) fn next(&mut self) -> i32 {
-        self.seed = self
-            .seed
-            .wrapping_mul(Self::MULTIPLIER)
-            .wrapping_add(Self::INCREMENT);
-        ((self.seed >> 16) & 0x7FFF) as i32
-    }
-}
 
 // ------------------------------------------------------------- the tables --
 
@@ -958,33 +927,6 @@ mod tests {
         run_to(rig, part, MAIN_FIRST_TICK);
         assert_eq!(part.phase, Phase::Main);
         assert_eq!(part.frame, 0);
-    }
-
-    // --- the RNG -------------------------------------------------------------
-
-    #[test]
-    fn the_rng_is_microsoft_cs_lcg_and_its_first_values_are_the_sequences() {
-        // `DOTS/MAKEFILE` compiles with `cl /qc /AL` and the linked EXE
-        // carries the MS run-time library's string: Microsoft C 6.0's
-        // `rand()`, an LCG modulo 2^32. The first ten values of its seed 1.
-        let mut rng = MsRand::new();
-        let first: Vec<i32> = (0..10).map(|_| rng.next()).collect();
-        assert_eq!(
-            first,
-            [41, 18467, 6334, 26500, 19169, 15724, 11478, 29358, 26962, 24464]
-        );
-        assert_eq!(MsRand::MULTIPLIER, 214_013);
-        assert_eq!(MsRand::INCREMENT, 2_531_011);
-        assert_eq!(MsRand::MODULUS, 1 << 32);
-        // The state wraps at the modulus: the 2^32 term is dropped.
-        let mut wrapped = MsRand { seed: u32::MAX };
-        let _ = wrapped.next();
-        assert_eq!(
-            wrapped.seed,
-            u32::MAX
-                .wrapping_mul(MsRand::MULTIPLIER)
-                .wrapping_add(MsRand::INCREMENT)
-        );
     }
 
     #[test]
