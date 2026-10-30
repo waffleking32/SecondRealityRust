@@ -23,10 +23,7 @@ pub mod module;
 pub mod player;
 
 pub use effects::{note_period, period_step, scaled_period, Channel};
-pub use mix::{
-    centre, multiplier, scale, side_of, step, voice_value, Curve, Mixer, Side, RING_SAMPLES,
-    VOLUME_SCALE,
-};
+pub use mix::{multiplier, step, Curve, Mixer, RING_SAMPLES, VOLUME_SCALE};
 pub use module::{
     descramble, Cell, Instrument, Module, ModuleError, Pattern, PatternFault, Song, CHANNELS,
     ROWS, SONGS,

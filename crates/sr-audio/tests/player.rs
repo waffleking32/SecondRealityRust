@@ -2143,7 +2143,7 @@ fn the_timeline_effects_the_modules_carry() {
 /// the builder's old misreading of every such run as `0x01` is where the "`0x0101` marker"
 /// came from (`segment_image`'s note; `APPROXIMATIONS.md` A14(a)). So the plane a flush leaves
 /// behind is zero, the frame's value lands on the flush's own `0x400 + value`, and that is the
-/// base the port's mixer indexes with (`mix.rs`'s `UNMARKED_BASE`) — the base the audible DMA
+/// base the port's mixer indexes with (`mix.rs`'s `FLUSH_BASE`) — the base the audible DMA
 /// buffer was measured at.
 #[test]
 fn the_flush_clears_the_accumulator_word_it_reads() {

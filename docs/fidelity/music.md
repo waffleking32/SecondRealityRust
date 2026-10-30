@@ -799,7 +799,7 @@ The accumulators are converted at the end of the buffer by `+0x2c89` (stereo) or
 Both add `0x400 - [0x2250]`, 1024 less the channels' summed centres, to every word (`+0x2cb4`,
 `+0x30b4`) and index the table at `cs:[0x6c]` (`+0x551c`'s second half). So the index is
 **`0x400 + value`**, the signed sample about the table's middle; the flush writes zero after the
-read, and `Mixer::base` is that base (A14(a)).
+read, and `mix.rs`'s `FLUSH_BASE` is that base (A14(a)).
 
 The table is a gain curve built from `_np_mastermul` (`+0x5569` reads the byte `[0x916]`, the master
 volume's low seven bits, floored at 0x10). The reference's master volume 0xB0 gives
@@ -828,7 +828,7 @@ three bits, flips its low bit with the pass flag (`+0x37c1`'s `xor 0x211e,%bl`) 
 base (`+0x37c5`), selecting the mixing loop (`+0x38c4`'s table) and the shift tables at
 `+0x38e4`/`+0x38f4`. The table (`Module::channel_pan`) is `0, 8, 1, 9, 2, 10, 3, 11`, and 0…7 are
 the left positions and 8…15 the right, so the eight channels are hard-panned L, R, L, R, L, R, L, R
-(`side_of`). A mono run has one accumulator and no pan.
+(`Side::of`). A mono run has one accumulator and no pan.
 
 ### 10.4 The port's numbers
 
