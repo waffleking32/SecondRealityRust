@@ -12,7 +12,9 @@ use sr_engine::{Engine, IndexedFrame, Palette, Tick};
 
 use super::dac::hardware_default_palette;
 use super::idle::{CueWait, Idle};
-use super::music::{music_for_part, ModuleId, MusicSource, MusicStart, LOOP_RESTART, MUSIC_RESTART_AT};
+use super::music::{
+    music_for_part, ModuleId, MusicSource, MusicStart, LOOP_RESTART, MUSIC_RESTART_AT,
+};
 use super::plan::{boot_anchor, loop_plan};
 use super::ShellError;
 use crate::parts;
@@ -102,9 +104,7 @@ pub struct Sequence {
     index: u32,
     anchor: Option<u32>,
     clock: Tick,
-    /// Whether the run is past its parts and holding the screen they left.
-    holding: bool,
-    finished: bool,
+    stage: Stage,
     music: Option<RunMusic>,
     /// How the run builds a player, kept for the restarts; `None` for a silent run.
     music_source: Option<MusicSource>,
@@ -112,18 +112,28 @@ pub struct Sequence {
     /// Whether `panicend` just retired by itself, so the next part is the cue wait
     /// (`MAIN/U2.ASM:826-853`). The exit flag retiring it is the wait's own `bx=2` check.
     cue_pending: bool,
-    /// Whether `live` is the shell's [`CueWait`].
-    live_cue: bool,
     ending: Ending,
-    /// The exit stage's ticks so far.
-    exit_ticks: u32,
     looping: Looping,
     /// 1, and one more each time a loop seam starts ALKU again.
     pass: u32,
-    /// The loop seam's ticks so far, while `live` is the seam.
-    seam: Option<u32>,
     /// Every plan part started, at the index its first tick drew at, across passes.
     starts: Vec<(u32, &'static str)>,
+}
+
+/// Where a run is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// Playing the plan: `live` is a plan part, or nothing between two.
+    Plan,
+    /// `live` is the post-PANICEND [`CueWait`].
+    Cue,
+    /// `live` is the loop seam, this many ticks in.
+    Seam(u32),
+    /// The plan has run out and `live` holds its last screen; the exit stage's ticks so far
+    /// ([`Ending::Exit`] only).
+    Hold(u32),
+    /// A part could not be started.
+    Finished,
 }
 
 /// The run's music: the player, the module and order it began at, how its clock was started,
@@ -211,18 +221,14 @@ impl Sequence {
             index: anchor.unwrap_or(0),
             anchor,
             clock: Tick::new(),
-            holding: false,
-            finished: false,
+            stage: Stage::Plan,
             music: None,
             music_source: music,
             player_options: settings.player,
             cue_pending: false,
-            live_cue: false,
             ending: settings.ending,
-            exit_ticks: 0,
             looping: settings.looping,
             pass: 1,
-            seam: None,
             starts: Vec::new(),
         };
         *run.engine.palette_mut() = hardware_default_palette();
@@ -283,7 +289,7 @@ impl Sequence {
 
     /// One logic tick. `Finished` only when the run has ended.
     pub fn tick(&mut self) -> SequenceStatus {
-        if self.finished {
+        if self.stage == Stage::Finished {
             return SequenceStatus::Finished;
         }
         if self.live.is_none() && !self.take_next() {
@@ -295,15 +301,16 @@ impl Sequence {
         let status = self.engine.tick(&mut **part, &mut self.frame);
         self.index += 1;
         self.exit_stage();
-        if status == PartStatus::Finished
-            || (self.engine.exit_requested() && !drains)
-        {
+        if status == PartStatus::Finished || (self.engine.exit_requested() && !drains) {
             // PANICEND's own `Finished` is its EXE ending, which reaches `@@zh5`.
-            if status == PartStatus::Finished && !self.live_cue && self.current == "panicend" {
+            let panicend = self.stage == Stage::Plan && self.current == "panicend";
+            if status == PartStatus::Finished && panicend {
                 self.cue_pending = true;
             }
             self.live = None;
-            self.live_cue = false;
+            if self.stage == Stage::Cue {
+                self.stage = Stage::Plan;
+            }
         }
         self.music_after_tick();
         // After the fade step, so the restart installed at the fade's end is never faded.
@@ -316,7 +323,7 @@ impl Sequence {
     /// under [`MusicStart::restart`] (`:929-932`), then [`LOOP_RELOAD_TICKS`] more, and
     /// `jmp @@partsagain` (`:933`) to block 1's plan.
     fn loop_seam(&mut self) {
-        let Some(ticks) = self.seam.as_mut() else {
+        let Stage::Seam(ticks) = &mut self.stage else {
             return;
         };
         *ticks += 1;
@@ -326,14 +333,13 @@ impl Sequence {
                 let (module, order) = LOOP_RESTART;
                 let start = MusicStart::restart(self.index);
                 if let Err(error) = self.install_music(module, order, source, start) {
-                    eprintln!("secondreality: {error}; the run ends here");
-                    self.finished = true;
+                    self.end_run(error);
                     return;
                 }
             }
         }
         if ticks == EXIT_FADE_TICKS + LOOP_RELOAD_TICKS {
-            self.seam = None;
+            self.stage = Stage::Plan;
             self.live = None;
             // The pass is counted when its first part starts.
             self.plan = loop_plan();
@@ -347,11 +353,14 @@ impl Sequence {
     /// [`EXIT_BLANK_TICKS`]. The border is left as the part set it, so the window keeps its
     /// size.
     fn exit_stage(&mut self) {
-        if self.ending != Ending::Exit || !self.holding {
+        let Stage::Hold(ticks) = &mut self.stage else {
+            return;
+        };
+        if self.ending != Ending::Exit {
             return;
         }
-        self.exit_ticks = self.exit_ticks.saturating_add(1);
-        if self.exit_ticks > EXIT_FADE_TICKS {
+        *ticks = ticks.saturating_add(1);
+        if *ticks > EXIT_FADE_TICKS {
             self.frame.pixels.fill(0);
             self.frame.palettes.reset(Palette::BLACK);
         }
@@ -364,7 +373,9 @@ impl Sequence {
         let Some(music) = self.music.as_mut() else {
             return;
         };
-        if self.holding || self.seam.is_some_and(|ticks| ticks < EXIT_FADE_TICKS) {
+        if matches!(self.stage, Stage::Hold(_))
+            || matches!(self.stage, Stage::Seam(ticks) if ticks < EXIT_FADE_TICKS)
+        {
             crate::audio::fade_music(&mut crate::audio::lock(&music.player), 1);
         }
         if let Some(dump) = music.dump.as_mut() {
@@ -385,7 +396,7 @@ impl Sequence {
     /// Put a part in `live` for this tick: the cue wait when one is due, the plan's next part,
     /// the loop seam or the hold. False only when the run has ended.
     fn take_next(&mut self) -> bool {
-        if self.holding {
+        if matches!(self.stage, Stage::Hold(_)) {
             return true;
         }
         if self.cue_pending {
@@ -394,15 +405,16 @@ impl Sequence {
             // polls the flag (`SHUTDOWN.C`), so ESC on its last tick leaves the flag set, and
             // the cue's `engine.start` would clear it before the cue saw it.
             if !self.engine.exit_requested() {
-                return self.start_cue_wait();
+                return self.start_idle(Box::new(CueWait::default()), Stage::Cue);
             }
         }
         let Some(&name) = self.plan.get(self.next) else {
             // `:920-925`: looping 1 goes round; 0 and 2 reach `@@partsdone`.
-            if self.looping == Looping::On {
-                return self.start_seam();
-            }
-            return self.hold();
+            let (drains, stage) = match self.looping {
+                Looping::On => (true, Stage::Seam(0)),
+                _ => (false, Stage::Hold(0)),
+            };
+            return self.start_idle(Box::new(Idle { of: self.current, drains }), stage);
         };
         // Only a loop seam rewinds `next` to 0.
         if self.next == 0 {
@@ -410,15 +422,8 @@ impl Sequence {
         }
         self.next += 1;
         // A restart site runs before `partexecute`, so the part's `init` sees the new player.
-        if let Err(error) = self.restart_music(name) {
-            eprintln!("secondreality: {error}; the run ends here");
-            self.finished = true;
-            return false;
-        }
-        if let Err(error) = self.start(name) {
-            eprintln!("secondreality: {error}; the run ends here");
-            self.finished = true;
-            return false;
+        if let Err(error) = self.restart_music(name).and_then(|()| self.start(name)) {
+            return self.end_run(error);
         }
         true
     }
@@ -446,52 +451,29 @@ impl Sequence {
         self.install_music(module, order, source, MusicStart::restart(self.index))
     }
 
-    /// Install the post-PANICEND cue wait (`MAIN/U2.ASM:826-853`); `current` stays
-    /// `panicend`.
-    fn start_cue_wait(&mut self) -> bool {
-        let mut part = Box::new(CueWait::default());
+    /// Start one of the shell's own parts as `live`, at `stage`: the cue wait, the loop seam
+    /// ([`loop_seam`](Sequence::loop_seam)) or the hold. `current` stays the part whose
+    /// screen is up.
+    fn start_idle(&mut self, mut part: Box<dyn Part>, stage: Stage) -> bool {
         if let Err(error) = self.engine.start(&mut *part) {
-            eprintln!("secondreality: {error}; the run ends here");
-            self.finished = true;
-            return false;
+            return self.end_run(error);
         }
         self.live = Some(part);
-        self.live_cue = true;
+        self.stage = stage;
         true
     }
 
-    /// Install the loop seam ([`loop_seam`](Sequence::loop_seam)).
-    fn start_seam(&mut self) -> bool {
-        let mut part = Box::new(Idle { of: self.current, drains: true });
-        if let Err(error) = self.engine.start(&mut *part) {
-            eprintln!("secondreality: {error}; the run ends here");
-            self.finished = true;
-            return false;
-        }
-        self.live = Some(part);
-        self.live_cue = false;
-        self.seam = Some(0);
-        true
-    }
-
-    /// Start holding the screen the run's last part left.
-    fn hold(&mut self) -> bool {
-        let mut part = Box::new(Idle { of: self.current, drains: false });
-        if let Err(error) = self.engine.start(&mut *part) {
-            eprintln!("secondreality: {error}; the run ends here");
-            self.finished = true;
-            return false;
-        }
-        self.live = Some(part);
-        self.live_cue = false;
-        self.holding = true;
-        true
+    /// End the run on `error`, which `tick` has no channel to return. Returns false.
+    fn end_run(&mut self, error: impl std::fmt::Display) -> bool {
+        eprintln!("secondreality: {error}; the run ends here");
+        self.stage = Stage::Finished;
+        false
     }
 
     /// Feed wall-clock time: tick once per due frame, dropping the stale ones. Returns the
     /// ticks taken, none once the run has finished.
     pub fn advance(&mut self, elapsed: Duration) -> u32 {
-        if self.finished {
+        if self.stage == Stage::Finished {
             return 0;
         }
         let due = self.clock.advance(elapsed);
@@ -513,7 +495,7 @@ impl Sequence {
         self.engine.start(&mut *part)?;
         self.live = Some(part);
         self.current = name;
-        self.live_cue = false;
+        self.stage = Stage::Plan;
         self.starts.push((self.index, name));
         Ok(())
     }
@@ -545,20 +527,20 @@ impl Sequence {
 
     /// Whether a part could not be started and the run has ended.
     pub fn finished(&self) -> bool {
-        self.finished
+        self.stage == Stage::Finished
     }
 
     /// Whether the exit stage has run its fade and blank ([`Ending::Exit`] only). The run
     /// still ticks, composing the blank.
     pub fn ended(&self) -> bool {
-        self.exit_ticks >= EXIT_FADE_TICKS + EXIT_BLANK_TICKS
+        matches!(self.stage, Stage::Hold(ticks) if ticks >= EXIT_FADE_TICKS + EXIT_BLANK_TICKS)
     }
 
     /// Whether the plan has run out and the run holds the last screen (`@@partsdone`,
     /// `MAIN/U2.ASM:935-968`): an [`Ending::Exit`] run's exit stage, or an [`Ending::Hold`]
     /// run's hold until the window closes.
     pub fn holding(&self) -> bool {
-        self.holding
+        matches!(self.stage, Stage::Hold(_))
     }
 
     /// The demo's pass: 1, and one more each time a loop seam starts ALKU again
@@ -649,7 +631,7 @@ impl Sequence {
     /// part is live or the run holds (`@@partsdone`, `MAIN/U2.ASM:935`). In a loop seam the
     /// press is taken and does nothing: the seam drains, and pass 2's start clears the flag.
     pub fn request_exit(&mut self) -> bool {
-        if self.holding || self.live.is_none() {
+        if matches!(self.stage, Stage::Hold(_)) || self.live.is_none() {
             return false;
         }
         self.engine.request_exit();
@@ -661,7 +643,8 @@ impl Sequence {
     /// (`:185-203`) keeps skipping every later part; the port skips one (D21, A58). False
     /// when there is no part: the hold, or a loop seam.
     pub fn skip_part(&mut self) -> bool {
-        if self.holding || self.live.is_none() || self.seam.is_some() {
+        let idle = matches!(self.stage, Stage::Hold(_) | Stage::Seam(_) | Stage::Finished);
+        if idle || self.live.is_none() {
             return false;
         }
         self.live = None;

@@ -47,7 +47,8 @@ fn walk(
         if until(run) {
             return (parts, installs);
         }
-        if last != Some((run.part(), run.pass())) && run.live.is_some() && run.seam.is_none() {
+        let in_seam = matches!(run.stage, Stage::Seam(_));
+        if last != Some((run.part(), run.pass())) && run.live.is_some() && !in_seam {
             parts.push(run.part());
         }
         last = Some((run.part(), run.pass()));
