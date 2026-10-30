@@ -599,13 +599,13 @@ Frames: `reference/parts/grid/` 400-800.
 
 **Original.** The image is `eye[784..64783]`, so the last 100 bytes (row 199, x = 220..319) stay
 raw. **Where.** `GRID/MAIN.C:141`. **Frame.** 400-800. **Tests.**
-`the_eye_shift_stops_100_bytes_short`, `the_buffers_start_as_the_same_shifted_eye`.
+`the_eye_shift_stops_100_bytes_short`.
 
 ### 24.2 Every dispatch entry the generator did not fill points at the first routine
 
 **Original.** `lineblit_init` fills the table with `lblt_54b56`, the line to (-10,-8); segments with
 dy = 56, or dx = 82 from iteration 24, draw it. **Where.** `GRID/ASM.ASM:213-217`,
-`LINEBLIT.INC:2-4`. **Frame.** 400-800 (A41). **Test.** `the_line_blit_is_the_generated_xor_bresenham`.
+`LINEBLIT.INC:2-4`. **Frame.** 400-800 (A41). **Test.** `an_out_of_table_delta_draws_the_fill_word`.
 
 ## 25. HARD (vault) — beyond §7-§9: the dot engine's unsigned clips and colour decrement, the 16-bit z load, and the record that is never read
 

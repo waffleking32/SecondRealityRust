@@ -24,11 +24,11 @@ use crate::parts::mode_view;
 use crate::parts::sin1024::SIN1024;
 
 /// The registry name (`parts::registry`).
-pub const TWIST_NAME: &str = "twist";
+const TWIST_NAME: &str = "twist";
 
 /// `while(!kbhit() && frame<4444)` (`MAIN.C:49`): frames 0..4,443 draw, and
 /// the 4,445th call returns `Finished` without drawing.
-pub const LAST_FRAME: u32 = 4_444;
+const LAST_FRAME: u32 = 4_444;
 
 /// The displayed picture's width: 200 logical rows of 80 plane bytes, each
 /// byte four pixels (`inittwk` leaves CRTC 0x09 at mode 13h's 0x41, so the
@@ -60,7 +60,7 @@ const PAGE_2: u32 = 4 * 0x8000;
 /// floor's 0. `w` is then in 1..=200, and `twister`'s clamp is modulo 200
 /// (`TWIST.ASM:26-35`): the sine peak `w = 200` selects generated row **0**,
 /// not row 199. Row 0 is the peak every frame, so `rows(frame)[0] == 0`.
-pub fn rows(frame: u32) -> [u8; 200] {
+fn rows(frame: u32) -> [u8; 200] {
     // `ra++` on the source's 16-bit `int`; part frames stop at 4,443, so this
     // is 1..4,444 in every frame the part draws.
     let ra = frame.wrapping_add(1) as u16;
@@ -87,7 +87,7 @@ pub fn rows(frame: u32) -> [u8; 200] {
 /// these bytes (121 of the 200 rows begin `0x3F`). The test reads the include
 /// and reconstructs every byte.
 #[rustfmt::skip]
-pub const TEXTURE: [[u8; PLANE_BYTES_PER_ROW]; 200] = [
+const TEXTURE: [[u8; PLANE_BYTES_PER_ROW]; 200] = [
     [  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  20,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0],
     [  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  20,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0],
     [  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,  53,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0],
@@ -327,7 +327,6 @@ fn draw_page(pixels: &mut [u8], page: u32, frame: u32) {
 }
 
 /// The TWIST part.
-#[derive(Default)]
 pub struct Twist;
 
 impl Twist {
@@ -463,32 +462,6 @@ mod tests {
             assert_eq!(rows(frame)[0], 0, "frame {frame}");
         }
 
-        // The measured two-band opening: frame 0 is generated row 0 in rows
-        // 0..63 and generated row 199 in rows 64..199; frame f's boundary is
-        // ceil(64/(f+1)) through the first four frames.
-        let zero = rows(0);
-        assert!(zero[..64].iter().all(|&row| row == 0));
-        assert!(zero[64..].iter().all(|&row| row == 199));
-        assert_eq!(zero.iter().position(|&row| row != 0), Some(64));
-        for frame in 0..4u32 {
-            let ra = frame as usize + 1;
-            let boundary = 64usize.div_ceil(ra);
-            let selected = rows(frame);
-            assert!(
-                selected[..boundary].iter().all(|&row| row == 0),
-                "frame {frame}"
-            );
-            assert!(
-                selected[boundary..].iter().all(|&row| row == 199),
-                "frame {frame}"
-            );
-            assert_eq!(
-                selected.iter().position(|&row| row != 0),
-                Some(boundary),
-                "frame {frame}"
-            );
-        }
-
         // The rows the source formula selects at the later recorded frames,
         // as transition and distinct-row counts (the full bytes are above).
         assert_eq!(transitions(&rows(99)), 124);
@@ -497,30 +470,6 @@ mod tests {
         assert_eq!(distinct(&rows(999)), 136);
         assert_eq!(transitions(&rows(4443)), 199);
         assert_eq!(distinct(&rows(4443)), 102);
-
-        // The 16-bit `r`: a full iteration's 200 adds at frame 326 are
-        // 200·327 = 65,400, inside a word; frame 327's final (unused) add is
-        // 200·328 = 65,600 and wraps. No *selected* row has wrapped yet: the
-        // first is frame 329's y = 199 (199·330 = 65,670 → 134).
-        let inside_before_327 = u32::from(200u16) * 327;
-        let final_add_at_327 = u32::from(200u16) * 328;
-        let last_selected_row_at_328 = u32::from(199u16) * 329;
-        assert!(inside_before_327 < 65_536, "{inside_before_327}");
-        assert!(final_add_at_327 > 65_536, "{final_add_at_327}");
-        let wrapped_final_add = (final_add_at_327 & 0xffff) as u16;
-        assert_eq!(wrapped_final_add, 64);
-        assert!(
-            last_selected_row_at_328 < 65_536,
-            "{last_selected_row_at_328}"
-        );
-        let wrapped_last_row = ((u32::from(199u16) * 330) & 0xffff) as u16;
-        assert_eq!(wrapped_last_row, 134);
-        let mut previous = 0u16;
-        for y in 0..200u16 {
-            let r = y.wrapping_mul(328);
-            assert!(r >= previous, "frame 327, row {y}");
-            previous = r;
-        }
 
         // The division truncates toward zero, not floor:
         // * frame 327, y = 199: sin1024[763] = -255, so -6375/64 = -99 and
@@ -733,37 +682,20 @@ mod tests {
             ];
             assert_eq!(palette.entry(a as u8), expected, "entry {a}");
         }
-        // The three entries the brief names, plus entry 31 (the border colour
-        // the dropped Scroll-Lock branch would have shown).
+        // Entry 31 is the border colour the dropped Scroll-Lock branch would
+        // have shown.
         assert_eq!(palette.entry(63), [21, 42, 63]);
         assert_eq!(palette.entry(191), [63, 63, 63]);
         assert_eq!(palette.entry(192), [0, 0, 0]);
         assert_eq!(palette.entry(31), [10, 20, 31]);
 
-        // The same bytes through `from_vga` are four times darker — the wrong
-        // conversion for a DAC write.
-        let mut vga = [0u8; 768];
-        for (a, entry) in vga.chunks_exact_mut(3).enumerate() {
-            entry[0] = ((a as u16) / 3) as u8;
-            entry[1] = ((2 * a as u16) / 3) as u8;
-            entry[2] = a as u8;
-        }
-        let shifted = Palette::from_vga(&vga);
-        assert_ne!(shifted, palette);
-        assert_eq!(shifted.entry(63), [5, 10, 15]);
-        assert_eq!(palette.entry(63), [21, 42, 63]);
     }
 
     #[test]
     fn the_first_frames_are_the_measured_two_band_phase() {
-        // The source formula's own bands.
-        let zero = rows(0);
-        assert!(zero[..64].iter().all(|&row| row == 0));
-        assert!(zero[64..].iter().all(|&row| row == 199));
-
-        // The composed picture. `K0` was measured on exactly this content:
-        // frame 0 is the two-band fingerprint, and frame f's first row that
-        // differs from row 0 is ceil(64/(f+1)) through the opening frames.
+        // Frame f is generated row 0 above ceil(64/(f+1)) and row 199 below,
+        // through the first four frames: the fingerprint the capture's first
+        // frame was found by (`twist.md`).
         let (mut engine, mut part, mut frame) = start();
         for part_frame in 0..4u32 {
             engine.tick(&mut part, &mut frame);
@@ -780,9 +712,5 @@ mod tests {
                 assert_eq!(frame.row(y), &want[..], "frame {part_frame}, row {y}");
             }
         }
-        assert_eq!(rows(0)[0], 0);
-        assert_eq!(rows(0)[63], 0);
-        assert_eq!(rows(0)[64], 199);
-        assert_eq!(rows(0)[199], 199);
     }
 }

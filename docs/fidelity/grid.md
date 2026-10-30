@@ -81,14 +81,14 @@ with the cycle; only the curve colours and the unshifted tail do
 `the_line_blit_is_the_committed_generated_code` is the oracle: it reads
 `upstream/SecondReality/GRID/LINEBLIT.INC`, pairs its 357 routines with the generator's y = −8..=8,
 x = −10..=10 order, and checks that each routine's 16-bit `di` stores are exactly the pixels the
-port's blit XORs for that delta. `the_line_blit_is_the_generated_xor_bresenham` is an independent
-`DOLINE.C` translation.
+port's blit XORs for that delta.
 
 Every out-of-table delta draws the dispatch table's default, `lblt_54b56`, the line to (−10,−8)
 (`ASM.ASM:213-217`, `LINEBLIT.INC:2-4`; `bugs.md` §24). With the measured tables two such segments
 occur: **segment 746 of every iteration has dy = 56** (the y waveform is static), and from
 **iteration 24** the cyclic seam segment `k = 1023 − i` has dx = 82 (`sinus1[0] − sinus1[1023]`). Both
-draw the (−10,−8) fill word once per line in the current colour. The y key's dropped bit 7 is never
+draw the (−10,−8) fill word once per line in the current colour
+(`an_out_of_table_delta_draws_the_fill_word`). The y key's dropped bit 7 is never
 reached: the static waveform's adjacent deltas are −7..=56
 (`the_static_y_waveform_never_reaches_the_dropped_bit`).
 

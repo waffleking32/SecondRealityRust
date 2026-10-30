@@ -23,7 +23,7 @@ use sr_engine::Palette;
 use crate::parts::{asset, load_image, mode_view};
 
 /// The registry name (`parts::registry`).
-pub const GRID_NAME: &str = "grid";
+const GRID_NAME: &str = "grid";
 
 /// `EYE4.UH` in the port's curated asset tree — byte-identical to
 /// `GRID/EYE4.UH`, which `P.EXE` links as `_EYE.OBK`.
@@ -58,7 +58,7 @@ const INITIAL_D: u16 = 0x07FE;
 /// truncated toward zero. The expression's left-to-right order is the
 /// compiled one (`MAIN.C`'s own doubles).
 #[allow(clippy::approx_constant)] // the source's own 13-digit literal, not std's PI
-pub fn sin1() -> [i16; 1024] {
+fn sin1() -> [i16; 1024] {
     std::array::from_fn(|a| {
         let f = (a as f64 * 3.141_592_653_589_f64) * 2.0 / 1024.0;
         (f.sin() * 256.0) as i16
@@ -66,10 +66,9 @@ pub fn sin1() -> [i16; 1024] {
 }
 
 /// `sinus1` and `sinus2` from a chosen initial `d`, with the source's 16-bit
-/// wrapping cursor adds, `>> 3 & 1023` indices and truncating division.
-///
-/// Published so the measured `d0` can be compared against the object's own
-/// static prediction (`0x116`) in a test, not fitted.
+/// wrapping cursor adds, `>> 3 & 1023` indices and truncating division. The
+/// parameter is what lets a test compare the measured `d0` with the object's
+/// own prediction (`0x116`).
 fn sinus_tables(d0: u16) -> ([i16; 1024], [i16; 1024]) {
     sinus_tables_from(&sin1(), d0)
 }
@@ -101,29 +100,28 @@ fn sinus_tables_from(s: &[i16; 1024], d0: u16) -> ([i16; 1024], [i16; 1024]) {
 }
 
 /// The x waveform: `MAIN.C:51-58`, with `d0 = 0x07FE`.
-pub fn sinus1() -> [i16; 1024] {
+fn sinus1() -> [i16; 1024] {
     sinus_tables(INITIAL_D).0
 }
 
 /// The y waveform: `MAIN.C:59-62`, static because `d` is reset to 0 at the top
 /// of every frame (`MAIN.C:162-163`).
-pub fn sinus2() -> [i16; 1024] {
+fn sinus2() -> [i16; 1024] {
     sinus_tables(INITIAL_D).1
 }
 
 /// The eye picture and its palette, after `MAIN.C:141`'s shift.
-#[derive(Clone)]
-pub struct Eye {
+struct Eye {
     /// The file's 768-byte six-bit palette, at file offset 16, verbatim.
-    pub palette: [u8; 768],
+    palette: [u8; 768],
     /// The 64,000 image bytes with the source's shift bound applied.
-    pub pixels: [u8; SCREEN_BYTES],
+    pixels: [u8; SCREEN_BYTES],
 }
 
 /// Load `EYE4.UH` through the port's Origin `Uh` decoder and apply the
 /// source's shift exactly: image bytes `0..63,900` become `(v << 3) & 0xff`,
 /// the last 100 (row 199, x=220..319) stay raw.
-pub fn load_eye() -> Result<Eye, PartError> {
+fn load_eye() -> Result<Eye, PartError> {
     let image = load_image(GRID_NAME, EYE_PATH)?;
     if image.width() != SCREEN_WIDTH as u16 || image.height() != SCREEN_HEIGHT as u16 {
         return Err(PartError::new(GRID_NAME, format!(
@@ -148,40 +146,23 @@ pub fn load_eye() -> Result<Eye, PartError> {
 
 /// The three palettes (`MAIN.C:95-126`), six bits per channel.
 ///
-/// `eye_palette` is the eye's 768-byte palette as [`Eye::palette`] holds it;
-/// the source's `eye[16 + (x >> 3) * 3 + channel]` is therefore group `x >> 3`'s
-/// three bytes at `3 * (x >> 3)` here. Only palette entries 0..31 are read, so
-/// each group of eight indices shares a base colour and its low three bits
-/// choose a red rank. Palette 0 adds +40/+20/+10 for bits 0/2/1, palette 1 for
-/// bits 1/0/2, palette 2 for bits 2/1/0; the sum clamps at 63. Green and blue
-/// are the base, never above 15.
-pub fn palettes(eye_palette: &[u8; 768]) -> [[u8; 768]; 3] {
+/// Entry `x` is group `x >> 3`'s base colour from the eye's palette (only
+/// entries 0..31 are read), its red raised by +40/+20/+10 for three of its low
+/// bits, in an order each palette rotates, and clamped at 63.
+fn palettes(eye_palette: &[u8; 768]) -> [[u8; 768]; 3] {
+    // The bits carrying +40, +20 and +10 in each palette.
+    const RANKS: [[usize; 3]; 3] = [[1, 4, 2], [2, 1, 4], [4, 2, 1]];
     let mut out = [[0u8; 768]; 3];
-    for (plane, palette) in out.iter_mut().enumerate() {
+    for (palette, ranks) in out.iter_mut().zip(RANKS) {
         for x in 0..256 {
             let at = (x >> 3) * 3;
-            let base = [
-                eye_palette[at] / 4,
-                eye_palette[at + 1] / 4,
-                eye_palette[at + 2] / 4,
-            ];
-            let red = match plane {
-                0 => {
-                    (if x & 1 != 0 { 40 } else { 0 })
-                        + (if x & 4 != 0 { 20 } else { 0 })
-                        + (if x & 2 != 0 { 10 } else { 0 })
-                }
-                1 => {
-                    (if x & 2 != 0 { 40 } else { 0 })
-                        + (if x & 1 != 0 { 20 } else { 0 })
-                        + (if x & 4 != 0 { 10 } else { 0 })
-                }
-                _ => {
-                    (if x & 4 != 0 { 40 } else { 0 })
-                        + (if x & 2 != 0 { 20 } else { 0 })
-                        + (if x & 1 != 0 { 10 } else { 0 })
-                }
-            };
+            let base = [eye_palette[at] / 4, eye_palette[at + 1] / 4, eye_palette[at + 2] / 4];
+            let red: u8 = ranks
+                .iter()
+                .zip([40, 20, 10])
+                .filter(|(bit, _)| x & **bit != 0)
+                .map(|(_, add)| add)
+                .sum();
             palette[x * 3] = (base[0] + red).min(63);
             palette[x * 3 + 1] = base[1];
             palette[x * 3 + 2] = base[2];
@@ -190,60 +171,39 @@ pub fn palettes(eye_palette: &[u8; 768]) -> [[u8; 768]; 3] {
     out
 }
 
-/// The mode-13h screen pair: the visible frame in `vram`, mirrored into
-/// `bufdata`. Every generated routine reads and writes both (`mov al,gs:[di];
-/// xor al,dl; mov gs:[di],al; mov es:[di],al`), so they stay in lockstep.
-pub struct LineBlitter {
+/// The mode-13h screen. Every generated routine reads `bufdata` and writes
+/// the result to both it and video memory (`mov al,gs:[di]; xor al,dl; mov
+/// gs:[di],al; mov es:[di],al`), so the two are always equal and the port
+/// keeps one.
+struct LineBlitter {
     vram: [u8; BUFFER_BYTES],
-    buf: [u8; BUFFER_BYTES],
-}
-
-impl Default for LineBlitter {
-    fn default() -> Self {
-        LineBlitter::new()
-    }
 }
 
 impl LineBlitter {
-    pub fn new() -> LineBlitter {
-        LineBlitter {
-            vram: [0; BUFFER_BYTES],
-            buf: [0; BUFFER_BYTES],
-        }
+    fn new() -> LineBlitter {
+        LineBlitter { vram: [0; BUFFER_BYTES] }
     }
 
-    /// `MAIN.C:142`/`:156`: both buffers start as the same shifted eye.
+    /// `MAIN.C:142`/`:156`: both buffers start as the shifted eye.
     fn set_image(&mut self, image: &[u8; SCREEN_BYTES]) {
         self.vram[..SCREEN_BYTES].copy_from_slice(image);
-        self.buf[..SCREEN_BYTES].copy_from_slice(image);
     }
 
-    /// One generated routine, selected the way `asmloop1` selects it: by the
-    /// **low bytes** of `(y1−y0, x1−x0)` (`ASM.ASM:183-192`). `sub cl,bl`
-    /// keeps only the y delta's low byte, and `mov bh,cl; add bx,bx` doubles
-    /// the 16-bit key: the doubling drops bit 7 of that byte, so the table's y
-    /// key is the 7-bit signed `dy_low & 0x7F` — low bytes `0x78..=0x7F`
-    /// select the negative-dy routines (−8..−1) and `0x80..=0x88` the positive
-    /// ones (0..8). This signed-byte range test agrees outside that band and
-    /// picks the fill word inside it; the static y waveform's adjacent deltas
-    /// are −7..=56, so no segment reaches it
-    /// (`the_static_y_waveform_never_reaches_the_dropped_bit`). The table
-    /// covers dx ∈ −10..=10, dy ∈ −8..=8; every other entry of the 64 KB
-    /// dispatch table is the fill word `lblt_54b56`, the line to (−10,−8),
-    /// because
-    /// `lineblit_init` reads the first table entry (`ASM.ASM:213-217`,
-    /// `LINEBLIT.INC:2-4`). The endpoint is not plotted (`DOLINE.C:64` marks
-    /// it 1 and the emitter ignores it); the start is.
-    pub fn line(&mut self, x0: i16, y0: i16, x1: i16, y1: i16, colour: u8) {
+    /// One generated routine, selected as `asmloop1` selects it: by the
+    /// **low bytes** of `(y1−y0, x1−x0)` (`ASM.ASM:183-192`). The table covers
+    /// dx −10..=10, dy −8..=8; every other entry is `lineblit_init`'s fill
+    /// word, the line to (−10,−8) (`ASM.ASM:213-217`, `LINEBLIT.INC:2-4`). The
+    /// key's doubling drops bit 7 of the y byte, which differs from this
+    /// signed-byte test only for low bytes `0x78..=0x88`, which no segment
+    /// reaches (`the_static_y_waveform_never_reaches_the_dropped_bit`). The
+    /// start is plotted, the endpoint not (`DOLINE.C:64`).
+    fn line(&mut self, x0: i16, y0: i16, x1: i16, y1: i16, colour: u8) {
         let dx = x1.wrapping_sub(x0);
         let dy = y1.wrapping_sub(y0);
         // `di = rows[Y1*2] + X1` in 16-bit arithmetic (`ASM.ASM:183-187`).
         let base = (y0 as u16)
             .wrapping_mul(SCREEN_WIDTH as u16)
             .wrapping_add(x0 as u16);
-        // The source's y key drops bit 7 (`ASM.ASM:189-191`); the reachable
-        // deltas never enter the band where that matters (the doc comment
-        // above and `the_static_y_waveform_never_reaches_the_dropped_bit`).
         let (key_dx, key_dy) = match ((dx as u8) as i8, (dy as u8) as i8) {
             (dx, dy) if (-10..=10).contains(&dx) && (-8..=8).contains(&dy) => (dx, dy),
             _ => (-10, -8),
@@ -289,7 +249,6 @@ impl LineBlitter {
     fn plot(&mut self, base: u16, x: i32, y: i32, colour: u8) {
         let at = (i32::from(base) + x + y * SCREEN_WIDTH) as u16 as usize;
         self.vram[at] ^= colour;
-        self.buf[at] ^= colour;
     }
 }
 
@@ -312,18 +271,12 @@ pub struct Grid {
     sinus2: [i16; 1024],
     /// The **source loop's** iteration counter. The port's composed frame `j`
     /// is source iteration `j + 1`: iteration 0 is the start-up transition
-    /// frame (reference 352), which Task 2's `K0` excludes, so `init` performs
-    /// it and the first composed frame is iteration 1 = reference 353.
+    /// frame (reference 352), which `init` performs, so the first composed
+    /// frame is iteration 1 = reference 353 (`grid.md`).
     iteration: u32,
     /// The three plane slots (`xyzdata`'s +8/+16/+24), each holding the line
     /// drawn three frames ago in its plane.
     slots: [Option<Vec<Segment>>; 3],
-}
-
-impl Default for Grid {
-    fn default() -> Self {
-        Grid::new()
-    }
 }
 
 impl Grid {
@@ -578,291 +531,85 @@ mod tests {
     }
 
     #[test]
-    fn the_buffers_start_as_the_same_shifted_eye() {
-        let e = eye();
-        let mut blitter = LineBlitter::new();
-        blitter.set_image(&e.pixels);
-        assert_eq!(&blitter.vram[..SCREEN_BYTES], &e.pixels[..]);
-        assert_eq!(&blitter.buf[..SCREEN_BYTES], &e.pixels[..]);
-        assert_eq!(
-            &blitter.vram[SCREEN_BYTES..],
-            &[0u8; BUFFER_BYTES - SCREEN_BYTES][..]
-        );
-        assert_eq!(blitter.vram, blitter.buf);
-
-        // Every draw and erase keeps them in lockstep
-        // (`mov gs:[di],al; mov es:[di],al`).
-        for (dx, dy) in [(-10, -8), (0, 0), (7, 3), (82, 56), (-4, -8)] {
-            blitter.line(160, 100, 160 + dx, 100 + dy, 0x2A);
-            assert_eq!(blitter.vram, blitter.buf);
-        }
-    }
-
-    #[test]
     fn the_three_palettes_are_the_sources_own() {
+        // Entry `x` is group `x >> 3`'s base; the three bits carry +40/+20/+10
+        // in the orders bit0/bit2/bit1, bit1/bit0/bit2 and bit2/bit1/bit0.
         let e = eye();
         let p = palettes(&e.palette);
-        for (plane, palette) in p.iter().enumerate() {
-            for group in 0..32u16 {
-                let x = (group * 8) as usize;
-                let at = group as usize * 3;
-                let base = [
-                    e.palette[at] / 4,
-                    e.palette[at + 1] / 4,
-                    e.palette[at + 2] / 4,
-                ];
-                // `x & 7 == 0` is the same entry in all three palettes.
-                assert_eq!(
-                    &palette[x * 3..x * 3 + 3],
-                    &base,
-                    "plane {plane} group {group}"
-                );
-            }
-        }
-        for palette in &p {
+        let adds: [[u8; 8]; 3] = [
+            [0, 40, 10, 50, 20, 60, 30, 70],
+            [0, 20, 40, 60, 10, 30, 50, 70],
+            [0, 10, 20, 30, 40, 50, 60, 70],
+        ];
+        for (palette, adds) in p.iter().zip(adds) {
             for x in 0..256usize {
                 let at = (x >> 3) * 3;
-                let base_g = e.palette[at + 1] / 4;
-                let base_b = e.palette[at + 2] / 4;
-                assert_eq!(palette[x * 3 + 1], base_g, "green at {x}");
-                assert_eq!(palette[x * 3 + 2], base_b, "blue at {x}");
-                assert!(palette[x * 3 + 1] <= 15 && palette[x * 3 + 2] <= 15);
-                assert!(palette[x * 3] <= 63);
+                let base = [e.palette[at] / 4, e.palette[at + 1] / 4, e.palette[at + 2] / 4];
+                let red = (base[0] + adds[x & 7]).min(63);
+                assert_eq!(&palette[x * 3..x * 3 + 3], &[red, base[1], base[2]], "entry {x}");
+                assert!(base[1] <= 15 && base[2] <= 15);
             }
         }
-        // The ranks: bit0 / bit2 / bit1 carry +40 / +20 / +10 in palette 0,
-        // bit1 / bit0 / bit2 in palette 1, bit2 / bit1 / bit0 in palette 2.
-        for group in 0..32usize {
-            // The same low bits rank differently per palette.
-            assert_eq!(
-                p[0][(group * 8 + 1) * 3],
-                (e.palette[group * 3] / 4 + 40).min(63)
-            );
-            assert_eq!(
-                p[1][(group * 8 + 1) * 3],
-                (e.palette[group * 3] / 4 + 20).min(63)
-            );
-            assert_eq!(
-                p[2][(group * 8 + 1) * 3],
-                (e.palette[group * 3] / 4 + 10).min(63)
-            );
-            assert_eq!(
-                p[0][(group * 8 + 2) * 3],
-                (e.palette[group * 3] / 4 + 10).min(63)
-            );
-            assert_eq!(
-                p[1][(group * 8 + 2) * 3],
-                (e.palette[group * 3] / 4 + 40).min(63)
-            );
-            assert_eq!(
-                p[2][(group * 8 + 2) * 3],
-                (e.palette[group * 3] / 4 + 20).min(63)
-            );
-            assert_eq!(
-                p[0][(group * 8 + 4) * 3],
-                (e.palette[group * 3] / 4 + 20).min(63)
-            );
-            assert_eq!(
-                p[1][(group * 8 + 4) * 3],
-                (e.palette[group * 3] / 4 + 10).min(63)
-            );
-            assert_eq!(
-                p[2][(group * 8 + 4) * 3],
-                (e.palette[group * 3] / 4 + 40).min(63)
-            );
-            // All three bits: +70 clamps at 63 in every palette.
-            for palette in &p {
-                assert_eq!(palette[(group * 8 + 7) * 3], 63);
-            }
-        }
-        // The entries the two buffers' shifted image actually addresses are
-        // multiples of 8 (groups 16..31), so the background is identical in
-        // all three palettes; the unshifted last 100 bytes use group 3.
-        assert_eq!(p[0][128 * 3..128 * 3 + 3], p[1][128 * 3..128 * 3 + 3]);
-        assert_eq!(p[0][128 * 3..128 * 3 + 3], p[2][128 * 3..128 * 3 + 3]);
-        assert_eq!(
-            &p[1][24 * 3..24 * 3 + 3],
-            &[
-                e.palette[3 * 3] / 4,
-                e.palette[3 * 3 + 1] / 4,
-                e.palette[3 * 3 + 2] / 4
-            ]
-        );
-        // x = 24 is `x & 7 == 0`, so it is the group base in all three.
-        assert_eq!(p[0][24 * 3..24 * 3 + 3], p[1][24 * 3..24 * 3 + 3]);
-        assert_eq!(p[1][24 * 3..24 * 3 + 3], p[2][24 * 3..24 * 3 + 3]);
     }
 
     // ------------------------------------------------------- line blitter --
 
-    /// `DOLINE.C:13-59`'s `line()`, translated directly: the pixels plotted
-    /// from the start to **before** the endpoint, in the generator's own
-    /// arithmetic (`d = -xd/2` with C truncation, the `xd > yd` branch).
-    fn doline(dx: i32, dy: i32) -> Vec<(i32, i32)> {
-        let xds = if dx < 0 { -1 } else { 1 };
-        let yds = if dy < 0 { -1 } else { 1 };
-        let (xd, yd) = (dx.abs(), dy.abs());
-        let (mut x, mut y) = (0, 0);
-        let mut out = Vec::new();
-        if xd > yd {
-            let mut d = -xd / 2;
-            while x != dx || y != dy {
-                out.push((x, y));
-                x += xds;
-                d += yd;
-                if d > 0 {
-                    d -= xd;
-                    y += yds;
-                }
-            }
-        } else {
-            let mut d = -yd / 2;
-            while x != dx || y != dy {
-                out.push((x, y));
-                y += yds;
-                d += xd;
-                if d > 0 {
-                    d -= yd;
-                    x += xds;
-                }
-            }
-        }
-        out
-    }
-
-    fn base_of(x0: i16, y0: i16) -> u16 {
-        (y0 as u16).wrapping_mul(320).wrapping_add(x0 as u16)
-    }
-
-    /// The direct DOLINE pixels XORed into a zero buffer at `base`.
-    fn direct(base: u16, dx: i32, dy: i32, colour: u8) -> [u8; BUFFER_BYTES] {
-        let mut v = [0u8; BUFFER_BYTES];
-        for (mx, my) in doline(dx, dy) {
-            let at = ((base as i32) + mx + my * 320) as u16 as usize;
-            v[at] ^= colour;
-        }
-        v
+    /// The pixels one line from `(x0, y0)` sets.
+    fn pixels_of(x0: i16, y0: i16, x1: i16, y1: i16, colour: u8) -> [u8; BUFFER_BYTES] {
+        let mut blit = LineBlitter::new();
+        blit.line(x0, y0, x1, y1, colour);
+        blit.vram
     }
 
     #[test]
-    fn the_line_blit_is_the_generated_xor_bresenham() {
-        // The whole filled table, dx −10..=10 × dy −8..=8, at a start that is
-        // never near an edge.
-        let (x0, y0) = (160i16, 100i16);
-        for dy in -8..=8 {
-            for dx in -10..=10 {
-                let mut blit = LineBlitter::new();
-                blit.line(x0, y0, x0 + dx, y0 + dy, 0x5A);
-                let expected = direct(base_of(x0, y0), i32::from(dx), i32::from(dy), 0x5A);
-                assert_eq!(blit.vram, expected, "dx {dx} dy {dy}");
-                assert_eq!(blit.buf, expected, "dx {dx} dy {dy}");
-            }
-        }
+    fn an_out_of_table_delta_draws_the_fill_word() {
+        // The start is plotted and the endpoint is not.
+        let blit = pixels_of(10, 10, 14, 13, 1);
+        assert_eq!(blit[10 + 10 * 320], 1);
+        assert_eq!(blit[14 + 13 * 320], 0);
 
-        // The endpoint is excluded and the start included; the next segment's
-        // start is this endpoint, so a polyline has no double-drawn joint.
-        assert!(doline(4, 3).contains(&(0, 0)));
-        assert!(!doline(4, 3).contains(&(4, 3)));
-        let mut blit = LineBlitter::new();
-        blit.line(10, 10, 14, 13, 1);
-        assert_eq!(blit.vram[base_of(10, 10) as usize], 1);
-        assert_eq!(blit.vram[base_of(14, 13) as usize], 0);
-        // The dot entry plots one pixel and the (0,0) entry plots none.
-        assert_eq!(doline(1, 0).len(), 1);
-        assert!(doline(0, 0).is_empty());
-        // The fill word is the (−10,−8) line, not the dot and not nothing.
-        assert_eq!(doline(-10, -8).len(), 10);
+        // Selection is by the deltas' **low bytes**: a 266-pixel x delta is
+        // the (10,0) routine, and an out-of-table delta is the (−10,−8) fill
+        // word (`ASM.ASM:213-217`).
+        assert_eq!(pixels_of(0, 0, 266, 0, 1), pixels_of(0, 0, 10, 0, 1));
+        assert_eq!(pixels_of(0, 0, 82, 0, 1), pixels_of(0, 0, -10, -8, 1));
 
-        // Negative directions, edges, a bottom-row crossing and 16-bit
-        // address wrap.
-        for &(sx, sy) in &[(0i16, 0i16), (319, 199), (2, 0), (300, 190), (0, 197)] {
-            for &(dx, dy) in &[
-                (-10, -8),
-                (10, 8),
-                (-7, 3),
-                (9, -6),
-                (0, 8),
-                (10, 0),
-                (-1, -1),
-                (4, 3),
-            ] {
-                let mut blit = LineBlitter::new();
-                blit.line(sx, sy, sx + dx, sy + dy, 0x33);
-                let expected = direct(base_of(sx, sy), i32::from(dx), i32::from(dy), 0x33);
-                assert_eq!(blit.vram, expected, "start {sx},{sy} delta {dx},{dy}");
-                assert_eq!(blit.buf, expected, "start {sx},{sy} delta {dx},{dy}");
-            }
-        }
-
-        // Selection is by the **low byte** of the deltas, not a signed range:
-        // a 266-pixel x delta selects the (10,0) routine...
-        let mut blit = LineBlitter::new();
-        blit.line(0, 0, 266, 0, 1);
-        assert_eq!(blit.vram, direct(0, 10, 0, 1));
-        // ...and an out-of-domain delta uses the fill word, not the dot.
-        let mut blit = LineBlitter::new();
-        blit.line(0, 0, 82, 0, 1);
-        assert_eq!(blit.vram, direct(0, -10, -8, 1));
-        assert_ne!(blit.vram, direct(0, 1, 0, 1));
-
-        // The measured out-of-domain segments. i = 746's y delta is 56 in
-        // every iteration (the y waveform is static), so every frame looks up
-        // an unfilled word.
+        // Segment 746's y delta is 56 in every iteration (the y waveform is
+        // static), and from iteration 24 the seam segment `k = 1023 − i` has
+        // dx = sinus1[0] − sinus1[1023] = 82: both draw the fill word.
         let s1 = sinus1();
         let s2 = sinus2();
         assert_eq!(s2[747] - s2[746], 56);
+        assert_eq!(s1[0] - s1[1023], 82);
         for i in 0..1024usize {
             let xa = s1[(i + 746) & 1023] + 160;
             let xb = s1[(i + 747) & 1023] + 160;
-            let ya = s2[746] + 100;
-            let yb = s2[747] + 100;
-            assert_eq!(yb - ya, 56);
-            let mut blit = LineBlitter::new();
-            blit.line(xa, ya, xb, yb, 2);
-            assert_eq!(blit.vram, direct(base_of(xa, ya), -10, -8, 2), "i = {i}");
+            let (ya, yb) = (s2[746] + 100, s2[747] + 100);
+            assert_eq!(pixels_of(xa, ya, xb, yb, 2), pixels_of(xa, ya, xa - 10, ya - 8, 2), "i = {i}");
         }
-        // The cyclic seam: from source iteration 24 the line contains segment
-        // k = 1023 − i, whose dx is sinus1[0] − sinus1[1023] = 82.
-        assert_eq!(s1[0] - s1[1023], 82);
         for i in 24..1024usize {
             let k = 1023 - i;
             let xa = s1[(i + k) & 1023] + 160;
             let xb = s1[(i + k + 1) & 1023] + 160;
-            let ya = s2[k] + 100;
-            let yb = s2[k + 1] + 100;
-            assert_eq!(xb - xa, 82, "seam at i = {i}");
-            let mut blit = LineBlitter::new();
-            blit.line(xa, ya, xb, yb, 4);
-            assert_eq!(
-                blit.vram,
-                direct(base_of(xa, ya), -10, -8, 4),
-                "seam i = {i}"
-            );
+            let (ya, yb) = (s2[k] + 100, s2[k + 1] + 100);
+            assert_eq!(pixels_of(xa, ya, xb, yb, 4), pixels_of(xa, ya, xa - 10, ya - 8, 4), "seam i = {i}");
         }
 
-        // Two different colours crossing stay lit: the visible mask is the
-        // union of the self-XOR lines (1 ^ 2 = 3), not an XOR of masks. The
-        // deltas stay inside the table (|dy| ≤ 8); they cross at (15, 14).
+        // Two colours crossing stay lit (1 ^ 2 = 3); one colour twice
+        // cancels, a curve's self-intersection.
         let mut blit = LineBlitter::new();
         blit.line(10, 10, 20, 18, 1);
         blit.line(10, 18, 20, 10, 2);
         assert_eq!(blit.vram[15 + 14 * 320], 3);
-        assert_eq!(blit.buf, blit.vram);
-        // The same colour twice cancels, which is a curve's self-intersection.
         let mut blit = LineBlitter::new();
         blit.line(10, 10, 20, 18, 1);
         blit.line(10, 18, 20, 10, 1);
         assert_eq!(blit.vram[15 + 14 * 320], 0);
     }
 
-    /// The dispatch's dropped bit. `GRID/ASM.ASM:183-191` keeps the y delta's
-    /// **low byte** and then doubles the 16-bit key (`mov bh,cl; add bx,bx`),
-    /// discarding bit 7 of that byte: the table's y key is the 7-bit signed
-    /// `dy_low & 0x7F`, so low bytes `0x78..=0x7F` select the negative-dy
-    /// routines (−8..−1) and `0x80..=0x88` the positive ones (0..8), where the
-    /// port's signed-byte range test would take the fill word. The static y
-    /// waveform never reaches that band: its 1,000 adjacent deltas are
-    /// −7..=56, measured here rather than assumed.
+    /// `ASM.ASM:183-191` doubles the key and drops bit 7 of the y delta's low
+    /// byte; the static y waveform's 1,000 adjacent deltas (−7..=56) never
+    /// reach the band where that differs from a signed-byte test.
     #[test]
     fn the_static_y_waveform_never_reaches_the_dropped_bit() {
         let s2 = sinus2();
