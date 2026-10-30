@@ -718,7 +718,7 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // 5723**, where the part's own `_dis_setmframe(0)` (`PLZPART/PLZ.C:69`) zeroes
         // `_np_zframe`; the natural advance over the `254` at MUSIC1 order 61 is what
         // lands 62:0 zplus 2. The seek starts at 62, the order in force; the entry run's
-        // head start and its two gates are the part's (`parts/plzpart.rs`), because a
+        // head start and its two gates are the part's (`plzpart::MUSIC_PRE_ROLL`), because a
         // seek cannot cross the marker that is now in the past.
         "plzpart" => Some((ModuleId::Music1, 62)),
         // LNS&ZOOM is block 3's second part, after MNTSCRL. The filed block-3 trace

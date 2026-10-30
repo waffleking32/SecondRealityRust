@@ -264,9 +264,9 @@ mod tests {
                             && before.iter().any(|acc| acc & 0x00FF != 0),
                         "the first fade left colour and fraction bytes to tell apart"
                     );
-                    for (at, (old, new)) in before.iter().zip(state.fadepal.iter()).enumerate() {
-                        assert_eq!(*new, old & 0x00FF, "accumulator {at}: colour zeroed, fraction kept");
-                    }
+                }
+                for (at, (old, new)) in before.iter().zip(state.fadepal.iter()).enumerate() {
+                    assert_eq!(*new, old & 0x00FF, "switch {index}, accumulator {at}: colour zeroed, fraction kept");
                 }
             }
             if exit.is_none() && part.phase == Phase::PlasmaEndWait {

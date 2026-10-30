@@ -24,10 +24,11 @@
 //! first wait is the release's measured 71 ticks, not the tree's `musplus >= 0`
 //! (A17), and `scp` stops at the release's 640, not the tree's 639 (D24).
 //!
-//! **Preserved** (`bugs.md` §15): the bias loop's one-byte overrun (`:119`); the
-//! forced-black bands and their ramp back; the exact `== -11` cue (`:200`); the
-//! dead `veke` bound (`inc(frame)` is commented out, `:221`). Measurements:
-//! `docs/fidelity/mntscrl.md`.
+//! **Preserved** (`bugs.md` §15): the forced-black bands and their ramp back;
+//! the exact `== -11` cue (`:200`); the dead `veke` bound (`inc(frame)` is
+//! commented out, `:221`). The bias loop's one-byte overrun into `font[0]`
+//! (`:119`) is a no-op, because the font is still zero, and is omitted.
+//! Measurements: `docs/fidelity/mntscrl.md`.
 
 use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};

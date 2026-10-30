@@ -65,8 +65,9 @@ and the lists' column count and positions. The largest destination offset in any
 
 - `O2.SCI` and `HILLBACK.CLX` are read through the RIX3 decoder, not by raw `seek`s; the
   payloads are the bytes at offsets 10 and 778.
-- The `hback` rebase (`:121`) is not performed; the rebased layout is kept as data
-  (`BACKGROUND_LEN`).
+- The `hback` rebase (`:121`) is not performed: `background` is the picture's 64,000 bytes,
+  and `pos_list` refuses any offset past them, so the 778-byte tail the rebase leaves standing
+  is never read (the largest offset is 63,870).
 - The fades, the ramp, the shift and the additive blit are the source's arithmetic.
 
 ## 6. The music and the release's first wait
@@ -114,7 +115,7 @@ D24 step 3's single-constant branch.
 
 - **The `fbuf` overrun** (`:119`): the bias loop covers index 19,841, which in the original is
   `font[0]`, still zero, so the increment is a no-op; the port biases the array alone
-  (`apply_bias`, `the_bias_adds_128_to_non_zero_bytes_and_wraps`).
+  (`apply_bias`).
 - **The dead `veke` bound** (`:3`, `:221-224`): `inc(frame)` is commented out, so
   `frame = veke` never fires; the port has no `frame` counter and runs until the cue.
 - **The forced-black bands and their ramp** (`:126-127`, `:146-147`, `:165-178`) are kept

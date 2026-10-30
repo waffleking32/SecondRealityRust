@@ -363,8 +363,8 @@ exact.
 (`font[0]` in the original); the release's `scp` bound of 640 reads exactly that byte for row 30
 (D24, `mntscrl.md` §7). **Where.** `FOREST/READ2.PAS:119` (`:88` is the tree's 639). **Frame.**
 2300 (exact under 640; the tree's 639 leaves 146 pixels off). **Tests.**
-`the_bias_adds_128_to_non_zero_bytes_and_wraps`,
-`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`.
+`the_releases_scp_bound_is_sixty_forty_where_the_tree_says_639`. The 19,841 increment is a
+no-op and the port omits it (`mntscrl.md` §8).
 
 ### 15.2 The forced-black bands and their ramp back
 
