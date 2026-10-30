@@ -644,7 +644,7 @@ index 209 less 15): `cargo xtask rediff --only pam`. The port's plane is `OUT.AN
 
 `EXIT_PALETTE_RELEASE = 4` is the release's `plz()` (`cmp word [0192h],4` at image `0x1181c`, where
 `PLZ.C:94` has 5), pinned by `the_release_exit_index_is_the_images` and
-`the_release_exit_index_is_the_measured_one` (`plzpart.md` §10).
+`the_plasma_switches_and_exits_on_the_reference_ticks` (`plzpart.md` §10).
 
 ## A23 — PLZPART: the cube's four band frames keep a palette-timing residue
 
@@ -675,8 +675,7 @@ the original's CPU time.
 are `reference/parts/plzpart/band/`, taken by `cargo xtask reference capture --arg 3 --boot autoexec
 --keys "KBD_left KBD_enter" --cycles 30000 --frames 8400,8450,8500,8600,8700,8800 --out
 reference/parts/plzpart/band`): **340 / 24 / 0 / 0 / 148 / 4** pixels at band 8400 / 8450 / 8500 /
-8600 / 8700 / 8800, and **0** at the cube keyframes 8500 and 9500
-(`cargo test --release -p secondreality --test plzpart the_cube_keyframes_match_the_reference`).
+8600 / 8700 / 8800, and **0** at the cube keyframes 8500 and 9500.
 All 516 band pixels are painted on both sides, at a channel delta of at most 9,
 in row runs on one face. Inside those frames the reference shows one colour index in two colours
 (24 of the port's indices at 8400, 18 at 8700), so its palette changed while the frame was read. The
@@ -1748,4 +1747,4 @@ can see them, and two are not on the shipped path.
 | TUNNELI's "patched y-base" | bit-identical; what `TUN10.PAS` patches is the plot's colour immediate (`:168` `mov byte ptr cs:[@c+3],al`, the plot at `:187`), not a y-base; the port passes `bbc` as a variable | `tunneli.md` §5 |
 | `GLENZ/VEC.ASM`'s matrix-in-immediates | bit-identical: state only, held in variables | `glenz.md` §5; rediff's `glenz` entry (1499 at 0) |
 | `LENS/ASM.ASM`'s patched addressing | bit-identical: the patched displacement table is evaluated as a table | `the_rotazoomer_composes_160_samples_each_shown_twice_and_100_rows_twice`; `the_forehead_asset_difference_is_the_whole_residual` (A25) |
-| PLZPART's "jump table" | bit-identical; `setplzparas` (`ASMYT.ASM:74-95`) patches four table bases into `plzline`'s instructions (the placeholders `0xC100`…`0xC400`, `:46-61`), not a jump table; the port evaluates the patched index expression over the map's flat segment | `the_table_bases_are_the_maps_not_the_assembly_placeholders`, `the_plasma_line_is_the_assemblers_index_expression` |
+| PLZPART's "jump table" | bit-identical; `setplzparas` (`ASMYT.ASM:74-95`) patches four table bases into `plzline`'s instructions (the placeholders `0xC100`…`0xC400`, `:46-61`), not a jump table; the port evaluates the patched index expression over the map's flat segment | `the_plasma_line_is_the_assemblers_index_expression` |

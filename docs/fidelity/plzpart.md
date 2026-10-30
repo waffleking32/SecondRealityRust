@@ -4,9 +4,10 @@ Sources: `PLZPART/MAIN.C` runs `init_copper(); initvect(); plz(); vect(); close_
 320×400 plasma (`PLZ.C:62-122`) and the textured cube (`VECT.C:110-130`, a 134-row screen shown
 on a 320×200 frame), over `PLZFILL.C`, `PLZA.ASM`, `COPPER.ASM`, `ASMYT.ASM`, `SPLINE.ASM` and
 `TWEAK.ASM`. Assets: seven `.INC` fragments in `assets/PLZPART/` (§1) and the unpacked
-`assets/MAIN/DATA/PLZPART.EXE` image (§5, D49). Port: `bins/secondreality/src/parts/plzpart.rs`
-(`"plzpart"`); the module doc has the data, the plasma, the cube, the copper mapping and the
-preserved bugs. Block 3's third part, after LNS&ZOOM. Run: mapping `boot = 5723 + tick` (§2);
+`assets/MAIN/DATA/PLZPART.EXE` image (§5, D49). Port: `bins/secondreality/src/parts/plzpart/`
+(`"plzpart"`); `mod.rs`'s doc has the map and the preserved bugs, and `tables.rs`, `release.rs`,
+`copper.rs`, `plasma.rs`, `cube.rs` and `raster.rs` have the data, the copper mapping, the two
+screens and the rasteriser. Block 3's third part, after LNS&ZOOM. Run: mapping `boot = 5723 + tick` (§2);
 music MUSIC1 order 62, entry pre-roll 8 polls (§8). Reference: `reference/parts/plzpart/plasma`
 (6000, 7000, 7600), `cube` (8500, 9500) and `band` (8400..8800), all RGB only
 (`reference-indices.md` §13).
@@ -27,8 +28,8 @@ words; `RATA` 1,088 words, 136 control points of 8 (36 written lines plus `REPT 
 release's `buu` has the same 1,088 words; its sine table is 10,240 words.
 
 The table bases are the map's (`PLZPART.MAP:368-369,387,391`), not `ASMYT.ASM:46-61`'s
-placeholders (`the_table_bases_are_the_maps_not_the_assembly_placeholders`); the plasma
-expression is the module doc's (`the_plasma_line_is_the_assemblers_index_expression`). Each row
+placeholders (`tables.rs`'s `MAP_*`); the plasma expression is `plasma.rs`'s module doc
+(`the_plasma_line_is_the_assemblers_index_expression`). Each row
 writes 84 bytes for an 80-byte visible line, so the last 4 land in the 96-byte stride's gap
 (`ASMYT.ASM:41-69`): kept, and invisible.
 
@@ -48,13 +49,14 @@ numbers the same frame from 0. Ticks in this note are manifest indices.
 |---|---|---|
 | 0 | 5723 | the plasma gate (`PLZ.C:68`) passes; `setmframe(0)` |
 | 975, 2010, 2527 | 6698, 7733, 8250 | the timetable's first three switches (`PLZ.C:46`, `getmframe` thresholds 723 / 1491 / 1875; the boots are the trace's `zframe` crossings) |
-| 2592 | 8315 | the plasma exits (`curpal == 4 && cop_drop > 64`, §10) |
+| 2592 | 8315 | the cube's mode set: the plasma's exit test (`curpal == 4 && cop_drop > 64`, §10) fires at 2591 and `PLZ.C:119`'s wait ends here |
 | 2641 | 8364 | the cube's `musplus() >= 13` gate passes (order 68 row 13) |
 | 2642 | 8365 | the cube's first draw |
 | 2777 | 8500 | cube keyframe: `frames` 136, page 4, display start 0x0028 |
 | 3777 | 9500 | cube keyframe |
 
-The switches and exit are asserted by `the_release_exit_index_is_the_measured_one`, the gate by
+The switches and exit are asserted with the real player by
+`the_plasma_switches_and_exits_on_the_reference_ticks`, the gate by
 `the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`. The exit lies in the capture's
 `(8310, 8340]` window. The tree's fourth switch (2259) would be boot 8769, and
 `timetable[4] = 2778` is never reached. The cube's exit,
@@ -87,7 +89,7 @@ tree (the table is its record); A24 carries the argument.
 ## 5. The cube is the release's
 
 The release's camera path, sine table and rotation are read or translated from the unpacked
-image (D49, A23). The module doc and `release_cube` have the mechanism; the facts the reading
+image (D49, A23). `release.rs` and `cube.rs` have the mechanism; the facts the reading
 rests on:
 
 - **The camera path.** `calculate` calls `getspl` as `call far 1389h:1084h` (image `0x12c8a`),
@@ -113,21 +115,21 @@ rests on:
 - **The 134-row screen.** `TWEAK.ASM:31-33` sets CRTC 0x09 = 2 (three scanlines a row, "134 y"),
   `PLZA.ASM:77` clips at 134, and the buffers are 136 rows apart. The release does the same: a
   live probe at boot 8500 read CRTC 0x09 = 2 in 26 of 30 frames (A23 has the command). A 320×200
-  frame shows row ⌊2y/3⌋ (`the_cube_is_a_134_row_screen`, `a_134_row_draw_stays_inside_its_slot`,
+  frame shows row ⌊2y/3⌋ (`a_134_row_draw_stays_inside_its_slot`,
   `the_cube_frame_shows_row_two_y_over_three`).
 - **The texture warp** adds `dd*16` paragraphs, so the sample is `dist1[dd*256 + bx]`
   (`the_texture_warp_shifts_dist1_by_dd_paragraphs`).
 
 ## 6. The copper
 
-The mapping is the identity (the module doc has the table); one tick is one copper frame, and
+The mapping is the identity (`copper.rs`'s module doc has the table); one tick is one copper frame, and
 `pompi` starts at 1 so the 60/61 alternation lines up with the reference
 (`the_split_and_pan_alternate_at_the_reference_parity`; `Split::scanline` is the register plus
 one, `reference-indices.md` §13.2).
 
 ## 7. The cube at the keyframes, and the band corpus
 
-8500 and 9500 are byte-identical (`the_cube_keyframes_match_the_reference`).
+8500 and 9500 are byte-identical (rediff's `plzpart/cube`).
 
 The band corpus is six frames of the close-up, filed for A23:
 
@@ -157,7 +159,8 @@ time.
 - **The entry pre-roll is 8 polls**, on a fresh start. With them the cube's `musplus() >= 13`
   gate passes at manifest 2641 = boot 8364, the frame the published order 68 row 13 first stands
   on, and the manifest reads the trace's **68:46** at boot 8500
-  (`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`, and the cube keyframe test). A
+  (`the_music_pre_roll_lands_the_cube_gate_on_the_reference_tick`,
+`the_cube_keyframe_reads_the_traces_68_46`). A
   nine-poll pre-roll puts the gate a frame early and reads 68:47.
 
 ## 9. The preserved bugs
@@ -177,7 +180,7 @@ the release's 15-bit shift, so the port does not keep it (`bugs.md` §17.4). The
 - **The exit palette index is the release's 4, not the tree's 5** (A22, closed). The tree's
   `curpal == 5` (`PLZ.C:94`, `PLZ.OBJ`'s `cmpw $5`) would fire at boot 8769, past the plasma
   screen, which is gone by 8340. The measured exit is tick 2592 = boot 8315
-  (`the_release_exit_index_is_the_measured_one`), and the release's `plz()` compares `curpal`
+  (`the_plasma_switches_and_exits_on_the_reference_ticks`), and the release's `plz()` compares `curpal`
   (DGROUP `0192h`) with 4 at image `0x1181c` (`the_release_exit_index_is_the_images`).
 - **The cube is the release's** (§5, A23). Both keyframes are byte-identical; four band frames
   keep A23's palette-timing residue.
@@ -199,15 +202,15 @@ the release's 15-bit shift, so the port does not keep it (`bugs.md` §17.4). The
 | `band` | 8400 / 8450 / 8500 / 8600 / 8700 / 8800 | 2677..3077 | 340 / 24 / 0 / 0 / 148 / 4 | A23 |
 
 All RGB. The rows are the `plzpart/*` entries of the rediff table (`xtask/src/rediff/table.rs`);
-`the_plasma_keyframes_are_close_at_the_derived_mapping` bounds the plasma percentages to 0.001
-points. In a full run the part's first frame is a `FULLRUN_SEAMS` row (21,927 in the original,
+`the_plasma_keyframes_are_close_at_the_derived_mapping` asserts the plasma's max channel deltas
+(§4). In a full run the part's first frame is a `FULLRUN_SEAMS` row (21,927 in the original,
 21,928 in the port; A53).
 
 Reproduce:
 
 ```bash
 cargo xtask rediff --only plzpart
-cargo test --release -p secondreality --test plzpart -- --nocapture
+cargo test -p secondreality --test plzpart
 cargo test -p secondreality --bin secondreality parts::plzpart
 ```
 

@@ -748,7 +748,7 @@ path. Where a note holds a counterfactual test, the row names it.
 | LNS&ZOOM | `rotpic90 = back` overwrites the picture buffer; `rotatez` is never called | `LENS/MAIN.C:191`, `LENS/ASM.ASM:419-564` | Nothing reads `back` after part 3 begins; the port has no `rotatez` | `lnszoom.md` §5-6 |
 | PLZPART | `plzline` writes 84 bytes into an 80-byte row | `PLZPART/ASMYT.ASM:41-69` | The last four land in the stride's hidden gap | `plzpart.md` §1, §9 |
 | PLZPART | `do_drop`'s `dtau` reaches 404 | `PLZPART/COPPER.ASM:175-181` | The split is off the 400-line screen; the port's 405 is inert | `plzpart.md` §9 |
-| PLZPART | `timetable[4] = 2778` can never be reached | `PLZPART/PLZ.C:46` | The exit fires 65 ticks after the previous switch (`the_timetable_events_happen_at_the_getmframe_thresholds`) | `plzpart.md` §9 |
+| PLZPART | `timetable[4] = 2778` can never be reached | `PLZPART/PLZ.C:46` | The exit fires 65 ticks after the previous switch (`the_plasma_switches_and_exits_on_the_reference_ticks`) | `plzpart.md` §9 |
 | PLZPART | The stale `PLZPART/MAIN.ASM` | `PLZPART/MAIN.ASM` | Not linked | `plzpart.md` §9 |
 | RAYSCRL | `pal[768]` is `font[0]` and `tmppal[768]` is `pal[0]`: the `pf = 3` step at x = 255 touches index 768 | `WATER/DEMO.PAS:125`, `:174` | Entry 0 is black, so the font is never touched (`the_fade_loops_step_the_next_entrys_red_and_read_the_byte_past_the_array`) | `rayscrl.md` §5 |
 | 3DSINFLD | `combg` is `char combg[16]` and every use is an overrun; `combguse` is read only under `PXLSUX`, which the build does not define | `COMAN/MAIN.C:8`, `:166-176`, `ASM.ASM:143-172` | No background; DAC 240..255 is unreachable (colour ≤ 127) | `3dsinfld.md` §2 |
