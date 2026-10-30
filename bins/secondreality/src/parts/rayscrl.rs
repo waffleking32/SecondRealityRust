@@ -123,12 +123,12 @@
 //! A RIX3 file's palette is six bits; the part's fade is a byte ramp over it,
 //! and the engine widens to eight only at upload.
 
-use std::path::Path;
 
 use sr_assets::poslist::PosList;
-use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::{asset, load_image, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "rayscrl";
@@ -284,9 +284,6 @@ pub struct Rayscrl {
     /// The part's tick counter, incremented at the top of `frame`: the call
     /// that draws dump index `n` leaves this at `n + 1`.
     tick: u32,
-    bkg_path: &'static str,
-    miekka_path: &'static str,
-    pos_paths: [&'static str; 3],
 }
 
 impl Rayscrl {
@@ -310,20 +307,6 @@ impl Rayscrl {
             confirm_ticks: GATE_CONFIRM_TICKS,
             phase: Phase::Init,
             tick: 0,
-            bkg_path: BKG_PATH,
-            miekka_path: MIEKKA_PATH,
-            pos_paths: POS_PATHS,
-        }
-    }
-
-    /// [`new`](Rayscrl::new) reading its assets from elsewhere.
-    #[cfg(test)]
-    fn at(bkg: &'static str, miekka: &'static str, pos: [&'static str; 3]) -> Rayscrl {
-        Rayscrl {
-            bkg_path: bkg,
-            miekka_path: miekka,
-            pos_paths: pos,
-            ..Rayscrl::new()
         }
     }
 
@@ -463,15 +446,42 @@ impl Rayscrl {
             self.scp += 1;
         }
     }
+}
 
-    /// [`load_path`] with the part's own error, so every asset failure names
-    /// the path the same way.
-    fn read_image(&self, path: &str) -> Result<Image, PartError> {
-        load_path(Path::new(path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{path}: {error}"),
-        })
+/// Parse and bound one POS list, `bytes` as read from `path`.
+fn pos_list(path: &str, bytes: &[u8]) -> Result<PosList, PartError> {
+    let list = PosList::parse(bytes).map_err(|error| PartError {
+        part: NAME,
+        message: format!("{path}: {error}"),
+    })?;
+    // `scr` indexes the surface and the background with every offset
+    // (:441); past the 64,000-byte picture the background read panics.
+    // The bound belongs here, where the file is still named, not in
+    // the blitter's hot path.
+    for (column, offsets) in list.columns.iter().enumerate() {
+        for &offset in offsets {
+            if offset as usize >= VIDEO_BYTES {
+                return Err(PartError {
+                    part: NAME,
+                    message: format!(
+                        "{path}: column {column} holds offset {offset}, outside the \
+                         {VIDEO_BYTES}-byte picture"
+                    ),
+                });
+            }
+        }
     }
+    if list.columns.len() != FBUF_COLUMNS {
+        return Err(PartError {
+            part: NAME,
+            message: format!(
+                "{path} holds {} columns; the blitter walks {FBUF_COLUMNS} (158*34, \
+                 WATER/ROUTINES.ASM:21)",
+                list.columns.len()
+            ),
+        });
+    }
+    Ok(list)
 }
 
 impl Part for Rayscrl {
@@ -509,13 +519,12 @@ impl Part for Rayscrl {
         // `:108` the palette and `:109` the first 400*34 pixels of MIEKKA.SCI.
         // Its declared 400x250 canvas carries 35 whole rows; the decoder hands
         // those back, and the part reads 34 of them.
-        let miekka = self.read_image(self.miekka_path)?;
+        let miekka = load_image(NAME, MIEKKA_PATH)?;
         if (miekka.width() as usize, miekka.height() as usize) != (MIEKKA_WIDTH, MIEKKA_ROWS) {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the part reads {MIEKKA_WIDTH}x{MIEKKA_ROWS}",
-                    self.miekka_path,
+                    "{MIEKKA_PATH} is {}x{}; the part reads {MIEKKA_WIDTH}x{MIEKKA_ROWS}",
                     miekka.width(),
                     miekka.height()
                 ),
@@ -525,8 +534,7 @@ impl Part for Rayscrl {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} carries {} pixel bytes; the part reads {FONT_LOADED} (400*34)",
-                    self.miekka_path,
+                    "{MIEKKA_PATH} carries {} pixel bytes; the part reads {FONT_LOADED} (400*34)",
                     miekka.pixels().len()
                 ),
             });
@@ -546,13 +554,12 @@ impl Part for Rayscrl {
         self.font[..FONT_LOADED].copy_from_slice(&miekka.pixels()[..FONT_LOADED]);
 
         // `:112-113` `_tausta`: the picture at +778 rebased to +0, then blitted.
-        let bkg = self.read_image(self.bkg_path)?;
+        let bkg = load_image(NAME, BKG_PATH)?;
         if (bkg.width() as usize, bkg.height() as usize) != (BKG_WIDTH, BKG_HEIGHT) {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the part reads {BKG_WIDTH}x{BKG_HEIGHT}",
-                    self.bkg_path,
+                    "{BKG_PATH} is {}x{}; the part reads {BKG_WIDTH}x{BKG_HEIGHT}",
                     bkg.width(),
                     bkg.height()
                 ),
@@ -565,43 +572,9 @@ impl Part for Rayscrl {
 
         // `:51-80`: the three lists, one frame group each, 158*34 columns.
         self.lists = Vec::with_capacity(3);
-        for path in self.pos_paths {
-            let bytes = std::fs::read(path).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{path}: {error}"),
-            })?;
-            let list = PosList::parse(&bytes).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{path}: {error}"),
-            })?;
-            // `scr` indexes the surface and the background with every offset
-            // (:441); past the 64,000-byte picture the background read panics.
-            // The bound belongs here, where the file is still named, not in
-            // the blitter's hot path.
-            for (column, offsets) in list.columns.iter().enumerate() {
-                for &offset in offsets {
-                    if offset as usize >= VIDEO_BYTES {
-                        return Err(PartError {
-                            part: NAME,
-                            message: format!(
-                                "{path}: column {column} holds offset {offset}, outside the \
-                                 {VIDEO_BYTES}-byte picture"
-                            ),
-                        });
-                    }
-                }
-            }
-            if list.columns.len() != FBUF_COLUMNS {
-                return Err(PartError {
-                    part: NAME,
-                    message: format!(
-                        "{path} holds {} columns; the blitter walks {FBUF_COLUMNS} (158*34, \
-                         WATER/ROUTINES.ASM:21)",
-                        list.columns.len()
-                    ),
-                });
-            }
-            self.lists.push(list);
+        for rel in POS_PATHS {
+            let bytes = read_asset(NAME, rel)?;
+            self.lists.push(pos_list(&asset(rel), &bytes)?);
         }
 
         // `:39` `fbuf`, zeroed at `:107`, plus the byte the `move` reads past it.
@@ -763,14 +736,6 @@ mod tests {
     use sr_engine::dac_expand;
     use sr_engine::music::Music;
 
-    const TEST_BKG: &str = "../../assets/WATER/BKG.CLX";
-    const TEST_MIEKKA: &str = "../../assets/WATER/MIEKKA.SCI";
-    const TEST_POS: [&str; 3] = [
-        "../../assets/WATER/WAT1.DAT",
-        "../../assets/WATER/WAT2.DAT",
-        "../../assets/WATER/WAT3.DAT",
-    ];
-
     /// The tick the port's published `musplus` first stands at -11. The
     /// reference's trace holds it from boot 14942; the port's player publishes
     /// the same state one poll later (the 88:0 row's phase), at boot 14943.
@@ -814,7 +779,7 @@ mod tests {
 
     fn started_with<M: RigMusic>(music: M) -> (Rig<M>, Rayscrl) {
         let mut rig = rig(music);
-        let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
+        let mut part = Rayscrl::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -833,7 +798,7 @@ mod tests {
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(86);
         let mut rig = rig(PlayerMusic::new(player, 0));
-        let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
+        let mut part = Rayscrl::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -1006,7 +971,7 @@ mod tests {
     // --- the reference -------------------------------------------------------
 
     fn sci_byte(path: &str, at: usize) -> u8 {
-        std::fs::read(path).unwrap()[at]
+        read_asset(NAME, path).unwrap()[at]
     }
 
     // --- the assets ----------------------------------------------------------
@@ -1018,7 +983,7 @@ mod tests {
         // `:108-109`: MIEKKA.SCI is a 400x35 crop (the decoder's `min` of the
         // declared 400x250 and the 14,000 bytes carried). Its palette is the
         // part's; its first 400*34 pixel bytes are the font strip.
-        let miekka = std::fs::read(TEST_MIEKKA).unwrap();
+        let miekka = read_asset(NAME, MIEKKA_PATH).unwrap();
         assert_eq!(miekka.len(), 14_778);
         assert_eq!(part.tmppal.len(), PALETTE_LEN);
         assert_eq!(
@@ -1027,7 +992,7 @@ mod tests {
             "MIEKKA.SCI's palette at +10"
         );
         // MIEKKA's palette wins over BKG.CLX's: 64 of the 256 entries differ.
-        let bkg_bytes = std::fs::read(TEST_BKG).unwrap();
+        let bkg_bytes = read_asset(NAME, BKG_PATH).unwrap();
         let differing_entries = (0..PALETTE_ENTRIES)
             .filter(|index| {
                 miekka[RIX3_PALETTE + index * 3..RIX3_PALETTE + index * 3 + 3]
@@ -1051,7 +1016,7 @@ mod tests {
 
         // `:112-113`: the picture at +778 rebased to +0; the trailing 778 bytes
         // stay where the rebase leaves them.
-        let bkg = std::fs::read(TEST_BKG).unwrap();
+        let bkg = read_asset(NAME, BKG_PATH).unwrap();
         assert_eq!(bkg.len(), 64_778);
         assert_eq!(part.background.len(), BACKGROUND_LEN);
         assert_eq!(
@@ -1084,14 +1049,14 @@ mod tests {
             per_list.push(count);
             positions += count;
         }
-        for (((path, bytes), expected), measured) in TEST_POS
+        for (((path, bytes), expected), measured) in POS_PATHS
             .iter()
             .zip([23_096usize, 23_034, 27_818])
             .zip([6_176usize, 6_145, 8_537])
             .zip(per_list.iter())
         {
             assert_eq!(
-                std::fs::metadata(path).unwrap().len() as usize,
+                std::fs::metadata(asset(path)).unwrap().len() as usize,
                 bytes,
                 "{path}"
             );
@@ -1116,21 +1081,11 @@ mod tests {
         for _ in 1..FBUF_COLUMNS {
             bytes.extend_from_slice(&0u16.to_le_bytes()); // an empty column
         }
-        let file = std::env::temp_dir().join(format!(
-            "sr-rayscrl-{}-offset.dat",
-            std::process::id()
-        ));
-        std::fs::write(&file, &bytes).unwrap();
-        let shown = file.to_string_lossy().into_owned();
-        let path: &'static str = Box::leak(shown.clone().into_boxed_str());
-
-        let mut rig = rig(quiet(0));
-        let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, [path, TEST_POS[1], TEST_POS[2]]);
-        let error = part
-            .init(&mut rig.init_ctx(0))
+        let shown = "POS.DAT";
+        let error = pos_list(shown, &bytes)
             .expect_err("65,000 is outside the 64,000-byte picture");
         assert!(
-            error.message.contains(&shown),
+            error.message.contains(shown),
             "the error names the file: {}",
             error.message
         );
@@ -1144,7 +1099,6 @@ mod tests {
             "the error names the offset: {}",
             error.message
         );
-        let _ = std::fs::remove_file(&shown);
     }
 
     #[test]
@@ -1154,7 +1108,7 @@ mod tests {
         // concatenation is the file the tree links.
         let obj = std::fs::read("../../upstream/SecondReality/WATER/MIEKKA.OBJ").unwrap();
         let embedded = sr_assets::omf::extract_ledata(&obj).unwrap();
-        let file = std::fs::read(TEST_MIEKKA).unwrap();
+        let file = read_asset(NAME, MIEKKA_PATH).unwrap();
         assert_eq!(embedded.len(), file.len());
         assert_eq!(embedded, file);
     }
@@ -1200,7 +1154,7 @@ mod tests {
         // already run through this stretch; 268 more polls would replay it.
         // The pre-roll is the entry run's (`music_fresh`) alone.
         let mut rig = rig(quiet(0));
-        let mut part = Rayscrl::at(TEST_BKG, TEST_MIEKKA, TEST_POS);
+        let mut part = Rayscrl::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
@@ -1276,9 +1230,9 @@ mod tests {
                 .map(|channel| channel.as_u64().unwrap())
                 .collect();
             let miekka = [
-                u64::from(sci_byte(TEST_MIEKKA, RIX3_PALETTE + index * 3)),
-                u64::from(sci_byte(TEST_MIEKKA, RIX3_PALETTE + index * 3 + 1)),
-                u64::from(sci_byte(TEST_MIEKKA, RIX3_PALETTE + index * 3 + 2)),
+                u64::from(sci_byte(MIEKKA_PATH, RIX3_PALETTE + index * 3)),
+                u64::from(sci_byte(MIEKKA_PATH, RIX3_PALETTE + index * 3 + 1)),
+                u64::from(sci_byte(MIEKKA_PATH, RIX3_PALETTE + index * 3 + 2)),
             ];
             assert_eq!(
                 reference[0], miekka[0],
@@ -1605,7 +1559,7 @@ mod tests {
         assert_eq!(recovered, expected);
         for &(band, source, _, release) in &recovered {
             if release != 0 {
-                let font = std::fs::read(TEST_MIEKKA).unwrap();
+                let font = read_asset(NAME, MIEKKA_PATH).unwrap();
                 assert_eq!(
                     release,
                     font[778 + band * FONT_STRIDE + source - 1],

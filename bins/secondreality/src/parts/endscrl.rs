@@ -100,6 +100,8 @@
 use sr_assets::exe::{unpack, LoadImage};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 
+use crate::parts::read_asset;
+
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "endscrl";
 
@@ -361,10 +363,6 @@ pub struct Endscrl {
     tick: u32,
     /// Whether the `%` line has been reached: the part has called `exit`.
     ended: bool,
-    /// Where the two files are read from. A unit test's working directory is this crate's,
-    /// not the repository root, so it reads `../../assets/…`.
-    exe_path: &'static str,
-    text_path: &'static str,
 }
 
 impl Endscrl {
@@ -381,15 +379,7 @@ impl Endscrl {
             line: 0,
             tick: 0,
             ended: false,
-            exe_path: EXE_PATH,
-            text_path: TEXT_PATH,
         }
-    }
-
-    /// [`new`](Endscrl::new) reading both files from elsewhere.
-    #[cfg(test)]
-    fn at(exe: &'static str, text: &'static str) -> Endscrl {
-        Endscrl { exe_path: exe, text_path: text, ..Endscrl::new() }
     }
 
     /// `0x122a-0x1326` (`MAIN.C:22-43`) — the mode, the palette, `init`, all of it one tick.
@@ -543,16 +533,14 @@ impl Part for Endscrl {
     /// read out of the shipped image.
     fn init(&mut self, _ctx: &mut PartCtx) -> Result<(), PartError> {
         let error = |message: String| PartError { part: NAME, message };
-        let file = std::fs::read(self.exe_path)
-            .map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
-        let image = unpack(&file).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
-        let data = image_data(&image).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
+        let file = read_asset(NAME, EXE_PATH)?;
+        let image = unpack(&file).map_err(|e| error(format!("{EXE_PATH}: {e}")))?;
+        let data = image_data(&image).map_err(|e| error(format!("{EXE_PATH}: {e}")))?;
         self.strip = Some(Strip::scan(data.raster, &data.order));
 
         // `open("endscrol.txt", 1)`, `read(fd, text, 60000)`, `close` (`0x16b2-0x16da`): the
         // text-mode read drops the carriage returns.
-        let text = std::fs::read(self.text_path)
-            .map_err(|e| error(format!("{}: {e}", self.text_path)))?;
+        let text = read_asset(NAME, TEXT_PATH)?;
         self.text = data.text;
         read_text_mode(&text, &mut self.text);
         // Every control line the part reaches divides by its own count (`idiv bx` at
@@ -566,8 +554,7 @@ impl Part for Endscrl {
                 textline.extend_from_slice(&[LINE_END, 0]);
                 if line_rows(&textline) <= 0 {
                     return Err(error(format!(
-                        "{}: the control line {:?} lasts no rows",
-                        self.text_path,
+                        "{TEXT_PATH}: the control line {:?} lasts no rows",
                         String::from_utf8_lossy(line)
                     )));
                 }
@@ -607,24 +594,20 @@ mod tests {
     use crate::parts::test_rig::{differing_pixels, reference, Rig};
     use crate::shell::{SURFACE_HEIGHT, SURFACE_WIDTH};
 
-    /// The paths a unit test reads: this crate's own directory, two levels below the
-    /// repository root, so the part's own relative paths do not resolve there.
-    const TEST_EXE: &str = "../../assets/MAIN/DATA/ENDSCRL.EXE";
-    const TEST_TEXT: &str = "../../assets/MAIN/DATA/ENDSCROL.TXT";
     /// The file the part must *not* read (`reference-indices.md` §21).
     const DEVELOPERS_TEXT: &str = "../../assets/ENDSCRL/ENDSCROL.TXT";
 
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Endscrl) {
         let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
-        let mut part = Endscrl::at(TEST_EXE, TEST_TEXT);
+        let mut part = Endscrl::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
 
     /// The unpacked image, as the part reads it.
     fn image() -> LoadImage {
-        unpack(&std::fs::read(TEST_EXE).unwrap()).unwrap()
+        unpack(&read_asset(NAME, EXE_PATH).unwrap()).unwrap()
     }
 
     /// Runs the part up to (and not including) `tick`, numbering each call by the part's own
@@ -1021,7 +1004,7 @@ mod tests {
         // bytes in place: 542 carriage returns dropped from the 6,141 bytes, 5,599 kept. The
         // bytes after the kept ones are the raw read's own, and the rest of the array is its
         // initialiser, which the image holds (the tree's `"Testing Testing\0…"`, `MAIN.C:52`).
-        let shipped = std::fs::read(TEST_TEXT).unwrap();
+        let shipped = read_asset(NAME, TEXT_PATH).unwrap();
         let developers = std::fs::read(DEVELOPERS_TEXT).unwrap();
         assert_eq!((shipped.len(), developers.len()), (6_141, 1_007));
         assert_eq!(shipped.iter().filter(|b| **b == CR).count(), 542);
@@ -1269,7 +1252,7 @@ mod tests {
             SURFACE_HEIGHT,
             crate::shell::start_view(),
             vec!["endscrl"],
-            |_| Some(Box::new(Endscrl::at(TEST_EXE, TEST_TEXT)) as Box<dyn Part>),
+            |_| Some(Box::new(Endscrl::new()) as Box<dyn Part>),
             None,
             RunSettings { ending: Ending::Exit, ..RunSettings::default() },
         )

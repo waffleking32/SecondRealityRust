@@ -130,6 +130,8 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::{Split, View};
 use sr_engine::{Palette, Surface};
 
+use crate::parts::read_asset;
+
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "cred";
 
@@ -633,8 +635,6 @@ pub struct Cred {
     screen: usize,
     /// The tick within that screen.
     tick: u32,
-    /// Where the shipped EXE is read from.
-    exe_path: &'static str,
 }
 
 impl Cred {
@@ -651,21 +651,6 @@ impl Cred {
             close: close_ramp(),
             screen: 0,
             tick: 0,
-            exe_path: EXE_PATH,
-        }
-    }
-
-    /// [`new`](Cred::new) reading the EXE from elsewhere.
-    ///
-    /// A unit test's working directory is this crate's, not the repository
-    /// root, so the part's own relative path does not resolve there; the
-    /// integration test in `tests/cred.rs` runs the real binary from the
-    /// repository root, where it does.
-    #[cfg(test)]
-    fn at(exe: &'static str) -> Cred {
-        Cred {
-            exe_path: exe,
-            ..Cred::new()
         }
     }
 
@@ -825,9 +810,9 @@ impl Part for Cred {
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         let error = |message: String| PartError {
             part: NAME,
-            message: format!("{}: {message}", self.exe_path),
+            message: format!("{EXE_PATH}: {message}"),
         };
-        let file = std::fs::read(self.exe_path).map_err(|e| error(e.to_string()))?;
+        let file = read_asset(NAME, EXE_PATH)?;
         let image = unpack(&file).map_err(|e| error(e.to_string()))?;
         let data = image_data(&image).map_err(error)?;
         self.strip = data.raster;
@@ -1057,10 +1042,6 @@ mod tests {
         Some(&line[2..])
     }
 
-    /// The paths a unit test reads: this crate's own directory, two levels
-    /// below the repository root, so `assets/` is not where the part's own
-    /// relative path looks.
-    const TEST_EXE: &str = "../../assets/MAIN/DATA/CRED.EXE";
     /// The tree's own font and pictures, which the part no longer reads: the tests compare the
     /// image's data with them, to measure what the release changed.
     const TREE_FONT: &str = "../../assets/CREDITS/FONA.INC";
@@ -1166,13 +1147,13 @@ mod tests {
 
     /// The unpacked image, as the part reads it.
     fn image() -> LoadImage {
-        unpack(&std::fs::read(TEST_EXE).unwrap()).unwrap()
+        unpack(&read_asset(NAME, EXE_PATH).unwrap()).unwrap()
     }
 
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Cred) {
         let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
-        let mut part = Cred::at(TEST_EXE);
+        let mut part = Cred::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -2200,7 +2181,7 @@ mod tests {
     /// it was drawn through.
     fn at_screen(screen: usize) -> (Rig, Cred) {
         let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT);
-        let mut part = Cred::at(TEST_EXE);
+        let mut part = Cred::new();
         part.init(&mut rig.ctx(0)).unwrap();
         let target = screen as u32 * part.screen_ticks() + SHOW_TICK;
         // `frame` advances the part, so the tick's own call is the last one.

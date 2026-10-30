@@ -56,11 +56,11 @@
 //! boot it is 567 ticks (`docs/fidelity/endlogo.md` §3's derivation, and §5 for
 //! the cue that reproduces it).
 
-use std::path::Path;
 
-use sr_assets::load_path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::load_image;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "endlogo";
@@ -208,11 +208,6 @@ const SETPALAREA_ENTRIES: u32 = 255;
 
 /// The picture and the palette it indexes, both as `readp` leaves them.
 pub struct Endlogo {
-    /// Where the picture is read from. [`PICTURE_PATH`] in a run — the binary
-    /// is started from the repository root, which is where `assets/` is — and
-    /// the same file by the path that works from this crate's directory in a
-    /// unit test.
-    picture_path: &'static str,
     /// The decoded picture, row-major at [`PICTURE_WIDTH`] — the shape
     /// `readp(rowbuf,y,pic)` decodes one row of. Empty until `init`.
     picture: Vec<u8>,
@@ -257,23 +252,11 @@ impl Endlogo {
     /// A part with no picture: `init` is what reads one.
     pub fn new() -> Endlogo {
         Endlogo {
-            picture_path: PICTURE_PATH,
             picture: Vec::new(),
             picture_palette: Palette::new(),
             plus: NO_PLAYER,
             phase: Phase::LeadIn,
         }
-    }
-
-    /// [`new`](Endlogo::new) reading the picture by `path`.
-    ///
-    /// A unit test's working directory is this crate's, not the repository
-    /// root, so the part's own relative path does not resolve there; the
-    /// integration test in `tests/endlogo.rs` runs the real binary from the
-    /// repository root, where it does.
-    #[cfg(test)]
-    fn at(path: &'static str) -> Endlogo {
-        Endlogo { picture_path: path, ..Endlogo::new() }
     }
 }
 
@@ -342,10 +325,7 @@ impl Part for Endlogo {
         // derivation test below is where that is measured: the decode is
         // byte-identical to the reference's held frame at 900, 0 of 128,000
         // pixels apart (`docs/fidelity/endlogo.md` §8).
-        let image = load_path(Path::new(self.picture_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{}: {error}", self.picture_path),
-        })?;
+        let image = load_image(NAME, PICTURE_PATH)?;
         let (width, height) = (image.width() as usize, image.height() as usize);
         if (width, height) != (PICTURE_WIDTH, PICTURE_HEIGHT) {
             return Err(PartError {
@@ -353,7 +333,7 @@ impl Part for Endlogo {
                 message: format!(
                     "{} is {width}x{height}; this part's screen is \
                      {PICTURE_WIDTH}x{PICTURE_HEIGHT}",
-                    self.picture_path
+                    PICTURE_PATH
                 ),
             });
         }
@@ -778,20 +758,15 @@ mod tests {
         Rig::new(VIEW_WIDTH, VIEW_HEIGHT).palette_entry(UNWRITTEN, [1, 2, 3]).with(sentinel())
     }
 
-    /// A part whose `init` has run, and the rig it ran against.
-    ///
-    /// The picture is the curated `END/PIC.UH`, by the path that resolves from
-    /// this crate's own directory — a unit test's working directory is not the
-    /// repository root. `tests/endlogo.rs` runs the real binary, and so the
-    /// part's own `assets/END/PIC.UH`, from there. The player is the sentinel
-    /// one: a test that needs the gate to open builds its own rig.
+    /// A part whose `init` has run, and the rig it ran against. The player is
+    /// the sentinel one: a test that needs the gate to open builds its own rig.
     fn started() -> (Rig, Endlogo) {
         started_with(shell_rig())
     }
 
     /// [`started`] against a rig of the caller's own.
     fn started_with(mut rig: Rig) -> (Rig, Endlogo) {
-        let mut part = Endlogo::at("../../assets/END/PIC.UH");
+        let mut part = Endlogo::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -807,7 +782,7 @@ mod tests {
         // rows, the unset offset.
         let mut rig = shell_rig();
         rig.view.y_line_offset = Some(320);
-        let mut part = Endlogo::at("../../assets/END/PIC.UH");
+        let mut part = Endlogo::new();
         part.init(&mut rig.ctx(0)).unwrap();
         assert_eq!(rig.view.y_line_offset, None);
     }
@@ -1150,7 +1125,7 @@ mod tests {
         // itself, rather than letting a run hold five thousand ticks against a silence
         // that cannot break (`src/parts/endlogo.rs`'s `init`, `PartCtx::music`).
         let mut rig = shell_rig();
-        let mut part = Endlogo::at("../../assets/END/PIC.UH");
+        let mut part = Endlogo::new();
         let error = part.init(&mut rig.ctx_without_music(0)).unwrap_err();
         assert_eq!(error.part, NAME);
         assert!(error.message.contains("107-111"), "{}", error.message);
@@ -1209,7 +1184,7 @@ mod tests {
             plan,
             |name| {
                 (name == NAME)
-                    .then(|| Box::new(Endlogo::at("../../assets/END/PIC.UH")) as Box<dyn Part>)
+                    .then(|| Box::new(Endlogo::new()) as Box<dyn Part>)
             },
             Some(crate::audio::test_music),
             crate::shell::RunSettings::default(),
@@ -1355,7 +1330,7 @@ mod tests {
     }
 
     fn picture() -> sr_assets::Image {
-        load_path(Path::new("../../assets/END/PIC.UH")).unwrap()
+        load_image(NAME, PICTURE_PATH).unwrap()
     }
 
     /// **The constants are a derivation, not a fit**.

@@ -115,11 +115,11 @@
 //!
 //! No copper callbacks: the source registers none.
 
-use std::path::Path;
 
-use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::{load_image, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "lnszoom";
@@ -284,9 +284,6 @@ enum Phase {
 
 /// LNS&ZOOM: the face, the lens tables and the rotazoomer.
 pub struct Lnszoom {
-    /// The asset root: empty for a run (the repository root), `../../` for a
-    /// unit test (the crate's own directory).
-    root: &'static str,
     /// `LENS.EX0`: dimensions and the three overlay triples.
     ex0: Vec<u8>,
     /// `LENS.EX1..4`, in the source's order.
@@ -324,7 +321,6 @@ impl Lnszoom {
     /// A part with nothing loaded: `init` reads the assets.
     pub fn new() -> Lnszoom {
         Lnszoom {
-            root: "",
             ex0: Vec::new(),
             tables: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             path1: Vec::new(),
@@ -343,35 +339,6 @@ impl Lnszoom {
             phase: Phase::Gate,
             tick: 0,
         }
-    }
-
-    /// [`new`](Lnszoom::new) reading its assets under `root`.
-    #[cfg(test)]
-    fn at(root: &'static str) -> Lnszoom {
-        Lnszoom {
-            root,
-            ..Lnszoom::new()
-        }
-    }
-
-    fn asset(&self, path: &str) -> String {
-        format!("{}{}", self.root, path)
-    }
-
-    fn read(&self, path: &str) -> Result<Vec<u8>, PartError> {
-        let full = self.asset(path);
-        std::fs::read(&full).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{full}: {error}"),
-        })
-    }
-
-    fn read_image(&self, path: &str) -> Result<Image, PartError> {
-        let full = self.asset(path);
-        load_path(Path::new(&full)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{full}: {error}"),
-        })
     }
 
     /// `MAIN.C:290-292`: mode 13h's display state.
@@ -748,7 +715,7 @@ impl Part for Lnszoom {
             }
         }
 
-        self.ex0 = self.read(EX0_PATH)?;
+        self.ex0 = read_asset(NAME, EX0_PATH)?;
         if self.ex0.len() < 13 {
             return Err(PartError {
                 part: NAME,
@@ -777,10 +744,10 @@ impl Part for Lnszoom {
             });
         }
         self.tables = [
-            self.read(EX1_PATH)?,
-            self.read(EX2_PATH)?,
-            self.read(EX3_PATH)?,
-            self.read(EX4_PATH)?,
+            read_asset(NAME, EX1_PATH)?,
+            read_asset(NAME, EX2_PATH)?,
+            read_asset(NAME, EX3_PATH)?,
+            read_asset(NAME, EX4_PATH)?,
         ];
         for (which, path) in [EX1_PATH, EX2_PATH, EX3_PATH, EX4_PATH].iter().enumerate() {
             let table = &self.tables[which];
@@ -822,7 +789,7 @@ impl Part for Lnszoom {
         }
 
         // `MAIN.C:300-301`: the palette at +16 and the far picture at +784.
-        let image = self.read_image(EXB_PATH)?;
+        let image = load_image(NAME, EXB_PATH)?;
         if (image.width(), image.height()) != (SCREEN_WIDTH, SCREEN_HEIGHT) {
             return Err(PartError {
                 part: NAME,
@@ -859,7 +826,7 @@ impl Part for Lnszoom {
 
         // `MAIN.C:296-298`: `a = *(int *)(lensexp+2)`, `pathdata1` at +4 and
         // `pathdata2` at `+4 + 2*a` bytes.
-        let exp = self.read(EXP_PATH)?;
+        let exp = read_asset(NAME, EXP_PATH)?;
         if exp.len() < PATH_HEADER {
             return Err(PartError {
                 part: NAME,
@@ -1088,7 +1055,7 @@ mod tests {
     use super::*;
 
     use crate::parts::test_rig::{
-        differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ROOT, ScriptedMusic,
+        differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ScriptedMusic,
     };
     use sr_engine::music::Music;
 
@@ -1122,14 +1089,14 @@ mod tests {
 
     fn started() -> (Rig, Lnszoom) {
         let mut rig = rig(running(4_000));
-        let mut part = Lnszoom::at(ROOT);
+        let mut part = Lnszoom::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
 
     fn started_with(music: ScriptedMusic) -> (Rig, Lnszoom) {
         let mut rig = rig(music);
-        let mut part = Lnszoom::at(ROOT);
+        let mut part = Lnszoom::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -1144,7 +1111,7 @@ mod tests {
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(45);
         let mut rig = rig(PlayerMusic::new(player, 0));
-        let mut part = Lnszoom::at(ROOT);
+        let mut part = Lnszoom::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -1469,7 +1436,7 @@ mod tests {
     #[test]
     fn a_mid_chain_start_does_not_pre_roll_the_music() {
         let mut rig = rig(running(10));
-        let mut part = Lnszoom::at(ROOT);
+        let mut part = Lnszoom::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }
@@ -1477,7 +1444,7 @@ mod tests {
     #[test]
     fn a_run_without_music_is_refused() {
         let mut rig = rig(running(10));
-        let mut part = Lnszoom::at(ROOT);
+        let mut part = Lnszoom::new();
         let mut ctx = rig.machine.ctx(None, 0, 0, 1, false, true);
         let error = part.init(&mut ctx).expect_err("no music, no gates");
         assert!(error.message.contains("music"), "{}", error.message);
@@ -1486,18 +1453,16 @@ mod tests {
     // --- the assets ----------------------------------------------------------
 
     fn assets() -> Lnszoom {
-        let driver = Lnszoom::at(ROOT);
         let mut part = Lnszoom::new();
-        part.root = ROOT;
-        part.ex0 = driver.read(EX0_PATH).unwrap();
+        part.ex0 = read_asset(NAME, EX0_PATH).unwrap();
         let overlays = part.ex0_overlays();
         part.tables = [
-            driver.read(EX1_PATH).unwrap(),
-            driver.read(EX2_PATH).unwrap(),
-            driver.read(EX3_PATH).unwrap(),
-            driver.read(EX4_PATH).unwrap(),
+            read_asset(NAME, EX1_PATH).unwrap(),
+            read_asset(NAME, EX2_PATH).unwrap(),
+            read_asset(NAME, EX3_PATH).unwrap(),
+            read_asset(NAME, EX4_PATH).unwrap(),
         ];
-        let image = driver.read_image(EXB_PATH).unwrap();
+        let image = load_image(NAME, EXB_PATH).unwrap();
         part.back = vec![0u8; VIDEO_MEMORY];
         part.back[..VIDEO_BYTES].copy_from_slice(&image.pixels()[..VIDEO_BYTES]);
         let from = VIDEO_BYTES - OVERRUN_BYTES;
@@ -1508,7 +1473,7 @@ mod tests {
         part.fade = fade;
         part.fade2 = fade2;
         part.rotpic = Lnszoom::build_rotpic(&part.back);
-        let exp = driver.read(EXP_PATH).unwrap();
+        let exp = read_asset(NAME, EXP_PATH).unwrap();
         let count = usize::from(u16::from_le_bytes([exp[2], exp[3]]));
         let at = PATH_HEADER;
         part.path1 = (0..2 * PATH1_FRAMES)
@@ -1535,7 +1500,7 @@ mod tests {
             &part.picture(),
             "the picture itself is LENS.EXB's 64,000 pixel bytes at +784"
         );
-        let raw = Lnszoom::at(ROOT).read(EXB_PATH).unwrap();
+        let raw = read_asset(NAME, EXB_PATH).unwrap();
         assert_eq!(
             &raw[EXB_PICTURE_AT..EXB_PICTURE_AT + VIDEO_BYTES],
             &part.picture()[..],
@@ -1594,7 +1559,7 @@ mod tests {
     #[test]
     fn the_palette_and_fades_are_the_sources_arithmetic() {
         let part = assets();
-        let image = Lnszoom::at(ROOT).read_image(EXB_PATH).unwrap();
+        let image = load_image(NAME, EXB_PATH).unwrap();
         // The overlays add EX0's triples to the base, clamped at 63.
         assert_eq!(part.ex0_overlays(), EXPECTED_OVERLAYS);
         for (i, (r, g, b)) in part.ex0_overlays().iter().enumerate() {
@@ -1632,7 +1597,7 @@ mod tests {
     #[test]
     fn the_path_data_is_the_expected_size_and_starts_where_the_c_prelude_reads() {
         let part = assets();
-        let exp = Lnszoom::at(ROOT).read(EXP_PATH).unwrap();
+        let exp = read_asset(NAME, EXP_PATH).unwrap();
         let count = usize::from(u16::from_le_bytes([exp[2], exp[3]]));
         assert_eq!(count, 2 * PATH1_FRAMES);
         assert_eq!(PATH_HEADER + 2 * count + PATH2_FRAMES * 8, exp.len());
@@ -1665,7 +1630,6 @@ mod tests {
     /// modulo 251, and one path frame.
     fn synthetic(path: [i16; 4]) -> Lnszoom {
         let mut part = Lnszoom::new();
-        part.root = ROOT;
         part.rotpic = (0..VIDEO_MEMORY).map(|i| (i % 251) as u8).collect();
         part.rotpic90 = Lnszoom::build_rotpic90(&part.rotpic);
         part.path2 = path.to_vec();
@@ -1723,7 +1687,6 @@ mod tests {
 
     fn clone_for_rotate(part: &Lnszoom) -> Lnszoom {
         Lnszoom {
-            root: part.root,
             ex0: Vec::new(),
             tables: part.tables.clone(),
             path1: part.path1.clone(),

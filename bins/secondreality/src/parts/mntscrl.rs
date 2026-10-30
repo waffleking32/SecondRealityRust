@@ -128,12 +128,12 @@
 //! the rebased memory leaves them, so an offset in the list's 64 KB range
 //! reads what the original's segment held ([`BACKGROUND_LEN`]).
 
-use std::path::Path;
 
 use sr_assets::poslist::PosList;
-use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::{asset, load_image, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "mntscrl";
@@ -348,11 +348,6 @@ pub struct Mntscrl {
     phase: Phase,
     /// The part's own tick, which is the shell's count for this part.
     tick: u32,
-    /// Where the assets are read from. A unit test's working directory is this
-    /// crate's, not the repository root, so it reads `../../assets/…`.
-    o2_path: &'static str,
-    hillback_path: &'static str,
-    pos_paths: [&'static str; 3],
 }
 
 impl Mntscrl {
@@ -375,20 +370,6 @@ impl Mntscrl {
             quit: false,
             phase: Phase::Setup,
             tick: 0,
-            o2_path: O2_PATH,
-            hillback_path: HILLBACK_PATH,
-            pos_paths: POS_PATHS,
-        }
-    }
-
-    /// [`new`](Mntscrl::new) reading its assets from elsewhere.
-    #[cfg(test)]
-    fn at(o2: &'static str, hillback: &'static str, pos: [&'static str; 3]) -> Mntscrl {
-        Mntscrl {
-            o2_path: o2,
-            hillback_path: hillback,
-            pos_paths: pos,
-            ..Mntscrl::new()
         }
     }
 
@@ -542,6 +523,42 @@ impl Mntscrl {
     }
 }
 
+/// Parse and bound one POS list, `bytes` as read from `path`.
+fn pos_list(path: &str, bytes: &[u8]) -> Result<PosList, PartError> {
+    let list = PosList::parse(bytes).map_err(|error| PartError {
+        part: NAME,
+        message: format!("{path}: {error}"),
+    })?;
+    // `scr` indexes the surface and the background with every offset
+    // (:515); past the 64,000-byte picture the background read panics.
+    // The bound belongs here, where the file is still named, not in
+    // the blitter's hot path.
+    for (column, offsets) in list.columns.iter().enumerate() {
+        for &offset in offsets {
+            if offset as usize >= VIDEO_BYTES {
+                return Err(PartError {
+                    part: NAME,
+                    message: format!(
+                        "{path}: column {column} holds offset {offset}, outside the \
+                         {VIDEO_BYTES}-byte picture"
+                    ),
+                });
+            }
+        }
+    }
+    if list.columns.len() != FONT_LEN {
+        return Err(PartError {
+            part: NAME,
+            message: format!(
+                "{path} holds {} columns; the blitter walks {FONT_LEN} (237*31, \
+                 FOREST/ROUTINES.ASM:21)",
+                list.columns.len()
+            ),
+        });
+    }
+    Ok(list)
+}
+
 impl Part for Mntscrl {
     fn name(&self) -> &'static str {
         NAME
@@ -580,13 +597,12 @@ impl Part for Mntscrl {
         // `:110-117`: 31 rows of 640 bytes. The RIX3 reader hands back the
         // same bytes the raw `seek(x*640+778)` reaches (its own tests pin the
         // layout), so the copy is row for row.
-        let o2 = self.read_image(self.o2_path)?;
+        let o2 = load_image(NAME, O2_PATH)?;
         if (o2.width() as usize, o2.height() as usize) != (O2_WIDTH, O2_HEIGHT) {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the part reads {O2_WIDTH}x{O2_HEIGHT}",
-                    self.o2_path,
+                    "{O2_PATH} is {}x{}; the part reads {O2_WIDTH}x{O2_HEIGHT}",
                     o2.width(),
                     o2.height()
                 ),
@@ -599,15 +615,14 @@ impl Part for Mntscrl {
         apply_bias(&mut self.fbuf, &mut overrun);
 
         // `:120-121`: the palette at +10 and the picture at +778.
-        let hillback = self.read_image(self.hillback_path)?;
+        let hillback = load_image(NAME, HILLBACK_PATH)?;
         if (hillback.width() as usize, hillback.height() as usize)
             != (HILLBACK_WIDTH, HILLBACK_HEIGHT)
         {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the part reads {HILLBACK_WIDTH}x{HILLBACK_HEIGHT}",
-                    self.hillback_path,
+                    "{HILLBACK_PATH} is {}x{}; the part reads {HILLBACK_WIDTH}x{HILLBACK_HEIGHT}",
                     hillback.width(),
                     hillback.height()
                 ),
@@ -624,43 +639,9 @@ impl Part for Mntscrl {
 
         // `:59-90`: the three lists, one frame group each.
         self.lists = Vec::with_capacity(3);
-        for path in self.pos_paths {
-            let bytes = std::fs::read(path).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{path}: {error}"),
-            })?;
-            let list = PosList::parse(&bytes).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{path}: {error}"),
-            })?;
-            // `scr` indexes the surface and the background with every offset
-            // (:515); past the 64,000-byte picture the background read panics.
-            // The bound belongs here, where the file is still named, not in
-            // the blitter's hot path.
-            for (column, offsets) in list.columns.iter().enumerate() {
-                for &offset in offsets {
-                    if offset as usize >= VIDEO_BYTES {
-                        return Err(PartError {
-                            part: NAME,
-                            message: format!(
-                                "{path}: column {column} holds offset {offset}, outside the \
-                                 {VIDEO_BYTES}-byte picture"
-                            ),
-                        });
-                    }
-                }
-            }
-            if list.columns.len() != FONT_LEN {
-                return Err(PartError {
-                    part: NAME,
-                    message: format!(
-                        "{path} holds {} columns; the blitter walks {FONT_LEN} (237*31, \
-                         FOREST/ROUTINES.ASM:21)",
-                        list.columns.len()
-                    ),
-                });
-            }
-            self.lists.push(list);
+        for rel in POS_PATHS {
+            let bytes = read_asset(NAME, rel)?;
+            self.lists.push(pos_list(&asset(rel), &bytes)?);
         }
 
         self.font = vec![0; FONT_LEN + 1];
@@ -817,35 +798,12 @@ fn ramp(from: &mut Palette768, to: &Palette768, count: usize, direction: Directi
     }
 }
 
-impl Mntscrl {
-    /// [`load_path`] with the part's own error, so every asset failure names
-    /// the path the same way.
-    fn read_image(&self, path: &str) -> Result<Image, PartError> {
-        load_path(Path::new(path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{path}: {error}"),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parts::test_rig::{differing_bytes, reference, Reading, Rig, ScriptedMusic};
     use sr_engine::dac_expand;
     use sr_engine::music::musplus_from;
-
-    /// The paths a unit test reads: this crate's own directory, two levels
-    /// below the repository root, so the part's own relative paths do not
-    /// resolve there. The integration test in `tests/mntscrl.rs` runs the
-    /// real binary from the root.
-    const TEST_O2: &str = "../../assets/FOREST/O2.SCI";
-    const TEST_HILLBACK: &str = "../../assets/FOREST/HILLBACK.CLX";
-    const TEST_POS: [&str; 3] = [
-        "../../assets/FOREST/POS1.DAT",
-        "../../assets/FOREST/POS2.DAT",
-        "../../assets/FOREST/POS3.DAT",
-    ];
 
     /// A script with no plus pending: `musplus` is -32 at every tick (the
     /// object's own sentinel), so the main loop's -11 cue never comes.
@@ -881,7 +839,7 @@ mod tests {
 
     fn started_with(music: ScriptedMusic) -> (Rig, Mntscrl) {
         let mut rig = rig(music);
-        let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
+        let mut part = Mntscrl::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -923,11 +881,11 @@ mod tests {
         // `:110-117`: 31 rows of 640 bytes from `O2.SCI`'s pixel payload
         // (RIX3 puts it at 778, where the raw `seek(x*640+778)` looks), and
         // `:119`'s +128 on every non-zero byte.
-        let o2 = std::fs::read(TEST_O2).unwrap();
+        let o2 = read_asset(NAME, O2_PATH).unwrap();
         assert_eq!(o2.len(), 21_258);
-        for (path, length) in TEST_POS.iter().zip([25_088usize, 25_064, 25_114]) {
+        for (path, length) in POS_PATHS.iter().zip([25_088usize, 25_064, 25_114]) {
             assert_eq!(
-                std::fs::metadata(path).unwrap().len() as usize,
+                std::fs::metadata(asset(path)).unwrap().len() as usize,
                 length,
                 "{path}"
             );
@@ -949,7 +907,7 @@ mod tests {
 
         // `:120-121`: the palette at +10, the picture at +778 — and the
         // rebased segment's trailing 778 bytes are the picture's own last 778.
-        let hillback = std::fs::read(TEST_HILLBACK).unwrap();
+        let hillback = read_asset(NAME, HILLBACK_PATH).unwrap();
         assert_eq!(hillback.len(), 64_778);
         for index in 0..256usize {
             let expected = [
@@ -1003,21 +961,11 @@ mod tests {
         for _ in 1..FONT_LEN {
             bytes.extend_from_slice(&0u16.to_le_bytes()); // an empty column
         }
-        let file = std::env::temp_dir().join(format!(
-            "sr-mntscrl-{}-offset.dat",
-            std::process::id()
-        ));
-        std::fs::write(&file, &bytes).unwrap();
-        let shown = file.to_string_lossy().into_owned();
-        let path: &'static str = Box::leak(shown.clone().into_boxed_str());
-
-        let mut rig = rig(sentinel());
-        let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, [path, TEST_POS[1], TEST_POS[2]]);
-        let error = part
-            .init(&mut rig.init_ctx(0))
+        let shown = "POS.DAT";
+        let error = pos_list(shown, &bytes)
             .expect_err("65,000 is outside the 64,000-byte picture");
         assert!(
-            error.message.contains(&shown),
+            error.message.contains(shown),
             "the error names the file: {}",
             error.message
         );
@@ -1031,7 +979,6 @@ mod tests {
             "the error names the offset: {}",
             error.message
         );
-        let _ = std::fs::remove_file(&shown);
     }
 
     #[test]
@@ -1069,7 +1016,7 @@ mod tests {
         // over the 64,000 pixels. The four means land on steps 5, 10, 15 and
         // 20 and the frame a step is displayed on is `tick 0 + n + 1`, so all
         // four say tick 0 is 419.
-        let hillback = load_path(Path::new(TEST_HILLBACK)).unwrap();
+        let hillback = load_image(NAME, HILLBACK_PATH).unwrap();
         let palette: Palette768 = core::array::from_fn(|i| hillback.palette.entry(i as u8));
         let mut target = palette;
         black_bands(&mut target);
@@ -1141,7 +1088,7 @@ mod tests {
         // and this part's tick 0. The head start is the entry run's
         // (`music_fresh`) alone.
         let mut rig = rig(sentinel());
-        let mut part = Mntscrl::at(TEST_O2, TEST_HILLBACK, TEST_POS);
+        let mut part = Mntscrl::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(rig.player().polls, 0, "a mid-chain start polls nothing");
     }

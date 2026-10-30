@@ -17,18 +17,17 @@
 //! `docs/fidelity/grid.md` is the full note: the capture, the substitutions
 //! and the residuals.
 
-use std::path::Path;
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::{asset, load_image};
 
 /// The registry name (`parts::registry`).
 pub const GRID_NAME: &str = "grid";
 
 /// `EYE4.UH` in the port's curated asset tree — byte-identical to
-/// `GRID/EYE4.UH`, which `P.EXE` links as `_EYE.OBK`. The binary's working
-/// directory is the repository root (the unit tests, which run from the
-/// crate's directory, use `../../assets/...` themselves).
+/// `GRID/EYE4.UH`, which `P.EXE` links as `_EYE.OBK`.
 const EYE_PATH: &str = "assets/GLENZ/EYE4.UH";
 
 /// The mode-13h screen: 320×200 bytes at `A000:0000`.
@@ -125,16 +124,15 @@ pub struct Eye {
 /// Load `EYE4.UH` through the port's Origin `Uh` decoder and apply the
 /// source's shift exactly: image bytes `0..63,900` become `(v << 3) & 0xff`,
 /// the last 100 (row 199, x=220..319) stay raw.
-pub fn load_eye(path: &Path) -> Result<Eye, String> {
-    let image =
-        sr_assets::load_path(path).map_err(|error| format!("{}: {error}", path.display()))?;
+pub fn load_eye() -> Result<Eye, PartError> {
+    let image = load_image(GRID_NAME, EYE_PATH)?;
     if image.width() != SCREEN_WIDTH as u16 || image.height() != SCREEN_HEIGHT as u16 {
-        return Err(format!(
+        return Err(PartError::new(GRID_NAME, format!(
             "{}: the eye is {}×{}, not 320×200",
-            path.display(),
+            asset(EYE_PATH),
             image.width(),
             image.height()
-        ));
+        )));
     }
     let mut pixels = [0u8; SCREEN_BYTES];
     pixels.copy_from_slice(image.pixels());
@@ -383,10 +381,7 @@ impl Part for Grid {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        let eye = load_eye(Path::new(EYE_PATH)).map_err(|message| PartError {
-            part: GRID_NAME,
-            message,
-        })?;
+        let eye = load_eye()?;
         self.palettes = palettes(&eye.palette).map(|raw| {
             let mut palette = Palette::new();
             for index in 0..256 {
@@ -448,12 +443,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-
-    /// Where the unit tests run from: the crate's own directory.
-    const ASSET: &str = "../../assets/GLENZ/EYE4.UH";
+    use crate::parts::read_asset;
 
     fn eye() -> Eye {
-        load_eye(Path::new(ASSET)).expect("the committed EYE4.UH loads")
+        load_eye().expect("the committed EYE4.UH loads")
     }
 
     /// The 1,024-point screen `MAIN.C:144-152` plots before `getch`, for a
@@ -563,7 +556,7 @@ mod tests {
     #[test]
     fn the_eye_shift_stops_100_bytes_short() {
         let e = eye();
-        let raw = std::fs::read(ASSET).expect("EYE4.UH");
+        let raw = read_asset(GRID_NAME, EYE_PATH).expect("EYE4.UH");
         assert_eq!(raw.len(), 64_784);
         for (u, &pixel) in e.pixels.iter().enumerate() {
             let source = raw[784 + u];
@@ -585,8 +578,6 @@ mod tests {
         for (i, &byte) in e.palette.iter().enumerate() {
             assert_eq!(byte, raw[16 + i], "palette byte {i}");
         }
-        // A missing file is an error, not a panic.
-        assert!(load_eye(Path::new("../../assets/GLENZ/no-such-file.UH")).is_err());
     }
 
     #[test]

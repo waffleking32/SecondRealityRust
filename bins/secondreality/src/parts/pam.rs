@@ -99,12 +99,13 @@
 //!   nothing and only put copy 63 back up, which is the closing white hold.
 
 use std::cell::RefCell;
-use std::path::Path;
 use std::rc::Rc;
 
 use sr_assets::{load_frames, pal, Format};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::read_asset;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "pam";
@@ -230,8 +231,6 @@ pub struct Pam {
     /// `OUTTAA.C:30`'s `f`, incremented before each step.
     f: u32,
     phase: Phase,
-    ani_path: &'static str,
-    pal_path: &'static str,
 }
 
 impl Pam {
@@ -243,18 +242,6 @@ impl Pam {
             palettes: Vec::new(),
             f: 0,
             phase: Phase::Sync,
-            ani_path: ANI_PATH,
-            pal_path: PAL_PATH,
-        }
-    }
-
-    /// [`new`](Pam::new) reading its assets from elsewhere.
-    #[cfg(test)]
-    fn at(ani: &'static str, pal: &'static str) -> Pam {
-        Pam {
-            ani_path: ani,
-            pal_path: pal,
-            ..Pam::new()
         }
     }
 
@@ -287,20 +274,16 @@ impl Pam {
             "this part waits on dis_sync() (PAM/OUTTAA.C:39) and the run has \
              no music to wait on",
         )?;
-        let ani = std::fs::read(Path::new(self.ani_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{}: {error}", self.ani_path),
-        })?;
+        let ani = read_asset(NAME, ANI_PATH)?;
         let frames = load_frames(&ani, Format::Ani).map_err(|error| PartError {
             part: NAME,
-            message: format!("{}: {error}", self.ani_path),
+            message: format!("{ANI_PATH}: {error}"),
         })?;
         if frames.len() != ANI_FRAMES {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} holds {} frames; the container's record chain is {ANI_FRAMES}",
-                    self.ani_path,
+                    "{ANI_PATH} holds {} frames; the container's record chain is {ANI_FRAMES}",
                     frames.len()
                 ),
             });
@@ -312,8 +295,7 @@ impl Pam {
                 return Err(PartError {
                     part: NAME,
                     message: format!(
-                        "{} frame {index} is {}x{}; the animation is {VIEW_WIDTH}x{VIEW_HEIGHT}",
-                        self.ani_path,
+                        "{ANI_PATH} frame {index} is {}x{}; the animation is {VIEW_WIDTH}x{VIEW_HEIGHT}",
                         frame.width(),
                         frame.height()
                     ),
@@ -322,13 +304,10 @@ impl Pam {
         }
         self.frames = frames.into_iter().map(|frame| frame.pixels().to_vec()).collect();
 
-        let pal_bytes = std::fs::read(Path::new(self.pal_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{}: {error}", self.pal_path),
-        })?;
+        let pal_bytes = read_asset(NAME, PAL_PATH)?;
         let base = pal::decode(&pal_bytes).map_err(|error| PartError {
             part: NAME,
-            message: format!("{}: {error}", self.pal_path),
+            message: format!("{PAL_PATH}: {error}"),
         })?;
         self.palettes = Pam::washes(&base);
 
@@ -508,9 +487,6 @@ mod tests {
     use sr_engine::dac_expand;
     use sr_engine::music::sync_from;
 
-    const TEST_ANI: &str = "../../assets/PAM/OUT.ANI";
-    const TEST_PAL: &str = "../../assets/PAM/PAL.PAL";
-
     fn rig(music: ScriptedMusic) -> Rig {
         Rig::new(VIEW_WIDTH, VIEW_HEIGHT).with(music)
     }
@@ -522,7 +498,7 @@ mod tests {
 
     fn started_with(music: ScriptedMusic) -> (Rig, Pam) {
         let mut rig = rig(music);
-        let mut part = Pam::at(TEST_ANI, TEST_PAL);
+        let mut part = Pam::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         (rig, part)
     }
@@ -588,7 +564,7 @@ mod tests {
         // setup has not run, so its `frame_count=0` is the counter, not the
         // anchor's 2.
         let mut rig = rig(ScriptedMusic::sync_codes(vec![SYNC_CODE]));
-        let mut part = Pam::at(TEST_ANI, TEST_PAL);
+        let mut part = Pam::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(part.phase, Phase::Loop, "the open gate starts the loop");
         assert_eq!(
@@ -725,7 +701,7 @@ mod tests {
     /// The container's frame count and the FLI header's word, from the files:
     /// the off-by-one is the source's and is kept.
     fn part_frame_count() -> usize {
-        let ani = std::fs::read(TEST_ANI).unwrap();
+        let ani = read_asset(NAME, ANI_PATH).unwrap();
         load_frames(&ani, Format::Ani).unwrap().len()
     }
 

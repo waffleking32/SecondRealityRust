@@ -28,11 +28,11 @@
 //! reference's frame 430 — 128,000 bytes of index 15, no picture in video
 //! memory yet — is inside them.
 
-use std::path::Path;
 
-use sr_assets::load_path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::load_image;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "beglogo";
@@ -97,11 +97,6 @@ const FADE_STEPS: u32 = 129;
 
 /// The picture and the palette it indexes, both as `readp` leaves them.
 pub struct Beglogo {
-    /// Where the picture is read from. [`PICTURE_PATH`] in a run — the binary
-    /// is started from the repository root, which is where `assets/` is — and
-    /// the same file by the path that works from this crate's directory in a
-    /// unit test.
-    picture_path: &'static str,
     /// The decoded picture, row-major at [`PICTURE_WIDTH`] — the shape
     /// `readp(rowbuf,y,pic)` decodes one row of. Empty until `init`.
     picture: Vec<u8>,
@@ -115,21 +110,9 @@ impl Beglogo {
     /// A part with no picture: `init` is what reads one.
     pub fn new() -> Beglogo {
         Beglogo {
-            picture_path: PICTURE_PATH,
             picture: Vec::new(),
             picture_palette: Palette::new(),
         }
-    }
-
-    /// [`new`](Beglogo::new) reading the picture by `path`.
-    ///
-    /// A unit test's working directory is this crate's, not the repository
-    /// root, so the part's own relative path does not resolve there; the
-    /// integration test in `tests/beglogo.rs` runs the real binary from the
-    /// repository root, where it does.
-    #[cfg(test)]
-    fn at(path: &'static str) -> Beglogo {
-        Beglogo { picture_path: path, ..Beglogo::new() }
     }
 }
 
@@ -183,10 +166,7 @@ impl Part for Beglogo {
         // the whole container in one call, which is the same bytes — and
         // `docs/fidelity/beglogo.md` records that the decode is byte-identical
         // to the reference's held frame, 0 of 128,000 pixels apart.
-        let image = load_path(Path::new(self.picture_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{}: {error}", self.picture_path),
-        })?;
+        let image = load_image(NAME, PICTURE_PATH)?;
         let (width, height) = (image.width() as usize, image.height() as usize);
         if (width, height) != (PICTURE_WIDTH, PICTURE_HEIGHT) {
             return Err(PartError {
@@ -194,7 +174,7 @@ impl Part for Beglogo {
                 message: format!(
                     "{} is {width}x{height}; this part's screen is \
                      {PICTURE_WIDTH}x{PICTURE_HEIGHT}",
-                    self.picture_path
+                    PICTURE_PATH
                 ),
             });
         }
@@ -362,14 +342,9 @@ mod tests {
     }
 
     /// A part whose `init` has run, and the rig it ran against.
-    ///
-    /// The picture is the curated `BEG/SRTITLE.UP`, by the path that resolves
-    /// from this crate's own directory — a unit test's working directory is not
-    /// the repository root. `tests/beglogo.rs` runs the real binary, and so the
-    /// part's own `assets/BEG/SRTITLE.UP`, from there.
     fn started() -> (Rig, Beglogo) {
         let mut rig = shell_rig();
-        let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
+        let mut part = Beglogo::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -385,7 +360,7 @@ mod tests {
         // rows, the unset offset.
         let mut rig = shell_rig();
         rig.view.y_line_offset = Some(320);
-        let mut part = Beglogo::at("../../assets/BEG/SRTITLE.UP");
+        let mut part = Beglogo::new();
         part.init(&mut rig.ctx(0)).unwrap();
         assert_eq!(rig.view.y_line_offset, None);
     }
@@ -548,7 +523,7 @@ mod tests {
     /// the scan it records.
     #[test]
     fn the_fade_constants_are_derived_by_matching_the_reference_bit_for_bit() {
-        let image = load_path(Path::new("../../assets/BEG/SRTITLE.UP")).unwrap();
+        let image = load_image(NAME, PICTURE_PATH).unwrap();
 
         // The decode is the strongest statement available that the decoder and
         // the art agree: the reference's held frame is its indices, byte for

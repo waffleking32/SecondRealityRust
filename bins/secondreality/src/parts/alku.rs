@@ -149,14 +149,14 @@
 //! strip but for one glyph the part never draws.
 
 use std::cell::RefCell;
-use std::path::Path;
 use std::rc::Rc;
 
 use sr_assets::font::Font;
-use sr_assets::{load_path, Image};
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::View;
 use sr_engine::Palette;
+
+use crate::parts::load_image;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "alku";
@@ -595,8 +595,6 @@ pub struct Alku {
     stage: Stage,
     /// The part's own tick.
     tick: u32,
-    hzpic_path: &'static str,
-    font_path: &'static str,
     /// Whether the three linked-hzpic entries are applied (D24). `true` for
     /// the part; `false` only for the counterfactual measurement test.
     shipped_palette: bool,
@@ -624,36 +622,14 @@ impl Alku {
             f: 60,
             stage: Stage::Sync { code: FIRST_GATE, card: 0 },
             tick: 0,
-            hzpic_path: HZPIC_PATH,
-            font_path: FONT_PATH,
             shipped_palette: true,
         }
     }
 
-    /// [`new`](Alku::new) reading its assets from elsewhere.
+    /// [`new`](Alku::new) with `HOI.U`'s own entries 1-3, for the counterfactual.
     #[cfg(test)]
-    fn at(hzpic: &'static str, font: &'static str) -> Alku {
-        Alku { hzpic_path: hzpic, font_path: font, ..Alku::new() }
-    }
-
-    /// [`at`](Alku::at) with `HOI.U`'s own entries 1-3, for the counterfactual.
-    #[cfg(test)]
-    fn at_curated(hzpic: &'static str, font: &'static str) -> Alku {
-        Alku {
-            hzpic_path: hzpic,
-            font_path: font,
-            shipped_palette: false,
-            ..Alku::new()
-        }
-    }
-
-    /// [`load_path`] with the part's own error, so every asset failure names
-    /// the path the same way.
-    fn read_image(&self, path: &str) -> Result<Image, PartError> {
-        load_path(Path::new(path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{path}: {error}"),
-        })
+    fn curated() -> Alku {
+        Alku { shipped_palette: false, ..Alku::new() }
     }
 
     /// The mode set's display state (`TWEAK.ASM:18-54`): 320×400, a 704-pixel
@@ -1397,15 +1373,14 @@ impl Alku {
             "this part waits on the music's start codes (ALKU/MAIN.C:59, :66, :72, \
              :79, :138) and the run has no music to wait on",
         )?;
-        let picture = self.read_image(self.hzpic_path)?;
+        let picture = load_image(NAME, HZPIC_PATH)?;
         if (picture.width() as usize, picture.height() as usize)
             != (HZPIC_WIDTH, HZPIC_HEIGHT)
         {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the part reads {HZPIC_WIDTH}x{HZPIC_HEIGHT}",
-                    self.hzpic_path,
+                    "{HZPIC_PATH} is {}x{}; the part reads {HZPIC_WIDTH}x{HZPIC_HEIGHT}",
                     picture.width(),
                     picture.height()
                 ),
@@ -1441,13 +1416,12 @@ impl Alku {
             self.picin[at] = i32::from(byte) * 256 / 128;
         }
 
-        let strip_image = self.read_image(self.font_path)?;
+        let strip_image = load_image(NAME, FONT_PATH)?;
         if (strip_image.width(), strip_image.height()) != (1500, FONT_ROWS as u16) {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the strip is 1500x{FONT_ROWS}",
-                    self.font_path,
+                    "{FONT_PATH} is {}x{}; the strip is 1500x{FONT_ROWS}",
                     strip_image.width(),
                     strip_image.height()
                 ),
@@ -1456,7 +1430,7 @@ impl Alku {
         let font = Font::from_image(strip_image);
         self.strip = Some(Strip::scan(font).map_err(|message| PartError {
             part: NAME,
-            message: format!("{}: {message}", self.font_path),
+            message: format!("{FONT_PATH}: {message}"),
         })?);
 
         if ctx.surface.pixels().len() < VIDEO_PIXELS {
@@ -1596,8 +1570,6 @@ mod tests {
     use crate::parts::test_rig::{differing_pixels, reference, Rig, ScriptedMusic};
     use sr_engine::{dac_expand, Surface};
 
-    const TEST_HZPIC: &str = "../../assets/ALKU/HOI.U";
-    const TEST_FONT: &str = "../../assets/ALKU/FONA.UH";
 
     /// A rig whose player answers `sync()` from `codes`, one a tick.
     fn rig(codes: Vec<i32>) -> Rig {
@@ -1606,7 +1578,7 @@ mod tests {
 
     fn started_with(codes: Vec<i32>) -> (Rig, Alku) {
         let mut rig = rig(codes);
-        let mut part = Alku::at(TEST_HZPIC, TEST_FONT);
+        let mut part = Alku::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -1764,7 +1736,7 @@ mod tests {
 
     #[test]
     fn the_font_strip_is_the_routines_own_scan_and_the_one_byte_shift_is_invisible() {
-        let image = load_path(Path::new(TEST_FONT)).unwrap();
+        let image = load_image(NAME, FONT_PATH).unwrap();
         assert_eq!((image.width(), image.height()), (1500, 30));
         let font = Font::from_image(image);
         let strip = Strip::scan(font).unwrap();
@@ -1825,7 +1797,7 @@ mod tests {
 
     #[test]
     fn the_picture_is_hoi_u_with_the_three_entries_the_release_ships() {
-        let image = load_path(Path::new(TEST_HZPIC)).unwrap();
+        let image = load_image(NAME, HZPIC_PATH).unwrap();
         assert_eq!((image.width(), image.height()), (640, 200));
         // The curated entries, the divergence E.18 records.
         assert_eq!(image.palette.entry(1), [2, 2, 3]);
@@ -2328,7 +2300,7 @@ mod tests {
     #[ignore]
     fn the_curated_palette_entries_leave_the_reference_different() {
         let mut rig = rig(trace_script(5455));
-        let mut part = Alku::at_curated(TEST_HZPIC, TEST_FONT);
+        let mut part = Alku::curated();
         part.init(&mut rig.ctx(0)).unwrap();
         let mut frames = Vec::new();
         for tick in 0..=5455u32 {

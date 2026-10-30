@@ -134,6 +134,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024;
+use crate::parts::{asset, read_asset};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "3dsinfld";
@@ -505,8 +506,6 @@ fn compose(video: &[u8; VIDEO_BYTES], page: u16, surface: &mut [u8]) {
 
 /// The COMAN sinus field.
 pub struct Coman {
-    /// The part's asset root, so the unit tests can read `../../assets`.
-    root: &'static str,
     wave1: Vec<u8>,
     wave2: Vec<u8>,
     vbuf: Box<[u8; VBUF_BYTES]>,
@@ -541,7 +540,6 @@ impl Coman {
     /// A fresh part reading `assets/COMAN/...` from the repository root.
     pub fn new() -> Coman {
         Coman {
-            root: "",
             wave1: Vec::new(),
             wave2: Vec::new(),
             vbuf: Box::new([0; VBUF_BYTES]),
@@ -562,29 +560,17 @@ impl Coman {
         }
     }
 
-    #[cfg(test)]
-    fn at(root: &'static str) -> Coman {
-        Coman {
-            root,
-            ..Coman::new()
-        }
-    }
-
-    fn asset(&self, path: &str) -> String {
-        format!("{}{path}", self.root)
-    }
-
     /// Read one wave table; a short or absent file is a part error.
-    fn read_wave(&self, path: &str) -> Result<Vec<u8>, PartError> {
-        let full = self.asset(path);
-        let bytes = std::fs::read(&full).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{full}: {error}"),
-        })?;
+    fn read_wave(path: &str) -> Result<Vec<u8>, PartError> {
+        let bytes = read_asset(NAME, path)?;
         if bytes.len() != WAVE_BYTES {
             return Err(PartError {
                 part: NAME,
-                message: format!("{full} is {} bytes; the linked table is {WAVE_BYTES}", bytes.len()),
+                message: format!(
+                    "{} is {} bytes; the linked table is {WAVE_BYTES}",
+                    asset(path),
+                    bytes.len()
+                ),
             });
         }
         Ok(bytes)
@@ -689,8 +675,8 @@ impl Part for Coman {
             "this part opens with a music gate (`COMAN/MAIN.C:56` \
              `while(!dis_exit() && dis_musplus()<0)`) and the run has no music",
         )?;
-        self.wave1 = self.read_wave(W1_PATH)?;
-        self.wave2 = self.read_wave(W2_PATH)?;
+        self.wave1 = Coman::read_wave(W1_PATH)?;
+        self.wave2 = Coman::read_wave(W2_PATH)?;
         self.palette = palette();
         ctx.set_palette(self.palette);
         ctx.view.width = SCREEN_WIDTH;
@@ -758,7 +744,7 @@ impl Coman {
 mod tests {
     use super::*;
     use crate::audio::PlayerMusic;
-    use crate::parts::test_rig::{Rig, ROOT};
+    use crate::parts::test_rig::Rig;
     use sr_engine::music::Music;
 
     #[test]
@@ -1009,10 +995,7 @@ mod tests {
     }
 
     fn read_waves() -> (Vec<u8>, Vec<u8>) {
-        (
-            std::fs::read("../../assets/COMAN/W1DTA.BIN").unwrap(),
-            std::fs::read("../../assets/COMAN/W2DTA.BIN").unwrap(),
-        )
+        (Coman::read_wave(W1_PATH).unwrap(), Coman::read_wave(W2_PATH).unwrap())
     }
 
     #[test]
@@ -1229,7 +1212,7 @@ mod tests {
         let mut rig = real_rig();
         // The player is fresh from `_zplaysong(91)`: no poll has advanced it.
         assert_eq!(rig.player().position().order, 0);
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         let position = rig.player().position();
         assert_eq!(position.order, 91);
@@ -1248,7 +1231,7 @@ mod tests {
     fn a_mid_chain_start_does_not_pre_poll_and_blacks_the_inherited_screen() {
         let mut rig = real_rig();
         rig.surface.pixels_mut().fill(0xFF);
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         assert_eq!(rig.player().position().order, 0, "nothing was polled");
         // The mode set and `inittwk` clear the screen the previous part left.
@@ -1261,9 +1244,9 @@ mod tests {
     fn the_iterations_run_every_second_tick_and_the_frame_four_waits_add_two() {
         // The source's `frame += (frepeat = dis_waitb())`: two vblanks an
         // iteration, and the frame-4 body's two `dis_waitb` calls add two.
-        let mut part = Coman::at(ROOT);
-        part.wave1 = part.read_wave(W1_PATH).unwrap();
-        part.wave2 = part.read_wave(W2_PATH).unwrap();
+        let mut part = Coman::new();
+        part.wave1 = Coman::read_wave(W1_PATH).unwrap();
+        part.wave2 = Coman::read_wave(W2_PATH).unwrap();
         part.started = true;
         part.next_iteration = 0;
         let mut ticks = Vec::new();
@@ -1284,9 +1267,9 @@ mod tests {
 
     #[test]
     fn the_two_pages_alternate_and_the_display_lags_one_iteration() {
-        let mut part = Coman::at(ROOT);
-        part.wave1 = part.read_wave(W1_PATH).unwrap();
-        part.wave2 = part.read_wave(W2_PATH).unwrap();
+        let mut part = Coman::new();
+        part.wave1 = Coman::read_wave(W1_PATH).unwrap();
+        part.wave2 = Coman::read_wave(W2_PATH).unwrap();
         let mut last_copy: Option<u16> = None;
         for k in 0..6usize {
             part.iteration(k as u32 * 2, -32);
@@ -1306,7 +1289,7 @@ mod tests {
     #[test]
     fn the_gate_opens_on_the_first_tick_and_the_first_picture_lags_one_iteration() {
         let mut rig = real_rig();
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // The engine's tick 0 is the 528th poll: the gate passes and the
         // first iteration runs, but the page it displays is the cleared one.
@@ -1342,7 +1325,7 @@ mod tests {
     #[test]
     fn the_part_ends_on_the_music_break_not_the_dead_frame_cap() {
         let mut rig = real_rig();
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         let mut tick = 0u32;
         loop {
@@ -1371,7 +1354,7 @@ mod tests {
     #[test]
     fn the_exit_flag_ends_the_part_where_the_source_checks_it() {
         let mut rig = real_rig();
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!(rig.step(&mut part), PartStatus::Continuing);
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
@@ -1386,7 +1369,7 @@ mod tests {
         // is flat black, `reference-indices.md` §16). The part keeps running
         // off-screen until the break at tick 2,014.
         let mut rig = real_rig();
-        let mut part = Coman::at(ROOT);
+        let mut part = Coman::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         for tick in 0..=1_964u32 {
             rig.step(&mut part);

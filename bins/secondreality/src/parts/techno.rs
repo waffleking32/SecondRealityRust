@@ -68,13 +68,13 @@
 //!   `jmp cap35` makes its result the first edge, skipping the first
 //!   iteration's clipping; the first edge is not a pseudo-point.
 
-use std::path::Path;
 
-use sr_assets::{load_path, Image};
+use sr_assets::Image;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024;
+use crate::parts::{load_image, read_asset};
 
 const NAME: &str = "techno";
 
@@ -269,9 +269,6 @@ enum Phase {
 }
 
 pub struct Techno {
-    /// The directory the assets are read from: empty for a run (the shell
-    /// starts in the repository root), `"../../"` for the unit tests.
-    root: &'static str,
     phase: Phase,
     tick: u32,
     /// The three polls the emulator's CPU-bound preamble takes between the
@@ -394,7 +391,6 @@ impl Techno {
     /// tables.
     pub fn new() -> Techno {
         Techno {
-            root: "",
             phase: Phase::Gate,
             tick: 0,
             extra_polls: 0,
@@ -1182,15 +1178,8 @@ impl Part for Techno {
              (TECHNO/KOE.C:213, :275, KOEA.ASM:900) and the run has no music \
              to wait on",
         )?;
-        let read = |path: &str| -> Result<Vec<u8>, PartError> {
-            let path = format!("{}{path}", self.root);
-            std::fs::read(&path).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{path}: {error}"),
-            })
-        };
-        self.circle2 = read(CIRCLE2_PATH)?;
-        self.circle = read(CIRCLE_PATH)?;
+        self.circle2 = read_asset(NAME, CIRCLE2_PATH)?;
+        self.circle = read_asset(NAME, CIRCLE_PATH)?;
         if self.circle2.len() != 8_000 {
             return Err(PartError {
                 part: NAME,
@@ -1203,11 +1192,7 @@ impl Part for Techno {
                 message: format!("{CIRCLE_PATH} is {} bytes, not 24000", self.circle.len()),
             });
         }
-        let troll_path = format!("{}{TROLL_PATH}", self.root);
-        let troll: Image = load_path(Path::new(&troll_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{troll_path}: {error}"),
-        })?;
+        let troll: Image = load_image(NAME, TROLL_PATH)?;
         if (troll.width(), troll.height()) != (SCREEN_WIDTH, TROLL_HEIGHT) {
             return Err(PartError {
                 part: NAME,
@@ -1918,15 +1903,6 @@ impl Techno {
 // can be written against the source's own globals; it is always `Some` after
 // `ResetMode`.
 impl Techno {
-    /// A part whose asset root is the unit tests' `../../`, so the handoff
-    /// test beside PANICEND can drive it to `Done` on a real player.
-    #[cfg(test)]
-    pub(crate) fn at(root: &'static str) -> Techno {
-        let mut part = Techno::new();
-        part.root = root;
-        part
-    }
-
     /// A test's blank video memory: four empty planes and the 320×200 window
     /// at its first bytes.
     #[cfg(test)]
@@ -1945,7 +1921,7 @@ impl Techno {
 mod tests {
     use super::*;
     use crate::audio::PlayerMusic;
-    use crate::parts::test_rig::{Rig, ROOT};
+    use crate::parts::test_rig::Rig;
 
     /// A rig with the real player, `MUSIC1` seeked to order 18. The part sets
     /// no copper and reads no `ctx.frame`, so a step is the engine's poll and
@@ -1969,7 +1945,7 @@ mod tests {
         // 3301, inside Doit1 (from 1437) and Doit3 (from 2700); the troll's
         // mode change begins at 3401 and the picture holds from 3548.
         let mut rig = real_rig();
-        let mut part = Techno::at(ROOT);
+        let mut part = Techno::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // A frame's index is the dump's index: `frame` increments `tick`
         // from the value set here, so the first call (tick 0) is the run's
@@ -2042,7 +2018,7 @@ mod tests {
     #[test]
     fn the_two_geometries_are_the_parts_two_screens() {
         let mut rig = real_rig();
-        let mut part = Techno::at(ROOT);
+        let mut part = Techno::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // The interference screen is 320×200 from the mode set to the troll.
         // The call with `tick` is engine frame `tick`; the view changes on
@@ -2173,8 +2149,8 @@ mod tests {
     #[test]
     fn the_interference_picture_is_the_circles_in_the_reference_window() {
         let mut t = Techno::new();
-        t.circle2 = std::fs::read("../../assets/TECHNO/CIRCLE2.EGA").unwrap();
-        t.circle = std::fs::read("../../assets/DDSTARS/PIC.EGA").unwrap();
+        t.circle2 = read_asset(NAME, CIRCLE2_PATH).unwrap();
+        t.circle = read_asset(NAME, CIRCLE_PATH).unwrap();
         t.reset_video_for_tests();
         t.init_interference();
         // The reference's 4900 is the doubled picture at row 100, pixel 160:

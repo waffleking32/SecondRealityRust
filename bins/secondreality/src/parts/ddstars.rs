@@ -142,12 +142,12 @@
 //! theoretical for any later part that waits on `dis_sync` here. The port's
 //! part calls the player zero times.
 
-use std::path::Path;
 use std::sync::OnceLock;
 
-use sr_assets::load_path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::load_image;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "ddstars";
@@ -467,7 +467,6 @@ pub struct Ddstars {
     tick: u32,
     /// The exit flag was seen; the loop has ended.
     finished: bool,
-    text_path: &'static str,
 }
 
 impl Ddstars {
@@ -489,17 +488,6 @@ impl Ddstars {
             rng: Lcg::new(),
             tick: 0,
             finished: false,
-            text_path: TEXT_PATH,
-        }
-    }
-
-    /// [`new`](Ddstars::new) reading the text strip from elsewhere: a unit
-    /// test's working directory is this crate's, not the repository root.
-    #[cfg(test)]
-    fn at(path: &'static str) -> Ddstars {
-        Ddstars {
-            text_path: path,
-            ..Ddstars::new()
         }
     }
 
@@ -788,16 +776,12 @@ impl Part for Ddstars {
     /// `KOE.ASM:74-76` and `STARS.ASM:56-176`: the mode's display state, the
     /// text strip, the ring, the star table and the 100 opening passes.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        let image = load_path(Path::new(self.text_path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{}: {error}", self.text_path),
-        })?;
+        let image = load_image(NAME, TEXT_PATH)?;
         if (image.width() as usize, image.height() as usize) != (TEXT_WIDTH, TEXT_HEIGHT) {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} is {}x{}; the text routine reads {TEXT_WIDTH}x{TEXT_HEIGHT}",
-                    self.text_path,
+                    "{TEXT_PATH} is {}x{}; the text routine reads {TEXT_WIDTH}x{TEXT_HEIGHT}",
                     image.width(),
                     image.height()
                 ),
@@ -807,8 +791,7 @@ impl Part for Ddstars {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} carries {} pixel bytes; the part reads {}",
-                    self.text_path,
+                    "{TEXT_PATH} carries {} pixel bytes; the part reads {}",
                     image.pixels().len(),
                     TEXT_WIDTH * TEXT_HEIGHT
                 ),
@@ -817,7 +800,7 @@ impl Part for Ddstars {
         if image.pixels().iter().any(|pixel| *pixel > 3) {
             return Err(PartError {
                 part: NAME,
-                message: format!("{} is not a two-plane picture", self.text_path),
+                message: format!("{TEXT_PATH} is not a two-plane picture"),
             });
         }
         // The decoder's plane path delivers the two 1bpp planes as 2-bit
@@ -908,15 +891,14 @@ impl Part for Ddstars {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::read_asset;
     use crate::parts::test_rig::{differing_bytes, reference, Rig};
     use crate::shell::SURFACE_WIDTH;
     use sr_engine::dac_expand;
 
-    const TEST_TEXT: &str = "../../assets/DDSTARS/TEXTS.16";
-
     fn started() -> (Rig, Ddstars) {
         let mut rig = Rig::new(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16);
-        let mut part = Ddstars::at(TEST_TEXT);
+        let mut part = Ddstars::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -1210,7 +1192,7 @@ mod tests {
     #[test]
     fn the_text_strip_is_read_as_its_two_planes() {
         let (_, part) = started();
-        let raw = std::fs::read(TEST_TEXT).unwrap();
+        let raw = read_asset(NAME, TEXT_PATH).unwrap();
         assert_eq!(raw.len(), 16064);
         assert_eq!(&raw[..2], &[0xFC, 0xFC]);
         assert_eq!(part.text[0].len(), TEXT_WIDTH / 8 * TEXT_HEIGHT);

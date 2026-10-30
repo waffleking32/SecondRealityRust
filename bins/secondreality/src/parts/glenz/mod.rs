@@ -68,9 +68,7 @@ pub mod poly;
 pub mod span;
 pub mod tables;
 
-use std::path::Path;
 
-use sr_assets::load_path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
@@ -79,12 +77,13 @@ use math::{clip_y, matrix_yxz, project, rotate, Matrix, PVert, INIT_320X200};
 use poly::{build, ColourState, DemoMode, EPOLYS, EPOLYSB};
 use span::Compositor;
 use crate::parts::sin1024::SIN1024;
+use crate::parts::{asset, load_image};
 
 /// The part's name: what `--part` accepts and the registry lists.
 const NAME: &str = "glenz";
 
 /// The FC-logo picture (`Uh1`, 320x200, palette 6-bit; `MAIN.C:14`).
-const PICTURE: &str = "GLENZ/FC.UH";
+const PICTURE: &str = "assets/GLENZ/FC.UH";
 
 const VIEW_WIDTH: u16 = 320;
 /// BEGLOGO's inherited Mode X screen (`MAIN.C:288-304`).
@@ -490,8 +489,6 @@ pub(crate) enum Phase {
 
 /// GLENZ: the zoomer, the FC bounce, and the polyhedron over the picture.
 pub struct Glenz {
-    /// Where `GLENZ/FC.UH` lives: `assets/` in a run, the test root in tests.
-    root: &'static str,
     /// The 320x400 pixel buffer (`MAIN.C:18`), linear rows of 320.
     vram: Vec<u8>,
     /// The compositor's background (`MAIN.C:12`), 64,000 bytes.
@@ -521,21 +518,9 @@ impl Default for Glenz {
 }
 
 impl Glenz {
-    /// The part with its runtime asset root.
+    /// A fresh part: `init` reads `assets/GLENZ/FC.UH`.
     pub fn new() -> Glenz {
-        Glenz::with_root("assets/")
-    }
-
-    /// [`new`](Glenz::new) with an explicit asset root, for the unit tests
-    /// (the test binary's cwd is the package directory).
-    #[cfg(test)]
-    fn at(root: &'static str) -> Glenz {
-        Glenz::with_root(root)
-    }
-
-    fn with_root(root: &'static str) -> Glenz {
         Glenz {
-            root,
             vram: vec![0; VRAM_PIXELS],
             bgpic: vec![0; SCREEN_PIXELS],
             fc: vec![0; SCREEN_PIXELS],
@@ -550,10 +535,6 @@ impl Glenz {
             moved: Vec::new(),
             projected: Vec::new(),
         }
-    }
-
-    fn asset(&self, name: &str) -> String {
-        format!("{}{name}", self.root)
     }
 
     /// Copy `rows` 320-pixel rows of `vram` into the surface's first 320
@@ -877,11 +858,8 @@ impl Part for Glenz {
             self.vram[dst..dst + width].copy_from_slice(&ctx.surface.pixels()[src..src + width]);
         }
 
-        let path = self.asset(PICTURE);
-        let image = load_path(Path::new(&path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{path}: {error}"),
-        })?;
+        let path = asset(PICTURE);
+        let image = load_image(NAME, PICTURE)?;
         if (image.width(), image.height()) != (VIEW_WIDTH, VIEW_HEIGHT_200) {
             return Err(PartError {
                 part: NAME,
@@ -967,8 +945,6 @@ mod tests {
     use super::*;
     use crate::parts::test_rig::{Rig, ScriptedMusic};
 
-    const TEST_ROOT: &str = "../../assets/";
-    const PICTURE_PATH: &str = "../../assets/GLENZ/FC.UH";
 
     /// The scripted player: a `musplus` schedule by tick and a `getmframe`
     /// that advances at a fixed rate from the tick `setmframe(0)` ran on.
@@ -1033,7 +1009,7 @@ mod tests {
     /// The part started on the rig's music, as the shell starts it.
     fn started(music: ScriptedMusic) -> (Rig, Glenz) {
         let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT_200).with(music);
-        let mut part = Glenz::at(TEST_ROOT);
+        let mut part = Glenz::new();
         part.init(&mut rig.ctx(0))
             .expect("the test music is installed");
         (rig, part)
@@ -1041,7 +1017,7 @@ mod tests {
 
     /// `FC.UH`'s palette entries 0..15, the `backpal` source.
     fn picture_palette() -> [[u8; 3]; 16] {
-        let image = load_path(Path::new(PICTURE_PATH)).unwrap();
+        let image = load_image(NAME, PICTURE).unwrap();
         let mut palette = [[0u8; 3]; 16];
         for (index, entry) in palette.iter_mut().enumerate() {
             *entry = image.palette.entry(index as u8);
@@ -1110,7 +1086,7 @@ mod tests {
     #[test]
     fn init_refuses_a_run_without_music() {
         let mut rig = Rig::new(VIEW_WIDTH, VIEW_HEIGHT_200).with(fast());
-        let mut part = Glenz::at(TEST_ROOT);
+        let mut part = Glenz::new();
         let error = part.init(&mut rig.ctx_without_music(0)).unwrap_err();
         assert_eq!(error.part, "glenz");
         assert!(error.message.contains("no music"), "{}", error.message);
@@ -1125,7 +1101,7 @@ mod tests {
         for (index, pixel) in rig.surface.pixels_mut().iter_mut().enumerate() {
             *pixel = (index % 251) as u8;
         }
-        let mut part = Glenz::at(TEST_ROOT);
+        let mut part = Glenz::new();
         part.init(&mut rig.ctx(0)).unwrap();
         assert_eq!(
             (rig.view.width, rig.view.height),

@@ -88,11 +88,11 @@
 //!
 //! [`View::set_origin`]: sr_engine::view::View::set_origin
 
-use std::path::Path;
 
-use sr_assets::load_path;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
+
+use crate::parts::{asset, load_image};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "jplogo";
@@ -433,7 +433,6 @@ fn palette_upload(file: &Palette, dac: Palette) -> Palette {
 /// JPLOGO's state: the decoded rows, the two interpolated tables, the entry's
 /// start addresses, the palimpsest guard and the `doit` counter.
 pub struct Jplogo {
-    root: &'static str,
     rows: Vec<[u8; ROW_BYTES]>,
     t1: [i32; 800],
     t2: [i32; 800],
@@ -454,11 +453,9 @@ pub struct Jplogo {
 }
 
 impl Jplogo {
-    /// A fresh part reading `assets/JPLOGO/ICEKNGDM.UP` from the repository
-    /// root.
+    /// A fresh part: `init` reads `assets/JPLOGO/ICEKNGDM.UP`.
     pub fn new() -> Jplogo {
         Jplogo {
-            root: "",
             rows: Vec::new(),
             t1: [0; 800],
             t2: [0; 800],
@@ -472,18 +469,6 @@ impl Jplogo {
             scroll_lock: false,
             done: false,
         }
-    }
-
-    #[cfg(test)]
-    fn at(root: &'static str) -> Jplogo {
-        Jplogo {
-            root,
-            ..Jplogo::new()
-        }
-    }
-
-    fn asset(&self, path: &str) -> String {
-        format!("{}{path}", self.root)
     }
 
     /// The 400 rows `readp` decodes and `:191-196` crops: 184 bytes from x=70,
@@ -547,11 +532,8 @@ impl Part for Jplogo {
              `while(!dis_exit() && dis_musplus()<4)`) and the run has no music",
         )?;
 
-        let path = self.asset(PICTURE_PATH);
-        let image = load_path(Path::new(&path)).map_err(|error| PartError {
-            part: NAME,
-            message: format!("{path}: {error}"),
-        })?;
+        let path = asset(PICTURE_PATH);
+        let image = load_image(NAME, PICTURE_PATH)?;
         if (image.width() as usize, image.height() as usize)
             != (PICTURE_WIDTH, PICTURE_HEIGHT)
         {
@@ -688,9 +670,10 @@ impl Part for Jplogo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parts::read_asset;
     use crate::audio::PlayerMusic;
     use crate::parts::test_rig::{
-        differing_pixels, reference, rgb_of, trace_position, Reading, Rig, ROOT, ScriptedMusic,
+        differing_pixels, reference, rgb_of, trace_position, Reading, Rig, ScriptedMusic,
     };
     use sr_engine::music::Music;
 
@@ -812,7 +795,7 @@ mod tests {
     }
 
     fn asset() -> sr_assets::Image {
-        load_path(Path::new("../../assets/JPLOGO/ICEKNGDM.UP")).expect("ICEKNGDM.UP")
+        load_image(NAME, PICTURE_PATH).expect("ICEKNGDM.UP")
     }
 
     fn patterned_palette() -> Palette {
@@ -1022,7 +1005,7 @@ mod tests {
 
     #[test]
     fn readp_is_the_sources_row_rle_and_palette() {
-        let bytes = std::fs::read("../../assets/JPLOGO/ICEKNGDM.UP").unwrap();
+        let bytes = read_asset(NAME, PICTURE_PATH).unwrap();
         assert_eq!(u16_at(&bytes, 0), 0xFCFD, "FD FC, the RLE variant");
         assert_eq!(u16_at(&bytes, 2), 320);
         assert_eq!(u16_at(&bytes, 4), 400);
@@ -1062,7 +1045,7 @@ mod tests {
         let image = asset();
         let rows = Jplogo::read_rows(&image);
         assert_eq!(rows.len(), PICTURE_HEIGHT);
-        let bytes = std::fs::read("../../assets/JPLOGO/ICEKNGDM.UP").unwrap();
+        let bytes = read_asset(NAME, PICTURE_PATH).unwrap();
         for y in [0usize, 1, 100, 399] {
             let raw = reference_readp_row(&bytes, y as i32);
             for b in 0..CROP_WIDTH {
@@ -1101,7 +1084,7 @@ mod tests {
         // entry 169 — and entry 170's blue is that zero, not the old DAC's.
         let mut rig = real_rig();
         rig.palette = patterned_palette();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         let file = asset().palette;
         assert_eq!(
@@ -1162,7 +1145,7 @@ mod tests {
     #[test]
     fn the_view_is_320_by_400_at_80_plane_bytes_a_row() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         assert_eq!((rig.view.width, rig.view.height), (SCREEN_WIDTH, SCREEN_HEIGHT));
         assert!(!rig.view.double_scan, "CRTC 0x09 = 0");
@@ -1176,7 +1159,7 @@ mod tests {
     #[test]
     fn the_entry_ticks_walk_scroll_y_from_399_to_zero() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // Tick 0 shows the start-400 screen `init` left.
         rig.step(&mut part);
@@ -1222,7 +1205,7 @@ mod tests {
             assert_eq!(MUSIC_PRE_ROLL + 1 - 5, polls);
         }
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // The player is fresh from `_zplaysong(96)`; 483 polls leave it at
         // the row-58 window, whose start is five ticks before tick 0.
@@ -1258,7 +1241,7 @@ mod tests {
     #[test]
     fn a_mid_chain_start_does_not_pre_poll() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx_chain(0)).unwrap();
         // `_zplaysong` publishes nothing until the ring drains: no pre-poll.
         assert_eq!(rig.player().position().order, 0);
@@ -1269,7 +1252,7 @@ mod tests {
     fn the_gate_waits_for_musplus_at_least_four() {
         let music = ScriptedMusic::musplus(vec![-6]).never_syncs("the gate does not sync");
         let mut rig = Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(music);
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.ctx(0)).unwrap();
         let mut tick = |part: &mut Jplogo, plus: i32, frame: u32| {
             rig.player().script = vec![Reading { musplus: plus, ..Reading::default() }];
@@ -1291,7 +1274,7 @@ mod tests {
     #[test]
     fn the_doit_guard_is_a_palimpsest() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         part.y1 = 0;
         part.y2 = 400;
@@ -1325,7 +1308,7 @@ mod tests {
     #[test]
     fn the_counter_freezes_after_511_and_reads_the_table_before_it() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
         // Frame 510 takes the table's 511th entry, which is the settled
@@ -1350,7 +1333,7 @@ mod tests {
         // after it. Nothing in a run sets Scroll Lock; the branch exists so
         // the source's structure is present and testable.
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
         part.scroll_lock = true;
@@ -1362,7 +1345,7 @@ mod tests {
     #[test]
     fn the_frame_cap_and_exit_end_the_part() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         part.gate_open = true;
         rig.tick = DOIT_FIRST_TICK;
@@ -1372,7 +1355,7 @@ mod tests {
         assert!(part.done);
 
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         rig.tick = DOIT_FIRST_TICK;
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
@@ -1382,7 +1365,7 @@ mod tests {
     #[test]
     fn the_rendered_keyframes_are_the_references() {
         let mut rig = real_rig();
-        let mut part = Jplogo::at(ROOT);
+        let mut part = Jplogo::new();
         part.init(&mut rig.init_ctx(0)).unwrap();
         // The view is at start 0 from the entry's last step on.
         for _ in 0..=235 {

@@ -162,12 +162,13 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
 use std::rc::Rc;
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::view::{Split, View};
 use sr_engine::Palette;
+
+use crate::parts::{asset, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "plzpart";
@@ -542,14 +543,15 @@ fn parse_inc(text: &str) -> Result<Vec<i32>, String> {
     Ok(values)
 }
 
+/// The directory the `.INC` fragments are read from.
+const TABLE_DIR: &str = "assets/PLZPART";
+
 impl Tables {
-    fn load_at(directory: &Path) -> Result<Tables, PartError> {
+    fn load() -> Result<Tables, PartError> {
         let read = |name: &str| -> Result<String, PartError> {
-            let path = directory.join(name);
-            std::fs::read_to_string(&path).map_err(|error| PartError {
-                part: NAME,
-                message: format!("{}: {error}", path.display()),
-            })
+            let path = asset(&format!("{TABLE_DIR}/{name}"));
+            std::fs::read_to_string(&path)
+                .map_err(|error| PartError::new(NAME, format!("{path}: {error}")))
         };
         let parse = |name: &str, text: &str| -> Result<Vec<i32>, PartError> {
             parse_inc(text).map_err(|error| PartError {
@@ -859,10 +861,6 @@ enum Phase {
 /// PLZPART: the plasma and the cube.
 pub struct Plzpart {
     tables: Option<Tables>,
-    /// Directory the `.INC` fragments are read from.
-    table_directory: &'static str,
-    /// The shipped part, whose image holds the cube's camera path and sine table.
-    exe_path: &'static str,
     /// Everything the three copper routines own, shared with their closures.
     copper: Rc<RefCell<CopperState>>,
     /// The part's phase.
@@ -957,8 +955,6 @@ impl Plzpart {
     pub fn new() -> Plzpart {
         Plzpart {
             tables: None,
-            table_directory: "assets/PLZPART",
-            exe_path: EXE_PATH,
             copper: Rc::new(RefCell::new(CopperState::new())),
             phase: Phase::PlasmaGate,
             tick: 0,
@@ -1279,7 +1275,7 @@ impl Part for Plzpart {
             "this part waits on the music player's position \
              (PLZPART/PLZ.C:68, VECT.C:116) and the run has no music to wait on",
         )?;
-        let tables = Tables::load_at(Path::new(self.table_directory))?;
+        let tables = Tables::load()?;
         let pals = build_pals(&tables);
         {
             let mut state = self.copper.borrow_mut();
@@ -1289,11 +1285,9 @@ impl Part for Plzpart {
             part: NAME,
             message,
         };
-        let file =
-            std::fs::read(self.exe_path).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
-        let image =
-            sr_assets::exe::unpack(&file).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
-        let release = release_cube(&image).map_err(|e| error(format!("{}: {e}", self.exe_path)))?;
+        let file = read_asset(NAME, EXE_PATH)?;
+        let image = sr_assets::exe::unpack(&file).map_err(|e| error(format!("{EXE_PATH}: {e}")))?;
+        let release = release_cube(&image).map_err(|e| error(format!("{EXE_PATH}: {e}")))?;
         self.sinit = release.sinit;
         self.buu = release.buu;
         self.tables = Some(tables);
@@ -2211,11 +2205,11 @@ mod tests {
     use super::*;
 
     fn root() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
     fn tables() -> Tables {
-        Tables::load_at(&root().join("assets/PLZPART")).expect("the five fragments load")
+        Tables::load().expect("the five fragments load")
     }
 
     /// One of the tree's fragments the part no longer reads, parsed as the tests' record.
@@ -2488,8 +2482,6 @@ mod tests {
         let mut engine = Engine::new(MAX_WIDTH, MAX_HEIGHT, View::new(320, 200));
         engine.set_music(Box::new(PlayerMusic::new(player, 0)));
         let mut part = Plzpart::new();
-        part.table_directory = "../../assets/PLZPART";
-        part.exe_path = "../../assets/MAIN/DATA/PLZPART.EXE";
         engine.start(&mut part).expect("the part starts");
         let mut frame = IndexedFrame::new(engine.view().width, engine.view().height);
         let mut switched = false;

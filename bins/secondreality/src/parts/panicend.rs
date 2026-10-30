@@ -377,7 +377,7 @@ impl Part for Panicend {
 mod tests {
     use super::*;
     use crate::audio::PlayerMusic;
-    use crate::parts::test_rig::{reference, rgb_of, Rig, ROOT};
+    use crate::parts::test_rig::{reference, rgb_of, Rig};
     use sr_engine::view::View;
     use sr_engine::IndexedFrame;
 
@@ -706,7 +706,7 @@ mod tests {
         let player = test_player(ModuleId::Music1).unwrap();
         lock(&player).play_song(18);
         let mut rig = blank_rig().with(PlayerMusic::new(player, 0));
-        let mut techno = crate::parts::techno::Techno::at(ROOT);
+        let mut techno = crate::parts::techno::Techno::new();
         techno.init(&mut rig.init_ctx(0)).unwrap();
         let finished = (0..4200u32).any(|_| rig.step(&mut techno) == PartStatus::Finished);
         assert!(finished, "TECHNO's troll reaches Done");

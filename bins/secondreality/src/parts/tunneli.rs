@@ -45,9 +45,10 @@
 //! video memory as `x + y*320`, so `View::y_line_offset` is set to 320 and the
 //! surface's first 64 KB *is* the original's video memory, wraparound and all.
 
-use std::path::Path;
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
+
+use crate::parts::read_asset;
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "tunneli";
@@ -178,12 +179,6 @@ struct Ring {
 
 /// The dot tunnel.
 pub struct Tunneli {
-    /// Where the two data files are read from. The paths are fields so a unit
-    /// test can point them at the same files through a path that resolves from
-    /// this crate's directory (a unit test's working directory is not the
-    /// repository root, and `tests/tunneli.rs` runs the real binary from there).
-    tunnel_path: &'static str,
-    sinit_path: &'static str,
 
     /// `:24` `sinit`, and `:25` `cosit`, as `:102-103` copy them.
     sinit: Vec<u16>,
@@ -210,8 +205,6 @@ impl Tunneli {
     /// A part with no tables: `init` is what reads them.
     pub fn new() -> Tunneli {
         Tunneli {
-            tunnel_path: TUNNEL_PATH,
-            sinit_path: SINIT_PATH,
             sinit: Vec::new(),
             cosit: Vec::new(),
             pcalc: Vec::new(),
@@ -222,14 +215,6 @@ impl Tunneli {
             sx: 0,
             sy: 0,
         }
-    }
-
-    /// [`new`](Tunneli::new) reading the two data files by `path`-relative
-    /// names. A unit test's working directory is this crate's, not the
-    /// repository root, so the part's own relative paths do not resolve there.
-    #[cfg(test)]
-    fn at(tunnel_path: &'static str, sinit_path: &'static str) -> Tunneli {
-        Tunneli { tunnel_path, sinit_path, ..Tunneli::new() }
     }
 
     /// The word `:186`'s `add di, word ptr ds:rows[bx]` reads for the 16-bit
@@ -452,14 +437,13 @@ impl Part for Tunneli {
     /// `:99-148`: the tables, mode 13h, and the DAC.
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
         // `:102-103` — the two sine tables, `move`d out of `sinit.obj`.
-        let sinit_bytes = read_file(self.sinit_path)?;
+        let sinit_bytes = read_asset(NAME, SINIT_PATH)?;
         let sinit_words = words_of(&sinit_bytes);
         if sinit_words.len() < SINIT_WORDS + COSIT_COPIED {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} holds {} word(s); :102-103 copy {} of sinit and {} of cosit",
-                    self.sinit_path,
+                    "{SINIT_PATH} holds {} word(s); :102-103 copy {} of sinit and {} of cosit",
                     sinit_words.len(),
                     SINIT_WORDS,
                     COSIT_COPIED
@@ -474,15 +458,14 @@ impl Part for Tunneli {
 
         // `:104` — `pcalc`, `move`d out of `tunneli.obj`: 138 rows of 64
         // `(x, y)` word pairs.
-        let pcalc_bytes = read_file(self.tunnel_path)?;
+        let pcalc_bytes = read_asset(NAME, TUNNEL_PATH)?;
         self.pcalc = words_of(&pcalc_bytes);
         let needed = PCALC_ROWS * DOTS_PER_RING * 2;
         if self.pcalc.len() != needed {
             return Err(PartError {
                 part: NAME,
                 message: format!(
-                    "{} holds {} word(s); pcalc is {}x{} of two-word records = {}",
-                    self.tunnel_path,
+                    "{TUNNEL_PATH} holds {} word(s); pcalc is {}x{} of two-word records = {}",
                     self.pcalc.len(),
                     PCALC_ROWS,
                     DOTS_PER_RING,
@@ -588,14 +571,6 @@ fn ring_colour(x: usize) -> u8 {
     (x as f64 / 1.3).round() as u8
 }
 
-/// A file's bytes, or the part's own error naming the file.
-fn read_file(path: &str) -> Result<Vec<u8>, PartError> {
-    std::fs::read(Path::new(path)).map_err(|error| PartError {
-        part: NAME,
-        message: format!("{path}: {error}"),
-    })
-}
-
 /// `bytes` as the little-endian words the original's `move` copies. A trailing
 /// odd byte is dropped, which is what a word-wise `move` of a whole file does;
 /// the two files here are both even and their lengths are checked by the
@@ -616,13 +591,6 @@ mod tests {
     use sr_engine::view::View;
     use sr_engine::Palette;
 
-    /// The two tables by the path that resolves from this crate's directory —
-    /// a unit test's working directory is not the repository root, which is
-    /// where the part's own `assets/...` paths resolve (`tests/tunneli.rs` runs
-    /// the real binary from there).
-    const TUNNEL_LOCAL: &str = "../../assets/TUNNELI/TUNNEL.DAT";
-    const SINIT_LOCAL: &str = "../../assets/TUNNELI/SINIT.DAT";
-
     /// An entry no path through the part writes, as a marker for "the shell's
     /// DAC is still there".
     const UNWRITTEN: u8 = 200;
@@ -641,7 +609,7 @@ mod tests {
     /// A part whose `init` has run, and the rig it ran against.
     fn started() -> (Rig, Tunneli) {
         let mut rig = shell_rig();
-        let mut part = Tunneli::at(TUNNEL_LOCAL, SINIT_LOCAL);
+        let mut part = Tunneli::new();
         part.init(&mut rig.ctx(0)).unwrap();
         (rig, part)
     }
@@ -1105,7 +1073,7 @@ mod tests {
         rig.surface.pixels_mut().fill(0xAA);
         rig.view = View::new(640, 400);
         rig.view.y_line_offset = Some(640);
-        let mut part = Tunneli::at(TUNNEL_LOCAL, SINIT_LOCAL);
+        let mut part = Tunneli::new();
         part.init(&mut rig.ctx(0)).unwrap();
 
         assert_eq!((rig.view.width, rig.view.height), (320, 200));
@@ -1257,12 +1225,12 @@ mod tests {
         // so `load_path` refuses them; and `raw_surface` would need a geometry
         // the caller invents — 35,328 is 384x92 and 12,292 is 4x3,073, which
         // are record counts, not pictures.
-        for path in [TUNNEL_LOCAL, SINIT_LOCAL] {
-            let bytes = std::fs::read(path).unwrap();
+        for path in [TUNNEL_PATH, SINIT_PATH] {
+            let bytes = read_asset(NAME, path).unwrap();
             assert!(sr_assets::sniff(&bytes).is_none(), "{path} is not sniffable");
         }
-        let tunnel = std::fs::read(TUNNEL_LOCAL).unwrap();
-        let sinit = std::fs::read(SINIT_LOCAL).unwrap();
+        let tunnel = read_asset(NAME, TUNNEL_PATH).unwrap();
+        let sinit = read_asset(NAME, SINIT_PATH).unwrap();
         assert_eq!(tunnel.len(), PCALC_ROWS * DOTS_PER_RING * 2 * 2, "pcalc's bytes");
         assert_eq!(sinit.len(), (SINIT_WORDS + COSIT_WORDS) * 2, "both sine tables");
     }

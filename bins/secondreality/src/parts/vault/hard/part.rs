@@ -43,7 +43,6 @@
 //! before the switch rebuilds it — which is the measured phase of reference
 //! 852's band (`a = 252 - pal1colp` at count 0, not count 1).
 
-use std::path::Path;
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
@@ -60,13 +59,13 @@ use super::math::{project, rotate, rotate_project, PVert};
 use super::poly::{clip_easy_list, FaceMode, Poly, PolyDef};
 use super::span::Compositor;
 
+use crate::parts::read_asset;
+
 /// The registry name (`parts::registry`).
 pub const HARD_NAME: &str = "hard";
 
 /// `FCRZ.U` in the port's curated asset tree (64000 raw bytes, SHA-256
-/// `e2c068fe26c00ab3cfc6816e240d1a2670a1ba31bce8ea543861d3c154a1da5c`). The
-/// binary's working directory is the repository root; the unit tests, which
-/// run from the crate's directory, use `../../assets/...` themselves.
+/// `e2c068fe26c00ab3cfc6816e240d1a2670a1ba31bce8ea543861d3c154a1da5c`).
 const FCRZ_PATH: &str = "assets/HARD/FCRZ.U";
 
 const SCREEN_WIDTH: usize = 320;
@@ -815,12 +814,7 @@ impl Part for Hard {
     }
 
     fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        let raw = std::fs::read(Path::new(FCRZ_PATH))
-            .or_else(|_| std::fs::read(Path::new("../../").join(FCRZ_PATH)))
-            .map_err(|error| PartError {
-                part: HARD_NAME,
-                message: format!("{FCRZ_PATH}: {error}"),
-            })?;
+        let raw = read_asset(HARD_NAME, FCRZ_PATH)?;
         if raw.len() != SCREEN_BYTES {
             return Err(PartError {
                 part: HARD_NAME,
