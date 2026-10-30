@@ -278,9 +278,9 @@ fn the_block_two_run_is_numbered_in_boot_frames_and_reaches_glenz() {
         assert_eq!(entry(index)["width"], 320);
         assert_eq!(entry(index)["height"], 200);
     }
-    // The filed `second2b` trace is one row ahead at all four (1499 5:12,
-    // 2306 8:20, 3006 11:1, 3406 12:36): the six-tick wait offset A36
-    // registers, seen on the published position.
+    // The filed `second2b` trace is one row ahead at 1499 (5:12) and 2306
+    // (8:20): the six-tick wait offset A36 registers, seen on the published
+    // position.
     assert_eq!(entry(1499)["music_position"], "5:11");
     assert_eq!(entry(2306)["music_position"], "8:19");
 }

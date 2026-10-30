@@ -14,8 +14,7 @@ make the 4900 window, which rediff holds at 0.
 ## 1. Timeline
 
 `the_sections_land_on_the_reference_ticks` runs the real MUSIC1 player through the whole part
-and asserts the full transition vector. The frames are the engine's (the dump indices); the
-part's own `tick` counter is one higher.
+and asserts the full transition vector. The frames are the engine's (the dump indices).
 
 | frame | phase | source | what |
 |---|---|---|---|

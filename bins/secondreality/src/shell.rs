@@ -736,7 +736,8 @@ pub fn music_for_part(part: &str) -> Option<(ModuleId, u8)> {
         // `18:60`, pattern 3, the row `KOE.C:214`'s `setmframe(0)` leaves in
         // place — and the order in force when the sequence reaches it is 18.
         // The seek starts at 18; the entry run's pre-roll is the part's
-        // (`parts/techno.rs`), which lands the published row at the trace's 60.
+        // (`parts::techno::MUSIC_PRE_ROLL`), which lands the published row at
+        // the trace's 60.
         "techno" => Some((ModuleId::Music1, 18)),
         // PANICEND is block 2's fifth part, after TECHNO, and the part that
         // never reads the player. The filed `second2` trace holds MUSIC1 at
