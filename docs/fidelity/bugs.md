@@ -395,7 +395,7 @@ Frames: `reference/parts/lnszoom/` 2700, 3400, 4200, 4900, 5650 (`reference-indi
 
 **Original.** The 307/256 scaling of `xadd`/`yadd` comes after the table is built, so only the
 row-to-row advance is scaled. **Where.** `LENS/ASM.ASM:274-417`. **Frame.** 4200. **Test.**
-`the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps`.
+`the_rotazoomer_composes_160_samples_each_shown_twice_and_100_rows_twice`.
 
 ## 17. PLZPART — beyond §1: the clear's mask underflow, the cut-short last fade, the double `+160` and the subtraction inside the shift (slot 11)
 
@@ -745,7 +745,7 @@ path. Where a note holds a counterfactual test, the row names it.
 | LNS&ZOOM | `if(dis_musplus>-30)` tests the function pointer, so the wait always runs | `LENS/MAIN.C:104` | At entry the player publishes -5 (`the_entry_pre_roll_lands_the_reference_position_at_tick_zero`); the counterfactual is `the_missing_call_in_the_part1_guard_is_preserved` | `lnszoom.md` §3 |
 | LNS&ZOOM | The `a > 3` clamp on the frame advance | `LENS/MAIN.C:176` | The port advances one frame a tick | `lnszoom.md` §4 |
 | LNS&ZOOM | `setpalarea` at `:200` is erased by `inittwk`'s DAC clear | `LENS/MAIN.C:200` | Uploaded and cleared inside one tick | `lnszoom.md` §5 |
-| LNS&ZOOM | `rotpic90 = back` overwrites the picture buffer; `rotatez` is never called | `LENS/MAIN.C:191`, `LENS/ASM.ASM:419-564` | Nothing reads `back` after part 3 begins (`rotatez_is_dead`) | `lnszoom.md` §5-6 |
+| LNS&ZOOM | `rotpic90 = back` overwrites the picture buffer; `rotatez` is never called | `LENS/MAIN.C:191`, `LENS/ASM.ASM:419-564` | Nothing reads `back` after part 3 begins; the port has no `rotatez` | `lnszoom.md` §5-6 |
 | PLZPART | `plzline` writes 84 bytes into an 80-byte row | `PLZPART/ASMYT.ASM:41-69` | The last four land in the stride's hidden gap | `plzpart.md` §1, §9 |
 | PLZPART | `do_drop`'s `dtau` reaches 404 | `PLZPART/COPPER.ASM:175-181` | The split is off the 400-line screen; the port's 405 is inert | `plzpart.md` §9 |
 | PLZPART | `timetable[4] = 2778` can never be reached | `PLZPART/PLZ.C:46` | The exit fires 65 ticks after the previous switch (`the_timetable_events_happen_at_the_getmframe_thresholds`) | `plzpart.md` §9 |

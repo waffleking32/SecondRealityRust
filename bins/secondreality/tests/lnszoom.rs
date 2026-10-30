@@ -1,55 +1,22 @@
 //! LNS&ZOOM through the real binary: the registry, the run's own numbering,
-//! the music row, and the five reference keyframes at the derived mapping.
+//! the music row, and what the keyframes show beyond rediff's counts.
 //!
-//! The part's arithmetic is unit-tested beside it in `src/parts/lnszoom.rs`
-//! (the three acts' lengths and gates, the lens tables' bounds and the
-//! 1,536-byte overrun, `rotate`'s aspect ordering and 90° swap, the entry
-//! pre-roll and the acts' ticks with the real player). What is left over here
-//! is the wiring only a process can answer: the registry, the asset paths as a
-//! run resolves them from the repository root, the real player's position, and
-//! the frames the shell actually composes.
-//!
-//! **This part has no boot anchor.** Its first drawn face frame is a measured
-//! window, `(2452, 2456]` (`docs/fidelity/reference-indices.md` §12.5), so a
-//! `--part lnszoom` run numbers its own frames from zero and its manifest says
-//! `index_origin: "part"`, `anchor: null`. The comparison below uses the
-//! mapping the music and the two later acts pin — **boot = 2452 + tick**, from
-//! the trace's `45:59` at 2452, the lens's frame 474 at 3400 and the
-//! rotazoomer's frame 552 at 4200 — and calls it a mapping, not an anchor.
-//!
-//! **The residual is one asset difference (D24, APPROXIMATIONS A25).** The
-//! tree's `LENS.EXB` picture differs from the release's in 2,058 pixels of the
-//! forehead (rows 33..91, columns 129..211). Each act shows the part of that
-//! change it samples: 2,058 pixels at 2700 (the whole picture), 1,935 at 3400
-//! (the forehead behind the lens's bubble) and 1,396 at 4900 (the zoomed
-//! rotazoomer); 4200's sampled region misses it entirely (0 differing).
-//! Patching the tree's picture with the reference's 2700 index plane makes
-//! 3400, 4200 and 4900 byte-identical (`docs/fidelity/lnszoom.md` §7). The
-//! pinned numbers below are that divergence measured: 3.2156 %, 3.0234 %,
-//! 0.0000 %, 2.18125 % and 0.0000 %.
-//!
-//! **5650's `.idx` is not a picture.** The reference's plane is the tool's
-//! 320×200 planar read of the rotazoomer's last frame under a white palette:
-//! its rows 0..99 are the 100 character rows and its rows 100..199 are the
-//! memory past them (all zero). The displayed frame — the one the RGB file is
-//! — has each character row twice, as 100 of the emulator's 200 scanline
-//! pairs, so the port's `.idx` is the displayed (doubled) plane and the two
-//! are different geometries. The white keyframe is compared as RGB and the
-//! `.idx`'s structure is pinned as evidence of what it is.
+//! The counts are rediff's `lnszoom` entry (A25: the tree's face differs from
+//! the release's in 2,058 forehead pixels). The part has no boot anchor: a run
+//! numbers its own frames from zero, and the reference is reached by the
+//! mapping `boot = 2452 + tick` (`docs/fidelity/lnszoom.md` §7). 5650's `.idx`
+//! is the capture tool's planar memory read (100 character rows, then zeros),
+//! not the displayed picture, so it is pinned as evidence and not compared.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Where a `cargo run` of the acceptance command starts, and where the part's
-/// own `assets/LENS/...` paths resolve.
+/// Where a `cargo run` of the acceptance command starts.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A run of this part alone, dumping the frames asked for.
-///
-/// The run must exit 0: every requested index is produced, and a hole in a
-/// dump reads as a keyframe that matched.
+/// A run of this part alone, dumping the frames asked for; it must exit 0.
 fn dump(name: &str, indices: &str) -> (PathBuf, serde_json::Value) {
     let dir = std::env::temp_dir().join(format!("sr-lnszoom-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -89,76 +56,26 @@ fn reference_frame(index: u32, extension: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// The mapping: boot = [`REFERENCE_FIRST_INDEX`] + tick. It is pinned by the
-/// trace's `45:59` at 2452 (the part's tick 0), the lens's frame 474 at 3400
-/// (`src/parts/lnszoom.rs`'s notes), and the rotazoomer's frame 552 at 4200
-/// and frame 1252 at 4900. A mapping, not an anchor.
+/// The mapping: boot = `REFERENCE_FIRST_INDEX` + tick.
 const REFERENCE_FIRST_INDEX: u32 = 2452;
 
 fn tick_of(index: u32) -> u32 {
     index - REFERENCE_FIRST_INDEX
 }
 
-/// A frame comparison: (differing pixels, max channel delta).
-///
-/// **The lengths are asserted first**: `zip` stops at the shorter side, so a
-/// truncated dump — the one failure a comparison test exists to catch — would
-/// compare a prefix and report no differences as if it had compared the frame.
-fn compare(rendered: &[u8], expected: &[u8]) -> (usize, u8) {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the frame is {} bytes where the reference's is {}; a short read is not a comparison",
-        rendered.len(),
-        expected.len()
-    );
-    assert_eq!(rendered.len() % 3, 0, "RGB8 frames are three bytes a pixel");
-    let mut differing = 0usize;
-    let mut max_delta = 0u8;
-    for (a, b) in rendered.chunks_exact(3).zip(expected.chunks_exact(3)) {
-        let delta = (0..3)
-            .map(|channel| a[channel].abs_diff(b[channel]))
-            .max()
-            .unwrap();
-        if delta != 0 {
-            differing += 1;
-        }
-        max_delta = max_delta.max(delta);
-    }
-    (differing, max_delta)
-}
-
-fn differing_bytes(rendered: &[u8], expected: &[u8]) -> usize {
-    assert_eq!(
-        rendered.len(),
-        expected.len(),
-        "the index plane is {} bytes where the reference's is {}",
-        rendered.len(),
-        expected.len()
-    );
+/// The largest channel difference between two RGB frames of one size.
+fn max_delta(rendered: &[u8], expected: &[u8]) -> u8 {
+    assert_eq!(rendered.len(), expected.len(), "a short read is not a comparison");
     rendered
         .iter()
         .zip(expected)
-        .filter(|(a, b)| a != b)
-        .count()
-}
-
-/// The percentage of differing pixels, to four decimal places, as the note
-/// states it.
-fn percent(differing: usize) -> f64 {
-    100.0 * differing as f64 / 64_000.0
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap()
 }
 
 #[test]
 fn the_run_is_numbered_in_its_own_frames_and_declares_the_music_row() {
-    // No anchor: the manifest says the indices are the run's own, and the
-    // reference indices are reached by the stated mapping, not by claiming an
-    // anchor this part does not have.
-    assert_eq!(tick_of(2700), 248);
-    assert_eq!(tick_of(3400), 948);
-    assert_eq!(tick_of(4200), 1748);
-    assert_eq!(tick_of(4900), 2448);
-    assert_eq!(tick_of(5650), 3198);
     let (dir, manifest) = dump("numbering", "0,248");
     assert_eq!(manifest["index_origin"], "part");
     assert_eq!(manifest["anchor"], serde_json::Value::Null);
@@ -195,57 +112,13 @@ fn the_five_keyframes_at_the_measured_mapping() {
 
     let held = |index: u32| -> Vec<u8> { frame_file(&dir, tick_of(index), "rgb") };
 
-    // 2700: the held face. The port's picture is the tree's LENS.EXB; the
-    // reference's is the release's, whose forehead differs (A25). Both the RGB
-    // and the index plane differ in exactly those 2,058 pixels.
-    let mine = held(2700);
-    let theirs = reference_frame(2700, "rgb");
-    let (differing, max_delta) = compare(&mine, &theirs);
-    println!(
-        "2700 (tick {}): {:.4} % pixels, max delta {max_delta}",
-        tick_of(2700),
-        percent(differing)
-    );
-    assert_eq!(differing, 2058, "the D24 forehead divergence, RGB");
-    assert_eq!(max_delta, 53);
-    assert_eq!(
-        differing_bytes(
-            &frame_file(&dir, tick_of(2700), "idx"),
-            &reference_frame(2700, "idx")
-        ),
-        2058,
-        "the same 2,058 pixels in the index plane"
-    );
-    assert!(
-        (percent(differing) - 3.2156).abs() < 0.0001,
-        "3.2156 %"
-    );
+    // The forehead residuals' largest channel differences (A25).
+    for (index, expected) in [(2700u32, 53u8), (3400, 48), (4900, 41)] {
+        assert_eq!(max_delta(&held(index), &reference_frame(index, "rgb")), expected, "{index}");
+    }
 
-    // 3400: the lens over both eyes. RGB only in the reference (its palette
-    // moves while the read would run); the residual is the forehead behind the
-    // bubble.
-    let (differing, max_delta) = compare(&held(3400), &reference_frame(3400, "rgb"));
-    println!(
-        "3400 (tick {}): {:.4} % pixels, max delta {max_delta}",
-        tick_of(3400),
-        percent(differing)
-    );
-    assert_eq!(differing, 1935);
-    assert_eq!(max_delta, 48);
-    assert!((percent(differing) - 3.0234).abs() < 0.0001, "3.0234 %");
-
-    // 4200: the rotazoomer's early phase. Byte-identical — the sampled region
-    // does not reach the forehead.
-    let (differing, max_delta) = compare(&held(4200), &reference_frame(4200, "rgb"));
-    println!(
-        "4200 (tick {}): {differing} pixels, max delta {max_delta}",
-        tick_of(4200)
-    );
-    assert_eq!(differing, 0, "the rotazoomer at 4200");
-    assert_eq!(max_delta, 0);
     // The rotazoomer's screen is 100 character rows, each on two scanlines
-    // (`inittwk`'s maximum-scan-line 3 with mode 13h's 400-line total); both
-    // the port's and the reference's 4200 are row pairs.
+    // (`inittwk`'s maximum scan line 3); the reference's 4200 is row pairs too.
     for picture in [held(4200), reference_frame(4200, "rgb")] {
         for row in 0..100 {
             assert_eq!(
@@ -255,27 +128,8 @@ fn the_five_keyframes_at_the_measured_mapping() {
             );
         }
     }
-
-    // 4900: the rotazoomer's late phase. The residual is the forehead's
-    // 2,058 picture bytes seen through the zoom, 1,396 of them.
-    let (differing, max_delta) = compare(&held(4900), &reference_frame(4900, "rgb"));
-    println!(
-        "4900 (tick {}): {:.4} % pixels, max delta {max_delta}",
-        tick_of(4900),
-        percent(differing)
-    );
-    assert_eq!(differing, 1396);
-    assert_eq!(max_delta, 41);
-    assert!((percent(differing) - 2.18125).abs() < 0.0001, "2.18125 %");
-
-    // 5650: the flat white screen the part exits on.
-    let mine = held(5650);
-    let (differing, max_delta) = compare(&mine, &reference_frame(5650, "rgb"));
-    println!("5650 (tick {}): {differing} pixels", tick_of(5650));
-    assert_eq!(differing, 0);
-    assert_eq!(max_delta, 0);
     assert!(
-        mine.chunks_exact(3).all(|pixel| pixel == [255, 255, 255]),
+        held(5650).chunks_exact(3).all(|pixel| pixel == [255, 255, 255]),
         "the exit is 63 in every DAC entry"
     );
 

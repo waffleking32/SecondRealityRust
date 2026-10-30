@@ -729,7 +729,7 @@ registered. The hand-over is one measured constant with everything else accounte
 adopted.
 
 **Measured difference:** **2,058 / 1,935 / 0 / 1,396 / 0** pixels at 2700 / 3400 / 4200 / 4900 /
-5650 (`cargo test -p secondreality --test lnszoom`; `cargo xtask rediff --only lnszoom`), and the full
+5650 (`cargo xtask rediff --only lnszoom`), and the full
 run's 19000 at the same 2,058 (`cargo xtask rediff --only fullrun/06-panicend-lnszoom`). The 2,058
 are the reference's held face (2700's `.idx`) against the tree's picture, all in the forehead (rows
 33..91, columns 129..211), each a small palette-index change. Patching the tree's picture with the
@@ -1747,5 +1747,5 @@ can see them, and two are not on the shipped path.
 | `HARD/LINEBLIT.INC` | not applicable: on no link line (`HARD/LINK.TMP:1-3`) | `hard.md` |
 | TUNNELI's "patched y-base" | bit-identical; what `TUN10.PAS` patches is the plot's colour immediate (`:168` `mov byte ptr cs:[@c+3],al`, the plot at `:187`), not a y-base; the port passes `bbc` as a variable | `tunneli.md` §5 |
 | `GLENZ/VEC.ASM`'s matrix-in-immediates | bit-identical: state only, held in variables | `glenz.md` §5; rediff's `glenz` entry (1499 at 0) |
-| `LENS/ASM.ASM`'s patched addressing | bit-identical: the patched displacement table is evaluated as a table | `the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps`; `the_forehead_asset_difference_is_the_whole_residual` (A25) |
+| `LENS/ASM.ASM`'s patched addressing | bit-identical: the patched displacement table is evaluated as a table | `the_rotazoomer_composes_160_samples_each_shown_twice_and_100_rows_twice`; `the_forehead_asset_difference_is_the_whole_residual` (A25) |
 | PLZPART's "jump table" | bit-identical; `setplzparas` (`ASMYT.ASM:74-95`) patches four table bases into `plzline`'s instructions (the placeholders `0xC100`…`0xC400`, `:46-61`), not a jump table; the port evaluates the patched index expression over the map's flat segment | `the_table_bases_are_the_maps_not_the_assembly_placeholders`, `the_plasma_line_is_the_assemblers_index_expression` |

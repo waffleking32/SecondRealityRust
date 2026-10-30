@@ -1,119 +1,35 @@
 //! LNS&ZOOM — the face wipe, the lens, and the rotazoomer.
 //!
-//! `LENS/MAIN.C` (394 lines) over `LENS/ASM.ASM` (566 lines), one binary
-//! holding three routines run back to back (`MAIN.C:379-386`):
+//! `LENS/MAIN.C` (394 lines) over `LENS/ASM.ASM` (566 lines): three routines
+//! run back to back (`MAIN.C:379-386`), each behind a music gate.
 //!
-//! 1. **`part1`** (`:89-131`) — the demon face wipes in with two moving edges,
-//!    for at most 300 frames, after a music wait.
-//! 2. **`part2`** (`:133-183`) — 715 frames of `drawlens`, a magnifying bubble
-//!    steered along `LENS.EXP`'s first path, then a 5-frame hold.
-//! 3. **`part3`** (`:185-276`) — the rotazoomer: the face sampled through a
-//!    16.16 walker, rotated/zoomed, for 2000 frames, fading out from frame
-//!    1872 and ending on a flat white palette.
+//! 1. **`part1`** (`:89-131`): after `while(musplus < -6)`, the face wipes in
+//!    with two moving edges (80 drawing frames of a 300-frame loop).
+//! 2. **`part2`** (`:133-183`): after `while(musplus < -20)` (`:380`), 715
+//!    frames of `drawlens` (`:49-76`) along `LENS.EXP`'s first path, then a
+//!    five-frame hold. `dorow`/`dorow2`/`dorow3` (`ASM.ASM:22-168`) walk the
+//!    `LENS.EX1..4` row tables (`{u16 data_offset, u16 count}`, data at 480,
+//!    `CALC.C:153`) with 16-bit wrapping addresses.
+//! 3. **`part3`** (`:185-276`): `inittwk` (`ASM.ASM:185-238`) sets Mode X with
+//!    maximum scan line 3, so 100 character rows each show twice; `rotate`
+//!    (`:274-417`) walks the face through a 16.16 vector for 2000 frames,
+//!    writing each byte address as `(a, a, b, b)` through two plane masks,
+//!    fading out from frame 1872 and ending on a white palette. It breaks on
+//!    `musplus > -4` (`:213`).
 //!
-//! # The screen, and the two layouts in one binary
+//! `rotate` accumulates its 160-step displacement table from the uncorrected
+//! vector and only then applies the aspect ratio (`* 307 >> 8`) to the row
+//! advance; the other order misses 4200 (`bugs.md` §16).
 //!
-//! Parts 1 and 2 are mode 13h: 320×200, one byte a pixel, row stride 320.
-//! Part 3 calls `inittwk` (`ASM.ASM:185-238`), which clears the DAC, takes
-//! CRTC 9 to 0 (a 400-line display), puts the address counter in byte mode
-//! (CRTC `0x14 = 0`; CRTC `0x17`'s data byte `0xE3`, written as the `out dx,ax`
-//! word `0xe317`), sets the sequencer's memory mode (index 4, data 6) and map
-//! mask (index 2, data `0x0F`), clears 64 KB with `rep stosw`, and then sets
-//! **maximum scan line 3** — four scanlines a character row. With mode 13h's
-//! 400-line vertical total that leaves 100 character rows, each drawn twice in
-//! the emulator's 320×200 frame (DOSBox's `is_double_scanned_mode` halves the
-//! height and halves `address_line_total`, `vga_draw.cpp`), and the frame the
-//! reference files is those 100 rows each repeated twice.
-//!
-//! The rotazoomer's writes are **Mode X 256-colour planar**: the sequencer's
-//! chain-4 is off, so one CPU address is four plane bytes (DOSBox's
-//! `VGA_UnchainedVGA_Handler` stores them at `4*addr + plane`), and one
-//! displayed byte address is four pixels, one a plane. `rotate` writes each
-//! address twice — mask `0x03` with planes 0 and 1, then mask `0x0C` with
-//! planes 2 and 3 — so a group of four pixels is `(a, a, b, b)`: the first two
-//! from one sample and the last two from another. The reference's frames show
-//! exactly that two-pixel repetition.
-//!
-//! # `rotate` (`ASM.ASM:274-417`), unit for unit
-//!
-//! The path gives `(x, y, xa, ya)`. `xpos`/`ypos` are `x`/`y` in 16.16;
-//! `xadd`/`yadd` are `xa`/`ya << 6`. If `|xa| > |ya|` the walker takes the
-//! **rotated** picture (`rotpic90 = back`, built in place from the heap's
-//! `rotpic`) and maps `(xa, ya) -> (-ya, xa)` with `xpos/ypos` swapped and
-//! negated; the two branches sample the same face along the same vector. The
-//! displacement table is accumulated once — 160 steps of the walker, each step
-//! `x += yadd`, `y += -xadd`, the accumulated high bytes patched into the
-//! unrolled draw code. **Then** the aspect ratio (`* 307 >> 8`) is applied to
-//! `xadd`/`yadd` — and to nothing else: the in-row steps keep the uncorrected
-//! vector and only the row-to-row base advance is scaled. Applying the aspect
-//! before the table (the obvious reading) moves the animation a frame's worth
-//! and misses the reference's 4200 entirely; the source's order is what the
-//! frame pins.
-//!
-//! The row loop (`ZOOMYW` = 100) adds the corrected vector to `ypos`/`xpos`,
-//! takes `(y & 0xff, x & 0xff)` from their integer parts, and samples
-//! `src[(base + disp[n]) & 0xffff]` for `n = 1..=160`. Pixels `2n, 2n+1` of
-//! the row take sample `n + 1`, so the row's 320 pixels are 160 samples each
-//! shown twice. The port composes the doubled 100→200-row screen the emulator
-//! renders.
-//!
-//! # The lens (`drawlens`, `MAIN.C:49-76`, over `dorow`/`dorow2`/`dorow3`)
-//!
-//! `LENS.EX1..4` are 116 row entries `{u16 data_offset, u16 count}` followed by
-//! a data area at 480 (`CALC.C:153` writes `rowbeg*2 + ymax*4`; `ymax` is 120,
-//! so 120*4 = 480). `dorow` (EX1, OR `0x40`) writes `count` pixels from
-//! `back[base + offset[i]]` to `video[base + i]` with `base = u + delta`, and
-//! returns without drawing below count 4; `dorow2` (EX2/EX3, OR `0x80`/`0xC0`)
-//! walks `{dest_offset, source_offset}` pairs; `dorow3` (EX4, no OR) copies
-//! `count` bytes at the same offset in both. Every address is 16-bit: the
-//! original's `es:[bx+di]`/`ds:[bx+di]` wrap at 64 KB, and the port wraps with
-//! `wrapping_add`.
-//!
-//! The source's `base` is the row's address `u` plus the row's delta; the
-//! destination runs `base + i` while the source runs `base + offset[i]` —
-//! the tables are a magnified, distorted sampling of the picture around the
-//! lens, not a copy.
-//!
-//! # The palette, `fade` and `fade2` (`MAIN.C:300-357`)
-//!
-//! `LENS.EXB+16` is the base 64-entry palette. The three overlay banks at
-//! 64/128/192 add `LENS.EX0`'s three RGB triples (`(0,5,15)`, `(0,7,26)`,
-//! `(0,9,37)`), clamped at 63; the lens's OR bits select them. `fade` is 64
-//! blocks of the base ramped to white (`(pal*(63-x) + x*63)/63`) followed by
-//! 16 blocks of `pal + (15-x)*5`; the rotazoomer's first 16 frames upload the
-//! latter and its last 128 the former. `fade2` is 32 blocks of entries 64..255
-//! ramped towards the base (`pal[y] - pal[y%192]*(31-x)/31`); the lens uploads
-//! them for `uframe < 96`.
-//!
-//! # The bugs, preserved
-//!
-//! - **`if(dis_musplus>-30)`** (`MAIN.C:104`) is missing its `()`: it tests the
-//!   function pointer, which is non-zero, so the wait always runs. The port
-//!   waits unconditionally ([`PART1_GATE`]).
-//! - **The `setpalarea` at `:200` is erased by `inittwk`** (`:201`), whose DAC
-//!   clear runs immediately after. The port uploads it and then sets black.
-//! - **The 1,536-byte overrun** (`:302`): `memcpy(back+64000, back+64000-1536,
-//!   1536)` copies the picture's last 1,536 bytes into the buffer past its end
-//!   (the `FILLER` pad). The lens's 16-bit source addresses reach it.
-//! - **`rotpic90=back`** (`:191`): the original writes the rotated texture over
-//!   the picture buffer, while `rotpic` is the separate heap copy. The port
-//!   keeps the two buffers separate and builds the rotation from `rotpic`;
-//!   the aliasing is **unobservable**, because nothing reads `back` after
-//!   part 3 begins — the wipe and the lens are its only readers, and both are
-//!   done by then.
-//! - **The `a>3` clamp** (`:176`): the original advances `frame` by
-//!   `min(waitb(), 3)` while `uframe` advances by the whole count. The port
-//!   runs one frame a tick, so both advance 1:1 and the clamp is
-//!   unreachable.
-//! - **`rotatez` is dead** (`ASM.ASM:419-564`): identical to `rotate` except
-//!   that it adds `256` to `xadd` and subtracts it from `yadd` each row; it is
-//!   never called.
-//! - **The Scroll Lock border test** (`MAIN.C:36-47`): `waitb` paints the
-//!   border when `shiftstatus` bit 4 is set. There is no video border in the
-//!   engine's composited frame, and the reference was captured headless; the
-//!   test is not modelled.
-//!
-//! No copper callbacks: the source registers none.
+//! **Preserved:** `if(dis_musplus>-30)` (`:104`) tests the function pointer, so
+//! the first wait always runs; `:200`'s `setpalarea` is erased by `inittwk`'s
+//! DAC clear; `:302` copies the picture's last 1,536 bytes past its end, which
+//! the lens reads. **Not modelled:** `rotpic90=back`'s aliasing (`:191`; nothing
+//! reads `back` in part 3), the `a>3` clamp (`:176`; one frame a tick),
+//! `rotatez` (`ASM.ASM:419-564`, never called) and the Scroll Lock border
+//! (`:36-47`). The face is the tree's `LENS.EXB` (A25); the hand-over costs two
+//! setup frames ([`ROT_SETUP_FRAMES`]). No copper callbacks. Measurements:
+//! `docs/fidelity/lnszoom.md`.
 
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
@@ -163,11 +79,6 @@ const EX4_PATH: &str = "assets/LENS/LENS.EX4";
 const EXB_PATH: &str = "assets/LENS/LENS.EXB";
 const EXP_PATH: &str = "assets/LENS/LENS.EXP";
 
-/// The picture's size inside `LENS.EXB`: header 16 + palette 768. The
-/// `load_path` decoder hands the pixels back on their own; the tests use the
-/// offset to check them against the raw file.
-#[cfg(test)]
-const EXB_PICTURE_AT: usize = 784;
 /// The 1,536 bytes `MAIN.C:302` copies past the picture's end.
 const OVERRUN_BYTES: usize = 1536;
 
@@ -182,9 +93,8 @@ const PATH2_FRAMES: usize = 2000;
 
 /// `MAIN.C:300` `memcpy(palette, lensexb+16, 768)`.
 const PALETTE_BYTES: usize = 768;
-/// The three overlay banks `MAIN.C:308-325` reads from `LENS.EX0`+4. The
-/// values are the file's; the constant is the expectation `init` validates
-/// the bytes against.
+/// The three overlay triples `MAIN.C:308-325` reads from `LENS.EX0`+4, which
+/// `load` checks the file against.
 const EXPECTED_OVERLAYS: [(u8, u8, u8); 3] = [(0, 5, 15), (0, 7, 26), (0, 9, 37)];
 /// `MAIN.C:331-347`: 64 ramp blocks and 16 white-step blocks.
 const FADE_BLOCKS: usize = 64 + 16;
@@ -224,37 +134,16 @@ const ROT_WHITE_STEPS: u32 = 16;
 /// `MAIN.C:262-265`: `a=(frame-1872)/2`, clamped at 63.
 const ROT_FADE_CLAMP: i32 = 63;
 
-/// `MAIN.C:213`'s counterpart in the tree: the part3 setup's cost. The source's
-/// explicit waits between the last lens draw and the first rotazoomer frame
-/// are seven (the loop's exit, five hold frames and `MAIN.C:199`'s `waitb`);
-/// the reference's pictures need eight — its 4200 is path frame 552 and its
-/// 4900 path frame 1252 (`bins/secondreality/tests/lnszoom.rs`), both one
-/// frame after `T3 = 3648`, while the lens's last draw is at 3640. The
-/// rotpic90 rotation and `inittwk`'s 64 KB clear cost the release a vblank, so
-/// the port charges the setup two frames (`RotSetup` stages 0 and 1).
+/// The part3 setup's frames (`RotSetup` stages 0 and 1). The source has seven
+/// waits from the last lens draw to the first rotazoomer frame; the reference
+/// needs eight (4200 is path frame 552): the rotation and `inittwk`'s clear
+/// cost the release a vblank (A25, adopted under D24).
 const ROT_SETUP_FRAMES: u32 = 2;
 
-/// How many polls [`Lnszoom::init`] makes to reach the reference's position at
-/// the part's tick 0: `reference/music/second3/trace.csv` holds MUSIC1 order
-/// 45 row 59 at boot 2452 (the frame the part's `_dis_setmframe(0)` is read
-/// on), and the player publishes 45:59 on its 491st poll after a seek to order
-/// 45 — so 490 polls precede the engine's tick-0 poll. Measured; the same
-/// pre-roll puts the 48:44 row at tick 473 (boot 2925), the frame the trace
-/// holds it, which is what puts the lens at the reference's frame 0 at tick
-/// 474. See `docs/fidelity/lnszoom.md` §4.
+/// The polls `init` makes so the engine's tick-0 poll publishes the trace's
+/// 45:59 at boot 2452, the part's tick 0 (a mapping, not an anchor); it also
+/// puts 48:44 at tick 473, boot 2925 (`docs/fidelity/lnszoom.md` §4).
 const MUSIC_PRE_ROLL: u32 = 490;
-
-/// The capture frame the port's tick 0 stands at — **a mapping, not an
-/// anchor.** The part's start is the window (2452, 2456]
-/// (`reference-indices.md` §12.5); `shell::boot_anchor("lnszoom")` stays
-/// `None`, a run of this part numbers its own frames from zero, and its
-/// manifest says `index_origin: "part"`, `anchor: null`. The tests compare a
-/// reference index at `index - REFERENCE_FIRST_INDEX`; the mapping is pinned
-/// by the trace's 45:59 at 2452, the lens's 3400 = frame 474, the
-/// rotazoomer's 4200 = frame 552 and 4900 = frame 1252, and the white at
-/// 5650.
-#[cfg(test)]
-const REFERENCE_FIRST_INDEX: u32 = 2452;
 
 // --------------------------------------------------------------- the part --
 
@@ -282,6 +171,7 @@ enum Phase {
 }
 
 /// LNS&ZOOM: the face, the lens tables and the rotazoomer.
+#[derive(Clone)]
 pub struct Lnszoom {
     /// `LENS.EX0`: dimensions and the three overlay triples.
     ex0: Vec<u8>,
@@ -458,11 +348,14 @@ impl Lnszoom {
 
     /// The white the part exits on (`MAIN.C:274-275`).
     fn set_white(&self, ctx: &mut PartCtx) {
-        let mut white = Palette::new();
-        for index in 0..256u16 {
-            white.set_entry(index as u8, [63, 63, 63]);
-        }
-        ctx.set_palette(white);
+        ctx.set_palette(Palette::from_six_bit(&[63; PALETTE_BYTES]));
+    }
+
+    /// Part 3's end: the white palette, and the part is done.
+    fn finish_white(&mut self, ctx: &mut PartCtx) -> PartStatus {
+        self.set_white(ctx);
+        self.phase = Phase::Done;
+        PartStatus::Finished
     }
 
     /// `MAIN.C:113-126`: six copies of the two-edge pixel walk. Each copy
@@ -490,23 +383,21 @@ impl Lnszoom {
         let mut u1 = (x0 - LENS_HALF_WIDTH) + (y0 - LENS_HALF_HEIGHT) * 320;
         let mut u2 = (x0 - LENS_HALF_WIDTH) + (y0 + LENS_HALF_HEIGHT - 1) * 320;
         for y in 0..LENS_HALF_HEIGHT as usize {
-            if (0..=VIDEO_BYTES as i32).contains(&u1) {
-                let u = u1 as u16;
-                self.dorow(0, u, y, 0x40);
-                self.dorow2(1, u, y, 0x80);
-                self.dorow2(2, u, y, 0xC0);
-                self.dorow3(u, y);
-            }
+            self.draw_lens_row(u1, y);
             u1 += 320;
-            let row = LENS_ROWS - 1 - y;
-            if (0..=VIDEO_BYTES as i32).contains(&u2) {
-                let u = u2 as u16;
-                self.dorow(0, u, row, 0x40);
-                self.dorow2(1, u, row, 0x80);
-                self.dorow2(2, u, row, 0xC0);
-                self.dorow3(u, row);
-            }
+            self.draw_lens_row(u2, LENS_ROWS - 1 - y);
             u2 -= 320;
+        }
+    }
+
+    /// One `drawlens` row: the four table passes at `u`, skipped off screen.
+    fn draw_lens_row(&mut self, u: i32, row: usize) {
+        if (0..=VIDEO_BYTES as i32).contains(&u) {
+            let u = u as u16;
+            self.dorow(0, u, row, 0x40);
+            self.dorow2(1, u, row, 0x80);
+            self.dorow2(2, u, row, 0xC0);
+            self.dorow3(u, row);
         }
     }
 
@@ -520,11 +411,7 @@ impl Lnszoom {
         )
     }
 
-    fn row_delta(&self, which: usize, at: usize) -> u16 {
-        let t = &self.tables[which];
-        i16::from_le_bytes([t[at], t[at + 1]]) as u16
-    }
-
+    /// A table word: a row's delta, or one of its offsets.
     fn lens_word(&self, which: usize, at: usize) -> u16 {
         let t = &self.tables[which];
         u16::from_le_bytes([t[at], t[at + 1]])
@@ -537,7 +424,7 @@ impl Lnszoom {
         if count < 4 {
             return;
         }
-        let base = u.wrapping_add(self.row_delta(which, at));
+        let base = u.wrapping_add(self.lens_word(which, at));
         for i in 0..count {
             let offset = self.lens_word(which, at + 2 + 2 * i);
             let source = base.wrapping_add(offset) as usize;
@@ -551,7 +438,7 @@ impl Lnszoom {
         if count == 0 {
             return;
         }
-        let base = u.wrapping_add(self.row_delta(which, at));
+        let base = u.wrapping_add(self.lens_word(which, at));
         for i in 0..count {
             let dest = self.lens_word(which, at + 2 + 4 * i);
             let source = self.lens_word(which, at + 4 + 4 * i);
@@ -566,7 +453,7 @@ impl Lnszoom {
         if count == 0 {
             return;
         }
-        let base = u.wrapping_add(self.row_delta(3, at));
+        let base = u.wrapping_add(self.lens_word(3, at));
         for i in 0..count {
             let offset = base.wrapping_add(self.lens_word(3, at + 2 + 2 * i));
             self.video[offset as usize] = self.back[offset as usize];
@@ -671,37 +558,10 @@ impl Lnszoom {
             }
         }
     }
-}
 
-impl Part for Lnszoom {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
-    /// `MAIN.C:278-372`: the loads, the generated palettes and tables, and the
-    /// music catch-up. The source's `waitb(); setpalarea(palette,0,256)` is
-    /// the initial palette; the mode set's clear is the zeroed video memory.
-    fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
-        // All three acts wait on the music: `:104`, `:380`, `:213`.
-        ctx.require_music(
-            NAME,
-            "this part waits on the music player's position \
-             (LENS/MAIN.C:104, :380, :213) and the run has no music to wait on",
-        )?;
-
-        // The reference's player is already at order 45 row 59 on the tick this
-        // part's tick 0 stands at; an entry run starts the player at the seek's
-        // row 0, so the difference is made here. A part reached mid-chain finds
-        // the player already past this stretch, so the catch-up is the entry
-        // run's (`music_fresh`) alone.
-        if ctx.music_fresh() {
-            for _ in 0..MUSIC_PRE_ROLL {
-                if let Some(music) = ctx.music() {
-                    music.poll();
-                }
-            }
-        }
-
+    /// `MAIN.C:278-368`: the loads, the generated palettes and tables. The
+    /// mode set's clear is the zeroed video memory.
+    fn load(&mut self) -> Result<(), PartError> {
         self.ex0 = read_asset(NAME, EX0_PATH)?;
         if self.ex0.len() < 13 {
             return Err(PartError {
@@ -850,27 +710,61 @@ impl Part for Lnszoom {
 
         self.rotpic90 = Vec::new();
         self.video = vec![0u8; VIDEO_MEMORY];
+        Ok(())
+    }
+}
+
+impl Part for Lnszoom {
+    fn name(&self) -> &'static str {
+        NAME
+    }
+
+    /// `MAIN.C:278-372`: the music catch-up, the loads, and `:370-371`'s
+    /// `waitb(); setpalarea(palette,0,256)`.
+    fn init(&mut self, ctx: &mut PartCtx) -> Result<(), PartError> {
+        // All three acts wait on the music: `:104`, `:380`, `:213`.
+        ctx.require_music(
+            NAME,
+            "this part waits on the music player's position \
+             (LENS/MAIN.C:104, :380, :213) and the run has no music to wait on",
+        )?;
+
+        // A part reached mid-chain finds the player already past this
+        // stretch: the catch-up is the entry run's alone.
+        if ctx.music_fresh() {
+            for _ in 0..MUSIC_PRE_ROLL {
+                if let Some(music) = ctx.music() {
+                    music.poll();
+                }
+            }
+        }
+
+        self.load()?;
         self.phase = Phase::Gate;
         self.tick = 0;
 
         // `:290-292`, the mode set's clear, and `:370-371`'s palette upload.
         *ctx.view = mode_view(SCREEN_WIDTH, SCREEN_HEIGHT, Some(LINE_LEN), Some(0));
         self.compose_linear(ctx);
-        let palette = self.live_palette();
-        ctx.set_palette(palette);
+        ctx.set_palette(self.live_palette());
         Ok(())
     }
 
     /// One tick of `MAIN.C:89-276`, from the first wait to the white exit.
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
         self.tick += 1;
+        // Every loop tests `dis_exit` first; part 3's exit leaves the white
+        // palette behind (`:274-275`).
+        if ctx.exit_requested && self.phase != Phase::Done {
+            if matches!(self.phase, Phase::RotSetup { .. } | Phase::Rot { .. }) {
+                self.set_white(ctx);
+            }
+            self.phase = Phase::Done;
+            return PartStatus::Finished;
+        }
         match self.phase {
             Phase::Done => PartStatus::Finished,
             Phase::Gate => {
-                if ctx.exit_requested {
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 // The missing `()` in `if(dis_musplus>-30)` makes the guard the
                 // function pointer, which is non-zero: the wait always runs.
                 let musplus = ctx.musplus();
@@ -888,10 +782,6 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::Wipe { frame } => {
-                if ctx.exit_requested {
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 if frame < WIPE_FRAMES {
                     self.wipe();
                 }
@@ -904,10 +794,6 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::LensWait => {
-                if ctx.exit_requested {
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 let musplus = ctx.musplus();
                 if musplus < LENS_GATE {
                     self.compose_linear(ctx);
@@ -919,10 +805,6 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::Lens { uframe, frame } => {
-                if ctx.exit_requested {
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 // `:146-151`: `a=(uframe-32)/2`, clamped at 0, uploaded to
                 // entries 64..255 from that fade2 block.
                 if uframe < LENS_FADE_FRAMES {
@@ -952,10 +834,6 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::LensHold { uframe } => {
-                if ctx.exit_requested {
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 let uframe = uframe + 1;
                 self.phase = if uframe >= LENS_HOLD_END {
                     Phase::RotSetup { stage: 0 }
@@ -966,11 +844,6 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::RotSetup { stage } => {
-                if ctx.exit_requested {
-                    self.set_white(ctx);
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
                 if stage == 0 {
                     // `:191-198`: the rotation into `back`; the `waitb()` that
                     // follows is the boundary, charged `ROT_SETUP_FRAMES`.
@@ -996,18 +869,9 @@ impl Part for Lnszoom {
                 PartStatus::Continuing
             }
             Phase::Rot { frame } => {
-                // `:211-213`: the exit and the music break both leave the white
-                // palette behind (`:274-275`).
-                if ctx.exit_requested {
-                    self.set_white(ctx);
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
-                }
-                let musplus = ctx.musplus();
-                if musplus > ROT_BREAK {
-                    self.set_white(ctx);
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
+                // `:213`: the music break.
+                if ctx.musplus() > ROT_BREAK {
+                    return self.finish_white(ctx);
                 }
                 self.rotate(ctx, frame as usize);
                 let frame = frame + 1;
@@ -1026,9 +890,7 @@ impl Part for Lnszoom {
                     self.upload(ctx, 0, 64, &self.fade[block..block + FADE_BLOCK]);
                 }
                 if frame >= ROT_FRAMES {
-                    self.set_white(ctx);
-                    self.phase = Phase::Done;
-                    return PartStatus::Finished;
+                    return self.finish_white(ctx);
                 }
                 self.phase = Phase::Rot { frame };
                 PartStatus::Continuing
@@ -1045,6 +907,9 @@ mod tests {
         differing_pixels, reference, rgb_of, Reading, Rig, RigMusic, ScriptedMusic,
     };
     use sr_engine::music::Music;
+
+    /// Where `LENS.EXB`'s pixels start: header 16 + palette 768.
+    const EXB_PICTURE_AT: usize = 784;
 
     /// A player scripted one `(order, row, musplus)` reading a tick; a tick
     /// past the script reads 45:59 with no plus pending.
@@ -1075,10 +940,7 @@ mod tests {
     }
 
     fn started() -> (Rig, Lnszoom) {
-        let mut rig = rig(running(4_000));
-        let mut part = Lnszoom::new();
-        part.init(&mut rig.init_ctx(0)).unwrap();
-        (rig, part)
+        started_with(running(4_000))
     }
 
     fn started_with(music: ScriptedMusic) -> (Rig, Lnszoom) {
@@ -1122,20 +984,6 @@ mod tests {
     }
 
     // --- the three acts' lengths and gates -----------------------------------
-
-    #[test]
-    fn the_acts_are_the_trees_lengths_and_gates() {
-        assert_eq!(PART1_FRAMES, 300);
-        assert_eq!(WIPE_FRAMES, 80);
-        assert_eq!(WIPE_COPIES, 6);
-        assert_eq!(LENS_FRAMES, 715);
-        assert_eq!(LENS_HOLD_END, 720);
-        assert_eq!(ROT_FRAMES, 2000);
-        assert_eq!(ROT_FADE_START, 1872);
-        assert_eq!(ROT_WHITE_STEPS, 16);
-        assert_eq!((PART1_GATE, LENS_GATE, ROT_BREAK), (-6, -20, -4));
-        assert_eq!(ROT_SETUP_FRAMES, 2);
-    }
 
     #[test]
     fn the_wipe_runs_three_hundred_frames_and_draws_only_the_first_eighty() {
@@ -1363,7 +1211,6 @@ mod tests {
         use crate::audio::{lock, test_player, PlayerMusic};
         use crate::shell::ModuleId;
 
-        assert_eq!(MUSIC_PRE_ROLL, 490);
         // `reference/music/second3/trace.csv` at 2452: 45:59, zplus 1, and
         // `musplus` -5 — the part 1 gate passes without waiting.
         let player = test_player(ModuleId::Music1).unwrap();
@@ -1416,8 +1263,6 @@ mod tests {
             Phase::Rot { frame: 1 },
             "the rotazoomer's frame 0 is drawn on tick 1196"
         );
-        assert_eq!(REFERENCE_FIRST_INDEX + 474, 2_926);
-        assert_eq!(REFERENCE_FIRST_INDEX + 1_196, 3_648);
     }
 
     #[test]
@@ -1439,37 +1284,10 @@ mod tests {
 
     // --- the assets ----------------------------------------------------------
 
+    /// The part with its assets loaded, no player and no tick run.
     fn assets() -> Lnszoom {
         let mut part = Lnszoom::new();
-        part.ex0 = read_asset(NAME, EX0_PATH).unwrap();
-        let overlays = part.ex0_overlays();
-        part.tables = [
-            read_asset(NAME, EX1_PATH).unwrap(),
-            read_asset(NAME, EX2_PATH).unwrap(),
-            read_asset(NAME, EX3_PATH).unwrap(),
-            read_asset(NAME, EX4_PATH).unwrap(),
-        ];
-        let image = load_image(NAME, EXB_PATH).unwrap();
-        part.back = vec![0u8; VIDEO_MEMORY];
-        part.back[..VIDEO_BYTES].copy_from_slice(&image.pixels()[..VIDEO_BYTES]);
-        let from = VIDEO_BYTES - OVERRUN_BYTES;
-        let tail = part.back[from..VIDEO_BYTES].to_vec();
-        part.back[VIDEO_BYTES..].copy_from_slice(&tail);
-        part.palette = part.build_palette(&image.palette, overlays);
-        let (fade, fade2) = part.build_fades();
-        part.fade = fade;
-        part.fade2 = fade2;
-        part.rotpic = Lnszoom::build_rotpic(&part.back);
-        let exp = read_asset(NAME, EXP_PATH).unwrap();
-        let count = usize::from(u16::from_le_bytes([exp[2], exp[3]]));
-        let at = PATH_HEADER;
-        part.path1 = (0..2 * PATH1_FRAMES)
-            .map(|i| i16::from_le_bytes([exp[at + 2 * i], exp[at + 2 * i + 1]]))
-            .collect();
-        let at = PATH_HEADER + 2 * count;
-        part.path2 = (0..4 * PATH2_FRAMES)
-            .map(|i| i16::from_le_bytes([exp[at + 2 * i], exp[at + 2 * i + 1]]))
-            .collect();
+        part.load().unwrap();
         part
     }
 
@@ -1482,16 +1300,11 @@ mod tests {
             &part.back[VIDEO_BYTES - OVERRUN_BYTES..VIDEO_BYTES],
             "`MAIN.C:302` copies the last 1,536 bytes past the picture"
         );
-        assert_eq!(
-            &part.back[..VIDEO_BYTES],
-            &part.picture(),
-            "the picture itself is LENS.EXB's 64,000 pixel bytes at +784"
-        );
         let raw = read_asset(NAME, EXB_PATH).unwrap();
         assert_eq!(
             &raw[EXB_PICTURE_AT..EXB_PICTURE_AT + VIDEO_BYTES],
-            &part.picture()[..],
-            "the decoder's pixels are the file's bytes at +784"
+            &part.back[..VIDEO_BYTES],
+            "the picture is LENS.EXB's 64,000 pixel bytes at +784"
         );
         // EX0's dimensions.
         assert_eq!(
@@ -1523,24 +1336,11 @@ mod tests {
                 }
             }
             assert!(max_end <= table.len(), "table {which} runs past its file");
-            println!(
-                "EX{}: {} bytes, {} rows drawn, data ends at {}",
-                which + 1,
-                table.len(),
-                drawn,
-                max_end
-            );
         }
         assert_eq!(used[0], 103, "EX1's drawn rows");
         assert_eq!(used[1], 102, "EX2's drawn rows");
         assert_eq!(used[2], 43, "EX3's drawn rows");
         assert_eq!(used[3], 116, "EX4's drawn rows");
-    }
-
-    impl Lnszoom {
-        fn picture(&self) -> Vec<u8> {
-            self.back[..VIDEO_BYTES].to_vec()
-        }
     }
 
     #[test]
@@ -1620,6 +1420,7 @@ mod tests {
         part.rotpic = (0..VIDEO_MEMORY).map(|i| (i % 251) as u8).collect();
         part.rotpic90 = Lnszoom::build_rotpic90(&part.rotpic);
         part.path2 = path.to_vec();
+        part.fade = vec![0u8; FADE_BLOCKS * FADE_BLOCK];
         part.video = vec![0u8; VIDEO_MEMORY];
         part.phase = Phase::Rot { frame: 0 };
         part
@@ -1672,26 +1473,13 @@ mod tests {
         rig.surface.pixels()[..VIDEO_BYTES].to_vec()
     }
 
+    /// `part` set to draw rotazoomer frame 0 on a cleared video memory.
     fn clone_for_rotate(part: &Lnszoom) -> Lnszoom {
-        Lnszoom {
-            ex0: Vec::new(),
-            tables: part.tables.clone(),
-            path1: part.path1.clone(),
-            path2: part.path2.clone(),
-            back: Vec::new(),
-            palette: Vec::new(),
-            fade: vec![0u8; FADE_BLOCKS * FADE_BLOCK],
-            fade2: vec![0u8; FADE2_BLOCKS * FADE2_BLOCK],
-            rotpic: part.rotpic.clone(),
-            rotpic90: part.rotpic90.clone(),
-            video: vec![0u8; VIDEO_MEMORY],
-            firfade1: Vec::new(),
-            firfade2: Vec::new(),
-            firfade1a: Vec::new(),
-            firfade2a: Vec::new(),
-            phase: Phase::Rot { frame: 0 },
-            tick: 0,
-        }
+        let mut part = part.clone();
+        part.video = vec![0u8; VIDEO_MEMORY];
+        part.phase = Phase::Rot { frame: 0 };
+        part.tick = 0;
+        part
     }
 
     #[test]
@@ -1715,24 +1503,6 @@ mod tests {
                 assert_eq!(plane[2 * row * 320 + 2 * n + 1], *value);
             }
         }
-    }
-
-    #[test]
-    fn the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps() {
-        // With `xa=0, ya=0` the row advance is zero and every row is the same;
-        // with a non-zero `ya` the rows differ. The displacement table itself
-        // is the uncorrected vector: sample 160's address is built from
-        // 160*ya<<6 when the row corrects by 160*(307*ya<<6)>>8.
-        let _part = synthetic([0, 0, 0, 400]);
-        let disp = Lnszoom::displacements(0, 400 << 6);
-        assert_eq!(
-            disp[159],
-            (((160i64 * (400 << 6)) as u32 >> 16) as u8) as u16,
-            "the table keeps the uncorrected step"
-        );
-        let aspect = (307u32.wrapping_mul(400 << 6) as i32) >> 8;
-        assert_eq!(aspect, (400 << 6) * 307 / 256);
-        assert_ne!(aspect, 400 << 6);
     }
 
     #[test]
@@ -1760,12 +1530,9 @@ mod tests {
         assert_ne!(plane, plane2);
     }
 
-    /// The displayed frame as RGB, through the live palette and the engine's
-    /// 6→8-bit widening — what `--dump-frames` writes.
+    /// The displayed frame as RGB, read linearly: the clones below never ran
+    /// `init`, so they set no view.
     fn rendered_rgb(rig: &Rig) -> Vec<u8> {
-        // The part composes a linear 320×200 picture; this helper is used on
-        // clones that never ran `init`, so it reads the same linear layout
-        // rather than a view those clones do not set.
         rgb_of(&rig.surface.pixels()[..VIDEO_BYTES], &rig.palette)
     }
 
@@ -1803,8 +1570,6 @@ mod tests {
         // The lens at its 3400 frame (path frame 474): the patched picture
         // behind the bubble.
         let mut lens = clone_for_rotate(&patched);
-        lens.back = patched.back.clone();
-        lens.palette = patched.palette.clone();
         lens.video[..VIDEO_BYTES].copy_from_slice(&patched.back[..VIDEO_BYTES]);
         lens.phase = Phase::Lens { uframe: 474, frame: 474 };
         let mut rig = rig(running(1_000));
@@ -1819,7 +1584,6 @@ mod tests {
         // The rotazoomer's two keyframes.
         for (frame, index) in [(552usize, 4_200u32), (1_252, 4_900)] {
             let mut part = clone_for_rotate(&patched);
-            part.palette = patched.palette.clone();
             part.phase = Phase::Rot { frame: frame as u32 };
             let mut rig = Rig::new(SCREEN_WIDTH, SCREEN_HEIGHT).with(running(2_000));
             rig.palette = part.live_palette();
@@ -1833,19 +1597,5 @@ mod tests {
                 "the patched picture alone accounts for {index}'s residual"
             );
         }
-    }
-
-    #[test]
-    fn rotatez_is_dead() {
-        // The tree's `rotatez` (`ASM.ASM:419-564`) differs only by the two
-        // adds in its row loop and is never called; the port has no such path.
-        let source = std::fs::read_to_string("../../upstream/SecondReality/LENS/ASM.ASM").unwrap();
-        assert!(source.contains("_rotatez PROC FAR"));
-        assert_eq!(
-            source.matches("_rotatez").count(),
-            3,
-            "declared PUBLIC, opened and ended — never called"
-        );
-        assert!(!source.contains("call\t_rotatez") && !source.contains("call _rotatez"));
     }
 }

@@ -91,7 +91,8 @@ The lens keyframe's residual is the picture asset, not the lens (§7.2).
   all 2000 frames.
 - `rotate` applies the aspect ratio (`* 307 >> 8`) after the displacement table is patched, so
   only the row advance is scaled. Applying it first does not reproduce 4200
-  (`the_aspect_ratio_scales_the_row_advance_not_the_in_row_steps`; `bugs.md` §16).
+  (`the_rotazoomer_composes_160_samples_each_shown_twice_and_100_rows_twice`, whose expected
+samples apply it in the source's order; `bugs.md` §16).
 - After the loop the palette is all 63. 5650's white is the palette; video memory still holds
   the last rotazoomer frame (§7.2).
 
@@ -107,7 +108,7 @@ The lens keyframe's residual is the picture asset, not the lens (§7.2).
   clamp (`bugs.md` §16 and the index).
 - Not modelled: the Scroll Lock border test (`MAIN.C:36-47`; the engine's frame has no
   overscan border and the reference was captured headless), `rotatez` (`ASM.ASM:419-564`,
-  never called, `rotatez_is_dead`), and the copper (the source registers no callbacks).
+  never called), and the copper (the source registers no callbacks).
 
 ## 7. Mapping and verification
 
@@ -152,8 +153,7 @@ and the full run's 19000 differs by the same 2,058 as 2700 (A25).
 | 5650 | 3198 | RGB | 0 | 0 | 0 | exact |
 
 The rows are the `lnszoom` entry of the rediff table (`xtask/src/rediff/table.rs`), and
-`the_five_keyframes_at_the_measured_mapping` asserts them (`-- --nocapture` prints the
-percentages and deltas). `reference-indices.md` §12.4 tables the same five files byte-identical
+`the_five_keyframes_at_the_measured_mapping` asserts the max Δ column and D19's support (§7.3). `reference-indices.md` §12.4 tables the same five files byte-identical
 across five sessions.
 
 **The residual is one asset difference (A25).** The tree's `LENS.EXB` differs from the release's
@@ -178,7 +178,7 @@ equal); 3400, 4200 and 4900 move (both differ).
 
 ```bash
 cargo xtask rediff --only lnszoom
-cargo test -p secondreality --test lnszoom -- --nocapture
+cargo test -p secondreality --test lnszoom
 cargo test -p secondreality --bin secondreality parts::lnszoom
 ```
 
