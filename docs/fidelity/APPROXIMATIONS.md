@@ -602,8 +602,7 @@ What remains is CPU time and session state that the image does not hold:
   frame outside a fade shows text where the other shows none), and nothing says which of the two
   moved them.
 
-**Measured difference:** 900, 1719, 2719 and 5859 are **0** (`cargo test -p secondreality --test
-alku -- --nocapture`; `cargo xtask rediff --only alku`). With `HOI.U`'s own entries, 1719, 2719 and
+**Measured difference:** 900, 1719, 2719 and 5859 are **0** (`cargo xtask rediff --only alku`). With `HOI.U`'s own entries, 1719, 2719 and
 5859 differ in **1,595 / 4,171 / 966** of 128,000 pixels:
 
 ```bash

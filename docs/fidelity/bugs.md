@@ -219,9 +219,8 @@ entries hold for the release's image as well as the tree (`alku.md` §12).
 
 **Original.** One loop repeats entries 0-63 three times, so entry `v` is entry `v mod 64`, and the
 text's XOR (`0x40/0x80/0xC0`) and `and 0x3f` leave the picture unchanged under the text.
-**Where.** `ALKU/MAIN.C:212`. **Frame.** 1719 and 2719 (cards mid-hold), exact. **Tests.**
-`the_picture_is_hoi_u_with_the_three_entries_the_release_ships`,
-`the_text_operations_keep_the_pictures_low_six_bits`.
+**Where.** `ALKU/MAIN.C:212`. **Frame.** 1719 and 2719 (cards mid-hold), exact. **Test.**
+`the_picture_is_hoi_u_with_the_three_entries_the_release_ships`.
 
 ### 10.2 The refresh reads past the picture's row
 

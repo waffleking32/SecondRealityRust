@@ -123,7 +123,7 @@ The cards are the strong evidence: their text is drawn in `fade2`'s entries 64, 
 are palette entries 1-3 (`MAIN.C:194-208`), so the two palettes give visibly different cards.
 
 **The font.** `ALKU/INCLUDE.ASM:17` includes `fona.inc`, which is `FONA.UH[783:]`, one byte before
-the decoder's pixel area at 784 (`asset-inventory.md` §8). The port builds `sr_assets::font::Font`
+the decoder's pixel area at 784 (`asset-inventory.md` §E.8). The port builds `sr_assets::font::Font`
 from the decoded 1500×30 strip. The shift is invisible: both `[783:]` and
 `[784:]` hold the same glyph bytes in all 76 runs (byte 783 is zero). `MAIN.C` reads 32 rows
 (`:218`, `:225`) of the 30-row strip; the release reads 29 (§12), and its two padding rows are zero
@@ -142,9 +142,9 @@ All four reference frames are `.rgb` only (§4).
 
 The held frames' `K-1`/`K+1` support frames are the same bytes. 5859 is the moving frame, but the
 run's 5858 and 5860 are the same step (the window moves every nine frames), as the reference's
-session holds 5859-5861 (`reference-indices.md` §4.3); the test asserts both. Pinned by
-`the_four_keyframes_against_the_reference` (`tests/alku.rs`) and by `cargo xtask rediff` (entry
-`alku`, all four at 0; `fullrun/01-alku`'s 1719 at 0).
+session holds 5859-5861 (`reference-indices.md` §4.3); `tests/alku.rs`'s
+`the_support_frames_hold_as_the_references_do` asserts every pair. Pinned by `cargo xtask rediff`
+(entry `alku`, all four at 0; `fullrun/01-alku`'s 1719 at 0).
 
 5859 is bare whatever the batches' phase: once the fifth batch's `ffonapois` has cleared the text,
 the release's `do_scroll(0)` passes do not carry it back (§12). `the_5859_phase_sensitivity`
@@ -156,8 +156,8 @@ earlier than the port's from the second batch on, at fade edges only.
 ## 9. Reproduce
 
 ```bash
-cargo test -p secondreality --test alku -- --nocapture          # §8, with D19's support frames
-cargo xtask rediff --only alku
+cargo test -p secondreality --test alku -- --nocapture          # §8's support frames
+cargo xtask rediff --only alku                                  # §8
 cargo test -p secondreality --bin secondreality \
     shell::tests::a_block_one_run_starts_under_the_initial_play_song_and_matches_second1 \
     -- --nocapture                                              # §2's distributions
@@ -239,9 +239,9 @@ compacted page, each row the 400-line frame's even row) and 5952 (the linear pag
 page copies, which nothing shows before the exit and which would land on the wrapped tail of the
 `0xc000` page in the port's 256,000-pixel video memory (D16). The emulator applies CRTC 9 half a
 frame late, so the original's capture holds one frame of step 2's page that turns double-scanned at
-line 185 (5950, `reference-indices.md` §4.5); every line of it is a row of the port's page
-(`the_originals_5950_is_the_compacted_page_resized_mid_frame`, ignored; it needs that capture
-locally).
+line 185 (5950, `reference-indices.md` §4.5): its lines 0-184 are the page's rows 0-184 and its
+lines 185-399 row `L/2`, every line a row of the port's page, in a capture not filed under
+`reference/`.
 
 **The exit path.** After each card gate, `fonapois`, `ffonapois` and the loop's end, `main` calls
 the closing routine when `dis_exit()` is set: `fade1` (black), one frame, `close_copper`, `exit(1)`

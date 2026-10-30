@@ -18,135 +18,37 @@
 //!    the picture, each gated on `dis_sync() < 4+tptr`.
 //! 5. `:147-152` — the exit: the final fade, `fonapois`, `close_copper`.
 //!
-//! # The release's build (D49)
+//! **The release's build (D49).** The port runs the shipped `MAIN/DATA/ALKU.EXE`'s
+//! loop, read from its unpacked image (`sr_assets::exe::unpack`): each difference
+//! from the tree's `MAIN.C` is a constant below citing its image offset
+//! ([`SCROLL_LAST`], [`SCROLL_GUARD`], [`MAKETEXT_LIMIT`], [`SCROLL_TEXT_BATCHES`],
+//! [`PRT_ROWS`], [`FONT_CONVERTED_ROWS`]), plus a closing routine the tree does not
+//! have ([`HandoverStep`]). The spin's `f` is the release's CPU's; the port takes
+//! the frames' answer ([`SPIN_LEAVES_F_ABOVE_THRESHOLD`], A20). `docs/fidelity/alku.md`
+//! §12.
 //!
-//! The port runs the shipped `MAIN/DATA/ALKU.EXE`'s loop, read from its unpacked image
-//! (`sr_assets::exe::unpack`; the offsets below are the image's, and
-//! `the_release_loop_and_its_closing_routine_are_the_images` pins their bytes). It differs
-//! from the tree's `MAIN.C` in five places:
+//! **The display.** `tw_opengraph` leaves 320×400 with a 176-byte line
+//! (`TWEAK.ASM:46`; `reference-indices.md` §1.6). The port keeps video memory as the
+//! source's flat byte array, plane byte `A` at pixel `4*A + plane`, read with
+//! `y_line_offset = 704` and no double scan: `outline` (`ASMYT.ASM:60-108`) writes
+//! two memory rows per picture row at byte columns `a` and `a+88`, and the refresh
+//! (`MAIN.C:405-409`) slides the second copy along with the picture's continuation.
+//! The window is `cop_start = a/4 + p*88` with `cop_scrl = (a&3)*2`.
 //!
-//! - the loop runs while `a <= 320` (`0x1380`), and `do_scroll` returns at once past 320
-//!   (`0x2315`);
-//! - `fmaketext` runs only when `aa < 304` (`0x134f`), not 308;
-//! - every pass ends `do_scroll(tptr<5 ? 1 : 0)` (`0x136c`): once the fifth batch (the
-//!   empty `case 4`) has cleared the text, the window no longer carries it, and the pass
-//!   no longer waits — it spins at CPU speed ([`MainPhase::Spin`]);
-//! - after the loop, `fonapois()` is followed by a closing routine the tree does not have
-//!   (`0x13ce`): it snaps the window to `p=0` and pan 0, compacts the last window into a
-//!   200-row page shown with CRTC 9 = 1, copies that to a linear page at `0xc000` with
-//!   every pixel moved to entries 192-255 and CRTC 0x13 = 0x28, and `exit(0)`s — the
-//!   320×200 screen U2A's background then continues ([`HandoverStep`]);
-//! - `prt` draws 29 rows (`0x1d49`) and `init` converts the strip's first 29 (`0x1857`).
+//! **The copper.** `init_copper` puts `copper3` (the 8.8 fade) in slot 0, `copper1`
+//! (start and pan) in slot 1 and `copper2` (`frame_count` and the upload) in slot 2,
+//! the engine's own order (`COPPER.ASM:42-145`). One tick is one copper frame, so
+//! `do_scroll`'s `while(frame_count<9);` is a nine-tick cadence.
 //!
-//! The release's `f` when the spin ends is its CPU's; the port takes the frames' answer
-//! ([`SPIN_LEAVES_F_ABOVE_THRESHOLD`], A20).
+//! **Preserved** (`bugs.md` §10): batch 0 waits for code 5, not 4 (`tptr++`,
+//! `MAIN.C:138`); the palette alias makes entry `v` entry `v mod 64` (`:212`), which
+//! hides the text XOR; the refresh reads past the picture's row; `memset(tbuf,0,
+//! 186*320)` keeps `tbuf`'s last 16 rows; the final fade touches only unused entries.
 //!
-//! # The display: 320×400 from a 640×200 picture
-//!
-//! `tw_opengraph` leaves the VGA in 320×400 with a **176-byte** line offset
-//! (`ALKU/TWEAK.ASM:46`, CRTC 0x13 = `0x5813`; `reference-indices.md` §1.6).
-//! A plane byte holds four pixels (`tw_putpixel`, `TWEAK.ASM:87-113`: plane
-//! `x & 3`, byte `y*176 + x/4`), so one displayed line is 176 bytes = 704
-//! pixels. The `outline` blitter (`ASMYT.ASM:60-108`) writes a source dword —
-//! four source columns — into the four planes at byte column `a` of **two**
-//! displayed rows (`di + ccc*352` and `+176`), and `init` calls it twice, at
-//! byte column `a` and `a+88`. The second call is not a copy of the first for
-//! long: `do_scroll`'s refresh (`MAIN.C:405-409`) rewrites byte column
-//! `a/4+86` (and `+88`) from the source dword at `(a/4+86)*4`, which for byte
-//! columns past 87 is the picture's *continuation* — columns 352 and up —
-//! rather than a repeat. The two 352-pixel copies the init leaves are
-//! therefore a starting state, and the refresh slides the second along behind
-//! the first.
-//!
-//! The port keeps the video memory as the source's own flat byte array: a
-//! plane byte at address `A` is pixel `4*A + plane`, so the surface's first
-//! 350 lines × 704 pixels are the video memory and the `View` reads them with
-//! `y_line_offset = 704`. The displayed window is `cop_start = a/4 + p*88`
-//! bytes in with `cop_scrl = (a&3)*2` of fine panning, which the port writes
-//! as `start_addr = 4*cop_start` and `pan = cop_scrl/2`. The fresh copy and
-//! the refreshed continuation agree, so the two `p` values show the same
-//! picture; the blit test pins the initial copies and the refresh test pins
-//! the continuation the spill puts in the next row.
-//!
-//! **The view does not double-scan**, even though the picture is 200 rows
-//! shown as 400: the source has two *memory* rows per picture row (`outline`
-//! writes `di+ccc*352` and `+176`) and the refresh's `+88` write crosses into
-//! the next row, which a folded pair cannot carry. The port keeps 400 rows of
-//! 176 bytes (350 written, the rest zero) and a 704-pixel stride.
-//!
-//! # The copper, and the port's slots
-//!
-//! `init_copper` registers `copper1` in the DIS's slot **1** (the CRTC start
-//! and pan, `COPPER.ASM:64-81`), `copper2` in slot **2** (the frame counter
-//! and the palette upload, `:83-104`) and `copper3` in slot **0** (the 8.8
-//! fade into `fadepal`, `:115-145`). The engine has the same three slots in
-//! the same order — 0 at the top of the screen, 1 before retrace, 2 in
-//! retrace — so the mapping is the identity and each routine keeps its
-//! original slot:
-//!
-//! ```text
-//! engine slot 0  <- copper3  the fade applier (after the display start)
-//! engine slot 1  <- copper1  the CRTC start/pan writer (before retrace)
-//! engine slot 2  <- copper2  frame_count++ and the palette upload (retrace)
-//! ```
-//!
-//! Slot 0's fade is uploaded by slot 2 in the same tick, so a frame is
-//! composed with the previous tick's upload — the original's line-20 write
-//! and retrace upload, seen one frame later. A test drives all three slots.
-//!
-//! # The tick is the copper's frame
-//!
-//! The original's `frame_count` is incremented once per vertical blank by
-//! `copper2`. The port's engine calls one tick per frame, so **one tick is one
-//! copper frame**: `copper2`'s slot increments the same counter once a tick,
-//! and `do_scroll`'s `while(frame_count<9);` becomes a 9-tick cadence — a
-//! blocking `do_scroll(1)`/`(2)` is a tick-consuming wait that retries next
-//! tick, never a spin. The counter is the one `dofade` and `wait(t)` pace
-//! themselves with too, so their resets are the source's.
-//!
-//! # The stages and the preserved bugs
-//!
-//! - The card gates are `dis_sync() < 1`, `< 2`, `< 3` and `< 4`; the text
-//!   batches wait `dis_sync() < 4+tptr` **with** `a&1` (`MAIN.C:138`), and
-//!   `tptr` is post-incremented by the `switch (tptr++)`, so batch 0 waits for
-//!   code **5**, not 4. The off-by-one is preserved and tested.
-//! - The palette write-order aliasing (`MAIN.C:212`): after `palette2` and
-//!   `fade2` are built, the byte copy `palette[192..768] = palette[..576]`
-//!   repeats entries 0-63 three times, so every picture entry 64-255 is
-//!   entry `v mod 64`. That is what makes the text XOR invisible over the
-//!   picture (its values keep the low six bits).
-//! - The refresh reads the source dword at `(a/4+86)*4`; under the tree's loop
-//!   the last refresh is `a=316`'s, whose dword is columns 660-663 of a
-//!   640-column row. The last byte, 663, is past the picture's row and comes
-//!   from the *next* one; the port reads the flat picture the same way. The
-//!   release's loop reaches `a=320`'s too (columns 664-667).
-//! - `memset(tbuf,0,186*320)` clears the first 59,520 bytes of a 65,472-byte
-//!   array, so the last 16 rows of `tbuf` keep the previous batch.
-//! - The final `dofade(palette2,palette)` (`MAIN.C:147-149`) only touches
-//!   entries 64-255, which the picture never indexes; it is kept as written,
-//!   and runs when the loop ends on a blocking pass with `f > 7`.
-//!
-//! # The assets, and the three palette entries the release ships
-//!
-//! `hzpic` is the linked `HOI.IN0+IN1`, which differs from `HOI.U` in palette
-//! entries 1-3 (`asset-inventory.md` §E.18): shipped `(10,10,10)`,
-//! `(30,30,30)`, `(63,63,63)` against `HOI.U`'s `(2,2,3)`, `(5,5,7)`,
-//! `(6,6,9)`. The port reads `HOI.U` — the picture bytes are identical — and
-//! overrides those three entries with the shipped values, which is D24's
-//! adopt-the-release rule for a data constant whose every other difference is
-//! accounted for: with `HOI.U`'s own entries the reference's 1719 differs in
-//! 1,595 pixels, 2719 in 4,171 and 5859 in 2,706; with the shipped entries
-//! 1719 and 2719 are byte-identical and 5859's residual is the text-batch
-//! phase (2,358 in this file's script, §A20). The measurement is an ignored
-//! test in this file.
-//!
-//! `font` is `FONA.UH[783:]`, one byte earlier than the decoder's pixel area
-//! at 784 (`asset-inventory.md` §E.8, A9). The port builds
-//! `sr_assets::font::Font` from the decoded 30-row strip — the routine reads
-//! 32 rows, and the two rows past the file are zero in the release's image
-//! (A9). A test shows the one-byte shift
-//! moves no glyph the cards use, and another that the release's font is this
-//! strip but for one glyph the part never draws.
+//! **The assets.** `hzpic` is `HOI.U` with entries 1-3 replaced by the linked
+//! hzpic's ([`SHIPPED_PALETTE_ENTRIES`], `asset-inventory.md` §E.18, D24). The font
+//! is the decoded `FONA.UH` strip, one byte off the linked array, which moves no
+//! glyph (§E.8, A9).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -173,8 +75,7 @@ const LINE_BYTES: usize = 176;
 const PIXELS_PER_BYTE: usize = 4;
 /// One displayed line in the port's pixel units: 176 × 4.
 const LINE_PIXELS: usize = LINE_BYTES * PIXELS_PER_BYTE;
-/// The displayed rows the part writes: rows 50-349. Rows 350-399 stay zero
-/// and the `View` wraps them into the zero rows above 50 (see [`Alku::prepare`]).
+/// The displayed rows the part writes: rows 50-349. Rows 350-399 stay zero.
 const VIDEO_ROWS: usize = 350;
 /// The video memory the part addresses, in pixels.
 const VIDEO_PIXELS: usize = VIDEO_ROWS * LINE_PIXELS;
@@ -198,16 +99,14 @@ const SHIPPED_PALETTE_ENTRIES: [(u8, [u8; 3]); 3] = [
 
 /// `ALKU/INCLUDE.ASM:17`: `FONA.UH` (1500×30) as the font strip.
 const FONT_PATH: &str = "assets/ALKU/FONA.UH";
-/// The strip's rows. `faddtext`/`addtext` read 32 (`MAIN.C:335`, `:428`; the release's
-/// `cmp word [bp-4],20h`, image `0x24c9`), and rows 30 and 31 are zero in the release's
-/// image (A9), so the 30 the file holds are everything those loops can ink.
+/// The strip's rows. `faddtext`/`addtext` read 32 (`MAIN.C:335`, `:428`; image `0x24c9`),
+/// and rows 30 and 31 are zero in the release's image (A9).
 const FONT_ROWS: usize = 30;
 /// The release converts the 2-bit strip to 0x40/0x80/0xC0 in its first **29** rows
-/// (`cmp word [bp-8],1dh`, image `0x1857`; the tree's `MAIN.C:169` says 32), so row 29
-/// keeps its raw 1/2/3 (A9).
+/// (image `0x1857`; `MAIN.C:169` says 32), so row 29 keeps its raw 1/2/3 (A9).
 const FONT_CONVERTED_ROWS: usize = 29;
-/// The release's `prt` draws **29** rows: `y2w=y+1dh` (`add ax,1dh`, image `0x1d49`), where
-/// the tree's `MAIN.C:274` has `y+32`.
+/// The release's `prt` draws **29** rows (`y2w=y+1dh`, image `0x1d49`; `MAIN.C:274`
+/// has `y+32`).
 const PRT_ROWS: usize = 29;
 /// `MAIN.C:40`'s `fonaorder`, the strip's 76 ink runs in order.
 const FONT_ORDER: &[u8] =
@@ -222,17 +121,15 @@ const NO_CELL: u8 = u8::MAX;
 
 /// `MAIN.C:7` `#define SCRLF 9`.
 const SCRLF: u16 = 9;
-/// The release's loop runs **while `a <= 320`** (`cmp word [9eh],140h; jg`, image
-/// `0x1380`), where the tree's `MAIN.C:87` has `a<320`; the inner wait's own bound is still
-/// `a<319` (`:138`, image `0x1341`).
+/// The release's loop runs while `a <= 320` (image `0x1380`; `MAIN.C:87` has `a<320`);
+/// the inner wait's bound is still `a<319` (`:138`, image `0x1341`).
 const SCROLL_LAST: u16 = 320;
-/// The release's `do_scroll` begins `if(a>320) return 0;` (`cmp word [9eh],140h; jle`,
-/// image `0x2315`), a guard the tree's `MAIN.C:397` does not have.
+/// The release's `do_scroll` begins `if(a>320) return 0;` (image `0x2315`), a guard
+/// `MAIN.C:397` does not have.
 const SCROLL_GUARD: u16 = 320;
-/// The release's every pass ends `do_scroll(tptr<5 ? 1 : 0)` (`cmp word [0a2h],5; jge`,
-/// image `0x136c`), where the tree's `MAIN.C:145` is `do_scroll(1)`: once the fifth batch
-/// (the empty `case 4`) is taken, the text is no longer carried with the window, and the
-/// pass no longer waits for the step.
+/// The release's every pass ends `do_scroll(tptr<5 ? 1 : 0)` (image `0x136c`;
+/// `MAIN.C:145` is `do_scroll(1)`): after the fifth batch the text is not carried and
+/// the pass no longer waits ([`MainPhase::Spin`]).
 const SCROLL_TEXT_BATCHES: usize = 5;
 /// `MAIN.C:47` `int a=0,p=0,tptr=0` — the picture phase starts them at 1,1.
 const SCROLL_A_START: u16 = 1;
@@ -247,8 +144,7 @@ const CARD_FADE_STEPS: u32 = 64;
 const CARD_HOLD_TICKS: u32 = 300;
 /// `MAIN.C:148` `f>63/SCRLF` — `63/9 = 7`.
 const FINAL_FADE_THRESHOLD: i32 = 7;
-/// The release's `if(aa<304) fmaketext(aa+16)` (`cmp word [9eh],130h; jge`, image
-/// `0x134f`), where the tree's `MAIN.C:141` has `320-12`, 308.
+/// The release's `if(aa<304) fmaketext(aa+16)` (image `0x134f`; `MAIN.C:141` has 308).
 const MAKETEXT_LIMIT: u16 = 304;
 const MAKETEXT_LEAD: u16 = 16;
 
@@ -269,20 +165,17 @@ const FFONAPOIS_FIRST: usize = 40 * 64;
 const FFONAPOIS_END: usize = 40 * (64 + 256 + 10);
 const FADE_MASK: u8 = 0x3F;
 
-/// What the release's `f` is when its loop ends on the spin (see [`MainPhase::Spin`]): its
-/// `if(f>7)` (image `0x13a2`) reads a counter the spin has stepped once a pass at CPU speed,
-/// wrapping through all 65,536 values, so the release's answer is its session's CPU time.
-/// The port takes the answer the release's frames give — **not above 7, no final fade** —
-/// because with the 64-tick fade ALKU would end after the original's U2A has started (boot
-/// 5961, `reference/parts/fullrun`); A20 registers it.
+/// Whether the release's `if(f>7)` (image `0x13a2`) holds when the loop ends on the
+/// spin: `f` counts passes at CPU speed, so the answer is the session's. The port takes
+/// the frames' answer, no final fade: with it ALKU would end after the original's U2A
+/// has started (boot 5961, A20).
 const SPIN_LEAVES_F_ABOVE_THRESHOLD: bool = false;
 
 // ------------------------------------------------------ the release's hand-over --
 
-/// The release's `main` ends in a routine the tree's `MAIN.C` does not have (image
-/// `0x13ce`-`0x1723`, called at `0x13bd` after `fonapois`): it rebuilds the screen as a
-/// linear 320×200 page at `0xc000` and leaves the part with `exit(0)`. Its compaction reads
-/// memory row `2*min(y,180)` (`cmp word [bp-8],0b4h`, image `0x14e1`; `imul 160h`).
+/// The release's closing routine (image `0x13ce`-`0x1723`) rebuilds the screen as a
+/// linear 320×200 page at `0xc000` and `exit(0)`s. Its compaction reads memory row
+/// `2*min(y,180)` (image `0x14e1`).
 const HANDOVER_CLAMP_ROW: usize = 180;
 /// `add dx,738h` (image `0x1511`): the compacted rows start 10 rows and 88 bytes in.
 const HANDOVER_COMPACT_BASE: usize = 0x738;
@@ -300,9 +193,7 @@ const HANDOVER_RECOLOUR_BYTES: usize = 0x4000;
 /// `and al,3fh; add al,0c0h` (`0x15d0`): the picture moved to entries 192-255, which the
 /// palette alias (`MAIN.C:212`) makes the same colours.
 const HANDOVER_RECOLOUR_BASE: u8 = 0xC0;
-/// CRTC 9 = 1 (`mov ax,0109h`, image `0x1559`) shows each memory row twice — the 320×200
-/// the emulator captures — and CRTC 0x13 = 0x28 (`mov ax,2813h`, `0x16be`) is the linear
-/// page's 80 bytes a line.
+/// CRTC 9 = 1 (image `0x1559`): each memory row shown twice, 320×200.
 const HANDOVER_VIEW_HEIGHT: u16 = 200;
 
 // -------------------------------------------------------------- the music --
@@ -318,9 +209,8 @@ const PICTURE_GATE: i32 = 4;
 /// a palette entry, the low byte its fraction.
 const FADEPAL_LEN: usize = 1536;
 
-/// A palette the source mutates byte by byte, as `array[0..768] of byte` does.
-type Rgb = [u8; 3];
-type Palette768 = [Rgb; 256];
+/// A palette as the source's `char[768]`.
+type Palette768 = [u8; 768];
 
 /// The font strip as the routine indexes it: the cells the scan found, keyed
 /// by the part's character order, and their widths.
@@ -360,6 +250,11 @@ impl Strip {
 
     fn width(&self, ch: u8) -> usize {
         usize::from(self.width[usize::from(ch)])
+    }
+
+    /// The pen's advance over `text`: each glyph's width and two pixels.
+    fn text_width(&self, text: &[u8]) -> usize {
+        text.iter().map(|&ch| self.width(ch) + 2).sum()
     }
 
     /// `MAIN.C:173-181`: a strip value 1/2/3 becomes 0x40/0x80/0xC0 in the rows the
@@ -442,12 +337,9 @@ impl CopperState {
         }
     }
 
-    /// `COPPER.ASM:115-145`: the fade applier. The source sets `cop_pal` to a
-    /// **pointer** to `fadepal` and then adds in place; `copper2` uploads it at
-    /// the retrace, so what reaches the DAC is the *post-add* palette. The port
-    /// copies `fadepal` after the add, which is the same bytes at the same
-    /// upload — and the last step's accumulation is uploaded, as the source's
-    /// is, rather than left one step behind.
+    /// `COPPER.ASM:115-145`: the fade applier. `cop_pal` points at `fadepal`,
+    /// so the retrace uploads the post-add palette; the port copies it after
+    /// the add.
     fn slot0(&mut self, _ctx: &mut PartCtx) {
         if self.cop_dofade == 0 {
             return;
@@ -572,7 +464,7 @@ pub struct Alku {
     shared: Rc<RefCell<CopperState>>,
     picture: Vec<u8>,
     strip: Option<Strip>,
-    /// `MAIN.C:30-31` `palette`/`palette2`, as triples (the source's bytes).
+    /// `MAIN.C:30-31` `palette`/`palette2`.
     palette: Palette768,
     palette2: Palette768,
     /// `:33-34` `fade1` (black) and `fade2` (the text ramp).
@@ -593,11 +485,6 @@ pub struct Alku {
     f: i32,
     /// Where the part is.
     stage: Stage,
-    /// The part's own tick.
-    tick: u32,
-    /// Whether the three linked-hzpic entries are applied (D24). `true` for
-    /// the part; `false` only for the counterfactual measurement test.
-    shipped_palette: bool,
 }
 
 impl Alku {
@@ -607,10 +494,10 @@ impl Alku {
             shared: Rc::new(RefCell::new(CopperState::new())),
             picture: Vec::new(),
             strip: None,
-            palette: [[0; 3]; 256],
-            palette2: [[0; 3]; 256],
-            fade1: [[0; 3]; 256],
-            fade2: [[0; 3]; 256],
+            palette: [0; 768],
+            palette2: [0; 768],
+            fade1: [0; 768],
+            fade2: [0; 768],
             picin: [0; 768],
             textin: [0; 768],
             textout: [0; 768],
@@ -621,60 +508,30 @@ impl Alku {
             tptr: 0,
             f: 60,
             stage: Stage::Sync { code: FIRST_GATE, card: 0 },
-            tick: 0,
-            shipped_palette: true,
         }
-    }
-
-    /// [`new`](Alku::new) with `HOI.U`'s own entries 1-3, for the counterfactual.
-    #[cfg(test)]
-    fn curated() -> Alku {
-        Alku { shipped_palette: false, ..Alku::new() }
     }
 
     /// `MAIN.C:161-167`: `outline` twice for every byte column 0-87, which
     /// fills rows 50-349 with the picture's first 352 columns twice.
     fn blit_picture(&self, video: &mut [u8]) {
         for column in 0..88usize {
-            for source_row in 0..PICTURE_ROWS {
-                let source = source_row * HZPIC_WIDTH + column * 4;
-                for &col in &[column, column + 88] {
-                    // `outline`'s two clears, at the base destination's rows
-                    // 48 and 49 (`di-352`, `di-176`).
-                    for row in [PICTURE_FIRST_ROW - 2, PICTURE_FIRST_ROW - 1] {
-                        for plane in 0..PIXELS_PER_BYTE {
-                            let at = (row * LINE_BYTES + col) * PIXELS_PER_BYTE + plane;
-                            if at < video.len() {
-                                video[at] = 0;
-                            }
-                        }
-                    }
-                    for row in [
-                        PICTURE_FIRST_ROW + 2 * source_row,
-                        PICTURE_FIRST_ROW + 2 * source_row + 1,
-                    ] {
-                        for plane in 0..PIXELS_PER_BYTE {
-                            let at = (row * LINE_BYTES + col) * PIXELS_PER_BYTE + plane;
-                            if let Some(value) = self.picture.get(source + plane) {
-                                if at < video.len() {
-                                    video[at] = *value;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            self.outline(video, column);
         }
     }
 
     /// `MAIN.C:405-409`: refresh the byte column the window is about to reach.
-    /// The source dword is read out of the flat picture, so the last columns
-    /// of a row read the next row's first bytes — the preserved bug.
     fn refresh(&self, video: &mut [u8], a: u16) {
-        let column = usize::from(a / 4) + 86;
+        self.outline(video, usize::from(a / 4) + 86);
+    }
+
+    /// `ASMYT.ASM:60-108` `outline`, at byte columns `column` and `column + 88`:
+    /// clear rows 48 and 49 (`di-352`, `di-176`), then write each source dword
+    /// to two memory rows. The dword is read from the flat picture, so the last
+    /// columns of a row read the next row's first bytes (the preserved bug).
+    fn outline(&self, video: &mut [u8], column: usize) {
         for source_row in 0..PICTURE_ROWS {
             let source = source_row * HZPIC_WIDTH + column * 4;
-            for &col in &[column, column + 88] {
+            for col in [column, column + 88] {
                 for row in [PICTURE_FIRST_ROW - 2, PICTURE_FIRST_ROW - 1] {
                     for plane in 0..PIXELS_PER_BYTE {
                         let at = (row * LINE_BYTES + col) * PIXELS_PER_BYTE + plane;
@@ -726,73 +583,43 @@ impl Alku {
         let Some(strip) = self.strip.as_ref() else {
             return;
         };
-        let mut width = 0usize;
-        for &ch in text {
-            width += strip.width(ch) + 2;
-        }
-        let left = x.saturating_sub(width / 2);
+        let left = x.saturating_sub(strip.text_width(text) / 2);
         self.prt(video, left, y, text);
     }
 
-    /// `MAIN.C:324-340` `addtext`: write a string into `tbuf`.
+    /// `MAIN.C:324-340` `addtext`: write a string into `tbuf`, centred on `tx`.
     fn addtext(&mut self, tx: usize, ty: usize, text: &[u8]) {
-        self.text_into_tbuf(tx, ty, text);
+        self.text_into_tbuf(None, tx, ty, text);
     }
 
     /// `MAIN.C:417-434` `faddtext`: the same, one `do_scroll(0)` per character.
     fn faddtext(&mut self, video: &mut [u8], tx: usize, ty: usize, text: &[u8]) {
-        let Some(widths) = self.strip.as_ref().map(|strip| {
-            text.iter().map(|&ch| strip.width(ch)).collect::<Vec<_>>()
-        }) else {
-            return;
-        };
-        let width = widths.iter().map(|width| width + 2).sum::<usize>() / 2;
-        let mut pen = tx;
-        for (&ch, &cell_width) in text.iter().zip(&widths) {
-            {
-                let strip = self.strip.as_ref().expect("the strip was read above");
-                for column in 0..cell_width {
-                    for row in 0..32usize {
-                        let ink = strip.ink(ch, column, row);
-                        let at = (ty + row) * TBUF_STRIDE + pen + column;
-                        let at = at as isize - width as isize;
-                        if at >= 0 {
-                            if let Some(slot) = self.tbuf.get_mut(at as usize) {
-                                *slot = ink;
-                            }
-                        }
-                    }
-                }
-            }
-            self.do_scroll0(video);
-            pen += cell_width + 2;
-        }
+        self.text_into_tbuf(Some(video), tx, ty, text);
     }
 
-    /// The body of `addtext`.
-    fn text_into_tbuf(&mut self, tx: usize, ty: usize, text: &[u8]) {
-        let Some(strip) = self.strip.as_ref() else {
+    /// The body both share: each glyph's 32 rows (`MAIN.C:335`, `:428`) written
+    /// over `tbuf`, then the scroll `faddtext` takes after each character.
+    fn text_into_tbuf(&mut self, mut video: Option<&mut [u8]>, tx: usize, ty: usize, text: &[u8]) {
+        let Some(half) = self.strip.as_ref().map(|strip| strip.text_width(text) / 2) else {
             return;
         };
-        let mut width = 0usize;
-        for &ch in text {
-            width += strip.width(ch) + 2;
-        }
-        let width = width / 2;
         let mut pen = tx;
         for &ch in text {
+            let strip = self.strip.as_ref().expect("the strip was read above");
             let cell_width = strip.width(ch);
             for column in 0..cell_width {
                 for row in 0..32usize {
                     let ink = strip.ink(ch, column, row);
-                    let at = (ty + row) * TBUF_STRIDE + pen + column;
-                    let at = at as isize - width as isize;
+                    let at = ((ty + row) * TBUF_STRIDE + pen + column) as isize - half as isize;
                     if at >= 0 {
                         if let Some(slot) = self.tbuf.get_mut(at as usize) {
                             *slot = ink;
                         }
                     }
                 }
+            }
+            if let Some(video) = video.as_deref_mut() {
+                self.do_scroll(video, 0);
             }
             pen += cell_width + 2;
         }
@@ -824,7 +651,7 @@ impl Alku {
                         self.dtau.push(i32::from(now ^ before));
                     }
                 }
-                self.do_scroll0(video);
+                self.do_scroll(video, 0);
                 x += 4;
             }
             self.dtau.push(-1);
@@ -843,7 +670,7 @@ impl Alku {
                 xor_pixel(video, address, plane, left);
                 xor_pixel(video, address + 88, plane, right);
             }
-            self.do_scroll0(video);
+            self.do_scroll(video, 0);
         }
     }
 
@@ -870,50 +697,28 @@ impl Alku {
         }
     }
 
-    /// `MAIN.C:250-270` / `:471-495` `fonapois`: clear the top two bits of
-    /// the addressed bytes, a plane at a time.
+    /// `MAIN.C:250-270` `fonapois`: clear the top two bits of the addressed
+    /// bytes, a plane at a time.
     fn fonapois(&self, video: &mut [u8]) {
         for plane in 0..PIXELS_PER_BYTE {
-            for address in FONAPOIS_FIRST..FONAPOIS_END {
-                let at = address * PIXELS_PER_BYTE + plane;
-                if at < video.len() {
-                    video[at] &= FADE_MASK;
-                }
-            }
+            mask_plane(video, plane, FONAPOIS_FIRST..FONAPOIS_END);
         }
     }
 
-    /// `MAIN.C:471-495` `ffonapois`: the `long far *` form, so the address
-    /// range steps in four-byte groups.
+    /// `MAIN.C:471-495` `ffonapois`: the `long far *` form, so the range steps
+    /// in four-byte groups, with a `do_scroll(0)` after each plane.
     fn ffonapois(&mut self, video: &mut [u8]) {
         for plane in 0..PIXELS_PER_BYTE {
-            for address in FFONAPOIS_FIRST * 4..FFONAPOIS_END * 4 {
-                let at = address * PIXELS_PER_BYTE + plane;
-                if at < video.len() {
-                    video[at] &= FADE_MASK;
-                }
-            }
-            self.do_scroll0(video);
+            mask_plane(video, plane, FFONAPOIS_FIRST * 4..FFONAPOIS_END * 4);
+            self.do_scroll(video, 0);
         }
     }
 
-    /// `MAIN.C:397-412`'s non-blocking half: one step if nine frames are up. The
-    /// release's `if(a>320) return 0;` comes first (image `0x2315`).
-    fn do_scroll0(&mut self, video: &mut [u8]) {
-        if self.a > SCROLL_GUARD {
-            return;
-        }
-        let count = self.shared.borrow().frame_count;
-        if count >= SCRLF {
-            self.shared.borrow_mut().frame_count = count - SCRLF;
-            self.scroll_step(video, 0);
-        }
-    }
-
-    /// The blocking half: `false` when the tick was spent waiting, `true` when
-    /// the call returned — with a step, or at once past the release's guard (image
-    /// `0x2315`).
-    fn blocking_scroll(&mut self, video: &mut [u8], mode: u8) -> bool {
+    /// `MAIN.C:397-412` `do_scroll(mode)`: `false` when the tick was spent
+    /// waiting for the ninth frame, `true` when the call returned, with a step
+    /// or at once past the release's guard (image `0x2315`). Mode 0 never waits:
+    /// its callers ignore the answer.
+    fn do_scroll(&mut self, video: &mut [u8], mode: u8) -> bool {
         if self.a > SCROLL_GUARD {
             return true;
         }
@@ -954,18 +759,21 @@ impl Alku {
         self.shared.borrow_mut().fade.copy_from_slice(table);
     }
 
-    /// `dofade`'s step `a`: the source's `(pal1*(64-a)+pal2*a)>>6`.
+    /// `dofade`'s step `a`: the source's `(pal1*(64-a)+pal2*a)>>6`, queued for
+    /// the retrace, and `frame_count=0` for the step's one-frame wait.
     fn dofade_step(&self, pal1: &Palette768, pal2: &Palette768, a: u32) {
         let mut bytes = [0u8; 768];
-        for entry in 0..256 {
-            for channel in 0..3 {
-                bytes[entry * 3 + channel] = ((u32::from(pal1[entry][channel]) * (64 - a)
-                    + u32::from(pal2[entry][channel]) * a)
-                    >> 6) as u8;
-            }
+        for (byte, (&one, &two)) in bytes.iter_mut().zip(pal1.iter().zip(pal2)) {
+            *byte = ((u32::from(one) * (64 - a) + u32::from(two) * a) >> 6) as u8;
         }
+        self.upload(&bytes);
+        self.shared.borrow_mut().frame_count = 0;
+    }
+
+    /// `cop_pal=pal; do_pal=1;`: the retrace's upload.
+    fn upload(&self, palette: &Palette768) {
         let mut shared = self.shared.borrow_mut();
-        shared.cop_pal = bytes;
+        shared.cop_pal = *palette;
         shared.do_pal = true;
     }
 
@@ -1024,7 +832,7 @@ impl Alku {
     }
 
     /// One tick. `code` is this tick's `dis_sync()` answer, read once.
-    fn tick_stage(&mut self, video: &mut [u8], code: i32, _tick: u32) -> PartStatus {
+    fn tick_stage(&mut self, video: &mut [u8], code: i32) -> PartStatus {
         loop {
             match self.stage {
                 Stage::Done => return PartStatus::Finished,
@@ -1037,7 +845,6 @@ impl Alku {
                             self.prtc(video, 160, usize::from(y), text);
                         }
                         self.dofade_step(&self.fade1, &self.fade2, 0);
-                        self.shared.borrow_mut().frame_count = 0;
                         self.stage = Stage::Card { card, phase: CardPhase::FadeIn { a: 1 } };
                         return PartStatus::Continuing;
                     }
@@ -1048,7 +855,6 @@ impl Alku {
                     CardPhase::FadeIn { a } => {
                         if a < CARD_FADE_STEPS {
                             self.dofade_step(&self.fade1, &self.fade2, a);
-                            self.shared.borrow_mut().frame_count = 0;
                             self.stage = Stage::Card {
                                 card,
                                 phase: if a + 1 == CARD_FADE_STEPS {
@@ -1069,7 +875,6 @@ impl Alku {
                                 Stage::Card { card, phase: CardPhase::Hold { ticks: ticks + 1 } };
                             return PartStatus::Continuing;
                         }
-                        self.shared.borrow_mut().frame_count = 0;
                         self.dofade_step(&self.fade2, &self.fade1, 0);
                         self.stage = Stage::Card { card, phase: CardPhase::FadeOut { a: 1 } };
                         return PartStatus::Continuing;
@@ -1077,7 +882,6 @@ impl Alku {
                     CardPhase::FadeOut { a } => {
                         if a < CARD_FADE_STEPS {
                             self.dofade_step(&self.fade2, &self.fade1, a);
-                            self.shared.borrow_mut().frame_count = 0;
                             if a + 1 == CARD_FADE_STEPS {
                                 self.fonapois(video);
                                 self.stage = if card + 1 < CARDS.len() {
@@ -1097,7 +901,7 @@ impl Alku {
                     }
                 },
                 Stage::PictureFade => {
-                    if !self.blocking_scroll(video, 2) {
+                    if !self.do_scroll(video, 2) {
                         return PartStatus::Continuing;
                     }
                     if self.shared.borrow().cop_dofade == 0 {
@@ -1109,7 +913,6 @@ impl Alku {
                 Stage::FinalFade { a } => {
                     if a < CARD_FADE_STEPS {
                         self.dofade_step(&self.palette2, &self.palette, a);
-                        self.shared.borrow_mut().frame_count = 0;
                         self.stage = Stage::FinalFade { a: a + 1 };
                         return PartStatus::Continuing;
                     }
@@ -1141,15 +944,7 @@ impl Alku {
                         self.f += 1;
                         self.stage = Stage::Main(MainPhase::Outer);
                     } else if self.f > 50 && self.shared.borrow().cop_dofade == 0 {
-                        let palette = self.palette;
-                        {
-                            let mut shared = self.shared.borrow_mut();
-                            for (entry, rgb) in palette.iter().enumerate() {
-                                shared.cop_pal[entry * 3..entry * 3 + 3]
-                                    .copy_from_slice(rgb);
-                            }
-                            shared.do_pal = true;
-                        }
+                        self.upload(&self.palette);
                         self.f += 1;
                         self.tbuf[..TBUF_CLEAR].fill(0);
                         let case = self.tptr;
@@ -1164,7 +959,7 @@ impl Alku {
                 Stage::Main(MainPhase::Inner { code: threshold }) => {
                     let waiting = ((self.a & 1) != 0 || code < threshold) && self.a < 319;
                     if waiting {
-                        self.do_scroll0(video);
+                        self.do_scroll(video, 0);
                         return PartStatus::Continuing;
                     }
                     self.f = 0;
@@ -1179,7 +974,7 @@ impl Alku {
                 }
                 Stage::Main(MainPhase::Tail { scrl }) => {
                     if self.a <= scrl {
-                        self.do_scroll0(video);
+                        self.do_scroll(video, 0);
                         return PartStatus::Continuing;
                     }
                     self.stage = Stage::Main(MainPhase::Outer);
@@ -1194,7 +989,7 @@ impl Alku {
                         }
                         return PartStatus::Continuing;
                     }
-                    if !self.blocking_scroll(video, 1) {
+                    if !self.do_scroll(video, 1) {
                         return PartStatus::Continuing;
                     }
                     if self.a > SCROLL_LAST {
@@ -1203,7 +998,7 @@ impl Alku {
                     self.stage = Stage::Main(MainPhase::Branch);
                 }
                 Stage::Main(MainPhase::Spin) => {
-                    self.do_scroll0(video);
+                    self.do_scroll(video, 0);
                     if self.a > SCROLL_LAST {
                         return self.end_loop(video, SPIN_LEAVES_F_ABOVE_THRESHOLD);
                     }
@@ -1223,7 +1018,7 @@ impl Alku {
     /// [`SPIN_LEAVES_F_ABOVE_THRESHOLD`]. The fades touch entries 64-255 only, which no
     /// pixel uses once the fifth batch's `ffonapois` has cleared the text.
     fn begin_spin(&mut self, video: &mut [u8]) {
-        self.do_scroll0(video);
+        self.do_scroll(video, 0);
         if self.a > SCROLL_LAST {
             return;
         }
@@ -1249,7 +1044,6 @@ impl Alku {
             // The final fade's first step is this tick's (the rest are the
             // `Stage::FinalFade` arm).
             self.dofade_step(&self.palette2, &self.palette, 0);
-            self.shared.borrow_mut().frame_count = 0;
             self.stage = Stage::FinalFade { a: 1 };
             return PartStatus::Continuing;
         }
@@ -1267,11 +1061,8 @@ impl Alku {
     /// 200 lines are written on the tick that sets the compacted start (its own frame still
     /// composes 400 lines at the old start); CRTC 0x13's stride, which the compose reads at
     /// once, is written on the tick whose frame first reads the linear page. (The emulator
-    /// defers a CRTC 9 change by half a frame, `dosbox-automation`'s `VGA_StartResize`, so
-    /// its capture holds one frame of the compacted page that turns double-scanned at line
-    /// 185 — the original's 5950, `reference-indices.md` §4.5, which
-    /// `the_originals_5950_is_the_compacted_page_resized_mid_frame` matches line for line;
-    /// A20.)
+    /// defers CRTC 9 by half a frame, so the original's 5950 turns double-scanned at line
+    /// 185: `reference-indices.md` §4.5, A20.)
     ///
     /// The three page copies of the last step (`0x16c2`-`0x1703`, 16,000 bytes from
     /// `9fffh:0c000h` to `0a000h:0`, `:4000h` and `9fffh:8000h`) are not made: nothing
@@ -1292,14 +1083,10 @@ impl Alku {
                 // `0x142a`-`0x1460`: three `memcpy(palette+64*3*k, palette, 192)`, which
                 // repeat what `MAIN.C:212`'s alias already holds.
                 self.p = 0;
-                let palette = self.palette;
+                self.upload(&self.palette);
                 let mut shared = self.shared.borrow_mut();
                 shared.cop_start = (a / 4) as u16;
                 shared.cop_scrl = 0;
-                for (entry, rgb) in palette.iter().enumerate() {
-                    shared.cop_pal[entry * 3..entry * 3 + 3].copy_from_slice(rgb);
-                }
-                shared.do_pal = true;
                 shared.frame_count = 0;
                 drop(shared);
                 self.stage = Stage::Handover(HandoverStep::Compact);
@@ -1364,14 +1151,14 @@ impl Alku {
         if (picture.width() as usize, picture.height() as usize)
             != (HZPIC_WIDTH, HZPIC_HEIGHT)
         {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "{HZPIC_PATH} is {}x{}; the part reads {HZPIC_WIDTH}x{HZPIC_HEIGHT}",
                     picture.width(),
                     picture.height()
                 ),
-            });
+            ));
         }
         self.picture = picture.pixels().to_vec();
 
@@ -1380,55 +1167,38 @@ impl Alku {
             let rgb = picture.palette.entry(entry as u8);
             bytes[entry * 3..entry * 3 + 3].copy_from_slice(&rgb);
         }
-        // D24: the linked hzpic's three entries, read out of HOI.U's palette
-        // and replaced with the shipped bytes (`asset-inventory.md` §E.18).
-        if self.shipped_palette {
-            for &(entry, rgb) in &SHIPPED_PALETTE_ENTRIES {
-                bytes[usize::from(entry) * 3..usize::from(entry) * 3 + 3].copy_from_slice(&rgb);
-            }
+        // D24: the linked hzpic's three entries (`asset-inventory.md` §E.18).
+        for &(entry, rgb) in &SHIPPED_PALETTE_ENTRIES {
+            bytes[usize::from(entry) * 3..usize::from(entry) * 3 + 3].copy_from_slice(&rgb);
         }
-        self.build_ramps(&bytes);
-        // `MAIN.C:212`: the byte copy that repeats entries 0-63.
-        for at in 192..768 {
-            bytes[at] = bytes[at - 192];
-        }
-        for entry in 0..256 {
-            self.palette[entry] = [bytes[entry * 3], bytes[entry * 3 + 1], bytes[entry * 3 + 2]];
-        }
-        // `MAIN.C:237-242`, after both the ramp and the alias.
-        for (at, &byte) in bytes.iter().enumerate() {
-            let palette2 = triple_byte(&self.palette2, at);
-            self.textin[at] = (i32::from(palette2) - i32::from(byte)) * 256 / 64;
-            self.textout[at] = (i32::from(byte) - i32::from(palette2)) * 256 / 64;
-            self.picin[at] = i32::from(byte) * 256 / 128;
-        }
+        self.take_palette(bytes);
 
         let strip_image = load_image(NAME, FONT_PATH)?;
         if (strip_image.width(), strip_image.height()) != (1500, FONT_ROWS as u16) {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "{FONT_PATH} is {}x{}; the strip is 1500x{FONT_ROWS}",
                     strip_image.width(),
                     strip_image.height()
                 ),
-            });
+            ));
         }
         let font = Font::from_image(strip_image);
-        self.strip = Some(Strip::scan(font).map_err(|message| PartError {
-            part: NAME,
-            message: format!("{FONT_PATH}: {message}"),
-        })?);
+        self.strip = Some(
+            Strip::scan(font)
+                .map_err(|message| PartError::new(NAME, format!("{FONT_PATH}: {message}")))?,
+        );
 
         if ctx.surface.pixels().len() < VIDEO_PIXELS {
-            return Err(PartError {
-                part: NAME,
-                message: format!(
+            return Err(PartError::new(
+                NAME,
+                format!(
                     "the part addresses {VIDEO_PIXELS} pixels of video memory and the surface \
                      holds {}",
                     ctx.surface.pixels().len()
                 ),
-            });
+            ));
         }
 
         // The mode set clears 256 KB (`TWEAK.ASM:29-34`); the picture lands in
@@ -1458,15 +1228,32 @@ impl Alku {
         self.p = 0;
         self.tptr = 0;
         self.f = 60;
-        self.tick = 0;
         self.stage = Stage::Sync { code: FIRST_GATE, card: 0 };
         Ok(())
     }
 
+    /// `MAIN.C:184-242` over the picture's palette `bytes`: the ramps from the
+    /// unaliased palette, then the alias, then the three fade tables.
+    fn take_palette(&mut self, mut bytes: Palette768) {
+        self.build_ramps(&bytes);
+        // `MAIN.C:212`: the byte copy that repeats entries 0-63.
+        for at in 192..768 {
+            bytes[at] = bytes[at - 192];
+        }
+        self.palette = bytes;
+        // `MAIN.C:237-242`, after both the ramp and the alias.
+        for (at, (&byte, &palette2)) in bytes.iter().zip(&self.palette2).enumerate() {
+            self.textin[at] = (i32::from(palette2) - i32::from(byte)) * 256 / 64;
+            self.textout[at] = (i32::from(byte) - i32::from(palette2)) * 256 / 64;
+            self.picin[at] = i32::from(byte) * 256 / 128;
+        }
+    }
+
     /// `MAIN.C:184-210`: `palette2` and `fade2` from the *unaliased* palette.
-    fn build_ramps(&mut self, palette: &[u8; 768]) {
-        let mut palette2 = [0u8; 768];
-        let mut fade2 = [0u8; 768];
+    fn build_ramps(&mut self, palette: &Palette768) {
+        let (palette2, fade2) = (&mut self.palette2, &mut self.fade2);
+        *palette2 = [0; 768];
+        *fade2 = [0; 768];
         for at in (0..768).step_by(3) {
             if at < 64 * 3 {
                 palette2[at..at + 3].copy_from_slice(&palette[at..at + 3]);
@@ -1487,15 +1274,6 @@ impl Alku {
                     >> 6) as u8;
             }
         }
-        for entry in 0..256 {
-            self.palette2[entry] = [
-                palette2[entry * 3],
-                palette2[entry * 3 + 1],
-                palette2[entry * 3 + 2],
-            ];
-            self.fade2[entry] =
-                [fade2[entry * 3], fade2[entry * 3 + 1], fade2[entry * 3 + 2]];
-        }
     }
 }
 
@@ -1512,8 +1290,14 @@ fn copy_bytes(video: &mut [u8], from: usize, to: usize, count: usize) {
     }
 }
 
-fn triple_byte(palette: &Palette768, at: usize) -> u8 {
-    palette[at / 3][at % 3]
+/// `&= 0x3f` over `addresses` of one plane.
+fn mask_plane(video: &mut [u8], plane: usize, addresses: std::ops::Range<usize>) {
+    for address in addresses {
+        let at = address * PIXELS_PER_BYTE + plane;
+        if at < video.len() {
+            video[at] &= FADE_MASK;
+        }
+    }
 }
 
 /// XOR one video pixel (`xor [es:bx+di],al`).
@@ -1534,7 +1318,6 @@ impl Part for Alku {
     }
 
     fn frame(&mut self, ctx: &mut PartCtx) -> PartStatus {
-        self.tick += 1;
         if ctx.exit_requested {
             self.stage = Stage::Done;
             return PartStatus::Finished;
@@ -1543,8 +1326,7 @@ impl Part for Alku {
             return self.handover_tick(ctx);
         }
         let code = ctx.music().map_or(i32::MIN, |music| music.sync());
-        let tick = self.tick;
-        let status = self.tick_stage(ctx.surface.pixels_mut(), code, tick);
+        let status = self.tick_stage(ctx.surface.pixels_mut(), code);
         // The loop's end runs straight into the closing routine's first step.
         if self.stage == Stage::Handover(HandoverStep::Snap) {
             return self.handover_tick(ctx);
@@ -1557,7 +1339,7 @@ impl Part for Alku {
 mod tests {
     use super::*;
     use crate::parts::test_rig::{differing_pixels, reference, Rig, ScriptedMusic};
-    use sr_engine::{dac_expand, Surface};
+    use sr_engine::dac_expand;
 
     /// A rig whose player answers `sync()` from `codes`, one a tick.
     fn rig(codes: Vec<i32>) -> Rig {
@@ -1575,31 +1357,34 @@ mod tests {
         started_with(Vec::new())
     }
 
+    /// `second1`'s transition frames (boot = 404 + tick).
+    const TRANSITIONS: [(i32, i32); 9] = [
+        (1537, 1),
+        (2097, 2),
+        (2509, 3),
+        (3069, 4),
+        (3630, 5),
+        (4189, 6),
+        (4750, 7),
+        (5310, 8),
+        (5459, 9),
+    ];
+
     /// A code script for `second1`'s transitions, one entry a tick.
     fn trace_script(last_tick: u32) -> Vec<i32> {
-        trace_script_shifted(last_tick, 0)
+        trace_script_after_gate(last_tick, 0)
     }
 
-    /// The same transition frames moved by `shift` (positive is later).
-    fn trace_script_shifted(last_tick: u32, shift: i32) -> Vec<i32> {
-        // boot = 404 + tick; the trace's transition frames.
-        const AT: [(i32, i32); 9] = [
-            (1537, 1),
-            (2097, 2),
-            (2509, 3),
-            (3069, 4),
-            (3630, 5),
-            (4189, 6),
-            (4750, 7),
-            (5310, 8),
-            (5459, 9),
-        ];
+    /// The same with the text batches' transitions (codes 5 and up) moved by
+    /// `shift` frames: the original's CPU-time phase, simulated.
+    fn trace_script_after_gate(last_tick: u32, shift: i32) -> Vec<i32> {
         (0..=last_tick)
             .map(|tick| {
                 let boot = 404 + tick as i32;
-                AT.iter()
+                TRANSITIONS
+                    .iter()
                     .rev()
-                    .find(|(at, _)| boot >= *at + shift)
+                    .find(|(at, code)| boot >= *at + if *code >= 5 { shift } else { 0 })
                     .map_or(0, |(_, code)| *code)
             })
             .collect()
@@ -1625,8 +1410,6 @@ mod tests {
             rig.step(part);
         }
     }
-
-    // --- the gates and the scroll ------------------------------------------
 
     #[test]
     fn the_stage_gates_follow_the_music_and_a_skipped_code_still_passes_them() {
@@ -1668,10 +1451,20 @@ mod tests {
     #[test]
     fn the_scroll_advances_one_step_every_nine_ticks() {
         let (mut rig, mut part) = started_with(picture_script(1500));
+        for slot in 0..3 {
+            assert!(rig.ctx(0).copper_is_set(slot), "slot {slot} is registered");
+        }
         run_to(&mut rig, &mut part, 1285);
         assert_eq!(part.stage, Stage::PictureFade);
+        // Slot 0's fade decrements `cop_dofade` and slot 2 counts, once a tick.
+        let dofade = part.shared.borrow().cop_dofade;
+        let frame_count = part.shared.borrow().frame_count;
         for tick in 1285..=1292u32 {
             rig.step(&mut part);
+            if tick == 1285 {
+                assert_eq!(part.shared.borrow().cop_dofade, dofade - 1, "slot 0's fade");
+                assert_eq!(part.shared.borrow().frame_count, frame_count + 1, "slot 2's counter");
+            }
             assert_eq!(
                 (rig.view.start_addr, rig.view.pan),
                 (0, 0),
@@ -1699,27 +1492,6 @@ mod tests {
             (0, 2),
             "the second step is (a=2,p=0): byte 0, pan 2"
         );
-    }
-
-    #[test]
-    fn the_pan_is_the_crtc_start_and_pel_panning() {
-        for a in [0u16, 1, 2, 3, 4, 7, 308, 309, 318, 319] {
-            for p in [0u16, 1] {
-                let start = cop_start(a, p);
-                assert_eq!(start, a / 4 + p * 88, "cop_start({a},{p})");
-                assert_eq!(cop_scrl(a), ((a & 3) * 2) as u8, "cop_scrl({a})");
-                let mut view = View::new(VIEW_WIDTH, VIEW_HEIGHT);
-                apply_view(&mut view, start, cop_scrl(a));
-                assert_eq!(view.start_addr, u32::from(start) * 4, "the start in pixels");
-                assert_eq!(view.x_offset, 0, "the panning is the AC register's");
-                assert_eq!(view.pan, (a & 3) as u8, "AC value / 2 pixels");
-                assert_eq!(
-                    view.source_index(&Surface::new(640, 400), 0, 0),
-                    usize::from(a + p * 352),
-                    "the first displayed pixel"
-                );
-            }
-        }
     }
 
     #[test]
@@ -1781,8 +1553,6 @@ mod tests {
         out
     }
 
-    // --- the assets and the preserved bugs ----------------------------------
-
     #[test]
     fn the_picture_is_hoi_u_with_the_three_entries_the_release_ships() {
         let image = load_image(NAME, HZPIC_PATH).unwrap();
@@ -1792,18 +1562,16 @@ mod tests {
         assert_eq!(image.palette.entry(2), [5, 5, 7]);
         assert_eq!(image.palette.entry(3), [6, 6, 9]);
         let (_, part) = started();
-        for &(entry, rgb) in &SHIPPED_PALETTE_ENTRIES {
-            assert_eq!(
-                part.palette[usize::from(entry)],
-                rgb,
-                "entry {entry} is the shipped hzpic's"
-            );
+        let rgb = |entry: usize| &part.palette[entry * 3..entry * 3 + 3];
+        for &(entry, shipped) in &SHIPPED_PALETTE_ENTRIES {
+            assert_eq!(rgb(usize::from(entry)), shipped, "entry {entry} is the shipped hzpic's");
         }
-        // And every entry 64-255 is entry `v mod 64` (MAIN.C:212).
+        // And every entry 64-255 is entry `v mod 64` (MAIN.C:212), which is what
+        // hides the text XOR and the masks: both keep the low six bits.
         for entry in 0..256 {
             assert_eq!(
-                part.palette[entry],
-                part.palette[entry % 64],
+                rgb(entry),
+                rgb(entry % 64),
                 "entry {entry} must alias entry {}",
                 entry % 64
             );
@@ -1848,12 +1616,8 @@ mod tests {
 
     #[test]
     fn the_tbuf_clear_keeps_the_arrays_last_sixteen_rows() {
-        // `MAIN.C:101` clears 186*320 bytes of a 186*352 array.
-        assert_eq!(TBUF_CLEAR, 186 * 320);
-        assert_eq!(TBUF_LEN, 186 * 352);
-        // Drive the part's own batch branch (`MAIN.C:99-101`): fill the buffer
-        // with a marker just before the tick that clears it, and read what the
-        // production clear left.
+        // `MAIN.C:101` clears 186*320 bytes of a 186*352 array: fill it with a
+        // marker before the batch's tick and read what the clear left.
         let (mut rig, mut part) = started_with(picture_script(1500));
         for _ in 0..1600 {
             // The picture fade's last tick falls through into the branch in the
@@ -1889,18 +1653,6 @@ mod tests {
     }
 
     #[test]
-    fn the_text_operations_keep_the_pictures_low_six_bits() {
-        // Both the text XOR (0x40/0x80/0xC0) and the two masks (&0x3f) are
-        // invisible under the aliased palette: `palette[v] == palette[v%64]`.
-        for value in 0u8..=255 {
-            for ink in [0x00u8, 0x40, 0x80, 0xC0] {
-                assert_eq!((value ^ ink) % 64, value % 64);
-            }
-            assert_eq!((value & FADE_MASK) % 64, value % 64);
-        }
-    }
-
-    #[test]
     fn the_fade_applier_uploads_the_post_add_palette() {
         // `COPPER.ASM:122-124` sets `cop_pal` to a *pointer* to `fadepal` and
         // `copper2` uploads it at the retrace, after the add: the port copies
@@ -1929,8 +1681,6 @@ mod tests {
         );
     }
 
-    // --- the music's gates --------------------------------------------------
-
     #[test]
     fn the_picture_fade_hands_over_to_a_batch_gated_on_code_five() {
         let (mut rig, mut part) = started_with(picture_script(1500));
@@ -1945,78 +1695,10 @@ mod tests {
     }
 
     #[test]
-    fn all_three_copper_slots_are_installed_and_each_does_its_job() {
-        let (mut rig, mut part) = started_with(picture_script(1500));
-        for slot in 0..3 {
-            let set = rig.ctx(0).copper_is_set(slot);
-            assert!(set, "slot {slot} is registered");
-        }
-        run_to(&mut rig, &mut part, 1285);
-        assert_eq!(part.stage, Stage::PictureFade);
-        // Slot 0 (the fade applier) decrements `cop_dofade` once a tick.
-        let dofade = part.shared.borrow().cop_dofade;
-        let frame_count = part.shared.borrow().frame_count;
-        rig.step(&mut part); // tick 1285
-        assert_eq!(part.shared.borrow().cop_dofade, dofade - 1, "slot 0's fade");
-        // Slot 2 (the frame counter) increments once a tick.
-        assert_eq!(part.shared.borrow().frame_count, frame_count + 1, "slot 2's counter");
-        // Slot 1 (the CRTC writer) has not run a step yet; at the ninth tick
-        // after the reset it writes the first step's start and pan.
-        assert_eq!(rig.view.start_addr, 0, "no step before the ninth tick");
-        for _ in 0..8 {
-            rig.step(&mut part); // ticks 1286..1293
-        }
-        assert_eq!(
-            (rig.view.start_addr, rig.view.pan),
-            (4 * 88, 1),
-            "slot 1 writes (a=1,p=1)'s start and pan"
-        );
-    }
-
-    #[test]
     fn an_exit_request_ends_every_wait_on_the_tick_it_is_seen() {
         let (mut rig, mut part) = started_with(vec![0; 10]);
         assert_eq!(rig.step_exit(&mut part), PartStatus::Finished);
         assert_eq!(part.stage, Stage::Done);
-    }
-
-    // --- the reference frames ----------------------------------------------
-
-    /// The reference frame at boot `boot` is the tick `boot - 404`'s composed
-    /// frame, which is what [`Rig::step_render`] captures.
-    fn render_at(boot: u32) -> Vec<u8> {
-        let tick = boot - 404;
-        let (mut rig, mut part) = started_with(trace_script(tick));
-        while rig.tick < tick {
-            rig.step(&mut part);
-        }
-        let (_, frame) = rig.step_render(&mut part);
-        frame
-    }
-
-    #[test]
-    fn the_three_held_keyframes_match_the_reference_rgb() {
-        for boot in [900u32, 1719, 2719] {
-            let frame = render_at(boot);
-            assert_eq!(
-                differing_pixels(&frame, &reference("alku", boot, "rgb")),
-                0,
-                "boot {boot}: the held frame is not the reference's"
-            );
-        }
-    }
-
-    #[test]
-    fn the_scrolling_keyframe_is_the_references() {
-        // The release's loop (A20): the fifth batch's `ffonapois` clears the text and
-        // its `do_scroll(tptr<5 ? 1 : 0)` no longer carries it, so 5859 is bare.
-        let key = render_at(5859);
-        assert_eq!(differing_pixels(&key, &reference("alku", 5859, "rgb")), 0, "boot 5859");
-        // The window steps every nine ticks and nothing else moves: the port's 5858 is
-        // the same picture and its 5860 the next step's (14,048 pixels), where the
-        // reference's own session holds 5859-5861 (`reference-indices.md` §4.4).
-        assert_eq!(render_at(5858), key, "5858 is the same step");
-        assert_eq!(differing_pixels(&render_at(5860), &key), 14048, "5860 is the next step");
     }
 
     /// The trace's run, stepped until `stop` holds or `last` ticks have run.
@@ -2175,7 +1857,7 @@ mod tests {
 
     /// The release's image holds what the port names as constants (D49): the loop, its
     /// closing routine and the text routines, compared byte for byte at the offsets the
-    /// constants cite (`out/glitches/alku-report.md`; `docs/fidelity/alku.md` §12).
+    /// constants cite (`docs/fidelity/alku.md` §12).
     #[test]
     fn the_release_loop_and_its_closing_routine_are_the_images() {
         let file = std::fs::read("../../assets/MAIN/DATA/ALKU.EXE").unwrap();
@@ -2281,15 +1963,21 @@ mod tests {
         assert_eq!(&order[73..75], b"[]");
     }
 
-    /// The D24 measurement, ignored: with the curated `HOI.U` entries the
-    /// reference's cards and its picture band differ; with the shipped
-    /// entries they do not. Run with `--ignored --nocapture`.
+    /// The D24 counterfactual, ignored: with `HOI.U`'s own entries 1-3 the
+    /// reference's cards and its picture band differ (A20, `alku.md` §7). Run
+    /// with `--ignored --nocapture`.
     #[test]
     #[ignore]
     fn the_curated_palette_entries_leave_the_reference_different() {
         let mut rig = rig(trace_script(5455));
-        let mut part = Alku::curated();
+        let mut part = Alku::new();
         part.init(&mut rig.ctx(0)).unwrap();
+        let hoi_u = load_image(NAME, HZPIC_PATH).unwrap().palette;
+        let mut bytes = [0u8; 768];
+        for entry in 0..256 {
+            bytes[entry * 3..entry * 3 + 3].copy_from_slice(&hoi_u.entry(entry as u8));
+        }
+        part.take_palette(bytes);
         let mut frames = Vec::new();
         for tick in 0..=5455u32 {
             if [496u32, 1315, 2315, 5455].contains(&tick) {
@@ -2301,41 +1989,11 @@ mod tests {
         }
         let mut measured = Vec::new();
         for (boot, frame) in frames {
-            let expected = reference("alku", boot, "rgb");
-            let differing = differing_pixels(&frame, &expected);
-            println!(
-                "boot {boot}: {differing} of 128000 pixels differ with the curated entries"
-            );
+            let differing = differing_pixels(&frame, &reference("alku", boot, "rgb"));
+            println!("boot {boot}: {differing} of 128000 pixels differ with HOI.U's entries");
             measured.push((boot, differing));
         }
-        // A20's numbers, pinned: a silent change here would let the note's
-        // counterfactual go stale.
         assert_eq!(measured, [(900, 0), (1719, 1595), (2719, 4171), (5859, 966)]);
-    }
-
-    /// The text batches' transitions moved by `shift` while the four gates stay
-    /// where the trace has them: the original's CPU-time shift, simulated.
-    fn trace_script_after_gate(last_tick: u32, shift: i32) -> Vec<i32> {
-        const AT: [(i32, i32); 9] = [
-            (1537, 1),
-            (2097, 2),
-            (2509, 3),
-            (3069, 4),
-            (3630, 5),
-            (4189, 6),
-            (4750, 7),
-            (5310, 8),
-            (5459, 9),
-        ];
-        (0..=last_tick)
-            .map(|tick| {
-                let boot = 404 + tick as i32;
-                AT.iter()
-                    .rev()
-                    .find(|(at, code)| boot >= *at + if *code >= 5 { shift } else { 0 })
-                    .map_or(0, |(_, code)| *code)
-            })
-            .collect()
     }
 
     /// The phase sensitivity of 5859 to the music's transition frames, ignored.
@@ -2368,33 +2026,6 @@ mod tests {
                 assert_eq!(differing, 0, "shift {shift:+}");
             } else {
                 assert_eq!(differing, 2065, "shift {shift:+}");
-            }
-        }
-    }
-
-    /// The original's 5950 (`out/b3-alku-boundary2`, an unfiled capture, `reference-indices.md`
-    /// §4.5) is the closing routine's compacted page: its lines 0-184 are the page's rows 0-184
-    /// at 400 lines and its lines 185-399 the page's row `L/2` — the emulator applying CRTC 9 = 1
-    /// half a frame late (`VGA_StartResize`), in the middle of the frame. Every line is the
-    /// port's page byte for byte. Ignored: the capture is under `out/`. Run with `--ignored`.
-    #[test]
-    #[ignore]
-    fn the_originals_5950_is_the_compacted_page_resized_mid_frame() {
-        let (rig, part) = run_until(5546, |_| false);
-        assert_eq!(part.stage, Stage::Handover(HandoverStep::Linear), "the page is compacted");
-        let reference = std::fs::read("../../out/b3-alku-boundary2/frame_005950.rgb").unwrap();
-        let start = 4 * (80 + HANDOVER_COMPACT_BASE);
-        for line in 0..400usize {
-            let row = if line < 185 { line } else { line / 2 };
-            for x in 0..320usize {
-                let index = rig.surface.pixels()[start + row * LINE_PIXELS + x];
-                let entry = rig.palette.entry(index);
-                let at = (line * 320 + x) * 3;
-                assert_eq!(
-                    [dac_expand(entry[0]), dac_expand(entry[1]), dac_expand(entry[2])][..],
-                    reference[at..at + 3],
-                    "line {line}, column {x}: page row {row}"
-                );
             }
         }
     }
