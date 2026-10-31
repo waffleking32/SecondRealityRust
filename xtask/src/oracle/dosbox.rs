@@ -32,20 +32,10 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Keys within one sequence are placed this far apart, in rendered frames
 /// (200 ms at the dos rate): long enough for the guest to read each one.
 const KEY_SPACING_FRAMES: u64 = 14;
-/// How many frames before the requested one the exact-grab loop starts.
-///
-/// That loop identifies every frame it takes with a counter reading on both
-/// sides of the grab, so it begins early rather than at the requested frame.
-/// The window has to outlast a host stall: a grab costs a millisecond or two
-/// when the host is keeping up, but one scheduled-out round trip of tens of
-/// milliseconds can jump several frames, and a window narrower than that
-/// refuses captures that would otherwise have landed exactly. Twenty-five
-/// frames is what the measurement in D17 used, and it costs a few hundred
-/// grabs — all small, and cheap next to the indexed reads a capture makes.
+/// How many frames before the requested one the exact-grab loop starts: enough to outlast a
+/// host stall of tens of milliseconds. D17 was measured with it.
 const GRAB_WINDOW_FRAMES: u64 = 25;
-/// How long the exact-grab loop keeps trying before it gives up. A frame that
-/// cannot be identified must end as a refusal, never as a guess at which one
-/// it was.
+/// How long the exact-grab loop keeps trying before it refuses.
 const GRAB_DEADLINE: Duration = Duration::from_secs(10);
 
 const PORT_SEQUENCER_INDEX: u16 = 0x3C4;
@@ -252,22 +242,8 @@ pub fn generate_token() -> Result<String, OracleError> {
     Ok(token)
 }
 
-/// The `PUT /io/port` body for writing `value` to `port`, as recorded in
-/// `tests/fixtures/dac_port.json`.
-pub fn port_write_body(port: u16, value: u8) -> serde_json::Value {
-    json!({ "port": port, "value": value })
-}
-
-/// The `GET /io/port` path for reading `port`, as recorded in
-/// `tests/fixtures/dac_port.json` (the fixture records the path below the
-/// `/api/v1` root).
-pub fn port_read_path(port: u16) -> String {
-    format!("/api/v1/io/port?port={port}")
-}
-
-/// What the oracle asks the emulator for. The capture's calls go to the
-/// emulator over HTTP; the tests answer them from a script, so the identity
-/// logic runs on the code that ships (D17).
+/// What the oracle asks the emulator for: HTTP in a capture, a script in the tests, so the
+/// frame-identity logic is tested on the code that ships (D17).
 trait EmulatorApi {
     fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError>;
     fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError>;
@@ -275,9 +251,7 @@ trait EmulatorApi {
     fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError>;
     /// `POST` a `text/plain` body, which is all `/script/load` accepts.
     fn post_text(&self, path: &str, body: &str) -> Result<Vec<u8>, OracleError>;
-    /// Whether the API has answered at all: any status counts as up (the 401
-    /// an unauthenticated probe gets means the API is listening), and only a
-    /// transport error means it is not.
+    /// Whether the API answers at all: any status, even an unauthenticated 401, means it is up.
     fn probe(&self) -> Result<(), OracleError>;
 }
 
@@ -289,9 +263,15 @@ struct HttpApi {
 }
 
 impl HttpApi {
-    /// The emulator API, with the token the emulator was given.
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
+    }
+
+    /// A request to `path` carrying the token.
+    fn authed(&self, method: &str, path: &str) -> ureq::Request {
+        self.agent
+            .request(method, &self.url(path))
+            .set("Authorization", &format!("Bearer {}", self.token))
     }
 
     fn transport_error(&self, path: &str, error: ureq::Error) -> OracleError {
@@ -310,9 +290,7 @@ impl HttpApi {
 impl EmulatorApi for HttpApi {
     fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError> {
         let response = self
-            .agent
-            .get(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
+            .authed("GET", path)
             .call()
             .map_err(|e| self.transport_error(path, e))?;
         read_body(response)
@@ -328,9 +306,7 @@ impl EmulatorApi for HttpApi {
 
     fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
         let response = self
-            .agent
-            .post(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
+            .authed("POST", path)
             .send_json(body.clone())
             .map_err(|e| self.transport_error(path, e))?;
         read_body(response)
@@ -338,9 +314,7 @@ impl EmulatorApi for HttpApi {
 
     fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
         let response = self
-            .agent
-            .put(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
+            .authed("PUT", path)
             .send_json(body.clone())
             .map_err(|e| self.transport_error(path, e))?;
         read_body(response)
@@ -348,9 +322,7 @@ impl EmulatorApi for HttpApi {
 
     fn post_text(&self, path: &str, body: &str) -> Result<Vec<u8>, OracleError> {
         let response = self
-            .agent
-            .post(&self.url(path))
-            .set("Authorization", &format!("Bearer {}", self.token))
+            .authed("POST", path)
             .set("Content-Type", "text/plain")
             .send_string(body)
             .map_err(|e| self.transport_error(path, e))?;
@@ -370,50 +342,31 @@ impl EmulatorApi for HttpApi {
 
 pub struct DosboxOracle {
     child: Option<Child>,
-    /// Where the HTTP calls go: the emulator in a capture, a script in the
-    /// tests. Everything the oracle asks for goes through it, so a test drives
-    /// the same `wait_for_frame`/`frame` path a capture does rather than a
-    /// stand-in for it (D17).
+    /// The emulator in a capture, a script in the tests.
     api: Box<dyn EmulatorApi + Send>,
     scratch: PathBuf,
-    /// The guest ran its own boot recipe out of `[autoexec]`
-    /// (`BootRecipe::Autoexec`), so `boot` waits for the configured anchor
-    /// instead of typing one (D17).
+    /// The guest runs its own boot out of `[autoexec]` (D17), so `boot` only waits for
+    /// `boot_wait`.
     autoexec: bool,
-    /// What `boot` waits for under the autoexec recipe: the demo's setup
-    /// screen text, or the first graphics frame for a program that never draws
-    /// it. [`BootWait::Setup`] until [`Oracle::set_boot_wait`] says otherwise.
+    /// [`BootWait::Setup`] until [`Oracle::set_boot_wait`] says otherwise.
     boot_wait: BootWait,
-    /// The frames [`Oracle::wait_for_frame`] has taken and not yet handed
-    /// over, oldest first.
-    ///
-    /// A queue rather than a slot: a capture with neighbours to take waits for
-    /// them before it reads the indices of the frame before, and a single slot
-    /// would drop the earlier frame on the floor.
+    /// The frames [`Oracle::wait_for_frame`] has taken and not yet handed over, oldest first.
     pending: VecDeque<CapturedFrame>,
 }
 
 impl DosboxOracle {
     /// Launch the emulator headless and wait for its API.
     ///
-    /// `allowed_base` is the directory the capture will mount, and must be
-    /// named in the *primary* config: the mount allow-list is only read from
-    /// there, and `--set` cannot fill it (D14). The spawn therefore points
-    /// `XDG_CONFIG_HOME` at a scratch directory holding a primary config, and
-    /// does not pass `--noprimaryconf`.
-    ///
-    /// `autoexec` are the lines that same config gives the guest's shell to
-    /// run at boot (`BootRecipe::Autoexec`, D17); empty means the typed
-    /// recipe, where the host drives the boot over the API instead.
+    /// `allowed_base`, the directory the capture mounts, has to be in the primary config's
+    /// allow-list, which `--set` cannot fill (D14), so `XDG_CONFIG_HOME` points at a scratch
+    /// primary config. `autoexec` are the lines that config gives the guest's shell (D17);
+    /// empty means the typed recipe.
     pub fn spawn(
         cycles: u32,
         allowed_base: &Path,
         autoexec: &[String],
     ) -> Result<DosboxOracle, OracleError> {
-        // The mount policy compares the guest's MOUNT argument with the
-        // allow-list, and the guest resolves a relative host path against the
-        // emulator's own working directory, not ours. Absolutise here so the
-        // two always name the same directory.
+        // The guest resolves a relative host path against the emulator's working directory.
         let allowed_base = absolute(allowed_base)?;
         let repo = env::var("SR_DOSBOX").unwrap_or_else(|_| DEFAULT_SR_DOSBOX.to_string());
         let binary = Path::new(&repo).join("build/release-linux/dosbox-automation");
@@ -485,26 +438,9 @@ impl DosboxOracle {
         }
     }
 
-    /// Fail with a legible 401 rather than a puzzle if the emulator did not
-    /// take the token this process generated for it.
+    /// Fail with a legible 401 if the emulator did not take the token.
     fn check_token(&self) -> Result<(), OracleError> {
-        self.get_bytes("/api/v1/dosbox/info").map(|_| ())
-    }
-
-    fn get_json(&self, path: &str) -> Result<serde_json::Value, OracleError> {
-        self.api.get_json(path)
-    }
-
-    fn get_bytes(&self, path: &str) -> Result<Vec<u8>, OracleError> {
-        self.api.get_bytes(path)
-    }
-
-    fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
-        self.api.post_json(path, body)
-    }
-
-    fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<Vec<u8>, OracleError> {
-        self.api.put_json(path, body)
+        self.api.get_bytes("/api/v1/dosbox/info").map(|_| ())
     }
 
     fn wait_for_api(&mut self, log_path: &Path) -> Result<(), OracleError> {
@@ -520,9 +456,6 @@ impl DosboxOracle {
                     )));
                 }
             }
-            // Any answer with a status — 200, or the 401 an unauthenticated
-            // probe gets — means the API is up. A transport error means it is
-            // not listening yet.
             if self.api.probe().is_ok() {
                 return Ok(());
             }
@@ -552,12 +485,12 @@ impl DosboxOracle {
                 String::from_utf8_lossy(&status)
             )));
         }
-        self.post_json("/api/v1/script/start", &json!({}))?;
+        self.api.post_json("/api/v1/script/start", &json!({}))?;
         Ok(())
     }
 
     fn type_line(&self, line: &str) -> Result<(), OracleError> {
-        self.post_json(
+        self.api.post_json(
             "/api/v1/input/type",
             &json!({ "text": format!("{line}\n"), "cps": 250 }),
         )?;
@@ -565,7 +498,9 @@ impl DosboxOracle {
     }
 
     fn port_write(&self, port: u16, value: u8) -> Result<(), OracleError> {
-        let answer = self.put_json("/api/v1/io/port", &port_write_body(port, value))?;
+        let answer = self
+            .api
+            .put_json("/api/v1/io/port", &json!({ "port": port, "value": value }))?;
         let answer: serde_json::Value = serde_json::from_slice(&answer)
             .map_err(|e| OracleError::Decode(format!("io/port write is not JSON: {e}")))?;
         if answer["status"].as_str() != Some("ok") {
@@ -577,7 +512,7 @@ impl DosboxOracle {
     }
 
     fn port_read(&self, port: u16) -> Result<u16, OracleError> {
-        let answer = self.get_json(&port_read_path(port))?;
+        let answer = self.api.get_json(&format!("/api/v1/io/port?port={port}"))?;
         answer["value"]
             .as_u64()
             .and_then(|v| u16::try_from(v).ok())
@@ -618,10 +553,7 @@ impl DosboxOracle {
         self.port_read(PORT_CRTC_DATA)
     }
 
-    /// What kind of screen is up: the emulator's own name for the mode's
-    /// colour depth, and the sequencer's chain-4 bit. The decision that turns
-    /// the two into a read is [`super::plan_indexed_read`], which is pure and
-    /// tested; this only asks.
+    /// What kind of screen is up, from the mode's colour depth and the sequencer's chain-4 bit.
     fn screen_layout(&self, color_depth: &str) -> Result<super::ScreenLayout, OracleError> {
         Ok(super::ScreenLayout::of(
             color_depth,
@@ -629,19 +561,10 @@ impl DosboxOracle {
         ))
     }
 
-    /// Indices for the frame on screen now: a linear read when the sequencer
-    /// is in chain-4, otherwise one memory read per plane with the graphics
-    /// controller's read map select set (D14), assembled at the screen's own
-    /// row stride.
-    ///
-    /// **A screen the read cannot describe is refused rather than guessed
-    /// at.** The read starts at offset 0 of each plane because that is where
-    /// the demo's screens begin; when `stride * height` runs past what one
-    /// plane holds, the guest's own display wraps and this read cannot say
-    /// what it shows — ALKU is that case (176 × 400 = 70,400 > 65,536), and
-    /// its frames come back RGB-only. So does a screen whose pixels are not
-    /// one index a byte. A missing `.idx` is honest; a sheared one is a wrong
-    /// artefact in the reference tree.
+    /// Indices for the frame on screen now: a linear read in chain-4, otherwise one read per
+    /// plane with the read map select set (D14), assembled at the screen's own row stride. The
+    /// read starts at each plane's offset 0, so a screen whose rows run past one plane (ALKU's,
+    /// 176 × 400 = 70,400 bytes) is refused by [`super::plan_indexed_read`] and stays RGB-only.
     fn capture_indexed(
         &self,
         width: u16,
@@ -690,31 +613,19 @@ impl DosboxOracle {
         Ok((indexed, palette))
     }
 
-    /// The guest's screen as raw bytes, with the counter reading that
-    /// identifies it — or `None` when it cannot be identified.
+    /// The guest's screen as raw bytes, with the counter reading that identifies it, or `None`
+    /// when a frame boundary fell inside the grab (D17).
     ///
-    /// The emulator publishes a frame's pixels and counts it immediately
-    /// afterwards, in that order and on one thread (`gui/render/render.cpp:446`
-    /// then `gui/sdl_gui.cpp:1205`), so a counter reading that is the same on
-    /// both sides of the grab can only have seen the frame that reading names:
-    /// no frame was published in between, or the reading would have moved. The
-    /// exception is narrow and loud: a video-mode stop or reset advances the
-    /// counter without publishing (`GFX_Stop`, `gui/sdl_gui.cpp:396-402`;
-    /// `halt_render`, `gui/render/render.cpp:349-353`), so one counter value
-    /// per stop can see the old picture — and a stop that changes geometry is
-    /// refused by the capture's `GeometryChanged` check rather than written.
-    /// When it did move, a frame boundary fell inside the grab and the picture
-    /// belongs to one side or the other — `None` says so instead of guessing
-    /// (D17).
-    ///
-    /// The bytes are returned undecoded on purpose. Decoding costs several
-    /// milliseconds in a debug build, and anywhere inside or between the grab
-    /// loop's iterations it would drop the loop's sampling rate to one grab
-    /// per two or three frames — which is how the frame asked for used to slip
-    /// between two grabs and get refused.
+    /// The emulator publishes a frame's pixels and then counts it, on one thread
+    /// (`gui/render/render.cpp:446`, then `gui/sdl_gui.cpp:1205`), so a reading that is the same
+    /// on both sides of the grab names the picture. A video-mode stop advances the counter
+    /// without publishing (`GFX_Stop`, `gui/sdl_gui.cpp:396-402`; `halt_render`,
+    /// `gui/render/render.cpp:349-353`); a stop that changes geometry is refused as
+    /// `GeometryChanged`. The bytes stay undecoded: decoding inside the loop would slow it to
+    /// one grab per two or three frames.
     fn grab_identified(&mut self) -> Result<Option<(u64, Vec<u8>)>, OracleError> {
         let before = self.frame_counter()?;
-        let raw = self.get_bytes("/api/v1/video/frame?format=raw")?;
+        let raw = self.api.get_bytes("/api/v1/video/frame?format=raw")?;
         let after = self.frame_counter()?;
         Ok((before == after).then_some((before, raw)))
     }
@@ -726,8 +637,7 @@ impl DosboxOracle {
         decode_frame(&raw)
     }
 
-    /// Take the next frame that can be identified, whatever the counter calls
-    /// it.
+    /// Take the next frame that can be identified, whatever the counter calls it.
     fn grab_any(&mut self) -> Result<CapturedFrame, OracleError> {
         let deadline = std::time::Instant::now() + GRAB_DEADLINE;
         loop {
@@ -748,16 +658,9 @@ impl DosboxOracle {
     }
 }
 
-/// Wait for the frame the counter names exactly, over an abstract grab.
-///
-/// `grab` returns the counter reading that identifies the frame it took and
-/// the frame itself, or `None` for a grab that straddled a frame boundary.
-/// The counter only moves forward one frame at a time, so the loop ends on the
-/// frame that was asked for, on a frame that arrived too late (a refusal, not
-/// a relabelling), or on the deadline.
-///
-/// Split out from the HTTP path so the three endings can be tested without an
-/// emulator; the REST side around it is a thin shell (D17).
+/// Wait for the frame the counter names exactly. `grab` returns the identifying reading and
+/// the frame, or `None` for a grab that straddled a boundary; the loop ends on the frame asked
+/// for, on a late one (refused, never relabelled), or on the deadline (D17).
 fn grab_exactly<T>(
     index: u64,
     deadline: std::time::Instant,
@@ -782,8 +685,6 @@ fn grab_exactly<T>(
     }
 }
 
-/// What the grab loop says when it runs out of time: a host slow enough to
-/// miss every frame's window is a failure to report, not a frame to invent.
 fn grab_timeout(index: Option<u64>) -> OracleError {
     let what = match index {
         Some(index) => format!("frame {index}"),
@@ -799,7 +700,7 @@ fn grab_timeout(index: Option<u64>) -> OracleError {
 impl Oracle for DosboxOracle {
     fn describe(&self) -> Result<String, OracleError> {
         let info = DosboxInfo::from_json(
-            &String::from_utf8(self.get_bytes("/api/v1/dosbox/info")?)
+            &String::from_utf8(self.api.get_bytes("/api/v1/dosbox/info")?)
                 .map_err(|e| OracleError::Decode(format!("dosbox/info is not UTF-8: {e}")))?,
         )?;
         let features = &info.features;
@@ -815,13 +716,8 @@ impl Oracle for DosboxOracle {
 
     fn boot(&mut self, exe: &Path, cwd: &Path, args: &[String]) -> Result<(), OracleError> {
         if self.autoexec {
-            // The guest's shell already ran the whole recipe out of
-            // `[autoexec]`, `AUTOTYPE` included, so there is nothing to type
-            // and no key to send: this waits for the anchor the capture asked
-            // for. The demo's anchor also catches a mount the policy refused
-            // before the capture waits on frames that would never come (D17);
-            // a program that never draws that screen is waited for at its
-            // first graphics frame instead.
+            // The guest's shell runs the recipe, `AUTOTYPE` included; this waits for the anchor.
+            // The setup screen also catches a mount the policy refused (D17).
             return match self.boot_wait {
                 BootWait::Setup => {
                     self.wait_for_text(crate::reference::SETUP_SCREEN_TEXT, SHELL_TIMEOUT)
@@ -830,8 +726,7 @@ impl Oracle for DosboxOracle {
             };
         }
         let cwd = absolute(cwd)?;
-        // The mount policy is enforced by the guest MOUNT command, so a
-        // refused base shows up as screen text, not as an HTTP error.
+        // A refused mount shows up as screen text, not as an HTTP error.
         self.wait_for_text(":\\>", SHELL_TIMEOUT)?;
         self.type_line(&format!("MOUNT C -RO {}", cwd.display()))?;
         self.wait_for_text("Mounted read-only", DEFAULT_WAIT)?;
@@ -848,7 +743,9 @@ impl Oracle for DosboxOracle {
         if cycles == 0 {
             return Err(OracleError::UnpinnedCycles);
         }
-        let answer = self.put_json("/api/v1/cpu/cycles", &json!({ "cycles": cycles }))?;
+        let answer = self
+            .api
+            .put_json("/api/v1/cpu/cycles", &json!({ "cycles": cycles }))?;
         let answer: serde_json::Value = serde_json::from_slice(&answer)
             .map_err(|e| OracleError::Decode(format!("cpu/cycles is not JSON: {e}")))?;
         // The PUT sets both real and protected mode, and reports what it took.
@@ -862,8 +759,6 @@ impl Oracle for DosboxOracle {
     }
 
     fn set_boot_wait(&mut self, wait: BootWait) -> Result<(), OracleError> {
-        // Stored for `boot`'s autoexec branch; the typed recipe has one
-        // anchor and ignores it (validation refuses the combination).
         self.boot_wait = wait;
         Ok(())
     }
@@ -883,14 +778,12 @@ impl Oracle for DosboxOracle {
     }
 
     fn read_memory(&self, segment: u16, offset: u32, len: usize) -> Result<Vec<u8>, OracleError> {
-        self.get_bytes(&format!(
-            "/api/v1/memory/{segment}/{offset}/{len}"
-        ))
+        self.api
+            .get_bytes(&format!("/api/v1/memory/{segment}/{offset}/{len}"))
     }
 
     fn wait_for_frame(&mut self, index: u64) -> Result<(), OracleError> {
-        // Sleep off everything but the last few frames: the grab loop below
-        // polls, and it must not do that for the length of a skip.
+        // The grab loop below polls; it must not do that for the length of a skip.
         loop {
             let now = self.frame_counter()?;
             if now + GRAB_WINDOW_FRAMES >= index {
@@ -904,27 +797,19 @@ impl Oracle for DosboxOracle {
     }
 
     fn frame(&mut self) -> Result<CapturedFrame, OracleError> {
-        // The frame the wait pinned, when there is one: writing any other
-        // frame under the index that was asked for is the failure this whole
-        // dance exists to prevent (D17).
-        //
-        // The grab inside comes first and fast: everything below it — the
-        // frame info, and in Mode X some eight hundred requests for planes and
-        // palette — takes long enough that the emulator is many frames further
-        // on by the time it is done, so a staleness check after it would
-        // measure nothing.
+        // The frame the wait pinned (D17). The indexed read below takes many frames, in Mode X
+        // some eight hundred requests, so it can only be checked against the picture, not the
+        // counter.
         let mut frame = match self.pending.pop_front() {
             Some(frame) => frame,
             None => self.grab_any()?,
         };
-        let info = self.get_json("/api/v1/video/frame/info")?;
+        let info = self.api.get_json("/api/v1/video/frame/info")?;
         if info["video_mode"]["is_graphics_mode"].as_bool() != Some(true) {
             // A text screen has no palette indices, only glyph codes.
             return Ok(frame);
         }
-        // The emulator's own name for the mode's colour depth. A depth it did
-        // not name is not one this read claims to describe, and is refused
-        // rather than assumed to be 256-colour.
+        // A depth the emulator did not name is refused, not assumed 256-colour.
         let color_depth = info["video_mode"]["color_depth"]
             .as_str()
             .unwrap_or_default();
@@ -933,9 +818,6 @@ impl Oracle for DosboxOracle {
                 frame.indexed = Some(indexed);
                 frame.palette = Some(palette);
                 if !frame.indexed_matches_rgb() {
-                    // The screen moved while its planes and palette were being
-                    // read a request at a time. The RGB frame is still the
-                    // frame that was asked for; the indices are not.
                     eprintln!(
                         "warning: indexed capture does not reproduce the RGB frame \
                          (the screen moved while it was read); keeping RGB only"
@@ -956,15 +838,14 @@ impl Oracle for DosboxOracle {
         if names.is_empty() {
             return Ok(());
         }
-        // Frame-scheduled dispatch: the emulator normalises the frames around
-        // the first timestamped event, so events land on exact rendered frames
-        // relative to the call, instead of drifting with the host clock.
+        // Frame-scheduled: the events land on rendered frames relative to the call.
         let events: Vec<serde_json::Value> = names
             .iter()
             .enumerate()
             .map(|(i, name)| json!({ "key": name, "frame": 1 + i as u64 * KEY_SPACING_FRAMES }))
             .collect();
-        self.post_json("/api/v1/input/sequence", &json!({ "events": events }))?;
+        self.api
+            .post_json("/api/v1/input/sequence", &json!({ "events": events }))?;
         Ok(())
     }
 
@@ -992,7 +873,7 @@ impl Oracle for DosboxOracle {
     fn wait_for_text(&mut self, needle: &str, timeout: Duration) -> Result<(), OracleError> {
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            let screen = self.get_json("/api/v1/video/text")?;
+            let screen = self.api.get_json("/api/v1/video/text")?;
             if screen["text"]
                 .as_str()
                 .is_some_and(|text| text.contains(needle))
@@ -1000,18 +881,10 @@ impl Oracle for DosboxOracle {
                 return Ok(());
             }
             if std::time::Instant::now() >= deadline {
-                // The last lines are where the command and its answer are; a
-                // refused mount says why there, not in the banner.
-                let lines: Vec<&str> = screen["text"]
-                    .as_str()
-                    .unwrap_or("<not a text screen>")
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .collect();
-                let shown = lines[lines.len().saturating_sub(4)..].join(" / ");
                 return Err(OracleError::Timeout(format!(
-                    "waited {}s for {needle:?}; the bottom of the screen says: {shown}",
-                    timeout.as_secs()
+                    "waited {}s for {needle:?}; the bottom of the screen says: {}",
+                    timeout.as_secs(),
+                    screen_tail(&screen)
                 )));
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -1021,22 +894,16 @@ impl Oracle for DosboxOracle {
     fn wait_for_graphics(&mut self, timeout: Duration) -> Result<(), OracleError> {
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            let info = self.get_json("/api/v1/video/frame/info")?;
+            let info = self.api.get_json("/api/v1/video/frame/info")?;
             if info["video_mode"]["is_graphics_mode"].as_bool() == Some(true) {
                 return Ok(());
             }
             if std::time::Instant::now() >= deadline {
-                let screen = self.get_json("/api/v1/video/text")?;
-                let lines: Vec<&str> = screen["text"]
-                    .as_str()
-                    .unwrap_or("<not a text screen>")
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .collect();
-                let shown = lines[lines.len().saturating_sub(4)..].join(" / ");
+                let screen = self.api.get_json("/api/v1/video/text")?;
                 return Err(OracleError::Timeout(format!(
-                    "the screen is still text after {}s; the bottom of it says: {shown}",
-                    timeout.as_secs()
+                    "the screen is still text after {}s; the bottom of it says: {}",
+                    timeout.as_secs(),
+                    screen_tail(&screen)
                 )));
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -1044,7 +911,7 @@ impl Oracle for DosboxOracle {
     }
 
     fn frame_counter(&mut self) -> Result<u64, OracleError> {
-        let status = self.get_json("/api/v1/script/status")?;
+        let status = self.api.get_json("/api/v1/script/status")?;
         if status["state"].as_str() == Some("error") {
             return Err(OracleError::Decode(format!(
                 "the frame-watching script failed: {}",
@@ -1057,6 +924,18 @@ impl Oracle for DosboxOracle {
     }
 }
 
+/// The last four non-blank lines of a `/video/text` answer, where a command and its answer
+/// are (a refused mount says why there, not in the banner).
+fn screen_tail(screen: &serde_json::Value) -> String {
+    let lines: Vec<&str> = screen["text"]
+        .as_str()
+        .unwrap_or("<not a text screen>")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    lines[lines.len().saturating_sub(4)..].join(" / ")
+}
+
 impl Drop for DosboxOracle {
     fn drop(&mut self) {
         // Never leave the emulator running, not even when a capture failed.
@@ -1064,16 +943,14 @@ impl Drop for DosboxOracle {
     }
 }
 
-/// The emulator process, as capture starts it: headless, silent, on the pinned
-/// cycles, with the token its API answers to.
+/// The emulator process, as capture starts it: headless, silent, on the pinned cycles, with
+/// the token its API answers to.
 ///
-/// Its output goes nowhere on purpose. A real audio device paces the mixer by
-/// the host's audio clock, and the demo's music and animation then drift
-/// against the frame counter between runs — a *silent* run is what makes a
-/// moving screen repeat, and no boot recipe can undo the drift (D17). SDL's
-/// dummy driver alone still let two runs land a frame or two apart over twenty
-/// seconds; the emulator's own `nosound` mode leaves the emulated clock in
-/// charge. Nothing captures audio, so nothing is lost.
+/// A real audio device paces the mixer by the host's clock and the demo then drifts against
+/// the frame counter between runs, so a silent run is what makes a moving screen repeat (D17).
+/// The silence comes from `SDL_AUDIODRIVER=dummy`: the emulator's setting is `[mixer] nosound`
+/// (`src/audio/mixer.cpp`), so the `mixer_nosound=true` passed here does not take effect.
+/// Correcting it needs D17's determinism re-measured first (CLAUDE.md's open items).
 fn emulator_command(
     binary: &Path,
     scratch: &Path,
@@ -1083,8 +960,7 @@ fn emulator_command(
 ) -> Command {
     let mut command = Command::new(binary);
     command
-        // `cpu_cycles`, not `cycles`: `cycles=` at startup forces legacy
-        // mode, where the runtime PUT is refused with 409 (D14).
+        // `cpu_cycles`, not `cycles`: `cycles=` forces legacy mode, where the PUT is a 409 (D14).
         .arg("--set")
         .arg(format!("cpu_cycles={cycles}"))
         .arg("--set")
@@ -1099,13 +975,9 @@ fn emulator_command(
     command
 }
 
-/// The primary config the scratch `XDG_CONFIG_HOME` holds: the mount
-/// allow-list, which is only ever read from this file (D14), and — when the
-/// capture boots through the guest (`BootRecipe::Autoexec`) — the `[autoexec]`
-/// section the shell runs at boot (D17).
-///
-/// The allow-list and the `MOUNT` in the autoexec lines name the same
-/// directory, so the mount the recipe performs is the one the policy allows.
+/// The scratch primary config: the mount allow-list, only ever read from this file (D14), and
+/// under the autoexec recipe the `[autoexec]` section the shell runs (D17). Both name the same
+/// directory.
 fn primary_config(allowed_base: &Path, autoexec: &[String]) -> String {
     let mut config = format!(
         "# Written by xtask reference capture; deleted when the capture ends.\n\
@@ -1171,8 +1043,8 @@ fn dependency_search_path(repo: &Path) -> Result<String, OracleError> {
         .join(":"))
 }
 
-/// Something already answering on the emulator's port would be captured
-/// instead of the emulator this tool starts, which would be a silent lie.
+/// Something already answering on the emulator's port, which would be captured instead of the
+/// emulator this tool starts.
 fn listener_on(base_url: &str) -> Option<String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_millis(500))
@@ -1198,10 +1070,9 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
+    use crate::oracle::fixtures::{DAC_BIN, FRAME_BIN};
+
     const INFO_JSON: &str = include_str!("../../tests/fixtures/info.json");
-    const FRAME_BIN: &[u8] = include_bytes!("../../tests/fixtures/frame.bin");
-    const MODEX_FRAME_BIN: &[u8] = include_bytes!("../../tests/fixtures/modex_title_frame.bin");
-    const DAC_BIN: &[u8] = include_bytes!("../../tests/fixtures/dac.bin");
     const DAC_PORT_JSON: &str = include_str!("../../tests/fixtures/dac_port.json");
 
     #[test]
@@ -1226,16 +1097,8 @@ mod tests {
         assert_eq!(header.pitch, 1280);
         assert_eq!(header.pixel_format, PIXEL_FORMAT_BGRX32);
         assert_eq!(header.palette_count, 0);
-        // 15 bytes of header, not 16: one byte of shift costs every pixel.
+        // 15 bytes of header, not 16.
         assert_eq!(raw.len(), RAW_HEADER_LEN + 200 * 1280);
-    }
-
-    #[test]
-    fn the_title_screen_fixture_is_a_genuine_four_hundred_line_frame() {
-        let f = decode_frame(MODEX_FRAME_BIN).unwrap();
-        assert_eq!((f.width, f.height), (320, 400));
-        assert_eq!(f.rgb.len(), 320 * 400 * 3);
-        assert_eq!(MODEX_FRAME_BIN.len(), RAW_HEADER_LEN + 400 * 1280);
     }
 
     #[test]
@@ -1270,10 +1133,7 @@ mod tests {
 
     #[test]
     fn the_emulator_is_started_headless_silent_and_on_pinned_cycles() {
-        // The two settings and the two dummy drivers are the recipe D17 was
-        // measured with: a host video device, a host audio device, or an
-        // unpinned cycle count each make captures of a moving screen differ
-        // between runs.
+        // The recipe D17 was measured with.
         let command = emulator_command(
             Path::new("/emulator/dosbox-automation"),
             Path::new("/scratch"),
@@ -1306,13 +1166,8 @@ mod tests {
         );
     }
 
-    /// A scripted emulator, driven through the oracle's own calls.
-    ///
-    /// The counters and the pictures are separate queues on purpose: the
-    /// emulator publishes a picture and *then* counts it, so a grab that
-    /// straddles a frame boundary sees a counter from one side and a picture
-    /// from the other, and that ordering is what the identity rule rests on
-    /// (D17).
+    /// A scripted emulator, driven through the oracle's own calls. Counters and pictures are
+    /// separate queues, so a grab can straddle a boundary as the real one does (D17).
     struct ScriptedEmulator {
         counters: RefCell<VecDeque<u64>>,
         pictures: RefCell<VecDeque<u64>>,
@@ -1326,9 +1181,7 @@ mod tests {
             }
         }
 
-        /// The picture numbered `picture`, as a raw frame whose first pixel
-        /// carries the number in its red byte — the frame comes back as
-        /// `[red, green, blue]`, so `frame.rgb[0]` reads it back.
+        /// A raw frame whose first pixel's red byte is `picture` (`frame.rgb[0]` reads it).
         fn raw_frame(picture: u64) -> Vec<u8> {
             let mut raw = Vec::with_capacity(RAW_HEADER_LEN + 200 * 1280);
             raw.extend_from_slice(&320u32.to_le_bytes());
@@ -1365,9 +1218,7 @@ mod tests {
                         .ok_or_else(|| OracleError::Decode("the script ran out of counters".into()))?;
                     Ok(json!({ "frame": frame, "state": "yielded" }))
                 }
-                // A text screen: `frame()` keeps the frame it was given and
-                // skips the indexed path, which is not what these tests are
-                // about.
+                // A text screen, so `frame()` skips the indexed read.
                 "/api/v1/video/frame/info" => {
                     Ok(json!({ "video_mode": { "is_graphics_mode": false } }))
                 }
@@ -1407,11 +1258,8 @@ mod tests {
 
     #[test]
     fn a_grab_that_straddles_a_frame_boundary_is_refused_not_written() {
-        // The counter reads 9 twice (a clean grab of picture 9), then 10 while
-        // the picture has already moved to 11: that grab straddled a boundary,
-        // and picture 11 would be filed under index 10 by a grab that read the
-        // counter only once. The wait must end in a refusal that names both
-        // frames — never in a frame written under the wrong index.
+        // A clean grab of 9, then counter 10 with picture 11 (a straddle), then a clean 11:
+        // the wait refuses, naming both, rather than file 11 under 10.
         let script = ScriptedEmulator::new(vec![9, 9, 9, 10, 11, 11, 11], vec![9, 11, 11]);
         let mut oracle = scripted_oracle(script);
         let error = oracle.wait_for_frame(10).unwrap_err();
@@ -1426,9 +1274,7 @@ mod tests {
 
     #[test]
     fn the_frame_written_under_an_index_is_the_one_the_wait_pinned() {
-        // Two clean grabs, 9 then 10: the wait keeps picture 10 and the
-        // following `frame` hands it over. A `frame` that grabbed for itself
-        // would return picture 11, which is the next thing the script has.
+        // The wait keeps picture 10; a `frame` that grabbed for itself would return 11.
         let script = ScriptedEmulator::new(vec![9, 9, 9, 10, 10, 11], vec![9, 10, 11]);
         let mut oracle = scripted_oracle(script);
         oracle.wait_for_frame(10).unwrap();
@@ -1438,10 +1284,7 @@ mod tests {
 
     #[test]
     fn a_sleep_never_runs_longer_than_a_second() {
-        // An hour of frames must not sleep for an hour: one call is capped at
-        // a second and the caller re-reads the counter in between. The
-        // uncapped version overshot by three frames over a minute-long skip,
-        // and that overshoot was the old capture's 0-3 frame lateness (D17).
+        // An hour of frames sleeps for at most a second a call (D17).
         let start = std::time::Instant::now();
         sleep_frames(60 * 60 * 70, 0);
         assert!(
@@ -1453,10 +1296,7 @@ mod tests {
 
     #[test]
     fn a_frame_is_taken_only_when_the_counter_names_it() {
-        // Grabs that straddled a frame boundary (None) are thrown away, an
-        // early frame is passed over, and the frame the counter names is the
-        // one that comes back. This loop is what stands between the capture
-        // and a frame written under an index it does not hold (D17).
+        // Straddled grabs (None) and early frames are passed over (D17).
         let script = vec![
             None,
             Some((6, "six")),
@@ -1472,8 +1312,6 @@ mod tests {
 
     #[test]
     fn a_frame_that_arrives_late_is_refused_rather_than_relabelled() {
-        // The old wait accepted anything up to three frames past the index and
-        // wrote it under the index anyway; that is the lie this refuses.
         let mut script = vec![Some((7, "seven")), Some((9, "nine"))].into_iter();
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
         let error = grab_exactly(8, deadline, || Ok(script.next().unwrap_or(None))).unwrap_err();
@@ -1488,8 +1326,6 @@ mod tests {
 
     #[test]
     fn a_grab_that_never_identifies_its_frame_gives_up_loudly() {
-        // A stalled host must end as an error naming the frame, never as a
-        // guess at which frame the picture belonged to.
         let deadline = std::time::Instant::now();
         let error = grab_exactly(8, deadline, || Ok(None::<(u64, &str)>)).unwrap_err();
         assert!(
@@ -1500,15 +1336,12 @@ mod tests {
 
     #[test]
     fn the_scratch_config_carries_the_guest_recipe_only_when_there_is_one() {
-        // The typed recipe's config is what Phase 0 wrote: the allow-list and
-        // nothing else, because the host drives that boot over the API.
+        // The typed recipe's config is the allow-list alone.
         let typed = primary_config(Path::new("/reference/original"), &[]);
         assert!(typed.contains("mount_allowed_bases = /reference/original"));
         assert!(!typed.contains("[autoexec]"));
 
-        // The autoexec recipe's lines go into the same file, in order: the
-        // mount policy is only read from the primary config (D14), and the
-        // section the shell runs has to be readable there too (D17).
+        // The autoexec recipe's lines follow, in order.
         let lines = vec![
             "MOUNT C -RO /reference/original".to_owned(),
             "C:".to_owned(),
@@ -1530,48 +1363,26 @@ mod tests {
         let t = generate_token().unwrap();
         assert_eq!(t.len(), 64);
         assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
-        // Two spawns must not share a token.
         assert_ne!(t, generate_token().unwrap());
     }
 
+    /// The recorded port session (`tests/fixtures/dac_port.json`): its reads are the path the
+    /// oracle builds, and the triple read after selecting DAC entry 1 is entry 1 of the
+    /// recorded palette, because reads advance and the select resets.
     #[test]
-    fn the_port_requests_match_the_recorded_session() {
+    fn the_port_reads_match_the_recorded_session() {
         let recorded: serde_json::Value = serde_json::from_str(DAC_PORT_JSON).unwrap();
         let calls = recorded["calls"].as_array().unwrap();
-        let mut writes = 0;
-        let mut reads = 0;
-        for call in calls {
-            let request = &call["request"];
-            let path = request["path"].as_str().unwrap();
-            match request["method"].as_str().unwrap() {
-                "PUT" => {
-                    assert_eq!(path, "/io/port");
-                    let port = request["port"].as_u64().unwrap() as u16;
-                    let value = request["value"].as_u64().unwrap() as u8;
-                    // The body the client builds is the one that was recorded.
-                    assert_eq!(
-                        port_write_body(port, value),
-                        json!({ "port": port, "value": value })
-                    );
-                    writes += 1;
-                }
-                "GET" => {
-                    let port: u16 = path
-                        .rsplit('=')
-                        .next()
-                        .unwrap()
-                        .parse()
-                        .expect("recorded GET names its port");
-                    assert_eq!(port_read_path(port), format!("/api/v1{path}"));
-                    reads += 1;
-                }
-                other => panic!("unexpected method {other}"),
-            }
+        let reads: Vec<&str> = calls
+            .iter()
+            .filter(|call| call["request"]["method"] == "GET")
+            .map(|call| call["request"]["path"].as_str().unwrap())
+            .collect();
+        assert!(reads.len() >= 3, "the fixture backs the read protocol");
+        for path in reads {
+            let port: u16 = path.rsplit('=').next().unwrap().parse().unwrap();
+            assert_eq!(path, format!("/io/port?port={port}"));
         }
-        assert!(writes >= 2 && reads >= 3, "the fixture backs the read protocol");
-
-        // The session's first triple, read after selecting DAC entry 1, is
-        // entry 1 of the recorded palette: reads advance, the select resets.
         let values: Vec<u8> = calls
             .iter()
             .filter(|c| c["request"]["path"] == "/io/port?port=969")

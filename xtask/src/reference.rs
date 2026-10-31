@@ -1,20 +1,16 @@
-//! `xtask reference capture`: drive the emulated original, write keyframes
-//! under `reference/`, and record what produced them.
-//!
-//! Task 13 diffs the port against whatever this writes, so two things matter
-//! more than anything else here: the manifest says exactly which frame each
-//! image is (what origin the index counts from, which arguments, which key
-//! sequence, which CPU cycles), and a capture that cannot be reproduced is
-//! refused instead of written.
+//! `xtask reference capture`: drive the emulated original, write keyframes under `reference/`,
+//! and record what produced them. The manifest says exactly which frame each image is (the
+//! index's origin, the arguments, the keys, the cycles, the boot), and a capture that cannot be
+//! reproduced is refused instead of written.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-
-use std::time::Duration;
 
 use crate::oracle::{CapturedFrame, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIGIN};
 
@@ -22,12 +18,8 @@ use crate::oracle::{CapturedFrame, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIG
 /// (`.gitmodules`; `docs/decisions.md` D13).
 pub const UPSTREAM_COMMIT: &str = "071a82e";
 
-/// The tree the reference lives in, where the CLI's defaults put the mounted
-/// original (`reference/original`) and where every capture goes
-/// (`reference/parts/<part>/` in Part B). It is **input-only**: `compare`
-/// refuses an `--out` inside one of its captures, and this tool refuses a
-/// `--sheet` inside it, for the same reason — a file written among the frames
-/// is a file every later diff is measured against.
+/// The reference tree: the mounted original (`reference/original`) and every capture. It is
+/// input-only, so `compare --out` and `--sheet` inside it are refused.
 pub const REFERENCE_ROOT: &str = "reference";
 
 /// The original's sound card setup screen. `SECOND.EXE` shows it whatever the
@@ -35,40 +27,23 @@ pub const REFERENCE_ROOT: &str = "reference";
 /// capture waits for this text before sending `--keys` (D14).
 pub const SETUP_SCREEN_TEXT: &str = "Soundcard";
 
-/// How long `AUTOTYPE` waits before its first key, in seconds.
-///
-/// Every step it waits for is on the emulated clock, so this only has to be
-/// after the setup screen is up — the screen then waits for an answer, and a
-/// longer wait costs wall-clock time rather than determinism. Measured under
-/// `--boot autoexec`: the screen's text is up at boot frame 16 (0.23 s), so
-/// five seconds leaves about 4.8 s of margin and is what D17's captures were
-/// taken with.
+/// How long `AUTOTYPE` waits before its first key, in seconds. It only has to be after the
+/// setup screen is up (boot frame 16, 0.23 s, under `--boot autoexec`); the steps are on the
+/// emulated clock, so a longer wait costs wall-clock time, not determinism (D17).
 pub const AUTOTYPE_WAIT_SECONDS: f64 = 5.0;
 
-/// How long the setup screen has to disappear after the capture's keys were
-/// sent or run. It is answered within a second of the keys landing (the demo's
-/// first graphics frame follows 0.26 s after Enter, D14), and the keys
-/// themselves are placed `AUTOTYPE_WAIT_SECONDS` into the boot, so this only
-/// has to outlast the boot plus a little — it is the failure case that waits.
+/// How long the setup screen may take to go once the keys were sent or typed: the boot, the
+/// `AUTOTYPE` wait and the 0.26 s from Enter to the first graphics frame (D14), with margin.
 pub const SETUP_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// What a manifest this tool writes may say it is; `compare` refuses to read
-/// any other version, and so does `reference verify`. `sha256` was added to
-/// the frame entries without changing it: the field is additive and `serde`
-/// defaults it, so a reader that predates it still reads the manifest.
+/// The manifest version `compare` and `reference verify` read. Additive fields (the digests,
+/// `boot`, `boot_wait`) do not change it: `serde` defaults them.
 pub(crate) const MANIFEST_VERSION: u32 = 1;
 
-/// How long one frame's indexed read costs, in rendered frames — the distance
-/// within which two requested indices are taken before either of them is read.
-///
-/// Measured (B1b fix round 1, `dosbox-automation 0.85.1`, 30000 cycles): one
-/// read is 270–326 ms, of which the 768 DAC port reads plus 256 DAC index
-/// writes are 260–325 ms, the framebuffer read 1.0 ms in chain-4 and 10 ms in
-/// Mode X, and the identified RGB grab around 1 ms. At 70.086 Hz that is
-/// 19–23 frames, so a read between two grabs loses every index within that
-/// distance of the one it was read for. This is the measured cost rounded up,
-/// not a budget: an index further away than this is waited for first, exactly
-/// as it always was, so a capture whose frames are far apart is unchanged.
+/// How long one frame's indexed read costs, in rendered frames: requested indices closer than
+/// this are all taken before any is read (D19). Measured at `dosbox-automation 0.85.1`, 30000
+/// cycles: 270–326 ms a read (the DAC's 768 port reads and 256 index writes are 260–325 ms of
+/// it), 19–23 frames at 70.086 Hz, rounded up.
 const INDEXED_READ_FRAMES: u64 = 25;
 
 #[derive(Debug)]
@@ -80,12 +55,8 @@ pub enum CaptureError {
         path: PathBuf,
         message: String,
     },
-    /// The emulator changed display geometry between two of the frames this
-    /// capture took, so one manifest cannot honestly describe them all:
-    /// capture one screen at a time. What is compared is the frames taken *in
-    /// this run* — the first read sets the geometry the rest must match — so a
-    /// change before the first requested index, or between two runs, is not
-    /// seen here and is the caller's to avoid (D15: one capture, one screen).
+    /// The display changed geometry between two frames of this run, so one manifest cannot
+    /// describe them all (D15: one capture, one screen).
     GeometryChanged {
         index: u64,
         expected: (u16, u16),
@@ -123,56 +94,42 @@ impl From<OracleError> for CaptureError {
     }
 }
 
-/// How the guest is taken from the emulator's boot to the demo.
-///
-/// A boot index means a screen only as precisely as the boot repeats, so this
-/// is part of the capture recipe exactly like the cycles are, and the manifest
-/// records it (D17).
+/// How the guest is taken from the emulator's boot to the demo; part of the recipe, because the
+/// same boot index is a different screen under another (D17).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, clap::ValueEnum,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum BootRecipe {
-    /// Phase 0's recipe: the host types `MOUNT`, `C:` and the program line
-    /// over the API and answers the setup screen with a frame-scheduled key
-    /// sequence anchored to when the host posted it. Two runs put the same
-    /// screen 43-45 frames apart, because every step waits on the host (D15).
+    /// The host types `MOUNT`, `C:` and the program line over the API and answers the setup
+    /// screen with a key sequence anchored to when it posted it. Two runs put the same screen
+    /// 43-45 frames apart, because every step waits on the host (D15).
     #[default]
     Typed,
-    /// The emulator's own shell runs the recipe from its `[autoexec]` section
-    /// and `AUTOTYPE` answers the setup screen from the PIC clock, so the
-    /// whole boot is a function of the emulated clock the demo animates on
-    /// and the same boot frame is the same screen in every run (D17).
+    /// The emulator's shell runs the recipe from its `[autoexec]` section and `AUTOTYPE`
+    /// answers the setup screen on the PIC clock, so the same boot frame is the same screen in
+    /// every run (D17).
     Autoexec,
 }
 
-/// What the `[autoexec]` boot waits for before the capture starts taking
-/// frames.
-///
-/// The demo is reached through its sound-card setup screen, and every capture
-/// written so far waited for that screen's text (D17). A program that never
-/// draws it — the vault's `DIS.EXE` + effect batch — switches to graphics on
-/// its own, so its anchor is the first graphics frame instead. The anchor is
-/// part of the recipe exactly like the cycles are, and the manifest records it,
-/// because the same boot index is a different screen under a different wait.
+/// What the `[autoexec]` boot waits for before the capture starts: the demo's setup screen,
+/// or the first graphics frame for a program that never draws it (the vault's `DIS.EXE` and
+/// effect batch, D39). Recorded, because the same boot index is a different screen under a
+/// different wait.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, clap::ValueEnum,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum BootWait {
-    /// The setup screen's text (`SETUP_SCREEN_TEXT`): the demo's anchor, and
-    /// what every manifest written before this field existed used.
+    /// [`SETUP_SCREEN_TEXT`]: the demo's anchor.
     #[default]
     Setup,
-    /// The first graphics frame: what a program that never draws the setup
-    /// screen shows when it has started.
+    /// The first graphics frame.
     Graphics,
 }
 
 impl BootWait {
-    /// The lowercase word serde writes into the manifest and clap accepts on
-    /// the command line. Used in messages so a refusal names the flag the way
-    /// the user would have to type it, not Rust's `Debug` spelling.
+    /// The word serde and clap use, so a refusal names the flag as it is typed.
     pub fn name(self) -> &'static str {
         match self {
             BootWait::Setup => "setup",
@@ -311,14 +268,10 @@ pub fn keys_from_script(script: &str) -> Vec<String> {
     script.split_whitespace().map(str::to_owned).collect()
 }
 
-/// The recipe the guest runs itself, as the shell will read it: mount the
-/// reference read-only, then `AUTOTYPE` the setup-screen answer, then run the
-/// program (D17).
-///
-/// `AUTOTYPE` comes before the program line because the program does not
-/// return: it schedules its key presses on the PIC clock and exits, and the
-/// shell runs the demo underneath them. The wait it is given is
-/// [`AUTOTYPE_WAIT_SECONDS`].
+/// The recipe the guest runs itself: mount the reference read-only, `AUTOTYPE` the
+/// setup-screen answer, run the program (D17). `AUTOTYPE` comes first because the program does
+/// not return: it schedules its presses on the PIC clock and exits, and the shell runs the demo
+/// underneath them.
 pub fn autoexec_lines(
     cwd: &Path,
     exe: &Path,
@@ -330,9 +283,6 @@ pub fn autoexec_lines(
     })?;
     let mut lines = vec![format!("MOUNT C -RO {}", cwd.display()), "C:".to_owned()];
     if !keys.is_empty() {
-        // Validation has already refused anything without a button; this is
-        // the lookup that has to be right, because AUTOTYPE presses nothing
-        // and says nothing for a name it does not know.
         let buttons: Vec<&str> = keys
             .iter()
             .map(|key| autotype_button(key).ok_or_else(|| unknown_key(key, true)))
@@ -346,9 +296,7 @@ pub fn autoexec_lines(
     Ok(lines)
 }
 
-/// The refusal a key gets when it is not one the capture can press. The
-/// offending name is always named, because the whole failure this guards
-/// against is a silently unpressed key.
+/// The refusal a key gets when the capture cannot press it, naming it.
 fn unknown_key(key: &str, autotype: bool) -> CaptureError {
     let known = if autotype {
         "a key the emulator's mapper has a button for"
@@ -361,25 +309,12 @@ fn unknown_key(key: &str, autotype: bool) -> CaptureError {
     ))
 }
 
-/// The two key namespaces, paired.
-///
-/// `input/sequence` names a key by its `KBD_KEYS` enumerator, `AUTOTYPE` by the
-/// mapper's button name, and **they are not the same word with a prefix on
-/// one side**: `KBD_backspace` is `bspace`, every keypad key differs
-/// (`KBD_kp8` is `kp_8`, `KBD_kpenter` is `kp_enter`), and so do the
-/// modifiers and brackets (`KBD_leftshift` is `lshift`, `KBD_leftctrl` is
-/// `lctrl`, `KBD_leftbracket` is `lbracket`). `AUTOTYPE` does not validate a
-/// name either — an unknown one only reaches `LOG_ERR` in the emulator's log
-/// (`gui/mapper.cpp:209-222`), which the capture deletes — so a derivation
-/// that is merely plausible would answer the setup screen with nothing and
-/// write a capture of the wrong screen, at exit 0.
-///
-/// This table is the pairing, taken from the emulator's own tables rather than
-/// derived from either spelling: the mapper's button layout and its `KeyBlock`
-/// tables (`gui/mapper.cpp`, `CreateLayout`) and the API's key list
-/// (`webserver/input.cpp`, `key_name_map`), at `dosbox-automation 0.85.1`.
-/// `KBD_NONE` is not in it: the API accepts it as a key that presses nothing,
-/// and there is no button to press, so a capture cannot use it.
+/// The two key namespaces, paired: `input/sequence`'s `KBD_*` enumerators and the mapper's
+/// `AUTOTYPE` button names, which are not the same word with a prefix (`KBD_backspace` is
+/// `bspace`, `KBD_kp8` is `kp_8`, `KBD_leftshift` is `lshift`). `AUTOTYPE` only logs a name it
+/// does not know (`gui/mapper.cpp:209-222`), so the pairing is taken from the emulator's own
+/// tables (`gui/mapper.cpp`'s `CreateLayout`, `webserver/input.cpp`'s `key_name_map`,
+/// `dosbox-automation 0.85.1`). `KBD_NONE` has no button and is left out.
 pub const KEY_NAMES: &[(&str, &str)] = &[
     ("KBD_0", "0"),
     ("KBD_1", "1"),
@@ -488,13 +423,12 @@ pub const KEY_NAMES: &[(&str, &str)] = &[
     ("KBD_z", "z"),
 ];
 
-/// Whether `input/sequence` would accept `key`, as far as the table knows.
+/// Whether `input/sequence` accepts `key`.
 pub fn is_sequence_key(key: &str) -> bool {
     KEY_NAMES.iter().any(|(api, _)| *api == key)
 }
 
-/// The `AUTOTYPE` button for a `KBD_*` name, or `None` when the emulator's
-/// mapper has no button for it (or the name is not one at all).
+/// The `AUTOTYPE` button for a `KBD_*` name.
 pub fn autotype_button(key: &str) -> Option<&'static str> {
     KEY_NAMES
         .iter()
@@ -507,14 +441,7 @@ pub fn frame_file_name(index: u64) -> String {
     format!("frame_{index:06}")
 }
 
-/// A digest in the form `sha256sum` prints and `reference-indices.md` records:
-/// lowercase hex, 64 digits.
-///
-/// The hashing is in-process (`sha2`, the crate `assets verify --tree` already
-/// digests with) rather than a `sha256sum` child: a capture must produce its
-/// manifest on a machine without coreutils, and a digest written by a different
-/// program than the one the record was measured with is a digest that can
-/// disagree with it.
+/// A digest as `sha256sum` prints it: lowercase hex, 64 digits.
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -529,27 +456,16 @@ pub struct FrameRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idx: Option<String>,
     pub rgb: String,
-    /// The palette entries this frame's indices use, six bits per component,
-    /// keyed by index and recorded so the indexed frame can be widened back to
-    /// colour without a second oracle run.
-    ///
-    /// Only the entries the frame uses are recorded: a running demo rewrites
-    /// the rest of the DAC continuously, so a snapshot of all 256 is a snapshot
-    /// of a race and does not repeat between runs, while the entries a still
-    /// screen shows are stable (and are what the coherence check verified
-    /// against the RGB frame).
+    /// The palette entries this frame's indices use, six bits per component. Only those: the
+    /// rest of the DAC is rewritten while the demo runs, and a snapshot of it does not repeat.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub palette: Option<BTreeMap<u8, [u8; 3]>>,
-    /// The `sha256` of the bytes of `rgb`, recorded beside the file (D23). `Option` because the
-    /// field is additive; [`crate::verify::command`] reports a frame without one as a finding.
+    /// The `sha256` of `rgb`'s bytes (D23). Absent in older manifests, which
+    /// [`crate::verify::command`] reports as a finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    /// The `sha256` of the bytes of `idx`, when the frame has indices.
-    ///
-    /// `compare` prefers the indexed side whenever both sides have it (it is
-    /// stricter than widened RGB), so an index plane whose bytes changed is a
-    /// change to what every diff is measured against — and the RGB digest
-    /// alone would not see it.
+    /// The `sha256` of `idx`'s bytes: `compare` prefers the indexed side, so the RGB digest
+    /// alone would not see a changed index plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idx_sha256: Option<String>,
 }
@@ -568,30 +484,17 @@ pub struct CaptureManifest {
     pub cycles: u32,
     pub width: u16,
     pub height: u16,
-    /// What `index` counts from. `"boot"` is the emulator's first rendered
-    /// frame at process start; the counter and every index are counted from
-    /// there, and `skip_boot_frames` says how much of the boot was skipped.
+    /// What `index` counts from: `"boot"`, the emulator's first rendered frame.
     pub frame_origin: String,
     pub skip_boot_frames: u64,
-    /// How the guest was taken to the demo. A manifest written before D17 does
-    /// not carry it and is the typed recipe, which is what `default` means —
-    /// and it has to be in the manifest at all because the same boot index is
-    /// a different screen under a different recipe.
+    /// Absent in older manifests, which were all taken with the typed recipe.
     #[serde(default)]
     pub boot: BootRecipe,
-    /// What the autoexec boot waited for before the capture started. Absent
-    /// from every manifest filed before this field existed, which is the
-    /// setup-screen wait they were all taken with.
+    /// Absent in older manifests, which all waited for the setup screen.
     #[serde(default)]
     pub boot_wait: BootWait,
     pub keys: Vec<String>,
     pub frames: Vec<FrameRef>,
-}
-
-impl CaptureManifest {
-    pub fn from_json(json: &str) -> Result<CaptureManifest, serde_json::Error> {
-        serde_json::from_str(json)
-    }
 }
 
 /// Refuse a capture that cannot be reproduced, before touching the emulator.
@@ -619,10 +522,6 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             )));
         }
     }
-    // `reference/` is input-only: the mounted distribution and every capture
-    // live there, `compare` refuses an `--out` inside one of them, and this
-    // tool refuses a `--sheet` inside one for the same reason — the reference
-    // is read, never written, by anything but a capture.
     if let Some(sheet) = &options.sheet {
         crate::paths::refuse_output_inside(
             sheet,
@@ -642,9 +541,6 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             &format!("Pass --sheet outside {REFERENCE_ROOT}/, e.g. out/<name>-sheet.png"),
         )
         .map_err(CaptureError::Options)?;
-        // The capture it just wrote is a reference tree too, and the same rule
-        // applies to it: the frames and the manifest are the capture, and a
-        // sheet is a rendering of them, not part of them.
         crate::paths::refuse_output_inside(
             sheet,
             &options.out,
@@ -685,18 +581,10 @@ pub fn capture(
 
     let mut geometry: Option<(u16, u16)> = None;
     let mut frames = Vec::with_capacity(options.frames.len());
-    // Indices taken but not yet read. Requested frames closer together than one
-    // frame's indexed read are all taken before any of them is read: the read
-    // costs INDEXED_READ_FRAMES rendered frames, so reading one frame's indices
-    // before taking the next loses the next index — which is what made
-    // `--frames 2449,2450,2451` uncapturable and what kept a reference from
-    // carrying the neighbouring frames the ±1 alignment search needs (D18).
+    // Indices taken but not yet read: frames closer than one indexed read are all taken
+    // before any is read, or reading one loses the next (D18, D19).
     let mut taken: Vec<u64> = Vec::new();
     for (position, &index) in options.frames.iter().enumerate() {
-        // Wait for this frame. The oracle refuses a capture the emulator has
-        // clearly run past (see `Oracle::wait_for_frame` for how close it can
-        // come, and D15), because a frame taken later would be written under
-        // this one's name.
         oracle.wait_for_frame(index)?;
         taken.push(index);
 
@@ -708,8 +596,6 @@ pub fn capture(
             continue;
         }
 
-        // Every frame in this run has been taken; read and write them now, in
-        // the order they were asked for.
         for index in taken.drain(..) {
             let frame = oracle.frame()?;
             let found = (frame.width, frame.height);
@@ -767,10 +653,8 @@ fn write_frame(
         message: e.to_string(),
     })?;
 
-    // The three fields the index plane contributes, so that a frame the
-    // coherence check refused them for has neither the file nor its digest:
-    // a digest must never name a file the manifest does not (`verify` reads
-    // `idx` as the list of the files a frame has).
+    // A frame the coherence check refused indices for has neither the `.idx` file nor its
+    // digest: `verify` reads `idx` as the list of a frame's files.
     let (mut idx, mut palette, mut idx_sha256) = (None, None, None);
     if let (Some(indexed), Some(entries)) = (&frame.indexed, &frame.palette) {
         let file = format!("{name}.idx");
@@ -788,21 +672,13 @@ fn write_frame(
         idx,
         rgb,
         palette,
-        // Digested from the bytes that were just written, so the record and
-        // the file cannot be about different moments.
         sha256: Some(sha256_hex(&frame.rgb)),
         idx_sha256,
     })
 }
 
-/// One PNG of a capture's frames, for a person to look at.
-///
-/// Written from what the capture left on disk rather than from the pixels in
-/// memory, for the same reason `main` re-reads the manifest: a sheet drawn from
-/// anything else could show something the capture did not write. The frames are
-/// tiles in the order they were captured — the layout is [`crate::sheet`]'s, the
-/// same one `assets verify --sheet` uses — and because nothing can draw text in
-/// a PNG, the tile positions are printed against the frame indices.
+/// One PNG of a capture's frames, in [`crate::sheet`]'s layout, drawn from the files the
+/// capture wrote rather than from memory, so it cannot show something that was not written.
 pub fn write_sheet(
     sheet: &Path,
     out: &Path,
@@ -819,8 +695,6 @@ pub fn write_sheet(
             width: u32::from(manifest.width),
             height: u32::from(manifest.height),
             rgb,
-            // The frame's own name for its file, and the index it was captured
-            // at — the two things a person needs to tell two frames apart.
             label: format!("frame {} ({})", frame.index, frame.rgb),
         });
     }
@@ -843,29 +717,15 @@ fn used_palette(indexed: &[u8], palette: &[[u8; 3]; 256]) -> BTreeMap<u8, [u8; 3
 mod tests {
     use super::*;
     use crate::oracle::dosbox::decode_frame;
+    use crate::oracle::fixtures::{recorded_palette, FB_BIN, FRAME_BIN, MODEX_FRAME};
     use std::collections::VecDeque;
     use std::time::Duration;
 
-    const FRAME_BIN: &[u8] = include_bytes!("../tests/fixtures/frame.bin");
-    const FB_BIN: &[u8] = include_bytes!("../tests/fixtures/fb.bin");
-    const DAC_BIN: &[u8] = include_bytes!("../tests/fixtures/dac.bin");
-    const MODEX_FRAME_BIN: &[u8] = include_bytes!("../tests/fixtures/modex_title_frame.bin");
-
-    /// `sha256sum` of the two files `write_frame` writes for the fixtures'
-    /// 320×200 indexed frame: `frame_000430.rgb` and `frame_000430.idx` (the
-    /// index plane is `fb.bin`). Taken with the shell command the reference
-    /// ledger was measured with, so the tool's digests are pinned to coreutils
-    /// rather than to each other.
+    /// `sha256sum` of the two files `write_frame` writes for the fixtures' 320×200 indexed
+    /// frame (`frame_000430.rgb`, and `frame_000430.idx`, which is `fb.bin`): pinned to
+    /// coreutils, not to this module's own arithmetic.
     const SAMPLE_RGB_SHA256: &str = "b7b9c97ef87d182265f9db77817f0ccdb6f6151a387d14b96f1edc6232a983c5";
     const SAMPLE_IDX_SHA256: &str = "d3d93da2885e73108be903779c78d8ffcabd8843faa47807ada4331c61e8661b";
-
-    fn recorded_palette() -> [[u8; 3]; 256] {
-        let mut palette = [[0u8; 3]; 256];
-        for (i, entry) in palette.iter_mut().enumerate() {
-            entry.copy_from_slice(&DAC_BIN[i * 3..i * 3 + 3]);
-        }
-        palette
-    }
 
     /// A frame as the recorded fixtures held it: 320×200 with indices.
     fn indexed_frame() -> CapturedFrame {
@@ -876,8 +736,7 @@ mod tests {
     }
 
     fn options(frames: Vec<u64>, out: &Path) -> CaptureOptions {
-        // The real reference directory: validation refuses a --cwd that is
-        // not there, and this is the one that exists.
+        // Validation refuses a --cwd that is not there.
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/original");
         CaptureOptions {
             recipe: Recipe {
@@ -902,10 +761,7 @@ mod tests {
         path
     }
 
-    /// A manifest as `capture` writes one, for the tests that are about the
-    /// record rather than about an emulator. The frame's digests are
-    /// placeholders: what a real one is, [`write_frame`] decides, and
-    /// `a_captured_frame_carries_its_digest` is the test that says so.
+    /// A manifest as `capture` writes one, with placeholder digests.
     fn sample_manifest() -> CaptureManifest {
         CaptureManifest {
             version: 1,
@@ -932,19 +788,48 @@ mod tests {
         }
     }
 
+    /// The manifest round-trips, and records the recipe under the keys and words a reader
+    /// looks for (D14, D17).
     #[test]
-    fn the_manifest_round_trips() {
-        let m = sample_manifest();
-        let json = serde_json::to_string(&m).unwrap();
-        assert_eq!(CaptureManifest::from_json(&json).unwrap(), m);
+    fn the_manifest_round_trips_and_records_the_recipe() {
+        let mut manifest = sample_manifest();
+        manifest.boot_wait = BootWait::Graphics;
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert_eq!(serde_json::from_str::<CaptureManifest>(&json).unwrap(), manifest);
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["cycles"], 25000);
+        assert_eq!(value["frame_origin"], "boot");
+        assert_eq!(value["boot"], "autoexec");
+        assert_eq!(value["boot_wait"], "graphics");
+        assert_eq!(value["keys"][1], "KBD_enter");
+    }
+
+    /// A manifest filed before `boot` and `boot_wait` existed is the typed recipe waiting for
+    /// the setup screen, which is how every one of them was taken.
+    #[test]
+    fn an_older_manifest_means_the_typed_recipe_and_the_setup_screen() {
+        let json = r#"{
+            "version": 1,
+            "oracle": "dosbox-automation 0.85.1 (6d100)",
+            "upstream_commit": "071a82e",
+            "exe": "SECOND.EXE",
+            "arguments": ["2"],
+            "cycles": 25000,
+            "width": 320,
+            "height": 400,
+            "frame_origin": "boot",
+            "skip_boot_frames": 300,
+            "keys": ["KBD_left", "KBD_enter"],
+            "frames": [{"index": 400, "idx": "frame_000400.idx", "rgb": "frame_000400.rgb"}]
+        }"#;
+        let manifest: CaptureManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.boot, BootRecipe::Typed);
+        assert_eq!(manifest.boot_wait, BootWait::Setup);
     }
 
     #[test]
     fn a_captured_frame_carries_its_digest() {
-        // The digest is written where the file is, and of the bytes that were
-        // written — `write_frame`'s return value *is* the manifest entry — so
-        // a capture directory can be checked against its own record later
-        // without a second oracle run and without the prose ledger.
+        // `write_frame`'s return value is the manifest entry, digested from the bytes written.
         let out = scratch_dir("digest");
         std::fs::create_dir_all(&out).unwrap();
         let frame = indexed_frame();
@@ -955,29 +840,17 @@ mod tests {
         assert_eq!(rgb, frame.rgb, "the rgb file is the frame that was written");
         assert_eq!(idx, frame.indexed.clone().unwrap());
 
-        // The digests are `sha256sum`'s, checked against the command rather
-        // than against this module's own arithmetic: these two constants were
-        // taken with `sha256sum` on the files this test just produced.
         assert_eq!(entry.sha256.as_deref(), Some(SAMPLE_RGB_SHA256));
         assert_eq!(entry.idx_sha256.as_deref(), Some(SAMPLE_IDX_SHA256));
         assert_eq!(sha256_hex(&rgb), SAMPLE_RGB_SHA256);
         assert_eq!(sha256_hex(&idx), SAMPLE_IDX_SHA256);
-
-        // And the manifest's JSON carries them where a reader looks.
-        let manifest = CaptureManifest {
-            frames: vec![entry],
-            ..sample_manifest()
-        };
-        let value = serde_json::to_value(manifest).unwrap();
-        assert_eq!(value["frames"][0]["sha256"].as_str().unwrap().len(), 64);
-        assert_eq!(value["frames"][0]["idx_sha256"].as_str().unwrap().len(), 64);
-        assert_eq!(value["frames"][0]["sha256"], SAMPLE_RGB_SHA256);
+        let value = serde_json::to_value(&entry).unwrap();
+        assert_eq!(value["sha256"], SAMPLE_RGB_SHA256);
+        assert_eq!(value["idx_sha256"], SAMPLE_IDX_SHA256);
     }
 
     #[test]
     fn a_frame_the_coherence_check_refused_records_no_index_digest() {
-        // No `.idx` file is written, so no digest may name one: the manifest
-        // must not record a file it does not have.
         let out = scratch_dir("digest-rgb-only");
         std::fs::create_dir_all(&out).unwrap();
         let frame = CapturedFrame {
@@ -1000,124 +873,9 @@ mod tests {
     }
 
     #[test]
-    fn the_manifest_records_the_capture_recipe() {
-        let json = serde_json::to_string(&CaptureManifest {
-            version: 1,
-            oracle: "dosbox-automation 0.85.1 (6d100)".into(),
-            upstream_commit: "071a82e".into(),
-            exe: "SECOND.EXE".into(),
-            arguments: vec!["2".into()],
-            cycles: 25000,
-            width: 320,
-            height: 400,
-            frame_origin: "boot".into(),
-            skip_boot_frames: 5000,
-            boot: BootRecipe::Autoexec,
-            boot_wait: BootWait::Setup,
-            keys: vec!["KBD_left".into(), "KBD_enter".into()],
-            frames: vec![FrameRef {
-                index: 100,
-                idx: None,
-                rgb: "frame_000100.rgb".into(),
-                palette: None,
-                sha256: None,
-                idx_sha256: None,
-            }],
-        })
-        .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        // A capture is only reproducible with the cycles it was pinned to, the
-        // boot recipe that reached the demo, and the key sequence that
-        // answered the setup screen (D14, D17).
-        assert_eq!(value["cycles"], 25000);
-        assert_eq!(value["frame_origin"], "boot");
-        assert_eq!(value["skip_boot_frames"], 5000);
-        assert_eq!(value["boot"], "autoexec");
-        assert_eq!(value["boot_wait"], "setup");
-        assert_eq!(value["keys"][1], "KBD_enter");
-        assert_eq!(value["width"], 320);
-        assert_eq!(value["height"], 400);
-    }
-
-    #[test]
-    fn a_manifest_written_before_the_boot_recipe_existed_means_the_typed_one() {
-        // reference/check_a was captured over the API-typed boot, and its
-        // manifest has no `boot` field; reading it must not invent a recipe it
-        // was not taken with.
-        let json = r#"{
-            "version": 1,
-            "oracle": "dosbox-automation 0.85.1 (6d100)",
-            "upstream_commit": "071a82e",
-            "exe": "SECOND.EXE",
-            "arguments": ["2"],
-            "cycles": 25000,
-            "width": 320,
-            "height": 400,
-            "frame_origin": "boot",
-            "skip_boot_frames": 300,
-            "keys": ["KBD_left", "KBD_enter"],
-            "frames": [{"index": 400, "idx": "frame_000400.idx", "rgb": "frame_000400.rgb"}]
-        }"#;
-        let manifest = CaptureManifest::from_json(json).unwrap();
-        assert_eq!(manifest.boot, BootRecipe::Typed);
-    }
-
-    #[test]
-    fn boot_wait_defaults_to_the_demo_setup_screen() {
-        // Every capture written before this field existed waited for the setup
-        // screen, so `Setup` is what an omitted `--boot-wait` and a manifest
-        // without the key have to mean (D17).
-        assert_eq!(BootWait::default(), BootWait::Setup);
-    }
-
-    #[test]
-    fn a_boot_wait_round_trips_through_the_manifest() {
-        // The manifest's serde name is the lowercase word, and the field is
-        // part of the recipe: the same boot index is a different screen if the
-        // capture waited somewhere else.
-        let mut manifest = sample_manifest();
-        manifest.boot_wait = BootWait::Graphics;
-        let json = serde_json::to_string(&manifest).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["boot_wait"], "graphics");
-        assert_eq!(CaptureManifest::from_json(&json).unwrap(), manifest);
-
-        manifest.boot_wait = BootWait::Setup;
-        let json = serde_json::to_string(&manifest).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["boot_wait"], "setup");
-        assert_eq!(CaptureManifest::from_json(&json).unwrap(), manifest);
-
-        // A manifest filed before the field existed is the setup-screen
-        // recipe, which is what every capture in the tree waited for. Reading
-        // it must not invent a wait it was not taken under.
-        let old = r#"{
-            "version": 1,
-            "oracle": "dosbox-automation 0.85.1 (6d100)",
-            "upstream_commit": "071a82e",
-            "exe": "SECOND.EXE",
-            "arguments": ["2"],
-            "cycles": 25000,
-            "width": 320,
-            "height": 400,
-            "frame_origin": "boot",
-            "skip_boot_frames": 300,
-            "boot": "autoexec",
-            "keys": ["KBD_left", "KBD_enter"],
-            "frames": [{"index": 400, "idx": "frame_000400.idx", "rgb": "frame_000400.rgb"}]
-        }"#;
-        assert_eq!(
-            CaptureManifest::from_json(old).unwrap().boot_wait,
-            BootWait::Setup
-        );
-    }
-
-    #[test]
     fn a_boot_wait_without_an_autoexec_boot_is_refused() {
-        // The typed recipe waits for the setup screen itself before it types
-        // the keys, so another anchor has nothing to attach to. The autoexec
-        // recipe is the only one where the guest runs the whole boot and an
-        // anchor is a choice.
+        // The typed recipe waits for the setup screen its keys answer; only the autoexec
+        // recipe can choose another anchor.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
         opts.recipe.boot = BootRecipe::Typed;
         opts.recipe.boot_wait = BootWait::Graphics;
@@ -1129,90 +887,16 @@ mod tests {
             ),
             other => panic!("expected a refusal, got {other:?}"),
         }
-
-        // The setup screen stays the typed recipe's anchor and is accepted.
         opts.recipe.boot_wait = BootWait::Setup;
         assert!(validate_options(&opts).is_ok());
-
-        // And the vault's anchor is accepted where the guest runs the boot.
         opts.recipe.boot = BootRecipe::Autoexec;
         opts.recipe.boot_wait = BootWait::Graphics;
         assert!(validate_options(&opts).is_ok());
     }
 
     #[test]
-    fn the_capture_parses_a_vault_boot_wait() {
-        // The vault's batch runs DIS and the effect under the guest's own
-        // shell and waits for the first graphics frame; the flag has to reach
-        // `CaptureOptions` with the recipe that can use it.
-        use clap::Parser as _;
-
-        let cli = crate::Cli::try_parse_from([
-            "xtask",
-            "reference",
-            "capture",
-            "--exe",
-            "out/vault-stage/grid/P.EXE",
-            "--cwd",
-            "out/vault-stage/grid",
-            "--boot",
-            "autoexec",
-            "--boot-wait",
-            "graphics",
-            "--cycles",
-            "30000",
-            "--frames",
-            "400,500,600",
-            "--out",
-            "out/vault-smoke/grid",
-        ])
-        .unwrap();
-        match cli.command {
-            crate::Command::Reference {
-                command:
-                    crate::ReferenceCommand::Capture {
-                        boot, boot_wait, ..
-                    },
-            } => {
-                assert_eq!(boot, BootRecipe::Autoexec);
-                assert_eq!(boot_wait, BootWait::Graphics);
-            }
-            _ => panic!("expected a reference capture"),
-        }
-
-        // Omitted, it is the setup screen: every existing command line keeps
-        // meaning what it meant before the flag existed.
-        let cli = crate::Cli::try_parse_from([
-            "xtask",
-            "reference",
-            "capture",
-            "--cycles",
-            "30000",
-            "--frames",
-            "400",
-            "--out",
-            "out/vault-smoke/default",
-        ])
-        .unwrap();
-        match cli.command {
-            crate::Command::Reference {
-                command:
-                    crate::ReferenceCommand::Capture {
-                        boot, boot_wait, ..
-                    },
-            } => {
-                assert_eq!(boot, BootRecipe::Typed);
-                assert_eq!(boot_wait, BootWait::Setup);
-            }
-            _ => panic!("expected a reference capture"),
-        }
-    }
-
-    #[test]
     fn the_capture_tells_the_oracle_which_anchor_to_wait_for() {
-        // `boot()` is where the anchor is used, so the value has to reach the
-        // oracle before it boots; setting it after would silently leave the
-        // setup-screen wait in place and time the run out at 60 s.
+        // `boot` reads the anchor, so it has to be set first; the manifest records it.
         let out = scratch_dir("boot-wait-oracle");
         let mut opts = options(vec![5100], &out);
         opts.recipe.boot = BootRecipe::Autoexec;
@@ -1220,9 +904,6 @@ mod tests {
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
         let manifest = capture(&mut oracle, &opts).unwrap();
         assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Graphics)));
-        // And the record says which anchor produced the frames: a capture that
-        // set the oracle but wrote `Setup` into the manifest would misdescribe
-        // its own boot.
         assert_eq!(manifest.boot_wait, BootWait::Graphics);
         std::fs::remove_dir_all(&out).unwrap();
 
@@ -1237,9 +918,6 @@ mod tests {
 
     #[test]
     fn the_autoexec_recipe_runs_the_whole_boot_in_the_guest() {
-        // D17's route: every line is a guest command, and AUTOTYPE must come
-        // before the program because the program does not return — it is the
-        // only line that can answer the setup screen the program draws.
         let cwd = Path::new("/reference/original");
         let exe = cwd.join("SECOND.EXE");
         let lines = autoexec_lines(
@@ -1262,8 +940,7 @@ mod tests {
 
     #[test]
     fn a_recipe_with_no_keys_leaves_the_setup_screen_alone() {
-        // AUTOTYPE with an empty button list is an error, and a capture that
-        // means to show the setup screen must not have it pressed through.
+        // `AUTOTYPE` with no buttons is an error.
         let lines = autoexec_lines(
             Path::new("/reference/original"),
             Path::new("/reference/original/SECOND.EXE"),
@@ -1283,9 +960,6 @@ mod tests {
 
     #[test]
     fn autotype_buttons_are_the_mappers_names_not_the_kbd_names_less_a_prefix() {
-        // The pairs where the two namespaces differ are the point: a capture
-        // that pressed `p_8` or `backspace` would answer the setup screen with
-        // nothing, silently (D17).
         assert_eq!(autotype_button("KBD_left"), Some("left"));
         assert_eq!(autotype_button("KBD_enter"), Some("enter"));
         assert_eq!(autotype_button("KBD_backspace"), Some("bspace"));
@@ -1298,8 +972,6 @@ mod tests {
         assert_eq!(autotype_button("KBD_leftbracket"), Some("lbracket"));
         assert_eq!(autotype_button("KBD_rightbracket"), Some("rbracket"));
 
-        // Names that are not the API's at all have no button, including the
-        // two spellings the old prefix rule invented.
         assert_eq!(autotype_button("KBD_kp_8"), None);
         assert_eq!(autotype_button("left"), None);
         assert_eq!(autotype_button("KBD_nope"), None);
@@ -1311,10 +983,8 @@ mod tests {
 
     #[test]
     fn a_key_the_emulator_does_not_know_is_refused_before_the_capture_starts() {
-        // The reviewer's reproduction: `--keys "KBD_kp8 KBD_enter"` used to
-        // answer the setup screen with nothing (AUTOTYPE has no `kp8`) and
-        // write the 720x400 text screen at exit 0. Now the name alone is
-        // enough to refuse, in both recipes, before an emulator is spawned.
+        // A name `AUTOTYPE` would silently press nothing for is refused, in both recipes,
+        // before an emulator is spawned; every name in the table passes.
         for key in ["KBD_kp_8", "KBD_nope", "left", "KBD_NONE"] {
             let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
             opts.recipe.keys = vec![key.to_owned()];
@@ -1332,8 +1002,6 @@ mod tests {
             }
         }
 
-        // The keys the reference manifests record still pass, and so does the
-        // whole table.
         for boot in [BootRecipe::Typed, BootRecipe::Autoexec] {
             let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
             opts.recipe.boot = boot;
@@ -1349,8 +1017,6 @@ mod tests {
 
     #[test]
     fn the_key_table_is_sorted_and_unique() {
-        // It is read by eye against the emulator's own tables; a duplicate or
-        // a stray blank line is how a missing key hides.
         for pair in KEY_NAMES.windows(2) {
             assert!(pair[0].0 < pair[1].0, "{} then {}", pair[0].0, pair[1].0);
         }
@@ -1362,8 +1028,7 @@ mod tests {
         assert_eq!(opts.recipe.boot, BootRecipe::Typed);
         assert!(opts.recipe.autoexec_lines().unwrap().is_empty());
 
-        // And the autoexec recipe resolves the mount to the same directory the
-        // emulator's allow-list does, which takes an absolute path.
+        // The autoexec mount is absolute, as the emulator's allow-list is.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
         opts.recipe.boot = BootRecipe::Autoexec;
         let lines = opts.recipe.autoexec_lines().unwrap();
@@ -1373,10 +1038,8 @@ mod tests {
 
     #[test]
     fn the_guest_answers_the_setup_screen_under_the_autoexec_recipe() {
-        // The keys travel in the emulator's config under this recipe, not over
-        // the API: the capture must not wait for the screen and press them
-        // again, because the guest has already answered it on the emulated
-        // clock by the time boot returns (D17).
+        // Under the autoexec recipe the guest answers the screen; the typed one waits for it and
+        // sends the keys over the API (D17).
         let out = scratch_dir("autoexec-keys");
         let mut opts = options(vec![5100], &out);
         opts.recipe.boot = BootRecipe::Autoexec;
@@ -1387,8 +1050,6 @@ mod tests {
         assert_eq!(oracle.keys, None);
         std::fs::remove_dir_all(&out).unwrap();
 
-        // The typed recipe still does both, which is what the contrast the
-        // decision in D17 rests on actually is.
         let out = scratch_dir("typed-keys");
         let opts = options(vec![5100], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
@@ -1400,11 +1061,8 @@ mod tests {
 
     #[test]
     fn keys_that_do_not_answer_the_setup_screen_refuse_the_capture() {
-        // The reviewer's reproduction, at the oracle boundary: the keys are
-        // sent, the setup screen stays up, and the run must not quietly write
-        // the menu as if it were the demo. `KBD_kp8` is a real key and a real
-        // button — it simply answers nothing on that screen — so no key-name
-        // check can catch this; the guest has to.
+        // The keys are sent and the setup screen stays up: the guest has to judge, since a real
+        // key such as `KBD_kp8` can answer nothing there. Nothing is written.
         let out = scratch_dir("keys-that-answer-nothing");
         let opts = options(vec![5100], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
@@ -1420,11 +1078,8 @@ mod tests {
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
-        // Nothing was written: the frames would have been of the menu.
         assert!(!out.join("manifest.json").exists());
 
-        // And when the screen does clear, the capture goes through and waits
-        // for exactly that.
         let out = scratch_dir("keys-that-answer");
         let opts = options(vec![5100], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
@@ -1444,12 +1099,6 @@ mod tests {
             validate_options(&opts),
             Err(CaptureError::Oracle(OracleError::UnpinnedCycles))
         ));
-        // And the emulator refuses to be told to pin nothing, too.
-        let mut oracle = FakeOracle::new(vec![]);
-        assert!(matches!(
-            oracle.set_cycles(0),
-            Err(OracleError::UnpinnedCycles)
-        ));
     }
 
     #[test]
@@ -1466,7 +1115,7 @@ mod tests {
             Err(CaptureError::Options(_))
         ));
 
-        // An index inside the skipped boot means two different origins at once.
+        // An index inside the skipped boot.
         let opts = options(vec![4999], Path::new("/tmp/never-written"));
         assert!(matches!(
             validate_options(&opts),
@@ -1486,8 +1135,7 @@ mod tests {
 
     #[test]
     fn a_trailing_slash_on_the_working_directory_still_matches() {
-        // The brief's default is written `reference/original/`, so a user
-        // passing that must not be told the exe lives somewhere else.
+        // The CLI's default is spelled `reference/original/`.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/original/");
         opts.recipe.exe = cwd.join("SECOND.EXE");
@@ -1513,15 +1161,12 @@ mod tests {
         assert_eq!(manifest.keys, vec!["KBD_left", "KBD_enter"]);
         assert_eq!(manifest.frames.len(), 2);
 
-        // The indices are boot-relative: the fake counter was stepped to the
-        // skipped boot and then to each requested frame.
         assert_eq!(oracle.counter, 5200);
         assert_eq!(oracle.stepped_frames, vec![5100, 5200]);
 
-        let on_disk = CaptureManifest::from_json(
-            &std::fs::read_to_string(out.join("manifest.json")).unwrap(),
-        )
-        .unwrap();
+        let on_disk: CaptureManifest =
+            serde_json::from_str(&std::fs::read_to_string(out.join("manifest.json")).unwrap())
+                .unwrap();
         assert_eq!(on_disk, manifest);
 
         for (index, frame) in manifest.frames.iter().enumerate() {
@@ -1533,8 +1178,7 @@ mod tests {
             );
             let idx = frame.idx.as_ref().unwrap();
             assert_eq!(std::fs::read(out.join(idx)).unwrap(), FB_BIN);
-            // Only the entries the frame uses are recorded: the rest of the
-            // DAC does not hold still while a demo runs.
+            // Only the entries the frame uses.
             let palette = frame.palette.as_ref().unwrap();
             assert_eq!(palette[&1], [11, 48, 63]);
             let distinct: std::collections::BTreeSet<u8> = FB_BIN.iter().copied().collect();
@@ -1545,11 +1189,7 @@ mod tests {
 
     #[test]
     fn indices_within_a_read_of_each_other_are_all_taken_before_any_is_read() {
-        // A frame's indexed read costs about twenty-five rendered frames (D15
-        // and the constant above), so reading the frames in turn loses every
-        // index within a read of the one before — which is what made a capture
-        // carrying a keyframe's neighbours impossible, and what left the ±1
-        // alignment search (D18) without a neighbouring frame to find.
+        // Closer than INDEXED_READ_FRAMES: every take before any read (D18, D19).
         let out = scratch_dir("adjacent-indices");
         let opts = options(vec![5100, 5101, 5102], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame(), indexed_frame()]);
@@ -1567,10 +1207,7 @@ mod tests {
 
     #[test]
     fn indices_further_apart_than_a_read_are_still_taken_and_read_in_turn() {
-        // Far-apart keyframes are what every capture in the tree holds today,
-        // and their behaviour does not change: taking the next one before
-        // reading this one would delay the read by the whole gap, and on a
-        // screen that changes slowly the indices would be stale by then.
+        // Far apart: each read follows its take, before the screen moves on.
         let out = scratch_dir("sparse-indices");
         let opts = options(vec![5100, 5200], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame()]);
@@ -1585,9 +1222,6 @@ mod tests {
 
     #[test]
     fn a_capture_is_written_as_one_sheet_a_person_can_look_at() {
-        // The point of the flag: after a capture, one PNG holding what was
-        // taken, in the order it was taken — B2–B5 find a part's frames by
-        // looking at it, so the tiles have to be the frames themselves.
         let out = scratch_dir("sheet");
         let opts = options(vec![5100, 5200], &out);
         let mut oracle = FakeOracle::new(vec![indexed_frame(), indexed_frame()]);
@@ -1601,68 +1235,41 @@ mod tests {
         // wide and 2 + (200 + 2*1 + 2) tall.
         assert_eq!((width, height), (650, 206));
         let frame_rgb = decode_frame(FRAME_BIN).unwrap().rgb;
-        // The tiles are the frames, drawn from the files the capture wrote.
         let at = |x: u32, y: u32| {
             let at = ((y * width + x) * 3) as usize;
             [rgb[at], rgb[at + 1], rgb[at + 2]]
         };
         assert_eq!(at(3, 3), [frame_rgb[0], frame_rgb[1], frame_rgb[2]]);
         assert_eq!(at(327, 3), [frame_rgb[0], frame_rgb[1], frame_rgb[2]]);
-        // And the gutter between the two cells is the sheet's background, not
-        // frame pixels: two frames side by side are still two frames.
+        // The gutter between the cells is the sheet's background.
         assert_eq!(at(324, 3), [40, 40, 40]);
         std::fs::remove_dir_all(&out).unwrap();
     }
 
+    /// `reference/` is input-only, and so is the capture this run writes; a sheet goes outside
+    /// both.
     #[test]
-    fn a_sheet_inside_the_mounted_directory_is_refused() {
-        // reference/original holds the 1993 distribution and is read-only:
-        // every frame diff in the project is measured against those bytes.
-        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.sheet = Some(opts.recipe.cwd.join("sheet.png"));
-        assert!(matches!(
-            validate_options(&opts),
-            Err(CaptureError::Options(_))
-        ));
-
-        // Beside the capture directory is where it belongs.
-        let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.sheet = Some(PathBuf::from("out/capture/sheet.png"));
-        assert!(validate_options(&opts).is_ok());
-    }
-
-    #[test]
-    fn a_sheet_anywhere_in_the_reference_tree_is_refused() {
-        // Not only the mounted directory: `reference/` holds the original and
-        // every capture, and it is input-only — `compare` refuses an `--out`
-        // inside one of its captures, and a sheet written among the frames is
-        // the same kind of extra file in the same kind of tree.
-        for sheet in [
-            "reference/sheet.png",
-            "reference/check_a/sheet.png",
-            "reference/parts/beglogo/sheet.png",
-        ] {
+    fn a_sheet_inside_the_reference_or_the_capture_is_refused() {
+        let options_with = |sheet: PathBuf| {
             let mut opts = options(vec![5100], Path::new("out/capture"));
-            opts.sheet = Some(PathBuf::from(sheet));
+            opts.sheet = Some(sheet);
+            opts
+        };
+        let mounted = options(vec![5100], Path::new("out/capture")).recipe.cwd.join("sheet.png");
+        for sheet in [
+            mounted,
+            PathBuf::from("reference/sheet.png"),
+            PathBuf::from("reference/check_a/sheet.png"),
+            PathBuf::from("reference/parts/beglogo/sheet.png"),
+            PathBuf::from("out/capture/sheet.png"),
+        ] {
             assert!(
-                matches!(validate_options(&opts), Err(CaptureError::Options(_))),
-                "{sheet} must be refused"
+                matches!(validate_options(&options_with(sheet.clone())), Err(CaptureError::Options(_))),
+                "{} must be refused",
+                sheet.display()
             );
         }
-
-        // And not inside the capture this run writes, for the same reason: the
-        // frames and the manifest are the capture.
-        let mut opts = options(vec![5100], Path::new("out/capture"));
-        opts.sheet = Some(PathBuf::from("out/capture/sheet.png"));
-        assert!(matches!(
-            validate_options(&opts),
-            Err(CaptureError::Options(_))
-        ));
-
-        // Outside both is where it goes.
-        let mut opts = options(vec![5100], Path::new("out/capture"));
-        opts.sheet = Some(PathBuf::from("out/beglogo-sheet.png"));
-        assert!(validate_options(&opts).is_ok());
+        assert!(validate_options(&options_with(PathBuf::from("out/beglogo-sheet.png"))).is_ok());
     }
 
     /// Read a PNG back: `(width, height, RGB8 pixels)`.
@@ -1681,7 +1288,7 @@ mod tests {
         let opts = options(vec![5100, 5200], &out);
         let mut oracle = FakeOracle::new(vec![
             indexed_frame(),
-            decode_frame(MODEX_FRAME_BIN).unwrap(),
+            decode_frame(MODEX_FRAME).unwrap(),
         ]);
         assert!(matches!(
             capture(&mut oracle, &opts),
@@ -1693,24 +1300,20 @@ mod tests {
         ));
     }
 
-    /// An oracle that answers from memory, so the capture's own behaviour —
-    /// ordering, refusals, what lands on disk — is tested without an emulator.
+    /// An oracle that answers from memory, for the capture's ordering, refusals and output.
     struct FakeOracle {
         frames: VecDeque<CapturedFrame>,
         counter: u64,
         stepped_frames: Vec<u64>,
-        /// Every take and every read, in the order the capture made them: what
-        /// a test needs to see that a read did not sit between two takes.
+        /// Every take and every read, in order.
         events: Vec<String>,
         keys: Option<String>,
         waited_for_text: Vec<String>,
         waited_for_graphics: Vec<String>,
-        /// The anchor `capture` set, and what `boot` saw when it ran: the
-        /// anchor is read by `boot`, so the capture has to set it first.
+        /// The anchor `capture` set, and what `boot` saw when it ran.
         boot_wait: Option<BootWait>,
         boot_saw_wait: Option<Option<BootWait>>,
-        /// Whether the setup screen goes away when the keys are sent, as the
-        /// real one does when they answer it.
+        /// Whether the setup screen goes away when the keys are sent.
         setup_screen_clears: bool,
         cycles: Option<u32>,
     }

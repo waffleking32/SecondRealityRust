@@ -398,7 +398,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             oracle.shutdown()?;
 
             // Print what was written, not what was in memory.
-            let written = CaptureManifest::from_json(&std::fs::read_to_string(
+            let written = serde_json::from_str::<CaptureManifest>(&std::fs::read_to_string(
                 options.out.join("manifest.json"),
             )?)?;
             println!(
