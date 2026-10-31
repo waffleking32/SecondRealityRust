@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GLENZ's opening: the source's main-loop recurrence and its first drawn frame.
 
-Task 1 of Phase 7's measurement, kept as a runnable tool (D25): the note
+A runnable tool (D25): the note
 `docs/fidelity/reference-indices.md` §7.6 quotes this tool's `entry` output beside
 the captures' first object pixels.
 

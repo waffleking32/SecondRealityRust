@@ -30,8 +30,8 @@ dense scan shows the plain landscape from 7560 at the latest to 7700 (`reference
 
 ## 2. Mapping and music
 
-The block-1 music clock is the shell's (part-sequence.md (block seams / pre-roll / mapping
-conventions)). The port's gate opens at boot **6986**, two frames before `second1c`'s row change:
+The block-1 music clock is the shell's (`part-sequence.md`
+§10.2). The port's gate opens at boot **6986**, two frames before `second1c`'s row change:
 
 ```bash
 cargo run --release --bin secondreality -- --block 1 --headless \

@@ -56,8 +56,8 @@ at 1; the reference's 400 rows are what the blits and the text occupy.
 start; its earliest evidence is a probe at 415 with the screen up (`reference-indices.md` §22), and a
 probe bounds a start without pinning it. `shell::boot_anchor("ddstars")` stays `None` and the
 manifest says `index_origin: "part"`, `anchor: null`
-(`the_run_is_numbered_in_its_own_frames_and_draws_320x400`; conventions in part-sequence.md
-(block seams / pre-roll / mapping conventions)).
+(`the_run_is_numbered_in_its_own_frames_and_draws_320x400`; conventions in `part-sequence.md`
+§10.1).
 
 The pictures pin it. The four keyframes reproduce byte for byte at `tick = boot - 414` (rediff's
 `ddstars` entry), and so do the survey's frames at 500, 700, 900, 1100, 1300, 1500, 1700 and 2100

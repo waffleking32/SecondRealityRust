@@ -2,7 +2,7 @@
 
 A faithful Rust port of **Second Reality** (Future Crew, 1993), checked frame by frame against
 the original running in an emulator. `README.md` is the user's view (flags, keys);
-`docs/design.md` is the architecture (a citation `spec §N` means its §N); `docs/decisions.md` has
+`docs/design.md` is the architecture (a citation `design §N` means its §N); `docs/decisions.md` has
 the rulings (D-numbers). Before touching a verified part, read its note in `docs/fidelity/`,
 `APPROXIMATIONS.md` (A-numbers) and `bugs.md`. Project history is in git
 (`git show phase-9:PROGRESS.md`).
@@ -11,13 +11,14 @@ the rulings (D-numbers). Before touching a verified part, read its note in `docs
 
 ```
 crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, compose, present,
-                      the Part trait and the Music seam (zero runtime dependencies)
+                      the Part trait, the Music seam, Machine and Engine, the test card
+                      (zero runtime dependencies)
 crates/sr-audio/      the S3M player and STMIK's mixer (zero runtime dependencies)
 crates/sr-assets/     decoders for the original formats (depends on sr-engine only)
 bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
                       menu/ (settings, vault), endscreen.rs, parts.rs (the registry), parts/
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
-tools/                emulator probes and the vault capture script
+tools/                emulator probes, measurement scripts, the vault capture script, the Windows readme
 assets/               the curated original media; assets/PROVENANCE.md is parsed by xtask
 reference/            captured frames and manifests: input-only
 upstream/             the original source (submodule): input-only

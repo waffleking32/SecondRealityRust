@@ -7,7 +7,7 @@
 # sound-card setup screen, so the capture boots them with
 # `--boot autoexec --boot-wait graphics`: the guest runs `RUN.BAT` (DIS, then
 # the effect) and the capture waits for the first graphics frame instead of the
-# setup text (Phase 8 Task 1; `xtask/src/reference.rs`'s `BootWait`).
+# setup text (`xtask/src/reference.rs`'s `BootWait`).
 #
 # GRID and HARD block until a key reaches DIS (`getch()` in GRID/MAIN.C:153,
 # `while (dis_muscode(1) != 1 ...)` in HARD/B.C:138), and the standalone DIS
@@ -22,14 +22,14 @@
 #                          [--stage DIR] [--sheet PATH]
 #
 #   --out    where the capture (frames + manifest.json) goes
-#            (default: reference/parts/<part>, Task 2's home for it)
+#            (default: reference/parts/<part>)
 #   --stage  where DIS.EXE, the effect EXE and RUN.BAT are staged; made fresh
 #            for every run (default: out/vault-stage/<part>)
 #   --sheet  one PNG of the captured frames, for a person to look at
 #            (the capture tool refuses a sheet inside reference/)
 #
 # `upstream/` and `reference/` are input-only: the script writes nothing there
-# except the capture itself under --out. The smoke runs of Task 1 pass
+# except the capture itself under --out. A smoke run passes
 # `--out out/vault-smoke/<part>`.
 #
 # Every binary is checked against its upstream SHA-256 before anything runs,
@@ -40,8 +40,7 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$ROOT"
 
-# The pinned upstream binaries (Appendix B of the Phase 8 capture research;
-# sizes 71,170 / 71,174 / 39,674 / 1,282 bytes).
+# The pinned upstream binaries (sizes 71,170 / 71,174 / 39,674 / 1,282 bytes).
 DIS_SHA256=270f5fe2c7c7d17b4720c2019c2832f4bd3863f97e750315974692911f0ead08
 GRID_SHA256=d4e7f1d6e1b5e5c3ba3fd85fe8f3645c1c99be1f0d200c791968c656b5334ff0
 HARD_SHA256=1f8a7bdae29a34af42c3ffde63163661ca82a6884a01cb6eb775e81ac600c81d
@@ -56,8 +55,7 @@ Usage:
                          [--stage DIR] [--sheet PATH]
 
   --out    where the capture (frames + manifest.json) goes; must be under
-           out/ or reference/parts/ (default: reference/parts/<part>, Task 2's
-           home for it)
+           out/ or reference/parts/ (default: reference/parts/<part>)
   --stage  where DIS.EXE, the effect EXE and RUN.BAT are staged; must resolve
            under out/ (symlinks and `..` included) and is made fresh for every
            run (default: out/vault-stage/<part>)
@@ -66,7 +64,7 @@ Usage:
            latter itself)
 
 `upstream/` and `reference/` are input-only: the script writes nothing there
-except the capture itself under --out. The smoke runs of Task 1 pass
+except the capture itself under --out. A smoke run passes
 `--out out/vault-smoke/<part>`.
 EOF
 }

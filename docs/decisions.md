@@ -152,7 +152,7 @@ from the source tree. The source tree is the reference for *how* each effect wor
 **Why.** The upstream tree has no runnable demo: `MAIN/U2.EXE` (31,612 bytes) and `U2.EXE` (31,548)
 are two developer builds of the shell. Fidelity means what people ran. The release's
 `README.1ST:34-38` lists five files, of which the demo is `SECOND.EXE` and `REALITY.FC` in one
-directory (`part-sequence.md` §3), and `SECOND 1`..`5` start at the beginning, the title screen,
+directory (`part-sequence.md` §1), and `SECOND 1`..`5` start at the beginning, the title screen,
 the landscape scroller, the vector part and the end credits. `REALITY.FC` is byte-identical in the
 tree and the release, so the music and art the tree ships are the shipped data.
 
@@ -380,7 +380,7 @@ a second capture settles: the oracle's ambiguity moves between sessions, a port 
 **Limit.** The search aligns only frames the rendered side holds, so a capture compared against
 another capture must carry the neighbours (D19).
 
-**Pinned by** `compare::tests::a_frame_one_index_later_is_found_and_its_offset_is_reported`.
+**Pinned by** `compare::tests::a_frame_one_index_away_is_found_and_its_offset_is_reported`.
 
 ## D19 — A capture carries its own neighbours
 
@@ -704,7 +704,7 @@ affine mapping fits every part of a chain, and the chain test asks for each keyf
 chain tick whose trace position is the reference's at `index + 419`. A `LOADER_TICKS` constant is
 not modelled: the full run's seam changes take both signs, which no delay at a handover can
 produce, and the two music-pinned seams need different amounts (6 and 59–68 frames). The seam
-table is A53 and `reference-indices.md` §26.8; **pinned by**
+table is A53 and `FULLRUN_SEAMS` in `xtask/src/rediff/table.rs`; **pinned by**
 `cargo test --release -p secondreality --test fullrun`.
 
 ## D32 — The vector renderer is a module in the binary; the packed formats are `sr-assets` data
@@ -1054,7 +1054,7 @@ keeps the reference's mode-5 clock, not the original's no-sound mode. What the p
 
 **Pinned by** `cargo test -p sr-audio --test player the_speed_adjusters_are_zero_in_the_image`.
 
-## D47 — No event stream: `design.md` §8.3's events and §4.8's `audio render` and `event log` are not built
+## D47 — No event stream: `design.md` §8.3's events, an `audio render` and an `event log` are not built
 
 **Decided.** These questions are answered by other tools instead:
 

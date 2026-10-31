@@ -144,8 +144,10 @@ xtask/                capture, compare, rediff, asset and music tooling (§4.8)
 ```
 
 `parts/` has one module per part, named by its registry name (`3dsinfld` is `coman.rs`, since an
-identifier cannot start with a digit), plus `parts/visu/` (the vector engine U2A and U2E share,
-D32), `parts/glenz/` (GLENZ's renderer, D36) and `parts/vault/` (GRID, HARD, TWIST; D39, D40).
+identifier cannot start with a digit); `glenz/`, `plzpart/` and `techno/` are directories (GLENZ's
+renderer is D36). Beside them sit `parts/visu/` (the vector engine U2A and U2E share, D32),
+`parts/vault/` (GRID, HARD, TWIST; D39, D40), and the helpers several parts share: `logo.rs`
+(BEGLOGO and ENDLOGO), `sin1024.rs`, `msrand.rs` and, for unit tests only, `test_rig.rs`.
 
 The dependency rule: `sr-engine` and `sr-audio` have no runtime dependencies, and `sr-assets`
 depends on `sr-engine` only; `the_engine_has_no_runtime_dependencies` and
@@ -284,7 +286,7 @@ silent, behind the standalone DIS (D39); the menu is window-only (D40).
 `cargo xtask` has `reference capture|verify` (file frames from the emulated original
 under `reference/`, check the manifests), `compare` (§8.2), `rediff` (every filed frame against its
 count in `xtask/src/rediff/table.rs`), `frames sheet`, `assets verify` (against
-`assets/PROVENANCE.md`) and `music symbols|trace|probe|analyse` (the original's player state, read
+`assets/PROVENANCE.md`) and `music symbols|trace|analyse` (the original's player state, read
 through `STMIK.300`'s OMF symbols, D26). The binary's `--audio-dump` and `--positions` complete the
 set (D47).
 

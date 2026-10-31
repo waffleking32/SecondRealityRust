@@ -28,8 +28,8 @@ reference's published order 88 row 0 first stands at (`reference/music/second3b/
 `None`: the part's first drawn frame is the measured window `(12900, 13000]`
 (`reference-indices.md` §15), and a `--part rayscrl` run numbers its own frames from zero
 (`index_origin: "part"`, `anchor: null`;
-`the_run_is_numbered_in_its_own_frames_and_draws_320x200`). The conventions are in part-sequence.md
-(block seams / pre-roll / mapping conventions).
+`the_run_is_numbered_in_its_own_frames_and_draws_320x200`). The conventions are in `part-sequence.md`
+§10.1.
 
 Four points pin it:
 

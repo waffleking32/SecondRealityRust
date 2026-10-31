@@ -37,8 +37,7 @@ run are the same run (`a_block_one_run_starts_at_alku_and_is_the_same_run` compa
 byte for byte); the manifest says `index_origin: "boot"`, `anchor: 404`, `MUSIC0` at order 0.
 
 The block-1 player starts at `BLOCK_ONE_MUSIC_START_FRAME` (400), so a run drawing from 404
-pre-polls four frames; the derivation of 400 is part-sequence.md (block seams / pre-roll / mapping
-conventions). `a_block_one_run_starts_under_the_initial_play_song_and_matches_second1` compares a
+pre-polls four frames; the derivation of 400 is `part-sequence.md` §10.2. `a_block_one_run_starts_under_the_initial_play_song_and_matches_second1` compares a
 block-1 run with the real player against `second1` frame by frame: all **638** position changes are
 visited in the trace's order, and the port's change frames minus the trace's are
 

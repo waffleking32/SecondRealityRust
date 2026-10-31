@@ -10,7 +10,7 @@ below.
 
 `assets/` mirrors the upstream layout exactly, so a copy's origin is its own path with
 `assets/` replaced by `upstream/SecondReality/`. That is what makes the check in
-`docs/fidelity/asset-inventory.md` §G a one-liner, with that one recovered file guarded out.
+`docs/fidelity/asset-inventory.md` §G (`cargo xtask assets verify --tree`), with that one recovered file guarded out.
 
 Licence: the original demo and its media are public domain under the Unlicense
 (`upstream/SecondReality/UNLICENSE`); the port's own code is MIT (`LICENSE`).
@@ -310,5 +310,5 @@ at on one contact sheet per part (`cargo xtask assets verify --sheet`), and an a
   `DDSTARS/DOIT2.C:21-52` produces, which is what identifies them; §D of the inventory and
   `crates/sr-assets/tests/provenance.rs` carry the measurement.
 - The upstream blob itself is **not** copied. `.OBK` is a build container, not an asset format:
-  nothing in `sr-parts` or the binary ever sees one (spec §4.4), and §9's recovery clause is
+  nothing in the parts or the rest of the binary ever sees one (design §4.4), and §9's recovery clause is
   what turned its payload into the standalone file above.

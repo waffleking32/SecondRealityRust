@@ -1434,7 +1434,7 @@ is forbidden (D24).
 part's difference, and the three frames the original shows during a loader stretch (7920, 16636,
 34110, `FULLRUN_LOADER_FRAMES`) at the port's last frame of that screen (7884, 16632, 34042).
 `cargo xtask rediff --only fullrun` compares all 60 (44 RGB, 16 index planes) at their registered
-counts (`reference-indices.md` §26.8 lists them). Every held frame is 0 in RGB except U2A's 6500
+counts (`xtask/src/rediff/table.rs` registers them). Every held frame is 0 in RGB except U2A's 6500
 (64,000, A32), A25's 19000 (2,058) and 34110 (72,363: the reload's white, which the port never
 shows; its index plane is 0). The moving frames registered here are 5961 (60,160: U2A's opening, the
 same picture as the original's in rows 0–179 under another DAC, A20, A32), 7930 (81,273, at BEGLOGO's
