@@ -404,8 +404,15 @@ mod tests {
         // The published row and `zplus`, never the engine's own, ten polls ahead.
         let player = shared(ModuleId::Music0);
         let mut music = PlayerMusic::new(Arc::clone(&player), 0);
+        assert_eq!(music.getmframe(), 0, "a fresh player has not ticked");
         music.poll();
         let published = lock(&player).state();
+        let p = music.position();
+        assert_eq!(
+            (p.order, p.row, p.speed, p.tempo),
+            (published.order, published.row, published.speed, published.tempo)
+        );
+        assert_eq!(music.muscode(2), 0, "`_np_zinfo` is 0 (D8)");
         assert_eq!(music.musrow(), i32::from(published.row));
         assert_eq!(
             music.musplus(),

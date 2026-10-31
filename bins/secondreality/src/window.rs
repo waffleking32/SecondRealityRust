@@ -606,7 +606,8 @@ mod tests {
         assert_eq!(menu_key(None), Key::Other);
     }
 
-    /// palette of 256 distinct colours, so a blended output pixel cannot match.
+    /// A 320×200 frame whose every pixel differs from its neighbours, under a palette of 256
+    /// distinct colours, so a blended output pixel cannot match.
     fn distinct_frame() -> IndexedFrame {
         let mut frame = IndexedFrame::new(320, 200);
         for y in 0..200usize {

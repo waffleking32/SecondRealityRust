@@ -11,7 +11,7 @@ pub mod grid;
 pub mod hard;
 pub mod twist;
 
-/// The vault menu's rows (`crate::vault_menu`), in menu order: the registry
+/// The vault menu's rows ([`crate::menu::vault`]), in menu order: the registry
 /// name, so a row and `--part <name>` start the same program, and its label.
 pub const VAULT: [(&str, &str); 3] = [("grid", "GRID"), ("hard", "HARD"), ("twist", "TWIST")];
 
