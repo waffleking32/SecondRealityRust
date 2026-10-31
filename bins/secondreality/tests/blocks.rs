@@ -362,7 +362,7 @@ mod glenz {
         let filed = |index: u32| reference("glenz", index, "rgb");
         let unexplained = |port: u32, at: u32| unexplained_pixels(run.rgb(port), &filed(at), run.idx(port));
 
-        // A36: the plan's `K + 5` at 3000/3400.
+        // A36: the aligned index `K + 5` answers 3000 and 3400.
         for (port, at, expected) in [(3005, 3000, 3114), (3405, 3400, 5261)] {
             assert_eq!(differing(run.rgb(port), &filed(at), 3), expected, "K+5 at {at}");
         }

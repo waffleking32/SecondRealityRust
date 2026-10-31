@@ -13,9 +13,8 @@ serde_json = { workspace = true }
 # Only ever speaks http to 127.0.0.1:8386, so no TLS: dropping the default
 # features keeps rustls and ring out of the tree entirely.
 ureq = { version = "2", default-features = false, features = ["json"] }
-# `compare` writes one diff image per frame, and `assets verify --sheet` writes
-# one contact sheet per part. Decoding-only compression would be enough, but
-# `png` carries both directions and is the crate the plan names.
+# `compare` writes one diff image per frame, and `frames sheet` and the `--sheet`
+# options write contact sheets; the tests decode them back.
 png = "0.17"
 # `assets verify` reads the curated tree with the port's own decoders, so a
 # format the port cannot read fails this check here as well as in a part.
