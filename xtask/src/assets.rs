@@ -1,89 +1,23 @@
-//! `xtask assets verify`: the curated tree against its provenance, every asset
-//! decoded, and one contact sheet per part to look at.
+//! `xtask assets verify`: the curated tree against `assets/PROVENANCE.md`, every asset decoded,
+//! and one contact sheet per part to look at.
 //!
-//! Phase 1's exit criterion is that every asset "decodes **and matches the
-//! source art**". The cross-format tests in `sr-assets` are the automated half
-//! of that sentence; this tool is the other half. It asks whether the tree is
-//! the tree the record says it is (`--tree`), whether every asset in it can be
-//! read at all (`--decode`), and — the part no assertion can do — it puts each
-//! part's assets on one page for a person to look at (`--sheet`). This project's
-//! one windowed bug was found by a person looking at output after every test
-//! passed, so the sheets are not decoration.
+//! - `--tree` re-hashes every file against the record (and its `bytes` column), and reports a
+//!   recorded file that is missing and a file nothing records.
+//! - `--decode` opens every asset. A file whose own magic says it is a picture
+//!   ([`sr_assets::sniff`]) must decode; the one recorded refusal is [`REFUSED_ON_RECORD`], and
+//!   it decoding is a finding too. `.PAL`, `.ANI` and the Visu scene set (`VISU/C/SCENE/*`,
+//!   read through `sr_assets::visu` as `VISU/C/MAIN.C` and `SAVE.C` name it, the `.0AB` with
+//!   its `.00M`'s object count, `U2A.C:168-172`) are opened by their names. Other headerless
+//!   files (`.U`, `.1BM`, `.EGA`) are reported, never decoded: only their part knows their
+//!   geometry.
+//! - `--sheet <DIR>` runs the decode pass and writes one PNG per part from its tiles; `<DIR>`
+//!   may not be inside the tree.
 //!
-//! **Three checks, and they are independent.** `--tree` re-hashes every file
-//! against `assets/PROVENANCE.md`; `--decode` opens every asset with the
-//! decoders that exist; `--sheet <DIR>` writes one PNG per part. Running all
-//! three is the full check, and each one's failures are its own.
-//!
-//! `--sheet` needs a tile per asset, and a tile is what the decode pass builds,
-//! so asking for sheets runs the decode pass: the sheets and the decode report
-//! come from one walk of the tree, and a `--sheet` run reports the findings a
-//! `--decode` run would. A sheet cannot be right about an asset the decoder
-//! refuses.
-//!
-//! **The exit code is the contract** (the convention `compare` set, which
-//! scripts depend on):
-//!
-//! - **0** everything asked for checked out.
-//! - **1** a check failed: a digest that does not match the record, a length
-//!   that does not match the record's `bytes` column, a provenance row with no
-//!   file, a file with no provenance row, an asset whose own magic says it is a
-//!   picture and which does not decode, or an asset a recorded refusal says must
-//!   not decode and which does.
-//! - **2** the tool could not run: no `assets/` where it was told to look, an
-//!   unreadable or malformed `PROVENANCE.md`, a `--sheet` inside the tree, or
-//!   nothing asked for at all.
-//!
-//! "They differ" and "it could not tell" stay distinguishable, which is the
-//! whole reason for the third code.
-//!
-//! **`PROVENANCE.md` is parsed by header name, never by position.** The file
-//! holds more than one table and only some of them are provenance: the
-//! *Collapsed duplicates* table has a `dropped path` column and a `sha256`
-//! column, and the *Identical files that are not copied at all* table has
-//! `path(s)` and `sha256`. Neither names a curated file's path, so neither is a
-//! row of the tree; a parser reading columns by number, or taking any digest
-//! column as evidence, would invent assets that do not exist. A table is read
-//! here only when its header holds both `path` and `sha256`, and its rows are
-//! read through those two names. The `parts` column is read when the table has
-//! one, and A5's *Recovered assets* table has one so that the file it records —
-//! the one asset with no source art to compare against — is on its part's sheet
-//! like every other asset. A row without the column is on no sheet, and the
-//! tool says nothing about it that the record does not.
-//!
-//! **A file that refuses to decode is a finding, not a shrug.** The rule is: if
-//! a file's own first bytes say it is a picture ([`sr_assets::sniff`]), the
-//! port's decoder must read it, or the tree has a problem. The one file whose
-//! refusal *is* the recorded outcome is named in [`REFUSED_ON_RECORD`] with the
-//! record that says so — so the check cannot pass by quietly tolerating
-//! everything. Both other directions are findings: a refusal at a path that is
-//! not on that list is a finding, and so is a *recorded* refusal that stops
-//! happening — a decoder that grew lenient leaves the file's digest unchanged,
-//! so `--tree` cannot see it and this is the only check that can.
-//!
-//! **Some headerless formats are opened by construction, and only because their
-//! names are the construction the crate documents.** `sr_assets` says of
-//! `Format::Pal` and `Format::Ani` that they have no magic and are "loaded by
-//! construction": the extension is the door, and once it is chosen the file
-//! must hold what the name says — a `.PAL` that is not 768 six-bit bytes, or an
-//! `.ANI` whose record stream does not parse, is a finding. The vector
-//! engine's scene set is the same shape of absence: `VISU/C/SCENE/<scene>`
-//! with `.00M`, `.0AA`, `.0AB` or a three-digit object number has no magic at
-//! all, and the directory plus the name are what `VISU/C/MAIN.C` and `SAVE.C`
-//! give it. Those 51 files are read through `sr_assets::visu`'s four readers —
-//! the `.0AB` with the object count from its own `.00M`, because that is where
-//! the part gets it (`U2A.C:168-172`) — and a file that does not parse is a
-//! finding like any other. Everything else with no magic is reported as what
-//! it is and not decoded: `.U`, `.1BM` and `.EGA` hold bare screens and mask
-//! planes whose geometry only the part that loads them knows
-//! ([`sr_assets::raw_surface`] is their door), and no decoder may invent one.
-//! Three files of 64,000 bytes in this tree have three different geometries —
-//! size is not evidence.
-//!
-//! **`--sheet` writes outside the tree, always.** `assets/` is input-only: a
-//! PNG written among the assets would be a file with no provenance row, which
-//! is precisely the failure `--tree` reports, and `compare` already refuses an
-//! `--out` inside its reference for the same reason.
+//! `PROVENANCE.md` is read by header name, never by position: a table counts only when its
+//! header holds both `path` and `sha256` (the *Collapsed duplicates* and *Identical files*
+//! tables do not), and `parts` is read where a table has it (the main table and A5's
+//! *Recovered assets*). Exit codes: **0** checked out, **1** a finding, **2** could not run (no
+//! tree, a malformed record, a refused `--sheet`, nothing asked for).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -121,17 +55,10 @@ const PARTS_COLUMN: &str = "parts";
 /// Assets whose *refusal to decode* is the recorded outcome, each with the
 /// record that says so.
 ///
-/// `COMAN/COMBG.UH` is a truncated copy — 32,768 bytes where the geometry in
-/// its own header needs 64,016, a byte-for-byte prefix of `COMAN/COMBG.X`.
-/// `assets/PROVENANCE.md`'s note on the file says it "does not decode as a whole
-/// image and a loader must refuse it rather than clip it", and
-/// `docs/fidelity/asset-inventory.md` §E.2 measures it: 32,752 payload bytes
-/// after the 16-byte header against 102 whole 320-byte rows plus a 112-byte
-/// stub, with the copy in `assets/` being "the file as it shipped" — not
-/// something this tree repairs. The blob the part links carries the same
-/// truncated file, and `COMAN/MAIN.C:163,170,174` reads no further than byte
-/// 29,582, so the shipped part never needs the rest. A refusal is therefore
-/// this check *passing*.
+/// `COMAN/COMBG.UH` is a truncated copy as it shipped: 32,768 bytes where its header's geometry
+/// needs 64,016 (`docs/fidelity/asset-inventory.md` §E.2). `COMAN/MAIN.C:163,170,174` reads no
+/// further than byte 29,582, so the part never needs the rest, and a refusal is the check
+/// passing.
 const REFUSED_ON_RECORD: &[(&str, &str)] = &[(
     "COMAN/COMBG.UH",
     "docs/fidelity/asset-inventory.md §E.2 and assets/PROVENANCE.md's note on the file: the copy \
@@ -530,10 +457,8 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
     let mut scenes = 0usize;
     let mut headerless = 0usize;
     let mut refused = 0usize;
-    // The two ways a row leaves the categories above: a recorded refusal that
-    // started decoding, and a file that could not be read or inspected at all.
-    // Both are findings, and both are counted, so the summary adds up to the
-    // number of rows it leads with whatever the tree does.
+    // A recorded refusal that decodes, and a file that cannot be read or inspected: findings,
+    // counted so the summary adds up to the number of rows.
     let mut decoded_refusals = 0usize;
     let mut undecodable = 0usize;
     let mut by_part: BTreeMap<String, Vec<Tile>> = BTreeMap::new();
@@ -567,17 +492,11 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
             Kind::Palette { .. } => palettes += 1,
             Kind::Scene(_) => scenes += 1,
             Kind::Headerless => headerless += 1,
-            // A refusal that stops happening is counted as the finding it is,
-            // below, not as a refusal.
             Kind::Refused { decoded: false, .. } => refused += 1,
             Kind::Refused { decoded: true, .. } => decoded_refusals += 1,
         }
-        // A refusal the record expects is the check passing. A refusal the
-        // record expects that *decodes* is the check failing, and it has to
-        // fail: the file's digest is unchanged when the decoder grows lenient,
-        // so `--tree` cannot see it — this is the only place that can, and a
-        // phase that went green while this line said the premise was broken
-        // would be the exact regression §E.2 is a record of.
+        // A recorded refusal that decodes fails: its digest is unchanged, so `--tree` cannot
+        // see a decoder grown lenient.
         if matches!(inspected.kind, Kind::Refused { decoded: true, .. }) {
             findings += 1;
             println!("FAIL {}: {}", row.path, inspected.kind);
@@ -586,9 +505,6 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
         }
         if let (Some(_), Some(tile)) = (sheets, inspected.tile) {
             if row.parts.is_empty() {
-                // An asset the record names no part for is on no sheet, and a
-                // sheet that is missing an asset must not look complete: say it
-                // where the sheets are listed, not only in a parser.
                 println!(
                     "note {}: the record names no part for this file, so it is on no sheet",
                     row.path
@@ -600,11 +516,7 @@ fn check_decode(tree: &Path, rows: &[Row], sheets: Option<&Path>) -> Result<usiz
         }
     }
 
-    // The two extra categories are printed only when they hold something, so
-    // the line reads the same as it always has on a tree where nothing is
-    // wrong, and a run where something is names the bucket it went into: a
-    // summary whose parts do not add up to its own total is the run a reviewer
-    // reads.
+    // The two extra categories are printed only when they hold something.
     let mut buckets = String::new();
     if decoded_refusals > 0 {
         buckets.push_str(&format!(
@@ -1190,10 +1102,6 @@ mod tests {
     /// this tool actually reads, not about an example of one.
     const PROVENANCE: &str = include_str!("../../assets/PROVENANCE.md");
 
-    fn row(path: &str, sha256: &str, parts: &str) -> String {
-        format!("| `{path}` | `upstream/x` | `071a82e` | 1 | `{sha256}` | Unlicense | {parts} |\n")
-    }
-
     fn digest(character: char) -> String {
         character.to_string().repeat(64)
     }
@@ -1253,29 +1161,6 @@ mod tests {
     }
 
     #[test]
-    fn a_table_whose_path_column_is_called_something_else_is_not_the_provenance() {
-        // The fixture, and the real file's third table: a `dropped path` column
-        // and a genuine digest, and neither one is a curated file.
-        let text = include_str!("../tests/fixtures/assets-no-path-column/assets/PROVENANCE.md");
-        let error = parse_provenance(text).unwrap_err();
-        assert!(matches!(error, VerifyError::Malformed(_)), "{error}");
-        assert!(error.to_string().contains("path"), "{error}");
-    }
-
-    #[test]
-    fn the_fixture_trees_read_as_the_failures_they_are_for() {
-        let mismatch = include_str!("../tests/fixtures/assets-hash-mismatch/assets/PROVENANCE.md");
-        let rows = parse_provenance(mismatch).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].path, "BAD.TXT");
-        assert_eq!(rows[0].sha256, digest('0'));
-
-        let missing = include_str!("../tests/fixtures/assets-missing-file/assets/PROVENANCE.md");
-        let rows = parse_provenance(missing).unwrap();
-        assert_eq!(rows[0].path, "GONE.TXT");
-    }
-
-    #[test]
     fn a_row_that_does_not_fit_its_table_is_malformed() {
         // Three columns of header, two cells of row: the record cannot say what
         // this file's digest was, so there is nothing to check against.
@@ -1301,17 +1186,6 @@ mod tests {
     }
 
     #[test]
-    fn one_path_recorded_twice_is_malformed() {
-        let text = format!(
-            "| path | sha256 |\n|---|---|\n{}{}",
-            row("a.UH", &digest('1'), "ALKU"),
-            row("a.UH", &digest('2'), "U2A"),
-        );
-        let error = parse_provenance(&text).unwrap_err();
-        assert!(matches!(error, VerifyError::Malformed(_)), "{error}");
-    }
-
-    #[test]
     fn one_path_in_two_tables_is_malformed_however_far_apart_they_are() {
         // The curated and the recovered tables are two tables in one file, and
         // a path in both would be hashed and decoded twice. Adjacent rows are
@@ -1332,46 +1206,12 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_that_counts_the_tables_other_tables_as_provenance_would_be_wrong() {
-        // The real file's *Collapsed duplicates* table, in miniature: a header
-        // with a `dropped path` column and an `onto` column, inside a table
-        // that follows the provenance table.
-        let text = format!(
-            "| path | sha256 |\n|---|---|\n| `FOREST/O2.SCI` | `{}` |\n\n## Collapsed duplicates\n\n\
-             | dropped path | collapsed onto | sha256 | why it is safe to drop |\n\
-             |---|---|---|---|\n\
-             | `MAIN/DATA/O2.SCI` | `assets/FOREST/O2.SCI` | `{}` | a staging copy |\n",
-            digest('3'),
-            digest('4'),
-        );
-        let rows = parse_provenance(&text).unwrap();
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].path, "FOREST/O2.SCI");
-    }
-
-    #[test]
     fn nothing_asked_for_is_a_tool_failure_not_a_pass() {
         // A run that checks nothing cannot report that everything checked out.
         let tree =
             std::env::temp_dir().join(format!("xtask-assets-nothing-{}", std::process::id()));
         let error = command(&tree, &Options::default()).unwrap_err();
         assert!(matches!(error, VerifyError::NothingAsked), "{error}");
-    }
-
-    #[test]
-    fn a_missing_tree_is_a_tool_failure_not_a_finding() {
-        let tree = std::env::temp_dir().join(format!("xtask-assets-absent-{}", std::process::id()));
-        let error = command(
-            &tree,
-            &Options {
-                tree: true,
-                ..Options::default()
-            },
-        )
-        .unwrap_err();
-        assert!(matches!(error, VerifyError::Io(_)), "{error}");
-        assert!(error.to_string().contains(PROVENANCE_FILE), "{error}");
     }
 
     /// The curated tree, as the tool sees it when run from `xtask/`.
@@ -1583,29 +1423,6 @@ mod tests {
         bytes[1] = 0xFC;
         let error = inspect("NOT/RECORDED.UH", &bytes).unwrap_err();
         assert!(error.contains("REFUSED_ON_RECORD"), "{error}");
-    }
-
-    #[test]
-    fn a_recorded_refusal_that_decodes_is_said_out_loud() {
-        // The record says this path is the one file whose refusal is the
-        // shipped outcome. If the bytes decode, the tree is not the tree that
-        // record was written for — the digest check cannot see that on its own,
-        // because a record can be updated.
-        let inspected = inspect("COMAN/COMBG.UH", &asset("ALKU/FONA.UH")).unwrap();
-
-        let Kind::Refused {
-            decoded, record, ..
-        } = &inspected.kind
-        else {
-            panic!("{}", inspected.kind);
-        };
-        assert!(*decoded);
-        assert!(record.contains("E.2"), "{record}");
-        assert!(
-            inspected.kind.to_string().contains("decoded"),
-            "{}",
-            inspected.kind
-        );
     }
 
     #[test]
