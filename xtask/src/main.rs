@@ -618,8 +618,6 @@ mod dump_parser_tests {
 
     #[test]
     fn a_dump_spec_that_is_not_one_is_refused_by_name() {
-        // The colon is the whole grammar; a missing one is a mistake a reader makes on the
-        // first try, so it says so rather than parsing half of it.
         let error = parse_dump("0x6E").unwrap_err();
         assert!(error.contains("OFFSET:LEN"), "{error}");
         assert!(parse_dump("0x6E:").is_err());
@@ -627,16 +625,12 @@ mod dump_parser_tests {
         assert!(parse_dump("0xZZ:4").is_err());
     }
 
-    /// The STMIK segment's own declared length — the number `music.rs`'s
-    /// `the_machine_words_are_read_as_their_own_widths` reads out of the object. It is a
-    /// fixture here because the rule at `music::dump_refusal` is checked without an object.
+    /// The STMIK segment's declared length (`music.rs`'s
+    /// `the_machine_words_are_read_as_their_own_widths` reads it out of the object).
     const SEGMENT_LENGTH: u32 = 29_607;
 
     #[test]
     fn a_dump_outside_the_segment_or_of_no_length_is_refused_before_the_guest_runs() {
-        // These are called on the product's own function, `music::dump_refusal` — the one
-        // `probe_command` applies to every spec before it spawns the guest. A copy of the
-        // conditions here would pass while the product drifted; this cannot.
         assert!(
             music::dump_refusal(0, 0, SEGMENT_LENGTH).is_some(),
             "a zero-length dump says nothing"
@@ -655,12 +649,8 @@ mod dump_parser_tests {
             "the table's own dump is legal"
         );
 
-        // And the refusal is the product's own path: `probe_command` returns
-        // `MusicError::Options` for a bad spec **without a boot**, which is what makes these
-        // the one part of the probe a test can exercise. Were the check moved back behind the
-        // spawn, this call would reach the oracle instead — a spawn failure is
-        // `MusicError::Oracle`, not `Options` — and the call's own cost is the second half of
-        // the guard.
+        // `probe_command` refuses a bad spec before it spawns the guest (a spawn failure would
+        // be `MusicError::Oracle`).
         let options = probe_options();
         for (offset, length) in [(0u32, 0usize), (29_600, 16)] {
             let error = music::probe_command(&options, 0x525c, &[(offset, length)])
@@ -669,9 +659,7 @@ mod dump_parser_tests {
         }
     }
 
-    /// The `probe` command's options, pointing at the vendored object and the reference's own
-    /// mounted original — the same paths the command is run with, resolved from this crate's
-    /// directory so the test does not depend on where it was started.
+    /// The `probe` command's options, with the command's own paths resolved from this crate.
     fn probe_options() -> music::TraceOptions {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         music::TraceOptions {
