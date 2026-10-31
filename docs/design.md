@@ -462,9 +462,16 @@ read from the unpacked part EXEs (D49). `cargo xtask assets verify --tree` check
 the provenance file.
 
 The binary carries the tree: `bins/secondreality/build.rs`
-embeds every file under `assets/` but `PROVENANCE.md` with `include_bytes!`, keyed by its
-repository-relative path (`assets/ALKU/FONA.UH`), and `assets::get` looks a path up. A run reads no
-media from disk, so it works from any directory; there is no option to read them from a folder.
+compresses every file under `assets/` but `PROVENANCE.md` to a raw LZMA stream (`lzma-rust2`'s
+encoder, a build-dependency) and embeds the streams with `include_bytes!`, keyed by each file's
+repository-relative path (`assets/ALKU/FONA.UH`). `assets::get` looks a path up and decompresses
+it on first use into a per-file `OnceLock`, so callers borrow `&'static [u8]`; the decoder is the
+same pure-Rust crate, a dependency of the binary alone. LZMA halves the 6.6 MB tree to 2.9 MB,
+about 210 KB smaller than zstd at its highest level with a decoder a quarter the size; the largest
+file, MUSIC1.S3M, decodes in about 14 ms, the whole tree in 0.1 s. Packages build with the
+`dist` profile (stripped, fat LTO, `opt-level = "s"`): 6.1 MB on Linux, against the release
+profile's 7.1 MB. A run reads no media from disk, so it works from any directory; there is no
+option to read them from a folder.
 `sr_audio::Song::decode` and `sr_assets::load_any` take the bytes, so neither crate learns where
 they came from.
 

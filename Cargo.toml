@@ -30,10 +30,19 @@ serde_json = "1"
 [profile.dev.package.sr-audio]
 opt-level = 3
 
+# build.rs compresses assets/ with this crate on every asset change, and the dependencies of build
+# scripts compile unoptimised by default: optimised, the encode takes 1.6 s instead of 8.7 (the same
+# bytes). The override reaches the run-time decoder too (in dist, 1.6 KB over "s").
+[profile.dev.package.lzma-rust2]
+opt-level = 3
+[profile.release.package.lzma-rust2]
+opt-level = 3
+
 # The packaged build (`cargo build --profile dist`, what CI ships): the release profile tuned for
 # size. Measured on the whole binary, "s" with fat LTO is the smallest ("z" is larger and slower,
 # thin LTO larger) and runs a frame in about 0.2 ms of the 14.3 ms a 70 Hz tick allows; opt 3
-# would cost about 220 KB. `release` stays cargo's default, fast to build, for tests and rediff.
+# would cost about 220 KB. `release`, otherwise cargo's default and fast to build, is for tests
+# and rediff.
 [profile.dist]
 inherits = "release"
 opt-level = "s"

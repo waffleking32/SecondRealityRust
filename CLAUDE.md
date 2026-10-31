@@ -59,12 +59,12 @@ and `TWIST` are unreleased development effects.
 
 ## Running it
 
-The binary embeds every file under `assets/` (`bins/secondreality/build.rs`, read through
-`src/assets.rs`), so it runs from any directory and reads no media from disk; changing an asset
-rebuilds it. Flags and keys for players are in `README.md` and `secondreality --help`. Tests,
-rediff and day-to-day runs use `--release`; the packages CI ships build with `--profile dist`
-(the workspace `Cargo.toml`: stripped, fat LTO, `opt-level = "s"`), which renders the same frames.
-The developer's view:
+The binary embeds every file under `assets/`, LZMA-compressed (`bins/secondreality/build.rs`;
+`src/assets.rs` decompresses a file on first use), so it runs from any directory and reads no
+media from disk; changing an asset rebuilds it. Flags and keys for players are in `README.md`
+and `secondreality --help`. Tests, rediff and day-to-day runs use `--release`; the packages CI
+ships build with `--profile dist` (the workspace `Cargo.toml`: stripped, fat LTO,
+`opt-level = "s"`), which renders the same frames. The developer's view:
 
 ```bash
 cargo run --release --bin secondreality -- --part glenz        # one part, by registry name
