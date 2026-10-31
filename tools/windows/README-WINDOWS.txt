@@ -17,5 +17,6 @@ When the demo ends it prints the original's end box in the console. A double-cli
 its console when it exits, so start it from Windows Terminal or PowerShell to read the box. The
 box is drawn with ANSI colour codes; the old console host may show those as raw characters.
 
-SDL2.dll is SDL 2 (https://libsdl.org), under the zlib licence in SDL2-LICENSE.txt. The port is
-MIT (LICENSE); the original demo's source and media are public domain under the Unlicense.
+SDL 2 (https://libsdl.org) is built into secondreality.exe, under the zlib licence in
+SDL2-LICENSE.txt. The port is MIT (LICENSE); the original demo's source and media are public
+domain under the Unlicense.

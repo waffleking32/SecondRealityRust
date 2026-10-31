@@ -1,0 +1,153 @@
+# Builds Second Reality for Windows x64, Linux x64 and macOS arm64, and on a v* tag publishes the
+# three packages as a GitHub Release. SDL 2 is compiled into the binary (the workspace enables
+# sdl2's bundled + static-link features), so a package is the executable, assets/ and the docs.
+# The binary reads assets/ relative to the folder it is started in.
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      # The build reads only assets/ and the crates; upstream/ (the submodule) is for tests.
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # .gitattributes keeps assets/ byte-exact; this proves the checkout did.
+      - name: Verify the assets against PROVENANCE.md
+        run: cargo xtask assets verify --tree
+
+      - name: Build
+        run: cargo build --release --locked -p secondreality
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = 'dist\SecondReality'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item target\release\secondreality.exe $out
+          $sys = (cargo metadata --format-version 1 --locked | ConvertFrom-Json).packages |
+            Where-Object name -eq 'sdl2-sys' | Select-Object -First 1
+          Copy-Item (Join-Path (Split-Path $sys.manifest_path) 'SDL\LICENSE.txt') (Join-Path $out 'SDL2-LICENSE.txt')
+          Copy-Item -Recurse assets (Join-Path $out 'assets')
+          Copy-Item README.md, LICENSE, tools\windows\README-WINDOWS.txt $out
+
+      # The packaged exe reads its assets from its own folder: two frames of a headless block-1
+      # run, dumped outside the package.
+      - name: Smoke-test the package
+        shell: pwsh
+        working-directory: dist\SecondReality
+        run: |
+          $dump = Join-Path $env:RUNNER_TEMP 'smoke'
+          .\secondreality.exe --headless --block 1 --dump-frames 500,1300 --dump-dir $dump
+          if ($LASTEXITCODE -ne 0) { throw "secondreality.exe exited $LASTEXITCODE" }
+          foreach ($f in 'alku_000500.idx', 'alku_001300.idx') {
+            if (-not (Test-Path (Join-Path $dump $f))) { throw "the smoke run wrote no $f" }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: secondreality-windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04's glibc (2.35) keeps the binary runnable on older distributions.
+          - os: ubuntu-22.04
+            name: linux-x64
+            readme: tools/linux/README-LINUX.txt
+          - os: macos-14
+            name: macos-arm64
+            readme: tools/macos/README-MACOS.txt
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # SDL's build finds these headers; at run time it loads the libraries only if present.
+      - name: Install SDL's build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libwayland-dev \
+            libxkbcommon-dev libegl-dev libasound2-dev libpulse-dev libudev-dev
+
+      - name: Verify the assets against PROVENANCE.md
+        run: cargo xtask assets verify --tree
+
+      - name: Build
+        run: cargo build --release --locked -p secondreality
+
+      - name: Package
+        run: |
+          out=dist/SecondReality
+          mkdir -p "$out"
+          cp target/release/secondreality "$out/"
+          sys=$(cargo metadata --format-version 1 --locked |
+            jq -r '[.packages[] | select(.name == "sdl2-sys")][0].manifest_path')
+          cp "$(dirname "$sys")/SDL/LICENSE.txt" "$out/SDL2-LICENSE.txt"
+          cp -R assets "$out/assets"
+          cp README.md LICENSE "${{ matrix.readme }}" "$out/"
+          if [ "$RUNNER_OS" = macOS ]; then
+            cp tools/macos/SecondReality.command "$out/"
+            chmod +x "$out/SecondReality.command"
+          fi
+          tar -C dist -czf "secondreality-${{ matrix.name }}.tar.gz" SecondReality
+
+      - name: Smoke-test the package
+        working-directory: dist/SecondReality
+        run: |
+          dump="$RUNNER_TEMP/smoke"
+          ./secondreality --headless --block 1 --dump-frames 500,1300 --dump-dir "$dump"
+          for f in alku_000500.idx alku_001300.idx; do
+            test -f "$dump/$f" || { echo "the smoke run wrote no $f"; exit 1; }
+          done
+
+      # A tarball keeps the executable bits that an Actions artifact zip would drop.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: secondreality-${{ matrix.name }}
+          path: secondreality-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, unix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          (cd artifacts/secondreality-windows-x64 && zip -qr ../../secondreality-windows-x64.zip SecondReality)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
+            secondreality-windows-x64.zip \
+            artifacts/secondreality-linux-x64/secondreality-linux-x64.tar.gz \
+            artifacts/secondreality-macos-arm64/secondreality-macos-arm64.tar.gz

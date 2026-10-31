@@ -8,8 +8,18 @@ captures of the original running in an emulator.
 
 ## Building and running
 
-You need a Rust toolchain (1.85 or later) and the system **SDL2** library: the `sdl2` crate links
-the system library, so it is not built for you. On Debian or Ubuntu, install `libsdl2-dev`.
+Prebuilt packages for Windows x64, Linux x64 and macOS (Apple Silicon) are on the
+[Releases](https://github.com/waffleking32/SecondRealityRust/releases) page; each one's readme
+says how to start it.
+
+To build it yourself you need a Rust toolchain (1.85 or later), CMake and a C compiler: SDL 2 is
+compiled from source and linked into the binary, so no SDL library is installed or shipped. On
+Debian or Ubuntu, SDL's build also wants the headers of the libraries it uses at run time:
+
+```bash
+sudo apt install cmake libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
+  libxfixes-dev libwayland-dev libxkbcommon-dev libegl-dev libasound2-dev libpulse-dev libudev-dev
+```
 
 ```bash
 cargo run --release --bin secondreality

@@ -20,8 +20,6 @@ sr-audio.workspace = true
 # pre-converts it.
 sr-assets = { path = "../../crates/sr-assets" }
 # The window is the binary's business; sr-engine keeps zero runtime deps.
-# sdl2's default feature set is empty, so this links the system SDL2 rather
-# than vendoring and compiling one.
 sdl2.workspace = true
 serde.workspace = true
 serde_json.workspace = true

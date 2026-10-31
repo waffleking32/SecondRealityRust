@@ -18,7 +18,9 @@ crates/sr-assets/     decoders for the original formats (depends on sr-engine on
 bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
                       menu/ (settings, vault), endscreen.rs, parts.rs (the registry), parts/
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
-tools/                emulator probes, measurement scripts, the vault capture script, the Windows readme
+tools/                emulator probes, measurement scripts, the vault capture script, the packages'
+                      readmes and the macOS launcher
+.github/workflows/    build.yml: Windows, Linux and macOS packages (manual, or a Release on a v* tag)
 assets/               the curated original media; assets/PROVENANCE.md is parsed by xtask
 reference/            captured frames and manifests: input-only
 upstream/             the original source (submodule): input-only
@@ -204,7 +206,5 @@ under the Unlicense. Set `license = "MIT"` in any new crate manifest.
   (`dosbox-automation`'s `src/audio/mixer.cpp`), so captures are silent only through
   `SDL_AUDIODRIVER=dummy` (D17). Fixing the name needs D17's determinism re-measured before any
   reference is re-captured.
-- **Windows CI** (`.github/workflows/windows.yml`) runs on every push that touches more than docs;
-  Windows minutes count double on a private repository.
 - **The end box's ANSI colour codes** print raw in the old Windows console host
   (`README-WINDOWS.txt`); enabling virtual-terminal processing would fix it.

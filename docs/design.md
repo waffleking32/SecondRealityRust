@@ -15,8 +15,8 @@ pixel-identical or with each knowing difference registered (§5); the media are 
 original formats. A settings screen replaces `START.EXE`'s sound-card questions (D44).
 
 Non-goals: running the original x86 binaries (this is a source port, not an emulator), and an
-enhanced visual mode. Linux is the verified target; a Windows build is produced by CI
-(`.github/workflows/windows.yml`) but nothing verifies it. The one enhancement is opt-in audio:
+enhanced visual mode. Linux is the verified target; Windows, Linux and macOS packages are built by CI
+(`.github/workflows/build.yml`, with SDL 2 linked statically), and only their smoke run checks them. The one enhancement is opt-in audio:
 `--sound-quality enhanced`, the port's own 48 kHz renderer, which never moves the music's
 position (D43, A60).
 
