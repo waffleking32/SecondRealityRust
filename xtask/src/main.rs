@@ -495,7 +495,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 cycles,
                 window,
                 out,
-                keys: music::keys(&keys),
+                keys: keys_from_script(&keys),
                 boot,
                 force,
             };

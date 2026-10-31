@@ -584,9 +584,9 @@ at a `255` is `music.md` §8's reading of the object.
 | what | where |
 |---|---|
 | the census and the 278 records; the seven position words as contiguous slots; the frame/tempo/speed offsets; the object's tempo and master-volume initialisers | `crates/sr-assets/tests/omf_symbols.rs` |
-| the needles (32 bytes, different records, one occurrence); the locator (a unique match, a second one refused, a needle across a 64 KiB boundary, a short needle, a short last chunk, several views only when they are one memory) | `xtask/src/music.rs`'s own tests |
-| the window (`A..B` half-open), the row round trip, the coverage's gaps and boundary run; back-to-front and overflowing windows are findings, never crashes | `xtask/src/music.rs`, `xtask/tests/music.rs` |
-| machine words recorded twice when they move, once when they do not, and a word above 32767 printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | `xtask/src/music.rs` |
+| the needles (32 bytes, different records, one occurrence); the locator (a unique match, a second one refused, a needle across a 64 KiB boundary, a short needle, a short last chunk) | `xtask/src/music/locate.rs`'s own tests |
+| the window (`A..B` half-open), the row round trip, the coverage's gaps and boundary run; back-to-front and overflowing windows are findings, never crashes | `xtask/src/music/format.rs` and `trace.rs`, `xtask/tests/music.rs` |
+| machine words recorded twice when they move, once when they do not, and a word above 32767 printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | `xtask/src/music/trace.rs`, `analyse.rs` |
 | the `zplus` rule against MUSIC1's order list, the `3` included | `crates/sr-audio/tests/player.rs` |
 | `music symbols` prints the map; the trace refusals (where it may be written, the window, the keys, `--force`) | `xtask/tests/music.rs` |
 | the traces as references: rows, columns, coverage and skipped frames; `reference verify --tree reference` passes; **a flipped byte of a trace fails it** (exit 1, both digests named); an unknown `kind` and an unsupported coverage claim are findings | `xtask/tests/music.rs` |
