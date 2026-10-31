@@ -798,7 +798,7 @@ Every 10th frame from 7660 to 7920 (refused at 7930):
 | distinct colours | 40 | 1 | 63 → 163 → 76 | 24 | 1 |
 
 - **U2A's hold ends at 7700 and PAM starts at 7710**, in the same geometry.
-- **The flat `(251,251,251)` frame is PAM's wash**: `251 = widen(62)`, and six-bit 62 is what
+- **The flat `(251,251,251)` frame is PAM's wash**: `251 = dac_expand(62)` (`sr_engine::dac_expand`, D14), and six-bit 62 is what
   `(63*63 + pal)/64` gives for `wfade[f] = 63`. It is at 7710 in three sessions, and holds at least 40
   frames at the end (7880–7920).
 - **The animation changes at every sample**, so its RGB-only frames are D15's moving case, not a

@@ -575,8 +575,9 @@ in prose. When a re-run disagrees with a note, the note is corrected in the same
 The emulator runs silent (D17), so the oracle for the music is a per-frame trace of the original's
 player words. `MAIN/STMIK.300`'s `PUBDEF` records give the offsets of `MAIN/STMIK.H:125-131`'s
 position words; the segment is found in guest memory by two 32-byte runs from the object's own
-`LEDATA`. Traces are under `reference/music/` and `cargo xtask music {symbols,trace,analyse,probe}`
-prints every number below (`music-clock.md` names each command).
+`LEDATA`. Traces are under `reference/music/` and `cargo xtask music {symbols,trace,analyse}`
+prints every number below (`music-clock.md` names each command); the probe measurements are retired
+(`git show phase-9:xtask/src/music.rs`).
 
 - **The clock starts at frame 408** in all four restart-recipe sessions (spread 0.1 frames),
   back-extrapolated from the first row change by `_np_zframe`. A tick is `2.5/tempo` seconds and a

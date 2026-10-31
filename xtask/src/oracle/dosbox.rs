@@ -512,7 +512,7 @@ impl DosboxOracle {
     }
 
     fn port_read(&self, port: u16) -> Result<u16, OracleError> {
-        let answer = self.api.get_json(&format!("/api/v1/io/port?port={port}"))?;
+        let answer = self.api.get_json(&port_read_path(port))?;
         answer["value"]
             .as_u64()
             .and_then(|v| u16::try_from(v).ok())
@@ -683,6 +683,11 @@ fn grab_exactly<T>(
             return Err(grab_timeout(Some(index)));
         }
     }
+}
+
+/// The GET path that reads one I/O port.
+fn port_read_path(port: u16) -> String {
+    format!("/api/v1/io/port?port={port}")
 }
 
 fn grab_timeout(index: Option<u64>) -> OracleError {
@@ -1381,7 +1386,7 @@ mod tests {
         assert!(reads.len() >= 3, "the fixture backs the read protocol");
         for path in reads {
             let port: u16 = path.rsplit('=').next().unwrap().parse().unwrap();
-            assert_eq!(path, format!("/io/port?port={port}"));
+            assert_eq!(format!("/api/v1{path}"), port_read_path(port));
         }
         let values: Vec<u8> = calls
             .iter()
