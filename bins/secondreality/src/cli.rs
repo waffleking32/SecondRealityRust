@@ -1,8 +1,6 @@
-//! The command line: everything the binary can be asked to do.
-//!
-//! Parsing is pure — no SDL, no filesystem, no clock — and it is where the
-//! headless/window split is decided, before anything is initialised. Headless
-//! mode therefore reaches a machine with no display at all; see `main`.
+//! The command line: everything the binary can be asked to do. Parsing is pure (no SDL,
+//! no filesystem, no clock) and decides the headless/window split before anything is
+//! initialised. The usage text is `main`'s.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -13,93 +11,53 @@ use sr_engine::present::{Aspect, PresentOptions};
 use crate::parts;
 use crate::shell;
 
-/// The part [`Cli::part_name`] falls back to for a `Cli` that names neither a
-/// part nor a block — one built by hand, since the command line never leaves
-/// both unset. A run with no argument is the demo: `SECOND` with no argument is
-/// `SECOND 1` (`part-sequence.md` §4), so [`Cli::parse`] makes it
-/// [`DEFAULT_BLOCK`]. The Phase 0 test card is still a part, and `--part
-/// testcard` names it.
+/// The part [`Cli::part_name`] falls back to for a hand-built `Cli` naming neither a part
+/// nor a block ([`Cli::parse`] makes that [`DEFAULT_BLOCK`]).
 const DEFAULT_PART: &str = "testcard";
 
-/// The block a command line that names no part and no block runs: `SECOND 1`,
-/// which the original treats exactly as no argument (`MAIN/U2.ASM:108`'s default
-/// `whattorun` 7fh and `partsmask[1]`'s 1fh gate the same parts).
+/// No part and no block is `SECOND 1`, as in the original (`MAIN/U2.ASM:108`'s default
+/// `whattorun` 7fh and `partsmask[1]`'s 1fh gate the same parts; `part-sequence.md` §4).
 const DEFAULT_BLOCK: char = '1';
 
 /// What to run, and how to show it.
 #[derive(Debug, Clone)]
 pub struct Cli {
-    /// The part to run, one of [`parts::registry`]'s names. `None` when the
-    /// command line named none.
+    /// `--part`: one of [`parts::registry`]'s names.
     pub part: Option<&'static str>,
-    /// A `SECOND n` entry point, whose parts are the ported ones in the demo's
-    /// own order from that block's first part. Kept separate from [`part`] so
-    /// that "neither was given" is a state and not a string comparison.
-    ///
-    /// [`part`]: Cli::part
+    /// `--block`: a `SECOND n` entry point.
     pub block: Option<char>,
-    /// Dump frames to disk instead of opening a window.
     pub headless: bool,
-    /// Where the dump goes. Required with `--headless`.
     pub dump_dir: Option<PathBuf>,
-    /// Stop after this many logic ticks, dumping every one. One of the three
-    /// ways a headless run is bounded.
+    /// `--frames`: stop after this many ticks, dumping every one.
     pub frames: Option<u32>,
-    /// Dump exactly these reference indices, and stop after the largest. One of
-    /// the three ways a headless run is bounded, and the only one that is
-    /// sparse: a part's keyframes are four numbers, and `--frames 900` is 900
-    /// frames of 320x400 output to answer them.
+    /// `--dump-frames`: dump exactly these indices, and stop after the largest.
     pub dump_frames: Option<Vec<u32>>,
-    /// Drive from real elapsed time for this long, dumping only the last frame.
+    /// `--run-seconds`: drive by wall-clock time, dumping only the last frame.
     pub run_seconds: Option<f64>,
-    /// The window's integer, nearest-neighbour magnification of a 320×200
-    /// picture; 1 or more, 2 by default. Window-only: a dump is always 1:1.
+    /// The window's integer magnification (D48); a dump is always 1:1.
     pub scale: u32,
-    /// How the picture is fitted to the window: square dots (the default, pure
-    /// pixel duplication) or the 4:3 stretch. Window-only, like `scale`.
     pub aspect: Aspect,
     /// Whether to draw the frame's overscan colour as a border.
     pub border: bool,
-    /// Write the music to this file as a 16-bit WAV instead of opening a sound card.
-    ///
-    /// The ring has one consumer, so a dump *replaces* the device rather than joining it:
-    /// a run that writes a file is silent to watch. The artifact is the point — a person
-    /// listens to it and a test reads its bytes — and no reference audio exists to compare
-    /// against (`docs/fidelity/music.md` §10.5).
+    /// `--audio-dump`: the WAV that replaces the sound card (`docs/fidelity/music.md` §10.5).
     pub audio_dump: Option<PathBuf>,
-    /// Do not open a sound card. The player still runs: the music's position is the tick's
-    /// and this only stops the tick's samples from being played.
+    /// `--no-audio`: no sound card; the player still runs.
     pub no_audio: bool,
-    /// Open the vault menu instead of a run: a window-only selection among the
-    /// demo's three unreleased effects (`parts::vault::VAULT`).
-    ///
-    /// The menu starts the parts itself, one at a time, so every flag that
-    /// names a run or bounds a dump contradicts it — [`validate`](Cli::validate)
-    /// refuses those. The presentation flags (`--scale`, `--aspect`,
-    /// `--no-border`, `--no-audio`) apply to it and to the runs it starts.
+    /// `--vault`: the window-only menu over `parts::vault::VAULT` (D40).
     pub vault: bool,
-    /// The original's `looping` (`MAIN/U2.ASM:746`): `--loop` is the setup menu's
-    /// "Demo looping: Enabled" (`MENU.C:236`, 1), and `/gravis` is 2 (`START.C:89-93`).
-    /// Only a block's run loops.
+    /// The original's `looping` (`MAIN/U2.ASM:746`): `--loop` is the setup's "Demo
+    /// looping: Enabled" (`MENU.C:236`), and `/gravis` is 2 (`START.C:89-93`).
     pub looping: shell::Looping,
-    /// Whether the run asks for its settings first — the original's setup screen, which
-    /// `START.C:89-95` skips for `/gravis` and runs (`menu()`) otherwise.
+    /// Whether a windowed demo run opens on the setup screen (`START.C:89-95`, D44).
     pub setup: bool,
-    /// Write the run's timeline to this file: one CSV line a tick, `index,pass,part,order,row`
-    /// — the frame's index, the loop pass, the part whose picture is up, and the music's
-    /// published position. Headless only; what a full-run comparison against the traces
-    /// reads (`tests/fullrun.rs`).
+    /// `--positions`: the headless run's timeline (`headless::Positions`).
     pub positions: Option<PathBuf>,
-    /// How the music is mixed (`--sound-quality authentic|enhanced`): the object's own mixer,
-    /// or the port's enhanced renderer at 48 kHz (D43). Authentic by default; the clock and
-    /// the pictures are the same either way.
+    /// `--sound-quality`: the object's own mixer, or the enhanced renderer (D43).
     pub quality: Quality,
 }
 
 impl Default for Cli {
-    /// Nothing named yet, in a window, at 2× with square dots and its border
-    /// ([`PresentOptions::WINDOW`], D48).
-    /// [`Cli::parse`] turns "nothing named" into the demo ([`DEFAULT_BLOCK`]).
+    /// Nothing named, in a window, at [`PresentOptions::WINDOW`] (D48).
     fn default() -> Cli {
         Cli {
             part: None,
@@ -124,11 +82,8 @@ impl Default for Cli {
 }
 
 impl Cli {
-    /// Parse the arguments after the program name.
-    ///
-    /// Every rule that spans more than one argument is checked here, so once a
-    /// `Cli` exists the rest of the binary may rely on it: a headless run has a
-    /// dump directory and exactly one way of deciding when to stop.
+    /// Parse the arguments after the program name, with every rule that spans more than one
+    /// argument checked, so the rest of the binary may rely on the result.
     pub fn parse<I>(args: I) -> Result<Cli, String>
     where
         I: IntoIterator<Item = String>,
@@ -140,11 +95,6 @@ impl Cli {
             match arg.as_str() {
                 "--part" => {
                     let name = value(&mut args, "--part")?;
-                    // The shell decides which names exist, because it is the
-                    // only place that knows which of the demo's parts are the
-                    // port's: a name the demo has and the port has not reached
-                    // is a task someone can pick up, and a name the demo never
-                    // had is a typo; the two used to say so.
                     cli.part = Some(
                         shell::resolve(&name)
                             .map_err(|e| format!("{e}; ported parts: {}", known_parts()))?,
@@ -152,11 +102,7 @@ impl Cli {
                 }
                 "--block" => {
                     let raw = value(&mut args, "--block")?;
-                    let block = exactly_one_char(&raw)?.to_ascii_uppercase();
-                    // Known is checked here and *runnable* in `validate`, which
-                    // only runs once the whole command line is in: the two
-                    // rules are different things, and `--part x --block 2` is a
-                    // contradiction whether or not BEGLOGO is ported yet.
+                    let block = block_char(&raw)?.to_ascii_uppercase();
                     shell::block_plan(block).map_err(|_| {
                         format!("unknown block {raw:?}; expected {}", known_blocks())
                     })?;
@@ -204,30 +150,20 @@ impl Cli {
                 }
                 "--vault" => cli.vault = true,
                 "--loop" => cli.looping = shell::Looping::On,
-                // The setup screen is on by default for a windowed demo run
-                // ([`Cli::shows_setup`]); this is the way to start without it, as
-                // `/gravis` does in the original (`START.C:89-95`) — the flags are then
-                // the run's settings.
                 "--no-setup" => cli.setup = false,
-                // `START.C:89`: `memicmp(argv[1],"/gravis",7)` — the first seven
-                // characters, any case — is `m_looping=2` and no setup menu. Applied after
-                // the loop, so that it wins over `--loop` in either order.
                 switch if is_gravis(switch) => gravis = true,
-                // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at a `/`, so any other
-                // switch is no block and no error. It is ignored here too.
+                // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at any other `/` switch.
                 switch if switch.starts_with('/') => {}
                 other => return Err(format!("unknown argument {other:?}")),
             }
         }
-        // `START.C:89-94`: `/gravis` sets `m_looping=2` and skips `menu()`, the only
-        // place `looping` 1 is chosen (`MENU.C:229-238`). `--loop` is that menu's choice,
-        // so `/gravis` wins over it wherever the two are written (D42).
+        // `START.C:89-94`: `/gravis` sets `m_looping=2` and skips `menu()`, the only place
+        // `looping` 1 is chosen (`MENU.C:229-238`), so it wins over `--loop` (D42).
         if gravis {
             cli.looping = shell::Looping::NoEndScroller;
             cli.setup = false;
         }
-        // No part and no block is the demo's own run, `SECOND 1`. The vault names
-        // neither and starts its own runs, so it is left alone.
+        // The vault names neither and starts its own runs.
         if cli.part.is_none() && cli.block.is_none() && !cli.vault {
             cli.block = Some(DEFAULT_BLOCK);
         }
@@ -235,35 +171,24 @@ impl Cli {
         Ok(cli)
     }
 
-    /// Whether the run opens on the settings screen ([`crate::settings`]): a **windowed
-    /// demo run** — one built from a block, which is also the run with no argument — that
-    /// has not skipped it (`--no-setup`, `/gravis`). Never `--part` or `--vault`, whose
-    /// runs are not the demo's, and never `--headless`, which opens no window and waits on
-    /// no key.
+    /// Whether the run opens on the settings screen ([`crate::menu::settings`]): a windowed
+    /// block run that has not skipped it (`--no-setup`, `/gravis`).
     pub fn shows_setup(&self) -> bool {
         self.setup && !self.headless && !self.vault && self.block.is_some()
     }
 
-    /// How the window presents: `--scale`, `--aspect` and `--no-border`. A headless dump
-    /// never reads this — it is one output pixel a source pixel whatever they say.
+    /// How the window presents: `--scale`, `--aspect` and `--no-border`.
     pub fn present_options(&self) -> PresentOptions {
         PresentOptions { aspect: self.aspect, scale: self.scale, border: self.border }
     }
 
-    /// The part a one-part run names, whether `--part` gave it or not.
-    ///
-    /// Only meaningful for a run that is not a block's: a block names a set of
-    /// parts and [`block`](Cli::block) is how a caller tells.
+    /// The part a one-part run names (meaningless for a block run).
     pub fn part_name(&self) -> &'static str {
         self.part.unwrap_or(DEFAULT_PART)
     }
 
-    /// What the run this command line names is to be, beyond its plan.
-    ///
-    /// A run built from a block — `--block`, or no argument — is the demo's own and
-    /// ends the way `SECOND.EXE` does ([`Ending::Exit`](shell::Ending::Exit)); one part
-    /// holds where it ends ([`Ending::Hold`](shell::Ending::Hold)), and so do the
-    /// vault's, which name no block.
+    /// The run's settings beyond its plan: a block run ends as `SECOND.EXE` does
+    /// ([`Ending::Exit`](shell::Ending::Exit)); one part, the vault's included, holds.
     pub fn run_settings(&self) -> shell::RunSettings {
         shell::RunSettings {
             ending: if self.block.is_some() {
@@ -271,8 +196,6 @@ impl Cli {
             } else {
                 shell::Ending::Hold
             },
-            // `validate` refuses looping for anything but a block, so this is the
-            // command line's own word.
             looping: self.looping,
             player: PlayerOptions {
                 quality: self.quality,
@@ -281,22 +204,18 @@ impl Cli {
         }
     }
 
-    /// The rules that span more than one argument.
+    /// The rules that span more than one argument. The order decides which refusal a
+    /// command line that breaks several rules gets.
     fn validate(&self) -> Result<(), String> {
         if self.scale < 1 {
             return Err("--scale is a magnification, so it must be at least 1".to_string());
         }
-        // The vault menu is the window's own surface: it starts runs itself, and
-        // a flag that names one (or bounds a dump of it) contradicts it. The
-        // check comes before the headless rules so that the headless vault says
-        // *why* it cannot exist, rather than asking for a dump directory.
+        // Before the headless rules, so a headless vault says why it cannot exist.
         if self.vault {
             if self.looping != shell::Looping::Off {
                 return Err("the vault's parts do not loop; --loop and /gravis are a block's run"
                     .to_string());
             }
-            // GRID, HARD and TWIST are silent (`shell::music_for_part` has no row for them), so
-            // a mixer setting would be accepted and do nothing.
             if self.quality != Quality::Authentic {
                 return Err("the vault's parts are silent; --sound-quality is for a run with music"
                     .to_string());
@@ -318,45 +237,27 @@ impl Cli {
         if self.block.is_some() && self.part.is_some() {
             return Err("give --part or --block, not both".to_string());
         }
-        // Looping is the demo's sequence going round (`MAIN/U2.ASM:914-933`); one part
-        // holds where it ends, and the vault (refused above for its own reasons) starts
-        // parts.
+        // Looping is the demo's sequence going round (`MAIN/U2.ASM:914-933`).
         if self.looping != shell::Looping::Off && self.block.is_none() {
             return Err("--loop and /gravis are a block's run; give --block, not --part".to_string());
         }
-        // A mixer setting for a run with no player would be accepted and do nothing: the
-        // test card and the vault's effects are silent (`music_for_part` has no row for
-        // them). The default names the authentic mixer and is harmless, so it is accepted.
-        if self.quality != Quality::Authentic && shell::music_for_part(self.first_part()?).is_none()
-        {
-            return Err(format!(
-                "--sound-quality enhanced needs a run with music, and a run of {} has none",
-                self.first_part()?
-            ));
+        // A mixer setting or a WAV for a run with no player would do nothing. The default
+        // quality names the authentic mixer and is harmless.
+        let first = self.first_part()?;
+        for (given, flag) in [
+            (self.quality != Quality::Authentic, "--sound-quality enhanced"),
+            (self.audio_dump.is_some(), "--audio-dump"),
+        ] {
+            if given && shell::music_for_part(first).is_none() {
+                return Err(format!("{flag} needs a run with music, and a run of {first} has none"));
+            }
         }
-        // A dump of a run with no music would be a file with a header and nothing in it,
-        // which reads as a recording that captured silence. Which runs have music is the
-        // shell's answer (`music_for_part`), not this module's: the test card is the port's
-        // own and not the demo's, so a run of it has no player at all.
-        if self.audio_dump.is_some() && shell::music_for_part(self.first_part()?).is_none() {
-            return Err(format!(
-                "--audio-dump needs a run with music, and a run of {} has none",
-                self.first_part()?
-            ));
-        }
-        // The block's first part has to be one the port can run, in **either**
-        // mode: the window drives the same `Sequence` a headless run dumps, so
-        // a block it cannot start at is a command-line mistake wherever it is
-        // asked for. Checked before the mode split — and here rather than where
-        // `--block` is read, so that a command line that contradicts itself
-        // says *that* first.
+        // In either mode: the window drives the same `Sequence` a dump does.
         if let Some(block) = self.block {
-            let first = self.first_part()?;
             shell::resolve(first).map_err(|e| format!("--block {block}: {e}"))?;
         }
         if !self.headless {
-            // Silently ignoring a dump would be a trap: the run would look
-            // right and leave nothing behind to compare.
+            // A dump flag silently ignored would leave nothing behind to compare.
             if self.frames.is_some()
                 || self.dump_frames.is_some()
                 || self.run_seconds.is_some()
@@ -406,7 +307,7 @@ impl Cli {
                     .to_string(),
             );
         }
-        self.dump_indices_are_reachable()
+        self.dump_indices_are_reachable(first)
     }
 
     /// The part a run of this command line begins at.
@@ -421,18 +322,12 @@ impl Cli {
         }
     }
 
-    /// `--dump-frames` and a run's own numbering have to agree.
-    ///
-    /// An index the run begins *after* is a mistake in the command, not an
-    /// empty dump: the run walks away from it on its way to the others, and a
-    /// dump that silently lacks the frame says nothing about why. The anchor is
-    /// named in the message, because it is the number the caller has to know to
-    /// see the mistake.
-    fn dump_indices_are_reachable(&self) -> Result<(), String> {
+    /// An index before the run's start (its boot anchor) is a mistake in the command, not
+    /// an empty dump; the message names the anchor.
+    fn dump_indices_are_reachable(&self, first: &str) -> Result<(), String> {
         let Some(wanted) = self.dump_frames.as_ref() else {
             return Ok(());
         };
-        let first = self.first_part()?;
         let start = shell::boot_anchor(first).unwrap_or(0);
         match shell::first_unreachable(start, wanted) {
             Some(below) => Err(format!(
@@ -445,7 +340,7 @@ impl Cli {
 }
 
 /// Whether `arg` is `/gravis` as `START.C:89` reads it: `memicmp(argv[1], "/gravis", 7)`,
-/// its first seven characters in any case — so `/GRAVIS` and `/gravisultrasound` too.
+/// its first seven characters in any case, so `/GRAVIS` and `/gravisultrasound` too.
 fn is_gravis(arg: &str) -> bool {
     arg.len() >= 7 && arg.as_bytes()[..7].eq_ignore_ascii_case(b"/gravis")
 }
@@ -462,8 +357,8 @@ fn number<T: FromStr>(args: &mut impl Iterator<Item = String>, flag: &str) -> Re
         .map_err(|_| format!("{flag} expects a number, got {raw:?}"))
 }
 
-/// `flag`'s argument, which is one character and no more.
-fn exactly_one_char(raw: &str) -> Result<char, String> {
+/// `--block`'s argument, which is one character and no more.
+fn block_char(raw: &str) -> Result<char, String> {
     let mut chars = raw.chars();
     match (chars.next(), chars.next()) {
         (Some(block), None) => Ok(block),
@@ -471,17 +366,8 @@ fn exactly_one_char(raw: &str) -> Result<char, String> {
     }
 }
 
-/// A comma-separated list of reference indices: `430,470,560,900`.
-///
-/// An empty item is refused rather than skipped — `430,,470` is a typo, and a
-/// skipped item would dump a different set from the one the command names.
-///
-/// **A repeated index is dropped, keeping the order the list was written in.**
-/// `--dump-frames` names a *set* of frames, so this is where it is normalised
-/// into one: a command line that says `5,5` twice asks for frame 5 twice, which
-/// is frame 5. Not a sort — the run visits indices in its own order whatever
-/// the command says, so only the set matters — and first occurrence wins so the
-/// list stays as it was written.
+/// A comma-separated list of indices: `430,470,560,900`. An empty item is refused; a
+/// repeated index is dropped, keeping the first, and the order is kept.
 fn indices(raw: &str) -> Result<Vec<u32>, String> {
     let items: Vec<&str> = raw.split(',').collect();
     if raw.is_empty() || items.iter().any(|item| item.is_empty()) {
@@ -524,498 +410,202 @@ mod tests {
     use super::*;
     use crate::shell::{Ending, Looping};
 
-    fn parse(args: &[&str]) -> Result<Cli, String> { Cli::parse(args.iter().map(|s| s.to_string())) }
+    fn parse(args: &[&str]) -> Result<Cli, String> {
+        Cli::parse(args.iter().map(|s| s.to_string()))
+    }
+
+    const VAULT_REFUSAL: &str = "the vault menu needs a window; name a part with --part";
+    const HEADLESS: [&str; 4] = ["--headless", "--dump-dir", "d", "--dump-frames"];
+
+    /// A headless run of `rest`, bounded by `--dump-frames frames`.
+    fn headless(frames: &str, rest: &[&str]) -> Result<Cli, String> {
+        let mut args = HEADLESS.to_vec();
+        args.push(frames);
+        args.extend_from_slice(rest);
+        parse(&args)
+    }
 
     #[test]
-    fn a_run_with_no_arguments_is_the_demo() {
-        // `SECOND` with no argument is `SECOND 1` (`part-sequence.md` §4: the
-        // default `whattorun` 7fh and `partsmask[1]` 1fh run the same parts), so
-        // the port's no-argument run is block 1 — in a window, at 2× with square
-        // dots (every 320×200 pixel a 2×2 block, D48) and its border.
+    fn a_run_with_no_arguments_is_the_demo_in_a_window() {
         let c = parse(&[]).unwrap();
-        assert_eq!(c.block, Some('1'));
-        assert_eq!(c.part, None);
-        assert!(!c.headless);
-        assert_eq!(c.scale, 2);
-        assert_eq!(c.aspect, Aspect::SquarePixels);
-        assert!(c.border);
-        // `--aspect 4:3` is still there, and `--scale` still overrides the 2.
-        let c = parse(&["--aspect", "4:3", "--scale", "1"]).unwrap();
-        assert_eq!((c.aspect, c.scale), (Aspect::FourThree, 1));
-    }
-
-    #[test]
-    fn the_test_card_is_still_a_part() {
-        // The Phase 0 test card is no longer the default run, but it is still
-        // the port's own part and `--part` still names it.
-        let c = parse(&["--part", "testcard"]).unwrap();
-        assert_eq!(c.part, Some("testcard"));
-        assert_eq!(c.block, None, "a named part is not a block run");
-        assert_eq!(c.part_name(), "testcard");
-    }
-
-    #[test]
-    fn a_part_run_holds_and_a_block_run_exits() {
-        // A run built from a block ends the way `SECOND.EXE` does
-        // (`MAIN/U2.ASM:935-994`: the fade, text mode, the end box); one part
-        // holds where it ends, as it always has.
-        assert_eq!(parse(&["--part", "glenz"]).unwrap().run_settings().ending, Ending::Hold);
-        assert_eq!(parse(&["--block", "3"]).unwrap().run_settings().ending, Ending::Exit);
-        assert_eq!(parse(&[]).unwrap().run_settings().ending, Ending::Exit);
-        // The vault's runs are one-part runs the menu starts: they hold.
-        assert_eq!(parse(&["--vault"]).unwrap().run_settings().ending, Ending::Hold);
-    }
-
-    #[test]
-    fn the_sound_quality_flag_picks_the_renderer_and_authentic_is_the_default() {
-        // The enhanced renderer is the port's own, off by default (D43): a command line that
-        // does not ask for it gets the object's mixer, and the run's player is built with it.
-        assert_eq!(Cli::default().quality, Quality::Authentic);
-        let c = parse(&[]).unwrap();
-        assert_eq!(c.quality, Quality::Authentic);
+        assert_eq!((c.block, c.part), (Some('1'), None));
+        assert!(!c.headless && !c.vault && c.setup && c.border);
+        assert_eq!((c.scale, c.aspect), (2, Aspect::SquarePixels));
+        assert_eq!((c.looping, c.quality, &c.positions), (Looping::Off, Quality::Authentic, &None));
+        assert_eq!(c.run_settings().ending, Ending::Exit);
         assert_eq!(c.run_settings().player, PlayerOptions::default());
-        let c = parse(&["--sound-quality", "enhanced"]).unwrap();
-        assert_eq!(c.quality, Quality::Enhanced);
-        assert_eq!(c.run_settings().player.quality, Quality::Enhanced);
-        assert_eq!(c.run_settings().player.output_rate(), 48_000);
-        let c = parse(&["--sound-quality", "authentic", "--part", "glenz"]).unwrap();
-        assert_eq!(c.run_settings().player.quality, Quality::Authentic);
-        // A part's run takes it as well as a block's.
+    }
+
+    #[test]
+    fn the_flags_set_their_fields() {
+        let c = parse(&["--aspect", "4:3", "--scale", "1", "--no-border", "--no-audio"]).unwrap();
+        assert_eq!((c.aspect, c.scale, c.border, c.no_audio), (Aspect::FourThree, 1, false, true));
+        assert_eq!(parse(&["--aspect", "square"]).unwrap().aspect, Aspect::SquarePixels);
+
+        let c = parse(&["--part", "testcard"]).unwrap();
+        assert_eq!((c.part, c.block, c.part_name()), (Some("testcard"), None, "testcard"));
+        assert_eq!(c.run_settings().ending, Ending::Hold, "a part run holds");
+        assert_eq!(parse(&["--block", "u"]).unwrap().block, Some('U'));
+
         let c = parse(&["--part", "u2e", "--sound-quality", "enhanced"]).unwrap();
         assert_eq!(c.run_settings().player.quality, Quality::Enhanced);
-        assert!(parse(&["--sound-quality", "high"]).is_err(), "only the two names");
-        // The vault's parts have no music, so the setting is refused there rather than
-        // ignored; naming the default is harmless and accepted.
-        let error = parse(&["--vault", "--sound-quality", "enhanced"]).unwrap_err();
-        assert!(error.contains("silent"), "{error}");
-        assert!(parse(&["--vault", "--sound-quality", "authentic"]).is_ok());
-        assert!(parse(&["--sound-quality"]).is_err(), "and a name is needed");
+        assert_eq!(c.run_settings().player.output_rate(), 48_000);
+
+        let c = parse(&["--vault", "--scale", "3", "--aspect", "4:3", "--no-border", "--no-audio",
+                        "--sound-quality", "authentic"]).unwrap();
+        assert!(c.vault && !c.headless && !c.border && c.no_audio);
+        assert_eq!((c.part, c.block, c.scale), (None, None, 3));
+        assert_eq!(c.run_settings().ending, Ending::Hold, "the vault's runs are parts");
+
+        let c = headless("500", &["--positions", "p.csv"]).unwrap();
+        assert_eq!(c.positions, Some(PathBuf::from("p.csv")));
+        let c = headless("7", &["--part", "testcard"]).unwrap();
+        assert_eq!((c.dump_frames, c.frames), (Some(vec![7]), None));
     }
 
     #[test]
-    fn enhanced_sound_is_refused_for_a_run_with_no_music() {
-        // The test card and the vault's three effects have no player
-        // (`shell::music_for_part` is `None`), so a mixer setting would be accepted and do
-        // nothing. It is refused, as `--audio-dump` and `--vault` refuse it.
-        for part in ["testcard", "grid", "hard", "twist"] {
-            assert!(shell::music_for_part(part).is_none(), "{part} is silent");
-            let error = parse(&["--part", part, "--sound-quality", "enhanced"]).unwrap_err();
-            assert_eq!(
-                error,
-                format!("--sound-quality enhanced needs a run with music, and a run of {part} has none")
-            );
-            let error = parse(&["--sound-quality", "enhanced", "--headless", "--dump-dir", "d",
-                                "--frames", "1", "--part", part]).unwrap_err();
-            assert!(error.starts_with("--sound-quality enhanced needs"), "{part}: {error}");
+    fn dump_frames_is_a_set_in_the_order_written() {
+        let list = |raw: &str| headless(raw, &["--part", "testcard"]).map(|c| c.dump_frames);
+        assert_eq!(list("430,470,560,900"), Ok(Some(vec![430, 470, 560, 900])));
+        assert_eq!(list("5,5"), Ok(Some(vec![5])));
+        assert_eq!(list("900,430,900"), Ok(Some(vec![900, 430])));
+        for bad in ["430,,470", "", "430,x"] {
+            assert!(list(bad).is_err(), "{bad:?}");
         }
-        // The default is accepted everywhere: every part, every block, and the vault.
-        for (name, _) in parts::registry() {
-            assert!(parse(&["--part", name, "--sound-quality", "authentic"]).is_ok(), "{name}");
-            let music = shell::music_for_part(name).is_some();
-            assert_eq!(
-                parse(&["--part", name, "--sound-quality", "enhanced"]).is_ok(),
-                music,
-                "{name}: enhanced is accepted exactly when the part has music"
-            );
+    }
+
+    #[test]
+    fn loop_and_gravis_are_the_originals_looping() {
+        // `--loop` is `looping` 1 (`MENU.C:229-238`); `/gravis` is 2 and no setup
+        // (`START.C:89-93`), matched on its first seven characters in any case, winning over
+        // `--loop` in either order. Other `/` switches are ignored (`MAIN/U2.ASM:605-606`).
+        let cases: [(&[&str], char, Looping, bool); 10] = [
+            (&["--loop"], '1', Looping::On, true),
+            (&["--block", "5", "--loop"], '5', Looping::On, true),
+            (&["/gravis"], '1', Looping::NoEndScroller, false),
+            (&["/GRAVIS"], '1', Looping::NoEndScroller, false),
+            (&["/gravisultrasound"], '1', Looping::NoEndScroller, false),
+            (&["--loop", "/gravis"], '1', Looping::NoEndScroller, false),
+            (&["/Gravis", "--block", "5", "--loop"], '5', Looping::NoEndScroller, false),
+            (&["/gravi"], '1', Looping::Off, true),
+            (&["/nosound"], '1', Looping::Off, true),
+            (&["--block", "5", "/x"], '5', Looping::Off, true),
+        ];
+        for (args, block, looping, setup) in cases {
+            let c = parse(args).unwrap();
+            assert_eq!((c.block, c.looping, c.setup), (Some(block), looping, setup), "{args:?}");
+            assert_eq!(c.run_settings().looping, looping, "{args:?}");
         }
+    }
+
+    #[test]
+    fn the_settings_screen_shows_only_for_a_windowed_demo_run() {
+        for args in [&[][..], &["--block", "3"], &["--block", "U"], &["--loop"],
+                     &["--no-audio", "--aspect", "square"], &["--audio-dump", "a.wav"]] {
+            assert!(parse(args).unwrap().shows_setup(), "{args:?}");
+        }
+        for args in [&["--part", "glenz"][..], &["--vault"], &["--no-setup"],
+                     &["--no-setup", "--block", "2"], &["/gravis"], &["/GRAVIS", "--block", "2"],
+                     &["--headless", "--frames", "1", "--dump-dir", "d"]] {
+            assert!(!parse(args).unwrap().shows_setup(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn every_block_is_recognised_and_runnable_in_either_mode() {
         for (block, _) in shell::BLOCKS {
             let block = block.to_string();
+            assert!(parse(&["--block", &block]).is_ok(), "--block {block}");
             for quality in ["authentic", "enhanced"] {
-                assert!(
-                    parse(&["--block", &block, "--sound-quality", quality]).is_ok(),
-                    "--block {block} --sound-quality {quality}"
-                );
+                assert!(parse(&["--block", &block, "--sound-quality", quality]).is_ok());
             }
         }
-        assert!(parse(&["--vault", "--sound-quality", "authentic"]).is_ok());
-    }
-
-    #[test]
-    fn the_loop_flag_is_looping_on() {
-        // The setup menu's looping row (`MENU.C:229-238`) is `looping` 1, which
-        // `MAIN/U2.ASM:920-933` turns into a run that plays for ever.
-        let c = parse(&["--loop"]).unwrap();
-        assert_eq!(c.looping, Looping::On);
-        assert_eq!(c.block, Some('1'), "with no block it is still the demo");
-        assert_eq!(c.run_settings().looping, Looping::On);
-        assert_eq!(c.run_settings().ending, Ending::Exit);
-        assert!(c.setup, "--loop says nothing about the setup screen");
-        let c = parse(&["--block", "5", "--loop"]).unwrap();
-        assert_eq!((c.block, c.looping), (Some('5'), Looping::On));
-        assert_eq!(parse(&[]).unwrap().looping, Looping::Off);
-        assert_eq!(Cli::default().looping, Looping::Off);
-        // Looping is the demo's sequence: a part holds where it ends, and the vault
-        // starts parts.
-        assert!(parse(&["--part", "glenz", "--loop"]).is_err());
-        assert!(parse(&["--vault", "--loop"]).is_err());
-    }
-
-    #[test]
-    fn gravis_is_looping_two() {
-        // `START.C:89-93`: `if(!memicmp(argv[1],"/gravis",7)) { m_looping=2;
-        // m_soundcard=3; } else menu();` — no setup screen, and ENDSCRL skipped
-        // without looping (`U2.ASM:914-925`).
-        for spelling in ["/gravis", "/GRAVIS", "/Gravis", "/gravisultrasound"] {
-            let c = parse(&[spelling]).unwrap();
-            assert_eq!(c.looping, Looping::NoEndScroller, "{spelling}");
-            assert!(!c.setup, "{spelling}: the setup screen is skipped");
-            assert_eq!(c.block, Some('1'), "{spelling}: `checkcmdline` stops at the slash");
-            assert_eq!(c.run_settings().looping, Looping::NoEndScroller);
+        for rejected in ["0", "6", "7", "x", "12", ""] {
+            assert!(parse(&["--block", rejected]).is_err(), "{rejected:?}");
         }
-        assert!(parse(&[]).unwrap().setup, "a plain run asks its settings");
-        assert!(Cli::default().setup);
-        assert!(parse(&["--part", "glenz", "/gravis"]).is_err());
+        assert!(parse(&["--block", "7"]).unwrap_err().contains("unknown block"));
     }
 
     #[test]
-    fn gravis_wins_over_loop_in_either_order() {
-        // `START.C:89-94`: `/gravis` sets `m_looping=2` and skips `menu()`, and the menu
-        // is the only place `looping` 1 is chosen (`MENU.C:229-238`), so the setup's
-        // looping choice never meets `/gravis`. `--loop` is that choice, and the order the
-        // two are written in does not matter.
-        for args in [["--loop", "/gravis"], ["/gravis", "--loop"]] {
-            let c = parse(&args).unwrap();
-            assert_eq!(c.looping, Looping::NoEndScroller, "{args:?}");
-            assert!(!c.setup, "{args:?}: /gravis skips the setup screen");
-            assert_eq!(c.run_settings().looping, Looping::NoEndScroller, "{args:?}");
-        }
-        for args in [["--block", "5", "--loop", "/gravis"], ["/gravis", "--block", "5", "--loop"]]
-            .iter()
-            .map(|a| a.as_slice())
-        {
-            let c = parse(args).unwrap();
-            assert_eq!((c.block, c.looping), (Some('5'), Looping::NoEndScroller), "{args:?}");
+    fn enhanced_sound_is_accepted_exactly_for_a_run_with_music() {
+        for (name, _) in parts::registry() {
+            assert!(parse(&["--part", name, "--sound-quality", "authentic"]).is_ok(), "{name}");
+            let enhanced = parse(&["--part", name, "--sound-quality", "enhanced"]);
+            match shell::music_for_part(name) {
+                Some(_) => assert!(enhanced.is_ok(), "{name}"),
+                None => assert_eq!(
+                    enhanced.unwrap_err(),
+                    format!("--sound-quality enhanced needs a run with music, and a run of {name} has none")
+                ),
+            }
         }
     }
 
     #[test]
-    fn unknown_slash_switches_are_ignored() {
-        // `MAIN/U2.ASM:605-606`: `checkcmdline` returns at a `/` with `whattorun`
-        // left at its 7fh — a switch is never a block and never an error. Only
-        // `/gravis` (its first seven characters, any case, `START.C:89`) means
-        // anything.
-        for switch in ["/x", "/grav", "/gravi", "/?", "/nosound"] {
-            let c = parse(&[switch]).unwrap();
-            assert_eq!(c.block, Some('1'), "{switch}");
-            assert_eq!(c.looping, Looping::Off, "{switch}");
-            assert!(c.setup, "{switch}");
-        }
-        let c = parse(&["--block", "5", "/x"]).unwrap();
-        assert_eq!((c.block, c.looping), (Some('5'), Looping::Off));
-    }
-
-    #[test]
-    fn positions_names_a_file_for_a_headless_run() {
-        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "500",
-                          "--positions", "p.csv"]).unwrap();
-        assert_eq!(cli.positions, Some(PathBuf::from("p.csv")));
-        assert_eq!(parse(&[]).unwrap().positions, None, "--positions is opt-in");
-        assert!(parse(&["--headless", "--positions"]).is_err(), "it needs a file");
-        assert!(
-            parse(&["--headless", "--dump-dir", "d", "--run-seconds", "1", "--positions", "p"])
-                .unwrap_err()
-                .contains("--frames or --dump-frames"),
-            "a wall-clock run ticks in batches"
-        );
-    }
-
-    #[test]
-    fn positions_needs_a_headless_run() {
-        // The same rule as the dump flags: a window run that silently wrote nothing would
-        // look like a run that recorded its timeline.
-        assert_eq!(
-            parse(&["--positions", "p.csv"]).unwrap_err(),
-            "--positions needs --headless"
-        );
-        assert_eq!(
-            parse(&["--block", "1", "--positions", "p.csv"]).unwrap_err(),
-            "--positions needs --headless"
-        );
-        assert_eq!(
-            parse(&["--vault", "--positions", "p.csv"]).unwrap_err(),
-            VAULT_REFUSAL,
-            "the vault says why it cannot record first"
-        );
-    }
-
-    #[test]
-    fn headless_requires_a_dump_directory() {
-        assert!(parse(&["--headless", "--frames", "1"]).is_err());
-    }
-
-    #[test]
-    fn headless_requires_a_frame_budget_or_a_duration() {
-        assert!(parse(&["--headless", "--dump-dir", "/tmp/x"]).is_err());
-    }
-
-    #[test]
-    fn an_unknown_part_is_rejected() {
-        assert!(parse(&["--part", "nope"]).is_err());
-    }
-
-    #[test]
-    fn an_empty_part_name_is_reported_as_the_empty_name_it_is() {
-        // `--part "$A"` with `A` unset. The message has to point at that
-        // argument, not at the run's plan: they are different mistakes.
-        let message = parse(&["--part", ""]).unwrap_err();
-        assert!(message.starts_with("unknown part \"\""), "{message}");
-    }
-
-    #[test]
-    fn a_part_the_port_has_is_accepted_by_name() {
-        let cli = parse(&["--part", "glenz"]).unwrap();
-        assert_eq!(cli.part, Some("glenz"));
-        assert_eq!(cli.part_name(), "glenz");
-    }
-
-    #[test]
-    fn dump_frames_parses_a_sparse_list_and_refuses_a_bad_one() {
-        let cli = Cli::parse(
-            ["--headless", "--dump-dir", "d", "--dump-frames", "430,470,560,900"]
-                .map(String::from),
-        )
-        .unwrap();
-        assert_eq!(cli.dump_frames, Some(vec![430, 470, 560, 900]));
-        assert!(Cli::parse(
-            ["--headless", "--dump-dir", "d", "--dump-frames", "430,,470"].map(String::from)
-        )
-        .is_err());
-        assert!(Cli::parse(["--headless", "--dump-dir", "d", "--dump-frames", ""].map(String::from))
-            .is_err());
-        assert!(Cli::parse(
-            ["--headless", "--dump-dir", "d", "--dump-frames", "430,x"].map(String::from)
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn a_repeated_dump_index_is_dropped_and_the_order_is_kept() {
-        // `--part testcard`: the no-argument run is the demo now, which begins
-        // at 404, and index 5 is below it.
-        let cli = parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
-                          "--dump-frames", "5,5"]).unwrap();
-        assert_eq!(cli.dump_frames, Some(vec![5]));
-        // First occurrence wins, and the list is not reordered: the run walks
-        // its indices in its own order, so the list is a set, not a schedule.
-        let cli = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "900,430,900"]).unwrap();
-        assert_eq!(cli.dump_frames, Some(vec![900, 430]));
-    }
-
-    #[test]
-    fn dump_frames_is_a_way_to_bound_a_headless_run_on_its_own() {
-        // No --frames and no --run-seconds: the largest requested index is the
-        // end of the run. (Of a part numbered from zero: the no-argument run is
-        // the demo, which begins at 404.)
-        let cli = parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
-                          "--dump-frames", "7"]).unwrap();
-        assert!(cli.headless);
-        assert_eq!(cli.frames, None);
-    }
-
-    #[test]
-    fn frames_and_dump_frames_are_mutually_exclusive() {
-        assert!(parse(&["--headless", "--dump-dir", "d", "--frames", "2", "--dump-frames", "7"])
-            .is_err());
-        assert!(parse(&[
-            "--headless",
-            "--dump-dir",
-            "d",
-            "--run-seconds",
-            "1",
-            "--dump-frames",
-            "7"
-        ])
-        .is_err());
-    }
-
-    #[test]
-    fn dump_frames_needs_a_headless_run() {
-        assert!(parse(&["--dump-frames", "7"]).is_err());
-    }
-
-    #[test]
-    fn a_block_and_a_part_are_two_ways_to_say_what_runs() {
-        let message = parse(&[
-            "--headless",
-            "--dump-dir",
-            "d",
-            "--dump-frames",
-            "1",
-            "--block",
-            "2",
-            "--part",
-            "testcard",
-        ])
-        .unwrap_err();
-        // The contradiction, not the block's own state: `--part` and `--block`
-        // name two different runs, which is a different problem from either
-        // one's parts.
-        assert!(message.contains("not both"), "{message}");
-    }
-
-    #[test]
-    fn a_run_that_starts_at_zero_reaches_every_index_asked_of_it() {
-        // The refusal rule itself is `shell::first_unreachable`, tested there
-        // against an anchor. (`--part alku` carries one now, so a block or part
-        // run asking for an index below 404 is refused by `--block 5`'s case
-        // above.)
-        assert!(parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
-                        "--dump-frames", "0"]).is_ok());
-        assert!(parse(&["--headless", "--part", "testcard", "--dump-dir", "d",
-                        "--dump-frames", "0,9000"])
-            .is_ok());
-        // The no-argument run is `SECOND 1`, which begins at ALKU's 404: index 0
-        // is below it, and the same rule refuses it.
-        let message = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "0"]).unwrap_err();
+    fn a_dump_index_before_the_runs_start_is_refused() {
+        assert!(headless("0", &["--part", "testcard"]).is_ok());
+        assert!(headless("0,9000", &["--part", "testcard"]).is_ok());
+        let message = headless("0", &[]).unwrap_err();
         assert!(message.contains("begins at 404"), "{message}");
     }
 
     #[test]
-    fn a_block_is_one_of_the_originals_entry_points() {
-        // Every block the code accepts is *recognised* — whether the port can
-        // run it yet is a different answer, and one that changes as the parts
-        // land, so this asserts the recognition and nothing about the porting.
-        for block in ["1", "2", "3", "4", "5", "U", "u"] {
-            let args = ["--headless", "--dump-dir", "d", "--dump-frames", "1", "--block", block];
-            match parse(&args) {
-                Ok(cli) => assert!(cli.block.is_some(), "block {block} selected nothing"),
-                Err(message) => assert!(
-                    !message.contains("unknown block"),
-                    "block {block} was called unknown: {message}"
-                ),
-            }
-        }
-        for rejected in ["0", "6", "7", "x", "12", ""] {
-            assert!(
-                parse(&["--headless", "--dump-dir", "d", "--dump-frames", "1", "--block", rejected])
-                    .is_err(),
-                "block {rejected:?} was accepted"
-            );
-        }
-        let unknown = parse(&["--headless", "--dump-dir", "d", "--dump-frames", "1", "--block", "7"])
-            .unwrap_err();
-        assert!(unknown.contains("unknown block"), "{unknown}");
-    }
-
-    #[test]
-    fn a_block_is_a_run_the_window_drives_as_well_as_a_dump() {
-        // The window drives the same `Sequence` a headless run dumps, so a
-        // block is no longer refused outside `--headless`. Every block the
-        // demo accepts now starts at a part the port has: `SECOND 4` begins at
-        // U2E, which landed with the vector engine's second part.
-        let cli = parse(&["--block", "5"]).unwrap();
-        assert_eq!(cli.block, Some('5'));
-        assert!(!cli.headless, "the window is the default mode");
-        assert!(parse(&["--block", "2"]).is_ok());
-        assert!(parse(&["--block", "3"]).is_ok(), "MNTSCRL is ported");
-        assert!(parse(&["--block", "1"]).is_ok(), "ALKU is ported");
-
-        let cli = parse(&["--block", "4"]).unwrap();
-        assert_eq!(cli.block, Some('4'), "SECOND 4 begins at U2E, which is ported");
-        assert!(!cli.headless);
-    }
-
-    #[test]
-    fn the_square_pixel_aspect_is_accepted() {
-        assert_eq!(parse(&["--aspect", "square"]).unwrap().aspect, Aspect::SquarePixels);
-    }
-
-    const VAULT_REFUSAL: &str = "the vault menu needs a window; name a part with --part";
-
-    #[test]
-    fn the_vault_flag_is_parsed() {
-        let cli = parse(&["--vault"]).unwrap();
-        assert!(cli.vault);
-        assert!(!cli.headless, "the vault is a window surface");
-        assert_eq!(cli.part, None, "the menu chooses the part");
-        assert_eq!(cli.block, None);
-        assert!(!parse(&[]).unwrap().vault, "--vault is opt-in");
-    }
-
-    #[test]
-    fn a_vault_run_refuses_headless() {
-        assert_eq!(
-            parse(&["--vault", "--headless"]).unwrap_err(),
-            VAULT_REFUSAL
-        );
-        // Even with everything else a headless run would need: the reason is
-        // the mode, not the missing dump.
-        assert_eq!(
-            parse(&["--vault", "--headless", "--dump-dir", "d", "--frames", "1"]).unwrap_err(),
-            VAULT_REFUSAL
-        );
-    }
-
-    #[test]
-    fn a_vault_run_refuses_a_part_or_block() {
-        let cases: [&[&str]; 3] = [
-            &["--vault", "--part", "grid"],
-            &["--vault", "--block", "1"],
-            &["--vault", "--part", "grid", "--block", "1"],
+    fn contradictory_command_lines_are_refused() {
+        // (args, the refusal, or a fragment of it).
+        let refused: &[(&[&str], &str)] = &[
+            (&["--scale", "0"], "--scale is a magnification"),
+            (&["--sound-quality", "high"], "unknown sound quality"),
+            (&["--sound-quality"], "--sound-quality needs a value"),
+            (&["--aspect", "wide"], "unknown aspect"),
+            (&["--part", "nope"], "unknown part"),
+            (&["--part", ""], "unknown part \"\""),
+            (&["--block", "55"], "--block expects one character"),
+            (&["--frames", "x"], "--frames expects a number"),
+            (&["--what"], "unknown argument"),
+            (&["--part", "glenz", "--loop"], "--loop and /gravis are a block's run"),
+            (&["--part", "glenz", "/gravis"], "--loop and /gravis are a block's run"),
+            (&["--part", "testcard", "--audio-dump", "a.wav"], "--audio-dump needs a run with music"),
+            (&["--headless", "--dump-dir", "d", "--frames", "1", "--sound-quality", "enhanced",
+               "--part", "grid"], "--sound-quality enhanced needs"),
+            (&["--headless", "--dump-dir", "d", "--dump-frames", "1", "--block", "2", "--part",
+               "testcard"], "give --part or --block, not both"),
+            (&["--dump-frames", "7"], "need --headless"),
+            (&["--frames", "7"], "need --headless"),
+            (&["--positions", "p.csv"], "--positions needs --headless"),
+            (&["--block", "1", "--positions", "p.csv"], "--positions needs --headless"),
+            (&["--headless", "--frames", "1"], "--headless needs --dump-dir"),
+            (&["--headless", "--dump-dir", "d"], "--headless needs --frames"),
+            (&["--headless", "--dump-dir", "d", "--frames", "2", "--dump-frames", "7"],
+             "give one of"),
+            (&["--headless", "--dump-dir", "d", "--run-seconds", "1", "--dump-frames", "7"],
+             "give one of"),
+            (&["--headless", "--dump-dir", "d", "--frames", "0"], "--frames must be at least 1"),
+            (&["--headless", "--dump-dir", "d", "--run-seconds", "-1"], "--run-seconds must be"),
+            (&["--headless", "--dump-dir", "d", "--run-seconds", "1", "--positions", "p"],
+             "bound the run with --frames or --dump-frames"),
+            (&["--vault", "--loop"], "the vault's parts do not loop"),
+            (&["--vault", "--sound-quality", "enhanced"], "the vault's parts are silent"),
+            (&["--vault", "--headless"], VAULT_REFUSAL),
+            (&["--vault", "--headless", "--dump-dir", "d", "--frames", "1"], VAULT_REFUSAL),
+            (&["--vault", "--part", "grid"], VAULT_REFUSAL),
+            (&["--vault", "--block", "1"], VAULT_REFUSAL),
+            (&["--vault", "--dump-dir", "d"], VAULT_REFUSAL),
+            (&["--vault", "--dump-frames", "1"], VAULT_REFUSAL),
+            (&["--vault", "--frames", "1"], VAULT_REFUSAL),
+            (&["--vault", "--run-seconds", "1"], VAULT_REFUSAL),
+            (&["--vault", "--audio-dump", "music.wav"], VAULT_REFUSAL),
+            (&["--vault", "--positions", "p.csv"], VAULT_REFUSAL),
         ];
-        for args in cases {
-            assert_eq!(parse(args).unwrap_err(), VAULT_REFUSAL, "{args:?}");
+        for (args, expected) in refused {
+            let message = parse(args).expect_err(&format!("{args:?} was accepted"));
+            assert!(message.contains(expected), "{args:?}: {message}");
         }
-    }
-
-    #[test]
-    fn a_vault_run_refuses_a_dump_or_audio_flag() {
-        let flags: [&[&str]; 5] = [
-            &["--dump-dir", "d"],
-            &["--dump-frames", "1"],
-            &["--frames", "1"],
-            &["--run-seconds", "1"],
-            &["--audio-dump", "music.wav"],
-        ];
-        for flag in flags {
-            let mut args = vec!["--vault"];
-            args.extend_from_slice(flag);
-            assert_eq!(parse(&args).unwrap_err(), VAULT_REFUSAL, "{args:?}");
-        }
-    }
-
-    #[test]
-    fn a_vault_run_accepts_the_presentation_flags() {
-        let cli = parse(&[
-            "--vault",
-            "--scale",
-            "2",
-            "--aspect",
-            "square",
-            "--no-border",
-            "--no-audio",
-        ])
-        .unwrap();
-        assert!(cli.vault);
-        assert_eq!(cli.scale, 2);
-        assert_eq!(cli.aspect, Aspect::SquarePixels);
-        assert!(!cli.border);
-        assert!(cli.no_audio);
-    }
-
-    #[test]
-    fn the_screen_shows_only_for_a_windowed_demo_run() {
-        // The demo's own run, in a window: no argument, a named block, a looping run.
-        for args in [&[][..], &["--block", "3"], &["--block", "U"], &["--loop"],
-                     &["--no-audio", "--aspect", "square"], &["--audio-dump", "a.wav"]] {
-            assert!(parse(args).unwrap().shows_setup(), "{args:?} opens the settings screen");
-        }
-        // Everything else starts as it always did.
-        assert!(!parse(&["--part", "glenz"]).unwrap().shows_setup(), "--part");
-        assert!(!parse(&["--vault"]).unwrap().shows_setup(), "--vault");
-        assert!(!parse(&["--no-setup"]).unwrap().shows_setup(), "--no-setup");
-        assert!(!parse(&["--no-setup", "--block", "2"]).unwrap().shows_setup());
-        assert!(!parse(&["/gravis"]).unwrap().shows_setup(), "/gravis skips it (START.C:89)");
-        assert!(!parse(&["/GRAVIS", "--block", "2"]).unwrap().shows_setup());
-        assert!(
-            !parse(&["--headless", "--frames", "1", "--dump-dir", "d"]).unwrap().shows_setup(),
-            "a headless run opens no window"
+        // The exact messages other tests and users see.
+        assert_eq!(parse(&["--vault", "--part", "grid"]).unwrap_err(), VAULT_REFUSAL);
+        assert_eq!(parse(&["--positions", "p.csv"]).unwrap_err(), "--positions needs --headless");
+        assert_eq!(
+            parse(&["--part", "testcard", "--audio-dump", "a.wav"]).unwrap_err(),
+            "--audio-dump needs a run with music, and a run of testcard has none"
         );
-        // `--no-setup` is a flag and changes nothing else.
-        let plain = parse(&[]).unwrap();
-        let skipped = parse(&["--no-setup"]).unwrap();
-        assert!(plain.setup && !skipped.setup);
-        assert_eq!(skipped.block, plain.block);
-        assert_eq!(skipped.looping, plain.looping);
     }
 }

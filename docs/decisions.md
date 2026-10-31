@@ -904,7 +904,7 @@ the error line), and never for `--part`, `--vault` or `--headless`. `endscreen.r
 Unicode; on a terminal (`IsTerminal`) each attribute change is an SGR sequence and every line ends
 `ESC[0m`.
 
-**Pinned by** `a_demo_run_fades_then_blanks_then_ends`, `a_run_with_no_arguments_is_the_demo`,
+**Pinned by** `a_demo_run_fades_then_blanks_then_ends`, `a_run_with_no_arguments_is_the_demo_in_a_window`,
 `escape_during_the_exit_stage_closes_at_once`, `the_end_screen_is_the_shipped_box` and
 `the_end_screen_is_printed_after_a_windowed_demo_run_only`.
 
@@ -947,7 +947,7 @@ flag. A looping run is left with the window's close button, and the end box is p
 bar names `pass N` from pass 2.
 
 **Pinned by** `tests/loop.rs`'s `the_loop_seam_is_the_originals` and
-`looping_leaves_pass_one_alone`, `cli::tests::gravis_wins_over_loop_in_either_order`, and
+`looping_leaves_pass_one_alone`, `cli::tests::loop_and_gravis_are_the_originals_looping`, and
 `cargo xtask rediff`'s `loop/` entries.
 
 ## D43 — An enhanced sound option: the port's own 48 kHz renderer, off by default
@@ -971,7 +971,7 @@ moves the published `(order, row)`, so pictures are identical under either quali
 **Pinned by** `tests/mix.rs`'s `the_authentic_stream_is_pinned_byte_for_byte`,
 `enhanced_keeps_the_authentic_tick_schedule`, `enhanced_emits_twelve_frames_for_every_five`,
 `a_restart_keeps_the_runs_sound_quality` and
-`cli::tests::enhanced_sound_is_refused_for_a_run_with_no_music`; pitch and level are printed by
+`cli::tests::enhanced_sound_is_accepted_exactly_for_a_run_with_music`; pitch and level are printed by
 `cargo test --release -p sr-audio --test enhanced -- --nocapture`.
 
 ## D44 — The settings screen: the original's setup, asked every time, nothing kept
