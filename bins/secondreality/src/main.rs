@@ -6,6 +6,7 @@
 //! demo's own order, or one part — so what a window plays and what a dump holds
 //! are the same run.
 
+mod assets;
 mod audio;
 mod cli;
 mod endscreen;

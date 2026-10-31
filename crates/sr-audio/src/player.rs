@@ -242,7 +242,7 @@ pub struct Player {
 
 impl Player {
     /// A player for `module`, as the module initialiser leaves one: the header's speed and
-    /// tempo (the shell's patch is [`crate::Song::load`]'s), and the ring primed with ten zero
+    /// tempo (the shell's patch is [`crate::Song::decode`]'s), and the ring primed with ten zero
     /// positions, which the traces show before the first tick.
     pub fn new(module: Module, options: PlayerOptions) -> Player {
         let speed = module.initial_speed();

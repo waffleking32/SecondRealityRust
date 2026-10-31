@@ -13,7 +13,6 @@ pub mod draw;
 pub mod math;
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use sr_engine::copper::COPPER_SLOTS;
@@ -243,10 +242,10 @@ fn stream_suffix(scene: u16) -> String {
     format!("{tens}{ones}")
 }
 
-/// Read a file below `dir`, naming it in the error.
-fn read_file(dir: &Path, file: &str) -> Result<(PathBuf, Vec<u8>), String> {
-    let path = dir.join(file);
-    let bytes = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+/// The embedded `file` of the scene directory, with its path for errors.
+fn read_file(file: &str) -> Result<(String, &'static [u8]), String> {
+    let path = format!("{SCENE_DIR}/{file}");
+    let bytes = crate::assets::read(&path)?;
     Ok((path, bytes))
 }
 
@@ -258,10 +257,8 @@ fn read_file(dir: &Path, file: &str) -> Result<(PathBuf, Vec<u8>), String> {
 /// fresh matrices; `<name>.0AA`; and the first scene stream it names,
 /// decoded with `conum` objects (the camera included).
 pub fn load_scene(name: &str) -> Result<Scene, String> {
-    let root = crate::parts::asset(SCENE_DIR);
-    let dir = Path::new(&root);
-    let (path, bytes) = read_file(dir, &format!("{name}.00M"))?;
-    let master = read_master(&bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    let (path, bytes) = read_file(&format!("{name}.00M"))?;
+    let master = read_master(bytes).map_err(|error| format!("{path}: {error}"))?;
 
     // `co[0]` is the camera and never has geometry (`U2A.C:202-204`).
     let mut instances = Vec::with_capacity(master.objects.len() + 1);
@@ -285,9 +282,9 @@ pub fn load_scene(name: &str) -> Result<Scene, String> {
         let object = match shared {
             Some(object) => object,
             None => {
-                let (path, bytes) = read_file(dir, &format!("{name}.{number:03}"))?;
+                let (path, bytes) = read_file(&format!("{name}.{number:03}"))?;
                 Rc::new(
-                    read_object(&bytes).map_err(|error| format!("{}: {error}", path.display()))?,
+                    read_object(bytes).map_err(|error| format!("{path}: {error}"))?,
                 )
             }
         };
@@ -300,15 +297,15 @@ pub fn load_scene(name: &str) -> Result<Scene, String> {
         });
     }
 
-    let (path, bytes) = read_file(dir, &format!("{name}.0AA"))?;
-    let scenes = read_scene_list(&bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    let (path, bytes) = read_file(&format!("{name}.0AA"))?;
+    let scenes = read_scene_list(bytes).map_err(|error| format!("{path}: {error}"))?;
     let scene_number = *scenes
         .scenes
         .first()
-        .ok_or_else(|| format!("{}: the scene list is empty", path.display()))?;
-    let (path, bytes) = read_file(dir, &format!("{name}.0{}", stream_suffix(scene_number)))?;
-    let animation = read_animation(&bytes, instances.len())
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+        .ok_or_else(|| format!("{path}: the scene list is empty"))?;
+    let (path, bytes) = read_file(&format!("{name}.0{}", stream_suffix(scene_number)))?;
+    let animation = read_animation(bytes, instances.len())
+        .map_err(|error| format!("{path}: {error}"))?;
 
     Ok(Scene {
         master,

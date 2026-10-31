@@ -13,7 +13,6 @@
 //! a looping run (D42) is left by the close button.
 
 use std::error::Error;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,7 +77,7 @@ pub fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 /// only after Enter, because Sound and Sound quality decide the card. ESC and the close
 /// button leave without a run.
 fn setup_run(cli: &Cli) -> Result<(), Box<dyn Error>> {
-    let font = menu::font(Path::new(""))?;
+    let font = menu::font()?;
     let sdl = sdl2::init()?;
     let initial = Setup::new(Settings::from_cli(cli));
     let mut frame = IndexedFrame::new(settings::LAYOUT.width, settings::LAYOUT.height);
@@ -145,7 +144,7 @@ fn setup_loop(
 fn vault_run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let opts = cli.present_options();
     let sdl = sdl2::init()?;
-    let font = menu::font(Path::new(""))?;
+    let font = menu::font()?;
     let mut menu = Menu::default();
     let mut frame = IndexedFrame::new(vault::LAYOUT.width, vault::LAYOUT.height);
     menu.draw(&font, &mut frame);

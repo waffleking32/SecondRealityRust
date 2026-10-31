@@ -42,7 +42,7 @@ use math::{clip_y, matrix_yxz, project, rotate, Matrix, PVert, INIT_320X200};
 use poly::{build, ColourState, DemoMode, EPOLYS, EPOLYSB};
 use span::Compositor;
 use crate::parts::sin1024::SIN1024;
-use crate::parts::{asset, load_image, mode_view};
+use crate::parts::{load_image, mode_view};
 
 /// The part's name: what `--part` accepts and the registry lists.
 const NAME: &str = "glenz";
@@ -756,12 +756,11 @@ impl Part for Glenz {
             self.vram[dst..dst + width].copy_from_slice(&ctx.surface.pixels()[src..src + width]);
         }
 
-        let path = asset(PICTURE);
         let image = load_image(NAME, PICTURE)?;
         if (image.width(), image.height()) != (VIEW_WIDTH, VIEW_HEIGHT_200) {
             return Err(PartError::new(
                 NAME,
-                format!("{path}: {}x{}, expected 320x200", image.width(), image.height()),
+                format!("{PICTURE}: {}x{}, expected 320x200", image.width(), image.height()),
             ));
         }
         self.fc.copy_from_slice(image.pixels());

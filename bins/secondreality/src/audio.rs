@@ -111,28 +111,19 @@ impl Music for PlayerMusic {
     }
 }
 
-/// The real [`MusicSource`](crate::shell::music::MusicSource): the module read from
-/// `assets/` under the working directory ([`sr_audio::Song::load`]), with the run's player
-/// options (D43).
+/// The real [`MusicSource`](crate::shell::music::MusicSource): the embedded module
+/// ([`crate::assets`], [`sr_audio::Song::decode`]), with the run's player options (D43).
 pub(crate) fn load_player(id: ModuleId, options: PlayerOptions) -> Result<Shared, String> {
-    player_at(id, Path::new(""), options)
-}
-
-/// [`load_player`] with `assets/` under `root`.
-pub(crate) fn player_at(
-    id: ModuleId,
-    root: &Path,
-    options: PlayerOptions,
-) -> Result<Shared, String> {
-    let module = id.song().load(root)?;
+    let song = id.song();
+    let bytes = crate::assets::read(song.file)?;
+    let module = song.decode(bytes).map_err(|error| format!("{}: {error}", song.file))?;
     Ok(Arc::new(Mutex::new(Player::new(module, options))))
 }
 
-/// The [`MusicSource`](crate::shell::music::MusicSource) unit tests play with: they run in
-/// the crate's directory.
+/// The [`MusicSource`](crate::shell::music::MusicSource) unit tests play with: the run's own.
 #[cfg(test)]
 pub(crate) fn test_music(id: ModuleId, options: PlayerOptions) -> Result<Shared, String> {
-    player_at(id, Path::new("../.."), options)
+    load_player(id, options)
 }
 
 /// [`test_music`] with the default (authentic) options: the player a part's own test reads.

@@ -38,7 +38,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024;
-use crate::parts::{asset, mode_view, read_asset};
+use crate::parts::{mode_view, read_asset};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "3dsinfld";
@@ -383,7 +383,7 @@ impl Coman {
                     NAME,
                     format!(
                         "{} is {} bytes; the linked table is {WAVE_BYTES}",
-                        asset(path),
+                        path,
                         bytes.len()
                     ),
                 ));

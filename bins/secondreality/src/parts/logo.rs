@@ -7,7 +7,7 @@
 use sr_engine::part::{PartCtx, PartError};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image};
+use crate::parts::load_image;
 
 /// The picture's geometry, and the screen's: 320×400 Mode X (`BEG.C:47-53`,
 /// `END.C:75-80` clear CRTC 9's double-scan bit and its low five bits).
@@ -26,7 +26,7 @@ pub fn load_picture(part: &'static str, rel: &str) -> Result<(Vec<u8>, Palette),
             format!(
                 "{} is {width}x{height}; this part's screen is \
                  {PICTURE_WIDTH}x{PICTURE_HEIGHT}",
-                asset(rel)
+                rel
             ),
         ));
     }

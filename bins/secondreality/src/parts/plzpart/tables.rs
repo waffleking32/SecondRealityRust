@@ -6,7 +6,6 @@
 use sr_engine::part::PartError;
 
 use super::NAME;
-use crate::parts::asset;
 
 /// `ASMYT.ASM:12-24`: `psini` is `db 16384 dup` — 16,384 bytes.
 const PSINI_LEN: usize = 16_384;
@@ -78,19 +77,20 @@ const TABLE_DIR: &str = "assets/PLZPART";
 
 impl Tables {
     pub(super) fn load() -> Result<Tables, PartError> {
-        let read = |name: &str| -> Result<String, PartError> {
-            let path = asset(&format!("{TABLE_DIR}/{name}"));
-            std::fs::read_to_string(&path)
+        let read = |name: &str| -> Result<&'static str, PartError> {
+            let path = format!("{TABLE_DIR}/{name}");
+            let bytes = crate::assets::read(&path).map_err(|error| PartError::new(NAME, error))?;
+            std::str::from_utf8(bytes)
                 .map_err(|error| PartError::new(NAME, format!("{path}: {error}")))
         };
         let parse = |name: &str, text: &str| -> Result<Vec<i32>, PartError> {
             parse_inc(text).map_err(|error| PartError::new(NAME, format!("{name}: {error}")))
         };
-        let psini_values = parse("PSINI.INC", &read("PSINI.INC")?)?;
-        let lsini4_values = parse("LSINI4.INC", &read("LSINI4.INC")?)?;
-        let lsini16_values = parse("LSINI16.INC", &read("LSINI16.INC")?)?;
-        let ptau_values = parse("PTAU.INC", &read("PTAU.INC")?)?;
-        let spline_values = parse("SPLINE.INC", &read("SPLINE.INC")?)?;
+        let psini_values = parse("PSINI.INC", read("PSINI.INC")?)?;
+        let lsini4_values = parse("LSINI4.INC", read("LSINI4.INC")?)?;
+        let lsini16_values = parse("LSINI16.INC", read("LSINI16.INC")?)?;
+        let ptau_values = parse("PTAU.INC", read("PTAU.INC")?)?;
+        let spline_values = parse("SPLINE.INC", read("SPLINE.INC")?)?;
         let mut tables = Tables {
             psini: psini_values.iter().map(|&v| v as u8).collect(),
             lsini4: lsini4_values.iter().map(|&v| v as i16).collect(),

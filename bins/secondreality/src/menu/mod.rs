@@ -15,10 +15,7 @@
 pub mod settings;
 pub mod vault;
 
-use std::path::Path;
-
 use sr_assets::font::Font;
-use sr_assets::load_path;
 use sr_engine::{IndexedFrame, Palette};
 
 /// `fonaw[32]=16` in the source's routines; the menus use ten columns for a space.
@@ -42,7 +39,7 @@ const FONA_ORDER: &str =
 /// no uppercase `Y`, so a `Y` is the `y` cell raised onto the cap line.
 const Y_DROP: i32 = 4;
 
-/// The font strip, under `root` (the working directory for a run).
+/// The font strip, embedded ([`crate::assets`]).
 const FONT: &str = "assets/ALKU/FONA.UH";
 
 // The palette groups: entry `base + value - 1` is ink level `value` (1..=3) of that role.
@@ -64,16 +61,15 @@ pub enum Key {
     Other,
 }
 
-/// The menus' font strip, read under `root` as `ALKU/MAIN.C`'s text routine reads it.
-pub fn font(root: &Path) -> Result<Font, String> {
-    let image = load_path(&root.join(FONT)).map_err(|error| format!("{FONT}: {error}"))?;
-    Ok(Font::from_image(image))
+/// The menus' font strip, read as `ALKU/MAIN.C`'s text routine reads it.
+pub fn font() -> Result<Font, String> {
+    Ok(Font::from_image(crate::assets::image(FONT)?))
 }
 
-/// The font as unit tests find it: they run in the binary's directory.
+/// The font unit tests draw with: the run's own.
 #[cfg(test)]
 pub fn test_font() -> Font {
-    font(Path::new("../..")).expect("the font strip")
+    font().expect("the font strip")
 }
 
 /// The menus' colours, six-bit: black, then white, grey, amber and dim blue groups.

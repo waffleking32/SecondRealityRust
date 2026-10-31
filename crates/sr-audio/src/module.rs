@@ -449,7 +449,7 @@ impl Module {
     }
 
     /// Overwrite the initial-tempo byte, as `MAIN/STARTMUS.C:257` does for MUSIC0 only
-    /// ([`Song::load`] applies it).
+    /// ([`Song::decode`] applies it).
     pub fn apply_tempo_patch(&mut self, tempo: u8) {
         self.initial_tempo = tempo;
     }
@@ -627,7 +627,7 @@ impl std::error::Error for ModuleError {}
 pub struct Song {
     /// `MUSIC0`/`MUSIC1`, as the status line and the manifests spell it.
     pub name: &'static str,
-    /// The module's file, relative to the directory a run reads its media from.
+    /// The module's file, relative to the repository root.
     pub file: &'static str,
     /// The tempo byte the shell patches into the header, if any.
     pub tempo_patch: Option<u8>,
@@ -639,17 +639,23 @@ impl Song {
         SONGS.iter().find(|song| song.name == name)
     }
 
-    /// Read [`Song::file`] under `root`, decode it and apply the shell's tempo patch: the
-    /// module as the player receives it. Errors name the path.
-    pub fn load(&self, root: &std::path::Path) -> Result<Module, String> {
-        let path = root.join(self.file);
-        let error = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
-        let bytes = std::fs::read(&path).map_err(|e| error(&e))?;
-        let mut module = Module::load(&bytes).map_err(|e| error(&e))?;
+    /// Decode `bytes`, this song's file, and apply the shell's tempo patch: the module as
+    /// the player receives it.
+    pub fn decode(&self, bytes: &[u8]) -> Result<Module, ModuleError> {
+        let mut module = Module::load(bytes)?;
         if let Some(tempo) = self.tempo_patch {
             module.apply_tempo_patch(tempo);
         }
         Ok(module)
+    }
+
+    /// [`Song::decode`] on [`Song::file`] read under `root`, the repository root. Errors
+    /// name the path.
+    pub fn load(&self, root: &std::path::Path) -> Result<Module, String> {
+        let path = root.join(self.file);
+        let error = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+        let bytes = std::fs::read(&path).map_err(|e| error(&e))?;
+        self.decode(&bytes).map_err(|e| error(&e))
     }
 }
 

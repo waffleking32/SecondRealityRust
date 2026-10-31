@@ -34,7 +34,7 @@ use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image, mode_view, read_asset};
+use crate::parts::{load_image, mode_view, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "rayscrl";
@@ -357,7 +357,7 @@ impl Part for Rayscrl {
 
         let lists = POS_PATHS
             .iter()
-            .map(|rel| pos_list(&asset(rel), &read_asset(NAME, rel)?))
+            .map(|rel| pos_list(rel, &read_asset(NAME, rel)?))
             .collect::<Result<Vec<_>, _>>()?;
 
         *self = Rayscrl {
@@ -666,7 +666,7 @@ mod tests {
         for (path, list) in POS_PATHS.iter().zip(&part.lists) {
             assert_eq!(list.columns.len(), FBUF_COLUMNS, "{path}");
             per_list.push((
-                std::fs::metadata(asset(path)).unwrap().len(),
+                crate::assets::read(path).unwrap().len(),
                 list.columns.iter().map(Vec::len).sum::<usize>(),
             ));
             max_offset = max_offset.max(list.columns.iter().flatten().copied().max().unwrap());

@@ -138,9 +138,9 @@ pub fn follows(cli: &Cli) -> bool {
 /// (D41): coloured on a terminal, plain when piped. A missing file is said; the run's own
 /// outcome is what the exit code reports.
 pub fn print() {
-    match std::fs::read(END_SCREEN) {
-        Ok(screen) => print!("{}", render(&screen, std::io::stdout().is_terminal())),
-        Err(error) => eprintln!("secondreality: {END_SCREEN}: {error}"),
+    match crate::assets::read(END_SCREEN) {
+        Ok(screen) => print!("{}", render(screen, std::io::stdout().is_terminal())),
+        Err(error) => eprintln!("secondreality: {error}"),
     }
 }
 
@@ -163,10 +163,9 @@ mod tests {
         }
     }
 
-    /// The shipped end screen, read where a unit test finds the repository's assets.
+    /// The shipped end screen, as [`print`] finds it embedded.
     fn shipped() -> Vec<u8> {
-        let path = std::path::Path::new("../..").join(END_SCREEN);
-        std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        crate::assets::read(END_SCREEN).unwrap().to_vec()
     }
 
     #[test]

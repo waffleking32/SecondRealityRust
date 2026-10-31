@@ -20,7 +20,7 @@
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image, mode_view};
+use crate::parts::{load_image, mode_view};
 
 /// The registry name (`parts::registry`).
 const GRID_NAME: &str = "grid";
@@ -126,7 +126,7 @@ fn load_eye() -> Result<Eye, PartError> {
     if image.width() != SCREEN_WIDTH as u16 || image.height() != SCREEN_HEIGHT as u16 {
         return Err(PartError::new(GRID_NAME, format!(
             "{}: the eye is {}×{}, not 320×200",
-            asset(EYE_PATH),
+            EYE_PATH,
             image.width(),
             image.height()
         )));

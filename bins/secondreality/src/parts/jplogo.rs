@@ -35,7 +35,7 @@ use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
 use crate::parts::sin1024::SIN1024 as COMMON_SIN1024;
-use crate::parts::{asset, load_image, mode_view};
+use crate::parts::{load_image, mode_view};
 
 /// The part's registry name: what `--part` accepts.
 const NAME: &str = "jplogo";
@@ -361,7 +361,7 @@ impl Part for Jplogo {
                 NAME,
                 format!(
                     "{} is {}x{}; the picture's rows are {PICTURE_WIDTH}x{PICTURE_HEIGHT}",
-                    asset(PICTURE_PATH),
+                    PICTURE_PATH,
                     image.width(),
                     image.height()
                 ),

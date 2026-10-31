@@ -34,7 +34,7 @@ use sr_assets::poslist::PosList;
 use sr_engine::part::{Part, PartCtx, PartError, PartStatus};
 use sr_engine::Palette;
 
-use crate::parts::{asset, load_image, mode_view, read_asset};
+use crate::parts::{load_image, mode_view, read_asset};
 
 /// The part's name: what `--part` accepts and what the registry lists.
 const NAME: &str = "mntscrl";
@@ -432,7 +432,7 @@ impl Part for Mntscrl {
         self.lists = Vec::with_capacity(3);
         for rel in POS_PATHS {
             let bytes = read_asset(NAME, rel)?;
-            self.lists.push(pos_list(&asset(rel), &bytes)?);
+            self.lists.push(pos_list(rel, &bytes)?);
         }
 
         self.font = vec![0; FONT_LEN + 1];
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(o2.len(), 21_258);
         for (path, length) in POS_PATHS.iter().zip([25_088usize, 25_064, 25_114]) {
             assert_eq!(
-                std::fs::metadata(asset(path)).unwrap().len() as usize,
+                crate::assets::read(path).unwrap().len(),
                 length,
                 "{path}"
             );

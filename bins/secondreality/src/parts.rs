@@ -31,22 +31,10 @@ pub mod visu;
 #[cfg(test)]
 pub(crate) mod test_rig;
 
-use std::path::Path;
-
-use sr_assets::{load_path, Image};
+use sr_assets::Image;
 use sr_engine::part::{Part, PartError};
 use sr_engine::testcard::TestCard;
 use sr_engine::View;
-
-/// Where a part finds `rel`, a path under the repository root. A run reads it
-/// relative to the working directory, the repository root (`README.md`); a
-/// unit test's working directory is the crate's, two levels below it.
-pub(crate) fn asset(rel: &str) -> String {
-    #[cfg(test)]
-    return test_rig::repo(rel);
-    #[cfg(not(test))]
-    rel.to_owned()
-}
 
 /// The CRTC state a mode set leaves: `width`×`height` from origin 0, no pan,
 /// split or double scan, rows `line` pixels apart (`None`: the surface's own
@@ -55,16 +43,14 @@ pub(crate) fn mode_view(width: u16, height: u16, line: Option<u16>, border: Opti
     View { y_line_offset: line, border, ..View::new(width, height) }
 }
 
-/// The bytes of [`asset`]`(rel)`, or `part`'s error naming the path.
+/// The bytes of the embedded asset `rel` ([`crate::assets`]), or `part`'s error naming it.
 pub(crate) fn read_asset(part: &'static str, rel: &str) -> Result<Vec<u8>, PartError> {
-    let path = asset(rel);
-    std::fs::read(&path).map_err(|error| PartError::new(part, format!("{path}: {error}")))
+    crate::assets::read(rel).map(<[u8]>::to_vec).map_err(|error| PartError::new(part, error))
 }
 
-/// [`load_path`] on [`asset`]`(rel)`, or `part`'s error naming the path.
+/// The picture the embedded asset `rel` holds, or `part`'s error naming it.
 pub(crate) fn load_image(part: &'static str, rel: &str) -> Result<Image, PartError> {
-    let path = asset(rel);
-    load_path(Path::new(&path)).map_err(|error| PartError::new(part, format!("{path}: {error}")))
+    crate::assets::image(rel).map_err(|error| PartError::new(part, error))
 }
 
 /// One registry row: a part's name and the constructor that builds it.
