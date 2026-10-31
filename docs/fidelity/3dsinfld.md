@@ -135,7 +135,7 @@ indexed read of the `0x80` offset is racy, so no `.idx` is filed (`reference-ind
 | 16800 | 1772, 1773 | 15028 | 0 | exact |
 
 The counts are the `3dsinfld` rows of `xtask/src/rediff/table.rs` (first tick of each pair).
-Each keyframe is drawn on two consecutive ticks, so `tests/coman.rs` asserts the second tick is the
+Each keyframe is drawn on two consecutive ticks, so `tests/parts.rs` asserts the second tick is the
 same picture and the tick before and the tick two after differ: the reference's two-frame step
 (`reference-indices.md` §16.3), D19's support made from the rendered side.
 
@@ -160,7 +160,7 @@ The run's manifest says `index_origin: "part"`, `anchor: null`
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::coman
-cargo test -p secondreality --test coman
+cargo test -p secondreality --test parts coman::
 cargo xtask rediff --only 3dsinfld
 ```
 

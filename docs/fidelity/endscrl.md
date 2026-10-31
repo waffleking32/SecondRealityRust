@@ -144,7 +144,7 @@ The tick whose display puts the text's first line on frame 9100's own rows is th
 (and 184, its pair), and there the whole frame is 0
 (`the_references_own_header_pins_the_chains_offset`): the release's scroller begins at **8917**.
 The port's chain hands the part its tick 0 at **8835**, with CRED's screen at 8834 and the geometry
-change at 8837 (`tests/endscrl.rs`,
+change at 8837 (`tests/blocks.rs`,
 `the_chain_hands_the_scroller_its_tick_zero_at_the_index_the_note_records`). The 82 frames (41 ring
 lines) are CRED's span in block 5, inside CRED's measured bracket of 6 to 105 frames early
 (`cred.md` §7). The reference's start lies in **[8841, 8938]** (the CRED sweep shows 8840 still CRED's
@@ -160,7 +160,7 @@ and refuses 8940 as 640×400), and 8917 is inside it. The full run's offset is 8
 
 ```bash
 cargo xtask rediff --only endscrl --only fullrun/13-endscrl
-cargo test --release -p secondreality --test endscrl
+cargo test --release -p secondreality --test blocks
 cargo test --release -p secondreality --bin secondreality parts::endscrl   # includes the release-only run
 ```
 

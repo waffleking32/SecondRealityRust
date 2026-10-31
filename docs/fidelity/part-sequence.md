@@ -397,7 +397,7 @@ frame). A part's own tick relates to that numbering in one of two ways.
 mapped part is part-numbered too: `--block 3` numbers from MNTSCRL's tick 0, which is boot
 419, so chain tick `t` is boot `419 + t`. Tests:
 `every_part_of_the_demo_has_its_measured_anchor_or_none` (shell unit test), `a_dump_manifest_says_which_numbering_its_indices_are_in` and
-`a_block_three_run_starts_at_mntscrl_with_its_own_numbering` (`tests/shell.rs`).
+`a_block_three_run_starts_at_mntscrl_with_its_own_numbering` (`tests/blocks.rs`).
 
 ### 10.2 The music start, and the entry pre-roll
 
@@ -436,7 +436,7 @@ unit tests (`a_mid_chain_start_does_not_pre_roll_the_music` in MNTSCRL, LNS&ZOOM
 and RAYSCRL; PAM's `a_mid_chain_start_with_the_gate_open_starts_the_counter_at_zero`), and
 the block-3 chain test with the real player,
 `a_block_three_run_is_the_whole_chain_and_its_mid_chain_entries_do_not_pre_roll`
-(`tests/shell.rs`).
+(`tests/blocks.rs`).
 
 ### 10.3 The block seams
 

@@ -4,7 +4,7 @@
 and `NEW.ASM`, with the zoom-and-bounce opening from `ZOOMER.C`. **Port.**
 `bins/secondreality/src/parts/glenz/` (`"glenz"`): `mod.rs` (the driver, the buffers, the tick
 model, the palette, the exit), `math.rs`, `tables.rs`, `poly.rs`, `span.rs` and `intro.rs`; their
-module docs hold the mechanism. Integration test `bins/secondreality/tests/glenz.rs`. **Run.** In
+module docs hold the mechanism. Integration tests `bins/secondreality/tests/blocks.rs` (`glenz::`) and `tests/parts.rs`. **Run.** In
 the boot numbering of the block that reaches it: block 2 from 576, block 1 from 8,057 (§10).
 **Music.** `MUSIC1` order 0; the part waits on `dis_musplus()` and `dis_getmframe()`.
 
@@ -172,7 +172,7 @@ cargo run --release --bin secondreality -- --block 2 --headless \
     --dump-frames 1499,2300,3000,3400 --dump-dir out/glenz-indexed
 cargo xtask compare --reference reference/parts/glenz \
     --rendered out/glenz-indexed --out out/glenz-indexed-diff
-cargo test -p secondreality --test glenz
+cargo test -p secondreality --test blocks glenz::
 cargo xtask rediff --only glenz
 awk -F, '$1 >= 1109 && $1 <= 1112' reference/music/second2b/trace.csv       # §1
 awk -F, '$1 == 1515 || $1 == 1560 || $1 == 1562' reference/music/second2b/trace.csv

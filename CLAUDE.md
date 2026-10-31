@@ -142,6 +142,11 @@ image per frame.
   `cargo test --release -p secondreality --test fullrun`, **without** `-- --ignored`, which in
   release runs only the genuinely ignored tests. `tests/loop.rs` (the loop seam) runs in both
   profiles; `-- --nocapture` prints its figures.
+- **The binary's other integration tests** check what rediff cannot see: `tests/cli.rs` (exit
+  codes, refusals, the audio dump, no sound card), `tests/parts.rs` (one module a `--part` run:
+  numbering, music, D19's holds and moves, a part's end) and `tests/blocks.rs` (each `--block`
+  chain's hand-overs and music, and the parts only a block reaches). They share
+  `tests/common/mod.rs`, which runs a dump once per argument list and reads it into memory.
 
 ### Caveats worth knowing before they bite
 

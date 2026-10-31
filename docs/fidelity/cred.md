@@ -154,7 +154,7 @@ every pixel the machine has, so no state ENDLOGO leaves can show through a credi
 | 21 | 8740 | 8576-8775 | 164 | 0 |
 
 Every keyframe is inside its hold, the tightest (screen 21) ending 35 frames after its keyframe, and
-`reference-indices.md` §20.2 measured all five as held, so a frame or two of phase cannot move a pixel. `tests/cred.rs` asserts
+`reference-indices.md` §20.2 measured all five as held, so a frame or two of phase cannot move a pixel. `tests/blocks.rs` asserts
 the frames around each are the same (`the_five_keyframes_are_inside_the_chains_own_holds`). The
 full run's `fullrun/12-cred` frames are 0 too, and so were the sweep's 49 hold samples (§3).
 
@@ -170,7 +170,7 @@ screen 21's 3 to 4, plus ENDSCRL's start), inside the bracket.
 
 ```bash
 cargo xtask rediff --only cred --only fullrun/12-cred
-cargo test --release -p secondreality --test cred
+cargo test --release -p secondreality --test blocks
 cargo test -p secondreality cred::                 # the unit tests
 cargo run --release --bin secondreality -- --block 5 --headless \
     --dump-frames 1211,1212 --dump-dir out/cred    # the 1212 boundary (§2)

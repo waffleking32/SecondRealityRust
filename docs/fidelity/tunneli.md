@@ -9,7 +9,7 @@ copy commented out (`:204`) and a live music exit (`:229-236`, quitting when `in
 `bx=6` returns -4), which TUN10 comments out (`TUN10.PAS:207-216`); so the part has no music exit.
 **Port.** `bins/secondreality/src/parts/tunneli.rs` (`"tunneli"`); its module doc holds the acts, the
 one-sided clip, the self-modified colour, `waitr`'s entry 0 and the fade-out. Integration test
-`bins/secondreality/tests/tunneli.rs`. **Run.** A mapping, not an anchor: `--part tunneli` numbers
+`bins/secondreality/tests/parts.rs`. **Run.** A mapping, not an anchor: `--part tunneli` numbers
 its own ticks, and **reference index = tick + 3,722** (§7.2). **Music.** None; the part runs
 `veke = 1060` frames.
 
@@ -189,14 +189,14 @@ At 4500 and 4600 no session reproduces the picture, so the residual is unattribu
 top right (4500 / 778), and the thinner one, mouth low right (4600 / 878). The reference's sheet is
 byte-identical to the one `reference capture --sheet` writes.
 
-`tests/tunneli.rs` checks the run's own numbering (`index_origin: part`, `anchor: null`) and the
+`tests/parts.rs` checks the run's own numbering (`index_origin: part`, `anchor: null`) and the
 retirement and hold (tick 1,040 has dots, 1,060 is black, held at 1,061 and 1,200).
 
 ## 8. Reproduce
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::tunneli
-cargo test -p secondreality --test tunneli
+cargo test -p secondreality --test parts tunneli::
 cargo xtask rediff --only tunneli
 cargo run --release --bin secondreality -- --headless --part tunneli \
     --dump-frames 78,478,778,878 --dump-dir out/tunneli-aligned

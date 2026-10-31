@@ -1034,7 +1034,7 @@ main frame 738, inside the fade, so its sky is black and its floor colours are t
 ### 7.7 The port's phase and the block-2 comparison
 
 Retired from this ledger: the port's side (the held opening, `L_p`, the moving keyframes' aligned
-residuals) is `glenz.md` §11, asserted by `bins/secondreality/tests/glenz.rs`, with A36 and A37.
+residuals) is `glenz.md` §11, asserted by `bins/secondreality/tests/blocks.rs`, with A36 and A37.
 
 ---
 

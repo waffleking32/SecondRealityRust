@@ -17,7 +17,7 @@ the trace wins (D12). The preserved behaviours are `bugs.md` §28.
 | the channel effects (§9) | `crates/sr-audio/src/effects.rs` | `tests/effects.rs` |
 | the mixer (§10, §13) | `crates/sr-audio/src/mix.rs` | `tests/mix.rs`, `tests/enhanced.rs` |
 | the engine's seam (§11) | `crates/sr-engine/src/music.rs` | its unit tests |
-| the run's music (§12) | `bins/secondreality/src/shell/`, `src/audio.rs` | their unit tests, `tests/audio.rs` |
+| the run's music (§12) | `bins/secondreality/src/shell/`, `src/audio.rs` | their unit tests, `tests/cli.rs` |
 
 The container's numbers below are printed by
 
@@ -1049,7 +1049,7 @@ The adapter (`PlayerMusic`), the device and the WAV dump are `bins/secondreality
 (its module doc has the drain policy: silence on underrun, never a stall or a resample). The device
 is opened at the mixer's own specification or not at all; `--audio-dump` writes 16-bit PCM at
 **20000 frames a second stereo**, because `MixRate::Hz40000` counts i16 samples and two make a
-frame (§10.2) (`bins/secondreality/tests/audio.rs`). The status line shows the *published*
+frame (§10.2) (`bins/secondreality/tests/cli.rs`). The status line shows the *published*
 `order:row`, ten polls behind the player (§8; `the_status_line_shows_where_the_music_is`).
 
 The **fade** is `audio::fade_music`, one pass of `MAIN/U2.ASM:333-346`'s loop body: the module's

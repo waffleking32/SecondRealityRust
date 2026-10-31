@@ -5,7 +5,7 @@
 `assets/VISU/C/SCENE/U2A.00M`, `.0AA`, `.0AB`, `.001`-`.003` and the clear image
 `assets/VISU/C/U2ABG.UH`. **Port.** `bins/secondreality/src/parts/u2a.rs` (`"u2a"`) over the shared
 engine in `parts/visu/{math,draw,mod}.rs`; the module docs hold the mechanism (the acts, the
-pre-gate hold, the page ring). Integration test `bins/secondreality/tests/u2a.rs`. **Run.** Block
+pre-gate hold, the page ring). Integration test `bins/secondreality/tests/blocks.rs`. **Run.** Block
 1's second part, no anchor of its own: its frames are in the block-1 run's boot numbering, and
 U2A starts at **5956** (`FULLRUN_SEAMS`; the original's first 320×200 frame is 5961). **Music.**
 Block 1's continuous `MUSIC0`; the gates read the published order and row.
@@ -143,7 +143,7 @@ Each is in `bugs.md` §12 or its index; the port's handling in one line:
 
 ```bash
 cargo test -p secondreality --bin secondreality u2a
-cargo test -p secondreality --test u2a -- --nocapture
+cargo test -p secondreality --test blocks -- --nocapture
 cargo xtask rediff --only u2a
 
 # the gates, from the filed traces (6987:11:46, 6988:11:47; 7617:12:54, 7618:12:55)

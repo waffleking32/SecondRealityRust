@@ -137,7 +137,7 @@ font is never touched (`the_fade_loops_step_the_next_entrys_red_and_read_the_byt
 | 14000 | 1038 | RGB | 3 px (0.0047 %) | A18 |
 | 14500 | 1538 | RGB | 42 px (0.0656 %) | A18 |
 
-The counts are the `rayscrl` rows of `xtask/src/rediff/table.rs`. `tests/rayscrl.rs` drives the
+The counts are the `rayscrl` rows of `xtask/src/rediff/table.rs`. `tests/parts.rs` drives the
 binary over the support frames D19 requires: every neighbour differs from its keyframe except the
 13000 upload/hold pair (tick 37 = tick 38, the reference's own 64-pixel capture artefact) and the
 held 13500's pair. `cargo xtask compare` is not the tool: it pairs by manifest index, and this run's
@@ -164,7 +164,7 @@ The assets, as `the_assets_are_read_the_way_the_source_reads_them` checks them:
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::rayscrl
-cargo test -p secondreality --test rayscrl
+cargo test -p secondreality --test parts rayscrl::
 cargo xtask rediff --only rayscrl
 ```
 

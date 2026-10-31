@@ -6,7 +6,7 @@
 shipped build's credits loop and closing routine**, read from the unpacked `MAIN/DATA/ALKU.EXE`
 (D49, §12). **Port.** `bins/secondreality/src/parts/alku.rs` (`"alku"`); its module doc holds the
 mechanism (the acts, the 320×400 display from a 640×200 picture, the copper slots, the tick, the
-preserved bugs). Integration test `bins/secondreality/tests/alku.rs`. **Run.** Anchor **404**
+preserved bugs). Integration tests `bins/secondreality/tests/parts.rs` (`alku::`) and `tests/blocks.rs`. **Run.** Anchor **404**
 (`boot_anchor("alku")`); `MUSIC0` at order 0 under block 1's initial `_zplaysong(0)`.
 
 ## 1. Timeline
@@ -142,8 +142,8 @@ All four reference frames are `.rgb` only (§4).
 
 The held frames' `K-1`/`K+1` support frames are the same bytes. 5859 is the moving frame, but the
 run's 5858 and 5860 are the same step (the window moves every nine frames), as the reference's
-session holds 5859-5861 (`reference-indices.md` §4.3); `tests/alku.rs`'s
-`the_support_frames_hold_as_the_references_do` asserts every pair. Pinned by `cargo xtask rediff`
+session holds 5859-5861 (`reference-indices.md` §4.3); `tests/parts.rs`'s
+`alku::the_support_frames_hold_as_the_references_do` asserts every pair. Pinned by `cargo xtask rediff`
 (entry `alku`, all four at 0; `fullrun/01-alku`'s 1719 at 0).
 
 5859 is bare whatever the batches' phase: once the fifth batch's `ffonapois` has cleared the text,
@@ -156,7 +156,7 @@ earlier than the port's from the second batch on, at fade edges only.
 ## 9. Reproduce
 
 ```bash
-cargo test -p secondreality --test alku -- --nocapture          # §8's support frames
+cargo test -p secondreality --test parts alku:: -- --nocapture          # §8's support frames
 cargo xtask rediff --only alku                                  # §8
 cargo test -p secondreality --bin secondreality \
     shell::music::tests::a_block_one_run_starts_under_the_initial_play_song_and_matches_second1 \

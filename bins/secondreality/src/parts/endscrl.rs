@@ -567,7 +567,7 @@ mod tests {
     const REFERENCE_LAST: u32 = 8938;
 
     /// Where the port's chain hands this part its tick 0 — measured through the binary in
-    /// `tests/endscrl.rs` from the dump's own `part` fields.
+    /// `tests/blocks.rs` from the dump's own `part` fields.
     const PORT_FIRST: u32 = 8835;
 
     /// Where the release's chain hands it its tick 0, measured below from the reference's

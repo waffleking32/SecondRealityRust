@@ -760,7 +760,7 @@ mapping predicts, which is the gapless handover (D31 §3), not the restart; afte
 with `second3e` within one MUSIC0 row. `u2e.md` §5 records the seam.
 
 **Pinned by** `MusicStart::restart`'s `waiting == 4` and the chain test in
-`bins/secondreality/tests/shell.rs`.
+`bins/secondreality/tests/blocks.rs`.
 
 ## D35 — Restart seams: an exit drain a part opts into, and a sound card that follows a new player
 
@@ -861,7 +861,7 @@ the copper service is a bare `ret` (`:294-316`). So the captures are silent, one
 number their frames from zero. The start key is modelled at `init` (GRID A40, HARD A46; TWIST takes
 none, A43). `K0` is 353 / 356 / 3 for GRID / HARD / TWIST (`reference-indices.md` §24). **Pinned
 by** `a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent` in
-`bins/secondreality/tests/vault.rs`.
+`bins/secondreality/tests/parts.rs`.
 
 ## D40 — The vault menu is window-only; `--part` is the headless surface
 

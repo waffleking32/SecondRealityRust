@@ -133,7 +133,7 @@ Registered as A40:
 | 800 | 447 | 14 | A41 |
 
 RGB of 64,000 pixels, at offset 0, max channel delta 41; the ±1 neighbours differ by about
-10,000-12,000. `grid_matches_the_reference_at_its_measured_start` (`tests/vault.rs`) compares
+10,000-12,000. `grid_matches_the_reference_at_its_measured_start` (`tests/parts.rs`) compares
 `R−K0−1`, `R−K0`, `R−K0+1` for each keyframe and asserts that every differing pixel is on rows 14-15,
 the topmost rows the curve reaches: the capture published its frame while the original was still
 drawing the top of the newest line, so those pixels miss it or carry the previous red rank. The eye,
@@ -144,7 +144,7 @@ everywhere else. No constant, anchor or palette phase was fitted to reduce it (D
 
 ```bash
 cargo xtask rediff --only grid
-cargo test -p secondreality --test vault -- --nocapture
+cargo test -p secondreality --test parts -- --nocapture vault::
 cargo test -p secondreality --bin secondreality parts::vault::grid
 tools/vault_capture.sh grid --frames 400,500,600,700,800     # the capture, reference-indices.md §24.1
 ```

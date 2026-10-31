@@ -152,8 +152,9 @@ and the full run's 19000 differs by the same 2,058 as 2700 (A25).
 | 4900 | 2448 | RGB | 1,396 | 2.18125 | 41 | A25 |
 | 5650 | 3198 | RGB | 0 | 0 | 0 | exact |
 
-The rows are the `lnszoom` entry of the rediff table (`xtask/src/rediff/table.rs`), and
-`the_five_keyframes_at_the_measured_mapping` asserts the max Δ column and D19's support (§7.3). `reference-indices.md` §12.4 tables the same five files byte-identical
+The rows are the `lnszoom` entry of the rediff table (`xtask/src/rediff/table.rs`); rediff's
+`report.json` gives the max Δ column, and `the_five_keyframes_at_the_measured_mapping`
+(`tests/parts.rs`) asserts D19's support (§7.3). `reference-indices.md` §12.4 tables the same five files byte-identical
 across five sessions.
 
 **The residual is one asset difference (A25).** The tree's `LENS.EXB` differs from the release's
@@ -178,7 +179,7 @@ equal); 3400, 4200 and 4900 move (both differ).
 
 ```bash
 cargo xtask rediff --only lnszoom
-cargo test -p secondreality --test lnszoom
+cargo test -p secondreality --test parts lnszoom::
 cargo test -p secondreality --bin secondreality parts::lnszoom
 ```
 

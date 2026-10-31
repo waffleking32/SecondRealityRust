@@ -28,7 +28,7 @@ boot 20.
 `K0` = 3 is derived from the phase, not from a captured frame: the boot anchor returns at 5, and
 boots 4, 5 and 6 show boundaries 32, 22 and 16, effect frames 1, 2 and 3
 (`the_first_frames_are_the_measured_two_band_phase`, `reference-indices.md` §24.6).
-`twist_draws_exactly_4444_frames_and_holds` (`tests/vault.rs`) dumps 4,442/4,443/4,444/4,500: 4,443 is
+`twist_draws_exactly_4444_frames_and_holds` (`tests/parts.rs`) dumps 4,442/4,443/4,444/4,500: 4,443 is
 a new picture and 4,444 and 4,500 are its held bytes. 4,444 ticks are 63.41 s nominal.
 
 Facts the item docs do not hold:
@@ -75,7 +75,7 @@ restores text mode after `doit`; the shell owns presentation, and the part does 
 | 603 | 600 | 3,284 | **0** | 3,280 | exact |
 
 Differing RGB pixels of 64,000 against the port's frames `R−K0−1`, `R−K0`, `R−K0+1`
-(`twist_matches_the_reference_at_its_measured_start`, `tests/vault.rs`, prints them). The comparison
+(`twist_matches_the_reference_at_its_measured_start`, `tests/parts.rs`, prints them). The comparison
 is RGB-only (A45): the moving screen fails the indexed read's coherence check, and an odd frame's page
 2 is not at plane offset 0, where the oracle's read starts.
 
@@ -110,7 +110,7 @@ can land in either phase; the port's dumps are deterministic.
 
 ```bash
 cargo xtask rediff --only twist
-cargo test -p secondreality --test vault -- --nocapture
+cargo test -p secondreality --test parts -- --nocapture vault::
 cargo test -p secondreality --bin secondreality vault::twist
 tools/vault_capture.sh twist --frames 103,203,303,403,503,603            # the filed capture
 tools/vault_capture.sh twist --frames 102,103,104 --out out/twist-support # the ±1 support capture

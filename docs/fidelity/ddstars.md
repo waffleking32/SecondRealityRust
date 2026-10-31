@@ -156,7 +156,7 @@ The four keyframes all move (`reference-indices.md` §22.3), so D19's support is
 
 The counts are the `ddstars` rows of `xtask/src/rediff/table.rs`.
 `the_keyframes_neighbours_differ_and_the_music_runs_twenty_two_frames_behind_the_trace`
-(`tests/ddstars.rs`) asserts through the binary that `K-1`/`K+1` differ. The rendered neighbours at ticks 1485, 1487,
+(`tests/parts.rs`) asserts through the binary that `K-1`/`K+1` differ. The rendered neighbours at ticks 1485, 1487,
 2585, 2587, 4585, 4587, 7585 and 7587 hash to `de6d1676`, `a1697853`, `f768ffbb`, `5eb100a6`,
 `062d91c4`, `0af0a960`, `fb4b902c`, `328201f6`: `reference-indices.md` §22.3's table, entry for entry.
 
@@ -184,7 +184,7 @@ waited on it would meet the answered band at once.
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::ddstars
-cargo test -p secondreality --test ddstars
+cargo test -p secondreality --test parts ddstars::
 cargo xtask rediff --only ddstars
 
 # the survey capture behind §3's sweep and §4's 1700, and the sweep comparison (exit 0, identical)

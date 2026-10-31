@@ -30,16 +30,19 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
+
+mod common;
+
+use common::{differing, Scratch};
 
 #[allow(dead_code)]
 #[path = "../../../xtask/src/rediff/table.rs"]
 mod table;
 
 use table::{
-    at, Part, FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS, JITTER_FRAMES, TABLE,
+    Part, FULLRUN_ACROSS_HANDOVER, FULLRUN_LOADER_FRAMES, FULLRUN_SEAMS, JITTER_FRAMES, TABLE,
 };
 
 /// The original's ENDSCRL begins at 46,277 (§26.3); the run goes 2,000 frames past it.
@@ -157,10 +160,6 @@ const AGREEMENTS: [Agreement; 6] = [
     Agreement { trace: "second1f", offset: -8, frames: 14_168, within: 6352, worst: 12, beyond: 1, unshifted: 13_554, last_offset: 0 },
 ];
 
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
 /// One line of `--positions`.
 struct Tick {
     pass: u32,
@@ -197,10 +196,10 @@ fn hash(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
-/// The `fullrun` frames compared pixel by pixel here: BEGLOGO's ramp and ENDLOGO's hold, the
-/// two frames the parts' line-offset fix is read at.
-fn kept() -> [(u32, &'static str, u32); 2] {
-    [(7930, "03-beglogo", 7930), (at(38_300, Part::Endlogo), "11-endlogo", 38_300)]
+/// The `fullrun` frames compared pixel by pixel here: BEGLOGO's ramp, which reads its own rows
+/// through the line offset it inherits (ENDLOGO's hold, the other such frame, is a rediff row).
+fn kept() -> [(u32, &'static str, u32); 1] {
+    [(7930, "03-beglogo", 7930)]
 }
 
 /// Every frame the seam checks read: from two before each part's start to its first frame.
@@ -220,14 +219,12 @@ fn dumped() -> Vec<u32> {
 fn run() -> &'static Run {
     static RUN: OnceLock<Run> = OnceLock::new();
     RUN.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("sr-fullrun-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Scratch::new("fullrun");
         let positions = dir.join("positions.csv");
         let frames = dir.join("frames");
         let list = dumped().iter().map(u32::to_string).collect::<Vec<_>>().join(",");
         let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
-            .current_dir(repository_root())
+            .current_dir(common::root())
             .args(["--block", "1", "--headless", "--dump-frames", &list, "--dump-dir"])
             .arg(&frames)
             .arg("--positions")
@@ -286,25 +283,14 @@ fn run() -> &'static Run {
                 .collect();
             Run { starts, shots, kept: kept_bytes, timeline }
         };
-        // Read, then remove the dump whatever the reading found: a failed run must not leave
-        // its hundreds of megabytes behind either.
-        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read));
-        let _ = std::fs::remove_dir_all(&dir);
-        run.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        // `dir` goes on drop, so a failed read does not leave hundreds of megabytes behind.
+        read()
     })
 }
 
 /// A filed `fullrun` frame's `.rgb`.
 fn reference(capture: &str, index: u32) -> Vec<u8> {
-    std::fs::read(
-        repository_root().join(format!("reference/parts/fullrun/{capture}/frame_{index:06}.rgb")),
-    )
-    .unwrap()
-}
-
-fn differing_pixels(a: &[u8], b: &[u8]) -> usize {
-    assert_eq!(a.len(), b.len(), "a short read is not a comparison");
-    a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|(x, y)| x != y).count()
+    common::reference(&format!("fullrun/{capture}"), index, "rgb")
 }
 
 /// Whether `index` meets `rule`: it holds and the frame before does not (and, for a change,
@@ -454,35 +440,15 @@ fn the_seam_table_is_the_ports_own_frames() {
         }
     }
 
-    // The two parts that inherit their predecessor's line offset read their own rows:
-    // BEGLOGO's ramp is the original's 7930 byte for byte at 7930, and ENDLOGO's hold —
-    // `endlogo`'s 900 — is the original's 38300 at ENDLOGO's start difference.
+    // BEGLOGO inherits its predecessor's line offset and reads its own rows: its ramp is the
+    // original's 7930 byte for byte at 7930.
     for (index, capture, reference_index) in kept() {
         assert_eq!(
-            differing_pixels(&run.kept[&index], &reference(capture, reference_index)),
+            differing(&run.kept[&index], &reference(capture, reference_index), 3),
             0,
             "{capture} {reference_index} at the port's {index}"
         );
     }
-}
-
-/// `reference/music/<name>/trace.csv` as `(frame, (order, row))`.
-fn trace(name: &str) -> Vec<(u32, (u8, u8))> {
-    let path = repository_root().join(format!("reference/music/{name}/trace.csv"));
-    let text = std::fs::read_to_string(&path).unwrap();
-    let mut lines = text.lines();
-    let header: Vec<&str> = lines.next().unwrap().split(',').collect();
-    let column = |wanted: &str| header.iter().position(|name| *name == wanted).unwrap();
-    let (frame, ord, row) = (column("frame"), column("ord"), column("row"));
-    lines
-        .map(|line| {
-            let fields: Vec<&str> = line.split(',').collect();
-            (
-                fields[frame].parse().unwrap(),
-                (fields[ord].parse().unwrap(), fields[row].parse().unwrap()),
-            )
-        })
-        .collect()
 }
 
 /// The port's change to the trace's row change at `(at, position)`: the nearest one from 20
@@ -510,7 +476,7 @@ fn the_full_runs_music_is_where_the_trace_holds_it() {
     let mut measured = Vec::new();
     for expected in &AGREEMENTS {
         let rows: Vec<(u32, (u8, u8))> =
-            trace(expected.trace).into_iter().filter(|(frame, _)| *frame >= 404).collect();
+            common::trace(expected.trace).iter().map(|(frame, position)| (*frame, *position)).filter(|(frame, _)| *frame >= 404).collect();
         let changes: Vec<(u32, (u8, u8))> = rows
             .windows(2)
             .filter(|pair| pair[0].1 != pair[1].1)

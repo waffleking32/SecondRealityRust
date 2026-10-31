@@ -189,7 +189,7 @@ The counts are the `endlogo`, `endlogo-leadin/*` and `fullrun/11-endlogo` rows o
 is the video memory U2E left, under ENDLOGO's white DAC). 430 and 900 go through the indexed path
 (900's `.idx` is a real one: 72 indices, 69 triples, none carrying two, §19.3); 500 and 1180 through
 RGB, because an indexed read is 20+ fade steps late and D15's coherence rule refuses those pairs.
-`tests/endlogo.rs` checks that a run is in the reference's own numbering (`index_origin: boot`,
+`tests/parts.rs` checks that a run is in the reference's own numbering (`index_origin: boot`,
 anchor 404); a `--block 5` run gives the same four frames.
 
 ## 8. The decode and the derivation's power
@@ -206,7 +206,7 @@ then §9's first command). The fade-in truncates where the original does
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::endlogo
-cargo test -p secondreality --test endlogo
+cargo test -p secondreality --test parts endlogo::
 cargo xtask rediff --only endlogo
 cargo run --release --bin secondreality -- --headless --block 5 \
     --dump-frames 430,500,900,1180 --dump-dir out/endlogo-block5

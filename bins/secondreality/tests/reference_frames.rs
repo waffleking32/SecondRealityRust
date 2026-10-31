@@ -20,8 +20,11 @@
 //! and `cargo xtask rediff` itself.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
+
+mod common;
+
+use common::{differing, Dump};
 
 #[allow(dead_code)]
 #[path = "../../../xtask/src/rediff/table.rs"]
@@ -29,19 +32,15 @@ mod table;
 
 use table::{Entry, Frame, Plane, TABLE};
 
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// One frame of a manifest: its files and its geometry (a dump's frame carries its own; a
-/// capture's falls back to the manifest's).
+/// One frame of a capture's manifest: its files and its geometry (the frame's own, or the
+/// manifest's).
 struct Filed {
     idx: Option<String>,
     rgb: String,
     geometry: (u64, u64),
 }
 
-/// The frame `index` of the manifest in `dir`.
+/// The frame `index` of the capture in `dir`.
 fn filed(dir: &Path, index: u32) -> Filed {
     let path = dir.join("manifest.json");
     let manifest: serde_json::Value = serde_json::from_str(
@@ -68,26 +67,24 @@ fn read(dir: &Path, file: &str) -> Vec<u8> {
 }
 
 /// The differing count of one row, as rediff's `compare_frame` computes it.
-fn differing(capture: &Path, dump: &Path, frame: &Frame) -> u32 {
+fn count(capture: &Path, dump: &Dump, frame: &Frame) -> u32 {
     let reference = filed(capture, frame.reference);
-    let rendered = filed(dump, frame.rendered);
+    let rendered = dump.frame(frame.rendered);
     assert_eq!(
-        reference.geometry, rendered.geometry,
+        reference.geometry,
+        (rendered.width, rendered.height),
         "reference {} against rendered {}: a geometry mismatch is never a count",
-        frame.reference, frame.rendered
+        frame.reference,
+        frame.rendered
     );
-    let pixels = (reference.geometry.0 * reference.geometry.1) as usize;
-    let (stride, a, b) = match frame.plane {
+    let count = match frame.plane {
         Plane::Indexed => {
-            let file = |filed: &Filed, side: &str| {
-                filed.idx.clone().unwrap_or_else(|| panic!("the {side} has no .idx"))
-            };
-            (1, read(capture, &file(&reference, "capture")), read(dump, &file(&rendered, "dump")))
+            let file = reference.idx.unwrap_or_else(|| panic!("capture frame {} has no .idx", frame.reference));
+            differing(&read(capture, &file), &rendered.idx, 1)
         }
-        Plane::Rgb => (3, read(capture, &reference.rgb), read(dump, &rendered.rgb)),
+        Plane::Rgb => differing(&read(capture, &reference.rgb), &rendered.rgb, 3),
     };
-    assert_eq!((a.len(), b.len()), (pixels * stride, pixels * stride), "a short read is not a comparison");
-    a.chunks_exact(stride).zip(b.chunks_exact(stride)).filter(|(x, y)| x != y).count() as u32
+    count as u32
 }
 
 /// Run the binary once with `args` and check every frame of every entry run with them.
@@ -96,43 +93,21 @@ fn check(args: &[&str]) {
     assert!(!entries.is_empty(), "no table entry runs with {args:?}");
     let indices: BTreeSet<u32> =
         entries.iter().flat_map(|entry| entry.frames).map(|frame| frame.rendered).collect();
-    let list = indices.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-    let dump = std::env::temp_dir()
-        .join(format!("sr-reference-frames-{}-{}", std::process::id(), args.join("_")));
-    let _ = std::fs::remove_dir_all(&dump);
-    std::fs::create_dir_all(&dump).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_secondreality"))
-        .current_dir(repository_root())
-        .args(args)
-        .args(["--headless", "--dump-frames", &list, "--dump-dir"])
-        .arg(&dump)
-        .output()
-        .unwrap();
-    // Compare, then remove the dump whatever the comparison found.
-    let compared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        let mut off = Vec::new();
-        for entry in &entries {
-            let capture = repository_root().join("reference/parts").join(entry.capture);
-            for frame in entry.frames {
-                let count = differing(&capture, &dump, frame);
-                if count != frame.registered {
-                    off.push(format!(
-                        "{} {} at {} ({:?}): {count} differing, {} registered ({})",
-                        entry.capture,
-                        frame.reference,
-                        frame.rendered,
-                        frame.plane,
-                        frame.registered,
-                        frame.register
-                    ));
-                }
+    let dump = Dump::new(args, &indices.into_iter().collect::<Vec<_>>());
+    let mut off = Vec::new();
+    for entry in &entries {
+        let capture = common::root().join("reference/parts").join(entry.capture);
+        for frame in entry.frames {
+            let count = count(&capture, &dump, frame);
+            if count != frame.registered {
+                off.push(format!(
+                    "{} {} at {} ({:?}): {count} differing, {} registered ({})",
+                    entry.capture, frame.reference, frame.rendered, frame.plane, frame.registered, frame.register
+                ));
             }
         }
-        assert!(off.is_empty(), "off their registered count:\n{}", off.join("\n"));
-    }));
-    let _ = std::fs::remove_dir_all(&dump);
-    compared.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    }
+    assert!(off.is_empty(), "off their registered count:\n{}", off.join("\n"));
 }
 
 /// One test a run: `name => [args]`, each optionally release-only.

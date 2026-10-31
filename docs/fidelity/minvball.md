@@ -128,7 +128,7 @@ jump could not (`part-sequence.md` §10.2).
 
 The rows are the `minvball` entry of the rediff table (`xtask/src/rediff/table.rs`). The dots
 move every frame, so no frame carries `.idx`; `each_keyframes_neighbours_differ_from_it`
-(`tests/minvball.rs`) holds `K-1, K, K+1` for each (D19), so each keyframe is reproduced at
+(`tests/parts.rs`) holds `K-1, K, K+1` for each (D19), so each keyframe is reproduced at
 exactly one frame counter.
 
 The release's `MAIN/DATA/MINVBALL.EXE` (7,395 bytes) is PKLITE-packed; the tree's
@@ -139,7 +139,7 @@ Reproduce:
 
 ```bash
 cargo xtask rediff --only minvball
-cargo test -p secondreality --test minvball
+cargo test -p secondreality --test parts minvball::
 cargo test -p secondreality --bin secondreality parts::minvball
 ```
 

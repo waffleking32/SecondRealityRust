@@ -5,7 +5,7 @@
 `PAM/PAL.PAL` and `PAM/PRAX4.FLI` (the source the `.ANI` was packed from). **Port.**
 `bins/secondreality/src/parts/pam.rs` (`"pam"`); its module doc holds the mechanism (the acts, the
 two-page planar display, the n−2 delta base, the cadence, the palette washes). Integration test
-`bins/secondreality/tests/pam.rs`. **Run.** Anchor **7710** (`shell::PAM_ANCHOR`,
+`bins/secondreality/tests/parts.rs`. **Run.** Anchor **7710** (`shell::PAM_ANCHOR`,
 `boot_anchor("pam")`). **Music.** Block 1's initial `_zplaysong(0)`, `MUSIC0`; a `--part pam` run
 pre-polls 7,310 (§5).
 
@@ -120,7 +120,7 @@ Pinned by `cargo xtask rediff` (entry `pam`;
 `fullrun/02-u2a-pam` for the block-1 run's 7707 and 7880, A53). The record's relations hold:
 7711 = 7710 (7709 is unreachable from the anchor); 7759 ≠ 7760 and 7761 = 7760; 7829 = 7830 = 7831;
 and the port's own 7899 and 7901 are the same white as 7900
-(`tests/pam.rs`, `the_support_frames_move_and_hold_as_the_references_do`). The port's hashes match
+(`tests/parts.rs`, `the_support_frames_move_and_hold_as_the_references_do`). The port's hashes match
 `reference-indices.md` §6.3's entry for entry: 7759 `23fa5096…`, 7761 `5d558081…`, 7829/7831
 `e1967ed2…`; the keyframes are `1fef46de…`, `5d558081…`, `e1967ed2…`, `1fef46de…`.
 
@@ -151,7 +151,7 @@ and A4.
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::pam -- --nocapture
-cargo test -p secondreality --test pam -- --nocapture
+cargo test -p secondreality --test parts pam:: -- --nocapture
 cargo xtask rediff --only pam
 
 # the port's dump against the record (§6's hashes and compare figures)

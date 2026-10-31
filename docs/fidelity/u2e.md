@@ -198,7 +198,7 @@ city hacks are in its index.
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::u2e
-cargo test -p secondreality --test u2e -- --nocapture
+cargo test -p secondreality --test blocks u2e:: -- --nocapture
 cargo xtask rediff --only u2e
 cargo test --release -p secondreality --bin secondreality search_reference_states -- --ignored --nocapture
 ```

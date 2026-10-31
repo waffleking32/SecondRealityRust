@@ -477,8 +477,8 @@ in the part accounted for (D24's single-constant case). The mechanism behind it 
 constant's name says so.
 
 **Measured difference:** **0** at all four keyframes 500 / 1100 / 1700 / 2300, with `K±1`
-distinguishable (`cargo xtask rediff --only mntscrl`; `cargo test -p secondreality --test mntscrl
-each_scroll_keyframes_neighbours_differ_from_it`). The tree's `musplus >= 0` would first hold at trace frame 2488,
+distinguishable (`cargo xtask rediff --only mntscrl`; `cargo test -p secondreality --test parts
+mntscrl::each_scroll_keyframes_neighbours_differ_from_it`). The tree's `musplus >= 0` would first hold at trace frame 2488,
 and the part would still be holding at 1100, 1700 and 2300, **118,843 / 118,924 / 119,056** bytes
 away (`the_trees_own_wait_would_hold_through_the_scroll_keyframes`). The part's other release value,
 the `scp` bound, is `mntscrl.md` §7.
@@ -545,8 +545,8 @@ cargo test --release -p secondreality --bin secondreality \
 ```
 
 **Measured difference:** **0 / 0 / 0 / 0** of 64,000 pixels at 10,900 / 11,200 / 11,800 / 12,400,
-with the shadow layer pixel for pixel (`cargo test --release -p secondreality --test minvball
-the_four_keyframes -- --nocapture`; `cargo xtask rediff --only minvball`). 10,900 is the fit's
+with the shadow layer pixel for pixel (`cargo xtask
+rediff --only minvball`). 10,900 is the fit's
 objective, so its 0 is by construction; the other three are out of sample. Each keyframe is
 reproduced at exactly one frame counter (403 / 703 / 1303 / 1903), and the `K±1` neighbours are
 different pictures.
@@ -699,8 +699,8 @@ boundary (`plzpart.md` §4 has the table). The reference's own sessions agree wi
 because a session's timing repeats.
 
 **Measured difference:** **14,348 / 7,486 / 5,186** of 128,000 pixels (11.209 / 5.848 / 4.052 %) at
-6000 / 7000 / 7600, max channel delta 16 / 21 / 17 (`cargo xtask rediff --only plzpart/plasma`;
-`cargo test -p secondreality --test plzpart`).
+6000 / 7000 / 7600, max channel delta 16 / 21 / 17 (`cargo xtask rediff --only plzpart/plasma`,
+whose `report.json` carries the deltas).
 
 **Status:** carried: the split depends on per-frame cycle costs that no capture or trace records.
 
@@ -833,7 +833,7 @@ ticks of music phase move the gate, and the ring shows each page for four to fiv
 Changing the block-1 clock to match `second1c` would move ALKU's verified frames.
 
 **Measured difference:** **1,098 of 64,000** (1.7156 %), RGB and indices: `cargo xtask rediff
---only u2a` pins it, `cargo test -p secondreality --test u2a
+--only u2a` pins it, `cargo test -p secondreality --test blocks
 the_block_one_clock_matches_second1_at_boot_5900` pins the clock, and `cargo test -p secondreality
 the_reference_7300_is_the_measured_stream_state` shows 1,098 belongs to state 297 and to no other
 of the 522.
@@ -860,8 +860,8 @@ the tree does not hold in a readable form.
 are mostly +1 (6,655 of 7,118 at 1600). `cargo xtask rediff --only u2e`; the state search is
 `cargo test --release -p secondreality --bin secondreality search_reference_states -- --ignored
 --nocapture`;
-`cargo test -p secondreality --test u2e
-the_keyframes_record_the_measured_session_phase_and_gouraud_residual`.
+`cargo test -p secondreality --test blocks
+u2e::the_keyframes_record_the_measured_session_phase_and_gouraud_residual`.
 
 **Status:** carried: the release's Gouraud constants are in an image the tree does not hold.
 
@@ -881,8 +881,8 @@ and moving the block-4 start or the gate would move it.
 
 **Measured difference:** **11,006 / 11,805 / 17,278 / 16,234** of 64,000 pixels (17.1969 / 18.4453 /
 26.9969 / 25.3656 %) at the exact keyframes, with the aligned-state residual A30's
-(`cargo test -p secondreality --test u2e
-the_keyframes_record_the_measured_session_phase_and_gouraud_residual`).
+(`cargo test -p secondreality --test blocks
+u2e::the_keyframes_record_the_measured_session_phase_and_gouraud_residual`).
 
 **Status:** carried: the session's phase (D17).
 
@@ -951,7 +951,7 @@ the pixel set and its colours, which is what the reference compares.
 intro is 0 at nine indices, and the Gouraud residuals A28/A30 have exact silhouettes, so they are
 colour deltas on faces the pipeline drew. `cargo test -p secondreality --bin secondreality
 parts::visu::draw`; `cargo xtask rediff --only u2a --only u2a-speed` (7640 in `u2a`, the hold in
-`u2a-speed/*`); `cargo test -p secondreality --test u2e`.
+`u2a-speed/*`); `cargo test -p secondreality --test blocks u2e::`.
 
 ## A35 — The four VGA pages are packed at 64,000 pixels, not the original's 65,536-pixel slots
 
@@ -998,9 +998,9 @@ to the reset than `second2b`, and the rest is the capture's sampling instant. No
 
 **Measured difference:** at `K + 5` (2305 / 3005 / 3405) **5,208 / 3,114 / 5,261** of 64,000 pixels.
 At the surface minima (2305, 3004, 3404) **5,208 / 2,289 / 5,941**, which `cargo xtask rediff --only
-glenz` registers (A37). `cargo test -p secondreality --test glenz
-the_loop_start_is_1567`; `cargo test -p secondreality --test glenz
-the_moving_keyframes_record_the_registered_alignments_and_residuals`; `glenz.md` §11.
+glenz` registers (A37). `cargo test -p secondreality --test blocks
+glenz::the_loop_start_is_1567`; `cargo test -p secondreality --test blocks
+glenz::the_moving_keyframes_record_the_registered_alignments_and_residuals`; `glenz.md` §11.
 
 **Status:** carried: the session's phase and the capture's sampling instant.
 
@@ -1030,8 +1030,8 @@ constant is adopted.
 of the 35,896 and 43,938 object pixels are not explained by the index structure (710 of 711 at
 indices below 16 at 3004, all 839 at 3404): the second object's interior XOR boundaries, its outer red
 silhouette matching within 118 / 180 px. No constant, shade or offset resolves them without breaking
-the exact 2305 match. `cargo test -p secondreality --test glenz
-the_moving_keyframes_record_the_registered_alignments_and_residuals`.
+the exact 2305 match. `cargo test -p secondreality --test blocks
+glenz::the_moving_keyframes_record_the_registered_alignments_and_residuals`.
 
 **Status:** carried: the 711 / 839 pixels have only a hypothesis (a sub-pixel edge or phase). The
 code that would settle it is in the release's `GLENZ.EXE` image (D49), not yet read.
@@ -1060,7 +1060,7 @@ trace's sample-to-picture frame. 5 is within A12's 7-frame inter-session spread 
 shell's 3-frame `JITTER_FRAMES`, so it stays registered.
 
 **Measured difference:** **8,527 − 8,521 = 6 frames** at the wait's exit. `cargo test -p
-secondreality --test shell a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering` pins
+secondreality --test blocks a_block_one_run_is_alku_then_u2a_then_pam_in_the_boots_numbering` pins
 8,057, `1:0` at 8,087, 8,527, 470 and 6; `the_block_one_run_restarts_music1_at_glenz` pins the
 install, `waiting == 4` and the carried channels; `cargo test -p sr-audio --test trace
 block_ones_music1_restart_takes_order_0s_break -- --nocapture` derives 8,056; and
@@ -1108,8 +1108,8 @@ player, A56), and the dot screen is not drawn.
 frame are overwritten before the first compared frame.
 
 **Measured difference:** not separately measurable: the five compared frames carry A41's sampling
-residual and nothing of this substitution. `cargo test -p secondreality --test vault
-grid_matches_the_reference_at_its_measured_start`; the capture command is in `grid.md`.
+residual and nothing of this substitution. `cargo test -p secondreality --test parts
+vault::grid_matches_the_reference_at_its_measured_start`; the capture command is in `grid.md`.
 
 ## A41 — GRID: the filed RGB frames catch the newest line mid-draw in its top rows
 
@@ -1129,8 +1129,8 @@ Nothing was changed to reduce it.
 
 **Measured difference:** **6 / 2 / 36 / 33 / 14** pixels at 400 / 500 / 600 / 700 / 800, all on rows
 14–15, max channel delta 41, the minimum at offset 0 for all five (`cargo xtask rediff --only grid`;
-`cargo test -p secondreality --test vault -- --nocapture
-grid_matches_the_reference_at_its_measured_start`, which asserts every differing row is 14 or 15).
+`cargo test -p secondreality --test parts -- --nocapture
+vault::grid_matches_the_reference_at_its_measured_start`, which asserts every differing row is 14 or 15).
 
 **Status:** carried: the filed frames are published mid-draw, an instant the port's completed frames
 cannot reproduce.
@@ -1150,8 +1150,9 @@ bare `ret` (`DISINT.ASM:294-316` is inside `IFDEF INDEMO`; the image's `setcoppe
 **Why:** registering it would invent a flash the artifact cannot produce, and the engine's palette
 timeline could not express an intra-frame band without an unmeasured duration.
 
-**Measured difference:** **0** at all six keyframes (`cargo test -p secondreality --test vault --
---nocapture twist_matches_the_reference_at_its_measured_start`).
+**Measured difference:** **0** at all six keyframes (`cargo xtask rediff --only twist`; `cargo test
+-p secondreality --test parts -- --nocapture vault::twist_matches_the_reference_at_its_measured_start`
+prints the ±1 neighbours).
 
 **Status:** carried: the standalone DIS has no copper service, so no capture can show the flash.
 
@@ -1367,7 +1368,7 @@ A43), and the later key cuts are unreachable. A `--part` run numbers its frames 
 
 **Measured difference:** **0** in all twenty compared frames (GRID 5, TWIST 6, HARD 9), and the
 manifests carry `music: null`, `anchor: null` and `index_origin: "part"` (`cargo test -p secondreality
---test vault`'s `a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent`; the
+--test parts`'s `vault::a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent`; the
 frames are `cargo xtask rediff --only grid --only twist --only hard`).
 
 ## A53 — The full run's seams: every part is handed over in one tick, and the loader's frames are not modelled

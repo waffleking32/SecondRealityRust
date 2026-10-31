@@ -50,7 +50,7 @@ The run is **1,903 port frames, 0..1902**: the pre-roll, modes 0..4 (478 ticks),
 displays, 501 + 801 iterations and the two exit arms. The source's count limits alone sum to 1,774
 (34 + 4×73 + 4 + 42 + 102 + 500 + 800); the `NEXTMODE` ticks of modes 5 and 6, four `part1init`
 waits, the exit arms and the boundary displays make up the difference.
-`hard_draws_the_whole_effect_and_holds` (`tests/vault.rs`) pins the last cube, the two no-draw ticks
+`hard_draws_the_whole_effect_and_holds` (`tests/parts.rs`) pins the last cube, the two no-draw ticks
 and the shell's hold.
 
 The display phases are measured, not fitted. Mode 4 uploads its palette at the top of the iteration
@@ -160,7 +160,7 @@ against captures of their own, at 0 everywhere (A48 names the commands).
 
 ```bash
 cargo xtask rediff --only hard
-cargo test -p secondreality --test vault -- --nocapture hard_
+cargo test -p secondreality --test parts -- --nocapture vault::hard_
 cargo test -p secondreality --bin secondreality parts::vault::hard
 tools/vault_capture.sh hard --frames 480,560,630,700,770,840,910,1050,1600   # reference-indices.md §24.1
 ```

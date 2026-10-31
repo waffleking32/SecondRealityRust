@@ -207,7 +207,7 @@ MUSIC1 order 96 at frame 0.
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::jplogo
-cargo test -p secondreality --test jplogo -- --nocapture
+cargo test -p secondreality --test parts jplogo:: -- --nocapture
 cargo xtask rediff --only jplogo
 awk -F, '$1 >= 17000 && $1 <= 17100' reference/music/second3d/trace.csv
 awk -F, '$1 == 17065 || $1 == 17149 || $1 == 17300 || $1 == 17500 || $1 == 17700' reference/music/second3d/trace.csv

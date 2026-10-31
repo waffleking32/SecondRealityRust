@@ -83,7 +83,7 @@ $ awk -F, '$1==6300 || $1==8100 || $1==8200' reference/music/second2/trace.csv
 - **The troll's pictures, `boot = 4800 + tick`.** 8300 is tick 3500 and 8400 tick 3600.
 
 The three origins are `FIRST_PASS_ORIGIN`, `MUSIC_ORIGIN` and `TROLL_ORIGIN` in
-`tests/techno.rs`; the fresh-start and manifest rules are `part-sequence.md` §10. In a full run
+`tests/parts.rs`; the fresh-start and manifest rules are `part-sequence.md` §10. In a full run
 the part's first frame is a `FULLRUN_SEAMS` row (12,214 in the original, 12,216 in the port; A53).
 
 ## 3. The first pass (`KOE.C:213-216`, `KOEB.ASM`)
@@ -201,7 +201,7 @@ No D24 divergence and no A-entry. The preserved bugs and dead paths (`bugs.md` �
 | `techno/troll` | 8200 (3401), 8300 (3500), 8400 (3600) | 320×400 | RGB | 0 each | exact |
 
 The rows are the rediff table's entries (`xtask/src/rediff/table.rs`), and
-`the_keyframes_move_and_hold_as_the_references_do` (`tests/techno.rs`) checks D19's support:
+`the_keyframes_move_and_hold_as_the_references_do` (`tests/parts.rs`) checks D19's support:
 4900, 6300, 8100 and 8300 differ from both port neighbours; 5000, 8200 and 8400 (the holds) do not.
 
 All seven are RGB only by necessity. The 320×200 screen is EGA 16-colour, which the oracle's
@@ -212,7 +212,7 @@ tree's (`reference-indices.md` §9.5); the port matches the tree's. Reproduce:
 
 ```bash
 cargo xtask rediff --only techno
-cargo test -p secondreality --test techno -- --nocapture
+cargo test -p secondreality --test parts techno:: -- --nocapture
 ```
 
 **Register.** `bugs.md` §4 (`setpalarea`) and §14 (`patdir`, `rotate1`, `clipanypoly`), with

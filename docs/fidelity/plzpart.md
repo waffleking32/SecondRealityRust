@@ -202,15 +202,14 @@ the release's 15-bit shift, so the port does not keep it (`bugs.md` §17.4). The
 | `band` | 8400 / 8450 / 8500 / 8600 / 8700 / 8800 | 2677..3077 | 340 / 24 / 0 / 0 / 148 / 4 | A23 |
 
 All RGB. The rows are the `plzpart/*` entries of the rediff table (`xtask/src/rediff/table.rs`);
-`the_plasma_keyframes_are_close_at_the_derived_mapping` asserts the plasma's max channel deltas
-(§4). In a full run the part's first frame is a `FULLRUN_SEAMS` row (21,927 in the original,
+rediff's `report.json` gives the plasma's max channel deltas (§4). In a full run the part's first frame is a `FULLRUN_SEAMS` row (21,927 in the original,
 21,928 in the port; A53).
 
 Reproduce:
 
 ```bash
 cargo xtask rediff --only plzpart
-cargo test -p secondreality --test plzpart
+cargo test -p secondreality --test parts plzpart::
 cargo test -p secondreality --bin secondreality parts::plzpart
 ```
 

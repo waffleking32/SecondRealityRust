@@ -4,7 +4,7 @@
 `BEG/READP.C` (64: the Origin RLE row reader); asset `assets/BEG/SRTITLE.UP` (§1). Slot 4 of
 `part-sequence.md` §1, `SECOND 2`'s first part; 320×400, 128,000 pixels. **Port.**
 `bins/secondreality/src/parts/beglogo.rs` (`"beglogo"`); its module doc holds the acts and the
-build question's summary. Integration test `bins/secondreality/tests/beglogo.rs`. **Run.** Anchor
+build question's summary. Integration test `bins/secondreality/tests/parts.rs`. **Run.** Anchor
 **404** (`shell::FIRST_GRAPHICS_FRAME`, `boot_anchor("beglogo")`). **Music.** None: `BEG/` has no
 music gate (§1). Reference `reference/parts/beglogo/`: 430, 470, 560, 900
 (`reference-indices.md` §3).
@@ -134,7 +134,7 @@ it is 81,273 px off, and 8300 is 0 (A53).
 
 ```bash
 cargo test -p secondreality --bin secondreality parts::beglogo
-cargo test -p secondreality --test beglogo
+cargo test -p secondreality --test parts beglogo::
 cargo xtask rediff --only beglogo
 cargo run --release --bin secondreality -- --headless --part beglogo \
     --dump-frames 430,470,560,900 --dump-dir out/beglogo

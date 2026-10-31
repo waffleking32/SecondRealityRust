@@ -29,7 +29,7 @@ The reference's own fade pins tick 0. `reference-indices.md` §11.1 records the 
 6.08 (425), 8.91 (430), 10.25 (435) and 10.53 (440); the port's curve `min(step, tmppal)` puts
 them on steps 5, 10, 15 and 20, displayed at `tick 0 + step + 1`. All four give 419
 (`the_fade_in_pins_tick_zero_to_boot_419`). A `--part mntscrl` or `--block 3` run numbers its
-own frames from zero (`a_block_three_run_starts_here_and_is_numbered_the_same_way`); the
+own frames from zero (`a_block_three_run_starts_at_mntscrl_with_its_own_numbering`); the
 manifest rule is `part-sequence.md` §10 (mapping, pre-roll and block-seam conventions), and
 `--block 3`'s chain tick `t` is boot `419 + t`. In a full run the part's first frame is a
 `FULLRUN_SEAMS` row (16,637 in the original, 16,633 in the port; A53).
@@ -149,7 +149,7 @@ Reproduce:
 
 ```bash
 cargo xtask rediff --only mntscrl
-cargo test -p secondreality --test mntscrl
+cargo test -p secondreality --test parts mntscrl::
 cargo test -p secondreality --bin secondreality mntscrl::tests
 ```
 
