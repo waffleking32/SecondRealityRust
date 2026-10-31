@@ -74,10 +74,14 @@ jobs:
           - os: ubuntu-22.04
             name: linux-x64
             readme: tools/linux/README-LINUX.txt
-          - os: macos-14
+          - os: macos-26
             name: macos-arm64
             readme: tools/macos/README-MACOS.txt
     runs-on: ${{ matrix.os }}
+    env:
+      # The oldest macOS the binary runs on, for rustc and SDL's CMake build alike; without it
+      # SDL would target the runner's own macOS. Linux ignores it.
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v7
 
@@ -122,6 +126,13 @@ jobs:
           for f in alku_000500.idx alku_001300.idx; do
             test -f "$dump/$f" || { echo "the smoke run wrote no $f"; exit 1; }
           done
+
+      - name: Check the oldest macOS the binary runs on
+        if: runner.os == 'macOS'
+        run: |
+          minos=$(otool -l dist/SecondReality/secondreality | awk '/minos/ {print $2; exit}')
+          echo "minos $minos"
+          test "$minos" = "$MACOSX_DEPLOYMENT_TARGET"
 
       # A tarball keeps the executable bits that an Actions artifact zip would drop.
       - uses: actions/upload-artifact@v7
