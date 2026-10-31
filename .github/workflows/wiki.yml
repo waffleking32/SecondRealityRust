@@ -1,0 +1,38 @@
+# Publishes wiki/ to the repository's GitHub wiki: the wiki is a mirror of that directory, so
+# pages are edited here, in the same commits as the code they describe.
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ['wiki/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mirror wiki/ into the wiki repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" "$RUNNER_TEMP/wiki"
+          rsync -a --delete --exclude .git wiki/ "$RUNNER_TEMP/wiki/"
+          cd "$RUNNER_TEMP/wiki"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the wiki is already up to date"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Mirror wiki/ at ${GITHUB_SHA::7}"
+          git push -q origin HEAD

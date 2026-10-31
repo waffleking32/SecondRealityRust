@@ -1,0 +1,1 @@
+The port is MIT licensed ([SecondRealityRust](https://github.com/waffleking32/SecondRealityRust)); the original Second Reality source is public domain ([mtuomi/SecondReality](https://github.com/mtuomi/SecondReality)).

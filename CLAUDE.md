@@ -20,7 +20,9 @@ bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, au
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
 tools/                emulator probes, measurement scripts, the vault capture script, the packages'
                       readmes and the macOS launcher
-.github/workflows/    build.yml: Windows, Linux and macOS packages (manual, or a Release on a v* tag)
+.github/workflows/    build.yml: Windows, Linux and macOS packages (manual, or a Release on a v* tag);
+                      wiki.yml: mirrors wiki/ to the GitHub wiki
+wiki/                 the GitHub wiki's pages and pictures
 assets/               the curated original media; assets/PROVENANCE.md is parsed by xtask
 reference/            captured frames and manifests: input-only
 upstream/             the original source (submodule): input-only
@@ -175,6 +177,11 @@ image per frame.
   matches*: the boot↔tick mapping, the music cue, the keyframes and their measurements, long
   investigations; it points at the module by item name. **`APPROXIMATIONS.md`** owns each
   approximation's argument, **`bugs.md`** the preserved bugs, **`decisions.md`** the rulings.
+- **The wiki** (`wiki/`, mirrored to the GitHub wiki by `.github/workflows/wiki.yml` on a push to
+  main) owns the *reader's explanation*: how each effect works, for a curious programmer. It links
+  to the module and the part's note rather than restating them. Its pictures are
+  `cargo xtask frames stills` (the table in `xtask/src/stills.rs`); a page that changes a picture
+  changes that table and regenerates.
 - A- and D-numbers, and cited § numbers, never change; a retired entry is a one-line tombstone.
   Write the current fact in the present tense (history is in git), and cite this repo's files by
   item or test name, not line number.

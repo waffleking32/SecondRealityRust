@@ -408,7 +408,7 @@ fn print_rows(rows: &[Row]) {
 }
 
 /// `cargo build --release -p secondreality`, and the executable it reports.
-fn build_release() -> Result<PathBuf, String> {
+pub(crate) fn build_release() -> Result<PathBuf, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     println!("building: cargo build --release -p secondreality");
     let output = Command::new(&cargo)

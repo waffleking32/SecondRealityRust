@@ -5,8 +5,8 @@
 //!   against the digests its manifests record (D23).
 //! - `compare` diffs frames against a capture; `rediff` re-renders every filed frame and checks
 //!   each against its registered count.
-//! - `frames sheet` and `assets verify --sheet` write contact sheets to look at; `assets verify`
-//!   checks `assets/` against `assets/PROVENANCE.md`.
+//! - `frames sheet` and `assets verify --sheet` write contact sheets to look at; `frames stills`
+//!   renders the wiki's pictures; `assets verify` checks `assets/` against `assets/PROVENANCE.md`.
 //! - `music` reads the original's player state out of the emulator (D26).
 //!
 //! Every checking command exits **0** when everything checked out, **1** when a check failed
@@ -24,6 +24,7 @@ mod paths;
 mod rediff;
 mod reference;
 mod sheet;
+mod stills;
 mod verify;
 
 use std::path::{Path, PathBuf};
@@ -151,6 +152,18 @@ enum FramesCommand {
         /// Where the PNG goes. A path inside `--dir` is refused.
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Render the wiki's pictures (the table in `xtask/src/stills.rs`) as
+    /// PNGs magnified to the window's 640x400.
+    ///
+    /// Exit code 0 when every still was written, 2 when one could not be.
+    Stills {
+        /// Where the PNGs go.
+        #[arg(long, default_value = "wiki/images")]
+        out: PathBuf,
+        /// The binary to run. Without it, `cargo build --release -p secondreality` and that.
+        #[arg(long)]
+        binary: Option<PathBuf>,
     },
 }
 
@@ -455,6 +468,9 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Frames {
             command: FramesCommand::Sheet { dir, out },
         } => Ok(sheet::frames_command(&dir, &out)?),
+        Command::Frames {
+            command: FramesCommand::Stills { out, binary },
+        } => Ok(stills::command(binary, &out)?),
         Command::Assets {
             command:
                 AssetsCommand::Verify {
