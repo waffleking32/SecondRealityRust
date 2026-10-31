@@ -865,7 +865,7 @@ by** `a_part_run_of_each_vault_effect_numbers_itself_from_zero_and_is_silent` in
 
 ## D40 — The vault menu is window-only; `--part` is the headless surface
 
-**Decided.** `--vault` opens a 320×200 menu (`vault_menu.rs`) drawn in `ALKU/FONA.UH`: `SECOND
+**Decided.** `--vault` opens a 320×200 menu (`menu/vault.rs`) drawn in `ALKU/FONA.UH`: `SECOND
 REALITY` / `VAULT`, the rows GRID, HARD, TWIST with a `>` marker, and the footer
 `UP DOWN  ENTER  ESC`. Up and Down wrap, Enter starts the part, ESC closes the window. It is refused
 with `--headless`, `--part`, `--block`, `--dump-dir`, `--dump-frames`, `--frames`, `--run-seconds`
@@ -877,7 +877,7 @@ returns to the menu. A part that finished by itself (HARD's `default` arm, TWIST
 is already holding, so one ESC returns. The menu is the port's own surface with no original to
 compare.
 
-**Pinned by** `vault_menu.rs`'s tests and `an_escape_on_a_held_vault_part_returns_to_the_menu`.
+**Pinned by** `menu::vault`'s tests and `an_escape_on_a_held_vault_part_returns_to_the_menu`.
 
 ## D41 — The demo's own run, and how it ends
 
@@ -906,7 +906,7 @@ Unicode; on a terminal (`IsTerminal`) each attribute change is an SGR sequence a
 
 **Pinned by** `a_demo_run_fades_then_blanks_then_ends`, `a_run_with_no_arguments_is_the_demo_in_a_window`,
 `escape_during_the_exit_stage_closes_at_once`, `the_end_screen_is_the_shipped_box` and
-`the_end_screen_is_printed_after_a_windowed_demo_run_only`.
+`the_end_screen_follows_a_windowed_demo_run_only`.
 
 ## D42 — Loop mode: `--loop`, `/gravis`, and the seam between passes
 
@@ -976,7 +976,7 @@ moves the published `(order, row)`, so pictures are identical under either quali
 
 ## D44 — The settings screen: the original's setup, asked every time, nothing kept
 
-**Decided.** A windowed demo run opens on a five-row settings screen (`settings.rs`,
+**Decided.** A windowed demo run opens on a five-row settings screen (`menu/settings.rs`,
 `window::setup_run`), the port's stand-in for `START.EXE`'s `menu()` (`MAIN/START.C:89-95`). The
 rows are **Sound** On/Off (`MENU.C:190-209`; Off is `--no-audio`, and the player still runs, as the
 original's no-sound option still syncs, `MENU.C:114-123`; D46), **Sound quality**
@@ -992,10 +992,10 @@ sound card, are built only after Enter.
 Not for `--part`, `--vault`, `--headless`, `--no-setup` or `/gravis`. It waits in bounded
 `wait_event_timeout`s.
 
-**Its look.** The text layer is `menu_text.rs`, shared with the vault menu, plus the seven marks
+**Its look.** The text layer is `menu/mod.rs`, shared with the vault menu, plus the seven marks
 `( ) + - * = '` at cells 67–73 of the source's order (`ALKU/MAIN.C:40`). The frame is 520×325,
 because "Sound quality", "Authentic" and the footer `UP DOWN  LEFT RIGHT  ENTER  ESC` do not fit
-320 columns. It changes no compared frame (A59). **Pinned by** `settings.rs`'s tests, including
+320 columns. It changes no compared frame (A59). **Pinned by** `menu::settings`'s tests, including
 `the_frame_is_sized_for_the_widest_row_and_the_footer`.
 
 ## D45 — A restart keeps what `_zplaysong`'s initialiser does not write

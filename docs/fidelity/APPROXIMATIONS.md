@@ -1587,7 +1587,7 @@ is pinned by `cargo test -p secondreality --bin secondreality window::tests`
 
 ## A59 — A demo run's two text-mode screens: the settings screen for `START.EXE`'s menu, and the end box printed to the terminal
 
-**Part:** a windowed demo run's start and end (`settings.rs`, `endscreen.rs`, D41, D44). A
+**Part:** a windowed demo run's start and end (`menu/settings.rs`, `endscreen.rs`, D41, D44). A
 substitution with measured difference 0.
 
 **Original:** `START.EXE` runs `menu()` in text mode on every start but `/gravis`
@@ -1608,7 +1608,7 @@ are the port's own surfaces (D41, D44).
 and the end box goes to stdout. The box's characters and colours are the shipped file's
 (`cargo test -p secondreality --bin secondreality endscreen`: `the_end_screen_is_the_shipped_box`,
 `the_end_screen_colours_are_its_attributes`), the stage's ticks are
-`a_demo_run_fades_then_blanks_then_ends`, and the screen is `settings::tests`.
+`a_demo_run_fades_then_blanks_then_ends`, and the screen is `menu::settings::tests`.
 
 ## A60 — The enhanced sound option: the port's own renderer, off by default, the clock untouched
 

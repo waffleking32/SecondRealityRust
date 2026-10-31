@@ -10,18 +10,15 @@ mod audio;
 mod cli;
 mod endscreen;
 mod headless;
-mod menu_text;
-mod settings;
+mod menu;
 mod parts;
 mod shell;
-mod vault_menu;
 mod window;
 
 use std::error::Error;
-use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use crate::shell::{Ending, Sequence};
+use crate::shell::Sequence;
 
 /// Printed when the command line does not parse.
 const USAGE: &str = "\
@@ -96,8 +93,8 @@ fn main() -> ExitCode {
     };
     // `fatalexit` prints the end box on every exit, the error path's included, and
     // before the error itself (`MAIN/U2.ASM:974`, `printerror` after it).
-    if prints_end_screen(&cli) {
-        print_end_screen();
+    if endscreen::follows(&cli) {
+        endscreen::print();
     }
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -117,51 +114,4 @@ fn new_sequence(cli: &cli::Cli) -> Result<Sequence, Box<dyn Error>> {
         None => vec![shell::resolve(cli.part_name())?],
     };
     Ok(Sequence::new(plan, settings)?)
-}
-
-/// Whether this command line's run ends by printing the demo's end box: a **windowed
-/// demo run** — one built from a block, which is also the run with no argument
-/// ([`Ending::Exit`]) — however its window closed. Never a `--part` run, the vault, or
-/// `--headless`, whose stdout is the dump's console and not a DOS screen.
-fn prints_end_screen(cli: &cli::Cli) -> bool {
-    !cli.headless && cli.run_settings().ending == Ending::Exit
-}
-
-/// Print `U2END.BIN` to stdout — the terminal the run was launched from is the port's
-/// stand-in for the text mode `printend` writes it into (D41) — with its colours when
-/// stdout is a terminal and as plain text when it is piped.
-fn print_end_screen() {
-    match std::fs::read(endscreen::END_SCREEN) {
-        Ok(screen) => {
-            let ansi = std::io::stdout().is_terminal();
-            print!("{}", endscreen::render(&screen, ansi));
-        }
-        // The box is the demo's goodbye, not its result: a missing file is said, and
-        // the run's own outcome is what the exit code reports.
-        Err(error) => eprintln!("secondreality: {}: {error}", endscreen::END_SCREEN),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(args: &[&str]) -> cli::Cli {
-        cli::Cli::parse(args.iter().map(|s| s.to_string())).unwrap()
-    }
-
-    #[test]
-    fn the_end_screen_is_printed_after_a_windowed_demo_run_only() {
-        assert!(prints_end_screen(&parse(&[])), "no argument is the demo");
-        assert!(prints_end_screen(&parse(&["--block", "5"])));
-        assert!(prints_end_screen(&parse(&["--loop"])), "a looping run prints it when it closes");
-        assert!(prints_end_screen(&parse(&["/gravis"])));
-        assert!(!prints_end_screen(&parse(&["--part", "glenz"])), "a part run holds");
-        assert!(!prints_end_screen(&parse(&["--vault"])), "the vault's runs are parts");
-        assert!(
-            !prints_end_screen(&parse(&["--headless", "--block", "5", "--dump-dir", "d",
-                                        "--frames", "1"])),
-            "a headless run is a dump"
-        );
-    }
 }

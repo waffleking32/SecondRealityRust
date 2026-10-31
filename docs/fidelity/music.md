@@ -1108,7 +1108,7 @@ ten seconds from order 0, within 1 dB.
 **The device's margin.** At 48000 Hz stereo SDL2 2.30.0 gives a 4096-frame callback on the
 `dummy`, `alsa`, `pulseaudio` and `pipewire` drivers, against 1024 at 20000 Hz; the enhanced ring
 (`Player::ring_capacity`, 19,660 samples) is a 2.4× margin over it, the authentic one 4×.
-`window::run` prints both.
+`audio::open_for` prints both.
 
 ### What it does not reproduce
 

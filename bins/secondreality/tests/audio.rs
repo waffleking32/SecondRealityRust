@@ -65,10 +65,8 @@ fn frames_of(dir: &Path) -> Vec<(String, Vec<u8>)> {
 
 #[test]
 fn a_headless_run_plays_the_music_with_and_without_a_device() {
-    // **The phase's own test that the run is the demo.** `--headless` opens no device, so
-    // `--no-audio` must change *nothing* about it: the frames, byte for byte, and the
-    // music's published position at every index. Without this the phase's comparisons would
-    // be measuring a demo that is not the one that plays.
+    // `--headless` opens no device, so `--no-audio` changes nothing: the frames, byte for
+    // byte, and the music's published position at every index.
     let with_device = scratch("with");
     let without = scratch("without");
     let both: &[&[&str]] = &[

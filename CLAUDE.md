@@ -15,7 +15,7 @@ crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, co
 crates/sr-audio/      the S3M player and STMIK's mixer (zero runtime dependencies)
 crates/sr-assets/     decoders for the original formats (depends on sr-engine only)
 bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
-                      settings.rs, vault_menu.rs, endscreen.rs, parts.rs (the registry), parts/
+                      menu/ (settings, vault), endscreen.rs, parts.rs (the registry), parts/
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
 tools/                emulator probes and the vault capture script
 assets/               the curated original media; assets/PROVENANCE.md is parsed by xtask

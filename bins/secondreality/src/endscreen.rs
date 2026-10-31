@@ -11,15 +11,21 @@
 //! after the window closes — with the attributes as SGR colours when stdout is a terminal,
 //! and as plain text when it is not.
 
+use std::io::IsTerminal;
+
+use crate::cli::Cli;
+use crate::shell::Ending;
+
 /// The end screen, by the relative path every part reads its media by.
-pub const END_SCREEN: &str = "assets/MAIN/DATA/U2END.BIN";
+const END_SCREEN: &str = "assets/MAIN/DATA/U2END.BIN";
 
 /// The row `printend` leaves the cursor on (`mov dx,256*14+0`, `MAIN/U2.ASM:532`): the
 /// box is rows `0..CURSOR_ROW`, and what DOS prints next starts here.
-pub const CURSOR_ROW: usize = 14;
+const CURSOR_ROW: usize = 14;
 
 /// Text mode 3's geometry: 80 columns, 25 rows, two bytes a cell.
 const COLUMNS: usize = 80;
+#[cfg(test)]
 const ROWS: usize = 25;
 const CELL: usize = 2;
 
@@ -56,7 +62,7 @@ const HIGH: [char; 128] = [
 /// `0x00` draws nothing, which is a space; `0x20..=0x7E` are ASCII; `0x7F` is the house.
 /// The rest are the code page's own glyphs, `LOW` for the control range and `HIGH` for the
 /// upper half (`0xFF` is the no-break space).
-pub fn glyph(byte: u8) -> char {
+fn glyph(byte: u8) -> char {
     match byte {
         0x00..=0x1F => LOW[byte as usize],
         0x20..=0x7E => byte as char,
@@ -75,7 +81,7 @@ fn is_blank(byte: u8) -> bool {
 ///
 /// The VGA's colour order is blue-green-red from bit 0 up and ANSI's is red-green-blue,
 /// so the three colour bits are swapped end for end: VGA 1 (blue) is ANSI 4.
-pub fn sgr(attribute: u8) -> String {
+fn sgr(attribute: u8) -> String {
     const ANSI: [u8; 8] = [0, 4, 2, 6, 1, 5, 3, 7];
     let foreground = attribute & 0x0F;
     let background = (attribute >> 4) & 0x07;
@@ -94,9 +100,9 @@ pub fn sgr(attribute: u8) -> String {
 /// With `ansi`, every change of attribute along a line — the first cell's included —
 /// becomes an [`sgr`] sequence, and every line ends with `ESC[0m`. A `screen` shorter than
 /// the rows asked for renders the rows it has.
-pub fn render(screen: &[u8], ansi: bool) -> String {
+fn render(screen: &[u8], ansi: bool) -> String {
     let mut out = String::new();
-    for row in screen.chunks(COLUMNS * CELL).take(CURSOR_ROW.min(ROWS)) {
+    for row in screen.chunks(COLUMNS * CELL).take(CURSOR_ROW) {
         let cells: Vec<(u8, u8)> = row.chunks_exact(CELL).map(|cell| (cell[0], cell[1])).collect();
         let inked = cells
             .iter()
@@ -121,9 +127,41 @@ pub fn render(screen: &[u8], ansi: bool) -> String {
     out
 }
 
+/// Whether this command line's run ends by printing the end box: a windowed demo run (one
+/// built from a block, [`Ending::Exit`]), however its window closed. Never `--part`, the
+/// vault, or `--headless`, whose stdout is the dump's console.
+pub fn follows(cli: &Cli) -> bool {
+    !cli.headless && cli.run_settings().ending == Ending::Exit
+}
+
+/// Print `U2END.BIN` to stdout, the port's stand-in for the text mode `printend` writes
+/// (D41): coloured on a terminal, plain when piped. A missing file is said; the run's own
+/// outcome is what the exit code reports.
+pub fn print() {
+    match std::fs::read(END_SCREEN) {
+        Ok(screen) => print!("{}", render(&screen, std::io::stdout().is_terminal())),
+        Err(error) => eprintln!("secondreality: {END_SCREEN}: {error}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_end_screen_follows_a_windowed_demo_run_only() {
+        let parse = |args: &[&str]| Cli::parse(args.iter().map(|s| s.to_string())).unwrap();
+        for args in [&[][..], &["--block", "5"], &["--loop"], &["/gravis"]] {
+            assert!(follows(&parse(args)), "{args:?}");
+        }
+        for args in [
+            &["--part", "glenz"][..],
+            &["--vault"],
+            &["--headless", "--block", "5", "--dump-dir", "d", "--frames", "1"],
+        ] {
+            assert!(!follows(&parse(args)), "{args:?}");
+        }
+    }
 
     /// The shipped end screen, read where a unit test finds the repository's assets.
     fn shipped() -> Vec<u8> {

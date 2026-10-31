@@ -138,8 +138,8 @@ crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, co
 crates/sr-assets/     the original's formats: decoders, OMF reader, EXE unpacker, VISU scenes
 crates/sr-audio/      the S3M player: descrambling, tracker, effects, the STMIK mixer
 bins/secondreality/   the binary: shell/ (the run), cli.rs, window.rs (SDL), headless.rs,
-                      audio.rs (Player as Music, the sound card, the WAV dump), settings.rs,
-                      vault_menu.rs, endscreen.rs, parts.rs (the registry) and parts/
+                      audio.rs (Player as Music, the sound card, the WAV dump), menu/ (the settings
+                      screen and the vault menu), endscreen.rs, parts.rs (the registry), parts/
 xtask/                capture, compare, rediff, asset and music tooling (§4.8)
 ```
 
@@ -271,7 +271,7 @@ A purpose-built S3M player with Scream Tracker 3 semantics that exposes STMIK's 
 (D21), the music restarts (`part-sequence.md` §3), the post-PANICEND cue wait (D38), the ESC, Ctrl
 and drain semantics (A58, D35), loop mode (D42) and the run's end (D41). `window.rs` feeds it
 wall-clock time and presents the newest frame; `headless.rs` ticks it and dumps frames. The settings
-screen is `settings.rs` (D44).
+screen is `menu/settings.rs` (D44).
 
 ### 4.7 The vault
 
