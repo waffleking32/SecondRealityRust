@@ -245,10 +245,9 @@ code is `xtask/src/oracle/dosbox.rs`. The OpenAPI document is at `/openapi.json`
   recipe the first graphics frame follows Enter by about 0.26 s.
 
 **Fixtures** in `xtask/tests/fixtures/`, recorded from the live emulator: `info.json`, `frame.bin`
-(a raw frame) with `frame_info.json` (its `video/frame/info`), `fb.bin` (its 64,000 indices),
-`dac.bin` (its 256 triples), `dac_port.json` (the literal port requests behind them), and
-`modex_title_frame.bin` with `modex_title_planes.bin` and `modex_title_frame_info.json` (the
-320×400 Mode X title screen, its four planes and its info). They check themselves: every pixel of
+(a raw frame), `fb.bin` (its 64,000 indices), `dac.bin` (its 256 triples), `dac_port.json` (the
+literal port requests behind them), and `modex_title_frame.bin` with `modex_title_planes.bin` (the
+320×400 Mode X title screen and its four planes). They check themselves: every pixel of
 the frame is the widened DAC entry its index names. **Pinned by** the fixture tests in
 `xtask/src/oracle/`.
 
