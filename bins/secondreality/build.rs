@@ -1,14 +1,14 @@
 //! Embeds the repository's `assets/` in the binary, so a run needs no files beside it.
 //!
-//! Compresses every file under `assets/` (except `PROVENANCE.md`, the tree's documentation) to a
-//! raw LZMA stream, writes the streams end to end to `$OUT_DIR/assets.lzma`, and writes
-//! `$OUT_DIR/assets.rs`: `PACKED`, that file's `include_bytes!`, and `FILES`, each asset's
-//! (repo-relative path, range in `PACKED`, decompressed length), sorted by path so
+//! Concatenates every file under `assets/` (except `PROVENANCE.md`, the tree's documentation) in
+//! path order, compresses the whole as one raw LZMA stream to `$OUT_DIR/assets.lzma`, and writes
+//! `$OUT_DIR/assets.rs`: `PACKED`, that file's `include_bytes!`, `UNPACKED_LEN`, and `FILES`,
+//! each asset's (repo-relative path, offset, length) in the unpacked tree, sorted by path so
 //! `src/assets.rs` can binary-search it. Paths use forward slashes on every host. Every directory
 //! and file is a `rerun-if-changed`, so adding, removing or changing an asset rebuilds the binary.
 //!
-//! The streams carry no `.lzma` header (13 bytes each): the properties are the constants below
-//! and the length is in `FILES`. docs/design.md §9 has why LZMA.
+//! The stream carries no `.lzma` header: the properties are the constants below and the length is
+//! `UNPACKED_LEN`. docs/design.md §9 has why one LZMA stream.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use lzma_rust2::{EncodeMode, LzmaOptions, LzmaWriter, MfType};
 const SKIPPED: &str = "assets/PROVENANCE.md";
 
 /// LZMA's literal context bits, literal position bits and position bits. lc 4, pb 0 beat the
-/// default lc 3, pb 2 on this tree by 15 KB: it is byte-oriented data, little of it aligned.
+/// default lc 3, pb 2 on this tree by 13 KB: it is byte-oriented data, little of it aligned.
 const LC: u32 = 4;
 const LP: u32 = 0;
 const PB: u32 = 0;
@@ -38,25 +38,29 @@ fn main() {
     files.retain(|(rel, _)| rel != SKIPPED);
     files.sort();
 
-    let mut packed = Vec::new();
-    let mut out = format!(
+    let mut tree = Vec::new();
+    let mut table = String::new();
+    for (rel, path) in &files {
+        let start = tree.len();
+        tree.extend(
+            std::fs::read(path).unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+        );
+        // `{:?}` writes a Rust string literal, backslashes and quotes escaped.
+        writeln!(table, "    ({rel:?}, {start}, {}),", tree.len() - start).unwrap();
+    }
+    let packed = compress(&tree);
+    let out = format!(
         "const LC: u32 = {LC};\nconst LP: u32 = {LP};\nconst PB: u32 = {PB};\n\
-         /// Every embedded asset's raw LZMA stream, end to end.\n\
+         /// The unpacked tree's length: every embedded asset, end to end.\n\
+         const UNPACKED_LEN: usize = {};\n\
+         /// The unpacked tree as one raw LZMA stream.\n\
          static PACKED: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/assets.lzma\"));\n\
-         /// Every embedded asset as (repository-relative path, its stream's start and end in\n\
-         /// `PACKED`, its decompressed length), sorted by path.\n\
-         static FILES: [(&str, usize, usize, usize); {}] = [\n",
+         /// Every embedded asset as (repository-relative path, offset, length) in the unpacked\n\
+         /// tree, sorted by path.\n\
+         static FILES: [(&str, usize, usize); {}] = [\n{table}];\n",
+        tree.len(),
         files.len()
     );
-    for (rel, path) in &files {
-        let bytes =
-            std::fs::read(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let start = packed.len();
-        compress(&mut packed, &bytes);
-        // `{:?}` writes a Rust string literal, backslashes and quotes escaped.
-        writeln!(out, "    ({rel:?}, {start}, {}, {}),", packed.len(), bytes.len()).unwrap();
-    }
-    out.push_str("];\n");
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
     let blob = out_dir.join("assets.lzma");
@@ -65,17 +69,20 @@ fn main() {
     std::fs::write(&dest, out).unwrap_or_else(|error| panic!("{}: {error}", dest.display()));
 }
 
-/// Appends `bytes`' raw LZMA stream to `packed`: no header and no end marker, a dictionary the
-/// size of the file (at least `DICT_SIZE_MIN`), and xz -9e's search (BT4, nice length 273).
-/// `src/assets.rs` decodes it with the same properties.
-fn compress(packed: &mut Vec<u8>, bytes: &[u8]) {
+/// `bytes` as a raw LZMA stream: no header and no end marker, a dictionary the size of the input
+/// (at least `DICT_SIZE_MIN`), and xz -9e's search (BT4, nice length 273). `src/assets.rs`
+/// decodes it with the same properties.
+fn compress(bytes: &[u8]) -> Vec<u8> {
     let dict_size = u32::try_from(bytes.len().max(lzma_rust2::DICT_SIZE_MIN as usize))
-        .expect("an asset under 4 GiB");
+        .expect("a tree under 4 GiB");
     let options = LzmaOptions::new(dict_size, LC, LP, PB, EncodeMode::Normal, 273, MfType::Bt4, 0);
-    let mut writer = LzmaWriter::new(packed, &options, false, false, Some(bytes.len() as u64))
-        .expect("the LZMA encoder");
+    let mut packed = Vec::new();
+    let mut writer =
+        LzmaWriter::new(&mut packed, &options, false, false, Some(bytes.len() as u64))
+            .expect("the LZMA encoder");
     std::io::Write::write_all(&mut writer, bytes).expect("compressing into memory");
     writer.finish().expect("compressing into memory");
+    packed
 }
 
 /// Every file below `dir`, whose repository-relative name is `rel`, as (`rel/...`, path).

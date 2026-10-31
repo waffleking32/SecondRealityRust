@@ -23,7 +23,7 @@ sr-assets = { path = "../../crates/sr-assets" }
 sdl2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# The embedded assets are raw LZMA streams (build.rs); this decodes one on first use. Pure Rust
+# The embedded assets are one raw LZMA stream (build.rs); this unpacks it at startup. Pure Rust
 # and, with the defaults off, no dependencies of its own.
 lzma-rust2 = { version = "=0.24.0", default-features = false, features = ["std"] }
 

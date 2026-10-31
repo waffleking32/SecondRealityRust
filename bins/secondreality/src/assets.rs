@@ -3,9 +3,9 @@
 //! working directory. Paths are repository-relative with forward slashes, e.g.
 //! `assets/ALKU/FONA.UH`.
 //!
-//! Each file is stored as a raw LZMA stream and decompressed the first time it is asked for, then
-//! kept for the rest of the run, so a caller still borrows `&'static` bytes (docs/design.md §9
-//! has the decode times).
+//! The tree is stored as one raw LZMA stream, which [`unpack`] decompresses whole, once: `main`
+//! calls it before a run starts, so no frame waits on a decode (docs/design.md §9 has the time).
+//! A caller borrows `&'static` bytes of the unpacked tree.
 
 use std::io::Read as _;
 use std::sync::OnceLock;
@@ -15,28 +15,28 @@ use sr_assets::Image;
 
 include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 
-/// `FILES[i]`'s bytes once decompressed.
-static DECODED: [OnceLock<Box<[u8]>>; FILES.len()] = [const { OnceLock::new() }; FILES.len()];
+/// The unpacked tree, which `FILES` indexes.
+static TREE: OnceLock<Box<[u8]>> = OnceLock::new();
+
+/// The unpacked tree, decompressed on the first call. The stream is build.rs's own output, so a
+/// failure is a build bug, not a bad input.
+pub(crate) fn unpack() -> &'static [u8] {
+    TREE.get_or_init(|| {
+        // The reader rounds the dictionary up to LZMA's minimum, as build.rs's encoder did.
+        let dict_size = u32::try_from(UNPACKED_LEN).expect("a tree under 4 GiB");
+        let mut tree = vec![0; UNPACKED_LEN];
+        LzmaReader::new(PACKED, UNPACKED_LEN as u64, LC, LP, PB, dict_size, None)
+            .and_then(|mut reader| reader.read_exact(&mut tree))
+            .unwrap_or_else(|error| panic!("the embedded assets do not decode: {error}"));
+        tree.into_boxed_slice()
+    })
+}
 
 /// The bytes of the embedded `path`, if it is one.
 pub(crate) fn get(path: &str) -> Option<&'static [u8]> {
-    FILES
-        .binary_search_by(|(name, ..)| (*name).cmp(path))
-        .ok()
-        .map(|index| &**DECODED[index].get_or_init(|| decode(index)))
-}
-
-/// `FILES[index]`'s stream, decompressed. The stream is build.rs's own output, so a failure is a
-/// build bug, not a bad input.
-fn decode(index: usize) -> Box<[u8]> {
-    let (name, start, end, len) = FILES[index];
-    // The reader rounds the dictionary up to LZMA's minimum, as build.rs's encoder did.
-    let dict_size = u32::try_from(len).expect("an asset under 4 GiB");
-    let mut bytes = vec![0; len];
-    LzmaReader::new(&PACKED[start..end], len as u64, LC, LP, PB, dict_size, None)
-        .and_then(|mut reader| reader.read_exact(&mut bytes))
-        .unwrap_or_else(|error| panic!("{name}: the embedded stream does not decode: {error}"));
-    bytes.into_boxed_slice()
+    let index = FILES.binary_search_by(|(name, ..)| (*name).cmp(path)).ok()?;
+    let (_, start, len) = FILES[index];
+    Some(&unpack()[start..start + len])
 }
 
 /// [`get`], or an error naming `path`.

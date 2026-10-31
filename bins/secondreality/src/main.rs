@@ -85,6 +85,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Every asset, decompressed before either mode opens anything, so a run never waits on one.
+    assets::unpack();
     // Dispatched on the parsed command line: a headless run must reach a
     // machine with no display, so it never initialises SDL video.
     let result = if cli.headless {
