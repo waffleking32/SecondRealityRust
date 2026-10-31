@@ -62,8 +62,8 @@ and `TWIST` are unreleased development effects.
 The binary embeds every file under `assets/` as one LZMA stream (`bins/secondreality/build.rs`;
 `src/assets.rs` unpacks it whole at startup, before the run), so it runs from any directory and
 reads no media from disk; changing an asset rebuilds it. Flags and keys for players are in
-`README.md` and `secondreality --help`. Tests, rediff and day-to-day runs use `--release`; the packages CI
-ships build with `--profile dist` (the workspace `Cargo.toml`: stripped, fat LTO,
+`README.md` and `secondreality --help`. Tests, rediff and day-to-day runs use `--release`; the
+packages CI ships build with `--profile dist` (the workspace `Cargo.toml`: stripped, fat LTO,
 `opt-level = "s"`), which renders the same frames. The developer's view:
 
 ```bash

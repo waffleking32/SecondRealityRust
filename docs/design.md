@@ -468,12 +468,12 @@ beside a table of each file's repository-relative path (`assets/ALKU/FONA.UH`) a
 length in the unpacked tree. `main` calls `assets::unpack` before either mode starts, which
 decompresses the 6.6 MB tree into one heap buffer in about 90 ms, so no frame waits on a decode;
 `assets::get` looks a path up and borrows `&'static [u8]` from that buffer. The decoder is the same
-pure-Rust crate, a dependency of the binary alone. LZMA (lc 4, lp 0, pb 0) packs the tree to
-2.7 MB, about 230 KB smaller than zstd at its highest level, with a decoder a quarter the size;
-one stream is 170 KB smaller than a stream per file, and path order packs as well as any grouping
-tried. Packages build with the `dist` profile (stripped, fat LTO, `opt-level = "s"`): 5.9 MB on
-Linux, against the release profile's 6.9 MB. A run reads no media from disk, so it works from any directory; there is no
-option to read them from a folder.
+pure-Rust crate, a dependency of the binary alone. LZMA packs the tree to 2.7 MB, about 230 KB
+smaller than zstd at its highest level, with a decoder a quarter the size; one stream is 170 KB
+smaller than a stream per file, and path order packs as well as any grouping tried. Packages build
+with the `dist` profile (stripped, fat LTO, `opt-level = "s"`): 5.9 MB on Linux, against the
+release profile's 6.9 MB. A run reads no media from disk, so it works from any directory; there is
+no option to read them from a folder.
 `sr_audio::Song::decode` and `sr_assets::load_any` take the bytes, so neither crate learns where
 they came from.
 
