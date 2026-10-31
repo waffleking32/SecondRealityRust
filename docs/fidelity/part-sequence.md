@@ -395,8 +395,8 @@ frame). A part's own tick relates to that numbering in one of two ways.
 
 "A mapping, not an anchor" in a note means the second case. A block that begins at a
 mapped part is part-numbered too: `--block 3` numbers from MNTSCRL's tick 0, which is boot
-419, so chain tick `t` is boot `419 + t`. Tests: `a_mid_block_part_has_no_anchor_and_says_so`
-(shell unit test), `a_dump_manifest_says_which_numbering_its_indices_are_in` and
+419, so chain tick `t` is boot `419 + t`. Tests:
+`every_part_of_the_demo_has_its_measured_anchor_or_none` (shell unit test), `a_dump_manifest_says_which_numbering_its_indices_are_in` and
 `a_block_three_run_starts_at_mntscrl_with_its_own_numbering` (`tests/shell.rs`).
 
 ### 10.2 The music start, and the entry pre-roll

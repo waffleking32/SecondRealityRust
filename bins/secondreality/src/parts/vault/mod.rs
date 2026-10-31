@@ -3,7 +3,7 @@
 //! GRID, HARD and TWIST never shipped inside `SECOND.EXE`; each was its own
 //! program (`GRID/P.EXE`, `HARD/B.EXE`, `TWIST/T.EXE`) run behind the
 //! standalone `DIS/DIS.EXE`. They are not in the demo's run order
-//! (`shell::PART_ORDER`), carry no boot anchor, and run silent: the captures
+//! (`shell::plan::PART_ORDER`), carry no boot anchor, and run silent: the captures
 //! that file them boot the shipped DIS with one start key and no music
 //! (`docs/fidelity/reference-indices.md` §24).
 

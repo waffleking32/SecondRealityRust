@@ -966,7 +966,7 @@ that music's clock starts, and where its samples go. All three are the shell's
 `SECOND n` selects a `partsmask` byte (`MAIN/U2.ASM:110-120`, `:595-630`), and `restartmus`
 (`:348-397`) loads a module and seeks it: `ax` is the module (0 = MUSIC0, 1 = MUSIC1), `bx` the
 order, and `cx` a speed adjustment written to `_zspeedadjust2` only for output modes 7 and 2
-(`:383-389`), which the reference's card is not. `shell::MUSIC_RESTARTS`:
+(`:383-389`), which the reference's card is not. `shell::music::MUSIC_RESTARTS`:
 
 | the block | module | order | the lines |
 |---|---|---|---|

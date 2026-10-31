@@ -27,8 +27,9 @@ pub(crate) type PartSource = fn(&str) -> Option<Box<dyn Part>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SequenceStatus {
     Continuing,
-    /// A part could not be started (a broken build or a missing asset). A run whose parts
-    /// have all retired is not finished: it [holds](Sequence::holding).
+    /// A part or a restart's music could not be started (a broken build or a missing asset);
+    /// the error is printed and the run ends. A run whose parts have all retired is not
+    /// finished: it [holds](Sequence::holding).
     Finished,
 }
 
@@ -132,7 +133,8 @@ enum Stage {
     /// The plan has run out and `live` holds its last screen; the exit stage's ticks so far
     /// ([`Ending::Exit`] only).
     Hold(u32),
-    /// A part could not be started.
+    /// A part or a restart's music could not be started; the error is printed and the run
+    /// ends.
     Finished,
 }
 
@@ -518,7 +520,7 @@ impl Sequence {
         self.anchor
     }
 
-    /// Whether a part could not be started and the run has ended.
+    /// Whether a part or the music could not be started and the run has ended.
     pub fn finished(&self) -> bool {
         self.stage == Stage::Finished
     }

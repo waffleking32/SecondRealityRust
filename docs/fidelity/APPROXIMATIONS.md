@@ -1582,7 +1582,7 @@ the original's flush. Keeping it serves the "get me out" press that ends a block
 **Measured difference:** **0** in every compared frame: no capture presses Ctrl or ESC. The behaviour
 is pinned by `cargo test -p secondreality --bin secondreality window::tests`
 (`escape_asks_the_running_part_to_exit_and_ctrl_skips_it`,
-`an_escape_between_two_parts_is_kept_and_then_closes_the_window`,
+`an_escape_after_the_last_part_and_before_the_hold_is_kept_and_then_closes_the_window`,
 `an_escape_between_two_parts_is_asked_of_the_next_one`).
 
 ## A59 — A demo run's two text-mode screens: the settings screen for `START.EXE`'s menu, and the end box printed to the terminal

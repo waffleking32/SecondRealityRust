@@ -1,6 +1,6 @@
 //! The part registry, the names `--part` accepts and what they construct, plus the asset
-//! reading every part shares. The demo's run order is `shell::PART_ORDER`; every name in it is
-//! registered here.
+//! reading every part shares. The demo's run order is `shell::plan::PART_ORDER`; every name in
+//! it is registered here.
 
 pub mod alku;
 pub mod beglogo;

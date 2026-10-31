@@ -5,7 +5,7 @@ Sources: `VISU/C/U2E.C` (628 lines) over the VISU library U2A uses (`VISU/VISU.C
 `assets/VISU/C/SCENE/U2E.00M`, `.0AA`, `.0AB`, `.001`–`.042`. Port:
 `bins/secondreality/src/parts/u2e.rs` (`"u2e"`) over `parts/visu/{math,draw,mod}.rs`; its module
 doc lists the six acts, and `prepare`'s doc the jelly substitution. Run: `SECOND 4`'s only part, anchor
-**418** (`shell::U2E_ANCHOR`, derived, §3); in blocks 1–3 it follows JPLOGO after the mid-run `MUSIC0@18` restart (`MAIN/U2.ASM:880-885`).
+**418** (`shell::plan::U2E_ANCHOR`, derived, §3); in blocks 1–3 it follows JPLOGO after the mid-run `MUSIC0@18` restart (`MAIN/U2.ASM:880-885`).
 Music: `MUSIC0` from order 18 (D34); the gate waits for the published order to pass 18.
 
 ## 1. Timeline

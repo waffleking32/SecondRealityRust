@@ -926,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn an_escape_between_two_parts_is_kept_and_then_closes_the_window() {
+    fn an_escape_after_the_last_part_and_before_the_hold_is_kept_and_then_closes_the_window() {
         // After the plan's last part retires there is no part and no hold yet: the press
         // waits, and closes the window as soon as the run holds.
         let mut run = run_of(vec!["endlogo"]);

@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mid_block_part_has_no_anchor_and_says_so() {
+    fn every_part_of_the_demo_has_its_measured_anchor_or_none() {
         // The measured anchors, and `None` for every other part of the demo: their starts
         // are windows (`part-sequence.md` §10.1).
         let anchored =

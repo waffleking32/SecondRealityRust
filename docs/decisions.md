@@ -180,10 +180,10 @@ order, the binary names, `partsmask[8] = 0x80` for `SECOND U` and the MUSIC0/MUS
   and `& 1`), and MUSIC0 at order 18 before U2E (`:880-885`, `& 8` alone), which fires mid-run for
   blocks 1–3 and is the entry point of `SECOND 4`.
 
-The port implements the first kind as one row an entry point (`shell::MUSIC_RESTARTS`, D27) and the
-second as `shell::MUSIC_RESTART_AT` (D34, D38). The demo is music-counted, so a part that starts at
-the wrong music position drifts against every later one; the capture harness records the argument
-it started the original with.
+The port implements the first kind as one row an entry point (`shell::music::MUSIC_RESTARTS`,
+D27) and the second as `shell::music::MUSIC_RESTART_AT` (D34, D38). The demo is music-counted, so
+a part that starts at the wrong music position drifts against every later one; the capture harness
+records the argument it started the original with.
 
 **Block arguments.** `README.1ST:66-79` documents `1`–`5`, and the code agrees. The code also
 accepts `U` (`checkcmdline`, `:613-616`, `:626-627`), which the README omits, and its error message
@@ -601,8 +601,8 @@ prints every number below (`music-clock.md` names each command).
 
 ## D27 — The run's music: the entry point decides the module, the anchor decides the clock
 
-**The restart table** is `shell::MUSIC_RESTARTS`, one row an entry point with the module, the
-order, the `whattorun` guard and the `MAIN/U2.ASM` lines: `SECOND 1` → MUSIC0 at 0
+**The restart table** is `shell::music::MUSIC_RESTARTS`, one row an entry point with the module,
+the order, the `whattorun` guard and the `MAIN/U2.ASM` lines: `SECOND 1` → MUSIC0 at 0
 (`:766-775`, `:785-787`), blocks 2–5 → MUSIC1 at 0 (`:772-775`), `SECOND 3` → MUSIC1 at 42
 (`:856-863`), `SECOND 4` → MUSIC0 at 18 (`:880-885`), `SECOND U` → MUSIC0 at 70 (`:889-894`),
 `SECOND 5` → MUSIC0 at 25 (`:898-905`). Its test reads the upstream file as bytes (it is not UTF-8)
