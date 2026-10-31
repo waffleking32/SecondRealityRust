@@ -41,7 +41,13 @@ pub const DEFAULT_OBJECT: &str = "upstream/SecondReality/MAIN/STMIK.300";
 /// The seven words of the player's position: consecutive slots one memory request returns
 /// together.
 pub const POSITION_WORDS: &[&str] = &[
-    "_np_zinfo", "_np_zplus", "_np_zframe", "_np_row", "_np_pat", "_np_ord", "_np_loop",
+    "_np_zinfo",
+    "_np_zplus",
+    "_np_zframe",
+    "_np_row",
+    "_np_pat",
+    "_np_ord",
+    "_np_loop",
 ];
 
 /// Speed and tempo, elsewhere in the segment (`MAIN/STMIK.H:117-120`).
@@ -130,9 +136,8 @@ pub fn symbols_command(object_path: &Path) -> Result<ExitCode, MusicError> {
         path: object_path.to_path_buf(),
         message: e.to_string(),
     })?;
-    let walk = symbols::walk(&object).map_err(|error| {
-        MusicError::Symbols(format!("{}: {error}", object_path.display()))
-    })?;
+    let walk = symbols::walk(&object)
+        .map_err(|error| MusicError::Symbols(format!("{}: {error}", object_path.display())))?;
     println!(
         "object: {} — {} bytes, {} record(s), sha256 {}",
         object_path.display(),
@@ -140,7 +145,10 @@ pub fn symbols_command(object_path: &Path) -> Result<ExitCode, MusicError> {
         walk.records(),
         sha256_hex(&object)
     );
-    println!("  every record the walk covers is 3 + length bytes: {} in all", walk.bytes);
+    println!(
+        "  every record the walk covers is 3 + length bytes: {} in all",
+        walk.bytes
+    );
     for (kind, count) in &walk.types {
         println!("  {:<14} {} record(s)", record_name(*kind), count);
     }
@@ -159,9 +167,8 @@ pub fn symbols_command(object_path: &Path) -> Result<ExitCode, MusicError> {
             symbol.offset, symbol.offset, symbol.name, symbol.segment
         );
     }
-    let map = symbol_map(object_path, &object).map_err(|error| {
-        MusicError::Symbols(format!("{}: {error}", object_path.display()))
-    })?;
+    let map = symbol_map(object_path, &object)
+        .map_err(|error| MusicError::Symbols(format!("{}: {error}", object_path.display())))?;
     println!("traced words ({}), read at base + offset:", map.words.len());
     for (name, offset) in &map.words {
         println!("  {name:<16} 0x{offset:04X} {:6}", offset);
@@ -207,7 +214,11 @@ pub(crate) mod tests {
 
     /// The vendored STMIK object.
     pub(crate) fn object() -> Vec<u8> {
-        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../").join(DEFAULT_OBJECT))
-            .expect("the vendored STMIK object")
+        std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../")
+                .join(DEFAULT_OBJECT),
+        )
+        .expect("the vendored STMIK object")
     }
 }

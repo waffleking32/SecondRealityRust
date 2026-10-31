@@ -18,11 +18,8 @@ use super::format::{
 };
 use super::locate::{find_segment, needles, symbol_map, SymbolMap};
 use super::{MusicError, MACHINE_WORDS, MUSIC_ROOT};
-use crate::oracle::{sleep_frames, Oracle, OracleError, DEFAULT_WAIT, FRAME_ORIGIN};
-use crate::reference::{
-    sha256_hex, validate_recipe, BootRecipe, BootWait, CaptureOptions, MANIFEST_VERSION,
-    REFERENCE_ROOT, SETUP_ANSWER_TIMEOUT, SETUP_SCREEN_TEXT, UPSTREAM_COMMIT,
-};
+use crate::oracle::{sleep_frames, Oracle, FRAME_ORIGIN};
+use crate::reference::{sha256_hex, Recipe, MANIFEST_VERSION, REFERENCE_ROOT, UPSTREAM_COMMIT};
 
 /// How far ahead a target frame may be before the wait sleeps rather than polls (~0.35 s).
 const POLL_WINDOW_FRAMES: u64 = 25;
@@ -30,54 +27,23 @@ const POLL_WINDOW_FRAMES: u64 = 25;
 /// How long the guest's counter may stand still before the trace is refused.
 const STALL_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Everything `music trace` needs.
+/// Everything `music trace` needs. The recipe's `boot_wait` is always the setup screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceOptions {
     pub object: PathBuf,
-    pub exe: PathBuf,
-    pub cwd: PathBuf,
-    pub arguments: Vec<String>,
-    pub cycles: u32,
+    pub recipe: Recipe,
     /// The window to sample, inclusive at both ends.
     pub window: [u64; 2],
     pub out: PathBuf,
-    pub keys: Vec<String>,
-    pub boot: BootRecipe,
     /// Replace a trace the directory already holds.
     pub force: bool,
-}
-
-impl TraceOptions {
-    /// The `[autoexec]` lines for this trace, through `reference capture`'s builder (D17).
-    pub fn autoexec_lines(&self) -> Result<Vec<String>, MusicError> {
-        let options = CaptureOptions {
-            exe: self.exe.clone(),
-            cwd: self.cwd.clone(),
-            arguments: self.arguments.clone(),
-            cycles: self.cycles,
-            frames: vec![self.window[0]],
-            out: self.out.clone(),
-            skip_boot_frames: 0,
-            keys: self.keys.clone(),
-            boot: self.boot,
-            boot_wait: BootWait::Setup,
-            sheet: None,
-        };
-        Ok(options.autoexec_lines()?)
-    }
 }
 
 /// Refuse a trace that cannot be reproduced, before touching the emulator: the recipe checks
 /// `reference capture` makes (D17), and `--out` only in a new directory under
 /// `reference/music/` when it is inside `reference/` at all.
 pub fn validate_trace_options(options: &TraceOptions) -> Result<(), MusicError> {
-    validate_recipe(
-        &options.exe,
-        &options.cwd,
-        options.cycles,
-        &options.keys,
-        options.boot,
-    )?;
+    options.recipe.validate()?;
     if options.window[1] < options.window[0] {
         return Err(MusicError::Options(format!(
             "the frame window {}..{} is empty: its last frame is before its first",
@@ -162,17 +128,11 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
     let mut needles = needles(&object)?;
 
     let oracle_name = oracle.describe()?;
-    oracle.set_cycles(options.cycles)?;
-    oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
-
-    let answering = !options.keys.is_empty();
-    if options.boot == BootRecipe::Typed && answering {
-        oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
-        oracle.send_keys(&options.keys.join(" "))?;
-    }
+    options.recipe.boot(oracle)?;
 
     // The locate starts as early as the guest answers, before the demo draws: the window's
-    // earliest frames hold the music's start, which is what the trace exists to measure.
+    // earliest frames hold the music's start, which is what the trace exists to measure. So
+    // whether the keys started the demo is checked after sampling.
     let location = find_segment(oracle, &object, &map, &needles)?;
     let base = location.base;
     let located_at = location.frame;
@@ -279,20 +239,10 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         }
     }
 
-    // The guest judges whether the keys answered the setup screen (D17): a demo that never
-    // reached graphics is a trace of the menu.
-    if answering {
-        if let Err(error) = oracle.wait_for_graphics(SETUP_ANSWER_TIMEOUT) {
-            let detail = match error {
-                OracleError::Timeout(message) => message,
-                other => other.to_string(),
-            };
-            return Err(MusicError::Coherence(format!(
-                "the keys {:?} did not start the demo: {detail}",
-                options.keys.join(" ")
-            )));
-        }
-    }
+    options
+        .recipe
+        .confirm_answered(oracle)
+        .map_err(MusicError::Coherence)?;
 
     // A segment that moved would make every later sample a different variable.
     let rerun = find_segment(oracle, &object, &map, &needles)?;
@@ -315,7 +265,9 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
     let machine_at_end = read_words(oracle, base, &map, MACHINE_WORDS)?;
     if rerun.views != location.views {
         locate_record.aliasing = match (&locate_record.aliasing, &rerun.aliasing) {
-            (Some(first), Some(second)) => Some(format!("{first} At the end of the trace: {second}")),
+            (Some(first), Some(second)) => {
+                Some(format!("{first} At the end of the trace: {second}"))
+            }
             (Some(first), None) => Some(first.clone()),
             (None, Some(second)) => Some(second.clone()),
             (None, None) => None,
@@ -340,17 +292,13 @@ pub fn trace(oracle: &mut dyn Oracle, options: &TraceOptions) -> Result<TraceMan
         kind: TRACE_KIND.to_string(),
         oracle: oracle_name,
         upstream_commit: UPSTREAM_COMMIT.to_string(),
-        exe: options
-            .exe
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        arguments: options.arguments.clone(),
-        cycles: options.cycles,
+        exe: options.recipe.exe_name(),
+        arguments: options.recipe.arguments.clone(),
+        cycles: options.recipe.cycles,
         frame_origin: FRAME_ORIGIN.to_string(),
         skip_boot_frames: 0,
-        boot: options.boot,
-        keys: options.keys.clone(),
+        boot: options.recipe.boot,
+        keys: options.recipe.keys.clone(),
         coverage: Coverage::of(window, &frames_in(&samples)),
         trace: trace_file,
         object: map,
@@ -592,8 +540,12 @@ fn write_trace(
 /// `cargo xtask music trace`.
 pub fn trace_command(options: &TraceOptions) -> Result<ExitCode, MusicError> {
     validate_trace_options(options)?;
-    let autoexec = options.autoexec_lines()?;
-    let mut oracle = crate::oracle::dosbox::DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
+    let autoexec = options.recipe.autoexec_lines()?;
+    let mut oracle = crate::oracle::dosbox::DosboxOracle::spawn(
+        options.recipe.cycles,
+        &options.recipe.cwd,
+        &autoexec,
+    )?;
     let manifest = trace(&mut oracle, options)?;
     oracle.shutdown()?;
     println!(
@@ -707,7 +659,10 @@ pub fn parse_window(spec: &str) -> Result<[u64; 2], MusicError> {
 
 fn parse_frame(text: &str, spec: &str) -> Result<u64, MusicError> {
     text.trim().parse::<u64>().map_err(|e| {
-        MusicError::Options(format!("--frames {spec:?}: {} is not a frame index: {e}", text.trim()))
+        MusicError::Options(format!(
+            "--frames {spec:?}: {} is not a frame index: {e}",
+            text.trim()
+        ))
     })
 }
 
@@ -724,7 +679,15 @@ mod tests {
         assert_eq!(parse_window("5").unwrap(), [5, 5]);
         assert_eq!(parse_window("1,2,3").unwrap(), [1, 3]);
         assert_eq!(parse_window(" 0..5 , 5..9 ").unwrap(), [0, 8]);
-        for bad in ["", "10..10", "10..0", "0,2", "0..5,9..12", "a..b", "0..=0..=3"] {
+        for bad in [
+            "",
+            "10..10",
+            "10..0",
+            "0,2",
+            "0..5,9..12",
+            "a..b",
+            "0..=0..=3",
+        ] {
             assert!(
                 parse_window(bad).is_err(),
                 "--frames {bad:?} must be refused"
@@ -807,7 +770,9 @@ mod tests {
 
         put(&mut bytes, &map, "_np_row", 300);
         match parse_sample(&bytes, 900, &map, 0x1051F0) {
-            Err(MusicError::Coherence(message)) => assert!(message.contains("0x1051F0"), "{message}"),
+            Err(MusicError::Coherence(message)) => {
+                assert!(message.contains("0x1051F0"), "{message}")
+            }
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
@@ -838,6 +803,9 @@ mod tests {
         let mut stopped = good;
         stopped.speed = 0;
         assert!(check_samples(&[stopped], &map).is_err());
-        assert!(check_samples(&[good, good], &map).is_err(), "frames must increase");
+        assert!(
+            check_samples(&[good, good], &map).is_err(),
+            "frames must increase"
+        );
     }
 }

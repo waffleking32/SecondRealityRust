@@ -34,7 +34,7 @@ use clap::{Parser, Subcommand};
 use oracle::dosbox::DosboxOracle;
 use oracle::Oracle;
 use reference::{
-    capture, keys_from_script, BootRecipe, BootWait, CaptureManifest, CaptureOptions,
+    capture, keys_from_script, BootRecipe, BootWait, CaptureManifest, CaptureOptions, Recipe,
 };
 
 #[derive(Parser)]
@@ -374,24 +374,26 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 },
         } => {
             let options = CaptureOptions {
-                exe,
-                cwd,
-                arguments,
-                cycles,
+                recipe: Recipe {
+                    exe,
+                    cwd,
+                    arguments,
+                    cycles,
+                    keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
+                    boot,
+                    boot_wait,
+                },
                 frames,
                 out,
                 skip_boot_frames,
-                keys: keys.as_deref().map(keys_from_script).unwrap_or_default(),
-                boot,
-                boot_wait,
                 sheet,
             };
-            // Refuse what cannot be reproduced before starting anything. The
-            // recipe goes into the emulator's config: `[autoexec]` runs at boot.
-            let autoexec = options.autoexec_lines()?;
+            // The recipe goes into the emulator's config: `[autoexec]` runs at boot.
+            let autoexec = options.recipe.autoexec_lines()?;
             reference::validate_options(&options)?;
 
-            let mut oracle = DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
+            let mut oracle =
+                DosboxOracle::spawn(options.recipe.cycles, &options.recipe.cwd, &autoexec)?;
             capture(&mut oracle, &options)?;
             oracle.shutdown()?;
 
@@ -489,14 +491,17 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             let window = music::parse_window(&frames)?;
             let options = music::TraceOptions {
                 object,
-                exe,
-                cwd,
-                arguments,
-                cycles,
+                recipe: Recipe {
+                    exe,
+                    cwd,
+                    arguments,
+                    cycles,
+                    keys: keys_from_script(&keys),
+                    boot,
+                    boot_wait: BootWait::Setup,
+                },
                 window,
                 out,
-                keys: keys_from_script(&keys),
-                boot,
                 force,
             };
             Ok(music::trace_command(&options)?)

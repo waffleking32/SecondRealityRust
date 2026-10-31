@@ -58,7 +58,10 @@ impl RateRun {
     /// The frames the module's own rule predicts: `intervals × speed` ticks of `2.5/tempo`
     /// seconds. A prediction, not a fit.
     pub fn predicted_frames(&self) -> f64 {
-        self.intervals() as f64 * f64::from(self.speed) * (2.5 / f64::from(self.tempo)) * FRAME_RATE_HZ
+        self.intervals() as f64
+            * f64::from(self.speed)
+            * (2.5 / f64::from(self.tempo))
+            * FRAME_RATE_HZ
     }
 
     /// One row's worth of frames.
@@ -97,11 +100,8 @@ impl Analysis {
             path: manifest_path.clone(),
             message: e.to_string(),
         })?;
-        let manifest: TraceManifest =
-            serde_json::from_str(&text).map_err(|e| MusicError::Trace(format!(
-                "{}: {e}",
-                manifest_path.display()
-            )))?;
+        let manifest: TraceManifest = serde_json::from_str(&text)
+            .map_err(|e| MusicError::Trace(format!("{}: {e}", manifest_path.display())))?;
         if manifest.kind != TRACE_KIND {
             return Err(MusicError::Trace(format!(
                 "{} is a {:?} capture; this command reads a {TRACE_KIND}",
@@ -265,9 +265,7 @@ impl Analysis {
                     run.1 = state.frame;
                     run.3 = state.zframe;
                 }
-                Some(_) | None => {
-                    runs.push((state.frame, state.frame, state.zframe, state.zframe))
-                }
+                Some(_) | None => runs.push((state.frame, state.frame, state.zframe, state.zframe)),
             }
         }
         runs.retain(|run| run.1 > run.0);
@@ -298,9 +296,7 @@ impl Analysis {
         );
         println!(
             "  segment base 0x{:06X} (found at frame {}, still there at frame {})",
-            self.manifest.locate.base,
-            self.manifest.locate.frame,
-            self.manifest.locate.rerun_frame
+            self.manifest.locate.base, self.manifest.locate.frame, self.manifest.locate.rerun_frame
         );
         self.print_start();
         self.print_rate()?;
@@ -347,10 +343,8 @@ impl Analysis {
                                 moved.push(format!("loop {} -> {}", earlier.loop_, state.loop_));
                             }
                             if earlier.zframe != state.zframe {
-                                moved.push(format!(
-                                    "zframe {} -> {}",
-                                    earlier.zframe, state.zframe
-                                ));
+                                moved
+                                    .push(format!("zframe {} -> {}", earlier.zframe, state.zframe));
                             }
                             if moved.is_empty() {
                                 String::new()
@@ -468,8 +462,7 @@ impl Analysis {
 
         // The anchor the rows imply: the first row change, less its `zframe` ticks at the
         // measured frames a tick. No simulation.
-        if let (Some(first_change), Some(longest)) = (self.first_row_change(), longest_zframe_run)
-        {
+        if let (Some(first_change), Some(longest)) = (self.first_row_change(), longest_zframe_run) {
             let frames_per_tick = longest.0 as f64 / longest.1 as f64;
             let ticks = f64::from(first_change.2);
             let implied = first_change.0 as f64 - ticks * frames_per_tick;
@@ -590,7 +583,14 @@ impl Analysis {
                     gap < below || gap > above
                 })
                 .map(|(at, pair)| {
-                    format!("{} of {} ({} -> {}, {})", at + 1, inside.len() - 1, pair[0], pair[1], pair[1] - pair[0])
+                    format!(
+                        "{} of {} ({} -> {}, {})",
+                        at + 1,
+                        inside.len() - 1,
+                        pair[0],
+                        pair[1],
+                        pair[1] - pair[0]
+                    )
                 })
                 .collect();
             if !outliers.is_empty() {
@@ -702,14 +702,7 @@ impl Analysis {
             .samples
             .windows(2)
             .filter(|pair| pair[1].zplus != pair[0].zplus)
-            .map(|pair| {
-                (
-                    pair[1].ord,
-                    pair[1].row,
-                    pair[0].zplus,
-                    pair[1].zplus,
-                )
-            })
+            .map(|pair| (pair[1].ord, pair[1].row, pair[0].zplus, pair[1].zplus))
             .collect();
         println!(
             "  zplus transitions: {} (first 12: {:?})",
@@ -870,7 +863,6 @@ impl Analysis {
         }
         Ok(())
     }
-
 }
 
 /// Read an S3M's header, as much of it as the tick rate needs: the order list, the pattern

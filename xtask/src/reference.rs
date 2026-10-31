@@ -181,55 +181,69 @@ impl BootWait {
     }
 }
 
-/// Everything a capture needs, and everything the manifest records about it.
+/// How the guest is taken to the demo: the program, the directory it runs from, the pinned
+/// cycles, the keys that answer the setup screen and the boot (D17). `reference capture` and
+/// `music trace` share it, because their indices mean the same thing only under the same
+/// recipe.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CaptureOptions {
-    /// The program to run in the guest. Bare `SECOND 2` defaults keep the two
-    /// reference files together, because `SECOND.EXE` loads `REALITY.FC` from
-    /// its working directory.
+pub struct Recipe {
+    /// The program to run in the guest. `SECOND.EXE` loads `REALITY.FC` from its working
+    /// directory, so it has to live in `cwd`.
     pub exe: PathBuf,
     pub cwd: PathBuf,
     pub arguments: Vec<String>,
     pub cycles: u32,
-    /// Boot-relative frame indices: counted from the emulator's first rendered
-    /// frame at process start (D14).
-    pub frames: Vec<u64>,
-    pub out: PathBuf,
-    /// Frames skipped from that same origin before the capture begins.
-    pub skip_boot_frames: u64,
-    /// `KBD_*` key names sent in order once the setup screen appears. Under
-    /// [`BootRecipe::Autoexec`] they become `AUTOTYPE` buttons instead, named
-    /// the way the mapper names them (`KBD_left` -> `left`).
+    /// `KBD_*` key names sent once the setup screen appears; under [`BootRecipe::Autoexec`]
+    /// they become `AUTOTYPE` buttons ([`autotype_button`]).
     pub keys: Vec<String>,
-    /// How the guest reaches the demo. The default is what every capture
-    /// written before this field existed used, so their indices keep meaning
-    /// what they meant when they were taken (D17).
     pub boot: BootRecipe,
-    /// What the autoexec boot waits for before the capture starts. Only the
-    /// autoexec recipe can choose: the typed recipe always waits for the setup
-    /// screen, because that is the only screen its keys answer.
+    /// What the autoexec boot waits for. Only the autoexec recipe can choose.
     pub boot_wait: BootWait,
-    /// Where to write one PNG of the frames this capture takes — the sheet a
-    /// person looks at to see *what* was captured. `None` writes none.
-    ///
-    /// It is an output of the capture but not part of what the capture *is*:
-    /// the frames and the manifest are the reference, and the sheet is how a
-    /// person reads them (see [`write_sheet`]).
-    pub sheet: Option<PathBuf>,
 }
 
-/// `--keys "KBD_left KBD_enter"`: whitespace-separated key names, in order.
-pub fn keys_from_script(script: &str) -> Vec<String> {
-    script.split_whitespace().map(str::to_owned).collect()
-}
+impl Recipe {
+    /// Refuse a recipe that cannot be reproduced, before anything starts. Every key is checked
+    /// in both recipes: `AUTOTYPE` presses nothing for a name it does not know and says so only
+    /// in the emulator's log, so a bad key would capture the setup screen at exit 0 (D17).
+    pub fn validate(&self) -> Result<(), CaptureError> {
+        if self.cycles == 0 {
+            return Err(CaptureError::Oracle(OracleError::UnpinnedCycles));
+        }
+        for key in &self.keys {
+            if !is_sequence_key(key) {
+                return Err(unknown_key(key, false));
+            }
+            if self.boot == BootRecipe::Autoexec && autotype_button(key).is_none() {
+                return Err(unknown_key(key, true));
+            }
+        }
+        if !self.cwd.is_dir() {
+            return Err(CaptureError::Options(format!(
+                "{} is not a directory to mount",
+                self.cwd.display()
+            )));
+        }
+        if self.exe.parent() != Some(self.cwd.as_path()) {
+            return Err(CaptureError::Options(format!(
+                "--exe {} must live in --cwd {}: the guest runs it from the mounted directory, \
+                 because it loads its data files from the working directory",
+                self.exe.display(),
+                self.cwd.display()
+            )));
+        }
+        if self.boot_wait != BootWait::Setup && self.boot != BootRecipe::Autoexec {
+            return Err(CaptureError::Options(format!(
+                "--boot-wait {} needs --boot autoexec: the typed recipe waits for the setup screen \
+                 itself, because that is the screen its keys answer",
+                self.boot_wait.name()
+            )));
+        }
+        Ok(())
+    }
 
-impl CaptureOptions {
-    /// The `[autoexec]` lines the guest's own shell has to run for this
-    /// capture, or an empty list for the typed recipe.
-    ///
-    /// The mount names the absolute directory for the same reason `spawn`
-    /// absolutises the allow-list: the guest resolves a relative host path
-    /// against the emulator's own working directory, not ours.
+    /// The `[autoexec]` lines the guest's shell runs, or none for the typed recipe. The mount
+    /// names the absolute directory, because the guest resolves a relative host path against
+    /// the emulator's working directory.
     pub fn autoexec_lines(&self) -> Result<Vec<String>, CaptureError> {
         if self.boot != BootRecipe::Autoexec {
             return Ok(Vec::new());
@@ -240,6 +254,61 @@ impl CaptureOptions {
         })?;
         autoexec_lines(&cwd, &self.exe, &self.arguments, &self.keys)
     }
+
+    /// Pin the cycles, set the anchor `boot` waits for, boot, and under the typed recipe
+    /// answer the setup screen over the API. Under the autoexec recipe the guest answers it.
+    pub fn boot(&self, oracle: &mut dyn Oracle) -> Result<(), OracleError> {
+        oracle.set_cycles(self.cycles)?;
+        oracle.set_boot_wait(self.boot_wait)?;
+        oracle.boot(&self.exe, &self.cwd, &self.arguments)?;
+        if self.boot == BootRecipe::Typed && !self.keys.is_empty() {
+            oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
+            oracle.send_keys(&self.keys.join(" "))?;
+        }
+        Ok(())
+    }
+
+    /// When keys were sent, that they started the demo: the guest is the judge, not the key
+    /// names (`KBD_kp8` is a real key that answers nothing there), and a screen still in text
+    /// is the menu (D17). The refusal names the keys.
+    pub fn confirm_answered(&self, oracle: &mut dyn Oracle) -> Result<(), String> {
+        if self.keys.is_empty() {
+            return Ok(());
+        }
+        oracle.wait_for_graphics(SETUP_ANSWER_TIMEOUT).map_err(|error| {
+            let detail = match error {
+                OracleError::Timeout(message) => message,
+                other => other.to_string(),
+            };
+            format!("the keys {:?} did not start the demo: {detail}", self.keys.join(" "))
+        })
+    }
+
+    /// The program as the manifest records it.
+    pub fn exe_name(&self) -> String {
+        self.exe
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+}
+
+/// Everything a capture needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureOptions {
+    pub recipe: Recipe,
+    /// Boot-relative frame indices: counted from the emulator's first rendered frame (D14).
+    pub frames: Vec<u64>,
+    pub out: PathBuf,
+    /// Frames skipped from that same origin before the capture begins.
+    pub skip_boot_frames: u64,
+    /// Where to write one PNG of the frames, to look at; not part of the reference.
+    pub sheet: Option<PathBuf>,
+}
+
+/// `--keys "KBD_left KBD_enter"`: whitespace-separated key names, in order.
+pub fn keys_from_script(script: &str) -> Vec<String> {
+    script.split_whitespace().map(str::to_owned).collect()
 }
 
 /// The recipe the guest runs itself, as the shell will read it: mount the
@@ -527,24 +596,7 @@ impl CaptureManifest {
 
 /// Refuse a capture that cannot be reproduced, before touching the emulator.
 pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
-    validate_recipe(
-        &options.exe,
-        &options.cwd,
-        options.cycles,
-        &options.keys,
-        options.boot,
-    )?;
-    // The typed recipe waits for the setup screen itself and its keys answer
-    // it; only the guest-run boot has an anchor to choose. Refusing here keeps
-    // a `--boot-wait graphics` that could never take effect from looking like
-    // it did.
-    if options.boot_wait != BootWait::Setup && options.boot != BootRecipe::Autoexec {
-        return Err(CaptureError::Options(format!(
-            "--boot-wait {} needs --boot autoexec: the typed recipe waits for the setup screen \
-             itself, because that is the screen its keys answer",
-            options.boot_wait.name()
-        )));
-    }
+    options.recipe.validate()?;
     if options.frames.is_empty() {
         return Err(CaptureError::Options(
             "at least one frame index is required (--frames I,J,K)".into(),
@@ -574,7 +626,7 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
     if let Some(sheet) = &options.sheet {
         crate::paths::refuse_output_inside(
             sheet,
-            &options.cwd,
+            &options.recipe.cwd,
             "--sheet",
             "that directory is the mounted original (SECOND.EXE and REALITY.FC), and every frame \
              diff in the project is measured against those exact bytes",
@@ -606,50 +658,6 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
     Ok(())
 }
 
-/// The checks every command that drives the emulated original makes before it
-/// starts one: the recipe half of [`validate_options`], shared with
-/// `xtask music trace`, whose trace's indices mean what a capture's indices
-/// mean only under the same recipe (D17).
-///
-/// Every key is checked here, before anything starts, in both recipes: a name
-/// `AUTOTYPE` does not know is not an error it reports — it logs and presses
-/// nothing — so a command would answer the setup screen with nothing and write
-/// the wrong screen at exit 0 (D17).
-pub fn validate_recipe(
-    exe: &Path,
-    cwd: &Path,
-    cycles: u32,
-    keys: &[String],
-    boot: BootRecipe,
-) -> Result<(), CaptureError> {
-    if cycles == 0 {
-        return Err(CaptureError::Oracle(OracleError::UnpinnedCycles));
-    }
-    for key in keys {
-        if !is_sequence_key(key) {
-            return Err(unknown_key(key, false));
-        }
-        if boot == BootRecipe::Autoexec && autotype_button(key).is_none() {
-            return Err(unknown_key(key, true));
-        }
-    }
-    if !cwd.is_dir() {
-        return Err(CaptureError::Options(format!(
-            "{} is not a directory to mount",
-            cwd.display()
-        )));
-    }
-    if exe.parent() != Some(cwd) {
-        return Err(CaptureError::Options(format!(
-            "--exe {} must live in --cwd {}: the guest runs it from the mounted directory, \
-             because it loads its data files from the working directory",
-            exe.display(),
-            cwd.display()
-        )));
-    }
-    Ok(())
-}
-
 /// Boot the original under the oracle, capture the requested frames, and write
 /// the frames and their manifest. The oracle is left running; shut it down.
 pub fn capture(
@@ -659,42 +667,11 @@ pub fn capture(
     validate_options(options)?;
 
     let oracle_name = oracle.describe()?;
-    // Pinned before the first frame. The emulator was already started with
-    // `cpu_cycles`; this is the runtime pin the API documents, and it is what
-    // makes a capture reproducible (D14).
-    // Pin the cycles, tell the oracle where the boot is expected to land, and
-    // only then boot. The wait is read by `boot`, so setting it afterwards
-    // would leave the default anchor — a 60 s timeout on a screen the vault's
-    // batch never draws.
-    oracle.set_cycles(options.cycles)?;
-    oracle.set_boot_wait(options.boot_wait)?;
-
-    oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
-    let answering = !options.keys.is_empty();
-    if options.boot == BootRecipe::Typed && answering {
-        // The setup screen has to be answered before the demo draws anything.
-        // Under the `Autoexec` recipe the guest answers it itself, from the
-        // `[autoexec]` section this run was started with (D17).
-        oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
-        oracle.send_keys(&options.keys.join(" "))?;
-    }
-    if answering {
-        // Keys that leave the setup screen up have not answered it: the
-        // capture would be of the menu while the manifest said the demo. The
-        // guest is the judge, not the key names — `KBD_kp8` is a real key and
-        // a real button, and it answers nothing on this screen — so a run
-        // whose keys do not clear it is refused, naming them (D17).
-        if let Err(error) = oracle.wait_for_graphics(SETUP_ANSWER_TIMEOUT) {
-            let detail = match error {
-                OracleError::Timeout(message) => message,
-                other => other.to_string(),
-            };
-            return Err(CaptureError::Oracle(OracleError::Timeout(format!(
-                "the keys {:?} did not start the demo: {detail}",
-                options.keys.join(" ")
-            ))));
-        }
-    }
+    options.recipe.boot(oracle)?;
+    options
+        .recipe
+        .confirm_answered(oracle)
+        .map_err(|message| CaptureError::Oracle(OracleError::Timeout(message)))?;
 
     let now = oracle.frame_counter()?;
     if now < options.skip_boot_frames {
@@ -756,20 +733,16 @@ pub fn capture(
         version: MANIFEST_VERSION,
         oracle: oracle_name,
         upstream_commit: UPSTREAM_COMMIT.to_owned(),
-        exe: options
-            .exe
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        arguments: options.arguments.clone(),
-        cycles: options.cycles,
+        exe: options.recipe.exe_name(),
+        arguments: options.recipe.arguments.clone(),
+        cycles: options.recipe.cycles,
         width,
         height,
         frame_origin: FRAME_ORIGIN.to_owned(),
         skip_boot_frames: options.skip_boot_frames,
-        boot: options.boot,
-        boot_wait: options.boot_wait,
-        keys: options.keys.clone(),
+        boot: options.recipe.boot,
+        boot_wait: options.recipe.boot_wait,
+        keys: options.recipe.keys.clone(),
         frames,
     };
     let manifest_path = options.out.join("manifest.json");
@@ -907,16 +880,18 @@ mod tests {
         // not there, and this is the one that exists.
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/original");
         CaptureOptions {
-            exe: cwd.join("SECOND.EXE"),
-            cwd,
-            arguments: vec!["2".into()],
-            cycles: 25000,
+            recipe: Recipe {
+                exe: cwd.join("SECOND.EXE"),
+                cwd,
+                arguments: vec!["2".into()],
+                cycles: 25000,
+                keys: keys_from_script("KBD_left KBD_enter"),
+                boot: BootRecipe::default(),
+                boot_wait: BootWait::default(),
+            },
             frames,
             out: out.to_path_buf(),
             skip_boot_frames: 5000,
-            keys: keys_from_script("KBD_left KBD_enter"),
-            boot: BootRecipe::default(),
-            boot_wait: BootWait::default(),
             sheet: None,
         }
     }
@@ -1144,8 +1119,8 @@ mod tests {
         // recipe is the only one where the guest runs the whole boot and an
         // anchor is a choice.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.boot = BootRecipe::Typed;
-        opts.boot_wait = BootWait::Graphics;
+        opts.recipe.boot = BootRecipe::Typed;
+        opts.recipe.boot_wait = BootWait::Graphics;
         match validate_options(&opts) {
             Err(CaptureError::Options(message)) => assert!(
                 message.contains("--boot-wait graphics") && message.contains("autoexec"),
@@ -1156,12 +1131,12 @@ mod tests {
         }
 
         // The setup screen stays the typed recipe's anchor and is accepted.
-        opts.boot_wait = BootWait::Setup;
+        opts.recipe.boot_wait = BootWait::Setup;
         assert!(validate_options(&opts).is_ok());
 
         // And the vault's anchor is accepted where the guest runs the boot.
-        opts.boot = BootRecipe::Autoexec;
-        opts.boot_wait = BootWait::Graphics;
+        opts.recipe.boot = BootRecipe::Autoexec;
+        opts.recipe.boot_wait = BootWait::Graphics;
         assert!(validate_options(&opts).is_ok());
     }
 
@@ -1240,8 +1215,8 @@ mod tests {
         // setup-screen wait in place and time the run out at 60 s.
         let out = scratch_dir("boot-wait-oracle");
         let mut opts = options(vec![5100], &out);
-        opts.boot = BootRecipe::Autoexec;
-        opts.boot_wait = BootWait::Graphics;
+        opts.recipe.boot = BootRecipe::Autoexec;
+        opts.recipe.boot_wait = BootWait::Graphics;
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
         let manifest = capture(&mut oracle, &opts).unwrap();
         assert_eq!(oracle.boot_saw_wait, Some(Some(BootWait::Graphics)));
@@ -1342,9 +1317,9 @@ mod tests {
         // enough to refuse, in both recipes, before an emulator is spawned.
         for key in ["KBD_kp_8", "KBD_nope", "left", "KBD_NONE"] {
             let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-            opts.keys = vec![key.to_owned()];
+            opts.recipe.keys = vec![key.to_owned()];
             for boot in [BootRecipe::Typed, BootRecipe::Autoexec] {
-                opts.boot = boot;
+                opts.recipe.boot = boot;
                 match validate_options(&opts) {
                     Err(CaptureError::Options(message)) => {
                         assert!(
@@ -1361,13 +1336,13 @@ mod tests {
         // whole table.
         for boot in [BootRecipe::Typed, BootRecipe::Autoexec] {
             let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-            opts.boot = boot;
+            opts.recipe.boot = boot;
             assert!(validate_options(&opts).is_ok());
         }
         for (api, _) in KEY_NAMES {
             let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-            opts.boot = BootRecipe::Autoexec;
-            opts.keys = vec![(*api).to_owned()];
+            opts.recipe.boot = BootRecipe::Autoexec;
+            opts.recipe.keys = vec![(*api).to_owned()];
             assert!(validate_options(&opts).is_ok(), "{api} must be usable");
         }
     }
@@ -1384,15 +1359,15 @@ mod tests {
     #[test]
     fn the_typed_recipe_gives_the_guest_nothing_to_run() {
         let opts = options(vec![5100], Path::new("/tmp/never-written"));
-        assert_eq!(opts.boot, BootRecipe::Typed);
-        assert!(opts.autoexec_lines().unwrap().is_empty());
+        assert_eq!(opts.recipe.boot, BootRecipe::Typed);
+        assert!(opts.recipe.autoexec_lines().unwrap().is_empty());
 
         // And the autoexec recipe resolves the mount to the same directory the
         // emulator's allow-list does, which takes an absolute path.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.boot = BootRecipe::Autoexec;
-        let lines = opts.autoexec_lines().unwrap();
-        assert_eq!(lines[0], format!("MOUNT C -RO {}", opts.cwd.canonicalize().unwrap().display()));
+        opts.recipe.boot = BootRecipe::Autoexec;
+        let lines = opts.recipe.autoexec_lines().unwrap();
+        assert_eq!(lines[0], format!("MOUNT C -RO {}", opts.recipe.cwd.canonicalize().unwrap().display()));
         assert_eq!(lines.last().unwrap(), "SECOND.EXE 2");
     }
 
@@ -1404,7 +1379,7 @@ mod tests {
         // clock by the time boot returns (D17).
         let out = scratch_dir("autoexec-keys");
         let mut opts = options(vec![5100], &out);
-        opts.boot = BootRecipe::Autoexec;
+        opts.recipe.boot = BootRecipe::Autoexec;
         let mut oracle = FakeOracle::new(vec![indexed_frame()]);
         let manifest = capture(&mut oracle, &opts).unwrap();
         assert_eq!(manifest.boot, BootRecipe::Autoexec);
@@ -1464,7 +1439,7 @@ mod tests {
     #[test]
     fn a_capture_without_pinned_cycles_is_refused() {
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.cycles = 0;
+        opts.recipe.cycles = 0;
         assert!(matches!(
             validate_options(&opts),
             Err(CaptureError::Oracle(OracleError::UnpinnedCycles))
@@ -1502,7 +1477,7 @@ mod tests {
     #[test]
     fn the_program_must_live_in_the_directory_that_is_mounted() {
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.exe = PathBuf::from("elsewhere/SECOND.EXE");
+        opts.recipe.exe = PathBuf::from("elsewhere/SECOND.EXE");
         assert!(matches!(
             validate_options(&opts),
             Err(CaptureError::Options(_))
@@ -1515,8 +1490,8 @@ mod tests {
         // passing that must not be told the exe lives somewhere else.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).join("../reference/original/");
-        opts.exe = cwd.join("SECOND.EXE");
-        opts.cwd = cwd;
+        opts.recipe.exe = cwd.join("SECOND.EXE");
+        opts.recipe.cwd = cwd;
         assert!(validate_options(&opts).is_ok());
     }
 
@@ -1644,7 +1619,7 @@ mod tests {
         // reference/original holds the 1993 distribution and is read-only:
         // every frame diff in the project is measured against those bytes.
         let mut opts = options(vec![5100], Path::new("/tmp/never-written"));
-        opts.sheet = Some(opts.cwd.join("sheet.png"));
+        opts.sheet = Some(opts.recipe.cwd.join("sheet.png"));
         assert!(matches!(
             validate_options(&opts),
             Err(CaptureError::Options(_))

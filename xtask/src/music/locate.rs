@@ -190,11 +190,7 @@ pub fn needles(object: &[u8]) -> Result<[Needle; 2], MusicError> {
     let blocks = data_blocks(object)?;
     let mut chosen: Vec<(usize, usize)> = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
-        if let Some(at) = block
-            .data
-            .windows(NEEDLE_LEN)
-            .position(all_distinct)
-        {
+        if let Some(at) = block.data.windows(NEEDLE_LEN).position(all_distinct) {
             if let Some(first) = chosen.first() {
                 if blocks[first.0].offset == block.offset {
                     continue;
@@ -554,7 +550,9 @@ mod tests {
     }
 
     fn needle(seed: u8) -> Vec<u8> {
-        (0..NEEDLE_LEN).map(|i| seed.wrapping_add(i as u8)).collect()
+        (0..NEEDLE_LEN)
+            .map(|i| seed.wrapping_add(i as u8))
+            .collect()
     }
 
     /// The base is solved from where the needle is, and the pair returned is one the same
@@ -572,7 +570,10 @@ mod tests {
     #[test]
     fn two_matches_are_refused_with_both_bases() {
         let bits = needle(9);
-        let mut read = memory(0x200000, &[(0x51F0, bits.clone()), (0x10_51F0, bits.clone())]);
+        let mut read = memory(
+            0x200000,
+            &[(0x51F0, bits.clone()), (0x10_51F0, bits.clone())],
+        );
         match locate(0x982, &bits, &mut read) {
             Err(LocateError::Ambiguous { bases, found }) => {
                 assert_eq!(bases, vec![0x51F0 - 0x982, 0x10_51F0 - 0x982]);
@@ -605,7 +606,9 @@ mod tests {
     fn a_short_needle_is_not_evidence() {
         let mut read = memory(0x1000, &[(0, vec![1, 2, 3, 4, 5, 6, 7, 8])]);
         match locate(0, &[1, 2, 3, 4, 5, 6, 7, 8], &mut read) {
-            Err(LocateError::BadNeedle(message)) => assert!(message.contains("8-byte"), "{message}"),
+            Err(LocateError::BadNeedle(message)) => {
+                assert!(message.contains("8-byte"), "{message}")
+            }
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
@@ -632,7 +635,10 @@ mod tests {
         let object = object();
         let needles = needles(&object).unwrap();
         assert_eq!(needles[0].len, NEEDLE_LEN);
-        assert_ne!(needles[0].block, needles[1].block, "different LEDATA records");
+        assert_ne!(
+            needles[0].block, needles[1].block,
+            "different LEDATA records"
+        );
         for needle in &needles {
             let bytes = needle_bytes(&object, needle).unwrap();
             assert_eq!(bytes.len(), NEEDLE_LEN);
@@ -659,6 +665,9 @@ mod tests {
         assert!(map.route.contains("PUBDEF"), "{}", map.route);
         assert_eq!(map.records.get("0x90"), Some(&45));
         assert_eq!(map.records.get("0x98"), Some(&1));
-        assert_eq!(map.words.len(), POSITION_WORDS.len() + CLOCK_WORDS.len() + MACHINE_WORDS.len());
+        assert_eq!(
+            map.words.len(),
+            POSITION_WORDS.len() + CLOCK_WORDS.len() + MACHINE_WORDS.len()
+        );
     }
 }

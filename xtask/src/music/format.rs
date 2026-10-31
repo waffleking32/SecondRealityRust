@@ -200,7 +200,9 @@ impl Coverage {
         let mut out = Vec::new();
         let mut field = |name: &str, mine: String, theirs: String| {
             if mine != theirs {
-                out.push(format!("{name}: the file makes it {mine}, the manifest says {theirs}"));
+                out.push(format!(
+                    "{name}: the file makes it {mine}, the manifest says {theirs}"
+                ));
             }
         };
         field(
@@ -413,8 +415,14 @@ mod tests {
         assert_eq!(PlayerState::parse(&line).unwrap(), state);
         assert_eq!(line, "1234,25,63,70,1,6,120,0,-1,385");
         assert!(PlayerState::parse("1,2,3").is_err());
-        assert!(PlayerState::parse("1,2,3,4,5,6,7,8,9,70000").is_err(), "not a 16-bit word");
-        assert!(PlayerState::parse("1,300,3,4,5,6,7,8,9,10").is_err(), "not a byte");
+        assert!(
+            PlayerState::parse("1,2,3,4,5,6,7,8,9,70000").is_err(),
+            "not a 16-bit word"
+        );
+        assert!(
+            PlayerState::parse("1,300,3,4,5,6,7,8,9,10").is_err(),
+            "not a byte"
+        );
         assert!(PlayerState::parse("1,2,3,4,5,6,7,8,9,x").is_err());
     }
 
@@ -430,7 +438,11 @@ mod tests {
         let holed = Coverage::of([10, 19], &[10, 11, 13, 14, 19]);
         assert!(!holed.per_frame);
         assert_eq!(holed.missing, vec![[12, 12], [15, 18]]);
-        assert!(holed.describe().contains("NOT per-frame"), "{}", holed.describe());
+        assert!(
+            holed.describe().contains("NOT per-frame"),
+            "{}",
+            holed.describe()
+        );
         assert_eq!(holed.gaps(), 5);
         assert_eq!(holed.before_sampling, None);
 
@@ -438,7 +450,11 @@ mod tests {
         assert!(!late.per_frame);
         assert_eq!(late.missing, vec![[0, 9], [13, 19]]);
         assert_eq!(late.before_sampling, Some([0, 9]));
-        assert!(late.describe().contains("the boundary"), "{}", late.describe());
+        assert!(
+            late.describe().contains("the boundary"),
+            "{}",
+            late.describe()
+        );
     }
 
     /// A window out of a manifest is data a verifier has to disbelieve: back to front, or a
@@ -446,7 +462,13 @@ mod tests {
     /// representable span is counted, saturating.
     #[test]
     fn a_window_that_has_no_frame_count_is_not_a_panic() {
-        for window in [[100, 10], [0, u64::MAX], [u64::MAX, u64::MAX - 1], [u64::MAX, 0], [7, 6]] {
+        for window in [
+            [100, 10],
+            [0, u64::MAX],
+            [u64::MAX, u64::MAX - 1],
+            [u64::MAX, 0],
+            [7, 6],
+        ] {
             let coverage = Coverage::of(window, &[10, 11, 12]);
             assert_eq!(coverage.requested, 0, "{window:?}");
             assert!(!coverage.per_frame, "{window:?}");
@@ -458,7 +480,11 @@ mod tests {
         }
         let absurd = Coverage::of([1, u64::MAX], &[10, 11, 12]);
         assert_eq!(absurd.requested, u64::MAX);
-        assert_eq!(absurd.gaps(), u64::MAX - 3, "two runs: 1..9 and 13..u64::MAX");
+        assert_eq!(
+            absurd.gaps(),
+            u64::MAX - 3,
+            "two runs: 1..9 and 13..u64::MAX"
+        );
         let _ = absurd.describe();
 
         let saturating = Coverage {
