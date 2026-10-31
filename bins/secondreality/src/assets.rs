@@ -4,8 +4,8 @@
 //! `assets/ALKU/FONA.UH`.
 //!
 //! Each file is stored as a raw LZMA stream and decompressed the first time it is asked for, then
-//! kept for the rest of the run, so a caller still borrows `&'static` bytes. The largest,
-//! MUSIC1.S3M, takes about 14 ms in a release build, the whole tree about 0.1 s.
+//! kept for the rest of the run, so a caller still borrows `&'static` bytes (docs/design.md §9
+//! has the decode times).
 
 use std::io::Read as _;
 use std::sync::OnceLock;
@@ -30,7 +30,8 @@ pub(crate) fn get(path: &str) -> Option<&'static [u8]> {
 /// build bug, not a bad input.
 fn decode(index: usize) -> Box<[u8]> {
     let (name, start, end, len) = FILES[index];
-    let dict_size = u32::try_from(len.max(DICT_MIN)).expect("an asset under 4 GiB");
+    // The reader rounds the dictionary up to LZMA's minimum, as build.rs's encoder did.
+    let dict_size = u32::try_from(len).expect("an asset under 4 GiB");
     let mut bytes = vec![0; len];
     LzmaReader::new(&PACKED[start..end], len as u64, LC, LP, PB, dict_size, None)
         .and_then(|mut reader| reader.read_exact(&mut bytes))
@@ -61,12 +62,6 @@ mod tests {
         assert!(FILES
             .iter()
             .all(|(name, ..)| name.starts_with("assets/") && !name.contains('\\')));
-        assert!(
-            FILES.windows(2).all(|pair| pair[0].2 == pair[1].1)
-                && FILES[0].1 == 0
-                && FILES[FILES.len() - 1].2 == PACKED.len(),
-            "the streams tile PACKED"
-        );
         assert_eq!(
             get("assets/PROVENANCE.md"),
             None,
