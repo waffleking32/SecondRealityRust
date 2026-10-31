@@ -40,8 +40,9 @@ cargo run --release --bin secondreality -- --block 1 --headless \
 ```
 
 The trace is a different session (D17 measures sessions 1-4 frames apart). The port's clock is
-`second1`'s: at boot 5900 it reads **9:51 / zframe 3771**, the trace's own value, while `second1c`
-reads **9:50 / zframe 3768** at the same index (`the_block_one_clock_matches_second1_at_boot_5900`).
+`second1`'s: at boot 5900 it reads **9:51**, `second1`'s own value (zframe 3771), while `second1c`
+reads **9:50** (zframe 3768) at the same index. `the_block_one_clock_matches_second1_at_boot_5900`
+asserts both positions; the zframes are the rows of `reference/music/second1{,c}/trace.csv`.
 At the keyframe the port and the trace agree: `second1c` at 7300 is `12:18`, and the integration
 test asserts the run's 7300 frame says `12:18`. Changing the block-1 clock to match `second1c`
 would move ALKU's verified frames (A29).

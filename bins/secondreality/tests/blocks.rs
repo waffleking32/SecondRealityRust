@@ -92,7 +92,7 @@ fn the_block_one_clock_matches_second1_at_boot_5900() {
     let run = dump(&["--block", "1"], BLOCK1_ENTRY);
     assert_eq!(run.position(5900), "9:51");
     assert_eq!(run.position(5900), trace_position("second1", 5900));
-    assert_ne!(run.position(5900), trace_position("second1c", 5900));
+    assert_eq!(trace_position("second1c", 5900), "9:50");
 }
 
 #[test]
@@ -428,7 +428,7 @@ fn a_block_three_run_starts_at_mntscrl_with_its_own_numbering() {
     // `SECOND 3`'s entry point is MNTSCRL (`MAIN/U2.ASM:865-866`, guarded `& 4`) under MUSIC1 at
     // order 42 (`:856-863`). Its first graphics frame is a measured window, not a frame
     // (`reference-indices.md` §11.5), so the run numbers its own frames.
-    let run = dump(&["--block", "3"], &[1100]);
+    let run = dump(&["--block", "3"], &[81, 1100]);
     assert_eq!(run.manifest["part"], "mntscrl");
     assert_eq!(run.manifest["index_origin"], "part");
     assert_eq!(run.manifest["anchor"], serde_json::Value::Null);
@@ -436,6 +436,8 @@ fn a_block_three_run_starts_at_mntscrl_with_its_own_numbering() {
     assert_eq!(run.manifest["music"]["start_order"], 42);
     assert_eq!(run.manifest["music"]["start_frame"], 0, "part-numbered, so the music starts with it");
     assert_eq!(run.part(1100), "mntscrl");
+    // The block's entry path draws the `--part` run's pixels: its tick 81 is the reference's 500.
+    assert_eq!(differing(run.idx(81), &reference("mntscrl", 500, "idx"), 1), 0, "block 3's tick 81 is the reference's 500");
 }
 
 #[test]

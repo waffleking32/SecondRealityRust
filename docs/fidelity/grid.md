@@ -132,7 +132,7 @@ Registered as A40:
 | 700 | 347 | 33 | A41 |
 | 800 | 447 | 14 | A41 |
 
-RGB of 64,000 pixels, at offset 0, max channel delta 41; the ±1 neighbours differ by about
+RGB of 64,000 pixels, at offset 0, max channel delta 41 (rediff's `report.json` gives it); the ±1 neighbours differ by about
 10,000-12,000. `grid_matches_the_reference_at_its_measured_start` (`tests/parts.rs`) compares
 `R−K0−1`, `R−K0`, `R−K0+1` for each keyframe and asserts that every differing pixel is on rows 14-15,
 the topmost rows the curve reaches: the capture published its frame while the original was still

@@ -192,6 +192,8 @@ mod ddstars {
         // The part reads no music; this is where the shell put it. The clock starts at D27's
         // 408, the mapping's zero is 414 and the hiddenu2 session's phase is -16 frames, so the
         // port at boot 8000 reads the trace's 7978.
+        assert_eq!(run.position(8000 - ORIGIN), "30:51");
+        assert_eq!(trace_position("hiddenu2", 8000), "30:54");
         assert_eq!(run.position(8000 - ORIGIN), trace_position("hiddenu2", 7978));
     }
 }
