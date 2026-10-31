@@ -331,7 +331,7 @@ pub fn command(tree: &Path, options: &Options) -> Result<ExitCode, VerifyError> 
             "--sheet",
             "the curated tree is the input this check reads, and a PNG written among the assets \
              would be a file with no provenance row — the failure --tree exists to report",
-            "Pass --sheet somewhere else; the plan's example is out/assets",
+            "Pass --sheet somewhere else, e.g. out/assets",
         )
         .map_err(VerifyError::Io)?;
     }

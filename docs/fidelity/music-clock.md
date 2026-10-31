@@ -589,7 +589,9 @@ at a `255` is `music.md` §8's reading of the object.
 | machine words recorded twice when they move, once when they do not, and a word above 32767 printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | `xtask/src/music/trace.rs`, `analyse.rs` |
 | the `zplus` rule against MUSIC1's order list, the `3` included | `crates/sr-audio/tests/player.rs` |
 | `music symbols` prints the map; the trace refusals (where it may be written, the window, the keys, `--force`) | `xtask/tests/music.rs` |
-| the traces as references: rows, columns, coverage and skipped frames; `reference verify --tree reference` passes; **a flipped byte of a trace fails it** (exit 1, both digests named); an unknown `kind` and an unsupported coverage claim are findings | `xtask/tests/music.rs` |
+| the traces as references: the declared columns, the row count, strictly increasing frames and the coverage recomputed from the file | `xtask/src/verify.rs`'s `inspect_trace` |
+| `reference verify --tree reference` passes with every trace checked as a trace | `xtask/tests/verify.rs`'s `the_reference_tree_the_repository_ships_checks_out` |
+| **a flipped byte of a trace fails it** (exit 1, both digests named); an unknown `kind` and an unsupported coverage claim are findings | `xtask/tests/music.rs` |
 | `music analyse`'s numbers and the boundary named | `xtask/tests/music.rs` |
 | **the anchor is per recipe** (408, 399.6, 401.1), and a window's extrapolation is not one | `xtask/tests/music.rs`'s `the_anchor_is_the_same_in_every_filed_session` |
 | the port's player against every trace, `zplus` included | `crates/sr-audio/tests/trace.rs` |

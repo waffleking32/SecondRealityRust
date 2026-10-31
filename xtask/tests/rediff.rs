@@ -110,17 +110,17 @@ fn the_table_names_every_filed_capture_once() {
 fn every_register_names_a_live_approximation() {
     let path = repo_root().join("docs/fidelity/APPROXIMATIONS.md");
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let headings: BTreeMap<u32, &str> = text
-        .lines()
-        .filter_map(|line| {
-            let digits: String = line
-                .strip_prefix("## A")?
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect();
-            Some((digits.parse().ok()?, line))
-        })
-        .collect();
+    // A-numbers are stable and never reused: each appears once, in increasing order.
+    let mut headings: BTreeMap<u32, &str> = BTreeMap::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("## A") else { continue };
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        let Ok(n) = digits.parse::<u32>() else { continue };
+        if let Some((&last, _)) = headings.last_key_value() {
+            assert!(n > last, "A{n} comes after A{last}: {line}");
+        }
+        headings.insert(n, line);
+    }
     for entry in TABLE {
         for frame in entry.frames {
             let register = frame.register;

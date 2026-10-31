@@ -379,7 +379,7 @@ fn the_anchor_is_the_same_in_every_filed_session() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 16, "the filed traces: {names:?}");
+    assert_eq!(names.len(), 18, "the filed traces: {names:?}");
 
     // recipe -> (trace, anchor, direct) for the traces that hold the start.
     let mut boots: std::collections::BTreeMap<String, Vec<(String, f64, f64)>> =
