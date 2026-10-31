@@ -1,64 +1,36 @@
-//! Contact sheets: many tiles, one PNG.
+//! Contact sheets: many tiles, one PNG, and the `frames sheet` command.
 //!
-//! Two callers, one layout. `assets verify --sheet` puts every asset a part
-//! needs on one page, and `reference capture --sheet` puts the frames a capture
-//! just took on one page — B2–B5 identify a part's frames by *looking* at a
-//! sweep, so the sheet a capture writes and the sheet the asset check writes
-//! have to be the same picture-language. [`contact_sheet`] is the only place a
-//! sheet is laid out and [`write_png`] the only place one is written; a second
-//! layout is a second thing to learn to read.
-//!
-//! Three properties are deliberate:
-//!
-//! - **Nothing is scaled or cropped.** A tile is drawn at its own size. A 1500×30
-//!   font strip and a 320×200 background look like what they are, and a scaled
-//!   tile would make "is this the picture the part shows" a question about the
-//!   scaling. Cells are uniform — the widest and tallest tile set the cell — so
-//!   a small tile sits in a corner of its cell instead of pushing its
-//!   neighbours around.
-//! - **Every cell is a panel.** Each cell of the grid is filled with a light
-//!   colour and the tile is drawn at its top-left corner, with a darker gutter
-//!   between the cells. A picture's edge is visible whatever the picture holds
-//!   — a black tile on a black background is a tile nobody can find — and a
-//!   partially filled last row shows as empty panels, so a person counting
-//!   tiles counts cells rather than guessing where the row ended.
-//! - **[`Tile::label`] is never drawn.** The `png` crate has no text and the
-//!   tree has no font — and this project does not carry a bitmap-font renderer
-//!   for a debug picture (A7 dropped `GRAB/BLOWFNT.1BM` as a *font*, so there
-//!   is not even a strip to borrow glyphs from). The label is what the caller
-//!   prints for each tile's position instead: a sheet whose tiles are named
-//!   nowhere is a sheet nobody can read.
-//!
-//! Grid order is row-major: tile `i` is at row `i / columns`, column
-//! `i % columns`, and that is what the callers print against each label.
+//! One layout for every caller (`reference capture --sheet`, `assets verify --sheet`,
+//! `frames sheet`). Nothing is scaled or cropped: a tile is drawn at its own size in the top-left
+//! corner of a uniform cell (the largest tile sets the cell), each cell is a light panel with a
+//! darker gutter between cells, so a black tile is still visible and empty cells in a last row
+//! can be counted. Grid order is row-major. [`Tile::label`] is never drawn (there is no font);
+//! [`write`] prints each tile's `rRcC` position against its label instead.
 
 use std::fs;
 use std::io::{self, BufWriter};
 use std::path::Path;
+use std::process::ExitCode;
 
-/// One picture on a sheet: RGB8, at its own size, and what it is called.
-///
-/// `Clone` because a tile can belong to two parts — one asset, two sheets — and
-/// a sheet is a debug picture, not a place to be clever about sharing pixels.
+use crate::capture::{capture_directories, read_frame, read_manifest};
+use crate::paths::refuse_output_inside;
+
+/// One picture on a sheet: RGB8, at its own size, and what it is called. `Clone` because one
+/// asset can be on two parts' sheets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tile {
     pub width: u32,
     pub height: u32,
     /// `width * height * 3` bytes, row-major, no padding.
     pub rgb: Vec<u8>,
-    /// This tile's name, for the caller's console output and file naming. It is
-    /// metadata: nothing draws it.
+    /// This tile's name, printed beside its position; nothing draws it.
     pub label: String,
 }
 
-/// The colour of the sheet between the cells, and of its outer border. Darker
-/// than a cell, so the grid reads as a grid.
+/// The colour between the cells and around the sheet.
 const GUTTER_COLOUR: [u8; 3] = [40, 40, 40];
 
-/// The panel each tile sits on. A tile is drawn at its cell's top-left corner
-/// and the rest of the panel shows, so a picture's edge is visible whatever the
-/// picture holds — a black tile on a black background is a tile nobody can
-/// find — and a partially filled last row is countable.
+/// The panel each tile sits on.
 const CELL_COLOUR: [u8; 3] = [120, 120, 120];
 
 /// Background between one cell and the next.
@@ -69,10 +41,8 @@ const BORDER: u32 = 1;
 
 /// Lay `tiles` out in a grid of `columns` and return `(width, height, rgb)`.
 ///
-/// `columns` is clamped to `1..=tiles.len()`: a sheet of no columns would have
-/// no width, and asking for more columns than tiles is asking for empty
-/// columns. A sheet of no tiles has no pixels at all, and [`write_png`] refuses
-/// it — a 0×0 PNG is not a picture.
+/// `columns` is clamped to `1..=tiles.len()`. A sheet of no tiles has no pixels, and
+/// [`write_png`] refuses it.
 pub fn contact_sheet(tiles: &[Tile], columns: usize) -> (u32, u32, Vec<u8>) {
     if tiles.is_empty() {
         return (0, 0, Vec::new());
@@ -89,9 +59,7 @@ pub fn contact_sheet(tiles: &[Tile], columns: usize) -> (u32, u32, Vec<u8>) {
 
     let mut rgb = vec![0u8; width as usize * height as usize * 3];
     fill(&mut rgb, width as usize, GUTTER_COLOUR);
-    // Every cell in the grid gets its outline, including the ones a partial
-    // last row leaves empty: a person counting tiles counts cells, and an empty
-    // cell that is not drawn is a cell they cannot count.
+    // Every cell gets its panel, including the empty ones of a partial last row.
     for index in 0..rows * columns {
         let (row, column) = (index / columns, index % columns);
         let x = GUTTER + column as u32 * pitch_x;
@@ -115,9 +83,7 @@ pub fn contact_sheet(tiles: &[Tile], columns: usize) -> (u32, u32, Vec<u8>) {
     (width, height, rgb)
 }
 
-/// How many columns a sheet of `count` tiles should have by default: the
-/// squarest grid, which keeps a sheet of frames or assets roughly the shape of
-/// a screen rather than a strip that scrolls for a metre.
+/// The squarest grid's column count for `count` tiles.
 pub fn columns_for(count: usize) -> usize {
     if count == 0 {
         return 1;
@@ -129,21 +95,70 @@ pub fn columns_for(count: usize) -> usize {
     columns
 }
 
-/// `columns` as a grid of `count` tiles can use it.
-pub fn clamp_columns(count: usize, columns: usize) -> usize {
+fn clamp_columns(count: usize, columns: usize) -> usize {
     columns.clamp(1, count.max(1))
 }
 
-/// The tile position a caller prints against a label: `(row, column)`.
-pub fn position(index: usize, columns: usize) -> (usize, usize) {
-    (index / columns, index % columns)
+/// Lay `tiles` out at [`columns_for`], write the PNG, and print its size and each tile's
+/// position against its label.
+pub fn write(path: &Path, tiles: &[Tile]) -> io::Result<()> {
+    let columns = columns_for(tiles.len());
+    let (width, height, rgb) = contact_sheet(tiles, columns);
+    write_png(path, width, height, &rgb)?;
+    println!(
+        "sheet {}: {} tile(s), {columns} column(s), {width}x{height}",
+        path.display(),
+        tiles.len()
+    );
+    for (index, tile) in tiles.iter().enumerate() {
+        println!("  r{}c{} {}", index / columns, index % columns, tile.label);
+    }
+    Ok(())
 }
 
-/// A part's name as a file name for its sheet. ASCII letters, digits, `.`, `_`
-/// and `-` are kept — and so is the `&` in `LNS&ZOOM`, which is the part's own
-/// name and reads as one on every filesystem this project runs on. Everything
-/// else becomes `_`, so a name from the record can never point at a different
-/// directory than the one the caller named.
+/// `frames sheet --dir <DIR> --out <PNG>`: every frame of every capture under `dir` (the same
+/// walk `compare` uses) as one sheet, read from the files on disk, in the walk's order and each
+/// capture's manifest order. `Err` (exit 2): no capture, no frames, an unreadable frame, or an
+/// `--out` inside `dir`.
+pub fn frames_command(dir: &Path, out: &Path) -> Result<ExitCode, String> {
+    refuse_output_inside(
+        out,
+        dir,
+        "--out",
+        "that is the directory whose frames are being read, and a sheet belongs beside it, not \
+         inside it",
+        "Pass --out outside --dir, e.g. out/<part>-sheet.png",
+    )?;
+    let mut tiles = Vec::new();
+    for capture in capture_directories(dir)? {
+        let manifest = read_manifest(&capture.dir)?;
+        for frame in &manifest.frames {
+            let (width, height) = frame.geometry(&manifest);
+            let label = if capture.name.is_empty() {
+                format!("frame {} ({})", frame.index, frame.rgb)
+            } else {
+                format!("{}: frame {} ({})", capture.name, frame.index, frame.rgb)
+            };
+            tiles.push(Tile {
+                width: u32::from(width),
+                height: u32::from(height),
+                rgb: read_frame(&capture.dir, &frame.rgb)?,
+                label,
+            });
+        }
+    }
+    if tiles.is_empty() {
+        return Err(format!(
+            "{} holds no frames: every capture below it has an empty manifest",
+            dir.display()
+        ));
+    }
+    write(out, &tiles).map_err(|error| format!("{}: {error}", out.display()))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A part's name as a sheet's file name: ASCII letters, digits, `.`, `_`, `-` and the `&` of
+/// `LNS&ZOOM` are kept, everything else becomes `_`, so a name cannot leave its directory.
 pub fn file_stem(name: &str) -> String {
     let stem: String = name
         .chars()
@@ -162,10 +177,7 @@ pub fn file_stem(name: &str) -> String {
     }
 }
 
-/// Write `rgb` as an 8-bit RGB PNG.
-///
-/// The writer `compare`'s diff images already use, so a sheet is a PNG the same
-/// tools open.
+/// Write `rgb` as an 8-bit RGB PNG; a 0×0 picture is refused.
 pub fn write_png(path: &Path, width: u32, height: u32, rgb: &[u8]) -> io::Result<()> {
     if width == 0 || height == 0 {
         return Err(io::Error::new(
@@ -194,10 +206,7 @@ pub fn write_png(path: &Path, width: u32, height: u32, rgb: &[u8]) -> io::Result
 }
 
 fn draw_tile(dst: &mut [u8], dst_width: usize, tile: &Tile, x: u32, y: u32) {
-    // A tile whose buffer is shorter than its stated geometry is drawn as far
-    // as it goes: the callers build both together, and a sheet is a debug
-    // picture — refusing to write it over a bookkeeping error would lose the
-    // picture, not fix the error.
+    // A tile whose buffer is shorter than its geometry is drawn as far as it goes.
     let row_bytes = tile.width as usize * 3;
     for row in 0..tile.height {
         let source = row as usize * row_bytes;
@@ -245,9 +254,21 @@ fn fill_rect(
     }
 }
 
+/// Read a PNG back as `(width, height, RGB8 pixels)`.
+#[cfg(test)]
+pub(crate) fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
+    let decoder = png::Decoder::new(fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buffer).unwrap();
+    buffer.truncate(info.buffer_size());
+    (info.width, info.height, buffer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn tile(width: u32, height: u32, value: u8, label: &str) -> Tile {
         Tile {
@@ -350,8 +371,6 @@ mod tests {
         // would be columns nobody can see.
         assert_eq!(contact_sheet(&tiles, 0).0, contact_sheet(&tiles, 1).0);
         assert_eq!(contact_sheet(&tiles, 9), contact_sheet(&tiles, 3));
-        assert_eq!(clamp_columns(3, 0), 1);
-        assert_eq!(clamp_columns(3, 9), 3);
     }
 
     #[test]
@@ -395,12 +414,7 @@ mod tests {
 
         write_png(&path, width, height, &rgb).unwrap();
 
-        let decoder = png::Decoder::new(fs::File::open(&path).unwrap());
-        let mut reader = decoder.read_info().unwrap();
-        let mut buffer = vec![0; reader.output_buffer_size()];
-        let info = reader.next_frame(&mut buffer).unwrap();
-        assert_eq!((info.width, info.height), (width, height));
-        assert_eq!(&buffer[..info.buffer_size()], &rgb[..]);
+        assert_eq!(read_png(&path), (width, height, rgb));
         fs::remove_file(&path).unwrap();
     }
 
@@ -420,5 +434,65 @@ mod tests {
         assert_eq!(pixel(&rgb, width, 3, 3), [0xEE; 3]);
         assert_eq!(pixel(&rgb, width, 3, 8), GUTTER_COLOUR);
         assert_eq!(pixel(&rgb, width, 11, 3), [0x22; 3]);
+    }
+
+    // --- frames sheet -----------------------------------------------------
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("xtask-frames-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A capture in the dump manifest's shape: `(index, value)` frames of `width` x `height`.
+    fn capture(dir: &Path, width: u32, height: u32, frames: &[(u32, u8)]) {
+        fs::create_dir_all(dir).unwrap();
+        let mut entries = Vec::new();
+        for (index, value) in frames {
+            let name = format!("frame_{index:06}.rgb");
+            fs::write(dir.join(&name), vec![*value; (width * height * 3) as usize]).unwrap();
+            entries.push(format!("{{\"index\": {index}, \"rgb\": \"{name}\"}}"));
+        }
+        let entries = entries.join(", ");
+        fs::write(
+            dir.join("manifest.json"),
+            format!(
+                "{{\"version\": 1, \"width\": {width}, \"height\": {height}, \
+                 \"frames\": [{entries}]}}"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_tree_of_captures_sheets_them_all_in_the_walks_order() {
+        // Captures sorted by name, each capture's frames in its manifest's order.
+        let dir = scratch("tree");
+        capture(&dir.join("b"), 2, 1, &[(7, 0x77)]);
+        capture(&dir.join("a"), 2, 1, &[(3, 0x33), (4, 0x44)]);
+        let out = dir.parent().unwrap().join("xtask-frames-tree.png");
+
+        assert_eq!(frames_command(&dir, &out).unwrap(), ExitCode::SUCCESS);
+
+        let expected = [
+            tile(2, 1, 0x33, "a: frame 3 (frame_000003.rgb)"),
+            tile(2, 1, 0x44, "a: frame 4 (frame_000004.rgb)"),
+            tile(2, 1, 0x77, "b: frame 7 (frame_000007.rgb)"),
+        ];
+        assert_eq!(read_png(&out), contact_sheet(&expected, 2));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&out);
+    }
+
+    #[test]
+    fn a_capture_whose_manifest_names_no_frames_is_refused() {
+        let dir = scratch("no-frames");
+        capture(&dir, 2, 2, &[]);
+        let out = dir.parent().unwrap().join("xtask-frames-no-frames.png");
+        let error = frames_command(&dir, &out).unwrap_err();
+        assert!(error.contains("holds no frames"), "{error}");
+        assert!(!out.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

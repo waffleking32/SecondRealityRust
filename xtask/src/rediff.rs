@@ -1,32 +1,20 @@
-//! `cargo xtask rediff`: every filed reference frame, re-rendered and re-compared in one
-//! command.
+//! `cargo xtask rediff`: every filed reference frame, re-rendered and re-compared in one command.
 //!
-//! The table ([`TABLE`], `rediff/table.rs`) registers a measured differing-pixel count per
-//! frame, each with the A- or D-entry that explains it (`register`). This command runs the
-//! release binary once per entry with all of that entry's rendered indices in one
-//! `--dump-frames`, compares each frame exactly at the index the table states (no ±1
-//! search), and checks each frame's count against the registered one.
-//! `bins/secondreality/tests/reference_frames.rs` is the cargo-test form of the same table.
+//! The table ([`TABLE`], `rediff/table.rs`) registers a measured differing-pixel count per frame,
+//! each with the A- or D-entry that explains it. This runs the release binary once per entry,
+//! with all of the entry's rendered indices in one `--dump-frames`, compares each frame exactly
+//! at the index the table states (no ±1 search), and checks its count against the registered
+//! one. A count that moves either way, without its register moving, is the regression this
+//! catches. `bins/secondreality/tests/reference_frames.rs` is the cargo-test form of the table.
 //!
-//! **The register is the point.** A frame that differs from the reference is not a failure
-//! here when its difference is registered — an A-entry, measured and explained — and a
-//! frame that matches is a failure when the register says it should not. Either way the
-//! count moved, and a count that moves without the register moving with it is the
-//! regression this command exists to catch.
-//!
-//! Exit codes are `compare`'s contract, reread for counts: **0** every frame at its
-//! registered count, **1** any frame off it, **2** could not compare — a missing frame, a
-//! geometry mismatch, a capture with neither an entry nor a `PENDING` line, an entry with
-//! no capture, a frame an entry leaves out or names wrongly, a run that failed. A geometry
-//! mismatch is never a count: two screens of different shape have no pixel difference.
-//!
-//! `--out` defaults to `out/rediff`, and is refused inside `reference/` and inside the
-//! tree being compared, resolved paths and all (`compare::refuse_output_inside`, which
-//! collapses a `..` behind a component that does not exist yet — D16's bypass).
+//! Exit **0** every frame at its registered count, **1** any frame off it, **2** could not
+//! compare: a missing frame, a geometry mismatch (never a count), a capture with no entry, an
+//! entry with no capture, a frame an entry leaves out, a failed run. `--out` (default
+//! `out/rediff`) is refused inside `reference/` and inside the tree being compared.
 
 mod table;
 
-pub use table::{Entry, Frame, Plane, PENDING, TABLE};
+pub use table::{Entry, Frame, Plane, TABLE};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -39,10 +27,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::compare::{
-    capture_directories, compare_indexed, compare_rgb, read_manifest, refuse_output_inside,
-    resolve, FrameDiff, FrameRef, Manifest,
-};
+use crate::capture::{capture_directories, read_frame, read_manifest, Manifest};
+use crate::compare::{compare_indexed, compare_rgb, FrameDiff};
+use crate::paths::{refuse_output_inside, resolve};
 
 /// Where the per-entry dumps and `report.json` go when `--out` is not given.
 pub const DEFAULT_OUT: &str = "out/rediff";
@@ -81,17 +68,9 @@ pub struct Options {
     pub table: Option<PathBuf>,
 }
 
-/// The table a run uses: the compiled one, or a JSON file of the same shape.
-struct Table {
-    entries: Vec<Entry>,
-    pending: Vec<&'static str>,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TableFile {
-    #[serde(default)]
-    pending: Vec<String>,
     entries: Vec<EntryFile>,
 }
 
@@ -126,11 +105,12 @@ fn leak(text: String) -> &'static str {
     Box::leak(text.into_boxed_str())
 }
 
-fn load_table(path: &Path) -> Result<Table, String> {
+/// A `--table` file, in the compiled table's shape.
+fn load_table(path: &Path) -> Result<Vec<Entry>, String> {
     let json = fs::read_to_string(path).map_err(|e| format!("--table {}: {e}", path.display()))?;
     let file: TableFile =
         serde_json::from_str(&json).map_err(|e| format!("--table {}: {e}", path.display()))?;
-    let entries = file
+    Ok(file
         .entries
         .into_iter()
         .map(|entry| Entry {
@@ -153,15 +133,10 @@ fn load_table(path: &Path) -> Result<Table, String> {
                     .collect(),
             ),
         })
-        .collect();
-    Ok(Table {
-        entries,
-        pending: file.pending.into_iter().map(leak).collect(),
-    })
+        .collect())
 }
 
-/// Whether `name` — a `PENDING` line or an `--only` — covers `capture`: the capture
-/// itself, or a directory above it.
+/// Whether an `--only` covers `capture`: the capture itself, or a directory above it.
 fn covers(name: &str, capture: &str) -> bool {
     capture == name || capture.starts_with(&format!("{name}/"))
 }
@@ -184,19 +159,12 @@ struct Row {
 }
 
 #[derive(Debug, Serialize)]
-struct PendingRow {
-    capture: String,
-    pending: String,
-}
-
-#[derive(Debug, Serialize)]
 struct Summary {
     entries: usize,
     frames: usize,
     ok: usize,
     differs: usize,
     not_compared: usize,
-    pending: usize,
     problems: usize,
     exit: u8,
 }
@@ -204,10 +172,8 @@ struct Summary {
 #[derive(Debug, Serialize)]
 struct Report {
     version: u32,
-    /// `full` only for the compiled table over the default reference tree with no
-    /// `--only`: the run that is the phase's evidence. Anything else is `partial`, and
-    /// says so here and on the console, so a narrowed or substituted run can never be
-    /// read as the phase run.
+    /// `full` for the compiled table over `reference/parts` with no `--only`, `partial`
+    /// otherwise (also said on the console).
     scope: &'static str,
     /// `compiled`, or the `--table` file the run used in its place.
     table: String,
@@ -217,54 +183,24 @@ struct Report {
     only: Vec<String>,
     binary: String,
     frames: Vec<Row>,
-    pending: Vec<PendingRow>,
     problems: Vec<String>,
     summary: Summary,
 }
 
-/// What a run measured against: the whole compiled table over `reference/parts`, or
-/// less, or something else.
-struct Scope {
-    /// `compiled`, or the `--table` path.
-    table: String,
-    /// What makes the run partial, one phrase each; empty for the full run.
-    narrowed: Vec<String>,
-}
-
-impl Scope {
-    fn of(options: &Options, reference: &Path) -> Result<Scope, String> {
-        let mut narrowed = Vec::new();
-        if !options.only.is_empty() {
-            narrowed.push(format!("--only {}", options.only.join(" --only ")));
-        }
-        let table = match &options.table {
-            Some(path) => {
-                narrowed.push(format!("--table {}", path.display()));
-                path.display().to_string()
-            }
-            None => "compiled".to_string(),
-        };
-        // By where it resolves, not how it is spelled: `./reference/parts/` is the
-        // default tree, and a different tree named `reference/parts` from elsewhere is not.
-        if resolve(reference)? != resolve(Path::new(DEFAULT_REFERENCE))? {
-            narrowed.push(format!("--reference {}", reference.display()));
-        }
-        Ok(Scope { table, narrowed })
+/// What makes a run partial, one phrase each: an `--only`, a `--table`, or a `--reference` that
+/// does not resolve to the default tree. Empty for the full run.
+fn narrowed(options: &Options, reference: &Path) -> Result<Vec<String>, String> {
+    let mut narrowed = Vec::new();
+    if !options.only.is_empty() {
+        narrowed.push(format!("--only {}", options.only.join(" --only ")));
     }
-
-    fn name(&self) -> &'static str {
-        if self.narrowed.is_empty() {
-            "full"
-        } else {
-            "partial"
-        }
+    if let Some(path) = &options.table {
+        narrowed.push(format!("--table {}", path.display()));
     }
-
-    /// The console's line for a partial run, printed before the verdict.
-    fn banner(&self) -> Option<String> {
-        (!self.narrowed.is_empty())
-            .then(|| format!("NOT THE PHASE RUN: {}", self.narrowed.join("; ")))
+    if resolve(reference)? != resolve(Path::new(DEFAULT_REFERENCE))? {
+        narrowed.push(format!("--reference {}", reference.display()));
     }
+    Ok(narrowed)
 }
 
 /// What one entry's run produced.
@@ -307,54 +243,28 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
 
     let table = match &options.table {
         Some(path) => load_table(path)?,
-        None => Table {
-            entries: TABLE.to_vec(),
-            pending: PENDING.to_vec(),
-        },
+        None => TABLE.to_vec(),
     };
-    let scope = Scope::of(options, &reference)?;
+    let narrowed = narrowed(options, &reference)?;
     let selected = |capture: &str| {
         options.only.is_empty() || options.only.iter().any(|only| covers(only, capture))
     };
 
     let mut problems = Vec::new();
-    let filed: Vec<String> = capture_directories(&reference)
-        .map_err(|e| e.to_string())?
+    let filed: Vec<String> = capture_directories(&reference)?
         .into_iter()
         .map(|found| found.name)
         .collect();
 
-    // The table against the tree: every capture has one entry or is under a PENDING line,
-    // and every entry and PENDING line names something filed.
-    let mut pending_rows = Vec::new();
+    // The table against the tree: every filed capture has one entry, and every entry a capture.
     for capture in filed.iter().filter(|capture| selected(capture)) {
-        let entries = table
-            .entries
-            .iter()
-            .filter(|e| e.capture == capture)
-            .count();
-        let pending: Vec<&str> = table
-            .pending
-            .iter()
-            .copied()
-            .filter(|pending| covers(pending, capture))
-            .collect();
-        match (entries, pending.first()) {
-            (0, None) => problems.push(format!(
-                "{capture}: a filed capture with no entry in the table and no PENDING line"
-            )),
-            (0, Some(line)) => pending_rows.push(PendingRow {
-                capture: capture.clone(),
-                pending: line.to_string(),
-            }),
-            (1, None) => {}
-            (_, None) => problems.push(format!("{capture}: {entries} entries in the table")),
-            (_, Some(line)) => problems.push(format!(
-                "{capture}: an entry in the table and PENDING under {line:?}"
-            )),
+        match table.iter().filter(|e| e.capture == capture).count() {
+            1 => {}
+            0 => problems.push(format!("{capture}: a filed capture with no entry in the table")),
+            entries => problems.push(format!("{capture}: {entries} entries in the table")),
         }
     }
-    for entry in table.entries.iter().filter(|e| selected(e.capture)) {
+    for entry in table.iter().filter(|e| selected(e.capture)) {
         if !filed.iter().any(|capture| capture == entry.capture) {
             problems.push(format!(
                 "{}: the table's entry names no capture under {}",
@@ -363,46 +273,20 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
             ));
         }
     }
-    for pending in &table.pending {
-        let in_scope = options.only.is_empty()
-            || options
-                .only
-                .iter()
-                .any(|only| covers(only, pending) || covers(pending, only));
-        if in_scope && !filed.iter().any(|capture| covers(pending, capture)) {
-            problems.push(format!(
-                "{pending}: a PENDING line that covers no capture under {}",
-                reference.display()
-            ));
-        }
-    }
 
     let entries: Vec<Entry> = table
-        .entries
         .iter()
         .copied()
         .filter(|entry| selected(entry.capture))
         .filter(|entry| filed.iter().any(|capture| capture == entry.capture))
         .collect();
-    if !options.only.is_empty() && entries.is_empty() && pending_rows.is_empty() {
-        return Err(format!(
-            "--only {} names no capture in the table",
-            options.only.join(", ")
-        ));
-    }
-    // A run that would compare no frame at all — an `--only` that names only PENDING
-    // captures, or a table of PENDING lines — is refused rather than reported as at its
-    // registered count: an exit 0 over nothing is the green run that lies.
+    // Comparing nothing is not "every frame at its registered count".
     if entries.is_empty() {
-        return Err(format!(
-            "nothing to compare: {} has no table entry ({} PENDING, not compared)",
-            if options.only.is_empty() {
-                "the tree".to_string()
-            } else {
-                format!("--only {}", options.only.join(", "))
-            },
-            pending_rows.len()
-        ));
+        return Err(if options.only.is_empty() {
+            "nothing to compare: the tree has no table entry".to_string()
+        } else {
+            format!("--only {} names no capture in the table", options.only.join(", "))
+        });
     }
 
     let binary = match &options.binary {
@@ -418,12 +302,6 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
     }
 
     print_rows(&rows);
-    for row in &pending_rows {
-        println!(
-            "{}  not compared: PENDING ({:?}; a later task measures its mapping)",
-            row.capture, row.pending
-        );
-    }
     for problem in &problems {
         println!("cannot compare: {problem}");
     }
@@ -443,14 +321,13 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
     };
     println!(
         "entries: {}; frames: {} ({ok} at their registered count, {differs} off it, \
-         {not_compared} not compared); pending captures: {}; problems: {}",
+         {not_compared} not compared); problems: {}",
         entries.len(),
         rows.len(),
-        pending_rows.len(),
         problems.len()
     );
-    if let Some(banner) = scope.banner() {
-        println!("{banner}");
+    if !narrowed.is_empty() {
+        println!("partial run: {}", narrowed.join("; "));
     }
     println!(
         "verdict: {}",
@@ -467,19 +344,20 @@ pub fn command(options: &Options) -> Result<ExitCode, String> {
         ok,
         differs,
         not_compared,
-        pending: pending_rows.len(),
         problems: problems.len(),
         exit,
     };
     let report = Report {
         version: REPORT_VERSION,
-        scope: scope.name(),
-        table: scope.table.clone(),
+        scope: if narrowed.is_empty() { "full" } else { "partial" },
+        table: options
+            .table
+            .as_ref()
+            .map_or_else(|| "compiled".to_string(), |path| path.display().to_string()),
         reference: reference.display().to_string(),
         only: options.only.clone(),
         binary: binary.display().to_string(),
         frames: rows,
-        pending: pending_rows,
         problems,
         summary,
     };
@@ -733,20 +611,6 @@ fn run_entry(entry: &Entry, binary: &Path, reference: &Path, out: &Path) -> Outc
     Outcome { rows, problems }
 }
 
-/// The frame `index` in `manifest`, or why there is none.
-fn frame_at<'a>(manifest: &'a Manifest, index: u32, side: &str) -> Result<&'a FrameRef, String> {
-    manifest
-        .frames
-        .iter()
-        .find(|frame| frame.index == index)
-        .ok_or_else(|| format!("the {side} holds no frame {index}"))
-}
-
-fn read(dir: &Path, file: &str) -> Result<Vec<u8>, String> {
-    let path = dir.join(file);
-    fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
 /// Compare one frame of the table, exactly where it says, in the plane it names.
 fn compare_frame(
     capture_dir: &Path,
@@ -755,9 +619,12 @@ fn compare_frame(
     rendered: &Manifest,
     frame: &Frame,
 ) -> Result<FrameDiff, String> {
-    let reference_frame = frame_at(capture, frame.reference, "capture")?;
-    let rendered_frame = frame_at(rendered, frame.rendered, "dump")
-        .map_err(|_| format!("the dump holds no rendered frame {}", frame.rendered))?;
+    let reference_frame = capture
+        .frame(frame.reference)
+        .ok_or_else(|| format!("the capture holds no frame {}", frame.reference))?;
+    let rendered_frame = rendered
+        .frame(frame.rendered)
+        .ok_or_else(|| format!("the dump holds no rendered frame {}", frame.rendered))?;
     let reference_geometry = reference_frame.geometry(capture);
     let rendered_geometry = rendered_frame.geometry(rendered);
     if reference_geometry != rendered_geometry {
@@ -777,14 +644,14 @@ fn compare_frame(
                 .as_deref()
                 .ok_or_else(|| format!("the dump holds no .idx for frame {}", frame.rendered))?;
             (
-                read(capture_dir, reference_idx)?,
-                read(dump, rendered_idx)?,
+                read_frame(capture_dir, reference_idx)?,
+                read_frame(dump, rendered_idx)?,
                 pixels,
             )
         }
         Plane::Rgb => (
-            read(capture_dir, &reference_frame.rgb)?,
-            read(dump, &rendered_frame.rgb)?,
+            read_frame(capture_dir, &reference_frame.rgb)?,
+            read_frame(dump, &rendered_frame.rgb)?,
             pixels * 3,
         ),
     };

@@ -210,8 +210,8 @@ For the rows: a *held* frame is reproducible byte for byte in every session seen
 is one exact picture the oracle reproduces when two sessions agree, and the row records the support
 rather than a tolerance.
 
-**A two-screen part is two captures.** A directory with no `manifest.json` is resolved by `compare`
-into every immediate subdirectory that has one, named by the subdirectory (`compare.rs`, the
+**A two-screen part is two captures.** Every directory below a tree that holds a `manifest.json`
+is a capture, named by its path below the tree (`capture::capture_directories`, the
 `reference/check_a` layout): `techno/{interference,troll}`, `plzpart/{plasma,cube}`.
 
 ### 1.8 The census rule: a moving keyframe is checked against sessions, or it is a phantom diff

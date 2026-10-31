@@ -281,7 +281,7 @@ silent, behind the standalone DIS (D39); the menu is window-only (D40).
 
 ### 4.8 Tooling
 
-`cargo xtask` has `reference capture|verify|backfill` (file frames from the emulated original
+`cargo xtask` has `reference capture|verify` (file frames from the emulated original
 under `reference/`, check the manifests), `compare` (§8.2), `rediff` (every filed frame against its
 count in `xtask/src/rediff/table.rs`), `frames sheet`, `assets verify` (against
 `assets/PROVENANCE.md`) and `music symbols|trace|probe|analyse` (the original's player state, read

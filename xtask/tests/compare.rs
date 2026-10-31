@@ -1,56 +1,13 @@
-//! `cargo xtask compare` end to end: the exit code *is* the contract.
-//!
-//! A script gating a phase has to tell three things apart — "every frame is
-//! identical" (0), "some frame differs" (1) and "the tool could not compare"
-//! (2). The difference between the last two is the one that matters most: a
-//! comparison that pairs a reference frame with something 300 frames away and
-//! prints a percentage is worse than one that refuses, because the percentage
-//! looks like evidence. The tests here run the built binary and read its exit
-//! code, the way the script will, and the refusal is the one that is checked in
-//! most detail: exit 2, a message naming the index, and **no report on disk**.
-//!
-//! The fixtures are written here rather than committed: a capture is a manifest
-//! and a handful of frame files, and a test that writes anything writes it
-//! outside the repository, under the temporary directory.
+//! `cargo xtask compare` end to end: **0** every frame identical, **1** some frame differs,
+//! **2** the tool could not compare. A refusal leaves no report on disk. The captures are
+//! written here, under the temporary directory.
+
+mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-struct Run {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-impl Run {
-    /// Both streams: the tool prints its report to stdout and its refusals to
-    /// stderr, and a test about a message does not care which.
-    fn output(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
-    }
-}
-
-/// Run the built `xtask` binary.
-fn xtask(args: &[&str]) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run {}: {e}", env!("CARGO_BIN_EXE_xtask")));
-    Run {
-        code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
-/// A scratch directory for this test, emptied first.
-fn scratch(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("xtask-compare-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
-    path
-}
+use common::{scratch, xtask};
 
 /// Write a one-geometry capture of 4×2 frames, each one a flat index value: two
 /// frames with different values differ in every pixel, which is all these tests
@@ -109,21 +66,11 @@ fn reports(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn frames_that_cannot_be_paired_exit_2_and_leave_no_report() {
-    // The shape of the stale negative check in the tree: `reference/check_a` at
-    // 700/900 against an older capture at 400/600. The old pairing zipped them
-    // positionally and printed percentages for frames 300 apart — and with
-    // these two screens, which happen to hold the same values, it would have
-    // printed `identical` and exited 0, a mispairing reported as a match. The
-    // window is ±1, so there is nothing to pair and the comparison is refused:
-    // this is what makes the search a widening of the alignment rather than a
-    // loosening of the check.
-    //
-    // Widening the window to 10,000 turns this test red (it exits 0), so the
-    // refusal is pinned to the window and not to the frame values.
+    // 700/900 against 400/600 holding the same values: zipped positionally they would read
+    // `identical`. Nothing is within ±1, so the comparison is refused.
     let reference = scratch("unpairable-reference");
     let rendered = scratch("unpairable-rendered");
-    // A path nothing has made yet, so the assertion below can tell a directory
-    // the comparison left from one that was there to begin with.
+    // A path nothing has made yet.
     let out = scratch("unpairable-out").join("reports");
     write_capture(&reference, &[(700, 1), (900, 1)]);
     write_capture(&rendered, &[(400, 1), (600, 1)]);
@@ -140,14 +87,10 @@ fn frames_that_cannot_be_paired_exit_2_and_leave_no_report() {
 
     assert_eq!(run.code, 2, "a comparison that cannot run is 2:\n{}", run.output());
     let output = run.output();
-    // The refusal names the frame it could not place and the window it looked
-    // in, so a reader does not have to run anything again to see why.
     assert!(output.contains("700"), "{output}");
     assert!(output.contains("±1"), "{output}");
     assert!(output.contains("means nothing"), "{output}");
-    // Nothing at all: not a report, not a diff image, and not even the empty
-    // output directory. A script that found a directory would have to open it
-    // to learn that the comparison never ran; the exit code is the answer.
+    // Nothing at all, not even the empty output directory.
     assert!(
         reports(&out).is_empty(),
         "a refused comparison must not leave a report behind"
@@ -161,7 +104,6 @@ fn frames_that_cannot_be_paired_exit_2_and_leave_no_report() {
 #[test]
 fn frames_that_are_identical_exit_0() {
     let capture = scratch("identical");
-    // A path nothing has made yet: a comparison that writes something makes it.
     let out = scratch("identical-out").join("reports");
     write_capture(&capture, &[(700, 1), (900, 2)]);
 
@@ -206,12 +148,8 @@ fn frames_that_differ_at_matching_indices_exit_1() {
 
 #[test]
 fn a_tree_of_captures_is_measured_all_the_way_down() {
-    // `reference/parts`' shape, and the failure it hid: eighteen captures in
-    // the top directory and two parts that keep two each one level deeper. A
-    // scan of the first level compared 18 of the 22, skipped everything below
-    // and still printed `verdict: identical` with exit 0 — the run that says a
-    // phase is finished. Every capture below the root has to be measured, and
-    // the count is printed with the verdict so a partial run cannot look whole.
+    // `reference/parts`' shape: captures at the top and one level deeper. Every one is
+    // measured, and the count is printed with the verdict.
     let tree = scratch("nested-tree");
     write_capture(&tree.join("title"), &[(700, 1), (900, 2)]);
     write_capture(&tree.join("plzpart/cube"), &[(1350, 3)]);
@@ -251,11 +189,8 @@ fn a_tree_of_captures_is_measured_all_the_way_down() {
 
 #[test]
 fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
-    // What a part the port cannot anchor needs (TUNNELI: `docs/fidelity/
-    // tunneli.md` §7.2). The same two captures as the refusal above — 300
-    // frames apart in their numbering — compared with the alignment that maps
-    // one numbering onto the other: the port's tick 400 with the reference's
-    // 700, and 600 with 900.
+    // A run numbered from zero against the reference's indices (`docs/fidelity/tunneli.md`
+    // §7.2): the rendered 400/600 are the reference's 700/900 at `--align 300`.
     let reference = scratch("align-reference");
     let rendered = scratch("align-rendered");
     let out = scratch("align-out").join("reports");
@@ -286,16 +221,13 @@ fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
     assert!(refused.output().contains("no rendered frame within"), "{}", refused.output());
     assert!(reports(&out).is_empty(), "a refused comparison left a report");
 
-    // With it: every frame identical, and the console says the alignment was
-    // applied, so a report cannot be mistaken for one made without it.
+    // With it: identical, and the console says the alignment was applied.
     let aligned = run("300");
     assert_eq!(aligned.code, 0, "{}", aligned.output());
     assert!(aligned.output().contains("read +300"), "{}", aligned.output());
     assert!(aligned.output().contains("frame 700: 0.0000%"), "{}", aligned.output());
 
-    // A *negative* alignment works too — the same two captures, a reference
-    // numbered above the rendered side and the sign that maps them — so the
-    // option is a numbering offset in both directions and not a one-way door.
+    // A negative alignment works too.
     let negative_reference = scratch("align-negative-reference");
     let negative_rendered = scratch("align-negative-rendered");
     let negative_out = scratch("align-negative-out").join("reports");
@@ -315,15 +247,12 @@ fn an_alignment_pairs_a_run_numbered_from_zero_with_the_references_indices() {
     assert_eq!(negative.code, 0, "{}", negative.output());
     assert!(negative.output().contains("read -300"), "{}", negative.output());
 
-    // An alignment that underflows is a mistake in the command (a sign, most
-    // likely) and is refused rather than clamped: clamping would collide both
-    // rendered frames on index 0 and pair them without saying so.
+    // An alignment that underflows is refused, not clamped.
     let underflow = run("-500");
     assert_eq!(underflow.code, 2, "{}", underflow.output());
     assert!(underflow.output().contains("outside the index range"), "{}", underflow.output());
 
-    // And the offset reported is the *net* one: one frame further off, the
-    // pair is at +1 and the console says so on the frame's own line.
+    // The reported offset is the net one.
     let off_by_one = run("301");
     assert_eq!(off_by_one.code, 0, "{}", off_by_one.output());
     assert!(off_by_one.output().contains("offset +1"), "{}", off_by_one.output());

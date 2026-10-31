@@ -471,16 +471,8 @@ pub struct FrameRef {
     /// against the RGB frame).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub palette: Option<BTreeMap<u8, [u8; 3]>>,
-    /// The `sha256` of the bytes of `rgb`, written where the file is written.
-    ///
-    /// The digest is recorded here rather than in `docs/fidelity/reference-indices.md`
-    /// because the document cannot be checked mechanically (Phase 1's close-out
-    /// measured it: two naming shapes, and 24 of the tree's 105 `frame_*` files
-    /// with no row by name), while a manifest sits in the capture directory and
-    /// says which file its digest is of. `Option` because a manifest filed
-    /// before the field existed has none — [`crate::verify::backfill`] fills
-    /// those in once, and [`crate::verify::command`] reports a frame that still
-    /// has none rather than passing over it.
+    /// The `sha256` of the bytes of `rgb`, recorded beside the file (D23). `Option` because the
+    /// field is additive; [`crate::verify::command`] reports a frame without one as a finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
     /// The `sha256` of the bytes of `idx`, when the frame has indices.
@@ -580,7 +572,7 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
     // tool refuses a `--sheet` inside one for the same reason — the reference
     // is read, never written, by anything but a capture.
     if let Some(sheet) = &options.sheet {
-        crate::compare::refuse_output_inside(
+        crate::paths::refuse_output_inside(
             sheet,
             &options.cwd,
             "--sheet",
@@ -589,7 +581,7 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
             "Pass --sheet outside the reference, e.g. out/<name>-sheet.png",
         )
         .map_err(CaptureError::Options)?;
-        crate::compare::refuse_output_inside(
+        crate::paths::refuse_output_inside(
             sheet,
             Path::new(REFERENCE_ROOT),
             "--sheet",
@@ -601,7 +593,7 @@ pub fn validate_options(options: &CaptureOptions) -> Result<(), CaptureError> {
         // The capture it just wrote is a reference tree too, and the same rule
         // applies to it: the frames and the manifest are the capture, and a
         // sheet is a rendering of them, not part of them.
-        crate::compare::refuse_output_inside(
+        crate::paths::refuse_output_inside(
             sheet,
             &options.out,
             "--sheet",
@@ -859,22 +851,10 @@ pub fn write_sheet(
             label: format!("frame {} ({})", frame.index, frame.rgb),
         });
     }
-    let columns = crate::sheet::columns_for(tiles.len());
-    let (width, height, rgb) = crate::sheet::contact_sheet(&tiles, columns);
-    crate::sheet::write_png(sheet, width, height, &rgb).map_err(|e| CaptureError::Io {
+    crate::sheet::write(sheet, &tiles).map_err(|e| CaptureError::Io {
         path: sheet.to_path_buf(),
         message: e.to_string(),
-    })?;
-    println!(
-        "sheet {}: {} tile(s), {columns} column(s), {width}x{height}",
-        sheet.display(),
-        tiles.len()
-    );
-    for (index, tile) in tiles.iter().enumerate() {
-        let (row, column) = crate::sheet::position(index, columns);
-        println!("  r{row}c{column} {}", tile.label);
-    }
-    Ok(())
+    })
 }
 
 /// The palette entries an indexed frame uses, in index order.

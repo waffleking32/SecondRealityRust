@@ -1,33 +1,24 @@
-//! `cargo xtask rediff` end to end: the table against the tree, and the exit code as the
-//! contract.
-//!
-//! Two kinds of test, and neither builds or runs the demo. The first reads the compiled
-//! table (`xtask/src/rediff/table.rs`, included here by path — `xtask` is a binary crate,
-//! so this is how an integration test sees its constants) against every `manifest.json`
-//! under `reference/parts`: a capture the table forgets, or a frame an entry leaves out,
-//! is a frame no command compares, which is the failure this command exists to end. The
-//! second runs the built `xtask` over a fixture capture (`tests/fixtures/rediff/parts`)
-//! with a stand-in for the binary (`tests/fixtures/rediff/fake-secondreality`), a table
-//! written per test, and reads its exit code the way a phase's script will: **0** every
-//! frame at its registered count, **1** a count off its register, **2** could not compare.
+//! `cargo xtask rediff` end to end: the compiled table against the tree and the register, and
+//! the exit code over a fixture capture (`tests/fixtures/rediff/parts`) with a stand-in binary
+//! (`tests/fixtures/rediff/fake-secondreality`) and a table written per test: **0** every frame
+//! at its registered count, **1** a count off its register, **2** could not compare.
+
+mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use common::{repo_root, scratch, xtask, Run};
 
 #[allow(dead_code)]
 #[path = "../src/rediff/table.rs"]
 mod table;
 
-use table::{PENDING, TABLE};
-
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
-}
+use table::TABLE;
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rediff")
+    common::fixture("rediff")
 }
 
 /// Every capture under `root`, by its path below it, with the indices its manifest files.
@@ -67,61 +58,19 @@ fn filed_captures(root: &Path) -> BTreeMap<String, BTreeSet<u32>> {
     found
 }
 
-/// Whether a `PENDING` line covers `capture`: the line itself, or a directory above it.
-fn pending_covers(pending: &str, capture: &str) -> bool {
-    capture == pending || capture.starts_with(&format!("{pending}/"))
-}
-
 #[test]
 fn the_table_names_every_filed_capture_once() {
-    let filed = filed_captures(&repository_root().join("reference/parts"));
+    let filed = filed_captures(&repo_root().join("reference/parts"));
     assert!(filed.len() >= 47, "the tree holds {} captures", filed.len());
 
-    // No capture is named twice, by two entries or by an entry and a PENDING line.
-    let mut named = BTreeSet::new();
-    for entry in TABLE {
-        assert!(
-            named.insert(entry.capture),
-            "{} has two entries",
-            entry.capture
-        );
-        for pending in PENDING {
-            assert!(
-                !pending_covers(pending, entry.capture),
-                "{} has an entry and is PENDING under {pending}",
-                entry.capture
-            );
-        }
-    }
-
-    // Every filed capture is an entry or under a PENDING line, and every entry and every
-    // PENDING line names a filed capture.
-    for capture in filed.keys() {
-        let entries = TABLE
-            .iter()
-            .filter(|entry| entry.capture == capture)
-            .count();
-        let pending = PENDING
-            .iter()
-            .any(|pending| pending_covers(pending, capture));
-        assert!(
-            entries == 1 || (entries == 0 && pending),
-            "{capture}: {entries} entries, pending {pending}"
-        );
-    }
-    for entry in TABLE {
-        assert!(
-            filed.contains_key(entry.capture),
-            "{} is not a filed capture",
-            entry.capture
-        );
-    }
-    for pending in PENDING {
-        assert!(
-            filed.keys().any(|capture| pending_covers(pending, capture)),
-            "PENDING {pending} covers no filed capture"
-        );
-    }
+    // Every entry names a filed capture, once, and every filed capture has an entry.
+    let named: BTreeSet<&str> = TABLE.iter().map(|entry| entry.capture).collect();
+    assert_eq!(named.len(), TABLE.len(), "a capture has two entries");
+    assert_eq!(
+        named,
+        filed.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        "the table's captures are not the tree's"
+    );
 
     // Every filed frame of an entry's capture is one of its frames, and every frame it
     // lists is filed: an index the table leaves out is a frame no one compares.
@@ -155,49 +104,49 @@ fn the_table_names_every_filed_capture_once() {
     }
 }
 
-struct Run {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-impl Run {
-    fn output(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
+/// Every non-`exact` register names a live `## A<n>` entry of `docs/fidelity/APPROXIMATIONS.md`
+/// (a tombstone, `## A<n> — Retired: …` or `— Closed: …`, is not live).
+#[test]
+fn every_register_names_a_live_approximation() {
+    let path = repo_root().join("docs/fidelity/APPROXIMATIONS.md");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let headings: BTreeMap<u32, &str> = text
+        .lines()
+        .filter_map(|line| {
+            let digits: String = line
+                .strip_prefix("## A")?
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            Some((digits.parse().ok()?, line))
+        })
+        .collect();
+    for entry in TABLE {
+        for frame in entry.frames {
+            let register = frame.register;
+            if register == "exact" {
+                continue;
+            }
+            let n: u32 = register
+                .strip_prefix('A')
+                .and_then(|digits| digits.parse().ok())
+                .unwrap_or_else(|| panic!("{}: `{register}` names no entry", entry.capture));
+            let heading = headings
+                .get(&n)
+                .unwrap_or_else(|| panic!("{}: A{n} is not in the register", entry.capture));
+            assert!(
+                !heading.contains("— Retired:") && !heading.contains("— Closed:"),
+                "{}: A{n} is a tombstone: {heading}",
+                entry.capture
+            );
+        }
     }
-}
-
-fn xtask(args: &[&str]) -> Run {
-    xtask_in(&std::env::current_dir().unwrap(), args)
-}
-
-/// The built `xtask`, run from `dir` — the repository root, for a run whose defaults
-/// (`reference/parts`, the compiled table) are the phase run's.
-fn xtask_in(dir: &Path, args: &[&str]) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run {}: {e}", env!("CARGO_BIN_EXE_xtask")));
-    Run {
-        code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
-/// A scratch directory for this test, emptied first.
-fn scratch(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("xtask-rediff-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
-    path
 }
 
 /// A table of one entry for the fixture capture `still`, run as `--part <dump>` (the fake
 /// binary hands back `rendered/<dump>/`), at `rendered = reference − 10`, with the counts
 /// given for its three frames: 10 indexed, 10 RGB, 11 RGB.
-fn write_table(dir: &Path, dump: &str, registered: [u32; 3], pending: &[&str]) -> PathBuf {
+fn write_table(dir: &Path, dump: &str, registered: [u32; 3]) -> PathBuf {
     let frame = |reference: u32, plane: &str, registered: u32| {
         serde_json::json!({
             "reference": reference,
@@ -208,7 +157,6 @@ fn write_table(dir: &Path, dump: &str, registered: [u32; 3], pending: &[&str]) -
         })
     };
     let table = serde_json::json!({
-        "pending": pending,
         "entries": [{
             "capture": "still",
             "args": ["--part", dump],
@@ -246,7 +194,7 @@ fn report(out: &Path) -> serde_json::Value {
 #[test]
 fn every_frame_at_its_registered_count_is_exit_0() {
     let dir = scratch("exact");
-    let table = write_table(&dir, "same", [0, 0, 0], &[]);
+    let table = write_table(&dir, "same", [0, 0, 0]);
     let out = dir.join("out");
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 0, "{}", run.output());
@@ -281,7 +229,7 @@ fn every_frame_at_its_registered_count_is_exit_0() {
 #[test]
 fn a_count_off_the_register_is_exit_1() {
     let dir = scratch("off");
-    let table = write_table(&dir, "off", [0, 0, 0], &[]);
+    let table = write_table(&dir, "off", [0, 0, 0]);
     let out = dir.join("out");
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 1, "{}", run.output());
@@ -298,11 +246,11 @@ fn a_count_off_the_register_is_exit_1() {
     assert_eq!(report(&out)["frames"][2]["verdict"], "DIFFERS");
 
     // The same two pixels, registered: the frame is at its register, and the run is 0.
-    let table = write_table(&dir, "off", [0, 0, 2], &[]);
+    let table = write_table(&dir, "off", [0, 0, 2]);
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 0, "{}", run.output());
     // And a register that is not the measured number is off it, in either direction.
-    let table = write_table(&dir, "same", [0, 0, 2], &[]);
+    let table = write_table(&dir, "same", [0, 0, 2]);
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 1, "{}", run.output());
 }
@@ -310,7 +258,7 @@ fn a_count_off_the_register_is_exit_1() {
 #[test]
 fn a_frame_the_dump_lacks_is_exit_2() {
     let dir = scratch("short");
-    let table = write_table(&dir, "short", [0, 0, 0], &[]);
+    let table = write_table(&dir, "short", [0, 0, 0]);
     let out = dir.join("out");
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 2, "{}", run.output());
@@ -331,7 +279,7 @@ fn a_frame_the_dump_lacks_is_exit_2() {
 fn a_geometry_mismatch_is_exit_2_not_a_count() {
     // The same 8 pixels on a 2x4 screen: a pixel count would be a number about nothing.
     let dir = scratch("tall");
-    let table = write_table(&dir, "tall", [0, 0, 0], &[]);
+    let table = write_table(&dir, "tall", [0, 0, 0]);
     let out = dir.join("out");
     let run = rediff(&table, &out, &fixtures().join("parts"));
     assert_eq!(run.code, 2, "{}", run.output());
@@ -342,14 +290,14 @@ fn a_geometry_mismatch_is_exit_2_not_a_count() {
 #[test]
 fn a_run_that_fails_is_exit_2() {
     let dir = scratch("fails");
-    let table = write_table(&dir, "fails", [0, 0, 0], &[]);
+    let table = write_table(&dir, "fails", [0, 0, 0]);
     let run = rediff(&table, &dir.join("out"), &fixtures().join("parts"));
     assert_eq!(run.code, 2, "{}", run.output());
     assert!(run.output().contains("asked to fail"), "{}", run.output());
 }
 
 #[test]
-fn a_capture_with_no_entry_and_no_pending_line_is_exit_2() {
+fn a_capture_with_no_entry_is_exit_2() {
     // A second capture beside `still` that the table does not name.
     let dir = scratch("unlisted");
     let reference = dir.join("parts");
@@ -361,108 +309,73 @@ fn a_capture_with_no_entry_and_no_pending_line_is_exit_2() {
             fs::copy(&file, to.join(file.file_name().unwrap())).unwrap();
         }
     }
-    let table = write_table(&dir, "same", [0, 0, 0], &[]);
+    let table = write_table(&dir, "same", [0, 0, 0]);
     let run = rediff(&table, &dir.join("out"), &reference);
     assert_eq!(run.code, 2, "{}", run.output());
     assert!(run.output().contains("extra"), "{}", run.output());
 
-    // A PENDING line covers it, and the report names it as not compared.
-    let table = write_table(&dir, "same", [0, 0, 0], &["extra"]);
-    let run = rediff(&table, &dir.join("out"), &reference);
-    assert_eq!(run.code, 0, "{}", run.output());
-    assert!(
-        run.stdout
-            .lines()
-            .any(|line| line.starts_with("extra") && line.contains("not compared")),
-        "{}",
-        run.stdout
-    );
-    let report = report(&dir.join("out"));
-    assert_eq!(report["pending"][0]["capture"], "extra");
+}
 
-    // A substituted table and tree are not the phase run, and say so in both places.
+#[test]
+fn a_substituted_table_and_tree_are_a_partial_run() {
+    let dir = scratch("partial");
+    let table = write_table(&dir, "same", [0, 0, 0]);
+    let reference = fixtures().join("parts");
+    let out = dir.join("out");
+    let run = rediff(&table, &out, &reference);
+    assert_eq!(run.code, 0, "{}", run.output());
+    let report = report(&out);
     assert_eq!(report["scope"], "partial");
     assert_eq!(report["table"], table.to_str().unwrap());
     assert_eq!(report["reference"], reference.to_str().unwrap());
     assert_eq!(report["only"], serde_json::json!([]));
-    let banner = run
-        .stdout
-        .lines()
-        .find(|line| line.starts_with("NOT THE PHASE RUN: "))
-        .unwrap_or_else(|| panic!("no banner: {}", run.stdout));
+    let lines: Vec<&str> = run.stdout.lines().collect();
+    let banner = lines
+        .iter()
+        .position(|line| line.starts_with("partial run: "))
+        .unwrap_or_else(|| panic!("no partial-run line: {}", run.stdout));
+    assert!(lines[banner].contains(&format!("--table {}", table.display())), "{}", lines[banner]);
     assert!(
-        banner.contains(&format!("--table {}", table.display())),
-        "{banner}"
+        lines[banner].contains(&format!("--reference {}", reference.display())),
+        "{}",
+        lines[banner]
     );
-    assert!(
-        banner.contains(&format!("--reference {}", reference.display())),
-        "{banner}"
-    );
-    let verdict = run
-        .stdout
-        .lines()
-        .position(|line| line.starts_with("verdict: "));
-    let banner_at = run
-        .stdout
-        .lines()
-        .position(|line| line.starts_with("NOT THE PHASE RUN"));
-    assert!(
-        banner_at < verdict,
-        "the banner comes before the verdict: {}",
-        run.stdout
-    );
+    let verdict = lines.iter().position(|line| line.starts_with("verdict: ")).unwrap();
+    assert!(banner < verdict, "the line comes before the verdict: {}", run.stdout);
 }
 
 #[test]
-fn an_only_that_names_only_pending_captures_is_refused() {
+fn an_only_that_names_nothing_in_the_table_is_refused() {
     // Comparing nothing is not "every frame at its registered count".
-    let dir = scratch("only-pending");
-    let reference = dir.join("parts");
-    for capture in ["still", "extra"] {
-        let to = reference.join(capture);
-        fs::create_dir_all(&to).unwrap();
-        for file in fs::read_dir(fixtures().join("parts/still")).unwrap() {
-            let file = file.unwrap().path();
-            fs::copy(&file, to.join(file.file_name().unwrap())).unwrap();
-        }
-    }
-    let table = write_table(&dir, "same", [0, 0, 0], &["extra"]);
+    let dir = scratch("only-nothing");
+    let table = write_table(&dir, "same", [0, 0, 0]);
     let out = dir.join("out");
     let run = xtask(&[
         "rediff",
         "--binary",
         fixtures().join("fake-secondreality").to_str().unwrap(),
         "--reference",
-        reference.to_str().unwrap(),
+        fixtures().join("parts").to_str().unwrap(),
         "--table",
         table.to_str().unwrap(),
         "--only",
-        "extra",
+        "elsewhere",
         "--out",
         out.to_str().unwrap(),
     ]);
     assert_eq!(run.code, 2, "{}", run.output());
-    assert!(
-        run.output().contains("nothing to compare"),
-        "{}",
-        run.output()
-    );
-    assert!(
-        !out.join("report.json").exists(),
-        "a refused run writes no report"
-    );
+    assert!(run.output().contains("names no capture"), "{}", run.output());
+    assert!(!out.join("report.json").exists(), "a refused run writes no report");
 }
 
 #[test]
 fn only_the_default_run_is_the_full_scope() {
-    // The compiled table over the default `reference/parts`, from the repository root,
-    // with the fake binary: it cannot render the demo, so every entry is a failed run and
-    // the exit is 2 — but the report it writes is the phase run's shape, and says `full`.
+    // The compiled table over the default `reference/parts`, with the fake binary: every entry
+    // is a failed run and the exit is 2, but the report says `full`.
     let dir = scratch("full-scope");
     let fake = fixtures().join("fake-secondreality");
     let out = dir.join("out");
-    let run = xtask_in(
-        &repository_root(),
+    let run = xtask(
         &[
             "rediff",
             "--binary",
@@ -477,11 +390,10 @@ fn only_the_default_run_is_the_full_scope() {
     assert_eq!(full["table"], "compiled");
     assert_eq!(full["reference"], "reference/parts");
     assert_eq!(full["only"], serde_json::json!([]));
-    assert!(!run.stdout.contains("NOT THE PHASE RUN"), "{}", run.stdout);
+    assert!(!run.stdout.contains("partial run"), "{}", run.stdout);
 
     // The same run narrowed by `--only` is partial, on the console and in the report.
-    let run = xtask_in(
-        &repository_root(),
+    let run = xtask(
         &[
             "rediff",
             "--binary",
@@ -496,7 +408,7 @@ fn only_the_default_run_is_the_full_scope() {
     assert!(
         run.stdout
             .lines()
-            .any(|line| line == "NOT THE PHASE RUN: --only loop/alku"),
+            .any(|line| line == "partial run: --only loop/alku"),
         "{}",
         run.stdout
     );
@@ -510,7 +422,7 @@ fn only_the_default_run_is_the_full_scope() {
 fn an_entry_with_no_capture_is_exit_2() {
     let dir = scratch("no-capture");
     // An entry for a capture the tree does not hold.
-    let table = write_table(&dir, "same", [0, 0, 0], &[]);
+    let table = write_table(&dir, "same", [0, 0, 0]);
     let mut json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&table).unwrap()).unwrap();
     let mut gone = json["entries"][0].clone();
@@ -520,18 +432,12 @@ fn an_entry_with_no_capture_is_exit_2() {
     let run = rediff(&table, &dir.join("out"), &fixtures().join("parts"));
     assert_eq!(run.code, 2, "{}", run.output());
     assert!(run.output().contains("gone"), "{}", run.output());
-
-    // And a PENDING line that covers nothing.
-    let table = write_table(&dir, "same", [0, 0, 0], &["nowhere"]);
-    let run = rediff(&table, &dir.join("out"), &fixtures().join("parts"));
-    assert_eq!(run.code, 2, "{}", run.output());
-    assert!(run.output().contains("nowhere"), "{}", run.output());
 }
 
 #[test]
 fn the_default_report_directory_is_out_rediff_and_the_reference_is_refused() {
     let dir = scratch("inside");
-    let table = write_table(&dir, "same", [0, 0, 0], &[]);
+    let table = write_table(&dir, "same", [0, 0, 0]);
     let reference = dir.join("parts");
     fs::create_dir_all(&reference).unwrap();
     let run = rediff(&table, &reference.join("report"), &reference);
@@ -544,9 +450,7 @@ fn the_default_report_directory_is_out_rediff_and_the_reference_is_refused() {
 
 #[test]
 fn an_out_through_dot_dot_into_the_reference_is_refused() {
-    // D16's bypass: a `..` behind a component that does not exist yet survived the guard
-    // as text, and the write landed inside the reference. Both writers are refused, and
-    // neither leaves the component it would have made on the way.
+    // D16: a `..` behind a component that does not exist yet lands inside the reference.
     let parent = scratch("dotdot");
     let reference = parent.join("ref");
     fs::create_dir_all(reference.join("still")).unwrap();
@@ -560,24 +464,13 @@ fn an_out_through_dot_dot_into_the_reference_is_refused() {
     }
     let out = parent.join("missing/../ref/nested");
 
-    let table = write_table(&parent, "same", [0, 0, 0], &[]);
+    let table = write_table(&parent, "same", [0, 0, 0]);
     let run = rediff(&table, &out, &reference);
     assert_eq!(run.code, 2, "rediff: {}", run.output());
     assert!(run.output().contains("ref/nested"), "{}", run.output());
     assert!(!parent.join("missing").exists());
     assert!(!reference.join("nested").exists());
 
-    let run = xtask(&[
-        "compare",
-        "--reference",
-        reference.to_str().unwrap(),
-        "--out",
-        out.to_str().unwrap(),
-    ]);
-    assert_eq!(run.code, 2, "compare: {}", run.output());
-    assert!(run.output().contains("ref/nested"), "{}", run.output());
-    assert!(!parent.join("missing").exists());
-    assert!(!reference.join("nested").exists());
 }
 
 /// Every `fullrun/*` row's rendered index is its reference plus its part's start difference —

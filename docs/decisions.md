@@ -308,10 +308,11 @@ per effective view. Set it only to pack rows more tightly (CRTC 0x13).
 `u16`s. The CRTC's 16 bits count bytes within a plane, which the pixel-addressed `View` does not
 model. The test card's split walk (`SPLIT_WALK_ROWS`) is a plain 3.
 
-**`compare`'s output guard** collapses `.`/`..` lexically after canonicalising the deepest existing
-ancestor (`compare::resolve`, `collapse`, `refuse_output_inside`), so
+**`xtask`'s output guard** collapses `.`/`..` lexically after canonicalising the deepest existing
+ancestor (`xtask/src/paths.rs`: `resolve`, `refuse_output_inside`), so
 `--out <missing>/../<reference>/x` is refused. **Pinned by**
-`an_out_through_dot_dot_into_the_reference_is_refused` in `xtask/tests/rediff.rs`.
+`an_out_through_dot_dot_into_the_reference_is_refused` in `xtask/tests/rediff.rs` and
+`paths::tests::a_dotdot_behind_a_missing_component_resolves_inside_the_input`.
 
 ## D17 — A boot that repeats
 
@@ -507,8 +508,8 @@ only when one is written) into each frame entry of its manifest. `manifest.json`
 the fields are additive. `cargo xtask reference verify --tree <DIR>` checks every capture against
 its own manifest: every named file present at the length its geometry implies, every `frame_*` file
 named, every digest matching. Exit 0 clean, 1 any finding, 2 could not check. A frame with no
-recorded digest is a finding, not a pass. `reference backfill --tree <DIR>` fills missing digests
-and refuses one that disagrees with its file, so a changed frame needs a re-capture.
+recorded digest is a finding, not a pass; a changed frame needs a re-capture, which records new
+digests.
 
 **Why `idx_sha256`.** `compare` measures with the indices whenever both sides have them, so a byte
 changed in an `.idx` changes every later diff, and an RGB digest alone would miss it.

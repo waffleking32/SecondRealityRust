@@ -91,7 +91,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use sha2::{Digest, Sha256};
 use sr_assets::visu::{read_animation, read_master, read_object, read_scene_list};
 use sr_assets::{load, load_frames, pal, sniff, Format, Image};
 use sr_engine::{dac_expand, Palette};
@@ -399,7 +398,7 @@ pub fn command(tree: &Path, options: &Options) -> Result<ExitCode, VerifyError> 
     // Before anything is written: the tree this tool reads is its input, and a
     // sheet written inside it would become a file with no provenance row.
     if let Some(sheets) = &options.sheet {
-        crate::compare::refuse_output_inside(
+        crate::paths::refuse_output_inside(
             sheets,
             tree,
             "--sheet",
@@ -474,7 +473,7 @@ fn check_tree(tree: &Path, rows: &[Row], present: &[String]) -> usize {
                 continue;
             }
         };
-        let actual = hex(&Sha256::digest(&bytes));
+        let actual = crate::reference::sha256_hex(&bytes);
         let size_is_wrong = row.bytes.filter(|recorded| *recorded != bytes.len());
         if actual != row.sha256 {
             findings += 1;
@@ -638,22 +637,9 @@ fn write_sheets(
     fs::create_dir_all(directory)
         .map_err(|e| VerifyError::Io(format!("cannot create {}: {e}", directory.display())))?;
     for (part, tiles) in by_part {
-        let columns = sheet::columns_for(tiles.len());
-        let (width, height, rgb) = sheet::contact_sheet(tiles, columns);
         let file = directory.join(format!("{}.png", sheet::file_stem(part)));
-        sheet::write_png(&file, width, height, &rgb)
+        sheet::write(&file, tiles)
             .map_err(|e| VerifyError::Io(format!("cannot write {}: {e}", file.display())))?;
-        println!(
-            "sheet {}: {} tile(s), {columns} column(s), {width}x{height}",
-            file.display(),
-            tiles.len()
-        );
-        // The labels are not in the PNG — nothing can draw text there — so this
-        // is how a person finds a tile: row-major, in this order.
-        for (index, tile) in tiles.iter().enumerate() {
-            let (row, column) = sheet::position(index, columns);
-            println!("  r{row}c{column} {}", tile.label);
-        }
     }
     println!(
         "sheets: {} written under {}",
@@ -1194,10 +1180,6 @@ fn bytes_tile(path: &str, bytes: &[u8], note: &str) -> Tile {
         rgb,
         label: format!("{path} (bytes at {width} wide{cut}: {note})"),
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

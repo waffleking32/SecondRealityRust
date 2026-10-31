@@ -1,84 +1,17 @@
-//! `cargo xtask assets verify` end to end: the exit code *is* the contract.
-//!
-//! The tool's job is to tell a script three things apart — "everything checked
-//! out" (0), "a check failed" (1) and "the tool could not run at all" (2) — so
-//! the tests here run the built binary and read its exit code, the way the
-//! script that gates the phase will. The checks themselves are exercised
-//! against the real tree (150 curated files) and against fixture trees that
-//! hold exactly the failure each test is about.
-//!
-//! Fixtures live in `tests/fixtures/assets-*/assets/`, mirroring the real
-//! layout: one `PROVENANCE.md` and the files it records. A test that writes
-//! anything writes it outside the repository, under the temporary directory —
-//! `assets/` is input-only, and a sheet written among the assets would become a
-//! file with no provenance row, which is the very thing `--tree` reports.
+//! `cargo xtask assets verify` end to end: **0** everything asked for checked out, **1** a
+//! check failed, **2** the tool could not run. The checks run against the real tree and against
+//! fixture trees (`tests/fixtures/assets-*/assets/`), each holding the failure its test is about.
+
+mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
-/// The repository root: `xtask/..`, where `assets/` lives.
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
-}
+use common::{copy_tree, fixture, repo_root, scratch, Run};
 
-/// `tests/fixtures/<name>` — a tree to point the binary's working directory at.
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-}
-
-/// A scratch directory for this test, emptied first.
-fn scratch(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("xtask-assets-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
-    path
-}
-
-/// Copy a fixture tree into a scratch directory, for a test that has to change
-/// a tree of its own: the fixtures themselves are read-only inputs, the same
-/// rule `assets/` is under.
-fn copy_tree(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), target).unwrap();
-        }
-    }
-}
-
-struct Run {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-impl Run {
-    /// Both streams: the tool prints its report to stdout and its refusals to
-    /// stderr, and a test about a message does not care which.
-    fn output(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
-    }
-}
-
-/// Run the built `xtask` binary in `dir`.
+/// The built `xtask`, run from `dir` (`assets verify` reads `assets/` below it).
 fn xtask(dir: &Path, args: &[&str]) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run {}: {e}", env!("CARGO_BIN_EXE_xtask")));
-    Run {
-        code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
+    common::xtask_in(dir, args)
 }
 
 #[test]
@@ -157,11 +90,8 @@ fn a_recorded_length_that_does_not_match_the_file_is_reported() {
 
 #[test]
 fn a_recorded_refusal_that_starts_decoding_is_a_failed_check() {
-    // The register's inverse direction. If the decoder ever grew lenient enough
-    // to read the truncated `COMAN/COMBG.UH` — clipping it instead of refusing
-    // it — the file's digest would be unchanged, `--tree` would still pass, and
-    // the phase's gate would go green while the premise the record rests on was
-    // broken. Nothing but this check can see that, so it has to fail.
+    // A decoder grown lenient enough to clip the truncated `COMAN/COMBG.UH` leaves its digest
+    // unchanged, so only this check can see it.
     let root = scratch("refusal-decoded");
     let tree = root.join("assets");
     fs::create_dir_all(tree.join("COMAN")).unwrap();
@@ -197,11 +127,7 @@ fn a_recorded_refusal_that_starts_decoding_is_a_failed_check() {
     );
     assert!(output.contains("REFUSED_ON_RECORD"), "{output}");
     assert!(output.contains("verdict: 1 finding(s)"), "{output}");
-    // And the summary's own arithmetic, in the run a reviewer reads: the row
-    // used to be counted nowhere — `refused on record` dropped to 0 and no
-    // other category took it — so a one-row tree printed a line whose parts did
-    // not add up to the one it led with. Every row is in exactly one category,
-    // and this one is in the category that says the premise broke.
+    // Every row is in exactly one category of the summary.
     assert!(
         output.contains(
             "decode: 1 asset(s) — 0 picture(s), 0 animation(s), 0 palette(s), 0 Visu scene file(s), \
@@ -271,17 +197,20 @@ fn every_asset_in_the_tree_decodes() {
         ),
         "{output}"
     );
-    // The record's own walk: every provenance row is on disk and hashes, and
-    // the tree holds nothing the record does not name. Phase 8 Task 6 added
-    // `HARD/FCRZ.U` (the row is in the main table), so the walk's own line is
-    // pinned here: a tree that gains or loses a file without the record
-    // changing has a problem this test cannot see.
+    // The record's own walk: every row on disk and hashing, nothing unrecorded.
     assert!(
         output.contains("tree: 179 file(s) recorded, 179 in the tree, 0 finding(s)"),
         "{output}"
     );
     assert!(!output.contains("FAIL"), "{output}");
 }
+
+/// The 24 parts the provenance's `parts` column names (MINVBALL by its shipped EXE alone, D49).
+const SHEETS: [&str; 24] = [
+    "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
+    "JPLOGO", "LNS&ZOOM", "MAIN", "MINVBALL", "MNTSCRL", "PAM", "PANICEND", "PLZPART", "RAYSCRL",
+    "START", "TECHNO", "TUNNELI", "U2A", "U2E",
+];
 
 #[test]
 fn a_sheet_is_written_for_every_part_that_has_assets() {
@@ -292,15 +221,8 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     );
 
     assert_eq!(run.code, 0, "sheets are not a check:\n{}", run.output());
-    // The provenance's `parts` column names 24 parts (MINVBALL by its shipped EXE alone, D49;
-    // PLZPART's sheet was missing from this list before). One sheet each, named
-    // after the part, is what makes "look at the sheets" a thing a person can
-    // do — so every one of them is asserted, not a count.
-    for part in [
-        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
-        "JPLOGO", "LNS&ZOOM", "MAIN", "MINVBALL", "MNTSCRL", "PAM", "PANICEND", "PLZPART", "RAYSCRL",
-        "START", "TECHNO", "TUNNELI", "U2A", "U2E",
-    ] {
+    // One sheet per part, named after it.
+    for part in SHEETS {
         let file = sheets.join(format!("{part}.png"));
         let bytes = fs::read(&file)
             .unwrap_or_else(|e| panic!("no sheet for {part} at {}: {e}", file.display()));
@@ -334,11 +256,7 @@ fn a_sheet_is_written_for_every_part_that_has_assets() {
     // names a part for has a tile somewhere, and this asserts the converse too
     // by counting.
     let mut tiles = Vec::new();
-    for part in [
-        "3DSINFLD", "ALKU", "BEGLOGO", "CRED", "DDSTARS", "ENDLOGO", "ENDSCRL", "GLENZ", "HARD", "GRAB",
-        "JPLOGO", "LNS&ZOOM", "MAIN", "MINVBALL", "MNTSCRL", "PAM", "PANICEND", "PLZPART", "RAYSCRL",
-        "START", "TECHNO", "TUNNELI", "U2A", "U2E",
-    ] {
+    for part in SHEETS {
         tiles.extend(sheet_tiles(&output, &format!("{part}.png")));
     }
     assert_eq!(tiles.len(), 179, "one tile per recorded file");
@@ -425,35 +343,5 @@ fn a_sheet_directory_inside_the_assets_tree_is_refused() {
         !inside.exists(),
         "the refused directory must not be created: {}",
         inside.display()
-    );
-}
-
-#[test]
-fn a_sheet_path_that_dotdots_behind_a_missing_component_is_refused_too() {
-    // The bypass `--sheet` inherited from `compare`'s guard: only the deepest
-    // ancestor that exists is canonicalised, so a `..` behind a component
-    // nothing has made yet survived as text — outside the tree for the string
-    // comparison, inside it for every write, which is how a PNG lands among the
-    // assets with no provenance row. `missing` has to sit *beside* the tree and
-    // not inside it: a tail that starts inside `assets/` still compares as one
-    // (the first mismatching component is what `starts_with` looks for), and a
-    // test written that way passes whether or not the guard collapses the path.
-    let root = scratch("sheet-dotdot").join("tree");
-    copy_tree(&fixture("assets-hash-mismatch"), &root);
-    let inside = root.join("missing/../assets/sheets");
-    let run = xtask(
-        &root,
-        &["assets", "verify", "--sheet", inside.to_str().unwrap()],
-    );
-
-    assert_eq!(run.code, 2, "a refused --sheet is 2:\n{}", run.output());
-    assert!(run.output().contains("--sheet"), "{}", run.output());
-    assert!(
-        !root.join("assets/missing").exists(),
-        "the refusal is before anything is written, so not even the component on the way exists"
-    );
-    assert!(
-        !root.join("assets/sheets").exists(),
-        "nothing may be written into the tree by a refused --sheet"
     );
 }

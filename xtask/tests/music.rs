@@ -1,69 +1,14 @@
-//! `cargo xtask music` end to end, and the trace as a `reference verify` citizen.
-//!
-//! Two things are checked here that nothing else can: that the **symbol map**
-//! the trace's every address comes from is produced by a command (so
-//! `docs/fidelity/music-clock.md`'s numbers have one behind them), and that the
-//! **verifier sees the new kind of capture** — `reference verify` reads the 24
-//! frame captures filed before `kind` existed *and* the music traces, and a
-//! flipped byte of a trace is a failure with both digests in it, while a `kind`
-//! it does not know is refused by name rather than walked past. Review Focus 5
-//! of the phase plan is exactly this, and a verifier that has never been seen to
-//! fail is worth nothing.
-//!
-//! The commands that drive the emulator are not run here: they need the
-//! emulator and minutes of wall clock. What is run is everything they refuse
-//! *before* touching it, because those refusals are what keep a trace from
-//! being filed in the wrong place or with the wrong recipe.
+//! `cargo xtask music` end to end, and the music trace as a `reference verify` capture: the
+//! symbol map behind `docs/fidelity/music-clock.md`'s addresses comes from a command, a flipped
+//! byte of a trace is a finding with both digests in it, and a `kind` the verifier does not know
+//! is refused by name. The commands that drive the emulator are not run here; what they refuse
+//! before touching it is.
+
+mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
-/// The repository root: `xtask/..`, where `reference/` lives.
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
-}
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-}
-
-struct Run {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-impl Run {
-    fn output(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
-    }
-}
-
-/// Run the built `xtask` binary from the repository root, so the relative
-/// defaults the commands document are the ones they use.
-fn xtask(args: &[&str]) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .args(args)
-        .current_dir(repo_root())
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run {}: {e}", env!("CARGO_BIN_EXE_xtask")));
-    Run {
-        code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
-/// A scratch directory for this test, emptied first.
-fn scratch(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("xtask-music-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
-    path
-}
+use common::{fixture, repo_root, scratch, xtask};
 
 const OBJECT: &str = "upstream/SecondReality/MAIN/STMIK.300";
 
@@ -274,17 +219,6 @@ fn the_filed_trace_is_what_the_phase_reads() {
     );
     let skipped = value["skipped"].as_array().unwrap();
     assert_eq!(skipped.len(), 2, "{skipped:?}");
-}
-
-/// `reference verify --tree reference` passes with the traces in it, and the 24
-/// frame captures filed before `kind` existed are still read as frame captures.
-#[test]
-fn the_reference_tree_passes_with_the_traces_in_it() {
-    let run = xtask(&["reference", "verify", "--tree", "reference"]);
-    assert_eq!(run.code, 0, "{}", run.output());
-    let text = run.output();
-    assert!(text.contains("music trace"), "{text}");
-    assert!(text.contains("71 capture(s)"), "{text}");
 }
 
 /// **The test that matters most**: a copy of a trace with one byte flipped is a

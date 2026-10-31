@@ -1,35 +1,26 @@
 //! Repository tooling.
 //!
-//! `reference capture` drives the emulated original, writes keyframes under
-//! `reference/`, and records what produced them. The oracle sits behind a
-//! trait, so an unusable emulator degrades to a documented alternative instead
-//! of blocking a phase (`docs/decisions.md` D10). The API shapes are D14.
+//! - `reference capture` drives the emulated original and files keyframes under `reference/`
+//!   (the oracle is behind a trait, D10; its API is D14). `reference verify` checks that tree
+//!   against the digests its manifests record (D23).
+//! - `compare` diffs frames against a capture; `rediff` re-renders every filed frame and checks
+//!   each against its registered count.
+//! - `frames sheet` and `assets verify --sheet` write contact sheets to look at; `assets verify`
+//!   checks `assets/` against `assets/PROVENANCE.md`.
+//! - `music` reads the original's player state out of the emulator (D26).
 //!
-//! `compare` is the other half: it diffs the port's frames against those
-//! captures and reports the difference per frame, exiting non-zero when any
-//! frame differs so a phase's exit criteria can be checked by a script.
-//!
-//! `reference verify` is the guard on the tree every one of those diffs is
-//! measured against: it checks each capture against the digests its own
-//! manifest records, and `reference backfill` writes those digests into a tree
-//! filed before `capture` recorded them — see `verify.rs`, which is the one
-//! place in this repository allowed to write inside `reference/`.
-//!
-//! `rediff` is `compare` over the whole tree at once: every filed reference frame
-//! re-rendered by the release binary at the mapping its own test states, and each
-//! frame's differing-pixel count checked against the count registered for it — see
-//! `rediff.rs` and its table.
-//!
-//! `assets verify` is the same idea one phase earlier: it checks the curated
-//! asset tree against its own record, decodes every asset, and writes a contact
-//! sheet per part — see `assets.rs`, which also carries the exit-code contract
-//! the two tools share.
+//! Every checking command exits **0** when everything checked out, **1** when a check failed
+//! (a frame differs, a count moved, a digest does not match) and **2** when it could not check
+//! at all, so a script can tell "they differ" from "it could not tell". Nothing writes inside
+//! `reference/` or `assets/` except `reference capture` (and `music trace`, under
+//! `reference/music/`).
 
 mod assets;
+mod capture;
 mod compare;
-mod frames;
 mod music;
 mod oracle;
+mod paths;
 mod rediff;
 mod reference;
 mod sheet;
@@ -68,34 +59,23 @@ enum Command {
     /// either side of its reference index, and the offset is reported (D18).
     Compare {
         /// The capture to measure against: a directory holding `manifest.json`,
-        /// or a tree holding capture directories at any depth below it (as
-        /// `reference/check_a` does directly and `reference/parts` does both
-        /// directly and one level deeper). A capture is input-only: nothing
-        /// this tool writes may land inside it.
+        /// or a tree holding capture directories at any depth below it. It is
+        /// input-only.
         #[arg(long)]
         reference: PathBuf,
-        /// Where the frames to measure came from, in the same shape. Defaults
-        /// to `--reference`, which compares the reference with itself.
+        /// The frames to measure, in the same shape. Defaults to `--reference`.
         #[arg(long)]
         rendered: Option<PathBuf>,
-        /// A command line to run first, through `sh -c`, that writes the
-        /// rendered frames. Needs `--rendered`.
-        #[arg(long = "run")]
-        run: Option<String>,
         /// Where `report.json` and the diff images go. Defaults to
         /// `out/compare`; a tree writes one report per capture, by name. An
         /// `--out` inside `--reference` is refused.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Read the rendered side's frame indices this much higher (negative
-        /// for lower) when pairing them with the reference's. For a part the
-        /// port cannot give a boot anchor — TUNNELI begins after GLENZ — the
-        /// run draws its own ticks from zero and the reference's index for a
-        /// picture is a constant away; the constant is measured, and this is
-        /// how the comparison is made at it. The frames' own indices are not
-        /// rewritten, the alignment is printed before the frames, and every
-        /// reported offset is the net one. It changes the *pairing*, never the
-        /// pixels: each pair is still compared exactly.
+        /// for lower) when pairing them with the reference's: for a run that
+        /// numbers its own ticks from zero, at a measured constant (TUNNELI,
+        /// `docs/fidelity/tunneli.md` §7.2). It moves the pairing, never the
+        /// pixels, and every reported offset is the net one.
         #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
         align: i32,
     },
@@ -107,8 +87,8 @@ enum Command {
     /// `--dump-frames`, at the mapping the part's own test states (no ±1 search).
     /// Exit code 0 when every frame is at its registered count, 1 when any is off
     /// it, 2 when something could not be compared (a missing frame, a geometry
-    /// mismatch, a capture with neither a table entry nor a PENDING line, an entry
-    /// with no capture, a failed run).
+    /// mismatch, a capture with no table entry, an entry with no capture, a failed
+    /// run).
     Rediff {
         /// The binary to run. Without it, `cargo build --release -p secondreality`
         /// runs first and its executable is used.
@@ -132,7 +112,7 @@ enum Command {
         table: Option<PathBuf>,
     },
     /// Look at a directory of frames the port or a capture wrote: one PNG of
-    /// every frame in it, to read with the eyes rather than a percentage.
+    /// every frame in it.
     Frames {
         #[command(subcommand)]
         command: FramesCommand,
@@ -144,12 +124,10 @@ enum Command {
     },
     /// The music player's own state, read out of the emulated original.
     ///
-    /// There is no audio reference and the modules' timing is invisible from
-    /// outside, so Phase 3's oracle is a per-frame trace of the words
-    /// `MAIN/STMIK.H:125-131` publishes — located in guest memory through
-    /// `MAIN/STMIK.300`'s own OMF public symbols. `symbols` prints that map;
-    /// `trace` writes one trace under `reference/music/`; `analyse` derives the
-    /// phase's numbers from one.
+    /// The oracle is a per-frame trace of the words `MAIN/STMIK.H:125-131`
+    /// publishes, located in guest memory through `MAIN/STMIK.300`'s own OMF
+    /// public symbols. `symbols` prints that map; `trace` writes one trace under
+    /// `reference/music/`; `analyse` derives the music notes' numbers from one.
     Music {
         #[command(subcommand)]
         command: MusicCommand,
@@ -158,24 +136,19 @@ enum Command {
 
 #[derive(Subcommand)]
 enum FramesCommand {
-    /// Write one PNG of every frame in a directory (or a tree). The tiles are
-    /// laid out in the order the frames are read — the same contact-sheet
-    /// layout `reference capture --sheet` and `assets verify --sheet` use — and
-    /// each tile's position and index is printed. Nothing is scaled, so a
-    /// 320x400 frame is a 320x400 tile.
+    /// Write one PNG of every frame in a directory (or a tree), in the layout
+    /// `reference capture --sheet` and `assets verify --sheet` use, and print
+    /// each tile's position and index. Nothing is scaled.
     ///
     /// Exit code 0 when a sheet was written, 2 when it could not be (no
     /// directory, no `manifest.json` anywhere below it, no frames, a frame file
     /// that cannot be read, an `--out` inside the directory being read).
     Sheet {
-        /// The directory (or tree) of frames to read: a directory holding a
-        /// `manifest.json`, or one holding capture directories at any depth
-        /// below it. What `xtask compare --rendered` accepts is what this
-        /// accepts, because it is the same walk.
+        /// The directory (or tree) of frames to read, as `compare --rendered`
+        /// accepts it.
         #[arg(long)]
         dir: PathBuf,
-        /// Where the PNG goes. A path inside `--dir` is refused: the frames are
-        /// inputs, and a sheet belongs beside them.
+        /// Where the PNG goes. A path inside `--dir` is refused.
         #[arg(long)]
         out: PathBuf,
     },
@@ -324,7 +297,7 @@ enum MusicCommand {
         #[arg(long, value_enum, default_value_t = BootRecipe::Autoexec)]
         boot: BootRecipe,
     },
-    /// Read a trace back and print the measurements the phase's note records:
+    /// Read a trace back and print the measurements the music notes record:
     /// where the music starts, the tick rate and its residual against the
     /// module's own header, the frame-to-frame quantisation of the row changes,
     /// the guest's soundcard and mixer words, `zplus`/`zinfo`, and what the
@@ -344,7 +317,7 @@ enum MusicCommand {
     },
 }
 
-/// A physical address, in decimal or with an `0x` prefix.
+/// `OFFSET:LEN`, each in decimal or with an `0x` prefix.
 fn parse_dump(text: &str) -> Result<(u32, usize), String> {
     let (offset, length) = text
         .split_once(':')
@@ -352,6 +325,7 @@ fn parse_dump(text: &str) -> Result<(u32, usize), String> {
     Ok((parse_address(offset)?, parse_address(length)? as usize))
 }
 
+/// A physical address, in decimal or with an `0x` prefix.
 fn parse_address(text: &str) -> Result<u32, String> {
     let trimmed = text.trim();
     let (digits, radix) = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
@@ -396,8 +370,7 @@ enum ReferenceCommand {
         /// are the buttons AUTOTYPE presses instead.
         #[arg(long)]
         keys: Option<String>,
-        /// How the guest reaches the demo. `typed` is Phase 0's recipe: the
-        /// host types the mount and the command line over the API and answers
+        /// How the guest reaches the demo. `typed`: the host types the mount and the command line over the API and answers
         /// the setup screen there, so a boot index is the same screen only as
         /// precisely as the host's timing repeats (D15). `autoexec` has the
         /// emulator's own shell run the recipe and AUTOTYPE answer the setup
@@ -405,10 +378,9 @@ enum ReferenceCommand {
         #[arg(long, value_enum, default_value_t = BootRecipe::Typed)]
         boot: BootRecipe,
         /// What the autoexec boot waits for before the capture starts.
-        /// `setup` is the demo's sound-card setup screen, which every capture
-        /// filed so far waited for. `graphics` waits for the first graphics
-        /// frame instead, for a program that never draws that screen (the
-        /// vault's DIS + effect batch). Only `--boot autoexec` can choose;
+        /// `setup` is the demo's sound-card setup screen. `graphics` waits for
+        /// the first graphics frame instead, for a program that never draws
+        /// that screen (the vault's DIS + effect batch). Only `--boot autoexec` can choose;
         /// the typed recipe always waits for the setup screen.
         #[arg(long, value_enum, default_value_t = BootWait::Setup)]
         boot_wait: BootWait,
@@ -438,25 +410,6 @@ enum ReferenceCommand {
         #[arg(long)]
         tree: PathBuf,
     },
-    /// Write every frame file's digest into the manifest beside it, for a tree
-    /// filed before `capture` recorded them.
-    ///
-    /// Records a digest that is missing, and writes a manifest only when it
-    /// had one to record: one whose digests are all there is not touched, and
-    /// neither is one carrying a key this tool does not model — writing it
-    /// would delete that key. Exit 1 when a recorded digest disagrees with its
-    /// file: a changed frame is a finding, it is never written over, and
-    /// nothing is written. Exit 2 when it cannot record the tree at all (a
-    /// manifest or frame it cannot read, a manifest it would lose keys from).
-    /// **The only command in this tool that writes inside `reference/`, and it
-    /// touches no frame file** — the phase plan allows this once, on the
-    /// condition that the frames are hashed out of band before and after.
-    Backfill {
-        /// The tree to walk, as `verify`'s. Only the manifests below it are
-        /// written, and only when a digest in them is missing.
-        #[arg(long)]
-        tree: PathBuf,
-    },
 }
 
 fn main() -> ExitCode {
@@ -464,9 +417,7 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(message) => {
             eprintln!("error: {message}");
-            // Exit code 2 is "could not tell": `compare` owns 0 (identical)
-            // and 1 (different), and a script must be able to tell a measured
-            // difference from a comparison that never ran.
+            // 2 is "could not tell" (see the module doc).
             ExitCode::from(2)
         }
     }
@@ -504,8 +455,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 sheet,
             };
             // Refuse what cannot be reproduced before starting anything. The
-            // guest's recipe is built here because the emulator has to be
-            // started with it in its config: `[autoexec]` runs at boot.
+            // recipe goes into the emulator's config: `[autoexec]` runs at boot.
             let autoexec = options.autoexec_lines()?;
             reference::validate_options(&options)?;
 
@@ -513,8 +463,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             capture(&mut oracle, &options)?;
             oracle.shutdown()?;
 
-            // Print what Task 13 will read, not what was in memory: re-read
-            // the file that was just written.
+            // Print what was written, not what was in memory.
             let written = CaptureManifest::from_json(&std::fs::read_to_string(
                 options.out.join("manifest.json"),
             )?)?;
@@ -545,19 +494,14 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Reference {
             command: ReferenceCommand::Verify { tree },
         } => Ok(verify::command(&tree)?),
-        Command::Reference {
-            command: ReferenceCommand::Backfill { tree },
-        } => Ok(verify::backfill(&tree)?),
         Command::Compare {
             reference,
             rendered,
-            run,
             out,
             align,
         } => Ok(compare::command(
             &reference,
             rendered.as_deref(),
-            run.as_deref(),
             out.as_deref(),
             align,
         )?),
@@ -576,7 +520,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
         })?),
         Command::Frames {
             command: FramesCommand::Sheet { dir, out },
-        } => frames::sheet(&frames::SheetOptions { dir, out }),
+        } => Ok(sheet::frames_command(&dir, &out)?),
         Command::Assets {
             command:
                 AssetsCommand::Verify {

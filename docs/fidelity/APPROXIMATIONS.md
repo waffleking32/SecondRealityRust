@@ -16,9 +16,8 @@ An entry that no longer registers a difference is a tombstone, `## A<n> — Reti
 that the code's and the notes' citations still resolve. Numbers are never reused. The history of an
 entry is in git.
 
-`cargo test -p xtask --test approximations` checks that every live entry has the five labels, that
-the numbers increase, and that every `register` string in `cargo xtask rediff`'s table
-(`xtask/src/rediff/table.rs`) names a live entry.
+`cargo test -p xtask --test rediff` (`every_register_names_a_live_approximation`) checks that every
+`register` string in `cargo xtask rediff`'s table (`xtask/src/rediff/table.rs`) names a live entry.
 
 **The release's images.** "The shipped part" is the part's EXE as `MAIN/DATA/` stages it, packed.
 `sr_assets::exe::unpack` turns each into the load image DOS runs (D49; the layers and their

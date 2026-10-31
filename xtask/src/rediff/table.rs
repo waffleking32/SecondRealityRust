@@ -49,10 +49,6 @@ pub struct Frame {
     pub register: &'static str,
 }
 
-/// Filed captures whose mapping is not yet measured: `rediff` reports each capture under one
-/// of these as not compared. Empty while every filed capture has an entry.
-pub const PENDING: &[&str] = &[];
-
 /// How far, in frames, a published music position may be from the frame a filed trace
 /// publishes it at (A12). The two filed sessions of one recipe (`second5`, `second5b`)
 /// disagree with each other by one frame at 8 of their 131 row changes, and the port's exact
@@ -97,7 +93,7 @@ const fn idx0(reference: u32, rendered: u32) -> Frame {
 /// One part of block 1's run: the original's first frame by `reference-indices.md` §26.3's
 /// definition (in the session the part's `fullrun` capture was filed in), the port's first frame
 /// by the same definition, and the index the port starts the part at (`Sequence::starts`).
-/// **This is the one source of the full run's start differences** (§26.8, A53): the `fullrun/*`
+/// **This is the one source of the full run's start differences** (A53): the `fullrun/*`
 /// entries derive every rendered index from it, and `bins/secondreality/tests/fullrun.rs`
 /// asserts both port columns against the run's own frames and timeline.
 #[derive(Debug, Clone, Copy)]
@@ -173,7 +169,7 @@ pub const fn before(next: Part) -> u32 {
 
 /// The frames the original shows during a loader stretch the port does not have, and the part
 /// that starts after it: PAM's white under BEGLOGO's load, the dot after the cue wait's exit,
-/// JPLOGO's white under the U2E reload (`reference-indices.md` §26.8).
+/// JPLOGO's white under the U2E reload (A53).
 #[allow(dead_code)]
 pub const FULLRUN_LOADER_FRAMES: [(u32, Part); 3] =
     [(7920, Part::Beglogo), (16636, Part::Mntscrl), (34110, Part::U2e)];
@@ -285,7 +281,7 @@ pub const TABLE: &[Entry] = &[
         ],
     },
     // §20.1's keyframes through the block-5 chain, at their own indices, all 0: the screens are
-    // read from the shipped CRED.EXE (A10, retired).
+    // read from the shipped CRED.EXE (`cred.md`).
     Entry {
         capture: "cred",
         args: &["--block", "5"],
@@ -777,29 +773,23 @@ pub const TABLE: &[Entry] = &[
             rgb0(7640, 7640),
         ],
     },
-    // The original at 15000 cycles (§27): U2A's pre-gate hold is the background under the
-    // merged palette, which the port shows (A32).
+    // The original at 15,000, 25,000, 35,000 and 60,000 cycles (§27): U2A's pre-gate hold is the
+    // background under the merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c15000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 25000 cycles (§27): U2A's pre-gate hold is the background under the
-    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c25000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 35000 cycles (§27): U2A's pre-gate hold is the background under the
-    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c35000",
         args: &["--block", "1"],
         frames: &[rgb0(6400, 6400), rgb0(6600, 6600)],
     },
-    // The original at 60000 cycles (§27): U2A's pre-gate hold is the background under the
-    // merged palette, which the port shows (A32).
     Entry {
         capture: "u2a-speed/c60000",
         args: &["--block", "1"],
