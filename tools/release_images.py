@@ -9,7 +9,8 @@ dump_the_unpacked_images`, in `out/release-images/`) in that memory, applies its
 the load segment found, and prints how many bytes differ: the C runtime's startup writes only
 (tens of bytes), and MNTSCRL's in-place `RIX3` decode.
 
-Needs the emulator built at `$SR_DOSBOX` (default `~/workspace/reality/dosbox-automation`) and
+Needs the emulator built at `$SR_DOSBOX` (default `../dosbox-automation`, beside the
+repository) and
 **no emulator already running** on port 8386. Memory dumps go to `out/release-images/mem/`.
 
 usage: python3 -I tools/release_images.py [NAME ...] [--frames N]
@@ -17,7 +18,7 @@ usage: python3 -I tools/release_images.py [NAME ...] [--frames N]
 import json, os, secrets, subprocess, sys, tempfile, time, urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOSBOX = os.environ.get("SR_DOSBOX", os.path.expanduser("~/workspace/reality/dosbox-automation"))
+DOSBOX = os.environ.get("SR_DOSBOX", os.path.join(os.path.dirname(REPO), "dosbox-automation"))
 BIN = DOSBOX + "/build/release-linux/dosbox-automation"
 DATA = REPO + "/assets/MAIN/DATA"
 IMAGES = REPO + "/out/release-images"

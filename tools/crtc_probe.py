@@ -17,7 +17,7 @@ A sample taken between the demo's own CRTC writes can read a transient value
 majority reading.
 
 Needs the emulator built at `$SR_DOSBOX` (default
-`~/workspace/reality/dosbox-automation`, `build/release-linux/dosbox-automation`)
+`../dosbox-automation` beside the repository, `build/release-linux/dosbox-automation`)
 and **no emulator already running** on port 8386.
 
 usage: python3 -I tools/crtc_probe.py ARG START_FRAME SAMPLES OUTDIR
@@ -25,7 +25,7 @@ usage: python3 -I tools/crtc_probe.py ARG START_FRAME SAMPLES OUTDIR
 import json, os, secrets, subprocess, sys, tempfile, time, urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOSBOX = os.environ.get("SR_DOSBOX", os.path.expanduser("~/workspace/reality/dosbox-automation"))
+DOSBOX = os.environ.get("SR_DOSBOX", os.path.join(os.path.dirname(REPO), "dosbox-automation"))
 BIN = DOSBOX + "/build/release-linux/dosbox-automation"
 ORIG = REPO + "/reference/original"
 BASE = "http://127.0.0.1:8386/api/v1"

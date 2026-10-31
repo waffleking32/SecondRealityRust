@@ -95,7 +95,8 @@ Five things the command needs, each of which cost time to discover:
 
 1. **`LD_LIBRARY_PATH`** must include the emulator's build dependencies, because the binary has no
    RPATH: `$SR_DOSBOX/build/release-linux/_deps/{sdl3,sdl3_image,mt32emu,fluidsynth,zlib-ng,iir1}-build`,
-   with `SR_DOSBOX` pointing at the `dosbox-automation` checkout.
+   with `SR_DOSBOX` pointing at the `dosbox-automation` checkout (default: `../dosbox-automation`,
+   beside this repository).
 2. **A scratch `XDG_CONFIG_HOME`** whose *primary* config carries `mount_allowed_bases`.
    `--noprimaryconf` alone cannot mount the reference directory; `xtask` writes one into a temp
    directory.

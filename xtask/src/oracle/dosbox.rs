@@ -20,8 +20,9 @@ use serde_json::json;
 use super::{sleep_frames, sleep_until_close, CapturedFrame, Oracle, OracleError, DEFAULT_WAIT};
 use crate::reference::BootWait;
 
-/// Where the emulator is mounted by default on this machine (D10).
-const DEFAULT_SR_DOSBOX: &str = "/home/ew/workspace/reality/dosbox-automation";
+/// Where the emulator's checkout is unless `SR_DOSBOX` says otherwise: beside this repository
+/// (D10).
+const DEFAULT_SR_DOSBOX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../dosbox-automation");
 /// Where the emulator's API listens unless its own config says otherwise; this
 /// is the address `SR_DOSBOX` builds from a stock checkout.
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8386";
