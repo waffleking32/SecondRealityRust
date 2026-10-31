@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+[env]
+# SDL 2's bundled CMakeLists.txt declares compatibility with CMake older than 3.5, which CMake 4
+# refuses to configure; this lets CMake 4 build it (older CMake ignores the variable).
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
