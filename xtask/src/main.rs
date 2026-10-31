@@ -254,49 +254,6 @@ enum MusicCommand {
         #[arg(long)]
         force: bool,
     },
-    /// Measure one 16-bit word of the STMIK segment live, over a frame window,
-    /// and place it against the object's symbols.
-    ///
-    /// This is how an address that is *not* one of the published words is
-    /// measured — `docs/fidelity/music-clock.md` §8 uses it for
-    /// `reference-indices.md` §1.7's `0x105B0E`, which no trace column carries.
-    Probe {
-        /// The OMF object whose `PUBDEF` records give the words' offsets.
-        #[arg(long, default_value = music::DEFAULT_OBJECT)]
-        object: PathBuf,
-        /// The program to run in the guest.
-        #[arg(long, default_value = "reference/original/SECOND.EXE")]
-        exe: PathBuf,
-        /// Mounted read-only as C: and the guest's working directory.
-        #[arg(long, default_value = "reference/original")]
-        cwd: PathBuf,
-        /// An argument for the program, e.g. the demo block. Repeatable.
-        #[arg(long = "arg")]
-        arguments: Vec<String>,
-        /// CPU cycles per millisecond to pin. Required.
-        #[arg(long)]
-        cycles: u32,
-        /// The window to measure over, as `music trace --frames`.
-        #[arg(long)]
-        frames: String,
-        /// The address to read, in decimal or with an `0x` prefix. It has to
-        /// fall inside the located segment; the view it falls in is reported.
-        #[arg(long, value_parser = parse_address)]
-        at: u32,
-        /// A segment offset and byte count to dump, as `OFFSET:LEN` with the
-        /// offset in decimal or with an `0x` prefix — repeatable. One line is
-        /// printed per frame in which a region's bytes change, which is how an
-        /// address that is *written* (a pointer, a table the builder fills) is
-        /// told from one that never moves. The count is capped at 4096 bytes.
-        #[arg(long, value_parser = parse_dump, action = clap::ArgAction::Append)]
-        dump: Vec<(u32, usize)>,
-        /// Key names sent once the setup screen appears, as `music trace`'s.
-        #[arg(long, default_value = "KBD_left KBD_enter")]
-        keys: String,
-        /// How the guest reaches the demo, as `music trace`'s.
-        #[arg(long, value_enum, default_value_t = BootRecipe::Autoexec)]
-        boot: BootRecipe,
-    },
     /// Read a trace back and print the measurements the music notes record:
     /// where the music starts, the tick rate and its residual against the
     /// module's own header, the frame-to-frame quantisation of the row changes,
@@ -308,32 +265,7 @@ enum MusicCommand {
         /// the digest its manifest records before anything is read out of it.
         #[arg(long)]
         trace: PathBuf,
-        /// A physical address to place against the object's symbols, e.g.
-        /// `0x105B0E` — the word `docs/fidelity/reference-indices.md` §1.7
-        /// measured. Reports the symbol it lands on, and the traced word's rate
-        /// per frame at that address when it is one of them.
-        #[arg(long, value_parser = parse_address)]
-        at: Option<u32>,
     },
-}
-
-/// `OFFSET:LEN`, each in decimal or with an `0x` prefix.
-fn parse_dump(text: &str) -> Result<(u32, usize), String> {
-    let (offset, length) = text
-        .split_once(':')
-        .ok_or_else(|| format!("{text:?} is not `OFFSET:LEN`"))?;
-    Ok((parse_address(offset)?, parse_address(length)? as usize))
-}
-
-/// A physical address, in decimal or with an `0x` prefix.
-fn parse_address(text: &str) -> Result<u32, String> {
-    let trimmed = text.trim();
-    let (digits, radix) = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
-        Some(hex) => (hex, 16),
-        None => (trimmed, 10),
-    };
-    u32::from_str_radix(digits.replace('_', "").as_str(), radix)
-        .map_err(|e| format!("{text:?} is not an address: {e}"))
 }
 
 #[derive(Subcommand)]
@@ -570,109 +502,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             Ok(music::trace_command(&options)?)
         }
         Command::Music {
-            command: MusicCommand::Analyse { trace, at },
-        } => Ok(music::analyse_command(&trace, at)?),
-        Command::Music {
-            command:
-                MusicCommand::Probe {
-                    object,
-                    exe,
-                    cwd,
-                    arguments,
-                    cycles,
-                    frames,
-                    at,
-                    dump,
-                    keys,
-                    boot,
-                },
-        } => {
-            let window = music::parse_window(&frames)?;
-            let options = music::TraceOptions {
-                object,
-                exe,
-                cwd,
-                arguments,
-                cycles,
-                window,
-                out: PathBuf::from("out/probe"),
-                keys: music::keys(&keys),
-                boot,
-                force: true,
-            };
-            Ok(music::probe_command(&options, at, &dump)?)
-        }
-    }
-}
-
-#[cfg(test)]
-mod dump_parser_tests {
-    use super::*;
-
-    #[test]
-    fn a_dump_spec_is_an_offset_and_a_length() {
-        assert_eq!(parse_dump("0x6E:16").unwrap(), (0x6e, 16));
-        assert_eq!(parse_dump("110:2").unwrap(), (110, 2));
-        assert_eq!(parse_dump("0x6C:2").unwrap(), (0x6c, 2));
-    }
-
-    #[test]
-    fn a_dump_spec_that_is_not_one_is_refused_by_name() {
-        let error = parse_dump("0x6E").unwrap_err();
-        assert!(error.contains("OFFSET:LEN"), "{error}");
-        assert!(parse_dump("0x6E:").is_err());
-        assert!(parse_dump(":16").is_err());
-        assert!(parse_dump("0xZZ:4").is_err());
-    }
-
-    /// The STMIK segment's declared length (`music.rs`'s
-    /// `the_machine_words_are_read_as_their_own_widths` reads it out of the object).
-    const SEGMENT_LENGTH: u32 = 29_607;
-
-    #[test]
-    fn a_dump_outside_the_segment_or_of_no_length_is_refused_before_the_guest_runs() {
-        assert!(
-            music::dump_refusal(0, 0, SEGMENT_LENGTH).is_some(),
-            "a zero-length dump says nothing"
-        );
-        assert!(
-            music::dump_refusal(0, 4097, SEGMENT_LENGTH).is_some(),
-            "and a 4097-byte one is past the cap"
-        );
-        assert!(
-            music::dump_refusal(29_600, 16, SEGMENT_LENGTH).is_some(),
-            "and one that runs past the segment"
-        );
-        assert!(music::dump_refusal(0, 4096, SEGMENT_LENGTH).is_none());
-        assert!(
-            music::dump_refusal(0x6e, 2048, SEGMENT_LENGTH).is_none(),
-            "the table's own dump is legal"
-        );
-
-        // `probe_command` refuses a bad spec before it spawns the guest (a spawn failure would
-        // be `MusicError::Oracle`).
-        let options = probe_options();
-        for (offset, length) in [(0u32, 0usize), (29_600, 16)] {
-            let error = music::probe_command(&options, 0x525c, &[(offset, length)])
-                .expect_err("a bad dump is refused, not measured");
-            assert!(matches!(error, music::MusicError::Options(_)), "{error}");
-        }
-    }
-
-    /// The `probe` command's options, with the command's own paths resolved from this crate.
-    fn probe_options() -> music::TraceOptions {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        music::TraceOptions {
-            object: root.join(music::DEFAULT_OBJECT),
-            exe: root.join("reference/original/SECOND.EXE"),
-            cwd: root.join("reference/original"),
-            arguments: vec!["5".to_owned()],
-            cycles: 30_000,
-            window: [400, 1300],
-            out: PathBuf::from("out/probe"),
-            keys: Vec::new(),
-            boot: BootRecipe::Autoexec,
-            force: true,
-        }
+            command: MusicCommand::Analyse { trace },
+        } => Ok(music::analyse_command(&trace)?),
     }
 }

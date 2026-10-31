@@ -115,13 +115,6 @@ pub const MACHINE_WORDS: &[&str] = &[
 /// ticks at.
 pub const FRAME_RATE_HZ: f64 = 70.086;
 
-/// The frame and the rate `docs/fidelity/reference-indices.md` §1.7 measured the
-/// 16-bit word at physical `0x105B0E` at: 371/373/374 at video frame 900, and
-/// 0.7424 per frame across three sessions. `music analyse --at 0x105B0E` places
-/// that address against the object's symbols and against the trace's own rate.
-pub const PHASE1_CROSS_CHECK_FRAME: u64 = 900;
-pub const PHASE1_CROSS_CHECK_RATE: f64 = 0.7424;
-
 /// How many frames a sample may fall behind before the guest's own counter is
 /// slept off rather than polled. The frame rate is 70.086 Hz, so this is ~0.35 s.
 const POLL_WINDOW_FRAMES: u64 = 25;
@@ -1986,226 +1979,6 @@ fn record_name(kind: u8) -> String {
     format!("0x{kind:02X} {name}")
 }
 
-/// Why a `--dump` spec is refused, or `None` when it will be measured: a dump is
-/// between 1 and 4096 bytes, and it has to lie inside the segment the locator
-/// found. [`probe_command`] calls this for every spec **before** the guest is
-/// spawned, so a refusal costs no boot — and so this rule is a function a test
-/// can call rather than a check restated in one.
-pub fn dump_refusal(offset: u32, length: usize, segment_length: u32) -> Option<String> {
-    if length == 0 || length > 4096 {
-        return Some(format!(
-            "--dump {offset:#06X}:{length} — a dump is between 1 and 4096 bytes"
-        ));
-    }
-    if offset as usize + length > segment_length as usize {
-        return Some(format!(
-            "--dump {offset:#06X}:{length} runs past the segment's {segment_length} byte(s)"
-        ));
-    }
-    None
-}
-
-/// `cargo xtask music probe`: measure one 16-bit word of the STMIK segment over
-/// a frame window, and place it against the object's symbols.
-///
-/// This is the command behind this note's cross-check of
-/// `docs/fidelity/reference-indices.md` §1.7 — a word at an address that is not
-/// one of the published symbols cannot be read out of a *trace*, so it is
-/// measured live, at the same recipe the traces use.
-pub fn probe_command(
-    options: &TraceOptions,
-    at: u32,
-    dumps: &[(u32, usize)],
-) -> Result<ExitCode, MusicError> {
-    validate_trace_options(options)?;
-    let autoexec = options.autoexec_lines()?;
-    let object = std::fs::read(&options.object).map_err(|e| MusicError::Io {
-        path: options.object.clone(),
-        message: e.to_string(),
-    })?;
-    let map = symbol_map(&options.object, &object)?;
-    // `--dump`'s refusals are checked **before** the guest is spawned: a tool this phase depends
-    // on should fail loudly without an emulator boot, and a refusal that costs a boot is one no
-    // test can afford to exercise. The rule itself lives in [`dump_refusal`], which is the
-    // function under this loop — so a test can exercise the product's own check.
-    for (offset, length) in dumps {
-        if let Some(reason) = dump_refusal(*offset, *length, map.segment_length) {
-            return Err(MusicError::Options(reason));
-        }
-    }
-    let mut oracle =
-        crate::oracle::dosbox::DosboxOracle::spawn(options.cycles, &options.cwd, &autoexec)?;
-    let needles = needles(&object)?;
-    oracle.set_cycles(options.cycles)?;
-    oracle.boot(&options.exe, &options.cwd, &options.arguments)?;
-    let answering = !options.keys.is_empty();
-    if options.boot == BootRecipe::Typed && answering {
-        oracle.wait_for_text(SETUP_SCREEN_TEXT, DEFAULT_WAIT)?;
-        oracle.send_keys(&options.keys.join(" "))?;
-    }
-    let location = find_segment(&mut oracle, &object, &map, &needles)?;
-    let views: Vec<u32> = location
-        .views
-        .iter()
-        .copied()
-        .filter(|view| at >= *view && at < *view + map.segment_length)
-        .collect();
-    println!(
-        "address 0x{at:06X}: the segment's base(s) are {} (of {} byte(s))",
-        location
-            .views
-            .iter()
-            .map(|view| format!("0x{view:06X}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        map.segment_length
-    );
-    if views.is_empty() {
-        println!("  it is not inside this segment in any view, so nothing was read");
-        oracle.shutdown()?;
-        return Ok(ExitCode::SUCCESS);
-    }
-    let view = views[0];
-    let offset = at - view;
-    println!("  in the view at 0x{view:06X} it is that base + 0x{offset:04X}");
-    let walk = symbols::walk(&object)?;
-    let mut sorted: Vec<&Symbol> = walk.symbols.iter().collect();
-    sorted.sort_by_key(|symbol| symbol.offset);
-    match sorted.iter().rfind(|symbol| symbol.offset <= offset) {
-        Some(symbol) => println!(
-            "  the last published symbol at or below it is {} (base + 0x{:04X}, {} byte(s) \
-             below); the next above is {}",
-            symbol.name,
-            symbol.offset,
-            offset - symbol.offset,
-            sorted
-                .iter()
-                .find(|next| next.offset > offset)
-                .map(|next| format!("{} at base + 0x{:04X}", next.name, next.offset))
-                .unwrap_or_else(|| "nothing".into())
-        ),
-        None => println!("  no published symbol is at or below it"),
-    }
-
-    // Read the word at the window's first and last frames, and say the rate.
-    // The word asked for **and** `_np_zframe`, read in the same bracketed
-    // sample: the two are only comparable if they are measured over the same
-    // frames of the same session, and that is what tells a counter running at
-    // the playing tempo's tick rate from one running at something else.
-    let zframe_at = view + map.offset("_np_zframe")?;
-    // The `--dump` regions, as `(the segment offset, the base address, the byte count)`:
-    // printed as a change log rather than per frame, because the question they answer is
-    // *when* an address moves and *what* it holds when it does.
-    let mut regions: Vec<(u32, u32, usize)> = Vec::new();
-    for (offset, length) in dumps {
-        regions.push((*offset, view + *offset, *length));
-    }
-    if !regions.is_empty() {
-        println!("  dumping {} region(s), one line per change:", regions.len());
-    }
-    let mut previous: Vec<Option<Vec<u8>>> = vec![None; regions.len()];
-    let mut samples: Vec<(u64, i16, i16)> = Vec::new();
-    // From the window's own first frame, not from wherever the locate left the
-    // guest: a rate measured from the segment's arrival would include the boot.
-    let mut next = oracle.frame_counter()?.max(options.window[0]) + 1;
-    while next <= options.window[1] {
-        let now = oracle.frame_counter()?;
-        if now < next {
-            if now + POLL_WINDOW_FRAMES < next {
-                sleep_frames(next - now, POLL_WINDOW_FRAMES);
-            }
-            continue;
-        }
-        let bytes = oracle.read_memory(0, at, 2)?;
-        let zframe = oracle.read_memory(0, zframe_at, 2)?;
-        for (index, (offset, base, length)) in regions.iter().enumerate() {
-            let dump = oracle.read_memory(0, *base, *length)?;
-            if previous[index].as_deref() != Some(dump.as_slice()) {
-                println!(
-                    "  frame {now}: base + 0x{offset:04X} = {}",
-                    dump.iter()
-                        .map(|byte| format!("{byte:02X}"))
-                        .collect::<Vec<String>>()
-                        .join(" ")
-                );
-                previous[index] = Some(dump);
-            }
-        }
-        let after = oracle.frame_counter()?;
-        if now == after && after >= next {
-            samples.push((
-                after,
-                i16::from_le_bytes([bytes[0], bytes[1]]),
-                i16::from_le_bytes([zframe[0], zframe[1]]),
-            ));
-            next = after + 1;
-        } else {
-            next = after;
-        }
-    }
-    if let (Some((first_frame, first, _)), Some((last_frame, last, _))) =
-        (samples.first(), samples.last())
-    {
-        let rate = (f64::from(*last) - f64::from(*first)) / (*last_frame - *first_frame) as f64;
-        // The words in this segment are a mix of `int` and `unsigned`
-        // (`MAIN/STMIK.H`), so a value above 32767 is printed both ways: 40000
-        // as a signed 16-bit word is -25536, and a reader who sees only that
-        // would think the mixing rate had gone negative. The analysis prints
-        // through the same function, so both commands read alike.
-        let show = |value: i16| Analysis::show_word(i64::from(value));
-        println!(
-            "  frame {first_frame}: {}; frame {last_frame}: {} — {rate:+.4} per frame, {:+.2} per \
-             second at {FRAME_RATE_HZ} Hz",
-            show(*first),
-            show(*last),
-            rate * FRAME_RATE_HZ
-        );
-        println!("  {} sample(s) between them", samples.len());
-        // The same measure for `_np_zframe`, split at its resets when it has
-        // any: the two counters are what §8 of the note is about.
-        let resets = samples
-            .windows(2)
-            .filter(|pair| pair[1].2 < pair[0].2)
-            .count();
-        let longest = samples
-            .split(|sample| sample.2 == 0)
-            .max_by_key(|run| run.len())
-            .filter(|run| run.len() > 1);
-        if let Some(run) = longest {
-            let (first_frame, _, zfirst) = run[0];
-            let (last_frame, _, zlast) = run[run.len() - 1];
-            let zrate =
-                (f64::from(zlast) - f64::from(zfirst)) / (last_frame - first_frame) as f64;
-            println!(
-                "  _np_zframe over the same window: {zfirst} at frame {first_frame} to {zlast} at \
-                 frame {last_frame} — {zrate:+.4} per frame, {:+.2} per second ({resets} \
-                 reset(s))",
-                zrate * FRAME_RATE_HZ
-            );
-        }
-        // The player's own clock at the same moment, so the measured word can
-        // be compared with the tempo that is playing: a word running at the
-        // tick rate of a tempo the demo is not playing is a different counter,
-        // and that is only sayable with both numbers in one output.
-        let clock = read_words(
-            &mut oracle,
-            view,
-            &map,
-            &["_np_tempo", "_np_speed", "_np_zframe", "_np_ord", "_np_row"],
-        )?;
-        println!(
-            "  the player's own words at frame {last_frame}: tempo {}, speed {}, zframe {}, ord \
-             {}, row {}",
-            clock["_np_tempo"], clock["_np_speed"], clock["_np_zframe"], clock["_np_ord"],
-            clock["_np_row"]
-        );
-    } else {
-        println!("  no frame in the window was sampled");
-    }
-    oracle.shutdown()?;
-    Ok(ExitCode::SUCCESS)
-}
-
 /// `cargo xtask music trace`: boot the original, trace the player, write it.
 pub fn trace_command(options: &TraceOptions) -> Result<ExitCode, MusicError> {
     validate_trace_options(options)?;
@@ -2346,9 +2119,9 @@ fn parse_frame(text: &str, spec: &str) -> Result<u64, MusicError> {
 
 /// `cargo xtask music analyse --trace …`: everything the note's numbers are
 /// read from.
-pub fn analyse_command(trace_dir: &Path, at: Option<u32>) -> Result<ExitCode, MusicError> {
+pub fn analyse_command(trace_dir: &Path) -> Result<ExitCode, MusicError> {
     let analysis = Analysis::read(trace_dir)?;
-    analysis.print(at)?;
+    analysis.print()?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -2365,77 +2138,6 @@ pub struct Analysis {
     /// pre-sampling boundary is named even for a trace filed before the
     /// manifest carried `before_sampling`.
     pub coverage: Coverage,
-}
-
-/// How many samples the `zplus` rule was checked against, and how many it got
-/// wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ZplusCheck {
-    pub samples: usize,
-    pub mismatches: usize,
-    /// The first few disagreements: frame, order, row, measured, expected.
-    pub examples: Vec<(u64, u8, u8, i16, i16)>,
-    /// The orders the trace held, in the order the counter first held them.
-    pub held: Vec<u8>,
-}
-
-/// **The port's `zplus` rule**, re-derived over a trace's own order sequence.
-///
-/// `zplus` is what `muscode_6` (`DIS/DISINT.ASM:242-282`) turns into a row
-/// offset for `dis_muscode`, so the port has to compute it rather than copy it.
-/// The rule below is the original player's own arithmetic — `STMIK.300`'s order
-/// advance, `+0x442d`, whose two `orw`s are `orw $0x1,%cs:0x90d` when the
-/// *next* order-list entry is a `254` (`+0x4452`..`+0x4456`) and
-/// `orw $0x2,%cs:0x90d` when the entry just examined is a `254` and is stepped
-/// over (`+0x445c`..`+0x4467`) — and it is checked against every sample of
-/// every trace filed under `reference/music/`:
-///
-/// - the low bit is set while the counter is playing an order whose *next*
-///   entry in the module's order list is `254` — the marker is coming;
-/// - the second bit is set when the order played was reached by stepping over
-///   a `254`;
-/// - so a plain advance reads **0** or **1**, a marker crossing reads **2**,
-///   and a crossing into an order whose own successor is a `254` reads **3**
-///   — bit 0 and bit 1 both set, because the object ORs them and nothing
-///   clears one;
-/// - and a seek or a restart credits **no** marker behind it: the scan starts
-///   at the order it was given and looks only forward, which is why `SECOND 3`'s
-///   restart at order 42 — whose list predecessor is a `254` the player never
-///   played — reads 0.
-///
-/// **`3` is the form the object has and the form the earlier note did not.**
-/// `music-clock.md` §6 first stated the crossing case as "2, *unless* the entry
-/// after the one entered is itself a `254`, in which case 1" — a reading with no
-/// cause in the code, which ORs and cannot produce 1 there. No filed trace holds
-/// such an order, which is why both readings survive the "0 mismatches" check;
-/// this one is the object's, and the note now says so.
-///
-/// What the traces do **not** show: no trace holds an order two steps past a
-/// marker (`MUSIC0` order 29 onwards, `MUSIC1` order 49 onwards), so `2` or `3`
-/// returning to `0` on the next natural advance is extrapolation, and so is
-/// anything about a `255`.
-pub fn zplus_rule(orders: &[u8], held: &[u8]) -> Vec<i16> {
-    let mut expected = Vec::with_capacity(held.len());
-    for (position, order) in held.iter().enumerate() {
-        let order = usize::from(*order);
-        let next_is_marker = orders.get(order + 1) == Some(&254);
-        let crossing = position
-            .checked_sub(1)
-            .filter(|_| order > 0)
-            .map(|earlier| {
-                usize::from(held[earlier]) + 2 == order && orders.get(order - 1) == Some(&254)
-            })
-            .unwrap_or(false);
-        let mut zplus = 0;
-        if next_is_marker {
-            zplus |= 1;
-        }
-        if crossing {
-            zplus |= 2;
-        }
-        expected.push(zplus);
-    }
-    expected
 }
 
 /// One run of constant `(speed, tempo)` in which rows advanced: what the tick
@@ -2716,61 +2418,6 @@ impl Analysis {
         runs
     }
 
-    /// The `zplus` rule ([`zplus_rule`]) re-derived over this trace's own order
-    /// sequence, with every sample compared against it.
-    ///
-    /// The sequence of orders the counter held is built from the samples
-    /// themselves, and each order's expected value is computed when the counter
-    /// first holds it — from the transition that entered it. That is what makes
-    /// "*a seek or a restart credits no marker behind it*" fall out of the
-    /// trace rather than out of this function having to know which transition
-    /// was a restart: a crossing is only a crossing when the counter came from
-    /// the order before the skipped entry.
-    ///
-    /// **The first order has no transition inside the trace**, and a trace filed
-    /// from a later window begins mid-song: `hiddenu2` starts on MUSIC0 order 28
-    /// with `zplus` 2, the crossing of the 254 at order 27, which no sample in
-    /// the window saw. Its first sample is the evidence for that order's state,
-    /// so it seeds the expectation; every later order is still computed from an
-    /// entry the trace holds. A trace that holds the music's start seeds 0,
-    /// which is what the rule computes there anyway.
-    pub fn zplus_check(&self) -> Option<ZplusCheck> {
-        let module = self.module.as_ref()?;
-        let mut held: Vec<u8> = Vec::new();
-        for state in &self.samples {
-            if held.last() != Some(&state.ord) {
-                held.push(state.ord);
-            }
-        }
-        let mut expected = zplus_rule(&module.orders, &held);
-        if let (Some(first), Some(state)) = (expected.first_mut(), self.samples.first()) {
-            *first = state.zplus;
-        }
-        let value_of = |order: u8| -> i16 {
-            held.iter()
-                .position(|held| *held == order)
-                .map(|at| expected[at])
-                .unwrap_or(0)
-        };
-        let mut check = ZplusCheck {
-            samples: self.samples.len(),
-            mismatches: 0,
-            examples: Vec::new(),
-            held: held.clone(),
-        };
-        for state in &self.samples {
-            let want = value_of(state.ord);
-            if state.zplus != want {
-                check.mismatches += 1;
-                if check.examples.len() < 6 {
-                    check.examples
-                        .push((state.frame, state.ord, state.row, state.zplus, want));
-                }
-            }
-        }
-        Some(check)
-    }
-
     /// The frames at which the order advanced, in order.
     fn order_changes(&self) -> Vec<(u64, u8, u8)> {
         self.samples
@@ -2780,7 +2427,7 @@ impl Analysis {
             .collect()
     }
 
-    fn print(&self, at: Option<u32>) -> Result<(), MusicError> {
+    fn print(&self) -> Result<(), MusicError> {
         println!("trace: {}", self.dir.display());
         println!(
             "  {} (recomputed from the trace file's own frames)",
@@ -2805,7 +2452,6 @@ impl Analysis {
         self.print_machine();
         self.print_zplus_zinfo();
         self.print_order_list()?;
-        self.print_cross_check(at)?;
         Ok(())
     }
 
@@ -3251,45 +2897,6 @@ impl Analysis {
             &transitions[..transitions.len().min(12)]
         );
 
-        // The port's rule, re-derived from this trace's own order sequence and
-        // checked against every sample of it: a rule that says what the trace
-        // does, with the count of the samples it had to be right about.
-        match self.zplus_check() {
-            Some(check) => {
-                println!(
-                    "  the port's zplus rule, re-derived from this trace's own order sequence: {} \
-                     sample(s) checked, {} mismatch(es)",
-                    check.samples, check.mismatches
-                );
-                println!(
-                    "    rule: bit 0 set while playing an order whose next entry in the module's \
-                     order list is 254; bit 1 set when the order played was reached by stepping \
-                     over a 254 (so a plain advance reads 0 or 1, a marker crossing 2, and a \
-                     crossing into an order whose own successor is a 254 reads 3, because the \
-                     object ORs the two bits and clears neither); a seek or a restart credits no \
-                     marker behind it"
-                );
-                println!("    the orders the counter held, in order: {:?}", check.held);
-                for (frame, order, row, measured, expected) in &check.examples {
-                    println!(
-                        "    frame {frame}: ord {order} row {row} reads {measured}, the rule says \
-                         {expected}"
-                    );
-                }
-                if check.mismatches == 0 {
-                    println!(
-                        "    (what the traces cannot show: none of them holds an order two steps \
-                         past a marker, so \"2 goes back to 0 on the next natural advance\" is \
-                         extrapolation — and so is anything about a 255)"
-                    );
-                }
-            }
-            None => println!(
-                "  no module matched the trace's order sequence, so the zplus rule cannot be \
-                 re-derived from it"
-            ),
-        }
-
         // zinfo: the frames each value covers, as runs.
         let mut runs: Vec<(i16, u64, u64)> = Vec::new();
         for state in &self.samples {
@@ -3454,135 +3061,6 @@ impl Analysis {
         Ok(())
     }
 
-    /// The cross-check the phase owes `reference-indices.md` §1.7: a 16-bit
-    /// word at the physical address `0x105B0E` advanced 0.7424 times a frame
-    /// there and read 371/373/374 at video frame 900. The located base turns
-    /// that into a claim about a named word — or says which word it is, when it
-    /// is not the one the phase's own trace reads.
-    ///
-    /// Every **view** of the segment is tried, not only the one the trace reads
-    /// through: the demo's DOS extender maps the same memory at more than one
-    /// linear address, and the phase's address was measured in the higher one.
-    fn print_cross_check(&self, at: Option<u32>) -> Result<(), MusicError> {
-        let Some(address) = at else {
-            return Ok(());
-        };
-        println!("\n7. the address 0x{address:06X} (reference-indices.md §1.7)");
-        let object = std::fs::read(&self.manifest.object.object).map_err(|e| MusicError::Io {
-            path: PathBuf::from(&self.manifest.object.object),
-            message: e.to_string(),
-        })?;
-        let walk = symbols::walk(&object)?;
-        let length = self.manifest.object.segment_length;
-        let mut inside = Vec::new();
-        for view in self
-            .manifest
-            .locate
-            .views
-            .iter()
-            .chain(self.manifest.locate.rerun_views.iter())
-        {
-            if address >= *view && address < *view + length {
-                inside.push(*view);
-            }
-        }
-        inside.sort_unstable();
-        inside.dedup();
-        if inside.is_empty() {
-            println!(
-                "  the segment's views are {} and this address is in none of them \
-                 ({length} byte(s) each), so it is not inside this segment at all",
-                self.manifest
-                    .locate
-                    .views
-                    .iter()
-                    .map(|view| format!("0x{view:06X}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            return Ok(());
-        }
-        let mut sorted: Vec<&Symbol> = walk.symbols.iter().collect();
-        sorted.sort_by_key(|symbol| symbol.offset);
-        for view in &inside {
-            let offset = address - view;
-            println!(
-                "  in the view at 0x{view:06X} it is that base + 0x{offset:04X} \
-                 (the trace reads through 0x{:06X})",
-                self.manifest.locate.base
-            );
-            let below = sorted.iter().rfind(|symbol| symbol.offset <= offset);
-            let above = sorted.iter().find(|symbol| symbol.offset > offset);
-            match below {
-                Some(symbol) => println!(
-                    "    the last published symbol at or below it is {} (base + 0x{:04X}, {} \
-                     byte(s) below){}",
-                    symbol.name,
-                    symbol.offset,
-                    offset - symbol.offset,
-                    above
-                        .map(|next| format!(
-                            "; the next published symbol above is {} at base + 0x{:04X}",
-                            next.name, next.offset
-                        ))
-                        .unwrap_or_default()
-                ),
-                None => println!("    no published symbol of the object is at or below it"),
-            }
-            match self
-                .manifest
-                .locate
-                .words
-                .iter()
-                .find(|(_, word)| **word == address)
-            {
-                Some((name, _)) => {
-                    println!("    it is exactly {} — one of the traced words", name);
-                    let values: Vec<(u64, i16)> = match name.as_str() {
-                        "_np_zframe" => self
-                            .samples
-                            .iter()
-                            .map(|state| (state.frame, state.zframe))
-                            .collect(),
-                        "_np_zplus" => self
-                            .samples
-                            .iter()
-                            .map(|state| (state.frame, state.zplus))
-                            .collect(),
-                        "_np_zinfo" => self
-                            .samples
-                            .iter()
-                            .map(|state| (state.frame, state.zinfo))
-                            .collect(),
-                        _ => Vec::new(),
-                    };
-                    if let Some((first, last)) = values.first().zip(values.last()) {
-                        let rate =
-                            (f64::from(last.1) - f64::from(first.1)) / (last.0 - first.0) as f64;
-                        println!(
-                            "    measured here: {} at frame {}, {} at frame {} — {rate:+.4} per \
-                             frame (Phase 1 measured {PHASE1_CROSS_CHECK_RATE:+.4})",
-                            first.1, first.0, last.1, last.0
-                        );
-                        if let Some((frame, value)) = values
-                            .iter()
-                            .find(|(frame, _)| *frame == PHASE1_CROSS_CHECK_FRAME)
-                        {
-                            println!(
-                                "    at frame {frame} it reads {value} (Phase 1 measured \
-                                 371/373/374 there)"
-                            );
-                        }
-                    }
-                }
-                None => println!(
-                    "    it is not one of the traced words, so this trace does not carry its \
-                     values"
-                ),
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Read an S3M's header, as much of it as the tick rate needs: the order list,
@@ -3909,42 +3387,6 @@ mod tests {
         // A word that fits in 16 bits and is not negative prints once.
         assert_eq!(Analysis::show_word(192), "192");
         assert_eq!(Analysis::show_word(0), "0");
-    }
-
-    /// The `zplus` rule against both modules' order lists: the marker-coming
-    /// case, the crossing case, the crossed-into-another-marker case, and the
-    /// restart case `SECOND 3` measures.
-    #[test]
-    fn the_zplus_rule_reproduces_the_traces_own_order_sequences() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let music0 = read_module(
-            root.join("assets/MAIN/MUSIC0.S3M").to_str().unwrap(),
-            Some(120),
-        )
-        .unwrap();
-        let music1 = read_module(root.join("assets/MAIN/MUSIC1.S3M").to_str().unwrap(), None)
-            .unwrap();
-
-        // MUSIC0: order 27 is the 254. Order 26 has it next (1), order 28 is a
-        // crossing into it (2) — unless the entry after 28 were itself a 254.
-        assert_eq!(zplus_rule(&music0.orders, &[0, 25, 26, 28]), vec![0, 0, 1, 2]);
-        // MUSIC1: order 46 is the 254. Same shape, and order 48 is a *plain*
-        // advance (47 → 48) whose own successor at 49 is a 254, so its 1 needs
-        // no exception: the trace's 2 → 1 is bit 0 being set on the way in.
-        assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47]), vec![0, 0, 0, 1, 2]);
-        assert_eq!(zplus_rule(&music1.orders, &[42, 43, 44, 45, 47, 48]), vec![0, 0, 0, 1, 2, 1]);
-        // MUSIC1 orders 25/26/27 are `254, 13, 254`: the crossing from 24 to 26
-        // sets bit 1, and 26's own successor at 27 is a 254, so bit 0 is set
-        // too — **3**, which is what the object's `orw`s produce and what the
-        // earlier "unless … in which case 1" reading could not.
-        // (order 24's own successor at 25 is that 254, so bit 0 is set there
-        // too, which is why it reads 1 on the way in.)
-        assert_eq!(zplus_rule(&music1.orders, &[24, 26]), vec![1, 3]);
-        // A restart credits no marker behind it: entered at 42, whose list
-        // predecessor is a 254 the player never played.
-        assert_eq!(zplus_rule(&music1.orders, &[0, 42]), vec![0, 0]);
-        // And the marker-coming case holds for a single order with no history.
-        assert_eq!(zplus_rule(&music0.orders, &[26]), vec![1]);
     }
 
     /// A window out of a manifest is data a verifier has to disbelieve, so

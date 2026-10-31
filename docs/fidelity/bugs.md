@@ -664,7 +664,7 @@ agrees (the keyframes reproduce with the 1,025 clip-row pixels present). **Where
 ## 28. The music player — five behaviours of the shipped player that every part's timing or sound stands on
 
 No frame shows these; the evidence is the traces under `reference/music/` and the segment bytes
-from `cargo xtask music probe --dump`.
+from `cargo xtask music probe --dump` (retired; `git show phase-9:xtask/src/music.rs` holds it).
 
 ### 28.1 A restart keeps what `_zplaysong`'s initialiser does not write (D45)
 

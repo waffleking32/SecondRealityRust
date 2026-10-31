@@ -84,7 +84,7 @@ The trace guarantees three things:
 
 ## 2. Where the music starts
 
-`music analyse`, section 1, derives the anchor two ways from the trace's own columns and prints
+`music analyse`, section 2, derives the anchor two ways from the trace's own columns and prints
 both, one line each. On `second5` (whose `zframe` reads 0 at 408 and 1 at 410):
 
 ```
@@ -447,29 +447,18 @@ distinct `(ord, row)` pairs, none carries more than one value (`second5`: 131 pa
 | `hiddenu` | the same two |
 | `second3` | (45, 0, 0→1), (47, 0, 1→2), (48, 0, 2→1) — MUSIC1's `254` is at order 46 |
 
-### The rule the port computes, and the command that checks it
+### The rule the port computes, and the tests that check it
 
 The port computes `zplus` by the object's own rule, read from the order advance at
 `STMIK.300 + 0x442d` (`music.md` §8: bit 0 while the next entry is a `254`, bit 1 when the order
 was reached over one, neither cleared, nothing credited behind a seek). `second3`'s `2 → 1` is a
 plain advance into order 48, whose successor at 49 is a `254`.
-
-`music analyse` re-derives the rule from each trace's own order sequence and prints the samples it
-checked: **0 mismatches in every filed trace**, each trace's line carrying its own count. A window
-that begins mid-song seeds its first order from its first sample (`hiddenu2` starts on MUSIC0 order
-28 reading 2); every later order is computed from an entry the trace holds. `second3`'s line:
-
-```
-  the port's zplus rule, re-derived from this trace's own order sequence: 2755 sample(s) checked, 0 mismatch(es)
-    rule: bit 0 set while playing an order whose next entry in the module's order list is 254; bit 1 set when the order played was reached by stepping over a 254 (so a plain advance reads 0 or 1, a marker crossing 2, and a crossing into an order whose own successor is a 254 reads 3, because the object ORs the two bits and clears neither); a seek or a restart credits no marker behind it
-    the orders the counter held, in order: [0, 42, 43, 44, 45, 47, 48]
-```
-
-`xtask/tests/music.rs` walks `reference/music/` and asserts 0 mismatches for each trace.
+`crates/sr-audio/tests/trace.rs`'s `the_port_reproduces_every_filed_trace` holds the port's
+published `zplus` to every filed trace's sequence of values.
 
 **What no trace holds.** The value 3 occurs at MUSIC1's order 26 (between the `254`s at 25 and 27),
-which no trace reaches; `the_zplus_rule_reproduces_the_traces_own_order_sequences`
-(`xtask/src/music.rs`) pins it on MUSIC1's order list. Nor does any trace hold an order two past a
+which no trace reaches; `crates/sr-audio/tests/player.rs`'s
+`a_254_is_stepped_over_and_zplus_records_the_crossing` pins it. Nor does any trace hold an order two past a
 marker whose successor is not a marker, so `2` falling back to `0` is the code's behaviour (the
 advance clears `zplus` at `+0x442d`), not a measurement. No trace plays a `255` (§10).
 `muscode_6` (`DIS/DISINT.ASM:242-282`) is how the parts use the value (`music.md` §11).
@@ -547,7 +536,8 @@ Its rate is a second, independent measure of what §3 measures through the row r
 
 `reference-indices.md` §1.7 records a 16-bit word at physical address **`0x105B0E`** advancing
 0.7424 times a video frame. Probed beside `_np_zframe` in the same bracketed samples
-(`cargo xtask music probe --arg 2 --cycles 30000 --frames 899..3000 --at 0x105B0E`, idle host), it
+(`cargo xtask music probe --arg 2 --cycles 30000 --frames 899..3000 --at 0x105B0E`, idle host; the
+command is retired, and `git show phase-9:xtask/src/music.rs` holds it), it
 is the **unnamed word at segment offset `0x091E`**, two bytes past `_zmixercount` (base +
 `0x091C`). It runs 370 → 1927 over frames 900…2999, +51.99 a second, while `_np_zframe` runs 1 → 1401
 from its reset at 1112, +52.00 a second: the same tick clock (`2.5/tempo` at tempo 130). What tells
@@ -597,10 +587,9 @@ at a `255` is `music.md` §8's reading of the object.
 | the needles (32 bytes, different records, one occurrence); the locator (a unique match, a second one refused, a needle across a 64 KiB boundary, a short needle, a short last chunk, several views only when they are one memory) | `xtask/src/music.rs`'s own tests |
 | the window (`A..B` half-open), the row round trip, the coverage's gaps and boundary run; back-to-front and overflowing windows are findings, never crashes | `xtask/src/music.rs`, `xtask/tests/music.rs` |
 | machine words recorded twice when they move, once when they do not, and a word above 32767 printed both ways (`a_machine_word_above_32767_is_printed_both_ways`) | `xtask/src/music.rs` |
-| the `zplus` rule against both modules' order lists, the restart case and the `3` included | `xtask/src/music.rs` |
+| the `zplus` rule against MUSIC1's order list, the `3` included | `crates/sr-audio/tests/player.rs` |
 | `music symbols` prints the map; the trace refusals (where it may be written, the window, the keys, `--force`) | `xtask/tests/music.rs` |
 | the traces as references: rows, columns, coverage and skipped frames; `reference verify --tree reference` passes; **a flipped byte of a trace fails it** (exit 1, both digests named); an unknown `kind` and an unsupported coverage claim are findings | `xtask/tests/music.rs` |
 | `music analyse`'s numbers and the boundary named | `xtask/tests/music.rs` |
 | **the anchor is per recipe** (408, 399.6, 401.1), and a window's extrapolation is not one | `xtask/tests/music.rs`'s `the_anchor_is_the_same_in_every_filed_session` |
-| **the `zplus` rule over every trace in `reference/music/`: 0 mismatches each** | `xtask/tests/music.rs` |
-| the port's player against every trace | `crates/sr-audio/tests/trace.rs` |
+| the port's player against every trace, `zplus` included | `crates/sr-audio/tests/trace.rs` |

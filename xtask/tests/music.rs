@@ -305,19 +305,11 @@ fn a_coverage_claim_the_file_does_not_support_is_a_finding() {
 // The analysis, which is where the note's numbers come from
 // -------------------------------------------------------------------------------------
 
-/// `music analyse` on `second5`, with `--at`: the note's sections and numbers, the pre-sampling
-/// boundary named, and `reference-indices.md` §1.7's `0x105B0E` placed against the symbols (the
-/// unnamed word at 0x091E, not `_np_zframe`).
+/// `music analyse` on `second5`: the note's sections and numbers, and the pre-sampling boundary
+/// named.
 #[test]
 fn the_analysis_prints_the_notes_numbers() {
-    let run = xtask(&[
-        "music",
-        "analyse",
-        "--trace",
-        "reference/music/second5",
-        "--at",
-        "0x105B0E",
-    ]);
+    let run = xtask(&["music", "analyse", "--trace", "reference/music/second5"]);
     assert_eq!(run.code, 0, "{}", run.output());
     let text = run.output();
     for section in [
@@ -342,14 +334,10 @@ fn the_analysis_prints_the_notes_numbers() {
             && text.contains("the boundary: the segment was located after they had gone"),
         "the boundary is named:\n{text}"
     );
-    assert!(text.contains("0x105B0E"), "{text}");
-    assert!(text.contains("0x091E"), "{text}");
-    assert!(text.contains("_np_zframe"), "{text}");
 }
 
 /// Over every filed trace (the tree's walk, so a trace filed later is covered), one `analyse`
-/// each: the port's `zplus` rule reproduces the trace with `0 mismatch(es)`, and the music's
-/// start is per recipe (`music-clock.md` §2). A trace whose window holds the start gives the
+/// each: the music's start is per recipe (`music-clock.md` §2). A trace whose window holds the start gives the
 /// recipe's anchor, the first row change back-extrapolated at the measured frames a tick, and
 /// the sessions of one recipe agree to 0.5 frames; the `zframe` column's first non-zero frame
 /// sits within the recipe's measured gap of it. A trace from a later window extrapolates the
@@ -397,24 +385,11 @@ fn the_anchor_is_the_same_in_every_filed_session() {
     let mut boots: std::collections::BTreeMap<String, Vec<(String, f64, f64)>> =
         std::collections::BTreeMap::new();
     let mut windows = Vec::new();
-    let mut samples = 0usize;
     for trace in &names {
         let path = format!("reference/music/{trace}");
         let run = xtask(&["music", "analyse", "--trace", &path]);
         assert_eq!(run.code, 0, "{trace}: {}", run.output());
         let text = run.output();
-
-        let rule = text
-            .lines()
-            .find(|line| line.contains("the port's zplus rule, re-derived"))
-            .unwrap_or_else(|| panic!("{trace}: no rule line in\n{text}"));
-        assert!(rule.contains("0 mismatch(es)"), "{trace}: the rule does not reproduce it: {rule}");
-        samples += rule
-            .split(": ")
-            .nth(1)
-            .and_then(|rest| rest.split(' ').next())
-            .and_then(|count| count.parse::<usize>().ok())
-            .unwrap_or_else(|| panic!("cannot read the sample count from {rule:?}"));
 
         let anchor = number_after(&text, "so that row began at frame ")
             .unwrap_or_else(|| panic!("{trace}: no anchor line in\n{text}"));
@@ -452,9 +427,6 @@ fn the_anchor_is_the_same_in_every_filed_session() {
             windows.push((trace.clone(), recipe, anchor));
         }
     }
-    // Below the measured total and above it with the largest trace (7,298) dropped, so a trace
-    // falling out of the walk fails here.
-    assert!(samples > 52_000, "every filed trace's samples are checked: {samples}");
     assert!(!boots.is_empty(), "no filed trace holds the music's start");
 
     for (recipe, sessions) in &boots {

@@ -392,7 +392,8 @@ object returns there is its segment's bytes, not a defined output.
 ## A14 — Closed: the curve builder's clobbered count is reproduced, and the index base is `0x400 + value`
 
 `Curve::build` reproduces `+0x559d`'s `rep stosw` clobbering its own count (`bugs.md` §28.4,
-`music.md` §10.3). The measurement: `cargo xtask music probe --at 0x525C --dump 0x6C:2 --dump
+`music.md` §10.3). The measurement (`music probe`, retired; `git show phase-9:xtask/src/music.rs`
+holds it): `cargo xtask music probe --at 0x525C --dump 0x6C:2 --dump
 0x6E:16 … --dump 0x86C:2` at `--cycles 30000 --arg 5 --frames 400..1300` reads the base word
 `cs:0x6C` as `6E 00` at every frame, and the table as `00` for entries 0…767, the ramp from 768 to
 1279 and `FF` from 1280, unchanged through the window. (b): the MUSIC1 window (`--arg 3 --frames
