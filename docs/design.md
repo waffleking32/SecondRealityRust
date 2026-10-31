@@ -139,7 +139,8 @@ crates/sr-assets/     the original's formats: decoders, OMF reader, EXE unpacker
 crates/sr-audio/      the S3M player: descrambling, tracker, effects, the STMIK mixer
 bins/secondreality/   the binary: shell/ (the run), cli.rs, window.rs (SDL), headless.rs,
                       audio.rs (Player as Music, the sound card, the WAV dump), menu/ (the settings
-                      screen and the vault menu), endscreen.rs, parts.rs (the registry), parts/
+                      screen and the vault menu), endscreen.rs, parts.rs (the registry), parts/,
+                      assets.rs (the embedded media, §9)
 xtask/                capture, compare, rediff, asset and music tooling (§4.8)
 ```
 
@@ -451,7 +452,7 @@ Retired: the event stream was not built; frame comparison and `music trace` answ
 
 ## 9. Asset handling
 
-Original formats, unmodified, read at runtime. No conversion. The subset the port needs is copied
+Original formats, unmodified, decoded at runtime. No conversion. The subset the port needs is copied
 into `assets/`, and `assets/PROVENANCE.md` records each file's origin, licence and digest, and the
 duplicates collapsed (`TMP.BBM` ×4, `ENDPIC/PIC.LBM` ≡ `JPLOGO/PIC.LBM`, `END/PIC.LBM` ≡ `NUTS.LBM`,
 the U2A/U2E scene set in `VISU/C/SCENE` and `MAIN/DATA`, `TROLL.UP` ×2, `O2.SCI` ×2,
@@ -459,6 +460,13 @@ the U2A/U2E scene set in `VISU/C/SCENE` and `MAIN/DATA`, `TROLL.UP` ×2, `O2.SCI
 compiled into an object are recovered from its OMF `LEDATA` records, and the release's own data is
 read from the unpacked part EXEs (D49). `cargo xtask assets verify --tree` checks the tree against
 the provenance file.
+
+The binary carries the tree, as `SECOND.EXE` carries `REALITY.FC`: `bins/secondreality/build.rs`
+embeds every file under `assets/` but `PROVENANCE.md` with `include_bytes!`, keyed by its
+repository-relative path (`assets/ALKU/FONA.UH`), and `assets::get` looks a path up. A run reads no
+media from disk, so it works from any directory; there is no option to read them from a folder.
+`sr_audio::Song::decode` and `sr_assets::load` take the bytes, so neither crate learns where they
+came from.
 
 ## 10–14. Retired
 

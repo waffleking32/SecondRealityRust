@@ -16,14 +16,16 @@ crates/sr-engine/     the software VGA: surface, view, palette, copper, tick, co
 crates/sr-audio/      the S3M player and STMIK's mixer (zero runtime dependencies)
 crates/sr-assets/     decoders for the original formats (depends on sr-engine only)
 bins/secondreality/   shell/ (the run), cli.rs, window.rs (SDL), headless.rs, audio.rs,
-                      menu/ (settings, vault), endscreen.rs, parts.rs (the registry), parts/
+                      menu/ (settings, vault), endscreen.rs, parts.rs (the registry), parts/,
+                      assets.rs (the media build.rs embeds)
 xtask/                reference capture/verify, compare, rediff, frames, assets, music
-tools/                emulator probes, measurement scripts, the vault capture script, the packages'
-                      readmes and the macOS launcher
+tools/                emulator probes, measurement scripts, the vault capture script and the
+                      packages' readmes
 .github/workflows/    build.yml: Windows, Linux and macOS packages (manual, or a Release on a v* tag);
                       wiki.yml: mirrors wiki/ to the GitHub wiki
 wiki/                 the GitHub wiki's pages and pictures
-assets/               the curated original media; assets/PROVENANCE.md is parsed by xtask
+assets/               the curated original media, embedded in the binary; assets/PROVENANCE.md
+                      is parsed by xtask (and not embedded)
 reference/            captured frames and manifests: input-only
 upstream/             the original source (submodule): input-only
 out/                  scratch, git-ignored
@@ -57,8 +59,10 @@ and `TWIST` are unreleased development effects.
 
 ## Running it
 
-Run from the repository root: assets are read relative to the working directory. Flags and keys
-for players are in `README.md` and `secondreality --help`. The developer's view:
+The binary embeds every file under `assets/` (`bins/secondreality/build.rs`, read through
+`src/assets.rs`), so it runs from any directory and reads no media from disk; changing an asset
+rebuilds it. Flags and keys for players are in `README.md` and `secondreality --help`. The
+developer's view:
 
 ```bash
 cargo run --release --bin secondreality -- --part glenz        # one part, by registry name

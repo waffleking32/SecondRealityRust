@@ -25,8 +25,8 @@ sudo apt install cmake libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi
 cargo run --release --bin secondreality
 ```
 
-Run it **from the repository root**. The demo's files are read relative to the working directory,
-for example `assets/ALKU/FONA.UH`, so the binary started anywhere else cannot find them.
+The binary is self-contained: every file under `assets/` is built into it, so it runs from any
+directory with nothing beside it, as `SECOND.EXE` carries its own data file.
 
 With no argument the demo plays from the beginning, as `SECOND.EXE` does with none.
 

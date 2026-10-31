@@ -28,7 +28,7 @@ in an emulator, and every place where it still differs is measured and recorded.
   says how to start it.
 - **Building it yourself** needs a Rust toolchain, CMake and a C compiler (SDL 2 is compiled in).
   The [README](https://github.com/waffleking32/SecondRealityRust/blob/main/README.md) lists the
-  Linux packages and every flag. Run it from the repository root:
+  Linux packages and every flag. The demo's media is built into the binary:
   `cargo run --release --bin secondreality`.
 - A settings screen opens first and stands in for the original's sound-card setup. **ESC** ends
   the part that is playing, and **Ctrl** skips it. `--block 1`..`5` starts at the same places as

@@ -1,10 +1,8 @@
 Second Reality (Rust port) for Linux x64
 ========================================
 
-Run it from this folder: the demo reads its files from assets/ relative to the folder it is
-started in.
+The demo's files are built into the program, so it runs from any folder:
 
-  cd SecondReality
   ./secondreality                      the demo, opening on the settings screen
   ./secondreality --no-setup           straight into the demo
   ./secondreality --loop               loop mode

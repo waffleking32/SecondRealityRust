@@ -1,7 +1,7 @@
 # Builds Second Reality for Windows x64, Linux x64 and macOS arm64, and on a v* tag publishes the
 # three packages as a GitHub Release. SDL 2 is compiled into the binary (the workspace enables
-# sdl2's bundled + static-link features), so a package is the executable, assets/ and the docs.
-# The binary reads assets/ relative to the folder it is started in.
+# sdl2's bundled + static-link features) and assets/ is embedded in it
+# (bins/secondreality/build.rs), so a package is the executable and the docs.
 name: Build
 
 on:
@@ -16,14 +16,16 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      # The build reads only assets/ and the crates; upstream/ (the submodule) is for tests.
+      # The build reads only assets/ (which it embeds) and the crates; upstream/ (the submodule)
+      # is for tests.
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      # .gitattributes keeps assets/ byte-exact; this proves the checkout did.
+      # .gitattributes keeps assets/ byte-exact; this proves the checkout, which the build embeds,
+      # did.
       - name: Verify the assets against PROVENANCE.md
         run: cargo xtask assets verify --tree
 
@@ -39,17 +41,17 @@ jobs:
           $sys = (cargo metadata --format-version 1 --locked | ConvertFrom-Json).packages |
             Where-Object name -eq 'sdl2-sys' | Select-Object -First 1
           Copy-Item (Join-Path (Split-Path $sys.manifest_path) 'SDL\LICENSE.txt') (Join-Path $out 'SDL2-LICENSE.txt')
-          Copy-Item -Recurse assets (Join-Path $out 'assets')
           Copy-Item README.md, LICENSE, tools\windows\README-WINDOWS.txt $out
 
-      # The packaged exe reads its assets from its own folder: two frames of a headless block-1
-      # run, dumped outside the package.
+      # The packaged exe is self-contained: two frames of a headless block-1 run, started from a
+      # directory that is neither the package nor the checkout.
       - name: Smoke-test the package
         shell: pwsh
-        working-directory: dist\SecondReality
+        working-directory: ${{ runner.temp }}
         run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'dist\SecondReality\secondreality.exe'
           $dump = Join-Path $env:RUNNER_TEMP 'smoke'
-          .\secondreality.exe --headless --block 1 --dump-frames 500,1300 --dump-dir $dump
+          & $exe --headless --block 1 --dump-frames 500,1300 --dump-dir $dump
           if ($LASTEXITCODE -ne 0) { throw "secondreality.exe exited $LASTEXITCODE" }
           foreach ($f in 'alku_000500.idx', 'alku_001300.idx') {
             if (-not (Test-Path (Join-Path $dump $f))) { throw "the smoke run wrote no $f" }
@@ -105,19 +107,17 @@ jobs:
           sys=$(cargo metadata --format-version 1 --locked |
             jq -r '[.packages[] | select(.name == "sdl2-sys")][0].manifest_path')
           cp "$(dirname "$sys")/SDL/LICENSE.txt" "$out/SDL2-LICENSE.txt"
-          cp -R assets "$out/assets"
           cp README.md LICENSE "${{ matrix.readme }}" "$out/"
-          if [ "$RUNNER_OS" = macOS ]; then
-            cp tools/macos/SecondReality.command "$out/"
-            chmod +x "$out/SecondReality.command"
-          fi
           tar -C dist -czf "secondreality-${{ matrix.name }}.tar.gz" SecondReality
 
+      # The packaged binary is self-contained: started from a directory that is neither the
+      # package nor the checkout.
       - name: Smoke-test the package
-        working-directory: dist/SecondReality
+        working-directory: ${{ runner.temp }}
         run: |
           dump="$RUNNER_TEMP/smoke"
-          ./secondreality --headless --block 1 --dump-frames 500,1300 --dump-dir "$dump"
+          "$GITHUB_WORKSPACE/dist/SecondReality/secondreality" --headless --block 1 \
+            --dump-frames 500,1300 --dump-dir "$dump"
           for f in alku_000500.idx alku_001300.idx; do
             test -f "$dump/$f" || { echo "the smoke run wrote no $f"; exit 1; }
           done

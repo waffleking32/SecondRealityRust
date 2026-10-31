@@ -1,9 +1,8 @@
 Second Reality (Rust port) for Windows x64
 ==========================================
 
-Run secondreality.exe from this folder. Double-clicking it works, because Windows starts it in
-its own folder. From a terminal, cd here first: the demo reads its files from assets\ relative
-to the folder it is started in.
+Double-click secondreality.exe, or run it from a terminal in any folder: the demo's files are
+built into the program.
 
   secondreality.exe                    the demo, opening on the settings screen
   secondreality.exe --no-setup         straight into the demo
