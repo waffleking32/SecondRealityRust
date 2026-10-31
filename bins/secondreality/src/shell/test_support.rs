@@ -88,7 +88,7 @@ pub(super) fn music_run(
         view,
         plan,
         source,
-        Some(crate::audio::test_music),
+        Some(crate::audio::load_player),
         settings,
     )
     .unwrap()

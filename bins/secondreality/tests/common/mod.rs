@@ -1,6 +1,6 @@
-//! What the binary's integration tests share: the repository root every run starts from, a
-//! headless dump read into memory (one run per argument list, cached), the reference tree's
-//! frames, a length-checked differ and the music traces.
+//! What the binary's integration tests share: the repository root, a headless dump read into
+//! memory (one run per argument list, cached), the reference tree's frames, a length-checked
+//! differ and the music traces.
 //!
 //! Each test crate includes this with `mod common;` and uses a subset of it.
 #![allow(dead_code)]
@@ -11,13 +11,13 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// The repository root: where `assets/` and `reference/` are, and where a run reads its media
-/// from, so every run starts here.
+/// The repository root: where `assets/` and `reference/` are. A run reads no media from disk
+/// (it is embedded); runs start here so relative paths in a test resolve in the checkout.
 pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Run the binary from the repository root.
+/// Run the binary with the repository root ([`root`]) as its working directory.
 pub fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_secondreality"))
         .current_dir(root())

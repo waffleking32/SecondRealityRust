@@ -26,7 +26,7 @@ cargo run --release --bin secondreality
 ```
 
 The binary is self-contained: every file under `assets/` is built into it, so it runs from any
-directory with nothing beside it, as `SECOND.EXE` carries its own data file.
+directory with nothing beside it.
 
 With no argument the demo plays from the beginning, as `SECOND.EXE` does with none.
 

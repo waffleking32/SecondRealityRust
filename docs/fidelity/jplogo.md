@@ -42,9 +42,9 @@ pins.
 
 `ICEKNGDM.UP` is `FD FC` (RLE), 320×400, 256 colours, `add = 49` (pixels at 784).
 `readp_is_the_sources_row_rle_and_palette` decodes the raw file through a transliteration of
-`READP.C` and matches `sr_assets::load_path` on the palette and all 400 rows. The run opcode's count
-register is 8 bits (`READP.C:44-51`, `dec ah / jnz l4`), so an opcode of exactly `0x80` writes
-**256** copies; the shipped writers never emit it and `sr-assets` refuses it.
+`READP.C` and matches `parts::load_image` (the embedded copy, decoded by `sr_assets::load_any`)
+on the palette and all 400 rows. The run opcode's count register is 8 bits (`READP.C:44-51`,
+`dec ah / jnz l4`), so an opcode of exactly `0x80` writes **256** copies; the shipped writers never emit it and `sr-assets` refuses it.
 
 The rows are the **184 bytes from x=70** plus byte 184 = **65**, a synthetic white border; entry 64
 is blacked and every source `0` becomes `64`

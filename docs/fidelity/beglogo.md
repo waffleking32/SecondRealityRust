@@ -78,8 +78,8 @@ shows at every index it holds in the window; 446 does not depend on the split.
 - **`init`** does `:18-21` (one `clear` to 15: the plane interleave folds away in the chunky
   model), sets the 320×400 view (`:42-53`: display start 0, CRTC 9's double-scan and max-scan
   fields cleared) with `y_line_offset = None` (§5) and `border = Some(255)`, and reads the picture
-  with `sr_assets::load_path("assets/BEG/SRTITLE.UP")` (one call for what `readp` reads row by
-  row; refused unless 320×400).
+  with `logo::load_picture("assets/BEG/SRTITLE.UP")` (the embedded copy, decoded by
+  `sr_assets::load_any`; one call for what `readp` reads row by row; refused unless 320×400).
 - **The blit and the white DAC are on tick 32** (`LEAD_IN_TICKS`, index 436), not in `init`:
   `:24`'s waits come before `:25-78`. The reference makes this load-bearing: `frame_000430.idx` is
   128,000 bytes of 15, and `compare` prefers the indexed path, so a port that blitted in `init`

@@ -1862,8 +1862,8 @@ mod tests {
     /// constants cite (`docs/fidelity/alku.md` §12).
     #[test]
     fn the_release_loop_and_its_closing_routine_are_the_images() {
-        let file = std::fs::read("../../assets/MAIN/DATA/ALKU.EXE").unwrap();
-        let image = sr_assets::exe::unpack(&file).unwrap();
+        let file = crate::assets::read("assets/MAIN/DATA/ALKU.EXE").unwrap();
+        let image = sr_assets::exe::unpack(file).unwrap();
         let at = |offset: usize, bytes: &[u8]| {
             assert_eq!(&image.image[offset..offset + bytes.len()], bytes, "image {offset:#x}");
         };
@@ -1932,8 +1932,8 @@ mod tests {
     /// 76; every glyph the part draws is the same bytes at the same run.
     #[test]
     fn the_release_font_is_the_strip_but_for_one_glyph_and_its_padding_is_zero() {
-        let file = std::fs::read("../../assets/MAIN/DATA/ALKU.EXE").unwrap();
-        let image = sr_assets::exe::unpack(&file).unwrap().image;
+        let file = crate::assets::read("assets/MAIN/DATA/ALKU.EXE").unwrap();
+        let image = sr_assets::exe::unpack(file).unwrap().image;
         let strip = std::fs::read("../../upstream/SecondReality/ALKU/FONA.UH").unwrap();
         let font = 0x42541;
         let mut differing = Vec::new();

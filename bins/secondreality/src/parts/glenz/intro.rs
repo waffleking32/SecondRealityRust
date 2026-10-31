@@ -235,7 +235,6 @@ impl Bounce {
 mod tests {
     use super::*;
     use sr_assets::Image;
-    use std::path::Path;
 
     /// A palette whose entry `i` is `(i, 63-i, i/4)`, so `pal1`'s copy and
     /// the fade arithmetic are readable.
@@ -253,7 +252,7 @@ mod tests {
 
     /// `FC.UH`'s pixels, decoded by the tree's own reader.
     fn fc_picture() -> Image {
-        sr_assets::load_path(Path::new("../../assets/GLENZ/FC.UH")).unwrap()
+        crate::assets::image("assets/GLENZ/FC.UH").unwrap()
     }
 
     /// The 47 drawn ticks and the break on the 48th (`ZOOMER.C:38-44`), with

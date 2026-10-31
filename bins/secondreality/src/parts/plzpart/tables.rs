@@ -185,14 +185,15 @@ impl Tables {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::parts::test_rig::repo;
 
     pub(in super::super) fn tables() -> Tables {
         Tables::load().expect("the five fragments load")
     }
 
     fn tree_text(name: &str) -> String {
-        std::fs::read_to_string(repo(&format!("{TABLE_DIR}/{name}"))).unwrap()
+        let path = format!("{TABLE_DIR}/{name}");
+        let bytes = crate::assets::read(&path).unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
     }
 
     /// The tree's `RATA.INC`, which the part does not read: its `kkk=100`

@@ -120,16 +120,10 @@ pub(crate) fn load_player(id: ModuleId, options: PlayerOptions) -> Result<Shared
     Ok(Arc::new(Mutex::new(Player::new(module, options))))
 }
 
-/// The [`MusicSource`](crate::shell::music::MusicSource) unit tests play with: the run's own.
-#[cfg(test)]
-pub(crate) fn test_music(id: ModuleId, options: PlayerOptions) -> Result<Shared, String> {
-    load_player(id, options)
-}
-
-/// [`test_music`] with the default (authentic) options: the player a part's own test reads.
+/// [`load_player`] with the default (authentic) options: the player a part's own test reads.
 #[cfg(test)]
 pub(crate) fn test_player(id: ModuleId) -> Result<Shared, String> {
-    test_music(id, PlayerOptions::default())
+    load_player(id, PlayerOptions::default())
 }
 
 /// The mixer's stream as a WAV header and the sound card describe it: **frames** a second
@@ -472,7 +466,7 @@ mod tests {
     #[test]
     fn the_wav_format_is_the_players_frame_rate() {
         let enhanced = PlayerOptions { quality: Quality::Enhanced, ..PlayerOptions::default() };
-        let player = test_music(ModuleId::Music0, enhanced).expect("MUSIC0 loads");
+        let player = load_player(ModuleId::Music0, enhanced).expect("MUSIC0 loads");
         assert_eq!(lock(&player).options(), enhanced, "the loader builds what it was asked for");
         assert_eq!(wav_format(&lock(&player).options()), (48_000, 2));
         assert_eq!(wav_format(&PlayerOptions::default()), (20_000, 2));

@@ -70,8 +70,9 @@ the surface, not the fade.
 `init` does the acts that cost no frame: the AC unlock (ending `0x20`, PAS = 1, which the engine
 always is), display start 0 (`View::set_origin(0)`), the 400-line CRTC 9, the overscan
 (`border = Some(0)`, the last of the 255 and 0 writes), and the picture read in one
-`sr_assets::load_path` call (refused unless 320×400). One `dis_waitb()` is one tick; the acts that
-cost no blank fall on the tick after the blank before them.
+`logo::load_picture` call (the embedded copy, decoded by `sr_assets::load_any`; refused unless
+320×400). One `dis_waitb()` is one tick; the acts that cost no blank fall on the tick after the
+blank before them.
 
 | tick | index | source | screen |
 |---|---|---|---|

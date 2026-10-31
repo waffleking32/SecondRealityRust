@@ -15,8 +15,10 @@ const SKIPPED: &str = "assets/PROVENANCE.md";
 fn main() {
     let manifest =
         PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let root = manifest.join("../..");
-    let assets = root.join("assets");
+    let assets = manifest
+        .join("../../assets")
+        .canonicalize()
+        .expect("the repository's assets/");
     println!("cargo:rerun-if-changed={}", assets.display());
 
     let mut files = Vec::new();
@@ -30,9 +32,6 @@ fn main() {
     );
     for (rel, path) in &files {
         let absolute = path
-            .canonicalize()
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let absolute = absolute
             .to_str()
             .unwrap_or_else(|| panic!("{}: not UTF-8", path.display()));
         // `{:?}` writes a Rust string literal, backslashes and quotes escaped.
@@ -48,11 +47,8 @@ fn main() {
 fn walk(dir: &Path, rel: &str, files: &mut Vec<(String, PathBuf)>) {
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
-    let mut entries: Vec<_> = entries
-        .map(|entry| entry.expect("a directory entry"))
-        .collect();
-    entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
+        let entry = entry.expect("a directory entry");
         let path = entry.path();
         let name = entry.file_name();
         let name = name

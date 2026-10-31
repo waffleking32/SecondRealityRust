@@ -726,12 +726,10 @@ fn pick_list(object: &ObjectData, rotated: &[Rotated]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sr_assets::load_path;
     use sr_assets::visu::{FaceList, Frame, Normal, Op, Vertex};
     use sr_engine::Palette;
-    use std::path::Path;
 
-    const BACKGROUND: &str = "../../assets/VISU/C/U2ABG.UH";
+    const BACKGROUND: &str = "assets/VISU/C/U2ABG.UH";
 
     /// One vertex and one `ORD0` list, enough for `single_z` and the order.
     fn plane_object_named(name: &[u8], z: i32) -> Rc<ObjectData> {
@@ -1207,7 +1205,7 @@ mod tests {
     #[test]
     fn u2a_draws_the_background_and_frame_sixteen_shows_object_two() {
         let mut scene = load_scene("U2A").unwrap();
-        let background = load_path(Path::new(BACKGROUND)).unwrap();
+        let background = crate::assets::image(BACKGROUND).unwrap();
         assert_eq!(background.pixels().len(), 320 * 200);
 
         let mut pixels = vec![0xFFu8; 320 * 200];
@@ -1262,7 +1260,7 @@ mod tests {
         // stream's negative `dy` deltas descend it into the window only at
         // frame 22: frames 16..=21 draw nothing and frame 22 draws.
         let mut scene = load_scene("U2A").unwrap();
-        let background = load_path(Path::new(BACKGROUND)).unwrap();
+        let background = crate::assets::image(BACKGROUND).unwrap();
         let mut pixels = vec![0u8; 320 * 200];
         let mut driver = Driver::new(Ring::new(Variant::U2a), false);
         let draw = |scene: &mut Scene, driver: &mut Driver, pixels: &mut Vec<u8>| {

@@ -358,11 +358,11 @@ pub const GRID1: [i16; 200] = [
 mod tests {
     use super::*;
 
-    /// The curated FCRZ.U, from the crate's directory (the tests run there).
+    /// The curated FCRZ.U, the embedded copy the run reads.
     fn fcrz() -> [u8; 64_000] {
-        let raw = std::fs::read("../../assets/HARD/FCRZ.U").expect("assets/HARD/FCRZ.U");
+        let raw = crate::assets::read("assets/HARD/FCRZ.U").unwrap();
         let mut image = [0u8; 64_000];
-        image.copy_from_slice(&raw);
+        image.copy_from_slice(raw);
         image
     }
 

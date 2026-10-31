@@ -91,11 +91,10 @@ pub(super) mod tests {
     use super::*;
     use crate::parts::plzpart::tables::tests::{tables, tree_rata};
     use crate::parts::plzpart::tables::SPLINE_WORDS;
-    use crate::parts::test_rig::repo;
 
     /// The shipped part, unpacked.
     pub(in super::super) fn image() -> sr_assets::exe::LoadImage {
-        sr_assets::exe::unpack(&std::fs::read(repo(EXE_PATH)).unwrap()).unwrap()
+        sr_assets::exe::unpack(crate::assets::read(EXE_PATH).unwrap()).unwrap()
     }
 
     /// The release's own `plz()` holds the 4 the frames measured (A22): `curpal` is DGROUP

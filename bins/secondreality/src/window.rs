@@ -1007,7 +1007,7 @@ mod tests {
         );
     }
 
-    /// Block 5 with the real player ([`crate::audio::test_music`]) and stub parts that
+    /// Block 5 with the real player ([`crate::audio::load_player`]) and stub parts that
     /// never retire.
     fn music_run() -> Sequence {
         Sequence::with_run(
@@ -1019,7 +1019,7 @@ mod tests {
                 "endlogo" | "cred" | "endscrl" => Some(Box::new(Stub { retires: None })),
                 other => stub_source(other),
             },
-            Some(crate::audio::test_music),
+            Some(crate::audio::load_player),
             crate::shell::RunSettings::default(),
         )
         .unwrap()

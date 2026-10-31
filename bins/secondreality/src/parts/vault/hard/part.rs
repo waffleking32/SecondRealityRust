@@ -1358,9 +1358,9 @@ mod tests {
         // by `dotsp += 4`), scaled by the first `doit1`'s x4 and jittered by
         // the first two `rand()` calls of the Microsoft C 6.0 LCG. Recompute
         // it from the LCG and the source's `adddot` arithmetic.
-        let raw = std::fs::read("../../assets/HARD/FCRZ.U").unwrap();
+        let raw = crate::assets::read("assets/HARD/FCRZ.U").unwrap();
         let mut image = [0u8; 64_000];
-        image.copy_from_slice(&raw);
+        image.copy_from_slice(raw);
         let streams = dots_from_fcrz(&image);
         let stream = &streams[0];
         let value = stream[4];

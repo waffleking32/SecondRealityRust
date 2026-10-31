@@ -1,7 +1,7 @@
 //! The demo's media, embedded in the binary by `build.rs`: every file under the repository's
 //! `assets/` (but `PROVENANCE.md`), so a run reads nothing from disk and works from any
-//! working directory, as `SECOND.EXE` carries its own data file. Paths are repository-
-//! relative with forward slashes, e.g. `assets/ALKU/FONA.UH`.
+//! working directory. Paths are repository-relative with forward slashes, e.g.
+//! `assets/ALKU/FONA.UH`.
 
 use sr_assets::Image;
 
@@ -20,14 +20,9 @@ pub(crate) fn read(path: &str) -> Result<&'static [u8], String> {
     get(path).ok_or_else(|| format!("{path}: not embedded in this binary"))
 }
 
-/// The picture `path` holds, its format sniffed as [`sr_assets::load_path`] does, or an
-/// error naming `path`.
+/// The picture `path` holds ([`sr_assets::load_any`]), or an error naming `path`.
 pub(crate) fn image(path: &str) -> Result<Image, String> {
-    let bytes = read(path)?;
-    let format = sr_assets::sniff(bytes).ok_or(sr_assets::AssetError::UnknownFormat);
-    format
-        .and_then(|format| sr_assets::load(bytes, format))
-        .map_err(|error| format!("{path}: {error}"))
+    sr_assets::load_any(read(path)?).map_err(|error| format!("{path}: {error}"))
 }
 
 #[cfg(test)]

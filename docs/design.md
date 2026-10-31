@@ -461,12 +461,12 @@ compiled into an object are recovered from its OMF `LEDATA` records, and the rel
 read from the unpacked part EXEs (D49). `cargo xtask assets verify --tree` checks the tree against
 the provenance file.
 
-The binary carries the tree, as `SECOND.EXE` carries `REALITY.FC`: `bins/secondreality/build.rs`
+The binary carries the tree: `bins/secondreality/build.rs`
 embeds every file under `assets/` but `PROVENANCE.md` with `include_bytes!`, keyed by its
 repository-relative path (`assets/ALKU/FONA.UH`), and `assets::get` looks a path up. A run reads no
 media from disk, so it works from any directory; there is no option to read them from a folder.
-`sr_audio::Song::decode` and `sr_assets::load` take the bytes, so neither crate learns where they
-came from.
+`sr_audio::Song::decode` and `sr_assets::load_any` take the bytes, so neither crate learns where
+they came from.
 
 ## 10–14. Retired
 

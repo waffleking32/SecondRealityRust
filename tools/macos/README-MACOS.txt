@@ -2,7 +2,8 @@ Second Reality (Rust port) for macOS (Apple Silicon)
 ====================================================
 
 Double-click secondreality to play: macOS opens it in Terminal. The demo's files are built into
-the program, so it runs from any folder. From a terminal:
+the program, so it runs from any folder. From a terminal in this folder (or give the program's
+full path from any other folder):
 
   ./secondreality                      the demo, opening on the settings screen
   ./secondreality --no-setup           straight into the demo

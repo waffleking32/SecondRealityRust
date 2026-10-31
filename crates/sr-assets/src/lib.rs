@@ -246,14 +246,19 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Image, AssetError> {
     }
 }
 
-/// Read a file and load it as whatever its magic says it is.
+/// Load `bytes` as whatever its magic says it is ([`sniff`], then [`load`]).
+pub fn load_any(bytes: &[u8]) -> Result<Image, AssetError> {
+    let format = sniff(bytes).ok_or(AssetError::UnknownFormat)?;
+    load(bytes, format)
+}
+
+/// Read a file and load it as whatever its magic says it is ([`load_any`]).
 pub fn load_path(path: &Path) -> Result<Image, AssetError> {
     let bytes = std::fs::read(path).map_err(|e| AssetError::Io {
         path: path.to_path_buf(),
         what: e.to_string(),
     })?;
-    let format = sniff(&bytes).ok_or(AssetError::UnknownFormat)?;
-    load(&bytes, format)
+    load_any(&bytes)
 }
 
 /// Every frame in `bytes`: a still picture is one frame, and the two animations are decoded to
