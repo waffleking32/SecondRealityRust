@@ -28,6 +28,9 @@ cargo run --release --bin secondreality
 The binary is self-contained: every file under `assets/` is built into it, so it runs from any
 directory with nothing beside it.
 
+`cargo build --profile dist --bin secondreality` builds the smaller binary the packages ship
+(`target/dist/`): stripped, link-time optimised and optimised for size, at a longer build.
+
 With no argument the demo plays from the beginning, as `SECOND.EXE` does with none.
 
 ## The settings screen

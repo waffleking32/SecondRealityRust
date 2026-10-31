@@ -1,7 +1,8 @@
 # Builds Second Reality for Windows x64, Linux x64 and macOS arm64, and on a v* tag publishes the
 # three packages as a GitHub Release. SDL 2 is compiled into the binary (the workspace enables
 # sdl2's bundled + static-link features) and assets/ is embedded in it
-# (bins/secondreality/build.rs), so a package is the executable and the docs.
+# (bins/secondreality/build.rs), so a package is the executable and the docs. Packages build with
+# the workspace's `dist` profile (Cargo.toml): stripped, fat LTO, optimised for size.
 name: Build
 
 on:
@@ -30,14 +31,14 @@ jobs:
         run: cargo xtask assets verify --tree
 
       - name: Build
-        run: cargo build --release --locked -p secondreality
+        run: cargo build --profile dist --locked -p secondreality
 
       - name: Package
         shell: pwsh
         run: |
           $out = 'dist\SecondReality'
           New-Item -ItemType Directory -Force $out | Out-Null
-          Copy-Item target\release\secondreality.exe $out
+          Copy-Item target\dist\secondreality.exe $out
           $sys = (cargo metadata --format-version 1 --locked | ConvertFrom-Json).packages |
             Where-Object name -eq 'sdl2-sys' | Select-Object -First 1
           Copy-Item (Join-Path (Split-Path $sys.manifest_path) 'SDL\LICENSE.txt') (Join-Path $out 'SDL2-LICENSE.txt')
@@ -97,13 +98,13 @@ jobs:
         run: cargo xtask assets verify --tree
 
       - name: Build
-        run: cargo build --release --locked -p secondreality
+        run: cargo build --profile dist --locked -p secondreality
 
       - name: Package
         run: |
           out=dist/SecondReality
           mkdir -p "$out"
-          cp target/release/secondreality "$out/"
+          cp target/dist/secondreality "$out/"
           sys=$(cargo metadata --format-version 1 --locked |
             jq -r '[.packages[] | select(.name == "sdl2-sys")][0].manifest_path')
           cp "$(dirname "$sys")/SDL/LICENSE.txt" "$out/SDL2-LICENSE.txt"
