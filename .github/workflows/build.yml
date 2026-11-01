@@ -101,6 +101,15 @@ jobs:
       - name: Verify the assets against PROVENANCE.md
         run: cargo xtask assets verify --tree
 
+      # SDL's `@available` checks, kept by the older deployment target, call
+      # __isPlatformVersionAtLeast from clang's runtime, which rustc's link line leaves out.
+      - name: Link clang's runtime
+        if: runner.os == 'macOS'
+        run: |
+          rt="$(clang -print-resource-dir)/lib/darwin/libclang_rt.osx.a"
+          test -f "$rt"
+          echo "RUSTFLAGS=-C link-arg=$rt" >> "$GITHUB_ENV"
+
       - name: Build
         run: cargo build --profile dist --locked -p secondreality
 
