@@ -61,10 +61,10 @@ pub struct PresentOptions {
 }
 
 impl PresentOptions {
-    /// The window's presentation: square dots at 2×, so a 320×200 frame is
-    /// duplicated into 640×400 with no interpolation, and the border on (D48).
+    /// The window's presentation: a 4:3 box at 2×, as a 1993 monitor showed the picture,
+    /// and the border on (D48).
     pub const WINDOW: PresentOptions =
-        PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: true };
+        PresentOptions { aspect: Aspect::FourThree, scale: 2, border: true };
 }
 
 impl Default for PresentOptions {
@@ -372,11 +372,16 @@ mod tests {
         }
     }
 
+    /// The window's options with square dots instead of its 4:3 box.
+    fn square_window() -> PresentOptions {
+        PresentOptions { aspect: Aspect::SquarePixels, ..PresentOptions::WINDOW }
+    }
+
     #[test]
-    fn a_320x200_frame_at_the_default_is_every_pixel_duplicated_into_640x400() {
+    fn a_320x200_frame_in_square_dots_is_every_pixel_duplicated_into_640x400() {
         let f = distinct_frame(320, 200);
         let mut out = FrameBuffer::new(0, 0);
-        present(&f, &PresentOptions::default(), &mut out);
+        present(&f, &square_window(), &mut out);
         assert_eq!((out.width(), out.height()), (640, 400));
         assert_duplicated(&out, &source(&f), (2, 2), 0);
         // A 2×2 block's four pixels are one colour, and its neighbour is not:
@@ -387,11 +392,11 @@ mod tests {
     }
 
     #[test]
-    fn the_border_pads_a_default_frame_without_scaling_its_picture() {
+    fn the_border_pads_a_square_dot_frame_without_scaling_its_picture() {
         let mut f = distinct_frame(320, 200);
         f.border = Some(7);
         let mut out = FrameBuffer::new(0, 0);
-        present(&f, &PresentOptions::default(), &mut out);
+        present(&f, &square_window(), &mut out);
         // Eight 320-column pixels a side, at 2: 16 output pixels of flat colour,
         // and the picture inside still exactly 2×2.
         assert_eq!((out.width(), out.height()), (640 + 32, 400 + 32));

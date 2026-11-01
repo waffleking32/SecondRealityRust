@@ -430,7 +430,7 @@ mod tests {
         let c = parse(&[]).unwrap();
         assert_eq!((c.block, c.part), (Some('1'), None));
         assert!(!c.headless && !c.vault && c.setup && c.border);
-        assert_eq!((c.scale, c.aspect), (2, Aspect::SquarePixels));
+        assert_eq!((c.scale, c.aspect), (2, Aspect::FourThree));
         assert_eq!((c.looping, c.quality, &c.positions), (Looping::Off, Quality::Authentic, &None));
         assert_eq!(c.run_settings().ending, Ending::Exit);
         assert_eq!(c.run_settings().player, PlayerOptions::default());

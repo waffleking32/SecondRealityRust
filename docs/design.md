@@ -207,9 +207,10 @@ composed with the palette current at that moment, so mid-frame VRAM and palette 
 scanline the beam drew them on (TECHNO's interference, PLZPART's split).
 
 **Presentation** (`sr_engine::present`) turns an `IndexedFrame` into RGBA through each scanline's
-palette. The window's default is **2× pixel duplication with square dots**: 320×200, 320×400 and
-640×400 frames are all 640×400 on the screen, and nothing interpolates (D48). `--aspect 4:3` is a
-resample into a 4:3 box; the border is a flat pad (A1). A headless dump is one pixel per source
+palette. The window's default is a **4:3 box at 2×** (768×576), a resample as a 1993 monitor
+showed the picture (D48). `--aspect square` is 2× pixel duplication with square dots: 320×200,
+320×400 and 640×400 frames are all 640×400 on the screen, and nothing interpolates. The border is
+a flat pad (A1). A headless dump is one pixel per source
 pixel, and `xtask compare` reads indexed frames, so presentation cannot affect a measurement.
 
 ### 4.3 The `Part` trait — replacing DIS

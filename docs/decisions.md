@@ -36,8 +36,8 @@ dozen parts and makes frame-diffs harder); instruction-level emulation (not a po
 
 ## D4 — Reversed by D48
 
-The window's default is 2× square-dot duplication (D48). 4:3 is `--aspect 4:3` and the settings
-screen's Aspect row.
+The window's default is a 4:3 box at 2× (D48). Square dots are `--aspect square` and the
+settings screen's Aspect row.
 
 ## D5 — The music's pattern data is scrambled, and the keystream is recovered
 
@@ -1072,14 +1072,14 @@ keeps the reference's mode-5 clock, not the original's no-sound mode. What the p
 D20's read race), so an event log of the original would mean changing the emulator. The cost is
 D18's and D19's limit: a register change no filed frame displays goes unseen.
 
-## D48 — The window's default is 2× pixel duplication with square dots; 4:3 is an option
+## D48 — The window's default is a 4:3 box at 2×; square-dot duplication is an option
 
-**Decided.** The window presents at scale 2 with square dots by default (`PresentOptions::WINDOW`,
-read by `Cli::default`). `present` copies one source pixel's colour into each output pixel and SDL
-never scales (`window::blit` copies the texture into a rectangle of its own size, centred; the
-texture's scale mode is nearest and its blend mode none). Asked for directly: "scaled by 2x, just
-duplicate pixels, no interpolation". The 4:3 box needs 200 rows into 288 lines a step, which is a
-resample, so it is `--aspect 4:3` and the settings screen's second Aspect value.
+**Decided.** The window presents at scale 2 in a 4:3 box by default (`PresentOptions::WINDOW`,
+read by `Cli::default`), as a 1993 monitor showed the picture; asked for directly. The box needs
+200 rows into 288 lines a step, which is a resample. Square dots are `--aspect square` and the
+settings screen's second Aspect value: `present` copies one source pixel's colour into each output
+pixel. Either way SDL never scales (`window::blit` copies the texture into a rectangle of its own
+size, centred; the texture's scale mode is nearest and its blend mode none).
 
 **The picture is sized by the display.** A VGA scans 320×200 (each row twice), 320×400 and 640×400
 to the same 640×400 dots, so a source pixel's block is `present::pixel_block`: at scale 2, 2×2 for
@@ -1091,7 +1091,7 @@ output pixels of flat colour (A1).
 **The dump is untouched.** `--headless` uses `Aspect::SourcePixels` at 1 with no border,
 `scale`×`scale` a source pixel whatever the mode; the window's presentation never reaches a dump.
 
-**Pinned by** `present::tests` and `window::tests` (the default frame through SDL's software
+**Pinned by** `present::tests` and `window::tests` (a square-dot frame through SDL's software
 renderer, read back pixel by pixel).
 
 ## D49 — The shipped part EXEs are unpacked and read

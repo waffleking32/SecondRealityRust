@@ -39,7 +39,7 @@ const ROWS: [(&str, [&str; 2]); 5] = [
     ("Sound", ["On", "Off"]),
     ("Sound quality", ["Authentic", "Enhanced"]),
     ("Demo looping", ["Disabled", "Enabled"]),
-    ("Aspect", ["Square", "4:3"]),
+    ("Aspect", ["4:3", "Square"]),
     ("Border", ["On", "Off"]),
 ];
 
@@ -91,7 +91,7 @@ impl Settings {
             0 => !self.sound as usize,
             1 => (self.quality == Quality::Enhanced) as usize,
             2 => self.looping as usize,
-            3 => (self.aspect == Aspect::FourThree) as usize,
+            3 => (self.aspect == Aspect::SquarePixels) as usize,
             _ => !self.border as usize,
         }
     }
@@ -102,7 +102,7 @@ impl Settings {
             0 => self.sound = !second,
             1 => self.quality = if second { Quality::Enhanced } else { Quality::Authentic },
             2 => self.looping = second,
-            3 => self.aspect = if second { Aspect::FourThree } else { Aspect::SquarePixels },
+            3 => self.aspect = if second { Aspect::SquarePixels } else { Aspect::FourThree },
             _ => self.border = !second,
         }
     }
@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn the_chosen_settings_are_the_runs_settings() {
         let cli = parse(&[
-            "--no-audio", "--sound-quality", "enhanced", "--loop", "--aspect", "4:3",
+            "--no-audio", "--sound-quality", "enhanced", "--loop", "--aspect", "square",
             "--no-border",
         ]);
         assert_eq!(
@@ -339,7 +339,7 @@ mod tests {
                 sound: false,
                 quality: Quality::Enhanced,
                 looping: true,
-                aspect: Aspect::FourThree,
+                aspect: Aspect::SquarePixels,
                 border: false,
             }
         );
@@ -354,7 +354,7 @@ mod tests {
         setup.settings.apply(&mut cli);
         assert!(cli.no_audio, "Sound Off is --no-audio");
         assert_eq!((cli.quality, cli.looping), (Quality::Enhanced, Looping::On));
-        assert_eq!((cli.aspect, cli.border), (Aspect::FourThree, false));
+        assert_eq!((cli.aspect, cli.border), (Aspect::SquarePixels, false));
         let run = cli.run_settings();
         assert_eq!(run.player.output_rate(), 48_000, "the card opens at the enhanced rate");
         assert_eq!(run.looping, Looping::On);
@@ -367,7 +367,7 @@ mod tests {
         setup.settings.apply(&mut cli);
         assert!(!cli.no_audio);
         assert_eq!((cli.quality, cli.looping), (Quality::Authentic, Looping::Off));
-        assert_eq!((cli.aspect, cli.border), (Aspect::SquarePixels, true));
+        assert_eq!((cli.aspect, cli.border), (Aspect::FourThree, true));
         assert_eq!(cli.run_settings().player.output_rate(), 20_000);
 
         let mut gravis = parse(&["/gravis"]);

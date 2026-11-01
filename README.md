@@ -6,6 +6,30 @@ specification. The port translates its fixed-point maths, tables and bugs, plays
 Tracker modules with a transcription of its own player, and is checked frame by frame against
 captures of the original running in an emulator.
 
+<p align="center">
+  <img src="wiki/images/glenz-10000.png" width="49%" alt="GLENZ: a translucent blue polyhedron inside a red one">
+  <img src="wiki/images/plzpart-23000.png" width="49%" alt="PLZPART: the plasma">
+  <img src="wiki/images/3dsinfld-31900.png" width="49%" alt="3DSINFLD: the sine-field landscape">
+  <img src="wiki/images/u2e-35200.png" width="49%" alt="U2E: the flight through the polygon city">
+</p>
+
+**How does it work?** The [wiki][wiki] explains every effect for a curious programmer: what
+you see, the trick behind it, the original's own routines (quoted and linked) and how the port
+reproduces them. Start with the [hardware primer][primer] (Mode X, the palette, the "copper"),
+the [demo's structure][structure] and the [music][music], then read the parts in the order they
+play, from [ALKU][alku] to [ENDSCRL][endscrl], and the [unreleased effects][vault].
+[How the port works][port] and [how it is verified][verified] cover the Rust side.
+
+[wiki]: https://github.com/waffleking32/SecondRealityRust/wiki
+[primer]: https://github.com/waffleking32/SecondRealityRust/wiki/Hardware-primer
+[structure]: https://github.com/waffleking32/SecondRealityRust/wiki/Demo-structure
+[music]: https://github.com/waffleking32/SecondRealityRust/wiki/Music
+[alku]: https://github.com/waffleking32/SecondRealityRust/wiki/ALKU
+[endscrl]: https://github.com/waffleking32/SecondRealityRust/wiki/ENDSCRL
+[vault]: https://github.com/waffleking32/SecondRealityRust/wiki/The-Vault
+[port]: https://github.com/waffleking32/SecondRealityRust/wiki/How-the-port-works
+[verified]: https://github.com/waffleking32/SecondRealityRust/wiki/How-it-is-verified
+
 ## Building and running
 
 Prebuilt packages for Windows x64, Linux x64 and macOS (Apple Silicon) are on the
@@ -43,7 +67,7 @@ questions. It offers:
 | Sound | On / Off | `--no-audio` for Off |
 | Sound quality | Authentic / Enhanced | `--sound-quality` |
 | Demo looping | Disabled / Enabled | `--loop` |
-| Aspect | Square / 4:3 | `--aspect square` / `--aspect 4:3` |
+| Aspect | 4:3 / Square | `--aspect 4:3` / `--aspect square` |
 | Border | On / Off | `--no-border` for Off |
 
 Up and Down choose a row, Left and Right change it, and Enter starts the demo. ESC leaves without
@@ -131,14 +155,14 @@ needs only one ESC. The effects are silent, so `--vault` and `--part grid|hard|t
 
 ## Display
 
-The window shows the picture at **2×, by duplicating pixels** — no smoothing or interpolation:
-each pixel of a 320×200 part is a 2×2 block, so the picture is 640×400, and the 320×400 and
-640×400 parts are the same 640×400 on the screen.
+The window shows the picture in a **4:3 box at 2×**, 768×576, as a 1993 monitor showed it: the
+demo's 320×200 pixels are taller than wide, and the box stretches 200 lines into 288 a step.
 
-- `--scale <N>` magnifies by any whole number instead: each 320×200 pixel becomes N×N.
-- `--aspect square` (the default) keeps that exact duplication; `--aspect 4:3` stretches the
-  picture into a 4:3 box as a 1993 monitor did, which resamples 200 lines into 288 and so is not
-  pure duplication.
+- `--aspect square` duplicates pixels exactly instead, with no smoothing or interpolation: each
+  pixel of a 320×200 part is a 2×2 block, so the picture is 640×400, and the 320×400 and 640×400
+  parts are the same 640×400 on the screen.
+- `--scale <N>` magnifies by any whole number instead of 2: the 4:3 box grows by 384×288 a step,
+  and under `--aspect square` each 320×200 pixel becomes N×N.
 - `--no-border` leaves out the overscan border colour, a flat pad around the picture.
 
 ## Without a window
@@ -163,7 +187,8 @@ A dump is always one file pixel per picture pixel, whatever `--scale` and `--asp
 ## How faithful it is
 
 Every part of the demo, and each vault effect, is compared against frames captured from the
-original, and every known difference is measured and recorded:
+original, and every known difference is measured and recorded (the wiki's
+[how it is verified][verified] is the overview):
 
 - `docs/fidelity/APPROXIMATIONS.md`: every place the port differs from the original, with the
   measured difference and why.

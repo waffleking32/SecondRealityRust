@@ -205,10 +205,10 @@ so.
 picks one of two front ends before anything starts. Both drive the same `Sequence`:
 
 - **The window** ([`window.rs`](https://github.com/waffleking32/SecondRealityRust/blob/main/bins/secondreality/src/window.rs))
-  presents through SDL 2 at 2× by default. Each pixel is duplicated into a block with no
-  smoothing, so 320×200, 320×400 and 640×400 parts all fill the same 640×400 picture.
-  `--aspect 4:3` resamples into a 4:3 box instead. The border is a flat pad of the overscan
-  colour.
+  presents through SDL 2 in a 4:3 box at 2× by default, 768×576, as a 1993 monitor showed the
+  picture. `--aspect square` duplicates each pixel into a block with no smoothing instead, so
+  320×200, 320×400 and 640×400 parts all fill the same 640×400 picture. The border is a flat pad
+  of the overscan colour.
 - **Headless** ([`headless.rs`](https://github.com/waffleking32/SecondRealityRust/blob/main/bins/secondreality/src/headless.rs))
   needs no display and no sound card. It ticks the sequence as fast as it can and writes the
   requested frames: an `.idx` (the raw indices), an `.rgb` (one pixel per source pixel, no border)

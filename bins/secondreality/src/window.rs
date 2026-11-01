@@ -649,11 +649,12 @@ mod tests {
     }
 
     #[test]
-    fn the_window_shows_a_320x200_frame_as_640x400_of_duplicated_pixels() {
-        // The default options, through SDL: every source pixel is exactly a 2×2 block on
-        // the screen, its colour the palette's, and no output pixel is a blend.
+    fn a_square_window_shows_a_320x200_frame_as_640x400_of_duplicated_pixels() {
+        // `--aspect square` through SDL: every source pixel is exactly a 2×2 block on the
+        // screen, its colour the palette's, and no output pixel is a blend.
         let frame = distinct_frame();
-        let opts = Cli::default().present_options();
+        let cli = Cli::parse(["--aspect", "square"].map(String::from)).expect("valid flags");
+        let opts = cli.present_options();
         assert_eq!(opts, PresentOptions { aspect: Aspect::SquarePixels, scale: 2, border: true });
         assert_eq!(output_size(&frame, &opts), (640, 400), "no border colour, no pad");
         let drawn = through_sdl(&frame, &opts, (640, 400));
@@ -677,7 +678,7 @@ mod tests {
         // A window manager that does not give the size asked for: SDL is still not asked
         // to stretch, so the picture keeps its 2×2 blocks and the rest is black.
         let frame = distinct_frame();
-        let opts = PresentOptions::default();
+        let opts = PresentOptions { aspect: Aspect::SquarePixels, ..PresentOptions::default() };
         assert_eq!(placement((640, 400), (640, 400)), Rect::new(0, 0, 640, 400));
         assert_eq!(placement((700, 450), (640, 400)), Rect::new(30, 25, 640, 400));
         assert_eq!(placement((600, 380), (640, 400)), Rect::new(-20, -10, 640, 400));
